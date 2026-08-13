@@ -106,6 +106,10 @@ func writeBehaviourFixture(outDir string) error {
 		"is_reserved_team_name":                         reservedTeamNameAll(),
 		"is_valid_team_name":                            validTeamNameAll(),
 		"clean_team_name":                               cleanTeamNameAll(),
+		"is_valid_standard_device_id":                   deviceIDAll(false),
+		"is_valid_voip_device_id":                       deviceIDAll(true),
+		"redact_device_id":                              redactAll(),
+		"session_is_mobile":                             sessionBoolAll(),
 	}
 
 	blob, err := json.MarshalIndent(out, "", "    ")
@@ -503,6 +507,65 @@ func cleanTeamNameAll() map[string]string {
 			continue
 		}
 		res[in] = first
+	}
+	return res
+}
+
+// --- session.go ---------------------------------------------------------------
+
+var deviceIDCorpus = []string{
+	"", ":", "apple_rn", "apple_rn:", ":token", "apple_rn:token",
+	"apple_rnbeta:token", "android_rn:token", "android_rnbeta:token",
+	"unknown:token", "APPLE_RN:token", "apple_rn:tok:en",
+	// the -v<N> suffix: stripped only when terminal and non-negative
+	"apple_rn-v1:token", "apple_rn-v0:token", "apple_rn-v99:token",
+	"apple_rn-v:token", "apple_rn-vx:token", "apple_rn-v-1:token",
+	"apple_rn-v+2:token", "apple_rn-v1.5:token", "apple_rn-v1-v2:token",
+	"-v1:token", "apple_rn-v1", "android_rn-v3:token", "apple_rnbeta-v2:token",
+	"apple_rn-v 1:token", "apple_rn-V1:token",
+}
+
+func deviceIDAll(voip bool) map[string]bool {
+	res := make(map[string]bool, len(deviceIDCorpus))
+	for _, in := range deviceIDCorpus {
+		if voip {
+			res[in] = model.IsValidVoIPDeviceId(in)
+		} else {
+			res[in] = model.IsValidStandardDeviceId(in)
+		}
+	}
+	return res
+}
+
+func redactAll() map[string]string {
+	corpus := append([]string{
+		"apple_rn:" + repeat("a", 40),
+		"apple_rn:" + repeat("a", 16),
+		"apple_rn:" + repeat("a", 17),
+		"apple_rn:é" + repeat("a", 30),
+		"noseparator",
+	}, deviceIDCorpus...)
+
+	res := make(map[string]string, len(corpus))
+	for _, in := range corpus {
+		res[in] = model.RedactDeviceId(in)
+	}
+	return res
+}
+
+// sessionBoolAll pins strconv.ParseBool as reached through Session.IsMobile. Rust's
+// str::parse::<bool> accepts only "true"/"false"; Go accepts eleven more spellings, and
+// session props are written by several code paths, so the wider set is reachable.
+func sessionBoolAll() map[string]bool {
+	values := []string{
+		"1", "t", "T", "TRUE", "true", "True",
+		"0", "f", "F", "FALSE", "false", "False",
+		"", "yes", "no", "TrUe", "2", "-1", "01", " true", "true ", "tRUE", "Y", "n",
+	}
+	res := make(map[string]bool, len(values))
+	for _, v := range values {
+		s := &model.Session{Props: model.StringMap{model.UserAuthServiceIsMobile: v}}
+		res[v] = s.IsMobile()
 	}
 	return res
 }

@@ -93,7 +93,9 @@ needed by anything translated, which is why it was skipped.
 **Status** OPEN · **Severity** divergence · **Raised** 2026-08-13 (phase 1, `user.go`)
 
 `crates/mm-model/src/user.rs::external` holds constants owned by `role.go`, `ldap.go`, `saml.go`,
-`config.go`, `custom_status.go`, `shared_channel.go` and `status.go`. They are correct today and
+`config.go`, `custom_status.go`, `shared_channel.go` and `status.go`.
+`crates/mm-model/src/session.rs::external` and `team.rs` do the same for `saml.go`,
+`push_notification.go` and `access_policy.go`. They are correct today and
 will silently drift the moment upstream changes one.
 
 **To pay off** move each into its own module as that file is translated, and delete `external`.
@@ -160,3 +162,24 @@ the top-level one, and `post.json` is deeply nested.
 `var`, not a const, so it cannot simply be transcribed. Blocks `Team::Etag` and `User::Etag`.
 Both are cache-validation headers, so a wrong value causes stale client caches rather than a
 hard failure — but it is still wire surface.
+
+---
+
+## D-011 · `TeamMemberWithError` and the invite-error types are unported
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-08-13 (phase 1, `team_member.go`)
+
+`TeamMemberWithError`, `EmailInviteWithError` and their four helper functions embed `*AppError`
+as a **wire** field (`json:"error"`), which the invite flow returns to clients. Skipped because
+nothing consumes them yet, and because serialising `AppError` as a nested value needs the
+`omitempty` behaviour of a pointer-to-struct checking, which no other type has needed so far.
+
+---
+
+## D-012 · `redact_device_id` truncates at a char boundary; Go does not
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-13 (phase 1, `session.go`)
+
+Same class as [D-007]. Go slices the token at exactly 16 bytes and can split a multi-byte
+character; this stops at the nearest boundary at or below 16. Device tokens are ASCII in
+practice, and the output goes to logs rather than to a client.

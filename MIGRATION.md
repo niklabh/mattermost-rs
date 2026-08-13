@@ -2,7 +2,7 @@
 
 Go source pinned at: mattermost@9dfbaeca99f4096388fd1c048a9e6d1d0a86743e (2026-08-13)
 Current phase: 1 — Core Types
-Next file: server/public/model/session.go
+Next file: server/public/model/channel.go
 
 Re-clone the reference source with:
 `git clone --depth 1 https://github.com/mattermost/mattermost.git reference/mattermost`
@@ -38,6 +38,8 @@ whenever a session skips, approximates, or discovers-but-does-not-close somethin
 
 | Go source | Rust target | Status | Tests | Notes |
 |---|---|---|---|---|
+| model/session.go | `mm-model/src/session.rs` | DONE | 20 pass | Strangler Fig critical path. Complete `IsValid`, `PreSave`, device-id validators. |
+| model/team_member.go | `mm-model/src/team_member.rs` | DONE | 6 pass | Pulled ahead of its turn: `Session.TeamMembers` is on the wire, so session.rs cannot round-trip without it. `TeamMemberWithError`/`EmailInviteWithError` deferred. |
 | model/team.go | `mm-model/src/team.rs` | DONE | 37 pass | First **complete** `IsValid` — every branch, all error ids. Only `Etag` deferred (needs `CurrentVersion`, D-010). |
 | model/utils.go (IsValidEmail) | `mm-model/src/utils.rs` | DONE | 2,916 cases | Corpus-verified against Go: 128 hand-picked + 2,788 generated. Grammar is `dot-atom @ (dot-atom / [ip])`. |
 | model/user.go | `mm-model/src/user.rs` | PARTIAL | 48 pass | Wire type + self-contained logic. Deferred: `IsValid` and `PreSave` (need `IsValidEmail`/`IsValidLocale` parser ports + CustomStatus + timezone defaults), custom-status accessors, `IsValidUserRoles`, `Etag`, `CleanUsername`, `GetTimezoneLocation`. `pre_save_partial` is named so deliberately — it does NOT hash passwords. |
@@ -160,3 +162,34 @@ What survives is exactly `dot-atom "@" ( dot-atom / "[" ip "]" )`.
 
 6. **`TeamForExport.SchemeName` has no json tag**, so the wire key is the Go field name verbatim,
    capital S included, sitting alongside the inlined snake_case `Team` fields.
+
+## Notes — model/session.go, model/team_member.go
+
+1. **`strconv.ParseBool` is not `str::parse::<bool>()`.** Go accepts `1 t T TRUE true True`
+   and `0 f F FALSE false False`; Rust accepts only `true`/`false`. `Session::is_mobile`,
+   `is_saml` and `is_oauth_user` all go through it, and session props are written by several
+   code paths, so the wider set is reachable. Ported as `parse_go_bool` and corpus-verified.
+
+2. **The bool props are not consistent with each other.** `IsMobile`/`IsSaml`/`IsOAuthUser` use
+   `ParseBool`, but `IsBotUser` and `IsGuest` use exact `== "true"`. So a prop of `"1"` makes a
+   session mobile but **not** a bot. Faithful to Go; do not unify them.
+
+3. **`Session.IsOAuth` (struct field) and `Session.IsOAuthUser()` (prop) are different things.**
+   `IsIntegration` reads the field; `IsSSOLogin` reads the prop. Easy to conflate.
+
+4. **`IsExpired` treats a non-positive `ExpiresAt` as "never expires"**, and compares strictly
+   greater-than, so a session is not expired at the exact millisecond of its expiry.
+
+5. **`PreSave` overwrites `CreateAt` unconditionally and never sets `ExpiresAt`** — expiry is
+   the caller's job. Same `CreateAt` behaviour as `Team`, opposite of `User`.
+
+6. **`Sanitize` strips only the token.** `props` survives, CSRF value included.
+
+7. **`IsValidDeviceId` strips a terminal `-v<N>` suffix**, and Go's `Atoi` accepts a leading
+   `+`, so `apple_rn-v+2:token` is valid. Rust's `parse::<i64>()` agrees. A negative `N` is not
+   stripped. The colon split takes the **first** colon, so `apple_rn:tok:en` is valid.
+
+8. **`TeamMember.CreateAt` carries `json:"-"`** — persisted, never on the wire.
+
+9. **`TeamMember::SanitizeRoleData` sets `DeleteAt` to `-1`**, not 0, for other users. That
+   sentinel reaches the client.
