@@ -149,3 +149,14 @@ today, so nothing is currently unreached — but the guarantee is weaker for nes
 the top-level one, and `post.json` is deeply nested.
 
 **To pay off** make `missingKeys` recurse.
+
+---
+
+## D-010 · `Team::Etag` needs `CurrentVersion`
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-08-13 (phase 1, `team.go`)
+
+`Etag` (utils.go:732) prefixes `CurrentVersion`, which is `versions[0]` in `version.go` — a
+`var`, not a const, so it cannot simply be transcribed. Blocks `Team::Etag` and `User::Etag`.
+Both are cache-validation headers, so a wrong value causes stale client caches rather than a
+hard failure — but it is still wire surface.

@@ -507,6 +507,13 @@ fn truncate_at_boundary(s: &str, max_bytes: usize) -> &str {
 
 const MAX_ERROR_LENGTH: usize = 1024;
 
+/// The result type Go's `*AppError`-returning validators map to.
+///
+/// The error is boxed deliberately: `AppError` carries five `String`s and is ~200 bytes, so an
+/// unboxed `Result<(), AppError>` would make every success path pay for the failure path. A
+/// validation failure is the exceptional branch, so the allocation belongs there.
+pub type AppResult<T = ()> = Result<T, Box<AppError>>;
+
 fn is_zero_i32(n: &i32) -> bool {
     *n == 0
 }

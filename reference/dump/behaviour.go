@@ -103,6 +103,9 @@ func writeBehaviourFixture(outDir string) error {
 		"is_valid_email":                                emailAll(),
 		"is_valid_locale":                               localeAll(),
 		"is_valid_email_fuzz":                           emailFuzzAll(),
+		"is_reserved_team_name":                         reservedTeamNameAll(),
+		"is_valid_team_name":                            validTeamNameAll(),
+		"clean_team_name":                               cleanTeamNameAll(),
 	}
 
 	blob, err := json.MarshalIndent(out, "", "    ")
@@ -451,6 +454,55 @@ func emailFuzzAll() map[string]bool {
 		}
 		in := string(buf)
 		res[in] = model.IsValidEmail(in)
+	}
+	return res
+}
+
+// --- team.go -----------------------------------------------------------------
+
+var teamNameCorpus = []string{
+	"", "a", "ab", "core-team", "Core Team", "My Team", "My  Team!!", "--core-team--",
+	"Team_2024", "team2024", "!!!", "-", "--", "a-b", "a--b", "a_b",
+	// reserved words: prefix hits, non-prefix misses, and the replace-all behaviour
+	"admin", "administrators", "ADMIN", "adminxadmin", "xadmin", "my-admin",
+	"api", "apiary", "channel", "channels", "post", "postmaster", "signup", "help",
+	"boards", "playbooks", "plug", "plugins", "landing", "login", "mfa", "oauth",
+	"claim", "error", "files", "system",
+	// junk that survives or does not
+	"a b c", "  spaced  ", "UPPER", "123", "1", "a1", "team!", "tëam", "teamé",
+	repeat("a", 64), repeat("a", 65),
+}
+
+func reservedTeamNameAll() map[string]bool {
+	res := make(map[string]bool, len(teamNameCorpus))
+	for _, in := range teamNameCorpus {
+		res[in] = model.IsReservedTeamName(in)
+	}
+	return res
+}
+
+func validTeamNameAll() map[string]bool {
+	res := make(map[string]bool, len(teamNameCorpus))
+	for _, in := range teamNameCorpus {
+		res[in] = model.IsValidTeamName(in)
+	}
+	return res
+}
+
+// cleanTeamNameAll records "<newid>" where Go fell back to NewId(), which is random and
+// cannot be pinned in a fixture. The Rust side asserts the shape for those cases.
+func cleanTeamNameAll() map[string]string {
+	res := make(map[string]string, len(teamNameCorpus))
+	for _, in := range teamNameCorpus {
+		// CleanTeamName falls back to NewId(), which is random and cannot be pinned in a
+		// fixture. Two runs agreeing means the result is deterministic; disagreeing means we
+		// hit the fallback. The Rust side asserts the shape for those.
+		first := model.CleanTeamName(in)
+		if second := model.CleanTeamName(in); second != first {
+			res[in] = "<newid>"
+			continue
+		}
+		res[in] = first
 	}
 	return res
 }

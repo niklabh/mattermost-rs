@@ -2,7 +2,7 @@
 
 Go source pinned at: mattermost@9dfbaeca99f4096388fd1c048a9e6d1d0a86743e (2026-08-13)
 Current phase: 1 — Core Types
-Next file: server/public/model/team.go
+Next file: server/public/model/session.go
 
 Re-clone the reference source with:
 `git clone --depth 1 https://github.com/mattermost/mattermost.git reference/mattermost`
@@ -38,6 +38,7 @@ whenever a session skips, approximates, or discovers-but-does-not-close somethin
 
 | Go source | Rust target | Status | Tests | Notes |
 |---|---|---|---|---|
+| model/team.go | `mm-model/src/team.rs` | DONE | 37 pass | First **complete** `IsValid` — every branch, all error ids. Only `Etag` deferred (needs `CurrentVersion`, D-010). |
 | model/utils.go (IsValidEmail) | `mm-model/src/utils.rs` | DONE | 2,916 cases | Corpus-verified against Go: 128 hand-picked + 2,788 generated. Grammar is `dot-atom @ (dot-atom / [ip])`. |
 | model/user.go | `mm-model/src/user.rs` | PARTIAL | 48 pass | Wire type + self-contained logic. Deferred: `IsValid` and `PreSave` (need `IsValidEmail`/`IsValidLocale` parser ports + CustomStatus + timezone defaults), custom-status accessors, `IsValidUserRoles`, `Etag`, `CleanUsername`, `GetTimezoneLocation`. `pre_save_partial` is named so deliberately — it does NOT hash passwords. |
 | model/utils.go | `mm-model/src/utils.rs` | PARTIAL | 54 pass | See notes below. Deferred: `IsValidHTTPURL` (needs an RFC 3986 parser), `ParseHashtags` (goes with post.go), `Scan`/`Value` (go to mm-store), the io.Reader JSON helpers (serde replaces them), `Etag`/`NewRandomTeamName` (need consts from other files). |
@@ -136,3 +137,26 @@ What survives is exactly `dot-atom "@" ( dot-atom / "[" ip "]" )`.
 
 `IsValidLocale` is measured but not ported — it needs the IANA subtag registry embedded. See
 [D-001] in `docs/TECH_DEBT.md`; it blocks `User::is_valid` ([D-002]).
+
+## Notes — model/team.go
+
+1. **Go's error ids do not match the fields they guard.** A too-long `Name` returns
+   `model.team.is_valid.url.app_error`, while an invalid `DisplayName` returns
+   `...is_valid.name.app_error`. Both email failures share `...is_valid.email.app_error`. Clients
+   key off these strings, so they are wire surface — do not tidy them.
+
+2. **`IsReservedTeamName` is a prefix test**, not equality (`strings.Index(s, value) == 0`). So
+   `administrators`, `apiary` and `postmaster` are all reserved team names.
+
+3. **`CleanTeamName` removes every occurrence of a reserved word, not just the prefix that
+   triggered it.** `adminxadmin` becomes `x`, which is then too short to be a valid team name, so
+   Go falls back to `NewId()`. The intuitive answer (`"x"`) is wrong; the oracle caught it.
+
+4. **`Team::PreSave` overwrites `CreateAt` unconditionally**, unlike `User::PreSave` which
+   preserves a non-zero value. An inbound `create_at` on a team is always discarded.
+
+5. **The three pointer fields have no `omitempty`.** `scheme_id`, `group_constrained` and
+   `policy_id` serialise as `null` when nil; the keys are always present.
+
+6. **`TeamForExport.SchemeName` has no json tag**, so the wire key is the Go field name verbatim,
+   capital S included, sitting alongside the inlined snake_case `Team` fields.
