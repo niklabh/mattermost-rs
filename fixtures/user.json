@@ -1,0 +1,50 @@
+{
+    "id": "umrmxsgrzx9hkuqks9ccjx89aw",
+    "create_at": 1704910245000,
+    "update_at": 1706196440000,
+    "delete_at": 1705537290000,
+    "username": "parity-user",
+    "password": "correct-horse-battery-439179",
+    "auth_data": "authdata-e54ed5",
+    "auth_service": "",
+    "email": "parity-user@example.com",
+    "email_verified": true,
+    "nickname": "nickname-a9d8a5",
+    "first_name": "firstname-a47b6a",
+    "last_name": "lastname-7e0dfd",
+    "position": "Staff Engineer",
+    "roles": "system_user",
+    "allow_marketing": true,
+    "props": {
+        "key0-46c64c": "val0-ef74bd",
+        "key1-45c499": "val1-ee730a"
+    },
+    "notify_props": {
+        "key0-88641c": "val0-765ac4",
+        "key1-8965cf": "val1-775c77"
+    },
+    "last_password_update": 1705338020000,
+    "last_picture_update": 1706340847000,
+    "failed_attempts": 44,
+    "locale": "en",
+    "timezone": {
+        "automaticTimezone": "America/New_York",
+        "manualTimezone": "Europe/Berlin",
+        "useAutomaticTimezone": "true"
+    },
+    "mfa_active": true,
+    "mfa_secret": "mfasecret-d301e8",
+    "remote_id": "j1fknrnbz6cpf9hmwrerdora4e",
+    "last_activity_at": 1706915204000,
+    "is_bot": true,
+    "bot_description": "botdescription-385132",
+    "bot_last_icon_update": 1705983801000,
+    "terms_of_service_id": "89gw3bqf3osgudgmj1nhm13cpr",
+    "terms_of_service_create_at": 1703309740000,
+    "disable_welcome_email": true,
+    "last_login": 1701956553000,
+    "mfa_used_timestamps": [
+        "mfausedtimestamps-f9d2af",
+        "mfausedtimestamps-bb36e1"
+    ]
+}

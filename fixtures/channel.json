@@ -1,0 +1,41 @@
+{
+    "id": "6bdz674pgq767e4jx75w4pf57a",
+    "create_at": 1701310223000,
+    "update_at": 1705492114000,
+    "delete_at": 1703204580000,
+    "team_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+    "type": "O",
+    "display_name": "Town Square",
+    "name": "town-square",
+    "header": "header-d074ea",
+    "purpose": "purpose-586aa1",
+    "last_post_at": 1703814081000,
+    "total_msg_count": 77,
+    "extra_update_at": 1705999640000,
+    "creator_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+    "scheme_id": "fpj4axm8rhhbe6ntio6sqjtano",
+    "props": {
+        "key0-58e930": "val0-3a28e1",
+        "key1-57e77d": "val1-39272e"
+    },
+    "group_constrained": true,
+    "autotranslation": true,
+    "shared": true,
+    "total_msg_count_root": 9,
+    "policy_id": "x4szyqf6qx5orcpxqyhmh78zye",
+    "last_root_post_at": 1706784877000,
+    "banner_info": {
+        "enabled": true,
+        "text": "text-3b293d",
+        "background_color": "backgroundcolor-81328f"
+    },
+    "policy_enforced": true,
+    "policy_actions": {
+        "key0-f95efa": true,
+        "key1-fa60ad": true
+    },
+    "policy_is_active": true,
+    "default_category_name": "defaultcategoryname-06d006",
+    "managed_category_name": "managedcategoryname-a48a63",
+    "discoverable": true
+}

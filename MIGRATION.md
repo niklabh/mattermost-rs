@@ -35,3 +35,4 @@ then `git -C reference/mattermost checkout 9dfbaeca99f4096388fd1c048a9e6d1d0a867
 
 | Go source | Rust target | Status | Tests | Notes |
 |---|---|---|---|---|
+| — (tooling) | `reference/dump/` → `fixtures/` | DONE | 9 fixtures | Parity oracle. Reflection-populated from zero values, so adding a type is one registry line; deterministic output (FNV of field path — no rand/time.Now, keeps diffs clean). Fails the run if a declared top-level key is missing from the JSON. Re-run and commit after adding a type. |

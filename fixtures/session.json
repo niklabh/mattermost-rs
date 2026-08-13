@@ -1,0 +1,30 @@
+{
+    "id": "3ztc77ph16q4qgzb35453fw7wh",
+    "token": "rc4az8gjsegt4hbutqqcucepdw",
+    "create_at": 1707147902000,
+    "expires_at": 1700126280000,
+    "last_activity_at": 1705328935000,
+    "user_id": "aawjyu1j94ik66jk1b8ru97kih",
+    "device_id": "t7ah8prmfx4b8zdxaq4eskzwnc",
+    "voip_device_id": "k8xoac3qfb9ii8s7bo31hj59me",
+    "roles": "system_user",
+    "is_oauth": true,
+    "expired_notify": true,
+    "props": {
+        "key0-585ca1": "val0-33a582",
+        "key1-595e54": "val1-34a735"
+    },
+    "team_members": [
+        {
+            "team_id": "jmkesknndjgz89qitcwrrg4pqc",
+            "user_id": "w1f5z67bnebpyihpzx74nran4y",
+            "roles": "roles-51d841",
+            "delete_at": 1702744471000,
+            "scheme_guest": true,
+            "scheme_user": true,
+            "scheme_admin": true,
+            "explicit_roles": "explicitroles-ef5292"
+        }
+    ],
+    "local": true
+}

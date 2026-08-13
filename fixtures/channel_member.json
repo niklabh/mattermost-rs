@@ -1,0 +1,21 @@
+{
+    "channel_id": "wz1yfpewwzx19hznyk4tjjg9fh",
+    "user_id": "dwu7gmkd1me3n4tf4csw8rqt1r",
+    "roles": "channel_user",
+    "last_viewed_at": 1700557221000,
+    "msg_count": 77,
+    "mention_count": 6,
+    "mention_count_root": 38,
+    "urgent_mention_count": 73,
+    "msg_count_root": 21,
+    "notify_props": {
+        "key0-932788": "val0-209faf",
+        "key1-94293b": "val1-21a162"
+    },
+    "last_update_at": 1707722148000,
+    "scheme_guest": true,
+    "scheme_user": true,
+    "scheme_admin": true,
+    "explicit_roles": "explicitroles-21a135",
+    "autotranslation_disabled": true
+}

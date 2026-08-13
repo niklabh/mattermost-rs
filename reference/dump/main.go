@@ -1,0 +1,423 @@
+// Command dump generates the golden JSON fixtures that the Rust port's
+// serialization-parity tests assert against. It is the parity oracle: rather
+// than reasoning about whether the Rust JSON matches the Go JSON, we make Go
+// say what the JSON is.
+//
+// # Why reflection instead of hand-written literals
+//
+// The registry below holds ZERO-valued instances. Every field is filled in by
+// reflection, so adding a type is a one-line change requiring no knowledge of
+// that type's fields.
+//
+// This is not just convenience. A field left at its zero value is dropped from
+// the JSON by `omitempty`, and the Rust round-trip test for that field then
+// passes while proving nothing about it — a green test that cannot fail, on
+// precisely the fields most likely to drift. Enumerating ~30 fields by hand for
+// each of 198 model types is a guarantee that some will be missed. Reflection
+// cannot forget a field.
+//
+// # Determinism
+//
+// Every generated value derives from a hash of the field's path, so re-running
+// produces byte-identical output. Fixtures are committed; a generator that
+// churned every ID on each run would make the diffs unreadable and re-running
+// it costly. Do not introduce rand or time.Now here.
+package main
+
+import (
+	"encoding/base32"
+	"encoding/json"
+	"flag"
+	"fmt"
+	"hash/fnv"
+	"os"
+	"path/filepath"
+	"reflect"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/mattermost/mattermost/server/public/model"
+)
+
+// registry maps fixture name -> a zero-valued instance to populate.
+//
+// TO ADD A TYPE: append one line. Do not populate it here — reflection does
+// that, and doing it by hand reintroduces the missed-field problem described
+// above.
+var registry = map[string]any{
+	"user":           &model.User{},
+	"team":           &model.Team{},
+	"channel":        &model.Channel{},
+	"channel_member": &model.ChannelMember{},
+	"post":           &model.Post{},
+	"session":        &model.Session{},
+	"team_member":    &model.TeamMember{},
+	"status":         &model.Status{},
+	"preference":     &model.Preference{},
+}
+
+// overrides pins specific fields to semantically valid values, keyed by the
+// dotted field path the populator walks ("channel.type"). The generic filler
+// produces values that serialize correctly but are meaningless as domain data;
+// where a fixture is also useful for exercising IsValid() on the Rust side, pin
+// the real value here. Extend freely — this is the escape hatch that keeps the
+// walker itself free of per-type special cases. Any value convertible to the
+// field's type works, maps included.
+//
+// The two empty strings below are deliberate, not oversights: "" is the valid
+// domain value (a regular post has no type; an email-auth user has no auth
+// service), and neither field carries omitempty, so the key still appears in
+// the JSON and the parity signal is preserved. The top-level key check in
+// missingKeys enforces that — pin "" on an omitempty field and the run fails.
+var overrides = map[string]any{
+	"channel.type":        "O",
+	"channel.displayname": "Town Square",
+	"channel.name":        "town-square",
+	"post.type":           "",
+	"status.status":       "online",
+	"team.type":           "O",
+	"team.name":           "core-team",
+	"team.displayname":    "Core Team",
+	"user.username":       "parity-user",
+	"user.email":          "parity-user@example.com",
+	"user.roles":          "system_user",
+	"user.locale":         "en",
+	"user.authservice":    "",
+	"user.position":       "Staff Engineer",
+	"user.timezone": model.StringMap{
+		"automaticTimezone":    "America/New_York",
+		"manualTimezone":       "Europe/Berlin",
+		"useAutomaticTimezone": "true",
+	},
+	"session.roles":       "system_user",
+	"preference.category": "display_settings",
+	"preference.name":     "use_military_time",
+	"preference.value":    "true",
+	"channelmember.roles": "channel_user",
+	"teammember.roles":    "team_user",
+}
+
+// idEncoding matches model.NewId (utils.go:378) — z-base-32, no padding. 16
+// bytes encode to exactly 26 characters, the Mattermost ID length.
+var idEncoding = base32.NewEncoding("ybndrfg8ejkmcpqxot1uwisza345h769").WithPadding(base32.NoPadding)
+
+// baseTimeMs is 2023-11-14T22:13:20Z in epoch milliseconds. Go stores all
+// timestamps as epoch ms in int64; the Rust side must keep i64 on the wire.
+const baseTimeMs int64 = 1_700_000_000_000
+
+const maxDepth = 12
+
+var (
+	timeType       = reflect.TypeOf(time.Time{})
+	rawMessageType = reflect.TypeOf(json.RawMessage{})
+	byteSliceType  = reflect.TypeOf([]byte(nil))
+)
+
+func main() {
+	out := flag.String("out", "../../fixtures", "directory to write fixtures into")
+	flag.Parse()
+
+	if err := os.MkdirAll(*out, 0o755); err != nil {
+		fmt.Fprintf(os.Stderr, "dump: cannot create %s: %v\n", *out, err)
+		os.Exit(1)
+	}
+
+	names := make([]string, 0, len(registry))
+	for name := range registry {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	var warnings, failures []string
+
+	for _, name := range names {
+		p := &populator{stack: map[reflect.Type]int{}}
+		v := reflect.ValueOf(registry[name])
+		p.fill(v.Elem(), strings.ToLower(v.Elem().Type().Name()), 0)
+
+		blob, err := json.MarshalIndent(registry[name], "", "    ")
+		if err != nil {
+			failures = append(failures, fmt.Sprintf("%s: marshal: %v", name, err))
+			continue
+		}
+
+		if missing := missingKeys(v.Elem().Type(), blob); len(missing) > 0 {
+			failures = append(failures, fmt.Sprintf(
+				"%s: %d field(s) absent from JSON (omitempty dropped a zero value): %s",
+				name, len(missing), strings.Join(missing, ", ")))
+		}
+		for _, note := range p.notes {
+			warnings = append(warnings, name+": "+note)
+		}
+
+		path := filepath.Join(*out, name+".json")
+		if err := os.WriteFile(path, append(blob, '\n'), 0o644); err != nil {
+			failures = append(failures, fmt.Sprintf("%s: write: %v", name, err))
+			continue
+		}
+		fmt.Printf("wrote %s\n", path)
+	}
+
+	// Warnings are fields reflection could not reach (cycles, depth caps,
+	// non-empty interfaces). They are not fatal, but each one is a field whose
+	// Rust parity test proves less than it appears to.
+	for _, w := range warnings {
+		fmt.Fprintf(os.Stderr, "warning: %s\n", w)
+	}
+	if len(failures) > 0 {
+		for _, f := range failures {
+			fmt.Fprintf(os.Stderr, "FAIL: %s\n", f)
+		}
+		fmt.Fprintf(os.Stderr, "\n%d fixture(s) are incomplete. A fixture missing a key "+
+			"silently weakens the Rust test that consumes it; fix before committing.\n", len(failures))
+		os.Exit(1)
+	}
+	fmt.Printf("\n%d fixtures written, all top-level fields present.\n", len(names))
+}
+
+type populator struct {
+	notes []string
+	stack map[reflect.Type]int // types on the current path, for cycle breaking
+}
+
+func (p *populator) note(path, reason string) {
+	p.notes = append(p.notes, fmt.Sprintf("%s left zero (%s)", path, reason))
+}
+
+// fill sets v to a distinctive non-zero value derived deterministically from path.
+func (p *populator) fill(v reflect.Value, path string, depth int) {
+	if !v.CanSet() {
+		return
+	}
+	t := v.Type()
+
+	if ov, ok := overrides[path]; ok {
+		rv := reflect.ValueOf(ov)
+		if rv.Type().ConvertibleTo(t) {
+			v.Set(rv.Convert(t))
+			return
+		}
+		p.note(path, "override type "+rv.Type().String()+" not convertible to "+t.String())
+	}
+
+	switch t {
+	case timeType:
+		v.Set(reflect.ValueOf(time.UnixMilli(timestampFor(path)).UTC()))
+		return
+	case rawMessageType:
+		// Must be syntactically valid JSON or Marshal fails outright.
+		v.Set(reflect.ValueOf(json.RawMessage(`{"key":"value"}`)))
+		return
+	}
+
+	if depth > maxDepth {
+		p.note(path, "max depth")
+		return
+	}
+
+	switch t.Kind() {
+	case reflect.Pointer:
+		v.Set(reflect.New(t.Elem()))
+		p.fill(v.Elem(), path, depth+1)
+
+	case reflect.Struct:
+		if p.stack[t] > 0 {
+			p.note(path, "cycle on "+t.String())
+			return
+		}
+		p.stack[t]++
+		defer func() { p.stack[t]-- }()
+		for i := 0; i < t.NumField(); i++ {
+			f := t.Field(i)
+			if !f.IsExported() {
+				continue // never appears in JSON
+			}
+			if name, _, _ := strings.Cut(f.Tag.Get("json"), ","); name == "-" {
+				continue // explicitly excluded from the wire
+			}
+			p.fill(v.Field(i), path+"."+strings.ToLower(f.Name), depth+1)
+		}
+
+	case reflect.String:
+		v.SetString(stringFor(path))
+
+	case reflect.Bool:
+		v.SetBool(true)
+
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		v.SetInt(intFor(path, t))
+
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		v.SetUint(uint64(1 + seedOf(path)%1000))
+
+	case reflect.Float32, reflect.Float64:
+		v.SetFloat(float64(1+seedOf(path)%1000) / 8.0)
+
+	case reflect.Slice:
+		if t == byteSliceType {
+			v.SetBytes([]byte("bytes-" + leafOf(path)))
+			return
+		}
+		n := 2
+		switch t.Elem().Kind() {
+		case reflect.Struct, reflect.Pointer, reflect.Map, reflect.Slice:
+			n = 1 // keep nested fixtures readable
+		}
+		s := reflect.MakeSlice(t, n, n)
+		for i := 0; i < n; i++ {
+			p.fill(s.Index(i), fmt.Sprintf("%s[%d]", path, i), depth+1)
+		}
+		v.Set(s)
+
+	case reflect.Map:
+		n := 2
+		if t.Elem().Kind() == reflect.Struct || t.Elem().Kind() == reflect.Pointer {
+			n = 1
+		}
+		m := reflect.MakeMap(t)
+		for i := 0; i < n; i++ {
+			k := reflect.New(t.Key()).Elem()
+			p.fill(k, fmt.Sprintf("%s.key%d", path, i), depth+1)
+			val := reflect.New(t.Elem()).Elem()
+			p.fill(val, fmt.Sprintf("%s.val%d", path, i), depth+1)
+			m.SetMapIndex(k, val)
+		}
+		v.Set(m)
+
+	case reflect.Interface:
+		if t.NumMethod() != 0 {
+			p.note(path, "non-empty interface "+t.String())
+			return
+		}
+		v.Set(reflect.ValueOf(stringFor(path)))
+
+	default:
+		p.note(path, "unsupported kind "+t.Kind().String())
+	}
+}
+
+// intFor returns a timestamp for fields that hold one and a small distinctive
+// number otherwise. Mattermost stores epoch milliseconds in int64.
+func intFor(path string, t reflect.Type) int64 {
+	leaf := leafOf(path)
+	if t.Kind() == reflect.Int64 && (strings.HasSuffix(leaf, "at") || strings.HasSuffix(leaf, "update") ||
+		strings.Contains(leaf, "expires") || strings.Contains(leaf, "login")) {
+		return timestampFor(path)
+	}
+	// Keep small so it fits every int width without overflow.
+	return int64(1 + seedOf(path)%100)
+}
+
+func timestampFor(path string) int64 {
+	// Spread across ~90 days, rounded to the second, all after baseTimeMs.
+	return baseTimeMs + int64(seedOf(path)%7_776_000)*1000
+}
+
+func stringFor(path string) string {
+	leaf := leafOf(path)
+	switch {
+	case leaf == "id" || strings.HasSuffix(leaf, "id"):
+		return fakeID(path)
+	case strings.Contains(leaf, "email"):
+		return leaf + "-" + shortHash(path) + "@example.com"
+	case strings.Contains(leaf, "ipaddress"):
+		return fmt.Sprintf("10.%d.%d.%d", seedOf(path)%256, seedOf(path+"b")%256, 1+seedOf(path+"c")%254)
+	case strings.Contains(leaf, "url") || strings.Contains(leaf, "link"):
+		return "https://example.com/" + leaf + "/" + shortHash(path)
+	case strings.Contains(leaf, "password"):
+		return "correct-horse-battery-" + shortHash(path)
+	case strings.Contains(leaf, "token"):
+		return fakeID(path)
+	}
+	return leaf + "-" + shortHash(path)
+}
+
+// fakeID returns a deterministic 26-character z-base-32 string, matching the
+// shape of model.NewId() without being random (see the determinism note above).
+func fakeID(path string) string {
+	buf := make([]byte, 0, 16)
+	for i := 0; len(buf) < 16; i++ {
+		h := seedOf(fmt.Sprintf("%s#%d", path, i))
+		for shift := 0; shift < 64 && len(buf) < 16; shift += 8 {
+			buf = append(buf, byte(h>>shift))
+		}
+	}
+	return idEncoding.EncodeToString(buf)
+}
+
+func shortHash(path string) string {
+	return fmt.Sprintf("%06x", seedOf(path)%0xffffff)
+}
+
+func seedOf(path string) uint64 {
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(path))
+	return h.Sum64()
+}
+
+// leafOf returns the field name a path ends in, so value heuristics key off the
+// field rather than a collection index. Trailing "[n]" segments are dropped:
+// element values still differ from each other because the hash seed uses the
+// full indexed path, but they read as "roles-a1b2c3" rather than "0-a1b2c3".
+func leafOf(path string) string {
+	for strings.HasSuffix(path, "]") {
+		i := strings.LastIndex(path, "[")
+		if i < 0 {
+			break
+		}
+		path = path[:i]
+	}
+	if i := strings.LastIndex(path, "."); i >= 0 {
+		return path[i+1:]
+	}
+	return path
+}
+
+// missingKeys reports top-level JSON keys that t declares but the marshalled
+// output does not contain — the omitempty-dropped-a-zero-value failure. Nested
+// objects are not checked; a nested gap shows up as a warning from the
+// populator instead.
+func missingKeys(t reflect.Type, blob []byte) []string {
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(blob, &obj); err != nil {
+		return []string{"<output is not a JSON object>"}
+	}
+	var missing []string
+	for _, want := range expectedKeys(t) {
+		if _, ok := obj[want]; !ok {
+			missing = append(missing, want)
+		}
+	}
+	sort.Strings(missing)
+	return missing
+}
+
+func expectedKeys(t reflect.Type) []string {
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	if t.Kind() != reflect.Struct {
+		return nil
+	}
+	var keys []string
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		if !f.IsExported() {
+			continue
+		}
+		name, _, _ := strings.Cut(f.Tag.Get("json"), ",")
+		if name == "-" {
+			continue
+		}
+		if f.Anonymous && name == "" {
+			keys = append(keys, expectedKeys(f.Type)...) // embedded fields inline
+			continue
+		}
+		if name == "" {
+			name = f.Name
+		}
+		keys = append(keys, name)
+	}
+	return keys
+}

@@ -1,0 +1,10 @@
+{
+    "team_id": "n66owmrtscy6w3f5besjdcob7e",
+    "user_id": "nz6o4mxiz81msaz5bws9mq8rzc",
+    "roles": "team_user",
+    "delete_at": 1702883326000,
+    "scheme_guest": true,
+    "scheme_user": true,
+    "scheme_admin": true,
+    "explicit_roles": "explicitroles-e63240"
+}

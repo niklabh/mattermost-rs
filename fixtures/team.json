@@ -1,0 +1,27 @@
+{
+    "id": "iday5jomo6zaqs91bsuyznfxoh",
+    "create_at": 1706230615000,
+    "update_at": 1700124026000,
+    "delete_at": 1706682236000,
+    "display_name": "Core Team",
+    "name": "core-team",
+    "description": "description-453377",
+    "email": "email-aa01cc@example.com",
+    "type": "O",
+    "company_name": "companyname-376764",
+    "allowed_domains": "alloweddomains-64e69c",
+    "invite_id": "srsr8zmmyksfj9tkexqssypcko",
+    "allow_open_invite": true,
+    "last_team_icon_update": 1706040147000,
+    "scheme_id": "wpotz3y6hotn5hn9dx1b7a3nfw",
+    "group_constrained": true,
+    "policy_id": "13eg6z6x3famh1k1p7xh91uoza",
+    "cloud_limits_archived": true,
+    "policy_enforced": true,
+    "policy_actions": {
+        "key0-bb3164": true,
+        "key1-bc3317": true
+    },
+    "policy_is_active": true,
+    "recommended": true
+}
