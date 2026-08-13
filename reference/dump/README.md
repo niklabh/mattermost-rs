@@ -14,6 +14,21 @@ go run .         # writes ../../fixtures/*.json
 Exit code is non-zero if any fixture came out incomplete. Commit `fixtures/` afterwards — those
 files are the contract.
 
+## Two oracles
+
+`main.go` pins the wire **shape** — what JSON each model type produces.
+
+`behaviour.go` pins the wire **logic** — it runs a corpus of inputs through the real Go
+validators, sanitizers and error rendering and records the answers to
+`fixtures/behaviour_utils.json`. Reading a Go regex and reasoning about what it accepts is the
+step that produces confident, wrong translations; this replaces the reasoning with Go's answer.
+It paid for itself on its first run, catching two bugs in `utils.rs` that had already passed a
+full suite of hand-written tests (`unicode.IsLetter` is not `char::is_alphabetic()`, and
+`GetTimeForMillis` returns local time).
+
+When translating anything with branching logic, add its cases to the corpus in `behaviour.go`
+and assert against them from Rust.
+
 ## Adding a type
 
 One line in the `registry` map in `main.go`:

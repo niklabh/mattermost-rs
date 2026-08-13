@@ -46,6 +46,7 @@ import (
 // that, and doing it by hand reintroduces the missed-field problem described
 // above.
 var registry = map[string]any{
+	"app_error":      &model.AppError{},
 	"user":           &model.User{},
 	"team":           &model.Team{},
 	"channel":        &model.Channel{},
@@ -173,7 +174,13 @@ func main() {
 			"silently weakens the Rust test that consumes it; fix before committing.\n", len(failures))
 		os.Exit(1)
 	}
-	fmt.Printf("\n%d fixtures written, all top-level fields present.\n", len(names))
+	if err := writeBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_utils.json"))
+
+	fmt.Printf("\n%d fixtures written, all top-level fields present.\n", len(names)+1)
 }
 
 type populator struct {

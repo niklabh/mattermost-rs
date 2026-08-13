@@ -52,3 +52,17 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Time — Go stores epoch milliseconds as i64; chrono is for conversion only.
 chrono = "0.4"
+
+# Validation. The Go identifier regexes have non-obvious alternation
+# (`^[a-z0-9]+([a-z\-0-9]+|(__)?)[a-z0-9]+$`); hand-rolling equivalents is where
+# parity bugs come from, so match Go's RE2 with the regex crate instead.
+regex = "1"
+
+# CSPRNG for NewId / NewRandomString.
+rand = "0.9"
+
+# Go's unicode.IsLetter is Unicode general category L. Rust's char::is_alphabetic is the
+# Alphabetic *property*, which also covers Other_Alphabetic — so it accepts combining marks
+# (U+0345 and friends) that Go rejects. The behavioural oracle caught this in IsValidId.
+# std cannot express general categories, hence this data-only crate.
+unicode-general-category = "1"
