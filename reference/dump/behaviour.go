@@ -95,6 +95,11 @@ func writeBehaviourFixture(outDir string) error {
 		"limits":                                        limitAll(),
 		"app_errors":                                    appErrorAll(),
 		"day_bounds":                                    dayBoundsAll(),
+		"is_valid_username":                             usernameAll(false),
+		"is_valid_username_allow_remote":                usernameAll(true),
+		"is_in_role":                                    isInRoleAll(),
+		"get_roles":                                     getRolesAll(),
+		"user_display_names":                            displayNameAll(),
 	}
 
 	blob, err := json.MarshalIndent(out, "", "    ")
@@ -255,4 +260,80 @@ func repeat(s string, n int) string {
 		out = append(out, s...)
 	}
 	return string(out)
+}
+
+// --- user.go -----------------------------------------------------------------
+
+var usernameCorpus = []string{
+	"", "a", "ada", "Ada", "ADA", "ada.lovelace", "ada-lovelace", "ada_lovelace",
+	"ada:remote", "ada@example", "ada lovelace", "ada!", "1", "1ada", ".ada", "ada.",
+	"-ada", "ada-", "_ada", "ada_", "..", "--", "__",
+	"all", "channel", "matterbot", "system", "All", "channels",
+	repeat("a", 63), repeat("a", 64), repeat("a", 65),
+	"\u00e9ada", "ada\u00e9",
+}
+
+func usernameAll(allowRemote bool) map[string]bool {
+	res := make(map[string]bool, len(usernameCorpus))
+	for _, in := range usernameCorpus {
+		if allowRemote {
+			res[in] = model.IsValidUsernameAllowRemote(in)
+		} else {
+			res[in] = model.IsValidUsername(in)
+		}
+	}
+	return res
+}
+
+// roleCorpus exercises the separator difference between IsInRole (Split on " ") and
+// GetRoles (strings.Fields).
+var roleCorpus = []string{
+	"", "system_user", "system_user system_admin", "system_user  system_admin",
+	"system_user\tsystem_admin", "system_user\nsystem_admin", " system_user ",
+	"system_guest", "system_user system_guest", "system_admin",
+}
+
+func isInRoleAll() map[string]bool {
+	res := map[string]bool{}
+	for _, roles := range roleCorpus {
+		for _, want := range []string{"system_user", "system_admin", "system_guest"} {
+			res[roles+"|"+want] = model.IsInRole(roles, want)
+		}
+	}
+	return res
+}
+
+func getRolesAll() map[string][]string {
+	res := map[string][]string{}
+	for _, roles := range roleCorpus {
+		u := &model.User{Roles: roles}
+		got := u.GetRoles()
+		if got == nil {
+			got = []string{}
+		}
+		res[roles] = got
+	}
+	return res
+}
+
+func displayNameAll() map[string]string {
+	type person struct{ username, first, last, nickname string }
+	people := map[string]person{
+		"full":          {"ada", "Ada", "Lovelace", "countess"},
+		"no_nickname":   {"ada", "Ada", "Lovelace", ""},
+		"first_only":    {"ada", "Ada", "", ""},
+		"last_only":     {"ada", "", "Lovelace", ""},
+		"username_only": {"ada", "", "", ""},
+		"nickname_only": {"ada", "", "", "countess"},
+	}
+	res := map[string]string{}
+	for name, p := range people {
+		u := &model.User{Username: p.username, FirstName: p.first, LastName: p.last, Nickname: p.nickname}
+		for _, format := range []string{model.ShowUsername, model.ShowFullName, model.ShowNicknameFullName} {
+			res[name+"|"+format] = u.GetDisplayName(format)
+			res[name+"|"+format+"|@"] = u.GetDisplayNameWithPrefix(format, "@")
+		}
+		res[name+"|fullname"] = u.GetFullName()
+	}
+	return res
 }

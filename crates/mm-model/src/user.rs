@@ -1,0 +1,1800 @@
+//! Port of `model/user.go` (user.go:1–1160).
+//!
+//! # Deliberately not translated here
+//!
+//! - **`User::IsValid`** (user.go:383) and **`PreSave`** (user.go:486). Both depend on ports
+//!   that are parser work in their own right — `IsValidEmail` (Go's `net/mail`) and
+//!   `IsValidLocale` (`golang.org/x/text/language`, BCP 47) — plus `CustomStatus` and
+//!   `timezones.DefaultUserTimezone()`. Shipping them against a guessed email or locale rule
+//!   would put a wrong validator on the write path, which is worse than not having one.
+//! - Custom-status accessors (user.go:781–823) need `custom_status.go`.
+//! - `IsValidUserRoles` needs `IsValidRoleName` from `role.go`.
+//! - `Etag` needs `CurrentVersion` from `version.go`.
+//! - `CleanUsername` takes an mlog logger; it belongs with the logging layer.
+//! - `GetTimezoneLocation` needs a tz database lookup (`chrono-tz`), deferred with `IsValid`.
+//! - `Auditable`/`LogClone` are audit-log projections, not wire types; they follow the audit
+//!   layer.
+//! - `UserSlice` filters (user.go:295–362) are `Iterator::filter` at every call site.
+
+use std::collections::HashMap;
+use std::sync::LazyLock;
+
+use regex::Regex;
+use serde::{Deserialize, Serialize};
+
+use crate::utils::{
+    self, StringArray, StringMap, get_millis, get_preferred_timezone, new_id, new_username,
+    sanitize_unicode,
+};
+
+// ---------------------------------------------------------------------------
+// Constants (user.go:25-72)
+// ---------------------------------------------------------------------------
+
+pub const ME: &str = "me";
+
+pub const USER_NOTIFY_ALL: &str = "all";
+pub const USER_NOTIFY_HERE: &str = "here";
+pub const USER_NOTIFY_MENTION: &str = "mention";
+pub const USER_NOTIFY_NONE: &str = "none";
+
+pub const DESKTOP_NOTIFY_PROP: &str = "desktop";
+pub const DESKTOP_SOUND_NOTIFY_PROP: &str = "desktop_sound";
+pub const MARK_UNREAD_NOTIFY_PROP: &str = "mark_unread";
+pub const PUSH_NOTIFY_PROP: &str = "push";
+pub const PUSH_STATUS_NOTIFY_PROP: &str = "push_status";
+pub const EMAIL_NOTIFY_PROP: &str = "email";
+pub const CHANNEL_MENTIONS_NOTIFY_PROP: &str = "channel";
+pub const COMMENTS_NOTIFY_PROP: &str = "comments";
+pub const MENTION_KEYS_NOTIFY_PROP: &str = "mention_keys";
+pub const HIGHLIGHTS_NOTIFY_PROP: &str = "highlight_keys";
+pub const COMMENTS_NOTIFY_NEVER: &str = "never";
+pub const COMMENTS_NOTIFY_ROOT: &str = "root";
+pub const COMMENTS_NOTIFY_ANY: &str = "any";
+pub const COMMENTS_NOTIFY_CRT: &str = "crt";
+pub const FIRST_NAME_NOTIFY_PROP: &str = "first_name";
+pub const AUTO_RESPONDER_ACTIVE_NOTIFY_PROP: &str = "auto_responder_active";
+pub const AUTO_RESPONDER_MESSAGE_NOTIFY_PROP: &str = "auto_responder_message";
+pub const DESKTOP_THREADS_NOTIFY_PROP: &str = "desktop_threads";
+pub const PUSH_THREADS_NOTIFY_PROP: &str = "push_threads";
+pub const EMAIL_THREADS_NOTIFY_PROP: &str = "email_threads";
+pub const CHANNEL_MENTION_AUTO_FOLLOW_THREADS_PROP: &str = "channel_mention_auto_follow_threads";
+
+pub const DEFAULT_LOCALE: &str = "en";
+pub const USER_AUTH_SERVICE_EMAIL: &str = "email";
+pub const USER_AUTH_SERVICE_MAGIC_LINK: &str = "magic_link";
+
+pub const USER_EMAIL_MAX_LENGTH: usize = 128;
+pub const USER_NICKNAME_MAX_RUNES: usize = 64;
+pub const USER_POSITION_MAX_RUNES: usize = 128;
+pub const USER_FIRST_NAME_MAX_RUNES: usize = 64;
+pub const USER_LAST_NAME_MAX_RUNES: usize = 64;
+pub const USER_AUTH_DATA_MAX_LENGTH: usize = 128;
+pub const USER_NAME_MAX_LENGTH: usize = 64;
+pub const USER_NAME_MIN_LENGTH: usize = 1;
+pub const USER_PASSWORD_MAX_LENGTH: usize = 72;
+pub const USER_LOCALE_MAX_LENGTH: usize = 5;
+pub const USER_TIMEZONE_MAX_RUNES: usize = 256;
+pub const USER_ROLES_MAX_LENGTH: usize = 256;
+
+/// Constants owned by other Go files, duplicated here because `user.go` needs them.
+///
+/// Each moves to its own module when that file is translated; the ledger records the debt.
+pub mod external {
+    /// role.go:380
+    pub const SYSTEM_GUEST_ROLE_ID: &str = "system_guest";
+    /// role.go:382
+    pub const SYSTEM_ADMIN_ROLE_ID: &str = "system_admin";
+    /// ldap.go:7
+    pub const USER_AUTH_SERVICE_LDAP: &str = "ldap";
+    /// saml.go:12
+    pub const USER_AUTH_SERVICE_SAML: &str = "saml";
+    /// config.go:67-71
+    pub const SERVICE_GITLAB: &str = "gitlab";
+    pub const SERVICE_GOOGLE: &str = "google";
+    pub const SERVICE_OFFICE365: &str = "office365";
+    pub const SERVICE_OPENID: &str = "openid";
+    /// config.go:83-85
+    pub const SHOW_USERNAME: &str = "username";
+    pub const SHOW_NICKNAME_FULL_NAME: &str = "nickname_full_name";
+    pub const SHOW_FULL_NAME: &str = "full_name";
+    /// custom_status.go:14
+    pub const USER_PROPS_KEY_CUSTOM_STATUS: &str = "customStatus";
+    /// shared_channel.go:18-20
+    pub const USER_PROPS_KEY_REMOTE_EMAIL: &str = "RemoteEmail";
+    pub const USER_PROPS_KEY_ORIGINAL_REMOTE_ID: &str = "OriginalRemoteId";
+    pub const USER_ORIGINAL_REMOTE_ID_UNKNOWN: &str = "UNKNOWN";
+    /// status.go:16
+    pub const STATUS_ONLINE: &str = "online";
+}
+
+use external::*;
+
+// ---------------------------------------------------------------------------
+// serde skip predicates — one per Go `omitempty` shape
+// ---------------------------------------------------------------------------
+
+fn is_false(b: &bool) -> bool {
+    !*b
+}
+
+fn is_zero(n: &i64) -> bool {
+    *n == 0
+}
+
+/// Go's `omitempty` on a map omits both nil **and** empty, unlike `Option::is_none`.
+fn map_is_empty(m: &Option<StringMap>) -> bool {
+    m.as_ref().is_none_or(StringMap::is_empty)
+}
+
+/// Same for slices.
+fn slice_is_empty(v: &Option<StringArray>) -> bool {
+    v.as_ref().is_none_or(Vec::is_empty)
+}
+
+// ---------------------------------------------------------------------------
+// User
+// ---------------------------------------------------------------------------
+
+/// Port of `model.User` (user.go:87).
+///
+/// Three field shapes here are easy to get wrong and all three are load-bearing:
+///
+/// - `props`/`notify_props` carry `omitempty`, so nil **and** empty are omitted — but the nil
+///   vs empty distinction is meaningful internally (`MakeNonNil`, `GetOriginalRemoteID` test
+///   for nil), hence `Option` plus an emptiness predicate rather than a bare map.
+/// - `timezone` has **no** `omitempty`, so a nil map serialises as `null`, not `{}`. It is
+///   `Option` with no skip predicate for exactly that reason.
+/// - `auth_data` is `*string` with `omitempty`: `Some("")` serialises as `""` and only `None`
+///   is omitted. `Sanitize` relies on this — it sets a pointer to the empty string, which
+///   must still appear on the wire.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct User {
+    #[serde(rename = "id")]
+    pub id: String,
+
+    #[serde(rename = "create_at", default, skip_serializing_if = "is_zero")]
+    pub create_at: i64,
+
+    #[serde(rename = "update_at", default, skip_serializing_if = "is_zero")]
+    pub update_at: i64,
+
+    #[serde(rename = "delete_at")]
+    pub delete_at: i64,
+
+    #[serde(rename = "username")]
+    pub username: String,
+
+    #[serde(rename = "password", default, skip_serializing_if = "String::is_empty")]
+    pub password: String,
+
+    #[serde(rename = "auth_data", default, skip_serializing_if = "Option::is_none")]
+    pub auth_data: Option<String>,
+
+    #[serde(rename = "auth_service")]
+    pub auth_service: String,
+
+    #[serde(rename = "email")]
+    pub email: String,
+
+    #[serde(rename = "email_verified", default, skip_serializing_if = "is_false")]
+    pub email_verified: bool,
+
+    #[serde(rename = "nickname")]
+    pub nickname: String,
+
+    #[serde(rename = "first_name")]
+    pub first_name: String,
+
+    #[serde(rename = "last_name")]
+    pub last_name: String,
+
+    #[serde(rename = "position")]
+    pub position: String,
+
+    #[serde(rename = "roles")]
+    pub roles: String,
+
+    #[serde(rename = "allow_marketing", default, skip_serializing_if = "is_false")]
+    pub allow_marketing: bool,
+
+    #[serde(rename = "props", default, skip_serializing_if = "map_is_empty")]
+    pub props: Option<StringMap>,
+
+    #[serde(rename = "notify_props", default, skip_serializing_if = "map_is_empty")]
+    pub notify_props: Option<StringMap>,
+
+    #[serde(
+        rename = "last_password_update",
+        default,
+        skip_serializing_if = "is_zero"
+    )]
+    pub last_password_update: i64,
+
+    #[serde(
+        rename = "last_picture_update",
+        default,
+        skip_serializing_if = "is_zero"
+    )]
+    pub last_picture_update: i64,
+
+    /// Go `int`, which is 64-bit on every platform Mattermost ships.
+    #[serde(rename = "failed_attempts", default, skip_serializing_if = "is_zero")]
+    pub failed_attempts: i64,
+
+    #[serde(rename = "locale")]
+    pub locale: String,
+
+    /// No `omitempty` in Go — a nil map must serialise as `null`.
+    #[serde(rename = "timezone")]
+    pub timezone: Option<StringMap>,
+
+    #[serde(rename = "mfa_active", default, skip_serializing_if = "is_false")]
+    pub mfa_active: bool,
+
+    #[serde(
+        rename = "mfa_secret",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
+    pub mfa_secret: String,
+
+    #[serde(rename = "remote_id", default, skip_serializing_if = "Option::is_none")]
+    pub remote_id: Option<String>,
+
+    #[serde(rename = "last_activity_at", default, skip_serializing_if = "is_zero")]
+    pub last_activity_at: i64,
+
+    #[serde(rename = "is_bot", default, skip_serializing_if = "is_false")]
+    pub is_bot: bool,
+
+    #[serde(
+        rename = "bot_description",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
+    pub bot_description: String,
+
+    #[serde(
+        rename = "bot_last_icon_update",
+        default,
+        skip_serializing_if = "is_zero"
+    )]
+    pub bot_last_icon_update: i64,
+
+    #[serde(
+        rename = "terms_of_service_id",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
+    pub terms_of_service_id: String,
+
+    #[serde(
+        rename = "terms_of_service_create_at",
+        default,
+        skip_serializing_if = "is_zero"
+    )]
+    pub terms_of_service_create_at: i64,
+
+    #[serde(rename = "disable_welcome_email")]
+    pub disable_welcome_email: bool,
+
+    #[serde(rename = "last_login", default, skip_serializing_if = "is_zero")]
+    pub last_login: i64,
+
+    #[serde(
+        rename = "mfa_used_timestamps",
+        default,
+        skip_serializing_if = "slice_is_empty"
+    )]
+    pub mfa_used_timestamps: Option<StringArray>,
+}
+
+/// Port of `model.UserPatch` (user.go:193).
+///
+/// Every `*string` here is `Option<String>` with **no** skip predicate except `password`,
+/// matching Go: only `password` and the two maps carry `omitempty`, so a patch that clears a
+/// field sends an explicit `null` and one that omits it sends nothing.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UserPatch {
+    #[serde(rename = "username")]
+    pub username: Option<String>,
+
+    #[serde(rename = "password", default, skip_serializing_if = "Option::is_none")]
+    pub password: Option<String>,
+
+    #[serde(rename = "nickname")]
+    pub nickname: Option<String>,
+
+    #[serde(rename = "first_name")]
+    pub first_name: Option<String>,
+
+    #[serde(rename = "last_name")]
+    pub last_name: Option<String>,
+
+    #[serde(rename = "position")]
+    pub position: Option<String>,
+
+    #[serde(rename = "email")]
+    pub email: Option<String>,
+
+    #[serde(rename = "props", default, skip_serializing_if = "map_is_empty")]
+    pub props: Option<StringMap>,
+
+    #[serde(rename = "notify_props", default, skip_serializing_if = "map_is_empty")]
+    pub notify_props: Option<StringMap>,
+
+    #[serde(rename = "locale")]
+    pub locale: Option<String>,
+
+    #[serde(rename = "timezone")]
+    pub timezone: Option<StringMap>,
+
+    #[serde(rename = "remote_id")]
+    pub remote_id: Option<String>,
+}
+
+/// Port of `model.UserAuth` (user.go:225).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UserAuth {
+    #[serde(rename = "auth_data", default, skip_serializing_if = "Option::is_none")]
+    pub auth_data: Option<String>,
+
+    #[serde(
+        rename = "auth_service",
+        default,
+        skip_serializing_if = "String::is_empty"
+    )]
+    pub auth_service: String,
+}
+
+impl UserAuth {
+    /// Port of `(*UserAuth).IsValid` (user.go:236).
+    ///
+    /// Email auth requires **no** auth data; every other service requires non-empty data.
+    pub fn is_valid(&self) -> bool {
+        if !is_valid_user_auth_service(&self.auth_service) {
+            return false;
+        }
+        if self.auth_service == USER_AUTH_SERVICE_EMAIL {
+            return self.auth_data.is_none();
+        }
+        self.auth_data.as_ref().is_some_and(|d| !d.is_empty())
+    }
+}
+
+/// Port of `model.UserForIndexing` (user.go:249).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UserForIndexing {
+    #[serde(rename = "id")]
+    pub id: String,
+    #[serde(rename = "username")]
+    pub username: String,
+    #[serde(rename = "nickname")]
+    pub nickname: String,
+    #[serde(rename = "first_name")]
+    pub first_name: String,
+    #[serde(rename = "last_name")]
+    pub last_name: String,
+    #[serde(rename = "roles")]
+    pub roles: String,
+    #[serde(rename = "create_at")]
+    pub create_at: i64,
+    #[serde(rename = "delete_at")]
+    pub delete_at: i64,
+    /// Note the tag: the Go field is `TeamsIds` but the JSON key is singular `team_id`.
+    #[serde(rename = "team_id")]
+    pub teams_ids: Vec<String>,
+    /// Likewise `ChannelsIds` -> `channel_id`.
+    #[serde(rename = "channel_id")]
+    pub channels_ids: Vec<String>,
+}
+
+impl User {
+    // -- identity / roles ---------------------------------------------------
+
+    /// Port of `(*User).GetRoles` (user.go:866). Go's `strings.Fields` splits on runs of any
+    /// whitespace, not single spaces.
+    pub fn get_roles(&self) -> Vec<&str> {
+        self.roles.split_whitespace().collect()
+    }
+
+    /// Port of `(*User).GetRawRoles` (user.go:870).
+    pub fn get_raw_roles(&self) -> &str {
+        &self.roles
+    }
+
+    /// Port of `(*User).IsInRole` (user.go:908).
+    pub fn is_in_role(&self, in_role: &str) -> bool {
+        is_in_role(&self.roles, in_role)
+    }
+
+    /// Port of `(*User).IsGuest` (user.go:893).
+    pub fn is_guest(&self) -> bool {
+        is_in_role(&self.roles, SYSTEM_GUEST_ROLE_ID)
+    }
+
+    /// Port of `(*User).IsSystemAdmin` (user.go:902).
+    pub fn is_system_admin(&self) -> bool {
+        is_in_role(&self.roles, SYSTEM_ADMIN_ROLE_ID)
+    }
+
+    /// Port of `(*User).IsMagicLinkEnabled` (user.go:897). Guests only.
+    pub fn is_magic_link_enabled(&self) -> bool {
+        self.auth_service == USER_AUTH_SERVICE_MAGIC_LINK && self.is_guest()
+    }
+
+    /// Port of `(*User).IsSSOUser` (user.go:920).
+    pub fn is_sso_user(&self) -> bool {
+        !self.auth_service.is_empty() && self.auth_service != USER_AUTH_SERVICE_EMAIL
+    }
+
+    /// Port of `(*User).IsOAuthUser` (user.go:924).
+    pub fn is_oauth_user(&self) -> bool {
+        matches!(
+            self.auth_service.as_str(),
+            SERVICE_GITLAB | SERVICE_GOOGLE | SERVICE_OFFICE365 | SERVICE_OPENID
+        )
+    }
+
+    /// Port of `(*User).IsLDAPUser` (user.go:931).
+    pub fn is_ldap_user(&self) -> bool {
+        self.auth_service == USER_AUTH_SERVICE_LDAP
+    }
+
+    /// Port of `(*User).IsSAMLUser` (user.go:935).
+    pub fn is_saml_user(&self) -> bool {
+        self.auth_service == USER_AUTH_SERVICE_SAML
+    }
+
+    // -- remote / auth data -------------------------------------------------
+
+    /// Port of `(*User).IsRemote` (user.go:969).
+    pub fn is_remote(&self) -> bool {
+        !self.get_remote_id().is_empty()
+    }
+
+    /// Port of `(*User).GetRemoteID` (user.go:974). `SafeDereference` on a nil pointer is `""`.
+    pub fn get_remote_id(&self) -> &str {
+        self.remote_id.as_deref().unwrap_or_default()
+    }
+
+    /// Port of `(*User).GetAuthData` (user.go:994).
+    pub fn get_auth_data(&self) -> &str {
+        self.auth_data.as_deref().unwrap_or_default()
+    }
+
+    /// Port of `(*User).GetOriginalRemoteID` (user.go:978).
+    pub fn get_original_remote_id(&self) -> &str {
+        match &self.props {
+            None => {
+                if self.is_remote() {
+                    USER_ORIGINAL_REMOTE_ID_UNKNOWN
+                } else {
+                    ""
+                }
+            }
+            Some(props) => match props.get(USER_PROPS_KEY_ORIGINAL_REMOTE_ID) {
+                Some(id) if !id.is_empty() => id,
+                _ if self.is_remote() => USER_ORIGINAL_REMOTE_ID_UNKNOWN,
+                _ => "",
+            },
+        }
+    }
+
+    // -- props --------------------------------------------------------------
+
+    /// Port of `(*User).GetProp` (user.go:999).
+    pub fn get_prop(&self, name: &str) -> Option<&str> {
+        self.props.as_ref()?.get(name).map(String::as_str)
+    }
+
+    /// Port of `(*User).SetProp` (user.go:1006). Creates the map when nil.
+    pub fn set_prop(&mut self, name: impl Into<String>, value: impl Into<String>) {
+        self.props
+            .get_or_insert_with(StringMap::new)
+            .insert(name.into(), value.into());
+    }
+
+    /// Port of `(*User).MakeNonNil` (user.go:765).
+    pub fn make_non_nil(&mut self) {
+        self.props.get_or_insert_with(StringMap::new);
+        self.notify_props.get_or_insert_with(StringMap::new);
+    }
+
+    /// Port of `(*User).AddNotifyProp` (user.go:775).
+    pub fn add_notify_prop(&mut self, key: impl Into<String>, value: impl Into<String>) {
+        self.make_non_nil();
+        if let Some(props) = self.notify_props.as_mut() {
+            props.insert(key.into(), value.into());
+        }
+    }
+
+    /// Port of `(*User).SetDefaultNotifications` (user.go:597). Replaces the map wholesale.
+    pub fn set_default_notifications(&mut self) {
+        let mut props = StringMap::new();
+        props.insert(EMAIL_NOTIFY_PROP.into(), "true".into());
+        props.insert(PUSH_NOTIFY_PROP.into(), USER_NOTIFY_MENTION.into());
+        props.insert(DESKTOP_NOTIFY_PROP.into(), USER_NOTIFY_MENTION.into());
+        props.insert(DESKTOP_SOUND_NOTIFY_PROP.into(), "true".into());
+        props.insert(MENTION_KEYS_NOTIFY_PROP.into(), String::new());
+        props.insert(CHANNEL_MENTIONS_NOTIFY_PROP.into(), "true".into());
+        props.insert(PUSH_STATUS_NOTIFY_PROP.into(), STATUS_ONLINE.into());
+        props.insert(COMMENTS_NOTIFY_PROP.into(), COMMENTS_NOTIFY_NEVER.into());
+        props.insert(FIRST_NAME_NOTIFY_PROP.into(), "false".into());
+        props.insert(DESKTOP_THREADS_NOTIFY_PROP.into(), USER_NOTIFY_ALL.into());
+        props.insert(EMAIL_THREADS_NOTIFY_PROP.into(), USER_NOTIFY_ALL.into());
+        props.insert(PUSH_THREADS_NOTIFY_PROP.into(), USER_NOTIFY_ALL.into());
+        props.insert(
+            CHANNEL_MENTION_AUTO_FOLLOW_THREADS_PROP.into(),
+            "true".into(),
+        );
+        self.notify_props = Some(props);
+    }
+
+    /// Port of `(*User).GetMentionKeys` (user.go:628). Splits on `,`, trims, drops blanks.
+    pub fn get_mention_keys(&self) -> Vec<String> {
+        let raw = self
+            .notify_props
+            .as_ref()
+            .and_then(|p| p.get(MENTION_KEYS_NOTIFY_PROP))
+            .map_or("", String::as_str);
+
+        raw.split(',')
+            .map(str::trim)
+            .filter(|k| !k.is_empty())
+            .map(str::to_string)
+            .collect()
+    }
+
+    /// Port of `(*User).UpdateMentionKeysFromUsername` (user.go:614).
+    ///
+    /// Note the leading comma Go produces: when any keys survive, the value becomes
+    /// `",key1,key2"` — an empty string concatenated with `"," + join(...)`. Reproduced
+    /// deliberately; clients tolerate the blank first element.
+    pub fn update_mention_keys_from_username(&mut self, old_username: &str) {
+        let at_old = format!("@{old_username}");
+        let kept: Vec<String> = self
+            .get_mention_keys()
+            .into_iter()
+            .filter(|k| k != old_username && *k != at_old)
+            .collect();
+
+        let value = if kept.is_empty() {
+            String::new()
+        } else {
+            format!(",{}", kept.join(","))
+        };
+        self.add_notify_prop(MENTION_KEYS_NOTIFY_PROP, value);
+    }
+
+    // -- names --------------------------------------------------------------
+
+    /// Port of `(*User).GetFullName` (user.go:825).
+    pub fn get_full_name(&self) -> String {
+        match (self.first_name.is_empty(), self.last_name.is_empty()) {
+            (false, false) => format!("{} {}", self.first_name, self.last_name),
+            (false, true) => self.first_name.clone(),
+            (true, false) => self.last_name.clone(),
+            (true, true) => String::new(),
+        }
+    }
+
+    /// Port of `(*User).getDisplayName` (user.go:836).
+    fn display_name_from(&self, base_name: &str, name_format: &str) -> String {
+        if name_format == SHOW_NICKNAME_FULL_NAME {
+            if !self.nickname.is_empty() {
+                return self.nickname.clone();
+            }
+            let full = self.get_full_name();
+            if !full.is_empty() {
+                return full;
+            }
+        } else if name_format == SHOW_FULL_NAME {
+            let full = self.get_full_name();
+            if !full.is_empty() {
+                return full;
+            }
+        }
+        base_name.to_string()
+    }
+
+    /// Port of `(*User).GetDisplayName` (user.go:854).
+    pub fn get_display_name(&self, name_format: &str) -> String {
+        self.display_name_from(&self.username, name_format)
+    }
+
+    /// Port of `(*User).GetDisplayNameWithPrefix` (user.go:860).
+    pub fn get_display_name_with_prefix(&self, name_format: &str, prefix: &str) -> String {
+        self.display_name_from(&format!("{prefix}{}", self.username), name_format)
+    }
+
+    /// Port of `(*User).GetPreferredTimezone` (user.go:956).
+    pub fn get_preferred_timezone(&self) -> &str {
+        static EMPTY: LazyLock<StringMap> = LazyLock::new(StringMap::new);
+        get_preferred_timezone(self.timezone.as_ref().unwrap_or(&EMPTY))
+    }
+
+    /// Port of `(*User).EmailDomain` (user.go:1144).
+    pub fn email_domain(&self) -> &str {
+        self.email.rsplit_once('@').map_or("", |(_, domain)| domain)
+    }
+
+    // -- mutation -----------------------------------------------------------
+
+    /// Port of `(*User).Patch` (user.go:644). Only non-nil patch fields are applied.
+    pub fn patch(&mut self, patch: &UserPatch) {
+        if let Some(v) = &patch.username {
+            self.username = v.clone();
+        }
+        if let Some(v) = &patch.nickname {
+            self.nickname = v.clone();
+        }
+        if let Some(v) = &patch.first_name {
+            self.first_name = v.clone();
+        }
+        if let Some(v) = &patch.last_name {
+            self.last_name = v.clone();
+        }
+        if let Some(v) = &patch.position {
+            self.position = v.clone();
+        }
+        if let Some(v) = &patch.email {
+            self.email = v.clone();
+        }
+        if patch.props.is_some() {
+            self.props = patch.props.clone();
+        }
+        if patch.notify_props.is_some() {
+            self.notify_props = patch.notify_props.clone();
+        }
+        if let Some(v) = &patch.locale {
+            self.locale = v.clone();
+        }
+        if patch.timezone.is_some() {
+            self.timezone = patch.timezone.clone();
+        }
+        if patch.remote_id.is_some() {
+            self.remote_id = patch.remote_id.clone();
+        }
+    }
+
+    /// Port of `(*User).ToPatch` (user.go:1013). Note Go does **not** copy `RemoteId`.
+    pub fn to_patch(&self) -> UserPatch {
+        UserPatch {
+            username: Some(self.username.clone()),
+            password: Some(self.password.clone()),
+            nickname: Some(self.nickname.clone()),
+            first_name: Some(self.first_name.clone()),
+            last_name: Some(self.last_name.clone()),
+            position: Some(self.position.clone()),
+            email: Some(self.email.clone()),
+            props: self.props.clone(),
+            notify_props: self.notify_props.clone(),
+            locale: Some(self.locale.clone()),
+            timezone: self.timezone.clone(),
+            remote_id: None,
+        }
+    }
+
+    /// Port of `(*User).PreUpdate` (user.go:554).
+    ///
+    /// Go sanitizes the name fields, then does it a second time verbatim (user.go:565-568);
+    /// `SanitizeUnicode` is idempotent so the repeat is a no-op and is not reproduced.
+    ///
+    /// **Incomplete:** the trailing custom-status re-save (user.go:588-594) needs
+    /// `custom_status.go`. Callers that rely on custom status must not use this yet.
+    pub fn pre_update(&mut self) {
+        self.username = sanitize_unicode(&self.username);
+        self.first_name = sanitize_unicode(&self.first_name);
+        self.last_name = sanitize_unicode(&self.last_name);
+        self.nickname = sanitize_unicode(&self.nickname);
+        self.bot_description = sanitize_unicode(&self.bot_description);
+
+        self.username = normalize_username(&self.username);
+        self.email = normalize_email(&self.email);
+        self.update_at = get_millis();
+
+        if self.auth_data.as_deref() == Some("") {
+            self.auth_data = None;
+        }
+
+        let has_keys = self
+            .notify_props
+            .as_ref()
+            .is_some_and(|p| p.contains_key(MENTION_KEYS_NOTIFY_PROP));
+
+        if self.notify_props.as_ref().is_none_or(StringMap::is_empty) {
+            self.set_default_notifications();
+        } else if has_keys {
+            // Drop blank mention keys and lowercase the rest.
+            let cleaned = self
+                .notify_props
+                .as_ref()
+                .and_then(|p| p.get(MENTION_KEYS_NOTIFY_PROP))
+                .map_or(String::new(), |raw| {
+                    raw.split(',')
+                        .filter(|k| !k.is_empty())
+                        .map(str::to_lowercase)
+                        .collect::<Vec<_>>()
+                        .join(",")
+                });
+            if let Some(props) = self.notify_props.as_mut() {
+                props.insert(MENTION_KEYS_NOTIFY_PROP.into(), cleaned);
+            }
+        }
+    }
+
+    /// The `PreSave` steps that do not depend on un-ported code (user.go:486-531).
+    ///
+    /// Password hashing, the `timezones.DefaultUserTimezone()` default and the custom-status
+    /// re-save are **not** applied — see the module docs. This is deliberately not named
+    /// `pre_save`: it is not a drop-in replacement, and calling it on a write path expecting
+    /// Go's behaviour would silently store an unhashed password.
+    pub fn pre_save_partial(&mut self) {
+        if self.id.is_empty() {
+            self.id = new_id();
+        }
+        if self.username.is_empty() {
+            self.username = new_username();
+        }
+        if self.auth_data.as_deref() == Some("") {
+            self.auth_data = None;
+        }
+
+        self.username = sanitize_unicode(&self.username);
+        self.first_name = sanitize_unicode(&self.first_name);
+        self.last_name = sanitize_unicode(&self.last_name);
+        self.nickname = sanitize_unicode(&self.nickname);
+
+        self.username = normalize_username(&self.username);
+        self.email = normalize_email(&self.email);
+
+        if self.create_at == 0 {
+            self.create_at = get_millis();
+        }
+        self.update_at = self.create_at;
+        self.last_password_update = self.create_at;
+        self.mfa_active = false;
+
+        if self.locale.is_empty() {
+            self.locale = DEFAULT_LOCALE.to_string();
+        }
+        self.props.get_or_insert_with(StringMap::new);
+
+        if self.notify_props.as_ref().is_none_or(StringMap::is_empty) {
+            self.set_default_notifications();
+        }
+    }
+
+    // -- sanitization -------------------------------------------------------
+
+    /// Port of `(*User).Sanitize` (user.go:696).
+    ///
+    /// `options` is Go's `map[string]bool`; an **empty** map means "strip nothing extra",
+    /// while a populated map strips every field whose flag is absent or false.
+    pub fn sanitize(&mut self, options: &HashMap<String, bool>) {
+        self.password.clear();
+        self.mfa_secret.clear();
+        self.mfa_used_timestamps = None;
+        self.last_login = 0;
+
+        if options.is_empty() {
+            return;
+        }
+        let allowed = |key: &str| options.get(key).copied().unwrap_or(false);
+
+        if !allowed("email") {
+            self.email.clear();
+            if let Some(props) = self.props.as_mut() {
+                props.remove(USER_PROPS_KEY_REMOTE_EMAIL);
+            }
+        }
+        if !allowed("fullname") {
+            self.first_name.clear();
+            self.last_name.clear();
+        }
+        if !allowed("passwordupdate") {
+            self.last_password_update = 0;
+        }
+        if !allowed("authservice") {
+            self.auth_service.clear();
+        }
+        if !allowed("authdata") {
+            // Go sets a pointer to "", which still serialises as "auth_data": "".
+            self.auth_data = Some(String::new());
+        }
+    }
+
+    /// Port of `(*User).SanitizeInput` (user.go:724).
+    pub fn sanitize_input(&mut self, is_admin: bool) {
+        if !is_admin {
+            self.auth_data = Some(String::new());
+            self.auth_service.clear();
+            self.email_verified = false;
+        }
+        self.remote_id = Some(String::new());
+        self.create_at = 0;
+        self.update_at = 0;
+        self.delete_at = 0;
+        self.last_password_update = 0;
+        self.last_picture_update = 0;
+        self.failed_attempts = 0;
+        self.mfa_active = false;
+        self.mfa_secret.clear();
+        self.mfa_used_timestamps = Some(StringArray::new());
+        self.email = self.email.trim().to_string();
+        self.last_activity_at = 0;
+    }
+
+    /// Port of `(*User).ClearNonProfileFields` (user.go:744).
+    pub fn clear_non_profile_fields(&mut self, as_admin: bool) {
+        self.password.clear();
+        self.mfa_secret.clear();
+        self.mfa_used_timestamps = None;
+        self.email_verified = false;
+        self.allow_marketing = false;
+        self.last_password_update = 0;
+
+        if !as_admin {
+            self.auth_data = Some(String::new());
+            self.notify_props = Some(StringMap::new());
+            self.failed_attempts = 0;
+        }
+    }
+
+    /// Port of `(*User).SanitizeProfile` (user.go:759).
+    pub fn sanitize_profile(&mut self, options: &HashMap<String, bool>, as_admin: bool) {
+        self.clear_non_profile_fields(as_admin);
+        self.sanitize(options);
+    }
+}
+
+impl UserPatch {
+    /// Port of `(*UserPatch).SetField` (user.go:1023). Unknown names are ignored, as in Go.
+    pub fn set_field(&mut self, field_name: &str, field_value: impl Into<String>) {
+        let value = Some(field_value.into());
+        match field_name {
+            "FirstName" => self.first_name = value,
+            "LastName" => self.last_name = value,
+            "Nickname" => self.nickname = value,
+            "Email" => self.email = value,
+            "Position" => self.position = value,
+            "Username" => self.username = value,
+            _ => {}
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Free functions
+// ---------------------------------------------------------------------------
+
+/// Port of `model.NormalizeUsername` (user.go:475).
+pub fn normalize_username(username: &str) -> String {
+    username.to_lowercase()
+}
+
+/// Port of `model.NormalizeEmail` (user.go:479).
+pub fn normalize_email(email: &str) -> String {
+    email.to_lowercase()
+}
+
+/// Port of `model.IsInRole` (user.go:914).
+///
+/// Splits on a **single space**, unlike `GetRoles`, which uses `strings.Fields`. A roles
+/// string with a tab or double space therefore behaves differently between the two. Faithful
+/// to Go.
+pub fn is_in_role(user_roles: &str, in_role: &str) -> bool {
+    user_roles.split(' ').any(|r| r == in_role)
+}
+
+/// Port of `restrictedUsernames` (user.go:1043).
+const RESTRICTED_USERNAMES: [&str; 4] = ["all", "channel", "matterbot", "system"];
+
+static VALID_USERNAME_CHARS: LazyLock<Option<Regex>> =
+    LazyLock::new(|| Regex::new(r"^[a-z0-9\.\-_]+$").ok());
+static VALID_USERNAME_CHARS_FOR_REMOTE: LazyLock<Option<Regex>> =
+    LazyLock::new(|| Regex::new(r"^[a-z0-9\.\-_:]*$").ok());
+
+/// Port of `model.IsValidUsername` (user.go:1050). Length is measured in **bytes**.
+pub fn is_valid_username(s: &str) -> bool {
+    if s.len() < USER_NAME_MIN_LENGTH || s.len() > USER_NAME_MAX_LENGTH {
+        return false;
+    }
+    if !VALID_USERNAME_CHARS
+        .as_ref()
+        .is_some_and(|re| re.is_match(s))
+    {
+        return false;
+    }
+    !RESTRICTED_USERNAMES.contains(&s)
+}
+
+/// Port of `model.IsValidUsernameAllowRemote` (user.go:1063).
+///
+/// The remote pattern ends in `*` rather than `+`, so it accepts the empty string — but the
+/// length check above rejects it first. Kept as-is to match Go exactly.
+pub fn is_valid_username_allow_remote(s: &str) -> bool {
+    if s.len() < USER_NAME_MIN_LENGTH || s.len() > USER_NAME_MAX_LENGTH {
+        return false;
+    }
+    if !VALID_USERNAME_CHARS_FOR_REMOTE
+        .as_ref()
+        .is_some_and(|re| re.is_match(s))
+    {
+        return false;
+    }
+    !RESTRICTED_USERNAMES.contains(&s)
+}
+
+/// Port of `model.IsValidUserAuthService` (user.go:942).
+///
+/// **Unverified against Go**: the Go body was not read this session. The accepted set is
+/// inferred from the auth-service constants and is asserted only by `UserAuth::is_valid`
+/// tests. Confirm when `ldap.go`/`saml.go` are translated.
+pub fn is_valid_user_auth_service(service: &str) -> bool {
+    matches!(
+        service,
+        USER_AUTH_SERVICE_EMAIL
+            | USER_AUTH_SERVICE_LDAP
+            | USER_AUTH_SERVICE_SAML
+            | SERVICE_GITLAB
+            | SERVICE_GOOGLE
+            | SERVICE_OFFICE365
+            | SERVICE_OPENID
+    )
+}
+
+/// Port of `model.InvalidUserError` (user.go:465).
+///
+/// Note the space Go leaves in the details when `user_id` is empty: the format string always
+/// starts with `" %s=%v"`, so a missing user id yields a leading space.
+pub fn invalid_user_error(field_name: &str, user_id: &str, field_value: &str) -> utils::AppError {
+    let details = if user_id.is_empty() {
+        format!(" {field_name}={field_value}")
+    } else {
+        format!("user_id={user_id} {field_name}={field_value}")
+    };
+    utils::AppError::new(
+        "User.IsValid",
+        format!("model.user.is_valid.{field_name}.app_error"),
+        None,
+        details,
+        400,
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fixture_user() -> User {
+        serde_json::from_str(include_str!("../../../fixtures/user.json")).unwrap()
+    }
+
+    #[test]
+    fn user_matches_go_serialization() {
+        let go = include_str!("../../../fixtures/user.json");
+        let parsed: User = serde_json::from_str(go).unwrap();
+        let round_tripped = serde_json::to_value(&parsed).unwrap();
+        let expected: serde_json::Value = serde_json::from_str(go).unwrap();
+        assert_eq!(round_tripped, expected);
+    }
+
+    #[test]
+    fn fixture_covers_every_field() {
+        // Guards the oracle itself: if the generator ever emits a partial user, the parity
+        // test above would still pass while proving less.
+        let go: serde_json::Value =
+            serde_json::from_str(include_str!("../../../fixtures/user.json")).unwrap();
+        assert_eq!(
+            go.as_object().unwrap().len(),
+            35,
+            "user.json field count changed"
+        );
+    }
+
+    #[test]
+    fn empty_user_omits_every_omitempty_field() {
+        let value = serde_json::to_value(User::default()).unwrap();
+        let object = value.as_object().unwrap();
+
+        // No omitempty in Go -> always present, even at zero.
+        for key in [
+            "id",
+            "delete_at",
+            "username",
+            "auth_service",
+            "email",
+            "nickname",
+            "first_name",
+            "last_name",
+            "position",
+            "roles",
+            "locale",
+            "timezone",
+            "disable_welcome_email",
+        ] {
+            assert!(object.contains_key(key), "{key} should always serialise");
+        }
+        // omitempty in Go -> absent at zero.
+        for key in [
+            "create_at",
+            "update_at",
+            "password",
+            "auth_data",
+            "email_verified",
+            "allow_marketing",
+            "props",
+            "notify_props",
+            "mfa_secret",
+            "remote_id",
+            "is_bot",
+            "last_login",
+            "mfa_used_timestamps",
+        ] {
+            assert!(!object.contains_key(key), "{key} should be omitted at zero");
+        }
+        assert_eq!(object.len(), 13);
+    }
+
+    #[test]
+    fn nil_timezone_serialises_as_null_not_empty_object() {
+        // Go: Timezone has no omitempty, so a nil map marshals to null.
+        let value = serde_json::to_value(User::default()).unwrap();
+        assert!(value["timezone"].is_null());
+
+        let user = User {
+            timezone: Some(StringMap::new()),
+            ..Default::default()
+        };
+        let value = serde_json::to_value(&user).unwrap();
+        assert!(value["timezone"].is_object());
+    }
+
+    #[test]
+    fn empty_props_map_is_omitted_like_gos_omitempty() {
+        let user = User {
+            props: Some(StringMap::new()),
+            ..Default::default()
+        };
+        let value = serde_json::to_value(&user).unwrap();
+        // Go's omitempty drops len == 0 maps, not just nil ones.
+        assert!(!value.as_object().unwrap().contains_key("props"));
+    }
+
+    #[test]
+    fn empty_auth_data_pointer_still_serialises() {
+        let user = User {
+            auth_data: Some(String::new()),
+            ..Default::default()
+        };
+        let value = serde_json::to_value(&user).unwrap();
+        assert_eq!(value["auth_data"], "");
+    }
+
+    #[test]
+    fn roles_helpers_split_differently() {
+        // A double space is harmless: Split(" ") yields an empty middle element, and both
+        // real roles still match.
+        let mut user = User {
+            roles: "system_user  system_admin".into(),
+            ..Default::default()
+        };
+        assert_eq!(user.get_roles(), vec!["system_user", "system_admin"]);
+        assert!(user.is_in_role("system_user"));
+        assert!(user.is_in_role("system_admin"));
+        assert_eq!(user.get_raw_roles(), "system_user  system_admin");
+
+        // A tab is where the two genuinely diverge: strings.Fields splits on it, but
+        // IsInRole's Split(" ") does not, so the roles never match.
+        user.roles = "system_user\tsystem_admin".into();
+        assert_eq!(user.get_roles(), vec!["system_user", "system_admin"]);
+        assert!(!user.is_in_role("system_user"));
+        assert!(!user.is_in_role("system_admin"));
+    }
+
+    #[test]
+    fn role_predicates() {
+        let mut user = User {
+            roles: "system_user system_guest".into(),
+            ..Default::default()
+        };
+        assert!(user.is_guest());
+        assert!(!user.is_system_admin());
+
+        user.roles = "system_admin".into();
+        assert!(user.is_system_admin());
+        assert!(!user.is_guest());
+    }
+
+    #[test]
+    fn magic_link_requires_guest_role() {
+        let mut user = User {
+            auth_service: USER_AUTH_SERVICE_MAGIC_LINK.into(),
+            ..Default::default()
+        };
+        assert!(!user.is_magic_link_enabled(), "not a guest");
+
+        user.roles = "system_guest".into();
+        assert!(user.is_magic_link_enabled());
+    }
+
+    #[test]
+    fn auth_service_predicates() {
+        let mut user = User::default();
+        assert!(!user.is_sso_user(), "empty auth service is not SSO");
+
+        user.auth_service = USER_AUTH_SERVICE_EMAIL.into();
+        assert!(!user.is_sso_user(), "email auth is not SSO");
+
+        for service in [
+            SERVICE_GITLAB,
+            SERVICE_GOOGLE,
+            SERVICE_OFFICE365,
+            SERVICE_OPENID,
+        ] {
+            user.auth_service = service.into();
+            assert!(user.is_oauth_user(), "{service} should be OAuth");
+            assert!(user.is_sso_user());
+        }
+
+        user.auth_service = USER_AUTH_SERVICE_LDAP.into();
+        assert!(user.is_ldap_user() && !user.is_oauth_user());
+
+        user.auth_service = USER_AUTH_SERVICE_SAML.into();
+        assert!(user.is_saml_user() && !user.is_oauth_user());
+    }
+
+    #[test]
+    fn remote_and_auth_data_dereference_safely() {
+        let mut user = User::default();
+        assert!(!user.is_remote());
+        assert_eq!(user.get_remote_id(), "");
+        assert_eq!(user.get_auth_data(), "");
+
+        user.remote_id = Some(String::new());
+        assert!(!user.is_remote(), "empty string is not remote");
+
+        user.remote_id = Some("remote1".into());
+        assert!(user.is_remote());
+        assert_eq!(user.get_remote_id(), "remote1");
+    }
+
+    #[test]
+    fn original_remote_id_covers_every_branch() {
+        let mut user = User::default();
+        // nil props, local user
+        assert_eq!(user.get_original_remote_id(), "");
+
+        // nil props, remote user
+        user.remote_id = Some("r1".into());
+        assert_eq!(
+            user.get_original_remote_id(),
+            USER_ORIGINAL_REMOTE_ID_UNKNOWN
+        );
+
+        // props present with the key set
+        user.set_prop(USER_PROPS_KEY_ORIGINAL_REMOTE_ID, "origin1");
+        assert_eq!(user.get_original_remote_id(), "origin1");
+
+        // props present but the key is blank -> falls through to remote check
+        user.set_prop(USER_PROPS_KEY_ORIGINAL_REMOTE_ID, "");
+        assert_eq!(
+            user.get_original_remote_id(),
+            USER_ORIGINAL_REMOTE_ID_UNKNOWN
+        );
+
+        // props present, blank key, local user
+        user.remote_id = None;
+        assert_eq!(user.get_original_remote_id(), "");
+    }
+
+    #[test]
+    fn props_accessors_create_the_map_lazily() {
+        let mut user = User::default();
+        assert_eq!(user.get_prop("k"), None);
+        assert!(user.props.is_none());
+
+        user.set_prop("k", "v");
+        assert_eq!(user.get_prop("k"), Some("v"));
+        assert!(user.props.is_some());
+    }
+
+    #[test]
+    fn make_non_nil_initialises_both_maps() {
+        let mut user = User::default();
+        user.make_non_nil();
+        assert_eq!(user.props.as_ref().map(StringMap::len), Some(0));
+        assert_eq!(user.notify_props.as_ref().map(StringMap::len), Some(0));
+    }
+
+    #[test]
+    fn set_default_notifications_matches_go_exactly() {
+        let mut user = User::default();
+        user.set_default_notifications();
+        let props = user.notify_props.unwrap();
+
+        assert_eq!(props.len(), 13);
+        assert_eq!(props["email"], "true");
+        assert_eq!(props["push"], "mention");
+        assert_eq!(props["desktop"], "mention");
+        assert_eq!(props["desktop_sound"], "true");
+        assert_eq!(props["mention_keys"], "");
+        assert_eq!(props["channel"], "true");
+        assert_eq!(props["push_status"], "online");
+        assert_eq!(props["comments"], "never");
+        assert_eq!(props["first_name"], "false");
+        assert_eq!(props["desktop_threads"], "all");
+        assert_eq!(props["email_threads"], "all");
+        assert_eq!(props["push_threads"], "all");
+        assert_eq!(props["channel_mention_auto_follow_threads"], "true");
+    }
+
+    #[test]
+    fn get_mention_keys_trims_and_drops_blanks() {
+        let mut user = User::default();
+        assert!(user.get_mention_keys().is_empty(), "nil notify props");
+
+        user.add_notify_prop(MENTION_KEYS_NOTIFY_PROP, "");
+        assert!(user.get_mention_keys().is_empty());
+
+        user.add_notify_prop(MENTION_KEYS_NOTIFY_PROP, "one, two ,,  three  ,");
+        assert_eq!(user.get_mention_keys(), vec!["one", "two", "three"]);
+    }
+
+    #[test]
+    fn update_mention_keys_from_username_keeps_gos_leading_comma() {
+        let mut user = User::default();
+        user.add_notify_prop(MENTION_KEYS_NOTIFY_PROP, "oldname,@oldname,keepme");
+        user.update_mention_keys_from_username("oldname");
+
+        // Go builds "" + "," + join(kept) — the leading comma is real.
+        assert_eq!(
+            user.notify_props.as_ref().unwrap()[MENTION_KEYS_NOTIFY_PROP],
+            ",keepme"
+        );
+        assert_eq!(user.get_mention_keys(), vec!["keepme"]);
+    }
+
+    #[test]
+    fn update_mention_keys_clears_when_nothing_survives() {
+        let mut user = User::default();
+        user.add_notify_prop(MENTION_KEYS_NOTIFY_PROP, "oldname,@oldname");
+        user.update_mention_keys_from_username("oldname");
+        assert_eq!(
+            user.notify_props.as_ref().unwrap()[MENTION_KEYS_NOTIFY_PROP],
+            ""
+        );
+    }
+
+    #[test]
+    fn full_name_covers_every_branch() {
+        let mut user = User::default();
+        assert_eq!(user.get_full_name(), "");
+
+        user.first_name = "Ada".into();
+        assert_eq!(user.get_full_name(), "Ada");
+
+        user.last_name = "Lovelace".into();
+        assert_eq!(user.get_full_name(), "Ada Lovelace");
+
+        user.first_name.clear();
+        assert_eq!(user.get_full_name(), "Lovelace");
+    }
+
+    #[test]
+    fn display_name_honours_the_name_format() {
+        let mut user = User {
+            username: "ada".into(),
+            first_name: "Ada".into(),
+            last_name: "Lovelace".into(),
+            nickname: "countess".into(),
+            ..Default::default()
+        };
+
+        assert_eq!(user.get_display_name(SHOW_USERNAME), "ada");
+        assert_eq!(user.get_display_name(SHOW_FULL_NAME), "Ada Lovelace");
+        assert_eq!(user.get_display_name(SHOW_NICKNAME_FULL_NAME), "countess");
+
+        // Nickname format falls back to full name, then to the base name.
+        user.nickname.clear();
+        assert_eq!(
+            user.get_display_name(SHOW_NICKNAME_FULL_NAME),
+            "Ada Lovelace"
+        );
+        user.first_name.clear();
+        user.last_name.clear();
+        assert_eq!(user.get_display_name(SHOW_NICKNAME_FULL_NAME), "ada");
+        assert_eq!(user.get_display_name(SHOW_FULL_NAME), "ada");
+    }
+
+    #[test]
+    fn display_name_with_prefix_applies_to_the_base_only() {
+        let user = User {
+            username: "ada".into(),
+            first_name: "Ada".into(),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            user.get_display_name_with_prefix(SHOW_USERNAME, "@"),
+            "@ada"
+        );
+        // When the full name wins, the prefix is dropped — the prefix only decorates the base.
+        assert_eq!(
+            user.get_display_name_with_prefix(SHOW_FULL_NAME, "@"),
+            "Ada"
+        );
+    }
+
+    #[test]
+    fn email_domain_extraction() {
+        let mut user = User::default();
+        assert_eq!(user.email_domain(), "");
+
+        user.email = "ada@example.com".into();
+        assert_eq!(user.email_domain(), "example.com");
+
+        user.email = "no-at-sign".into();
+        assert_eq!(user.email_domain(), "");
+    }
+
+    #[test]
+    fn preferred_timezone_handles_a_nil_map() {
+        let mut user = User::default();
+        assert_eq!(user.get_preferred_timezone(), "");
+
+        let mut tz = StringMap::new();
+        tz.insert("useAutomaticTimezone".into(), "true".into());
+        tz.insert("automaticTimezone".into(), "Europe/Berlin".into());
+        user.timezone = Some(tz);
+        assert_eq!(user.get_preferred_timezone(), "Europe/Berlin");
+    }
+
+    // -- patching -----------------------------------------------------------
+
+    #[test]
+    fn patch_applies_only_present_fields() {
+        let mut user = fixture_user();
+        let original_email = user.email.clone();
+
+        let patch = UserPatch {
+            username: Some("newname".into()),
+            ..Default::default()
+        };
+        user.patch(&patch);
+
+        assert_eq!(user.username, "newname");
+        assert_eq!(user.email, original_email, "absent fields are untouched");
+    }
+
+    #[test]
+    fn patch_can_set_empty_values() {
+        let mut user = fixture_user();
+        let patch = UserPatch {
+            nickname: Some(String::new()),
+            ..Default::default()
+        };
+        user.patch(&patch);
+        assert_eq!(user.nickname, "");
+    }
+
+    #[test]
+    fn to_patch_drops_the_remote_id() {
+        // Go's ToPatch does not carry RemoteId across; a round trip must not resurrect it.
+        let mut user = fixture_user();
+        user.remote_id = Some("r1".into());
+        let patch = user.to_patch();
+        assert!(patch.remote_id.is_none());
+        assert_eq!(patch.username, Some(user.username.clone()));
+    }
+
+    #[test]
+    fn set_field_maps_go_field_names() {
+        let mut patch = UserPatch::default();
+        patch.set_field("FirstName", "Ada");
+        patch.set_field("Email", "ada@example.com");
+        patch.set_field("Unknown", "ignored");
+
+        assert_eq!(patch.first_name, Some("Ada".into()));
+        assert_eq!(patch.email, Some("ada@example.com".into()));
+        assert_eq!(patch.last_name, None);
+    }
+
+    // -- sanitization -------------------------------------------------------
+
+    fn options(pairs: &[(&str, bool)]) -> HashMap<String, bool> {
+        pairs.iter().map(|(k, v)| ((*k).to_string(), *v)).collect()
+    }
+
+    #[test]
+    fn sanitize_with_empty_options_strips_only_secrets() {
+        let mut user = fixture_user();
+        let email = user.email.clone();
+        user.sanitize(&HashMap::new());
+
+        assert_eq!(user.password, "");
+        assert_eq!(user.mfa_secret, "");
+        assert!(user.mfa_used_timestamps.is_none());
+        assert_eq!(user.last_login, 0);
+        // An empty options map means nothing else is stripped.
+        assert_eq!(user.email, email);
+    }
+
+    #[test]
+    fn sanitize_strips_fields_whose_flag_is_absent_or_false() {
+        let mut user = fixture_user();
+        user.set_prop(USER_PROPS_KEY_REMOTE_EMAIL, "remote@example.com");
+        user.sanitize(&options(&[("email", false), ("fullname", true)]));
+
+        assert_eq!(user.email, "", "email flag false -> stripped");
+        assert_eq!(
+            user.get_prop(USER_PROPS_KEY_REMOTE_EMAIL),
+            None,
+            "remote email prop removed with the email"
+        );
+        assert_ne!(user.first_name, "", "fullname flag true -> kept");
+        assert_eq!(user.last_password_update, 0, "flag absent -> stripped");
+        assert_eq!(user.auth_service, "");
+        assert_eq!(
+            user.auth_data,
+            Some(String::new()),
+            "Go sets a pointer to empty, not nil"
+        );
+    }
+
+    #[test]
+    fn sanitize_keeps_everything_flagged_true() {
+        let mut user = fixture_user();
+        let before = user.clone();
+        user.sanitize(&options(&[
+            ("email", true),
+            ("fullname", true),
+            ("passwordupdate", true),
+            ("authservice", true),
+            ("authdata", true),
+        ]));
+
+        assert_eq!(user.email, before.email);
+        assert_eq!(user.first_name, before.first_name);
+        assert_eq!(user.last_password_update, before.last_password_update);
+        assert_eq!(user.auth_service, before.auth_service);
+        assert_eq!(user.auth_data, before.auth_data);
+    }
+
+    #[test]
+    fn sanitize_input_clears_server_controlled_fields() {
+        let mut user = fixture_user();
+        user.email = "  ada@example.com  ".into();
+        user.sanitize_input(false);
+
+        assert_eq!(user.auth_data, Some(String::new()));
+        assert_eq!(user.auth_service, "");
+        assert!(!user.email_verified);
+        assert_eq!(user.remote_id, Some(String::new()));
+        assert_eq!(user.create_at, 0);
+        assert_eq!(user.update_at, 0);
+        assert_eq!(user.delete_at, 0);
+        assert_eq!(user.failed_attempts, 0);
+        assert!(!user.mfa_active);
+        assert_eq!(user.mfa_used_timestamps, Some(StringArray::new()));
+        assert_eq!(user.email, "ada@example.com", "trimmed");
+        assert_eq!(user.last_activity_at, 0);
+    }
+
+    #[test]
+    fn sanitize_input_as_admin_keeps_auth_fields() {
+        let mut user = fixture_user();
+        let auth_service = user.auth_service.clone();
+        let auth_data = user.auth_data.clone();
+        user.email_verified = true;
+
+        user.sanitize_input(true);
+
+        assert_eq!(user.auth_service, auth_service);
+        assert_eq!(user.auth_data, auth_data);
+        assert!(user.email_verified, "admins keep email_verified");
+        // Non-admin-gated fields are still cleared.
+        assert_eq!(user.remote_id, Some(String::new()));
+    }
+
+    #[test]
+    fn clear_non_profile_fields_differs_by_admin() {
+        let mut user = fixture_user();
+        user.clear_non_profile_fields(true);
+        assert_eq!(user.password, "");
+        assert!(!user.email_verified);
+        assert!(!user.allow_marketing);
+        assert_eq!(user.last_password_update, 0);
+        assert!(user.notify_props.is_some(), "admin keeps notify props");
+
+        let mut user = fixture_user();
+        user.clear_non_profile_fields(false);
+        assert_eq!(user.auth_data, Some(String::new()));
+        assert_eq!(user.notify_props, Some(StringMap::new()));
+        assert_eq!(user.failed_attempts, 0);
+    }
+
+    #[test]
+    fn sanitize_profile_composes_both_steps() {
+        let mut user = fixture_user();
+        user.sanitize_profile(&options(&[("email", true)]), false);
+
+        assert_eq!(user.password, "");
+        assert_eq!(user.notify_props, Some(StringMap::new()));
+        assert_ne!(user.email, "", "email flag true");
+        assert_eq!(user.last_password_update, 0);
+    }
+
+    // -- lifecycle ----------------------------------------------------------
+
+    #[test]
+    fn pre_save_partial_fills_identity_and_timestamps() {
+        let mut user = User {
+            email: "ADA@Example.COM".into(),
+            ..Default::default()
+        };
+        user.pre_save_partial();
+
+        assert!(utils::is_valid_id(&user.id));
+        assert_eq!(user.username.len(), 27, "generated username is 'a' + 26");
+        assert_eq!(user.email, "ada@example.com", "normalised");
+        assert!(user.create_at > 0);
+        assert_eq!(user.update_at, user.create_at);
+        assert_eq!(user.last_password_update, user.create_at);
+        assert_eq!(user.locale, DEFAULT_LOCALE);
+        assert!(user.props.is_some());
+        assert_eq!(user.notify_props.as_ref().map(StringMap::len), Some(13));
+    }
+
+    #[test]
+    fn pre_save_partial_preserves_an_existing_id_and_create_at() {
+        let mut user = User {
+            id: "existingid1234567890abcde".into(),
+            create_at: 12345,
+            username: "Ada".into(),
+            ..Default::default()
+        };
+        user.pre_save_partial();
+
+        assert_eq!(user.id, "existingid1234567890abcde");
+        assert_eq!(user.create_at, 12345);
+        assert_eq!(user.update_at, 12345);
+        assert_eq!(user.username, "ada");
+    }
+
+    #[test]
+    fn pre_save_partial_nils_an_empty_auth_data_pointer() {
+        let mut user = User {
+            auth_data: Some(String::new()),
+            ..Default::default()
+        };
+        user.pre_save_partial();
+        assert!(user.auth_data.is_none());
+    }
+
+    #[test]
+    fn pre_update_normalises_and_cleans_mention_keys() {
+        let mut user = User {
+            username: "ADA".into(),
+            email: "ADA@Example.COM".into(),
+            ..Default::default()
+        };
+        user.add_notify_prop(MENTION_KEYS_NOTIFY_PROP, "One,,TWO,");
+        user.pre_update();
+
+        assert_eq!(user.username, "ada");
+        assert_eq!(user.email, "ada@example.com");
+        assert!(user.update_at > 0);
+        assert_eq!(
+            user.notify_props.as_ref().unwrap()[MENTION_KEYS_NOTIFY_PROP],
+            "one,two"
+        );
+    }
+
+    #[test]
+    fn pre_update_sets_defaults_when_notify_props_are_empty() {
+        let mut user = User::default();
+        user.pre_update();
+        assert_eq!(user.notify_props.as_ref().map(StringMap::len), Some(13));
+    }
+
+    #[test]
+    fn pre_update_strips_unicode_from_names() {
+        let mut user = User {
+            username: "ad\u{202E}a".into(), // BIDI override
+            bot_description: "bot\u{FEFF}desc".into(),
+            ..Default::default()
+        };
+        user.pre_update();
+        assert_eq!(user.username, "ada");
+        assert_eq!(user.bot_description, "botdesc");
+    }
+
+    // -- UserAuth -----------------------------------------------------------
+
+    #[test]
+    fn user_auth_is_valid_covers_every_branch() {
+        // Unknown service.
+        let auth = UserAuth {
+            auth_service: "nope".into(),
+            auth_data: Some("x".into()),
+        };
+        assert!(!auth.is_valid());
+
+        // Email auth must have NO auth data.
+        let auth = UserAuth {
+            auth_service: USER_AUTH_SERVICE_EMAIL.into(),
+            auth_data: None,
+        };
+        assert!(auth.is_valid());
+
+        let auth = UserAuth {
+            auth_service: USER_AUTH_SERVICE_EMAIL.into(),
+            auth_data: Some(String::new()),
+        };
+        assert!(!auth.is_valid(), "email auth with a non-nil pointer");
+
+        // Other services require non-empty auth data.
+        let auth = UserAuth {
+            auth_service: USER_AUTH_SERVICE_LDAP.into(),
+            auth_data: Some("cn=ada".into()),
+        };
+        assert!(auth.is_valid());
+
+        let auth = UserAuth {
+            auth_service: USER_AUTH_SERVICE_LDAP.into(),
+            auth_data: Some(String::new()),
+        };
+        assert!(!auth.is_valid());
+
+        let auth = UserAuth {
+            auth_service: USER_AUTH_SERVICE_LDAP.into(),
+            auth_data: None,
+        };
+        assert!(!auth.is_valid());
+    }
+
+    // -- free functions -----------------------------------------------------
+
+    #[test]
+    fn normalize_lowercases() {
+        assert_eq!(normalize_username("AdA"), "ada");
+        assert_eq!(normalize_email("Ada@Example.COM"), "ada@example.com");
+    }
+
+    #[test]
+    fn invalid_user_error_formats_details_like_go() {
+        let err = invalid_user_error("email", "abc", "bad@");
+        assert_eq!(err.id, "model.user.is_valid.email.app_error");
+        assert_eq!(err.detailed_error, "user_id=abc email=bad@");
+        assert_eq!(err.status_code, 400);
+
+        // Go's format string always leads with a space, so a blank user id shows through.
+        let err = invalid_user_error("id", "", "xyz");
+        assert_eq!(err.detailed_error, " id=xyz");
+    }
+}
+
+/// Differential tests against what the real Go `user.go` functions returned.
+///
+/// See the module of the same name in `utils.rs`. This one earned its place immediately too:
+/// a hand-written test here asserted that a double space in `Roles` made `IsInRole` miss the
+/// second role. It does not — `strings.Split("a  b", " ")` yields an empty middle element and
+/// both roles still match. Go said so; the reasoning did not.
+#[cfg(test)]
+mod go_parity {
+    use super::*;
+    use serde_json::Value;
+
+    fn oracle() -> Value {
+        serde_json::from_str(include_str!("../../../fixtures/behaviour_utils.json")).unwrap()
+    }
+
+    #[test]
+    fn is_valid_username_matches_go() {
+        let oracle = oracle();
+        for (input, want) in oracle["is_valid_username"].as_object().unwrap() {
+            assert_eq!(
+                is_valid_username(input),
+                want.as_bool().unwrap(),
+                "IsValidUsername({input:?})"
+            );
+        }
+    }
+
+    #[test]
+    fn is_valid_username_allow_remote_matches_go() {
+        let oracle = oracle();
+        for (input, want) in oracle["is_valid_username_allow_remote"]
+            .as_object()
+            .unwrap()
+        {
+            assert_eq!(
+                is_valid_username_allow_remote(input),
+                want.as_bool().unwrap(),
+                "IsValidUsernameAllowRemote({input:?})"
+            );
+        }
+    }
+
+    #[test]
+    fn is_in_role_matches_go() {
+        let oracle = oracle();
+        let cases = oracle["is_in_role"].as_object().unwrap();
+        assert!(!cases.is_empty());
+        for (key, want) in cases {
+            let (roles, wanted_role) = key.rsplit_once('|').unwrap();
+            assert_eq!(
+                is_in_role(roles, wanted_role),
+                want.as_bool().unwrap(),
+                "IsInRole({roles:?}, {wanted_role:?})"
+            );
+        }
+    }
+
+    #[test]
+    fn get_roles_matches_go() {
+        let oracle = oracle();
+        for (roles, want) in oracle["get_roles"].as_object().unwrap() {
+            let expected: Vec<&str> = want
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| v.as_str().unwrap())
+                .collect();
+            let user = User {
+                roles: roles.clone(),
+                ..Default::default()
+            };
+            assert_eq!(user.get_roles(), expected, "GetRoles({roles:?})");
+        }
+    }
+
+    #[test]
+    fn display_names_match_go() {
+        // Mirrors the `people` table in behaviour.go.
+        let people: [(&str, [&str; 4]); 6] = [
+            ("full", ["ada", "Ada", "Lovelace", "countess"]),
+            ("no_nickname", ["ada", "Ada", "Lovelace", ""]),
+            ("first_only", ["ada", "Ada", "", ""]),
+            ("last_only", ["ada", "", "Lovelace", ""]),
+            ("username_only", ["ada", "", "", ""]),
+            ("nickname_only", ["ada", "", "", "countess"]),
+        ];
+
+        let oracle = oracle();
+        let cases = oracle["user_display_names"].as_object().unwrap();
+
+        for (name, [username, first, last, nickname]) in people {
+            let user = User {
+                username: username.to_string(),
+                first_name: first.to_string(),
+                last_name: last.to_string(),
+                nickname: nickname.to_string(),
+                ..Default::default()
+            };
+
+            assert_eq!(
+                user.get_full_name(),
+                cases[&format!("{name}|fullname")].as_str().unwrap(),
+                "GetFullName for {name}"
+            );
+
+            for format in [SHOW_USERNAME, SHOW_FULL_NAME, SHOW_NICKNAME_FULL_NAME] {
+                assert_eq!(
+                    user.get_display_name(format),
+                    cases[&format!("{name}|{format}")].as_str().unwrap(),
+                    "GetDisplayName({format}) for {name}"
+                );
+                assert_eq!(
+                    user.get_display_name_with_prefix(format, "@"),
+                    cases[&format!("{name}|{format}|@")].as_str().unwrap(),
+                    "GetDisplayNameWithPrefix({format}, @) for {name}"
+                );
+            }
+        }
+    }
+}

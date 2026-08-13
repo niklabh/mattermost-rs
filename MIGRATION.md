@@ -2,7 +2,7 @@
 
 Go source pinned at: mattermost@9dfbaeca99f4096388fd1c048a9e6d1d0a86743e (2026-08-13)
 Current phase: 1 — Core Types
-Next file: server/public/model/user.go
+Next file: server/public/model/team.go
 
 Re-clone the reference source with:
 `git clone --depth 1 https://github.com/mattermost/mattermost.git reference/mattermost`
@@ -35,6 +35,7 @@ then `git -C reference/mattermost checkout 9dfbaeca99f4096388fd1c048a9e6d1d0a867
 
 | Go source | Rust target | Status | Tests | Notes |
 |---|---|---|---|---|
+| model/user.go | `mm-model/src/user.rs` | PARTIAL | 48 pass | Wire type + self-contained logic. Deferred: `IsValid` and `PreSave` (need `IsValidEmail`/`IsValidLocale` parser ports + CustomStatus + timezone defaults), custom-status accessors, `IsValidUserRoles`, `Etag`, `CleanUsername`, `GetTimezoneLocation`. `pre_save_partial` is named so deliberately — it does NOT hash passwords. |
 | model/utils.go | `mm-model/src/utils.rs` | PARTIAL | 54 pass | See notes below. Deferred: `IsValidEmail`, `IsValidHTTPURL` (need RFC 5322 / 3986 parsers), `ParseHashtags` (goes with post.go), `Scan`/`Value` (go to mm-store), the io.Reader JSON helpers (serde replaces them), `Etag`/`NewRandomTeamName` (need consts from other files). |
 | — (tooling) | `reference/dump/behaviour.go` → `fixtures/behaviour_utils.json` | DONE | 12 diff tests | Behavioural oracle: runs a corpus through the real Go funcs and records the answers. Caught two bugs a reading of the source did not. Extend the corpus when translating anything with branching logic. |
 | — (tooling) | `reference/dump/` → `fixtures/` | DONE | 10 fixtures | Parity oracle. Reflection-populated from zero values, so adding a type is one registry line; deterministic output (FNV of field path — no rand/time.Now, keeps diffs clean). Fails the run if a declared top-level key is missing from the JSON. Re-run and commit after adding a type. |
@@ -72,3 +73,36 @@ recoverable by re-reading the Go source casually.
 
 7. **Go nil map marshals to `null`, not `{}`.** Struct fields that Go can leave nil must be
    `Option<StringMap>`, or `user.go` and friends will drift on the wire.
+
+## Notes — model/user.go
+
+1. **Three field shapes decide the wire format and all three are easy to miss.** `props` and
+   `notify_props` have `omitempty`, which drops nil **and** empty maps — but nil vs empty is
+   semantically meaningful (`MakeNonNil` and `GetOriginalRemoteID` branch on nil), so they are
+   `Option<StringMap>` plus an emptiness skip predicate. `timezone` has **no** `omitempty`, so
+   a nil map must serialise as `null`. `auth_data` is `*string` + `omitempty`, so `Some("")`
+   serialises as `""` — `Sanitize` depends on that; it sets a pointer to empty, not nil.
+
+2. **`GetRoles` and `IsInRole` split differently.** `GetRoles` uses `strings.Fields` (any
+   whitespace run); `IsInRole` uses `Split(" ")`. A double space is harmless — Split yields an
+   empty middle element and both roles still match — but a **tab** makes `IsInRole` miss every
+   role while `GetRoles` still returns them. Verified against Go, not reasoned.
+
+3. **`UpdateMentionKeysFromUsername` writes a leading comma.** When any key survives the value
+   becomes `",key1,key2"` — Go concatenates onto an emptied string. Reproduced as-is.
+
+4. **`ToPatch` does not carry `RemoteId`**, although `Patch` applies it. Round-tripping a user
+   through `ToPatch` silently drops it.
+
+5. **`InvalidUserError` leaves a leading space** in `detailed_error` when `user_id` is empty:
+   the format string always starts with `" %s=%v"`.
+
+6. **`PreUpdate` sanitizes the name fields twice** (user.go:555-558, then again at 565-568).
+   Idempotent, so the repeat is not reproduced.
+
+7. **`IsValidUserAuthService` is inferred, not read.** Its Go body was not opened this session;
+   the accepted set comes from the auth-service constants. Confirm when `ldap.go`/`saml.go` land.
+
+8. **Constants borrowed from six other Go files** live in `user::external` (role, ldap, saml,
+   config, custom_status, shared_channel, status). Move each into its own module as those
+   files are translated.
