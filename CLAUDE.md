@@ -107,7 +107,8 @@ cargo fmt && cargo check --workspace && cargo clippy -- -D warnings && cargo tes
 ```
 
 Then update `MIGRATION.md` (status, test count, and a one-line **Note** for any non-obvious
-semantics discovered) and stop. Do not start the next file. Do not commit unless asked.
+semantics discovered). Anything you skipped, approximated, or found-but-did-not-fix gets an entry
+in `docs/TECH_DEBT.md` — that register is how deferred work survives a `/clear`. Then stop. Do not start the next file. Do not commit unless asked.
 
 ## Reporting
 

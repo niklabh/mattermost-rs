@@ -31,6 +31,9 @@ then `git -C reference/mattermost checkout 9dfbaeca99f4096388fd1c048a9e6d1d0a867
 | plugin host (hashicorp/go-plugin) | Keep Go process alive indefinitely |
 | search (Bleve / Elasticsearch) | Deferred past Phase 5 |
 
+Deferred work and known divergences live in `docs/TECH_DEBT.md`, not here. Log an entry there
+whenever a session skips, approximates, or discovers-but-does-not-close something.
+
 ## Progress
 
 | Go source | Rust target | Status | Tests | Notes |
@@ -131,10 +134,5 @@ What survives is exactly `dot-atom "@" ( dot-atom / "[" ip "]" )`.
 - **Domains need no dot**: `a@b` is valid. Hyphens and underscores are fine anywhere in the
   domain (`a@-b.com`, `a@b_c.com`) because they are atext; only empty labels fail.
 
-### IsValidLocale is NOT done and needs a decision
-
-`language.Parse` (x/text) validates against the **IANA subtag registry**, not just syntax:
-`en` passes, `xx` does not; `zh-CN` passes, `zh-Ha` does not; `eng` passes, `engl` does not.
-Matching it needs that registry embedded. The 5-character cap makes the reachable input space
-finite and enumerable from Go, so a generated table is feasible — roughly 180 two-letter codes,
-~7k three-letter codes and ~250 regions. Until that lands, `User::is_valid` stays unported.
+`IsValidLocale` is measured but not ported — it needs the IANA subtag registry embedded. See
+[D-001] in `docs/TECH_DEBT.md`; it blocks `User::is_valid` ([D-002]).
