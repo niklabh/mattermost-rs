@@ -35,8 +35,9 @@ then `git -C reference/mattermost checkout 9dfbaeca99f4096388fd1c048a9e6d1d0a867
 
 | Go source | Rust target | Status | Tests | Notes |
 |---|---|---|---|---|
+| model/utils.go (IsValidEmail) | `mm-model/src/utils.rs` | DONE | 2,916 cases | Corpus-verified against Go: 128 hand-picked + 2,788 generated. Grammar is `dot-atom @ (dot-atom / [ip])`. |
 | model/user.go | `mm-model/src/user.rs` | PARTIAL | 48 pass | Wire type + self-contained logic. Deferred: `IsValid` and `PreSave` (need `IsValidEmail`/`IsValidLocale` parser ports + CustomStatus + timezone defaults), custom-status accessors, `IsValidUserRoles`, `Etag`, `CleanUsername`, `GetTimezoneLocation`. `pre_save_partial` is named so deliberately — it does NOT hash passwords. |
-| model/utils.go | `mm-model/src/utils.rs` | PARTIAL | 54 pass | See notes below. Deferred: `IsValidEmail`, `IsValidHTTPURL` (need RFC 5322 / 3986 parsers), `ParseHashtags` (goes with post.go), `Scan`/`Value` (go to mm-store), the io.Reader JSON helpers (serde replaces them), `Etag`/`NewRandomTeamName` (need consts from other files). |
+| model/utils.go | `mm-model/src/utils.rs` | PARTIAL | 54 pass | See notes below. Deferred: `IsValidHTTPURL` (needs an RFC 3986 parser), `ParseHashtags` (goes with post.go), `Scan`/`Value` (go to mm-store), the io.Reader JSON helpers (serde replaces them), `Etag`/`NewRandomTeamName` (need consts from other files). |
 | — (tooling) | `reference/dump/behaviour.go` → `fixtures/behaviour_utils.json` | DONE | 12 diff tests | Behavioural oracle: runs a corpus through the real Go funcs and records the answers. Caught two bugs a reading of the source did not. Extend the corpus when translating anything with branching logic. |
 | — (tooling) | `reference/dump/` → `fixtures/` | DONE | 10 fixtures | Parity oracle. Reflection-populated from zero values, so adding a type is one registry line; deterministic output (FNV of field path — no rand/time.Now, keeps diffs clean). Fails the run if a declared top-level key is missing from the JSON. Re-run and commit after adding a type. |
 
@@ -106,3 +107,34 @@ recoverable by re-reading the Go source casually.
 8. **Constants borrowed from six other Go files** live in `user::external` (role, ldap, saml,
    config, custom_status, shared_channel, status). Move each into its own module as those
    files are translated.
+
+## Notes — IsValidEmail
+
+Verified against Go over 2,916 inputs (128 hand-picked + 2,788 deterministically generated),
+not reasoned about. The accepted grammar is much narrower than RFC 5322 because Mattermost
+composes three checks:
+
+1. `isLower` — input must equal its own lowercasing.
+2. `mail.ParseAddress` succeeds **and** `addr.Address == input`. This equality does most of
+   the work: display names, angle brackets, comments and every quoted local part normalise to
+   something different from the input and are therefore rejected.
+3. At most one `@`.
+
+What survives is exactly `dot-atom "@" ( dot-atom / "[" ip "]" )`.
+
+- **Non-ASCII is atext.** `日本@example.com`, `ünicode@x.com`, even `a\u00A0b@x.com` (NBSP) and
+  emoji are accepted. Go's parser treats any rune > 127 as valid atext (RFC 6532).
+- **The bracketed domain is an IP, not free `dtext`.** `a@[::1]` and `a@[127.0.0.1]` pass;
+  `a@[abc]`, `a@[1.2.3]`, `a@[01.2.3.4]` (leading zero) and `a@[fe80::1%eth0]` (zone) do not.
+  Rust's `IpAddr` parser agrees with Go's on every probe. The `IPv6:` prefix Go also accepts is
+  unreachable — its uppercase fails check 1.
+- **Domains need no dot**: `a@b` is valid. Hyphens and underscores are fine anywhere in the
+  domain (`a@-b.com`, `a@b_c.com`) because they are atext; only empty labels fail.
+
+### IsValidLocale is NOT done and needs a decision
+
+`language.Parse` (x/text) validates against the **IANA subtag registry**, not just syntax:
+`en` passes, `xx` does not; `zh-CN` passes, `zh-Ha` does not; `eng` passes, `engl` does not.
+Matching it needs that registry embedded. The 5-character cap makes the reachable input space
+finite and enumerable from Go, so a generated table is feasible — roughly 180 two-letter codes,
+~7k three-letter codes and ~250 regions. Until that lands, `User::is_valid` stays unported.

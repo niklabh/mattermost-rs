@@ -5,10 +5,9 @@
 //!
 //! # Deliberately not translated here
 //!
-//! - `IsValidEmail` (utils.go:655) and `IsValidHTTPURL` (utils.go:790) delegate to Go's
-//!   `net/mail` and `net/url` parsers. Reproducing RFC 5322 / RFC 3986 acceptance exactly
-//!   is a parser port, not a translation, and an approximation would silently accept or
-//!   reject addresses the Go server does not. They get their own session.
+//! - `IsValidHTTPURL` (utils.go:790) delegates to Go's `net/url`. Reproducing RFC 3986
+//!   acceptance exactly is a parser port, not a translation, and an approximation would
+//!   silently accept or reject URLs the Go server does not. It gets its own session.
 //! - `ParseHashtags` (utils.go:750) is post-rendering logic and belongs with `post.go`.
 //! - `Scan`/`Value` (utils.go:100–216) are `database/sql` driver impls — they belong in
 //!   `mm-store`, expressed as sqlx traits, not here.
@@ -323,6 +322,91 @@ pub fn is_valid_alpha_num_hyphen_underscore_plus(s: &str) -> bool {
 /// and lands with that file.
 pub fn is_valid_simple_alpha_num(s: &str) -> bool {
     matches(&VALID_SIMPLE_ALPHA_NUM, s)
+}
+
+// ---------------------------------------------------------------------------
+// Email
+// ---------------------------------------------------------------------------
+
+/// RFC 5322 `atext`, extended per RFC 6532.
+///
+/// Go's `net/mail` treats any non-ASCII rune as valid atext, so `日本@example.com` and even
+/// `a\u{00A0}b@x.com` (non-breaking space) are accepted addresses. Measured, not assumed.
+fn is_atext(c: char) -> bool {
+    c.is_ascii_alphanumeric()
+        || matches!(
+            c,
+            '!' | '#'
+                | '$'
+                | '%'
+                | '&'
+                | '\''
+                | '*'
+                | '+'
+                | '-'
+                | '/'
+                | '='
+                | '?'
+                | '^'
+                | '_'
+                | '`'
+                | '{'
+                | '|'
+                | '}'
+                | '~'
+        )
+        || !c.is_ascii()
+}
+
+/// `dot-atom` — one or more non-empty atoms joined by single dots.
+///
+/// Rejects a leading dot, a trailing dot, and consecutive dots, because each produces an
+/// empty atom.
+fn is_dot_atom(s: &str) -> bool {
+    !s.is_empty()
+        && s.split('.')
+            .all(|atom| !atom.is_empty() && atom.chars().all(is_atext))
+}
+
+/// Port of `model.IsValidEmail` (utils.go:655).
+///
+/// Go composes three checks, and the combination is far narrower than RFC 5322:
+///
+/// 1. `isLower` — the input must already equal its own lowercasing.
+/// 2. `mail.ParseAddress` must succeed **and** return an `Address` equal to the input
+///    verbatim. That single equality does most of the work: it rejects display names, angle
+///    brackets, comments, and every quoted local part, because the parser normalises those
+///    and the result then differs from the input.
+/// 3. At most one `@`.
+///
+/// What survives is exactly `dot-atom "@" ( dot-atom / "[" ip "]" )`. Note that the bracketed
+/// domain form is validated as an **IP address**, not as free `dtext`: `a@[::1]` is accepted
+/// while `a@[abc]` and `a@[1.2.3]` are not. `a@[fe80::1%eth0]` is rejected too — Go's parser
+/// does not take a zone. The `IPv6:` prefix Go also accepts is unreachable here, since its
+/// uppercase fails check 1.
+///
+/// Every claim above is asserted against Go's own answers over a 128-case corpus; see
+/// `go_parity::is_valid_email_matches_go`.
+pub fn is_valid_email(input: &str) -> bool {
+    if input.to_lowercase() != input {
+        return false;
+    }
+
+    // splitn(3) distinguishes "no @", "one @" and "more than one @" in a single pass.
+    let parts: Vec<&str> = input.splitn(3, '@').collect();
+    if parts.len() != 2 {
+        return false;
+    }
+    let (local, domain) = (parts[0], parts[1]);
+
+    is_dot_atom(local) && is_email_domain(domain)
+}
+
+fn is_email_domain(domain: &str) -> bool {
+    if let Some(literal) = domain.strip_prefix('[').and_then(|d| d.strip_suffix(']')) {
+        return literal.parse::<std::net::IpAddr>().is_ok();
+    }
+    is_dot_atom(domain)
 }
 
 // ---------------------------------------------------------------------------
@@ -1102,6 +1186,32 @@ mod go_parity {
     #[test]
     fn pad_date_string_zeros_matches_go() {
         check_transform("pad_date_string_zeros", pad_date_string_zeros);
+    }
+
+    #[test]
+    fn is_valid_email_matches_go() {
+        // 128 hand-picked cases: every atext special, dot placement, domain shape, IP
+        // literal, display name, quoted local part, unicode boundary and case-folding edge.
+        check_predicate("is_valid_email", is_valid_email);
+    }
+
+    #[test]
+    fn is_valid_email_matches_go_on_generated_input() {
+        // ~2.8k deterministic pseudo-random strings drawn from a hostile alphabet. The
+        // hand-picked corpus above only covers cases someone thought of; this one does not
+        // care what either implementer expected.
+        let oracle = oracle();
+        let cases = oracle["is_valid_email_fuzz"].as_object().unwrap();
+        assert!(cases.len() > 2000, "fuzz corpus unexpectedly small");
+
+        let mut accepted = 0;
+        for (input, want) in cases {
+            let want = want.as_bool().unwrap();
+            assert_eq!(is_valid_email(input), want, "IsValidEmail({input:?})");
+            accepted += usize::from(want);
+        }
+        // Guard against a corpus that proves nothing because Go rejected everything.
+        assert!(accepted > 0, "no generated input was accepted by Go");
     }
 
     #[test]

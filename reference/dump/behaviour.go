@@ -100,6 +100,9 @@ func writeBehaviourFixture(outDir string) error {
 		"is_in_role":                                    isInRoleAll(),
 		"get_roles":                                     getRolesAll(),
 		"user_display_names":                            displayNameAll(),
+		"is_valid_email":                                emailAll(),
+		"is_valid_locale":                               localeAll(),
+		"is_valid_email_fuzz":                           emailFuzzAll(),
 	}
 
 	blob, err := json.MarshalIndent(out, "", "    ")
@@ -334,6 +337,120 @@ func displayNameAll() map[string]string {
 			res[name+"|"+format+"|@"] = u.GetDisplayNameWithPrefix(format, "@")
 		}
 		res[name+"|fullname"] = u.GetFullName()
+	}
+	return res
+}
+
+// --- IsValidEmail (utils.go:655) ---------------------------------------------
+//
+// Mattermost's rule is net/mail.ParseAddress plus three extra constraints: the input must
+// already be lowercase, the parsed Address must equal the input verbatim (so no display
+// names, angle brackets, comments or requoting), and there must be at most one "@". That
+// combination is much narrower than RFC 5322 and is not obvious from reading either half, so
+// the corpus below is deliberately hostile.
+
+var emailCorpus = []string{
+	// plainly valid
+	"a@b.com", "ada@example.com", "ada.lovelace@example.co.uk", "a@b", "a1@b2.c3",
+	"ada+tag@example.com", "ada_lovelace@example.com", "ada-lovelace@example.com",
+	// every atext special
+	"a!b@x.com", "a#b@x.com", "a$b@x.com", "a%b@x.com", "a&b@x.com", "a'b@x.com",
+	"a*b@x.com", "a/b@x.com", "a=b@x.com", "a?b@x.com", "a^b@x.com", "a`b@x.com",
+	"a{b@x.com", "a|b@x.com", "a}b@x.com", "a~b@x.com", "a+b@x.com",
+	// dots in the local part
+	".a@x.com", "a.@x.com", "a..b@x.com", "a.b.c@x.com", ".@x.com", "..@x.com",
+	// missing pieces
+	"", "a", "@", "@x.com", "a@", "a.com", "a@@x.com", "a@b@c.com", "@@",
+	// domain shapes
+	"a@b.", "a@.b", "a@b..c", "a@-b.com", "a@b-.com", "a@b_c.com", "a@b c.com",
+	"a@[127.0.0.1]", "a@[ipv6:::1]", "a@[]", "a@b.c.d.e.f",
+	// case
+	"A@b.com", "a@B.com", "Ada@Example.com", "a@x.COM",
+	// whitespace
+	" a@x.com", "a@x.com ", "a b@x.com", "a@x .com", "a\tb@x.com", "a@x.com\n",
+	// display names / angle brackets / comments
+	"<a@x.com>", "Bob <a@x.com>", "\"Bob\" <a@x.com>", "a@x.com (comment)", "(comment) a@x.com",
+	// quoted local parts
+	"\"a\"@x.com", "\"a b\"@x.com", "\"a@b\"@x.com", "\"\"@x.com",
+	// unicode
+	"ünicode@x.com", "a@ünicode.com", "日本@example.com", "a@x.中国",
+	// length boundaries (Mattermost caps at 128 elsewhere, ParseAddress does not)
+	repeat("a", 64) + "@x.com", repeat("a", 200) + "@x.com", "a@" + repeat("b", 200) + ".com",
+	// trailing/leading dots and misc
+	"a@x.com.", ".a.@x.com", "a..@x.com", "a@x..com", "-a@x.com", "a-@x.com",
+	"_a@x.com", "a_@x.com", "1@2.3", "a@1.2.3.4",
+	// second probe batch: domain literals, unicode boundaries, case folding
+	"a@[abc]", "a@[1.2.3]", "a@[::1]", "a@[127.0.0.1", "a@127.0.0.1]", "a@[a b]",
+	"a@[a\\\\b]", "a@[a[b]", "a@x.com]", "a@[]x", "x[a@b.com",
+	"a b@x.com", "a​b@x.com", "\U0001f600@x.com", "a@\U0001f600.com",
+	"ß@x.com", "ẞ@x.com", "İ@x.com", "ı@x.com",
+	"é́@x.com", "a@x.中国", "日.本@example.com",
+	"a..b@x.com", "a@b.c-d", "a@b-c.d", "a@_b.com", "a@b.c_",
+	"a-b.c_d@e-f.g_h", "'@x.com", "~@x.com", "|@x.com", "{}@x.com",
+	// IP-literal edges: Go validates the bracketed form as an IP address, not as free dtext
+	"a@[0.0.0.0]", "a@[255.255.255.255]", "a@[256.1.1.1]", "a@[01.2.3.4]",
+	"a@[1.2.3.4.5]", "a@[1.2.3.4 ]", "a@[::ffff:1.2.3.4]", "a@[fe80::1%eth0]",
+	"a@[::]", "a@[:::1]", "a@[1::2::3]",
+	// separators that look like addresses
+	"a,b@x.com", "a;b@x.com", "a:b@x.com", "a<b@x.com", "a>b@x.com", "a[b@x.com",
+	"a]b@x.com", "a\\b@x.com", "a\"b@x.com", "a(b@x.com", "a)b@x.com",
+}
+
+func emailAll() map[string]bool {
+	res := make(map[string]bool, len(emailCorpus))
+	for _, in := range emailCorpus {
+		res[in] = model.IsValidEmail(in)
+	}
+	return res
+}
+
+// --- IsValidLocale (user.go:1105) --------------------------------------------
+//
+// Delegates to golang.org/x/text/language.Parse, gated by a 5-character cap. The cap makes
+// the reachable grammar far smaller than BCP 47, but "reachable" still needs measuring
+// rather than guessing.
+
+var localeCorpus = []string{
+	"", "e", "en", "eng", "engl", "en-US", "en-us", "en_US", "EN", "En",
+	"fr", "de", "ja", "zh", "pt-BR", "pt-br", "zh-CN", "zh-Ha", "sr-Cy",
+	"x", "xx", "xxx", "xxxx", "xxxxx", "xxxxxx", "1", "12", "123", "en-1",
+	"en-", "-en", "e-", "--", "en--", "a-b", "a_b", "en US", "en.US", "en/US",
+	"i-en", "und", "mul", "zxx", "qaa", "root", "c", "C", "POSIX",
+}
+
+func localeAll() map[string]bool {
+	res := make(map[string]bool, len(localeCorpus))
+	for _, in := range localeCorpus {
+		res[in] = model.IsValidLocale(in)
+	}
+	return res
+}
+
+// emailFuzzAll generates a deterministic pseudo-random corpus so the Rust port is measured
+// against inputs nobody hand-picked. A hand-written corpus tests the cases its author already
+// thought of; this one does not care what either implementer expected.
+//
+// The generator is a self-contained xorshift rather than math/rand so the output cannot drift
+// with the Go release, and the fixture stays byte-stable across runs.
+func emailFuzzAll() map[string]bool {
+	pool := []rune("abcxyz019..@@--__[]{}!#$%&'*+/=?^`|~ \"(),:;<>\\\t\neé日")
+	state := uint64(0x2545F4914F6CDD1D)
+	next := func(n int) int {
+		state ^= state << 13
+		state ^= state >> 7
+		state ^= state << 17
+		return int(state % uint64(n))
+	}
+
+	res := make(map[string]bool, 3000)
+	for range 3000 {
+		length := 1 + next(12)
+		buf := make([]rune, length)
+		for i := range buf {
+			buf[i] = pool[next(len(pool))]
+		}
+		in := string(buf)
+		res[in] = model.IsValidEmail(in)
 	}
 	return res
 }
