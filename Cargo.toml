@@ -1,0 +1,54 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/mm-model",
+    "crates/mm-store",
+    "crates/mm-app",
+    "crates/mm-api",
+    "crates/mm-ws",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "AGPL-3.0-only"
+repository = "https://github.com/mattermost/mattermost"
+
+[workspace.dependencies]
+# Internal crates. Dependency direction is strict and enforced by review:
+#   mm-model <- mm-store <- mm-app <- {mm-api, mm-ws}
+mm-model = { path = "crates/mm-model" }
+mm-store = { path = "crates/mm-store" }
+mm-app = { path = "crates/mm-app" }
+
+# Runtime
+tokio = { version = "1", features = ["full"] }
+
+# HTTP
+axum = "0.8"
+
+# Database — Postgres only.
+sqlx = { version = "0.8", default-features = false, features = [
+    "runtime-tokio-rustls",
+    "postgres",
+    "chrono",
+    "json",
+    "macros",
+    "migrate",
+] }
+
+# Serde
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Errors
+thiserror = "2"
+anyhow = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Time — Go stores epoch milliseconds as i64; chrono is for conversion only.
+chrono = "0.4"

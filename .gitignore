@@ -1,0 +1,20 @@
+# Rust build artifacts
+/target/
+**/*.rs.bk
+
+# Go reference source — pinned shallow clone, never vendored into history.
+# The pinned SHA is recorded in MIGRATION.md; re-clone from there.
+/reference/mattermost/
+
+# Local environment
+.env
+.env.local
+
+# SQLx offline query cache is intentionally NOT ignored — commit .sqlx/
+# so compile-time query verification works without a live database.
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
