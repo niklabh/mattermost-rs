@@ -25,17 +25,30 @@ correctness and idiomatic Rust conflict on the wire format, wire format wins.
 | Time | `chrono` | Go stores epoch **milliseconds** as `i64` — keep `i64` on the wire |
 | IDs | `String` | Mattermost IDs are 26-char base32, NOT UUIDs. Do not use the `uuid` type. |
 
-## Token rules — these are hard constraints
+## Token rules — strong defaults, not hard constraints
 
-1. **Read only what the prompt names.** Never open a file that was not explicitly listed. If you
-   believe you need another file, **stop and ask** — do not read it speculatively.
+**Quality outranks the token budget.** The goal is the best-quality, best-architected Rust port of
+Mattermost; these rules exist to stop context blowup, which is a means to that end, not the end
+itself. When following a rule would force you to *guess* — at a field name, a `json:` tag, a
+validation branch, a semantic — the rule has stopped doing its job. Read the extra file instead,
+and say in your report which rule you broke and what it bought.
+
+What that does **not** license: speculative wandering, reading a file "for background", or
+re-reading what you already have. Break a rule for a specific fact you need and can name.
+
+Rules 2 and 7 below are scope and safety decisions, not budget ones — those hold unconditionally.
+
+1. **Prefer to read only what the prompt names.** Don't open unlisted files speculatively. If you
+   need another file to avoid guessing, read it and say why — asking first is welcome but not
+   required when the need is clear-cut.
 2. **Never read `reference/mattermost/server/public/model/client4.go`** (8,526 lines, Go REST
    client, out of scope) or any `*_test.go` file in the Go tree.
 3. **Use ranged reads for large files.** For anything over ~600 lines, read a line range only
    (`sed -n '448,520p' <file>`). `store/store.go` is 1,471 lines — one interface at a time.
 4. **No repo-wide grep.** Allowed: `grep -rl` (filenames only), `grep -c` (counts),
    `grep -n ... | head -20`. Never emit an unbounded `grep -r` or `find` over `reference/`.
-5. **One Go file → one Rust file per session.** Do not "while I'm here" adjacent files.
+5. **One Go file → one Rust file per session.** Do not "while I'm here" adjacent files. Reading a
+   neighbouring file to get a type right is fine; *translating* it in the same session is not.
 6. **Don't re-read files you already wrote this session.** Trust the edits.
 7. **Never read `target/`, `Cargo.lock`, `node_modules/`, or `reference/mattermost/webapp/`.**
 
@@ -51,8 +64,23 @@ Every translated file ships with `#[cfg(test)]` tests in the same file. Minimum 
 - **Edge cases the Go code encodes:** empty strings vs `None`, zero timestamps, `omitempty`
   fields, and any field Go explicitly sanitizes out.
 
-If a fixture doesn't exist for a type you're translating, say so and write the test against
-values transcribed from the Go source — do not invent a fixture file.
+### Fixtures — the parity oracle
+
+`fixtures/*.json` is **generated** by the Go program at `reference/dump/`. Never write or edit a
+fixture by hand — a hand-written fixture asserts what you already believe and cannot detect drift.
+
+- **Every field must carry a distinctive non-zero value.** A fixture marshalled from a
+  zero-valued Go struct silently omits every `omitempty` field, so the round-trip test passes
+  while proving nothing about precisely the fields most likely to drift. Before trusting a
+  fixture, check it for missing or zero-valued keys; if any are missing, say so and treat the
+  parity test as provisional rather than evidence.
+- **Extending the oracle is part of translating a type.** If the file you are translating
+  declares a type with `json:` tags and no fixture exists, append it to the registry in
+  `reference/dump/main.go` — one line, fully populated. Do not run the generator; report that it
+  needs re-running.
+- If a fixture doesn't exist for a type you're translating, say so and write the test against
+  values transcribed from the Go source — do not invent a fixture file. Record in `MIGRATION.md`
+  that the test is provisional until the fixture lands.
 
 ## Rust practice
 

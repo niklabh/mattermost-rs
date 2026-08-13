@@ -30,15 +30,10 @@ tracing-subscriber (env-filter), chrono.
 Dependency direction is strict: mm-model has no internal deps; mm-store depends on mm-model;
 mm-app on mm-store; mm-api and mm-ws on mm-app.
 
-Also create MIGRATION.md with this exact structure and nothing else filled in:
-
-  # Migration Ledger
-  Go source pinned at: mattermost@<SHA>
-  Current phase: 0
-  Next file: —
-
-  | Go source | Rust target | Status | Tests | Notes |
-  |---|---|---|---|---|
+MIGRATION.md ALREADY EXISTS and holds the pinned Go SHA, verified line ranges, and the
+out-of-scope list. Read it, but do NOT overwrite or restructure it. Your only edit is to set
+"Current phase:" to "1 — Core Types" and "Next file:" to
+server/public/model/utils.go once the workspace compiles.
 
 Then run `cargo check --workspace` and report the result. Stop.
 ```
@@ -49,17 +44,31 @@ Then run `cargo check --workspace` and report the result. Stop.
 Do not read any Go source files.
 
 Write reference/dump/main.go — a standalone Go program in package main that imports
-github.com/mattermost/mattermost/server/public/model, constructs one fully-populated instance
-of each of these types, marshals each to indented JSON, and writes it to
-fixtures/<snake_case_type>.json:
+github.com/mattermost/mattermost/server/public/model.
 
-  User, Team, Channel, ChannelMember, Post, Session, TeamMember, Status, Preference
+Structure it as a HARNESS PLUS A REGISTRY, not as a flat sequence of marshal calls:
+
+  var registry = map[string]any{
+      "user": model.User{ ... },
+      ...
+  }
+
+and a main() that loops the registry, marshals each value to indented JSON, and writes it to
+fixtures/<key>.json. Adding a type later must be a ONE-LINE change to the registry — later
+sessions will append to it as they translate each type, so the loop must be fully generic.
+
+Seed the registry with exactly these nine keys:
+
+  user, team, channel, channel_member, post, session, team_member, status, preference
 
 "Fully populated" means every field set to a distinctive non-zero value — no zero values, no
 empty strings, no nil maps — so that omitempty behaviour and field naming are both visible in
-the output. Use realistic 26-character IDs and epoch-millisecond timestamps.
+the output. Use realistic 26-character IDs and epoch-millisecond timestamps. A zero-valued
+field is omitted from the fixture and its parity test then proves nothing; this is the single
+most important property of the file.
 
-Also write reference/dump/README.md with the exact command to run it.
+Also write reference/dump/README.md with the exact command to run it, and a one-paragraph note
+telling future sessions to append their type to the registry and re-run.
 
 Do not run it — I will run it myself and commit the fixtures. Stop when the file is written.
 ```
@@ -127,6 +136,12 @@ Tests, in the same file:
 1. Parity: deserialize fixtures/user.json, re-serialize, assert the serde_json::Value graphs
    are equal. This must pass before you consider the file done.
 2. One test per branch of every validation/sanitization method, error branches included.
+
+If this file declares a type with `json:` tags that has NO fixture yet, append it to the
+registry in reference/dump/main.go — one line, every field a distinctive non-zero value. Do
+not run the generator; tell me it needs re-running. Fall back to values transcribed from the
+Go source for this session's test, and note in MIGRATION.md that the parity test is
+provisional until the fixture lands.
 
 Run `cargo test -p mm-model` and `cargo clippy -p mm-model -- -D warnings`.
 Update MIGRATION.md (status, test count, Notes, Next file).

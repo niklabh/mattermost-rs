@@ -121,6 +121,7 @@ Several files are unreadable whole. Never `Read` these; always read a line range
 | `store/store.go` | 1,471 | `sed -n '448,520p'` — one interface at a time |
 | `model/config.go` | 5,795 | one config section at a time |
 | `model/post.go` | 1,640 | `sed -n '1,400p'` then continue |
+| `model/utils.go` | 938 | `sed -n '1,300p'` then continue — over the 600-line threshold |
 | `model/client4.go` | 8,526 | **never** — it's the Go client, not server code |
 | `model/permission.go` | 2,789 | mechanical data; generate, don't translate |
 
@@ -134,12 +135,26 @@ instead. This roughly halves the readable surface of the repo.
 
 ### 3.4 The golden-fixture parity oracle
 This is the highest-leverage trick in the whole plan. Rather than having the agent reason about
-whether the Rust JSON matches the Go JSON, make Go *tell* you — once, cheaply:
+whether the Rust JSON matches the Go JSON, make Go *tell* you.
+
+Build it as a **harness plus a registry**, not as a one-shot dump of every type. `model/` holds
+198 non-test files; populating each type up front would mean reading all of them before writing
+a line of Rust, which is precisely the token blowup this plan exists to avoid.
 
 ```go
-// reference/dump/main.go — write this ONCE, ~60 lines, run it with `go run`
-// Marshals a populated instance of each model type to fixtures/<type>.json
+// reference/dump/main.go — the harness. Write this ONCE, ~40 lines. Zero type knowledge.
+var registry = map[string]any{
+    "user": model.User{ /* every field, non-zero */ },
+    "team": model.Team{ /* ... */ },
+    // one line appended per type, in the session that translates that type
+}
+// for name, v := range registry { → fixtures/<name>.json, indented }
 ```
+
+Seed the registry with the nine types Phase 1 opens with (see prompt 0.2). After that, **each
+translation session appends its own type** and the generator is re-run. The marginal cost is a
+few lines in a session that already has the Go struct open — versus a prohibitive up-front cost
+if you try to cover all 198 files before starting.
 
 Now every Rust test is a mechanical assertion that costs no reasoning:
 
@@ -157,6 +172,13 @@ This catches the single most common and most damaging class of migration bug: a 
 that doesn't match Go's `json:"..."` tag, or a `null` vs `omitempty` mismatch. Wire-format drift
 between Rust server and existing Mattermost mobile/desktop clients is invisible in code review
 and obvious in a fixture diff.
+
+**The one rule that makes or breaks the oracle: every field in the Go instance must carry a
+distinctive non-zero value.** Marshal a zero-valued struct and every `omitempty` field vanishes
+from the fixture — the round-trip then passes trivially while proving nothing about exactly the
+fields most likely to drift. A green test that cannot fail is worse than no test, because it
+buys false confidence at a phase gate. Spot-check each new fixture for missing keys before
+committing it.
 
 ### 3.5 No repo-wide grep
 `grep -r` over Mattermost returns tens of thousands of lines. `CLAUDE.md` restricts the agent to
