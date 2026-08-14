@@ -85,6 +85,8 @@ var registry = map[string]any{
 	"post_translation":       &model.PostTranslation{},
 	"post_priority":          &model.PostPriority{},
 	"post":                   &model.Post{},
+	"post_list":              &model.PostList{},
+	"wrangler_post_list":     &model.WranglerPostList{},
 	"session":                &model.Session{},
 	"team_member":            &model.TeamMember{},
 	"status":                 &model.Status{},
@@ -303,6 +305,72 @@ func main() {
 	}
 	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_post_metadata.json"))
 
+	if err := writePostBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: post behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_post.json"))
+
+	if err := writeURLBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: url behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_url.json"))
+
+	if err := writeIntegrationActionBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: integration action behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_integration_action.json"))
+
+	if err := writeMessageAttachmentBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: message attachment behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_message_attachment.json"))
+
+	if err := writePostAttachmentsBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: post attachments behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_post_attachments.json"))
+
+	if err := writePostInteractiveBlocksBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: post interactive blocks behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_post_interactive_blocks.json"))
+
+	if err := writeDialogBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: dialog behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_dialog.json"))
+
+	if err := writePostActionsBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: post actions behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_post_actions.json"))
+
+	if err := writeGoURLBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: go url behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_go_url.json"))
+
+	if err := writeMmBlocksActionsBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: mm_blocks actions behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_mm_blocks_actions.json"))
+
+	if err := writePostListBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: post list behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_post_list.json"))
+
 	// Not a fixture: a generated Rust source file. See behaviour_emoji.go for why the emoji
 	// table is emitted rather than transcribed.
 	if err := writeEmojiTable(*rustOut); err != nil {
@@ -311,7 +379,7 @@ func main() {
 	}
 	fmt.Printf("wrote %s\n", filepath.Join(*rustOut, "emoji_generated.rs"))
 
-	fmt.Printf("\n%d fixtures written, all top-level fields present.\n", len(names)+13)
+	fmt.Printf("\n%d fixtures written, all top-level fields present.\n", len(names)+21)
 }
 
 type populator struct {

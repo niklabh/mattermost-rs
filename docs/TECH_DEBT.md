@@ -69,11 +69,42 @@ passwords**. Any caller mistaking it for Go's `PreSave` would store plaintext. R
 
 ## D-003 · `IsValidHTTPURL` needs an RFC 3986 parser
 
-**Status** OPEN · **Severity** incomplete · **Raised** 2026-08-13 (phase 1, `utils.go`)
+**Status** CLOSED · **Severity** incomplete · **Raised** 2026-08-13 (phase 1, `utils.go`)
+**Closed** 2026-08-14 (phase 1, ahead of `message_attachment.go`)
 
 Delegates to Go's `net/url.ParseRequestURI`. Same shape of problem as `IsValidEmail` was, and the
-same solution applies: build a corpus, run it through Go, iterate until it matches. Not yet
-needed by anything translated, which is why it was skipped.
+same solution applied: build a corpus, run it through Go, iterate until it matches. It stopped
+being deferrable because `MessageAttachment.IsValid` calls it six times.
+
+**How it was paid.** `utils::is_valid_http_url` reproduces `ParseRequestURI`'s grammar directly
+rather than delegating to a URL crate — the `url` crate implements WHATWG, which normalises and
+would disagree in both directions. Verified against Go over 136 hand-picked inputs, a 2,881-case
+generated corpus, and four exhaustive 0..127 byte sweeps (host, path, query, userinfo) plus
+targeted colon and bracket corpora.
+
+**Superseded 2026-08-14** by the full `net/url` port ([D-047]). `is_valid_http_url` is now the two
+lines Go is — a prefix test, then `go_url::parse_request_uri` succeeding with a non-empty scheme
+and host — and the hand-written grammar underneath it is deleted. All 3,529 cases still pass
+unchanged, which is what made the swap safe; the corpus this entry built now verifies the parser
+rather than a predicate that shadowed it.
+
+Four readings of the Go source were **wrong** and the oracle caught each one:
+
+- The port is everything after the **first** colon, not the last. `a:1:2` fails as
+  `invalid port ":1:2"`, not on a host character.
+- A `[` anywhere in a non-bracketed host is `invalid IP-literal`, even though `[` is in
+  `shouldEscape`'s allow list for hosts. A stray `]` is fine.
+- A bracketed host must parse as a real **IPv6** address. `[abc]`, `[]` and `[1.2.3.4]` are all
+  rejected; `[::ffff:1.2.3.4]` is accepted.
+- `Host` includes the port, so `http://:1` and even `http://:` are valid — the hostname is empty
+  but `Host` is not, and the emptiness test is on `Host`.
+
+The diagnostics section of the fixture records Go's actual `parse_error` and `Host` for the
+ambiguous inputs, which is what turned each of those from a guess into a measurement.
+
+Two behaviours worth keeping in mind at call sites: `ParseRequestURI` does **not** strip a
+`#fragment`, so `http://x#f` is invalid while `http://x/#f` is valid; and the query string is not
+validated at all, so `?q=%zz` passes.
 
 ---
 
@@ -590,6 +621,40 @@ silently is not (Go's `strings.ToLower` is a different function). One `disallowe
 should cover both, and the emoji session proved the failure mode is real rather than theoretical
 — that one shipped in six call sites before it was measured.
 
+**Half of it paid 2026-08-14** (`post.go` chunk 1). The *ordering* hazard is gone:
+`utils::StringInterface` is now `serde_json::Map<String, Value>` rather than a `HashMap`, and
+`serde_json::Map` is a `BTreeMap` absent the `preserve_order` feature — so it is sorted by byte
+value exactly as Go sorts map keys when marshalling. That removes the documented sharp edge from
+[D-022] ("`go_json_marshal` is struct-only") for every `StringInterface`: `Post::props` and
+`Channel::props` now marshal byte-for-byte like Go's, and `go_json_marshal` is safe on any struct
+containing one. It also removes a divergence nobody had logged — a `HashMap`'s iteration order is
+not merely unsorted, it is **unstable between runs**, so two serialisations of the same post from
+the same process could order props differently.
+
+The *escaping* hazard is unchanged and remains the whole of this entry: `serde_json::to_string`
+still does not HTML-escape, so it is still the wrong call whenever the bytes are stored or
+compared rather than sent. `post::go_parity::plain_serde_differs_from_go_only_by_html_escaping`
+pins that distinction at the `Post` level — plain serde differs from Go's bytes, `go_json_marshal`
+matches them, and both decode to the same value. The `clippy.toml` `disallowed-methods` entry is
+still the recommended fix and is still unwritten.
+
+**The rest of the ordering half paid 2026-08-14** (`integration_action.go` chunk 2). `StringMap`
+is now a `BTreeMap` rather than a `HashMap`, so both map aliases sort by byte value exactly as
+Go's marshaller does, and the "two aliases with different guarantees" trap is gone. What forced
+it was a wire probe: `DialogActionButton.Context` is a `map[string]string` on the wire, and the
+byte-exact assertion against Go failed on key order — the first time the instability was
+observable in a committed test rather than in reasoning.
+
+The conversion cost one line elsewhere in the crate (`StringMap::with_capacity` has no `BTreeMap`
+counterpart) and no test changed its expectations, which is the evidence that nothing depended on
+hash iteration order.
+
+`go_json_marshal_string_map` is kept: it is still the required call wherever Go's bytes are
+**measured** rather than sent, because it applies the HTML escaping as well as the sorting. That
+remains the whole of this entry — `serde_json::to_string` still does not escape `<`, `>`, `&`,
+U+2028 or U+2029, and nothing enforces the choice. The `clippy.toml` `disallowed-methods` entry
+is still the recommended fix and is still unwritten.
+
 ---
 
 ## D-028 · `Auditable` is unported on three types, and `Emoji`'s has an upstream bug
@@ -778,6 +843,12 @@ This is **not** new to `post_metadata.go` — it is a convention already shipped
 | `ChannelListWithTeamData []*ChannelWithTeamData` | `Vec<ChannelWithTeamData>` | `channel_list.rs` |
 | `PostMetadata.{Embeds,Emojis,Files,Reactions,Acknowledgements}` | `Vec<T>` | `post_metadata.rs` |
 | `PostMetadata.{Images,Translations}` `map[string]*T` | `HashMap<String, T>` | `post_metadata.rs` |
+| `PostAction.Options []*PostActionOptions` | `Vec<PostActionOptions>` | `integration_action.rs` |
+| `MmBlocksActionCookie.Actions map[string]map[string]any` | `Option<BTreeMap<String, StringInterface>>` | `integration_action.rs` — see [D-050] |
+| `MessageAttachment.Fields []*MessageAttachmentField` | `Option<Vec<MessageAttachmentField>>` | `message_attachment.rs` |
+| `MessageAttachment.Actions []*PostAction` | `Vec<PostAction>` | `message_attachment.rs` |
+| `PostList.{Posts,BurnOnReadPosts}` `map[string]*Post` | `Option<BTreeMap<String, Post>>` | `post_list.rs` |
+| `WranglerPostList.Posts []*Post` | `Option<Vec<Post>>` | `wrangler.rs` |
 
 `post_metadata.go` is only where it stopped being hypothetical: the `embeds_nil_element` oracle
 case is a **failing** decode, asserted explicitly in
@@ -797,9 +868,39 @@ logged rather than shrugged off.
 - **(c) Leave it.** Current state. Consistent across the crate, and the one measured case is
   pinned.
 
+**Widened 2026-08-14** by `message_attachment.go`, where a nil element is not merely legal but
+**produced by the Go code itself**: `ParseMessageAttachment` drops nil *attachments* while
+leaving nil *fields* in place, so its output can contain `"fields":[null,…]` — which we cannot
+decode. That moves the exposure from "a malformed client request" to "a document the Go server
+writes", and it is the strongest argument yet for option (a). `StringifyMessageAttachmentFieldValue`
+filters both, so the two functions disagree about whether a nil field survives.
+
+**Widened again 2026-08-14** by `post.go` chunk 2, which makes the cost concrete rather than
+theoretical. `(*Post).Attachments` re-decodes `props.attachments` element by element and **drops
+the element when the decode fails**, so a nil `PostActionOptions` does not cost us one option —
+it costs us the whole attachment. Measured: `{"actions":[{"options":[null]}]}` gives Go one
+attachment holding `"options":[null]` and gives us none, so the post renders with an attachment
+missing entirely rather than with an empty dropdown.
+
+Go's own nil filter in the same function is the other half of the picture: it strips nil
+**actions** and nil **fields** before returning, so those two are safe by construction and only
+`options` is exposed. That asymmetry is why option (a) can be applied to `PostAction.Options`
+alone at a fraction of the cost — it is the only `[]*T` in the tree whose nil element both
+survives Go's filters and reaches a decode we perform. `a_nil_action_option_drops_the_attachment_
+where_go_keeps_it` pins it.
+
 **(c) for now**, revisit if the app layer ever sees a real nil element. Whatever is chosen must
 be applied to all five types above at once — the value of the current state is that it is
 uniform.
+
+**Widened 2026-08-14** by `post_list.go`, where the exposure is a whole *response*: a
+`{"posts":{"p1":null}}` document decodes in Go with `p1` present and nil, and fails our decode
+outright. It is also the first place the nil element makes a **method** crash rather than merely
+decode oddly — `Clone`, `StripActionIntegrations` and `MakeNonNil` all dereference it, which the
+oracle records as `panicked: true` and the Rust tests assert as a decode failure instead. That
+pairing (Go crashes, we refuse the document) is the least-bad shape this divergence has taken so
+far, and it is another argument that `Vec<Option<T>>`/`BTreeMap<String, Option<T>>` would be
+buying faithfulness to a state no correct producer emits.
 
 ---
 
@@ -836,3 +937,745 @@ and translations with the original — mutating one mutates the other. Only `Pri
 Rust owns its values, so ours is genuinely independent. Same class as [D-015] on
 `Channel::deep_copy`, accepted for the same reason, and the oracle records the aliasing flags so
 the divergence stays visible.
+
+---
+
+## D-035 · `Post::pre_commit` does not generate action ids
+
+**Status** CLOSED · **Severity** incomplete · **Raised** 2026-08-14 (phase 1, `post.go` chunk 1)
+**Closed** 2026-08-14 (phase 1, `integration_action.go` chunk 3) — same day it was raised.
+
+`(*Post).PreCommit` (post.go:724) does four things. Three are ported — materialising `Props`,
+`Filenames` and `FileIds`, and de-duplicating the file ids. The fourth, `o.GenerateActionIds()`,
+is not: it walks `props.attachments`, mints an id for every interactive action that lacks one and
+rewrites the props in place. It lives in `integration_action.go` and needs `MessageAttachment`.
+
+`Post::pre_save` calls `pre_commit`, so **`pre_save` is incomplete for any post carrying
+attachments** — the actions keep whatever ids the client sent, or none. For a post without
+`props.attachments` the two are identical, which is every case in the oracle corpus today.
+
+Not renamed the way `User::pre_save_partial` was ([D-002]): the failure mode there was storing a
+plaintext password, which is a security incident. This one is a missing id on an interactive
+button, and the whole interactive-message surface is unported anyway, so a mid-sized rename would
+buy nothing. **Revisit when `integration_action.go` lands** — that is the same session that must
+port `StripActionIntegrations`, and therefore `Post::ToJSON`/`EncodeJSON`, which are deferred for
+exactly the same reason.
+
+**How it was paid.** `Post::generate_action_ids` is ported in `integration_action.rs` and
+`pre_commit` calls it in Go's position — before the file-id de-duplication. `pre_save` is
+therefore complete for a post with attachments, and both are pinned over the same 34-case corpus.
+
+Two things the port had to get right and neither is in the source:
+
+- **The emptiness test is exact.** An id of `"  "` or `"x"` is kept, however unusable. Only `""`
+  is minted over.
+- **It rewrites the prop even when it mints nothing.** `GenerateActionIds` stores the *decoded*
+  attachment list back into `props.attachments` whenever the prop is non-nil, so an ordinary
+  `pre_save` normalises the client's payload: unknown keys vanish, a wrongly-typed element is
+  dropped, and `{"attachments":[]}` comes back as `{"attachments":null}`. That last one is the
+  trap — Go's `Attachments()` returns a *nil* slice, and a nil Go slice marshals as `null`.
+
+The ids come from `NewId()`, so the oracle records the output with every id absent from the input
+replaced by `<generated>` and counts them separately; the Rust test applies the same substitution
+and additionally asserts each minted id passes `is_valid_id`. Recording the raw ids would have
+broken the determinism rule [D-032] exists for.
+
+One divergence came out of the rewrite and is logged separately as [D-048].
+
+---
+
+## D-036 · `Post::clone` copies more than Go's `ShallowCopy`
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-14 (phase 1, `post.go` chunk 1)
+
+`(*Post).ShallowCopy` (post.go:357) assigns all 25 fields and deep-copies exactly **one**:
+
+```go
+if o.IsFollowing != nil { dst.IsFollowing = new(*o.IsFollowing) }
+```
+
+Everything else that is a reference is aliased. Measured — mutating the clone writes through to
+the original for `Props`, `FileIds`, `Participants` and `Metadata`; `RemoteId` is the same
+pointer; only `IsFollowing` is independent. Rust's `Clone` owns its values, so ours is
+independent throughout.
+
+Third instance of this class after [D-015] (`Channel::deep_copy`) and [D-034]
+(`PostMetadata::Copy`), accepted for the same reason: reproducing the aliasing means
+`Arc<Mutex<…>>` on four fields to make a footgun faithful. `clone_diverges_from_gos_aliasing_by_
+design` asserts Go's aliasing flags **and** our independence side by side, so the divergence is
+pinned rather than assumed.
+
+Flagged because the hazard is directional: an app-layer call site that clones a post, mutates the
+clone's props and then reads the original would silently change behaviour. Check for that when
+the app layer lands. `ShallowCopy`'s other observable, `error("dst cannot be nil")` on a nil
+destination, is unreachable in Rust and is pinned in the oracle rather than ported.
+
+**Widened 2026-08-14** by `post_list.go`. `(*PostList).Clone` deep-copies its posts — measured,
+so this is not the same aliasing — but copies `HasNext` as a bare `*bool`, so writing through the
+clone writes through to the original. Ours is an `Option<bool>` and is independent.
+`clone_matches_go` asserts Go's aliasing flag **and** our independence side by side, the same
+treatment this entry's own test gets. Fourth instance of the class, after `Channel::deep_copy`
+([D-015]) and `PostMetadata::Copy` ([D-034]); `PostList::extend` and `PostList::add_post` are a
+fifth and sixth, where Go files the caller's post *pointers* into the receiver and we copy.
+
+---
+
+## D-037 · `SlackCompatibleBool` matches Go's raw token; we match the decoded string
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-14 (phase 1, `slack_compatibility.go`)
+
+Go's `(*SlackCompatibleBool).UnmarshalJSON` (slack_compatibility.go:35) lowercases the **raw JSON
+token** and compares it against four literals:
+
+```go
+value := strings.ToLower(string(data))
+switch value {
+case "true", `"true"`:  *b = true
+case "false", `"false"`: *b = false
+default: return fmt.Errorf("unmarshal: unable to convert %s to bool", data)
+}
+```
+
+Because it sees the raw bytes, a string spelled with escapes does not match. Measured:
+`"\u0074rue"`, `"tr\u0075e"`, `"\u0054RUE"` and `"fals\u0065"` are all **rejected** by Go,
+though every one of them decodes to `true` or `false`.
+
+Serde hands a visitor the **decoded** string, so this port accepts all four. Reproducing Go would
+mean deserialising through `serde_json::value::RawValue` — which needs the `raw_value` feature,
+ties the type to serde_json specifically, and complicates every containing struct — to make a
+pathological input fail in the same way. No client library emits a boolean word spelled with
+unicode escapes.
+
+Accepted rather than open, and pinned rather than skipped:
+`slack_compatibility::go_parity::unmarshal_matches_go` asserts the divergence explicitly on those
+four cases, so if the decision is ever revisited the test says so.
+
+**Not a divergence, and the more surprising half of this type:** the case-insensitivity applies
+only to the *quoted* form. `TRUE` unquoted is rejected — not by `UnmarshalJSON`, which would
+accept it, but by `encoding/json`'s scanner, which never calls the unmarshaler for an invalid
+token. `"TRUE"` is accepted. Both languages agree here, for the same reason, and
+`only_the_quoted_form_is_case_insensitive` pins it.
+
+---
+
+## D-038 · `PostAction::Equals` ignores three fields, and panics on a nil option
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-14 (phase 1, `integration_action.go` chunk 1)
+
+Two separate problems in `(*PostAction).Equals` (integration_action.go:272), both reproduced.
+
+**It never compares `Tooltip`, `Disabled` or `Style`.** It walks Id, Type, Name, DataSource,
+DefaultOption, Cookie, the Options list and the Integration — and stops. Measured: two actions
+differing only in `Style` (`primary` vs `danger`) are equal; likewise `Disabled: false` vs
+`Disabled: true`. Almost certainly fields added to the struct without updating `Equals`, the same
+shape as [D-034] on `PostMetadata::Copy`.
+
+**Do not "fix" it.** `Equals` gates whether an interactive-message update is treated as a change;
+a Rust server that compared the three extra fields would diverge from the Go server on the same
+data. `post_action_equals_matches_go` pins all three as *equal*, so if upstream repairs it the
+test fails, which is the signal we want.
+
+**Separately, Go panics on a nil option element.** After the length check it indexes
+`p.Options[k].Text` with no nil guard, so `Options: []*PostActionOptions{nil}` crashes — measured
+under `recover`, on the receiver, the input and both. `PostAction.IsValid` handles the same input
+politely with `select action contains nil option`, so the two disagree about whether a nil option
+is survivable.
+
+Our `Vec<PostActionOptions>` cannot hold a nil, so the crash is unreachable and the `IsValid`
+branch is dead. That is the standing [D-033] convention (`[]*T` → `Vec<T>`), and it is asserted
+rather than skipped: `post_action_is_valid_matches_go` requires those two corpus cases to fail at
+**decode** time, and `equals_panics_in_go_on_a_nil_option` records Go's panic. The exposure is the
+usual D-033 one — a client posting `{"options":[null]}` gets a 400 from us and a 500 from Go.
+
+---
+
+## D-039 · `MessageAttachment`'s `any` fields validate a Go type JSON cannot express
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-14 (phase 1, `message_attachment.go`)
+
+`MessageAttachment.Timestamp` and `MessageAttachmentField.Value` are bare `any`s, and their
+validators switch on the **Go dynamic type**:
+
+```go
+switch s.Timestamp.(type) { case string, int64: /* valid */ }   // message_attachment.go:95
+switch s.Value.(type)     { case string, int:   /* valid */ }   // message_attachment.go:206
+```
+
+`encoding/json` decodes every JSON number into a `float64`, and **neither validator accepts
+`float64`**. So `{"ts": 123}` and `{"fields":[{"value": 123}]}` are *invalid* when they arrive
+over the wire, while the same structs built in Go code with an `int64`/`int` are valid. Measured
+in both directions; the wire direction is the one a server takes, and it is the one this port
+reproduces exactly.
+
+**What we cannot reproduce** is the Go-native direction: a `serde_json::Value` has one number
+type, so `is_valid` cannot distinguish an `int64` an app-layer caller built from the `float64` a
+decode produced. Nothing in the ported tree constructs an attachment other than by decoding, so
+this is currently unreachable. If the webhook path is ported and starts building attachments in
+Rust, revisit — a Rust caller setting `Value::Number` gets a rejection where Go's `int64` would
+pass.
+
+Almost certainly an upstream bug rather than a design: no client can send a valid numeric `ts`.
+Not "fixed" here, for the usual reason — a Rust server accepting `{"ts":123}` would accept a
+payload the Go server rejects.
+
+**Separately, `MessageAttachmentField.Equals` panics whenever either `Value` is nil.**
+
+```go
+if reflect.ValueOf(input.Value).Type().Comparable() && ...   // message_attachment.go:222
+```
+
+`reflect.ValueOf(nil)` is the zero `reflect.Value`, and calling `Type()` on it panics. A field
+with no `value` key decodes to exactly that, so comparing two ordinary attachments crashes the Go
+server. Measured under `recover` on the receiver, the input, and both. Ours compares
+`Value::Null` normally — a divergence that replaces a crash, the same class as [D-018].
+
+**Widened 2026-08-14** by `post.go` chunk 2: `(*Post).AttachmentsEqual` calls straight into that
+panicking comparison, so the crash is reachable from a *post*, not only from two attachments an
+app-layer caller happened to hold. Two of the twenty corpus pairs panic in Go — one where a field
+carries no `value` key at all, which is the ordinary shape. Ours answers (`true` and `false`
+respectively) and `equals_answers_where_go_panics` records both, so the divergence is measured
+rather than skipped.
+
+**One more, and it is the reason `json_values_equal_like_go` exists.** Go compares these fields
+with `==` on two `any`s. Both sides of a real comparison came from JSON and are therefore both
+`float64`, so `1` and `1.0` and `1e2` and `100` all compare **equal**. serde_json keeps integers
+and floats apart, so a plain `Value == Value` would disagree with Go on any integral number
+written with a decimal point or an exponent. `utils::json_values_equal_like_go` normalises
+numbers through `f64` and is used by `MessageAttachment::equals`,
+`MessageAttachmentField::equals` and `PostAction::equals`.
+
+---
+
+## D-040 · Go's `encoding/json` matches keys case-insensitively; serde does not
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-08-14 (phase 1, `post.go` chunk 2)
+
+`encoding/json` falls back to a **case-insensitive** match when no field carries the exact JSON
+name (`{"Title":"t"}` populates `Title`, and so does `{"TITLE":"t"}` and `{"tItLe":"t"}`). serde
+matches the `rename` string byte-for-byte and treats anything else as an unknown field, which it
+silently ignores.
+
+Measured through `Post::attachments`, which is where client-supplied JSON gets decoded into a
+model type: Go reads `{"Title":"t","TEXT":"x"}` as a populated attachment, we read it as an empty
+one. `case_insensitive_keys_are_go_only` asserts both halves.
+
+**This is crate-wide, not an attachment problem.** Every `Deserialize` in `mm-model` has it. The
+exposure is a client — or a Go server writing into the shared database — that spells a key with
+different casing: Go honours the value, we drop it, and the two disagree about a record neither
+rejected.
+
+**Options**
+- **(a) `#[serde(alias = …)]` per field.** Only fixes the spellings enumerated, and the reachable
+  set is every casing of every key. Not tractable by hand.
+- **(b) A case-insensitive deserializer** (a `Visitor` lowercasing keys before matching, or
+  `serde_json::Value` preprocessing at the crate boundary). Faithful, and it is one helper rather
+  than a per-type change — but it must lowercase with [`utils::go_to_lower`], and Go's own rule is
+  a *simple ASCII-ish fold* rather than full Unicode case folding, so the helper needs its own
+  oracle before it can be trusted.
+- **(c) Leave it.** Current state. Real clients emit the documented casing; the risk is bespoke
+  integrations and hand-written webhook payloads.
+
+**(c) for now.** Revisit at the API layer, where one boundary-level decoder could cover every
+type at once — which is the argument for doing it there rather than in `mm-model`.
+
+---
+
+## D-041 · `AllStrings` covers everything except the interactive blocks
+
+**Status** CLOSED · **Severity** incomplete · **Raised** 2026-08-14 (phase 1, `post.go` chunk 2)
+**Closed** 2026-08-14 (phase 1, `post_interactive_blocks.go`) — same day it was raised.
+
+`(*Post).AllStrings` (post.go:806) takes an `AllStringsOptions{OmitInteractiveBlocks bool}` and
+ends with `appendHumanReadableInteractiveStrings`, which walks `props.mm_blocks`, `props.blocks`
+(Block Kit) and `props.cards` (Adaptive Cards). That walker is all of
+`post_interactive_blocks.go`, which is unported.
+
+What shipped is `Post::all_strings_omitting_interactive_blocks`, exact against Go for
+`OmitInteractiveBlocks: true` over all 45 corpus cases. It is named for the half it omits, the
+same way `User::pre_save_partial` is — not because a caller could store a plaintext password, but
+because the missing strings feed mention checks and search indexing, so a caller mistaking it for
+`AllStrings` would silently under-index every post carrying an interactive payload.
+
+`AllStringsOptions` itself is deliberately **not** ported: a struct whose only field is honoured
+in one of its two positions is worse than no struct.
+
+**How it was paid.** `post_interactive_blocks.go`'s three human-string walkers are ported in
+`crates/mm-model/src/post_interactive_blocks.rs`, and the method is now
+`Post::all_strings(AllStringsOptions)` — both option values, exact against Go over the 45 cases
+in `behaviour_post_attachments.json` plus 51 new interactive-tree cases.
+
+The gap assertion was inverted rather than deleted:
+`the_interactive_half_is_the_only_difference_between_the_options` still requires that exactly the
+four payload-carrying cases differ between the options, that the `omitting` answer is a **prefix**
+of the `full` one, and that both match Go — so the walkers cannot regress silently and the
+append-last ordering stays pinned. `the_interactive_half_of_all_strings_is_no_longer_a_gap` in the
+new module re-runs the four cases that recorded the gap against the full answer.
+
+What did **not** come with it is the id-collection half of the same Go file; that is [D-044].
+
+---
+
+## D-042 · `propsIsValid` and `ValidateProps` are still unported
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-08-14 (phase 1, `post.go` chunk 2)
+**Depends on** [D-044] (the markdown parser) and `ValidateMmBlocksActions`
+(integration_action.go:1103) — i.e. integration_action.go chunk 2.
+**Narrowed** 2026-08-14 (`post_interactive_blocks.go`): the walkers are ported, so the only
+missing pieces are the ones [D-044] describes.
+
+`propsIsValid` (post.go:909) is ~150 lines of independent per-prop branches, all of whose
+dependencies (`IsValidId`, `IsValidHTTPURL`, `MessageAttachment::IsValid`, `MultiError`) have
+landed — **except two**, and both are load-bearing:
+
+- `ValidateMmBlocksActions(o)` pulls in `CollectInteractiveActionIDsFromPost`,
+  `mmBlocksEntryMapToSpec`, `validateIntegrationURL`, `validateOpenURL`, `ValidateActionQuery`
+  and `validateMmBlocksActionsPairing`. The first of those is [D-044].
+- `nonEmptyInteractivePayloadPropKeys` needs `interactivePropJSONArrayNonEmpty`, which is four
+  lines and was left out of the `post_interactive_blocks.go` session for a reason worth
+  recording: both functions are unexported, so **no exported Go function reaches them** and the
+  oracle cannot measure either one. They are portable, but only against a reading of the source
+  — so they land with `propsIsValid`, whose own oracle case will exercise them end to end.
+
+Shipping the rest without them was considered and rejected. `CollectInteractiveActionIDsFromPost`
+scans the post **Message** for `mmaction://` links, so a plain text post carrying one is invalid
+in Go and would be valid for us — a divergence reachable by an ordinary message, not by a crafted
+payload. `propsIsValid` accumulates a `*multierror.Error`, so a missing branch is a missing
+message in a list whose count and order are the whole output.
+
+**To pay off** port `post_interactive_blocks.go` and integration_action.go chunk 2 first, then
+translate `propsIsValid` whole. `ValidateProps` is a one-line wrapper that logs the result — it
+lands with the logging layer and reduces to `if let Err(e) = self.props_is_valid()`.
+
+---
+
+## D-043 · Absent JSON keys must zero-fill, and 14 of 75 types say so
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-08-14 (phase 1, `post.go` chunk 2)
+
+Go's `encoding/json` leaves an absent field at its zero value; serde's derived `Deserialize`
+**errors** with `missing field` unless the field or the container carries `#[serde(default)]`. So
+any partial object a client sends is a 400 from us and a 200 from Go.
+
+Found by feeding `Post` the oracle's corpus, which is written the way a client writes a post:
+`{"channel_id":"c","message":"hi"}` failed with `missing field 'id'`. That is the **create-post
+payload** — the single most common inbound document in the product.
+
+`Post` is fixed (container-level `#[serde(default)]`, pinned by
+`a_partial_post_decodes_the_way_go_zero_fills`). The audit is what is owed. Counted at the time
+of writing: **75** structs in `mm-model` derive `Deserialize`, and **14** carry a container-level
+default — `CustomStatus`, `Emoji`, `FileInfo` (both), `Post`, `PostAcknowledgement`, `PostEmbed`,
+the four in `post_metadata.rs`, `Preference`, `Reaction` and `Status`.
+
+Of the 61 that do not, three groups are already safe and should not be touched:
+`#[serde(transparent)]` newtypes over a `Vec` or map (`ChannelList`, `ChannelListWithTeamData`,
+`Preferences`, `RecentCustomStatuses`), types whose every field is an `Option` (`PostPatch`,
+`ChannelPatch`, `UserPatch`, `TeamPatch`), and `MessageAttachment`/`MessageAttachmentField`,
+which carry the attribute per field instead. The rest — `Channel` and its satellites,
+`ChannelMember` and its, `User`, `Team`, `Session`, `TeamMember` and the ten in
+`integration_action.rs` — reject a partial document that Go accepts.
+
+**One field paid 2026-08-14** (`mm_blocks_actions.go`), and it is worth recording because it was
+found the way the entry predicts: `MmBlocksActionCookie.actions` was the one field in that struct
+without a per-field `default`, so a cookie written without an `actions` key — which
+`ParseDecryptedActionCookiePayload` has to decode, and which Go zero-fills — failed. The other 60
+containers are untouched.
+
+**To pay off** add `#[serde(default)]` to each container that derives `Default`, and add a decode
+test per file asserting the minimal realistic payload. Cheap and mechanical, but it touches every
+already-shipped module, so it wants its own session rather than being smuggled into the next
+translation. Nothing detects the gap today except a test that tries a partial document — the
+round-trip fixtures are all **complete** objects, which is precisely why this survived nine files.
+
+---
+
+## D-044 · The `mmaction://` id scan needs `shared/markdown`
+
+**Status** OPEN · **Severity** blocking · **Raised** 2026-08-14 (phase 1, `post_interactive_blocks.go`)
+**Blocks** [D-042] (`propsIsValid`), and with it `ValidateMmBlocksActions`,
+`RefreshInteractiveActionsOnPost` and the interactive-webhook path.
+
+`appendMmactionIDsFromText` (post_interactive_blocks.go:385) is four lines and one of them is
+`markdown.Inspect`:
+
+```go
+markdown.Inspect(text, func(blockOrInline any) bool {
+    switch v := blockOrInline.(type) {
+    case *markdown.InlineLink:    ids = appendMmactionIDFromURL(ids, v.Destination())
+    case *markdown.ReferenceLink: … case *markdown.Autolink: …
+    }
+    return true
+})
+```
+
+So finding the action ids a post references means **parsing the post's markdown** —
+`server/public/shared/markdown` is 4,688 non-test lines across 20 files (CommonMark blocks,
+inlines, links, reference definitions, autolinks, HTML entities). It is a package-sized
+translation and it is the fourth "Go's stdlib-shaped dependency does the real work" case after
+`net/mail`, `x/text/language` ([D-001]) and `net/url` ([D-003]).
+
+**Everything downstream is deferred as a unit**, which is the point of this entry:
+`CollectMmBlockActionIDs`, `CollectBlockKitActionIDs`, `CollectAdaptiveCardActionIDs`,
+`CollectInteractiveActionIDs`, `CollectInteractiveActionIDsFromPost`, `CollectMmactionIDsFromText`,
+`RefreshInteractiveActionsOnPost`, `ApplyMmBlocksWithActionsToProps`,
+`validateMmBlocksActionsPairing`, `ValidateInteractiveActionsForWebhook` and
+`ValidateMmBlocksActionsForWebhook`. Also `SubsetMmBlocksActions` and `interactiveControlDisabled`,
+which are markdown-free but have no other caller.
+
+**Porting the collectors without it was considered and rejected.** Every one of them walks text
+nodes as well as controls — a `text` block, a Block Kit `section`'s text, an Adaptive Card
+`TextBlock` — so a stubbed scanner returns a *subset* of the referenced ids. That subset flows
+into `validateMmBlocksActionsPairing`, which then reports `mm_blocks_actions entry "x" is not
+referenced by interactive content` for an entry that **is** referenced, rejecting a payload the Go
+server accepts. Under-reporting is the dangerous direction here, and it is silent.
+
+**Options**
+- **(a) Port `shared/markdown`.** It is needed eventually regardless — the mention parser, the
+  image-proxy rewriter (`RewriteImageURLs`) and the notification path all use it. Its own session,
+  or several.
+- **(b) Port only the link-destination scan** — a much smaller parser that finds `[x](dest)`,
+  `<dest>` and reference definitions. Tempting, and wrong for the usual reason: "which text is a
+  link" is exactly the question CommonMark's block/inline structure answers, and a scanner that
+  disagrees inside code spans, fenced blocks or nested brackets reports different ids.
+- **(c) Leave the whole family unported.** Current state.
+
+**(c) until the markdown port is scheduled**, then (a). `appendMmactionIDFromURL` — the pure
+string half, splitting the id off at the first `/`, `?` or `#` and matching
+`^[A-Za-z0-9_-]+$` — is *not* ported either, because it cannot be tested in isolation: it is
+unexported and reachable only through the parser, so any test of it would assert our reading of
+the Go source rather than Go's answer.
+
+---
+
+## D-045 · The two `column_set` walkers disagree, and the image one is wrong
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-14 (phase 1, `post_interactive_blocks.go`)
+
+`appendHumanStringsFromMmBlockMap` (post_interactive_blocks.go:73) hands a column's whole `items`
+array to the block walker. `appendMmBlockMapImageURLs` (:236) hands it **each element**, which the
+same walker then re-tests as an array:
+
+```go
+for _, item := range colItems {
+    out = appendMmBlocksArrayImageURLs(out, item)   // item, not colItems
+}
+```
+
+Measured: for the ordinary shape `{"type":"column_set","columns":[{"items":[{"type":"image",
+"url":"…"}]}]}` the text walker finds the column's contents and the image walker finds
+**nothing**; an image only surfaces when `items` is an array *of arrays*, which no producer emits.
+So images inside mm_blocks columns are invisible to link previews in the Go server today.
+
+Reproduced verbatim and pinned by `the_two_column_set_walkers_disagree_the_way_go_does`, which
+asserts the empty result for the flat shape, the found URL for the nested one, and the text
+walker's answer for the same input side by side.
+
+**Do not "fix" it.** A Rust server that found the image would fetch and attach a preview the Go
+server never attaches, and the two would disagree about the metadata written for the same post.
+If upstream repairs the loop, the oracle case flips and the test fails — the signal we want. Same
+treatment as [D-016] and [D-019].
+
+---
+
+## D-046 · integration_action.go's crypto half is unported
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-08-14 (phase 1, `integration_action.go` chunk 2)
+**Blocks** the interactive-message request path, not the model types.
+
+Two clusters were left out of chunk 2 because neither is a translation problem — both are
+cryptographic compatibility problems, and getting one subtly wrong fails open rather than loudly:
+
+**Trigger ids** (`GenerateTriggerId` :636, `DecodeAndVerifyTriggerId` :664, plus the two method
+wrappers). An ECDSA signature over `userId:timestamp`, base64-encoded, verified against a
+timeout. Go signs with `crypto.Signer` and a SHA-256 digest; reproducing it means matching the
+**signature encoding** (ASN.1 DER over the P-256 curve) and the exact digest input, since the
+same key pair has to verify tokens minted by either server during the migration.
+`signForGenerateTriggerId` also wraps the signing call in a `recover`, because an invalid signer
+panics inside `crypto` — a Rust port has no panic to catch and should return an error instead.
+
+**Post action cookies** (`AddPostActionCookies` :1261, `EncryptPostActionCookie` :1307,
+`DecryptPostActionCookie` :1337). AES-GCM over a JSON `PostActionCookie`, keyed by the server's
+`AtRestEncryptKey`, with the nonce prepended and the whole thing base64-encoded. Both servers
+read the *same* posts, so a cookie written by Go must decrypt in Rust and vice versa: nonce
+length, the associated data (there is none) and the base64 alphabet are all load-bearing.
+
+Also deferred, and *not* crypto: `StripActionIntegrations` (:1044), `GetAction` (:1057) and
+`GenerateActionIds` (:1246). All three walk `props.attachments` and rewrite it, which is now
+possible — `Post::attachments` landed with chunk 2 of post.go — so they are the natural next
+chunk. `GenerateActionIds` is what [D-035] is waiting on, and `Post::to_json`/`encode_json` wait
+on `StripActionIntegrations`.
+
+**Two of those three landed 2026-08-14** as chunk 3: `strip_action_integrations` closed the
+`to_json`/`encode_json` deferral and `generate_action_ids` closed [D-035]. `GetAction` did not —
+it needs `MergeQueryIntoURL`, which is a `net/url` port rather than a crypto one. See [D-047].
+
+**To pay off** the crypto needs a decision on crates (`p256`/`ecdsa` and `aes-gcm`, or `ring`) and
+an oracle that records Go's *ciphertext* for a fixed key and nonce — a round-trip test in Rust
+alone would prove nothing about cross-server compatibility.
+
+---
+
+## D-047 · `Post::get_action` needs `MergeQueryIntoURL`, i.e. a `net/url` parser that re-emits
+
+**Status** CLOSED · **Severity** incomplete · **Raised** 2026-08-14 (phase 1, `integration_action.go` chunk 3)
+**Closed** 2026-08-14 (phase 1, `net/url` + `mm_blocks_actions.go`) — same day it was raised.
+**Related** [D-003] (`IsValidHTTPURL`, which reproduces `ParseRequestURI` as a *validator*)
+
+Chunk 3 shipped two of the three `Post` methods that walk `props.attachments`.
+`(*Post).GetAction` (integration_action.go:1057) is the third and it did not, because its second
+half is not a translation problem:
+
+```go
+if spec := o.GetMmBlocksActionSpec(id); spec != nil && spec.Type == MmBlocksActionTypeExternal && spec.URL != "" {
+    url := spec.URL
+    if len(spec.Query) > 0 {
+        merged, err := MergeQueryIntoURL(spec.URL, spec.Query)   // mm_blocks_actions.go:148
+        if err != nil { return nil }
+        url = merged
+    }
+    ...
+}
+```
+
+`MergeQueryIntoURL` is `url.Parse` → `u.Query()` → `values.Set` → `values.Encode()` → `u.String()`.
+Four pieces of `net/url` and only the first overlaps with what [D-003] already built:
+
+- **`url.Parse` is not `url.ParseRequestURI`.** It accepts a relative reference and it *does*
+  split a `#fragment`, which `ParseRequestURI` does not — the one behaviour D-003's notes single
+  out as a call-site trap. And `is_valid_http_url` answers a bool; this needs the **components**.
+- **`Values.Encode` sorts by key and percent-encodes with `QueryEscape`**, which is not the same
+  escape set as a path or a host — a space becomes `+`, not `%20`.
+- **`URL.String()` re-assembles with its own escaping rules per component**, so a round trip is
+  not the identity: it can normalise the input URL even when nothing was merged into it.
+
+Shipping the attachment half alone and returning `None` for the mm_blocks half was considered and
+rejected: that is the under-reporting direction, and it turns a working external action into a
+404 rather than into a visible failure.
+
+**Also deferred with it, and the same session's work:** the rest of `mm_blocks_actions.go` — the
+`MmBlocksActionSpec` type, `GetMmBlocksActionSpec`, `mmBlocksEntryMapToSpec`,
+`MmBlocksActionCookie::ActionSpec`, `ResolveMmBlocksAction`, `MmBlocksContextMap`,
+`contextMapFromProp`, `stringMapFromPropValue` and `coerceToStringAnyMap`. All of those are pure
+`map[string]any` coercion and could land today; they buy nothing without `GetAction`, so they wait
+for it rather than being smuggled in one at a time.
+
+**One method of that file did come across**, because `StripActionIntegrations` calls it and
+shipping that without it would leak the `context` of every mm_blocks action to the client:
+`(*Post).StripMmBlocksActionSecrets` (mm_blocks_actions.go:243) is ported in
+`integration_action.rs` and pinned over all 34 corpus cases. `AddMmBlocksActionCookies` and
+`ParseDecryptedActionCookiePayload` stay with the crypto in [D-046].
+
+**To pay off** port `net/url`'s `Parse`/`String`/`Values` as a unit — it is the same shape of job
+D-003 was, and an oracle recording Go's `String()` for a corpus of inputs is what makes it
+checkable — then `GetAction` and the rest of `mm_blocks_actions.go` are mechanical.
+
+**How it was paid.** `crates/mm-model/src/go_url.rs` is `net/url`'s `Parse`, `ParseRequestURI`,
+`URL.String`, `EscapedPath`/`EscapedFragment`, `escape`/`unescape`, `ParseQuery` and
+`Values.Encode`. `crates/mm-model/src/mm_blocks_actions.rs` is the rest of the Go file bar
+`AddMmBlocksActionCookies`, which stays with the crypto in [D-046]. `Post::get_action` is ported
+and pinned over all 44 corpus cases, asserting the **marshalled** synthesised action rather than
+its fields.
+
+**The strongest evidence is not the new corpus.** `utils::is_valid_http_url` was a hand-written
+predicate reproducing `ParseRequestURI`'s grammar, verified over 3,529 inputs including four
+exhaustive 0..127 byte sweeps. It is now two lines delegating to `go_url::parse_request_uri`, and
+**every one of those 3,529 cases still passes, unchanged**. A corpus built to check a predicate
+turned out to be a much better test of the parser underneath it. The 200-odd lines of duplicated
+grammar in `utils.rs` are deleted; there is one implementation now.
+
+Two things the new oracle caught that a reading would not have:
+
+- **`escape` differs per position on ~30 bytes**, and the fixture runs all 256 byte values through
+  all six reachable modes rather than sampling. `encodeFragment` leaves `!()*` alone and escapes
+  `'`; `encodePath` escapes only `?` out of the reserved set; `encodeHost` allows `<>"`.
+- **`URL.String()` is not the identity on its input.** `http://x/a%41b` comes back as
+  `http://x/aAb` because the escaping is canonicalised, while `http://x/a%2fb` survives — the
+  difference is `RawPath`, which `setPath` populates *only* when the default encoding differs.
+
+One divergence came out of it and is logged separately as [D-049].
+
+---
+
+## D-048 · A rewritten `props.attachments` loses Go's struct field order
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-14 (phase 1, `integration_action.go` chunk 3)
+**Related** [D-027] (which made `StringInterface` sorted *because* Go sorts map keys)
+
+`StripActionIntegrations` and `GenerateActionIds` both store the decoded attachment list back
+into `props.attachments`. Go stores a native `[]*MessageAttachment`, so `json.Marshal` later emits
+each element in **struct declaration order** — `id`, `fallback`, `color`, … , `ts`, `actions`.
+Our props map holds `serde_json::Value`, and a `serde_json::Map` absent the `preserve_order`
+feature is a `BTreeMap`, so the same element comes out **sorted** — `actions`, `author_icon`,
+`author_link`, … .
+
+The two documents are equal; the bytes are not.
+
+This is the mirror image of [D-027]. There, `StringInterface` was changed from a `HashMap` to a
+sorted map *because* Go sorts the keys of a `map[string]any`. Here Go is marshalling a **struct**
+through an `any`-typed field, which is the one shape where Go does not sort — and it is not
+reachable from JSON, so no round-trip fixture could have caught it. The `strip_action_integrations`
+oracle section is what did.
+
+**Options**
+- **(a) Enable serde_json's `preserve_order`.** Makes `serde_json::Map` an `IndexMap` and would
+  fix this case by insertion order — and would simultaneously *break* every ordinary prop, which
+  Go sorts and we currently sort for free. Strictly worse.
+- **(b) Hold an order-preserving representation for this one prop.** There is no such value type;
+  it would mean not storing a `Value` at all, i.e. a parallel typed field on `Post` shadowing
+  `props.attachments`, with every reader having to check both.
+- **(c) Leave it.** Current state.
+
+**(c).** JSON object key order carries no meaning, no Mattermost client depends on it, and the
+one place the project *measures* Go's bytes rather than sending them — `Post::is_valid`'s
+800,000-rune props cap — counts characters, which reordering does not change.
+
+Pinned rather than shrugged off: `the_rewritten_attachments_differ_from_go_only_in_key_order`
+asserts that the bytes differ, that Go's start with `"id":0,"fallback":"` and ours with
+`"actions":[`, and that the parsed values are equal. If a future change closes the gap the test
+fails, which is the signal we want. The corpus assertions fall back to a `serde_json::Value`
+comparison for exactly the cases carrying a rewritten list, and stay byte-for-byte everywhere
+else — including the HTML-escaping case, which is what proves `to_json` uses the right marshaller.
+
+---
+
+## D-049 · `go_url`'s error text is not Go's, and the query-parameter cap is not ported
+
+**Status** ACCEPTED · **Severity** unverified · **Raised** 2026-08-14 (phase 1, `net/url`)
+
+Two deliberate gaps in `crates/mm-model/src/go_url.rs`, both recorded rather than reproduced.
+
+**The error messages.** `UrlParseError` is a typed enum whose `Display` approximates Go's, but it
+is not asserted against it and one variant is knowingly wrong: Go wraps `netip.ParseAddr`'s own
+error for a bad IP-literal (`invalid host: ParseAddr("abc"): unable to parse IP`) and ours emits
+that shape with a fixed reason. Reproducing `netip`'s wording means porting `netip`'s parser
+error taxonomy, which is a package away from anything Mattermost calls.
+
+Nothing in the ported tree reads one of these strings. `IsValidHTTPURL` discards the error;
+`MergeQueryIntoURL` wraps it and `GetAction` turns the wrapped value into a `None`;
+`ResolveMmBlocksAction` returns it to an app layer that does not exist yet. So the oracle records
+Go's text as a **diagnostic** and every test asserts *whether* a parse failed, not what it said —
+which is the same treatment [D-003]'s fixture gave its `parse_error` column, and for the same
+reason.
+
+Revisit if an error string ever reaches a client. It would then be wire surface, and the fixture
+already holds Go's answer for 102 inputs to check against.
+
+**The 10,000-parameter cap.** `parseQuery` (net/url/url.go:957) rejects a query with more than
+`defaultMaxParams` settings, and the limit is a `godebug` knob (`urlmaxqueryparams`) rather than a
+parse rule — a deployment can raise, lower or disable it at runtime. Ours has no limit. The
+divergence needs a query with more than 10,000 `&`-separated settings to observe; Go returns an
+error and keeps *no* pairs, we would return all of them.
+
+Accepted rather than open because reproducing a runtime-tunable Go knob means inventing a Rust
+equivalent and a way to configure it, which is a decision for the API layer rather than for
+`mm-model`. Flagged because it is the one place `go_url` is knowingly more permissive than Go.
+
+---
+
+## D-050 · `MmBlocksActionCookie.actions` cannot hold a nil entry
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-08-14 (phase 1, `mm_blocks_actions.go`)
+**Related** [D-033], of which this is one more instance
+
+Go's field is `map[string]map[string]any`, so `{"actions":{"a1":null}}` decodes with `a1` present
+and nil — which is exactly what `ActionSpec`'s `entry == nil` guard is written for. Ours is
+`Option<BTreeMap<String, StringInterface>>`, and `StringInterface` cannot be null, so the whole
+cookie fails to decode.
+
+This is the D-033 convention applied to a **map value** rather than a slice element, and the
+exposure is the same shape: a document Go accepts is a decode failure for us. Reachability is
+lower than D-033's, because the only writer is `AddMmBlocksActionCookies`, which builds the map
+from `coerceToStringAnyMap` and therefore never stores a nil.
+
+Listed rather than fixed for D-033's stated reason: the value of the current state is that it is
+uniform across the crate, and whatever is chosen must be applied to every `[]*T` and
+`map[string]*T` at once. `ActionSpec`'s nil-entry branch is consequently dead code in the Rust
+port, and the doc comment says so at the site.
+
+---
+
+## D-051 · `SortByCreateAt` uses Go's **unstable** sort, and `order` is on the wire
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-14 (phase 1, `post_list.go`)
+
+`(*PostList).SortByCreateAt` (post_list.go:169) sorts `Order` with `sort.Slice`, which is
+explicitly documented as "not guaranteed to be stable". `Order` is a wire field, so the
+permutation Go picks among posts sharing a `create_at` is observable by every client.
+
+Measured across five tie corpora:
+
+| input | Go's `Order` out | a stable sort |
+|---|---|---|
+| 2, 3, 5 all-tied | input order | same ✓ |
+| 4 elements, two tie groups | `b d a c` | same ✓ |
+| 13 all-tied, 20 all-tied | input order | same ✓ |
+| **20, two tie groups interleaved** | `s15 s1 s19 s3 s17 s5 s13 s7 s9 s11 s12 s8 s10 s6 s14 s0 s16 s4 s18 s2` | `s1 s3 … s19 s0 s2 … s18` ✗ |
+
+Below thirteen elements `sort.Slice` runs insertion sort and is stable in practice; above it,
+pdqsort's partitioning scrambles ties. The all-tied cases at 13 and 20 still agree because an
+already-sorted input short-circuits — the divergence needs both a long list and interleaved keys,
+which is what a real channel of posts looks like the moment two posts share a millisecond.
+
+**The Rust port uses `sort_by_key` (stable) and diverges.** Reproducing Go's answer means
+reimplementing `sort.Slice`'s pdqsort — pivot selection, `breakPatterns`, the partial-insertion
+fallback and the depth limit — bit for bit, and then keeping it pinned to whatever the Go
+runtime does next. That is a large, brittle amount of code to reproduce an ordering Go itself
+calls arbitrary.
+
+Accepted rather than open, with two things that bound the damage: both orderings are *correct*
+sorts (the `create_at` sequence is identical, which the test asserts), and the only in-model
+caller is `BuildWranglerPostList`, whose consumer is the move-thread feature rather than the
+channel view. `an_unstable_go_sort_scrambles_ties_above_twelve` asserts the divergence explicitly
+— including that Go's answer still differs from ours — so if upstream switches to `sort.SliceStable`
+the test fails and this can be closed.
+
+**Revisit** if a ported endpoint ever returns `Order` straight out of this function to a client
+that compares it against the Go server's.
+
+---
+
+## D-052 · Three `PostList` methods return where Go panics
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-14 (phase 1, `post_list.go`)
+**Related** [D-018], which is the same call on `ChannelMember`
+
+`CLAUDE.md` forbids `panic!` in library code, and three of `post_list.go`'s methods reach one on
+input the public API can produce. All three are measured under `recover` in
+`fixtures/behaviour_post_list.json`, so the Go answer is a crash rather than an inference.
+
+| Go | why it panics | ours |
+|---|---|---|
+| `AddPost` (post_list.go:132) | assigns into `BurnOnReadPosts` without a nil check, and the field is `json:"-"` — so it is nil on **every decoded list** | creates the map |
+| `SortByCreateAt` (post_list.go:169) | the comparator dereferences `o.Posts[id]` for an order id with no post | treats the missing post as `create_at: 0` |
+| `BuildWranglerPostList` (post_list.go:207) | reads `p.UserId` off the nil element `ToSlice` returned | skips the element |
+
+The first is the reachable one and it is not a corner case: `NewPostList` is the only constructor
+that initialises `BurnOnReadPosts`, so any list that arrived over the wire and is then handed a
+burn-on-read post crashes the Go server. The other two need an order id with no matching post,
+which `AddOrder` produces without complaint.
+
+Accepted for [D-018]'s reason: the divergence is only observable where the Go server returns a
+500, and the alternatives are panicking (forbidden) or silently discarding a user's post. Each is
+asserted in the parity tests rather than skipped — `add_post_matches_go` checks that the map was
+nil *and* that we filed the post, so if upstream adds the nil check the test still passes and the
+oracle row flips from `panicked: true` to a real answer.
+
+---
+
+## D-053 · `PostList::with_rewritten_image_urls` is unported
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-08-14 (phase 1, `post_list.go`)
+**Depends on** [D-044]
+
+`(*PostList).WithRewrittenImageURLs` (post_list.go:79) is four lines over
+`(*Post).WithRewrittenImageURLs` (post.go:1269), which calls `RewriteImageURLs` — a walk over
+`shared/markdown`'s parsed document, the same 4,688-line dependency [D-044] is waiting on. It is
+the only method in `post_list.go` left unported.
+
+Its shape is worth recording now, because it is the **fourth** distinct copy semantic in the file
+and the only one that is not `Clone`: it does `plCopy := *o`, so the copy shares `Order` and
+`BurnOnReadPosts` with the original and gets a fresh `Posts` map — the same shallow-struct-copy
+`ToJSON` does, rather than the nil-materialising `Clone` the other methods use. A port that
+reached for `go_clone` here would materialise a nil `order` into `[]` and change the wire output.
+
+**To pay off** close [D-044], port `RewriteImageURLs` and `Post::with_rewritten_image_urls`, then
+this is four lines and one oracle section.

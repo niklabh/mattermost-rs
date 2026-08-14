@@ -298,7 +298,7 @@ fn decode_theme(value: &str) -> (Option<StringMap>, bool) {
         // Go zeroes a map destination on JSON null, without error.
         serde_json::Value::Null => (None, false),
         serde_json::Value::Object(fields) => {
-            let mut props = StringMap::with_capacity(fields.len());
+            let mut props = StringMap::new();
             let mut had_error = false;
             for (key, field) in fields {
                 match field {

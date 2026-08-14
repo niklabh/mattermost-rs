@@ -1117,7 +1117,7 @@ mod tests {
         assert!(channel.props.is_none());
 
         channel.make_non_nil();
-        assert_eq!(channel.props.as_ref().map(HashMap::len), Some(0));
+        assert_eq!(channel.props.as_ref().map(StringInterface::len), Some(0));
         // Now that props is non-nil it must serialise as {} rather than null.
         assert_eq!(
             serde_json::to_value(&channel).unwrap()["props"],

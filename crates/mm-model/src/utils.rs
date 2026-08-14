@@ -24,7 +24,7 @@
 //! `HashSet::contains`, `Vec::contains`, `==`, `Vec::retain`, `Clone` — so they are aliased
 //! rather than wrapped.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::sync::LazyLock;
 
@@ -33,14 +33,259 @@ use rand::RngCore;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
+use crate::go_url::parse_request_uri;
+
 /// Port of `model.StringMap` — serialises as a plain JSON object.
+///
+/// A `BTreeMap`, **not** a `HashMap`, for the same wire reason [`StringInterface`] is a
+/// `serde_json::Map`: Go's `encoding/json` sorts map keys by byte value when marshalling, while
+/// a `HashMap` emits iteration order — which is not merely unsorted but *unstable between runs*,
+/// so one process could serialise the same value two different ways. See [D-027].
 ///
 /// Note: a **nil** Go map marshals to `null`, not `{}`. Struct fields that Go can leave nil
 /// must therefore be `Option<StringMap>`, or the wire format drifts.
-pub type StringMap = HashMap<String, String>;
+pub type StringMap = BTreeMap<String, String>;
 
 /// Port of `model.StringInterface` (utils.go:48).
-pub type StringInterface = HashMap<String, serde_json::Value>;
+///
+/// A `serde_json::Map`, **not** a `HashMap`, and that is a wire decision rather than a taste
+/// one. Go's `encoding/json` sorts map keys by byte value when marshalling; a `HashMap` emits
+/// iteration order, which is neither sorted nor stable between runs. Since `serde_json` builds
+/// `Map` on a `BTreeMap` (absent the `preserve_order` feature) it is sorted for free, so
+/// `Post.Props` and `Channel.Props` serialise byte-for-byte like Go's. See [D-027].
+pub type StringInterface = serde_json::Map<String, serde_json::Value>;
+
+/// Compares two `serde_json::Value`s the way Go compares two values that came out of
+/// `encoding/json`.
+///
+/// The difference that matters is **numbers**. Go decodes every JSON number into a `float64`,
+/// so `1` and `1.0` are the same value and compare equal. serde_json keeps them apart —
+/// `Number(PosInt(1))` and `Number(Float(1.0))` are unequal — so a plain `==` on two decoded
+/// documents disagrees with Go on any integral number written with a decimal point or an
+/// exponent (`1e2` vs `100`).
+///
+/// Used by every `Equals` that compares an `any`/`map[string]any` field:
+/// `MessageAttachment.Timestamp`, `MessageAttachmentField.Value` and
+/// `PostAction.Integration.Context`.
+pub fn json_values_equal_like_go(a: &serde_json::Value, b: &serde_json::Value) -> bool {
+    use serde_json::Value;
+    match (a, b) {
+        (Value::Number(x), Value::Number(y)) => match (x.as_f64(), y.as_f64()) {
+            (Some(x), Some(y)) => x == y,
+            _ => x == y,
+        },
+        (Value::Array(x), Value::Array(y)) => {
+            x.len() == y.len()
+                && x.iter()
+                    .zip(y.iter())
+                    .all(|(a, b)| json_values_equal_like_go(a, b))
+        }
+        (Value::Object(x), Value::Object(y)) => {
+            x.len() == y.len()
+                && x.iter()
+                    .all(|(k, v)| y.get(k).is_some_and(|w| json_values_equal_like_go(v, w)))
+        }
+        _ => a == b,
+    }
+}
+
+/// Go's `fmt.Sprintf("%v", f)` for a `float64`, which is `strconv.FormatFloat(f, 'g', -1, 64)`.
+///
+/// Not substitutable by Rust formatting. Rust's `Display` for `f64` never uses exponent form
+/// (`1e21` prints as twenty-one digits) and its `LowerExp` always does; Go switches between them
+/// on the **scientific exponent**: exponent form when `exp < -4 || exp >= 6`. So Go prints
+/// `1000000.0` as `1e+06` and `100000.0` as `100000`, and the exponent always carries a sign and
+/// at least two digits.
+///
+/// Measured against Go over 36 values, chosen from what `encoding/json` can produce — which is
+/// the only source that matters, since a decoded JSON number is always a `float64`.
+///
+/// Negative zero is the one case not in the corpus; `-0` follows Go's `strconv`.
+pub fn go_format_float(f: f64) -> String {
+    if f.is_nan() {
+        return "NaN".to_string();
+    }
+    if f.is_infinite() {
+        return if f > 0.0 { "+Inf" } else { "-Inf" }.to_string();
+    }
+    if f == 0.0 {
+        return if f.is_sign_negative() { "-0" } else { "0" }.to_string();
+    }
+
+    // Rust's LowerExp gives the shortest round-tripping digits in normalised form (`d.ddde±n`),
+    // which is the same digit string Go's shortest mode computes. Only the layout differs.
+    let sci = format!("{f:e}");
+    let Some((mantissa, exp_str)) = sci.split_once('e') else {
+        return sci;
+    };
+    let Ok(exp) = exp_str.parse::<i32>() else {
+        return sci;
+    };
+
+    let negative = mantissa.starts_with('-');
+    let digits: String = mantissa.chars().filter(char::is_ascii_digit).collect();
+
+    let body = if !(-4..6).contains(&exp) {
+        let mut m = String::from(&digits[..1]);
+        if digits.len() > 1 {
+            m.push('.');
+            m.push_str(&digits[1..]);
+        }
+        let sign = if exp < 0 { '-' } else { '+' };
+        format!("{m}e{sign}{:02}", exp.abs())
+    } else if exp >= 0 {
+        let point = exp as usize + 1;
+        if digits.len() > point {
+            format!("{}.{}", &digits[..point], &digits[point..])
+        } else {
+            format!("{digits}{}", "0".repeat(point - digits.len()))
+        }
+    } else {
+        format!("0.{}{digits}", "0".repeat((-exp - 1) as usize))
+    };
+
+    if negative { format!("-{body}") } else { body }
+}
+
+/// Go's `fmt.Sprintf("%v", v)` for a value that came out of `encoding/json`.
+///
+/// Go's `%v` is not JSON: a string prints bare (so `"a b"` and two elements are
+/// indistinguishable), a nil prints `<nil>`, a slice prints `[a b]` space-separated, and a map
+/// prints `map[k:v]` with **sorted** keys. `StringifyMessageAttachmentFieldValue` writes this
+/// into a post's props, so it is stored bytes, not a debug rendering.
+///
+/// Numbers route through [`go_format_float`] because `encoding/json` decodes every JSON number
+/// into a `float64` — so Go prints `123456789` as `1.23456789e+08`, not as its digits.
+pub fn go_format_v(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::Null => "<nil>".to_string(),
+        serde_json::Value::Bool(b) => b.to_string(),
+        serde_json::Value::Number(n) => go_format_float(n.as_f64().unwrap_or(f64::NAN)),
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Array(items) => {
+            let parts: Vec<String> = items.iter().map(go_format_v).collect();
+            format!("[{}]", parts.join(" "))
+        }
+        // serde_json::Map is a BTreeMap, so iteration is already in Go's sorted order.
+        serde_json::Value::Object(map) => {
+            let parts: Vec<String> = map
+                .iter()
+                .map(|(k, v)| format!("{k}:{}", go_format_v(v)))
+                .collect();
+            format!("map[{}]", parts.join(" "))
+        }
+    }
+}
+
+/// Port of `*multierror.Error` from `github.com/hashicorp/go-multierror`.
+///
+/// Not a Mattermost type — a Go library one, in the same category as [`go_time`] and
+/// [`go_json_marshal`]. It is here because `integration_action.go` and `message_attachment.go`
+/// validate with it, and their `IsValid` methods therefore behave unlike every other `IsValid`
+/// in the tree: they **accumulate every failure** instead of returning the first, and they
+/// return a plain `error` rather than an `*AppError`.
+///
+/// Two observables have to match Go, and both are measured rather than assumed:
+///
+/// - **The message order**, which is the order of the checks in the validator.
+/// - **The `Error()` layout**, which is not a plain join and which changes wording between one
+///   error and several: `"1 error occurred:\n\t* x\n\n"` versus
+///   `"2 errors occurred:\n\t* x\n\t* y\n\n"`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MultiError {
+    errors: Vec<String>,
+}
+
+impl MultiError {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Go's `multierror.Append`.
+    pub fn push(&mut self, message: impl Into<String>) {
+        self.errors.push(message.into());
+    }
+
+    /// Go's `multierror.Prefix`. Applied to a `*multierror.Error` it prefixes **each** contained
+    /// error and keeps them flat — it does not nest — so two option failures become two
+    /// prefixed messages in the parent, not one. The separator is a single space, and the
+    /// callers supply a prefix already ending in `:`.
+    #[must_use]
+    pub fn prefixed(self, prefix: &str) -> Self {
+        Self {
+            errors: self
+                .errors
+                .into_iter()
+                .map(|e| format!("{prefix} {e}"))
+                .collect(),
+        }
+    }
+
+    /// Merges another error list in, preserving order.
+    pub fn extend(&mut self, other: MultiError) {
+        self.errors.extend(other.errors);
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.errors.is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        self.errors.len()
+    }
+
+    /// The accumulated messages, in the order the validator produced them.
+    pub fn messages(&self) -> &[String] {
+        &self.errors
+    }
+
+    /// Go's `ErrorOrNil`.
+    pub fn into_result(self) -> Result<(), MultiError> {
+        if self.errors.is_empty() {
+            Ok(())
+        } else {
+            Err(self)
+        }
+    }
+}
+
+impl std::fmt::Display for MultiError {
+    /// Go's `multierror.ListFormatFunc`, reproduced exactly — including the trailing blank
+    /// line and the singular/plural split.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.errors.len() == 1 {
+            return write!(f, "1 error occurred:\n\t* {}\n\n", self.errors[0]);
+        }
+        write!(f, "{} errors occurred:\n\t", self.errors.len())?;
+        let joined: Vec<String> = self.errors.iter().map(|e| format!("* {e}")).collect();
+        write!(f, "{}\n\n", joined.join("\n\t"))
+    }
+}
+
+impl std::error::Error for MultiError {}
+
+/// Port of `model.ArrayToJSON` (utils.go:530).
+///
+/// A **nil** slice is `"null"`, not `"[]"` — which matters because `Post::is_valid` measures
+/// this string's rune count against a cap. Go discards the marshal error and returns
+/// `string(nil)`, i.e. `""`; `unwrap_or_default` is the same answer.
+pub fn array_to_json(objmap: Option<&[String]>) -> String {
+    match objmap {
+        None => "null".to_string(),
+        Some(a) => go_json_marshal(&a).unwrap_or_default(),
+    }
+}
+
+/// Port of `model.StringInterfaceToJSON` (utils.go:585).
+///
+/// A **nil** map is `"null"`. Go's HTML escaping applies, so a single `<` in a value costs six
+/// runes against `Post::is_valid`'s 800,000-rune props cap rather than one.
+pub fn string_interface_to_json(objmap: Option<&StringInterface>) -> String {
+    match objmap {
+        None => "null".to_string(),
+        Some(m) => go_json_marshal(m).unwrap_or_default(),
+    }
+}
 
 /// Port of `model.StringArray` (utils.go:52).
 pub type StringArray = Vec<String>;
@@ -166,6 +411,46 @@ fn is_go_number(c: char) -> bool {
         unicode_general_category::get_general_category(c),
         DecimalNumber | LetterNumber | OtherNumber
     )
+}
+
+/// Port of `model.IsValidHTTPURL` (utils.go:790).
+///
+/// Go is two checks: a literal `http://` or `https://` prefix, then `net/url.ParseRequestURI`
+/// succeeding with a non-empty `Scheme` and `Host`. This is now those two lines, delegating to
+/// [`crate::go_url::parse_request_uri`].
+///
+/// It was not always. [D-003] shipped a hand-written predicate reproducing the same grammar,
+/// because no parser existed; the corpus that verified it — 136 hand-picked inputs, 2,881
+/// generated ones and four exhaustive 0..127 byte sweeps — now verifies the *parser* instead,
+/// which is a much stronger use of the same 3,529 cases. The behaviour below is unchanged and
+/// every one of them still passes.
+///
+/// Measured against Go over 136 hand-picked inputs, a 2,881-case generated corpus and four
+/// exhaustive 0..127 byte sweeps. The traps, each of which a plausible port gets wrong:
+///
+/// - **The prefix test is case- and position-sensitive** (`strings.Index(...) != 0`), so
+///   `HTTP://x` and `" http://x"` are both rejected.
+/// - **`ParseRequestURI` does not strip a `#fragment`**, unlike `Parse`. So `http://x#f` is
+///   *invalid* — the `#` lands in the host, where it is not a legal byte — while
+///   `http://x/#f` is fine, because there the `#` is in the path.
+/// - **Three positions have three different rules.** The host is validated against a character
+///   class; the path is checked only for well-formed `%` escapes; the query is not checked at
+///   all, so `?q=%zz` is valid. Control bytes are rejected everywhere, by a check over the
+///   whole raw string before parsing starts.
+/// - **`Host` includes the port**, so `http://:1` and even `http://:` are valid: the host name
+///   is empty but `Host` is not.
+/// - **A bracketed host must be a real IPv6 address.** `[::1]` and `[::ffff:1.2.3.4]` pass;
+///   `[abc]`, `[]` and `[1.2.3.4]` do not.
+/// - **A `%` escape in the host is rejected unless it encodes a byte >= 0x80, or is `%25`.**
+///   That is the reverse of the usual intuition: `%80` is fine and `%41` is not.
+pub fn is_valid_http_url(raw_url: &str) -> bool {
+    if !raw_url.starts_with("http://") && !raw_url.starts_with("https://") {
+        return false;
+    }
+    match parse_request_uri(raw_url) {
+        Ok(url) => !url.scheme.is_empty() && !url.host.is_empty(),
+        Err(_) => false,
+    }
 }
 
 /// Port of `model.IsValidId` (utils.go:802).
@@ -1864,5 +2149,223 @@ mod go_to_lower_parity {
 
         assert_eq!(go_to_lower("ΟΔΟΣ"), "οδοσ");
         assert_ne!("ΟΔΟΣ".to_lowercase(), "οδοσ");
+    }
+}
+
+/// Tests for [`is_valid_http_url`], asserted against `fixtures/behaviour_url.json` — produced by
+/// `reference/dump/behaviour_url.go`, which runs the real `model.IsValidHTTPURL`.
+///
+/// This closes [D-003]. It gets its own module because it reads a different fixture from the
+/// `go_parity` module above.
+#[cfg(test)]
+mod http_url_go_parity {
+    use super::is_valid_http_url;
+
+    fn oracle() -> serde_json::Value {
+        serde_json::from_str(include_str!("../../../fixtures/behaviour_url.json")).unwrap()
+    }
+
+    fn check(cases: &serde_json::Map<String, serde_json::Value>, label: &str) {
+        assert!(!cases.is_empty(), "{label} corpus is empty");
+        for (input, want) in cases {
+            let want = want.as_bool().unwrap();
+            assert_eq!(
+                is_valid_http_url(input),
+                want,
+                "{label}({input:?}): Go said {want}, we said {}",
+                !want
+            );
+        }
+    }
+
+    /// 136 hand-picked inputs: the prefix gate, empty authorities, userinfo splitting,
+    /// bracketed IP literals, percent escapes in all three positions, control bytes and the
+    /// characters that separate a host from a path.
+    #[test]
+    fn is_valid_http_url_matches_go() {
+        let o = oracle();
+        check(
+            o["is_valid_http_url"].as_object().unwrap(),
+            "is_valid_http_url",
+        );
+    }
+
+    /// ~2.9k deterministic pseudo-random strings over a hostile alphabet, two thirds of them
+    /// given a real scheme prefix so the parser behind the prefix gate is actually exercised.
+    #[test]
+    fn is_valid_http_url_matches_go_on_generated_input() {
+        let o = oracle();
+        let cases = o["is_valid_http_url_fuzz"].as_object().unwrap();
+        assert!(cases.len() > 2000, "fuzz corpus unexpectedly small");
+        check(cases, "is_valid_http_url_fuzz");
+    }
+
+    /// Exhaustive 0..127 sweeps at four positions. A hand-picked corpus finds the characters
+    /// its author suspected; these find the rest — and they are what established that the host,
+    /// the path and the query have three different rules.
+    #[test]
+    fn the_per_position_byte_classes_match_go() {
+        let o = oracle();
+        let tables = o["is_valid_http_url_bytes"].as_object().unwrap();
+
+        for (position, build) in [
+            (
+                "host",
+                &(|c: &str| format!("http://a{c}b.com")) as &dyn Fn(&str) -> String,
+            ),
+            ("path", &|c: &str| format!("http://example.com/a{c}b")),
+            ("query", &|c: &str| format!("http://example.com/?q=a{c}b")),
+            ("userinfo", &|c: &str| format!("http://a{c}b@example.com")),
+        ] {
+            let table = tables[position].as_object().unwrap();
+            assert_eq!(table.len(), 128, "{position} sweep is not 0..127");
+            for (hex, want) in table {
+                let byte = u8::from_str_radix(hex, 16).unwrap();
+                let input = build(&(byte as char).to_string());
+                let want = want.as_bool().unwrap();
+                assert_eq!(
+                    is_valid_http_url(&input),
+                    want,
+                    "{position} byte 0x{hex}: Go said {want}, we said {}",
+                    !want
+                );
+            }
+        }
+
+        for section in ["colons", "brackets"] {
+            check(tables[section].as_object().unwrap(), section);
+        }
+    }
+}
+
+/// Port of `strconv.Quote`, which is what `fmt`'s `%q` verb produces for a string.
+///
+/// Rust's `{:?}` is **not** substitutable. Both quote with `"` and escape `"` and `\`, but they
+/// disagree on everything else that is not plainly printable:
+///
+/// | input | Go `%q` | Rust `{:?}` |
+/// |---|---|---|
+/// | U+0007 | `\a` | `\u{7}` |
+/// | U+000B | `\v` | `\u{b}` |
+/// | U+001B | `\x1b` | `\u{1b}` |
+/// | U+00A0 | ` ` | `\u{a0}` |
+///
+/// Go's rule, measured over 29 inputs: a rune is written literally when
+/// [`go_is_print`] accepts it; otherwise `\a \b \f \n \r \t \v` where one applies, `\xNN` for a
+/// byte below U+0020 or U+007F exactly, `\uNNNN` below U+10000, and `\UNNNNNNNN` above. Note the
+/// C1 controls (U+0080..U+009F) take the **`\u` form, not `\x`** — the `\x` branch is keyed on
+/// the rune value, not on its encoded width.
+///
+/// The one Go behaviour with no counterpart is invalid UTF-8, which Go writes as `\xNN` per
+/// bad byte; a Rust `&str` cannot hold it.
+pub fn go_quote(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            _ if go_is_print(c) => out.push(c),
+            '\u{7}' => out.push_str("\\a"),
+            '\u{8}' => out.push_str("\\b"),
+            '\u{c}' => out.push_str("\\f"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '\u{b}' => out.push_str("\\v"),
+            _ => {
+                let code = c as u32;
+                if code < 0x20 || code == 0x7f {
+                    out.push_str(&format!("\\x{code:02x}"));
+                } else if code < 0x10000 {
+                    out.push_str(&format!("\\u{code:04x}"));
+                } else {
+                    out.push_str(&format!("\\U{code:08x}"));
+                }
+            }
+        }
+    }
+
+    out.push('"');
+    out
+}
+
+/// Port of `unicode.IsPrint` — general categories `L`, `M`, `N`, `P`, `S`, plus the ASCII space.
+///
+/// Note what this excludes: every other space (NBSP, U+3000, U+1680), the format characters
+/// (U+200B, U+FEFF, U+0085) and the control characters. `char::is_control` alone would keep all
+/// of those literal and diverge from Go.
+fn go_is_print(c: char) -> bool {
+    use unicode_general_category::GeneralCategory::*;
+    if c == ' ' {
+        return true;
+    }
+    matches!(
+        unicode_general_category::get_general_category(c),
+        UppercaseLetter
+            | LowercaseLetter
+            | TitlecaseLetter
+            | ModifierLetter
+            | OtherLetter
+            | NonspacingMark
+            | SpacingMark
+            | EnclosingMark
+            | DecimalNumber
+            | LetterNumber
+            | OtherNumber
+            | ConnectorPunctuation
+            | DashPunctuation
+            | OpenPunctuation
+            | ClosePunctuation
+            | InitialPunctuation
+            | FinalPunctuation
+            | OtherPunctuation
+            | MathSymbol
+            | CurrencySymbol
+            | ModifierSymbol
+            | OtherSymbol
+    )
+}
+
+#[cfg(test)]
+mod go_quote_go_parity {
+    use super::*;
+
+    #[test]
+    fn go_quote_matches_go() {
+        let oracle: serde_json::Value =
+            serde_json::from_str(include_str!("../../../fixtures/behaviour_dialog.json")).unwrap();
+
+        let mut skipped = 0;
+        for case in oracle.get("quote").unwrap().as_array().unwrap() {
+            let input = case.get("input").unwrap().as_str().unwrap();
+            let expected = case.get("quoted").unwrap().as_str().unwrap();
+
+            // Two corpus inputs are invalid UTF-8. Go quotes the bad bytes as `\xNN`; the
+            // fixture had to marshal them through JSON, which replaced each with U+FFFD, and a
+            // Rust `&str` could not have held them in the first place. Unreachable rather than
+            // divergent.
+            if input.contains('\u{fffd}') {
+                skipped += 1;
+                continue;
+            }
+
+            assert_eq!(go_quote(input), expected, "input {input:?}");
+        }
+        assert_eq!(skipped, 2, "the invalid-UTF-8 corpus changed");
+    }
+
+    /// The four inputs where Rust's `{:?}` disagrees, asserted explicitly so the reason this
+    /// shim exists cannot be forgotten.
+    #[test]
+    fn rusts_debug_formatting_is_not_substitutable() {
+        for input in ["\u{7}", "\u{b}", "\u{1b}", "\u{a0}"] {
+            assert_ne!(go_quote(input), format!("{input:?}"));
+        }
+        // …and agrees on ordinary text, which is why the difference is easy to miss.
+        for input in ["", "abc", "a\"b", "a\\b", "é", "日本語", "😀"] {
+            assert_eq!(go_quote(input), format!("{input:?}"));
+        }
     }
 }
