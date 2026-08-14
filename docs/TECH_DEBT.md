@@ -724,3 +724,36 @@ to defer, taking Apache-2.0 "for now" with this entry as the tripwire.
 
 Whichever is chosen, `Cargo.toml`'s `license` field, `LICENSE`, `NOTICE` and the README all have
 to move together. `NOTICE` already states the current scope and the coming change.
+
+---
+
+## D-032 · The `file_info` oracle wrote random and clock-derived values into a committed fixture
+
+**Status** CLOSED · **Severity** unverified · **Raised** 2026-08-14 (phase 1, `post_embed.go`)
+**Closed** 2026-08-14, same session.
+
+`reference/dump/main.go`'s header states the rule plainly: *"Every generated value derives from a
+hash of the field's path, so re-running produces byte-identical output… Do not introduce rand or
+time.Now here."* The `file_info.go` session broke it twice:
+
+- `fileInfoEtagAll` built its corpus with `model.NewId()`, which is a CSPRNG.
+- `fileInfoPreSaveAll` recorded `out_update_at` for the `all_zero` case, where `PreSave` derives
+  the value from `GetMillis()`.
+
+Neither was caught when it was written, because `behaviour_file_info.json` was a **new** file
+that session — there was nothing to diff it against. It surfaced one session later as an
+unexplained `M fixtures/behaviour_file_info.json` after an unrelated generator run.
+
+Both are fixed: the etag corpus takes ids from the fixed `idA`/`idB`/`idC` set (the id plays no
+part in `GetEtagForFileInfos`, which reads `PostId` and `UpdateAt`), and `out_update_at` is
+recorded as `0` when the input `CreateAt` was zero — which is exactly the case the Rust test
+already skipped.
+
+**Why this mattered more than the churn.** CLAUDE.md tells a reader that a clean generator run
+touches only new files, and that anything else in `git status` is a signal worth reading. A
+fixture that rewrites itself every run destroys that signal for *every* fixture, not just its
+own. Verified fixed by running the generator twice and diffing all 47 fixtures: byte-identical.
+
+**Residual risk:** nothing enforces this. A future oracle that calls `NewId`, `GetMillis` or
+`time.Now` will reintroduce it, and will again go unnoticed for exactly one session. A cheap
+guard would be a CI step that runs the generator twice and fails on any diff.

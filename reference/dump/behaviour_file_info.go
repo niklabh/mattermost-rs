@@ -266,6 +266,14 @@ type fileInfoPreSaveCase struct {
 	OutRemoteNil      bool  `json:"out_remote_nil"`
 }
 
+// outUpdateAt suppresses the clock-derived value so the fixture stays deterministic.
+func outUpdateAt(inCreateAt, actual int64) int64 {
+	if inCreateAt == 0 {
+		return 0
+	}
+	return actual
+}
+
 func fileInfoPreSaveAll() []fileInfoPreSaveCase {
 	cases := []struct {
 		name               string
@@ -299,9 +307,12 @@ func fileInfoPreSaveAll() []fileInfoPreSaveCase {
 			IDPreserved:       c.id != "" && fi.Id == c.id,
 			IDGenerated:       c.id == "" && len(fi.Id) == 26,
 			CreateAtPreserved: c.createAt != 0 && fi.CreateAt == c.createAt,
-			OutUpdateAt:       fi.UpdateAt,
-			UpdateAtRaised:    fi.UpdateAt != c.updateAt,
-			OutRemoteNil:      fi.RemoteId == nil,
+			// Only meaningful when CreateAt was supplied: with CreateAt == 0 PreSave derives it
+			// from GetMillis(), and recording a clock reading here would rewrite this fixture on
+			// every run. The Rust test skips the assertion in exactly that case.
+			OutUpdateAt:    outUpdateAt(c.createAt, fi.UpdateAt),
+			UpdateAtRaised: fi.UpdateAt != c.updateAt,
+			OutRemoteNil:   fi.RemoteId == nil,
 		})
 	}
 	return res
@@ -364,8 +375,15 @@ type fileInfoEtagCase struct {
 }
 
 func fileInfoEtagAll() []fileInfoEtagCase {
+	// The id plays no part in GetEtagForFileInfos (it reads PostId and UpdateAt only), and
+	// model.NewId() is random — which would rewrite this fixture on every run and break the
+	// "a clean run touches only new files" guarantee. Derive it from the index instead.
+	next := 0
 	mk := func(postID string, updateAt int64) *model.FileInfo {
-		return &model.FileInfo{Id: model.NewId(), PostId: postID, UpdateAt: updateAt}
+		ids := []string{idA, idB, idC}
+		id := ids[next%len(ids)]
+		next++
+		return &model.FileInfo{Id: id, PostId: postID, UpdateAt: updateAt}
 	}
 
 	lists := []struct {

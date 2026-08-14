@@ -11,6 +11,8 @@ pub mod emoji;
 /// The system-emoji table, emitted from Go by `reference/dump`. Private: `emoji` wraps it.
 mod emoji_generated;
 pub mod file_info;
+pub mod post_acknowledgement;
+pub mod post_embed;
 pub mod preference;
 pub mod reaction;
 pub mod session;

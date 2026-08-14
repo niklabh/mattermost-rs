@@ -2,7 +2,7 @@
 
 Go source pinned at: mattermost@9dfbaeca99f4096388fd1c048a9e6d1d0a86743e (2026-08-13)
 Current phase: 1 — Core Types
-Next file: server/public/model/post.go — large (1,640 ln); plan on more than one session
+Next file: server/public/model/post_metadata.go (136 ln) — both its leaf deps have landed
 
 Re-clone the reference source by fetching the pinned SHA directly. A plain
 `git clone --depth 1` fetches only the current tip, so the subsequent `checkout` fails as soon as
@@ -55,6 +55,8 @@ whenever a session skips, approximates, or discovers-but-does-not-close somethin
 | model/channel_list.go | `mm-model/src/channel_list.rs` | DONE | 13 pass | Two `#[serde(transparent)]` newtypes plus their `Etag`. Unblocked by `CURRENT_VERSION`; also closed `Team::etag`, `User::etag` and `ChannelsWithCount` — D-010 and D-014 are both paid off. |
 | model/utils.go (Etag) | `mm-model/src/utils.rs` | DONE | 11 diff cases | `etag(&[&dyn Display])` — Go is variadic over `any` with `%v`. `CURRENT_VERSION` is borrowed from `version.go` but **cannot drift**: the oracle records it and a test fails when the pinned SHA moves. |
 | model/channel_member.go | `mm-model/src/channel_member.rs` | DONE | 30 pass | Complete `IsValid`, the six-key notify-props validator with both `allowMissingFields` modes, all 9 wire types with a fixture. Also closed the `DirectChannelForExport` half of D-014 in `channel.rs`. Deferred: `Auditable`. |
+| model/post_embed.go | `mm-model/src/post_embed.rs` | DONE | 9 pass | Whole file except `Auditable` ([D-028]). Three output states for `data`, an `any` with `omitempty`. Wire format byte-for-byte against Go's **round-trip**, not its output — `data: null` is lossy in Go too. |
+| model/post_acknowledgement.go | `mm-model/src/post_acknowledgement.rs` | DONE | 9 pass | Whole file. The only ported type whose `remote_id` has `omitempty`. Deferred: nothing. |
 | model/file_info.go | `mm-model/src/file_info.rs` | PARTIAL | 23 pass | `FileInfo`, `GetFileInfosOptions`, `IsValid`, `PreSave`, `IsValidFilename`, `SanitizeFilename`, `IsImage`/`IsSvg`, `GetEtagForFileInfos`, `MakeContentInaccessible`. Wire format asserted **byte-for-byte**. Deferred: `Auditable` ([D-028]) and `NewInfo`'s mime lookup ([D-030]). |
 | model/reaction.go | `mm-model/src/reaction.rs` | DONE | 12 pass | Whole file: `IsValid`, `PreSave`, `PreUpdate`, `GetRemoteID`. Reuses `is_valid_alpha_num_hyphen_underscore_plus` on **measured** evidence that Go's inline pattern is equivalent. Deferred: nothing. |
 | model/emoji.go | `mm-model/src/emoji.rs` | DONE | 18 pass | Whole file except `Auditable` ([D-028]). The 4,464-entry system-emoji table is **generated** from Go into `emoji_generated.rs` rather than transcribed. Deferred: `Auditable`. |
@@ -67,6 +69,7 @@ whenever a session skips, approximates, or discovers-but-does-not-close somethin
 | — (shared) | `mm-model/src/utils.rs::go_json_marshal` | DONE | 3 unit + 1 diff | `json.Marshal` with Go's HTML escaping for any `Serialize` value. Closes [D-022]. Use it — not `serde_json::to_string` — whenever a marshalled string is **stored** rather than sent. |
 | model/version.go | `mm-model/src/version.rs` | DONE | 14 pass | Whole file. `CURRENT_VERSION` moved here from `utils.rs`, which now re-exports it — one definition, D-005's borrow closed. `VERSIONS`/`VERSIONS_WITHOUT_HOTFIXES` are unexported in Go; the oracle extracts the literal with `go/parser` so the transcription is checked. Deferred: nothing. |
 | model/utils.go (ToJSON) | `mm-model/src/utils.rs` | DONE | 11 diff cases | `go_json_marshal_string_map` — the `map[string]string` case. Needed because the notify-props size cap **measures** Go's JSON, and serde_json escapes differently. |
+| — (tooling) | `reference/dump/behaviour_post_leaves.go` → `fixtures/behaviour_post_leaves.json` | DONE | 8 diff tests | 13 `PostEmbed` wire probes driving `omitempty`-on-an-interface, 5 acknowledgement probes, 10 `IsValid` cases, and the three-way `remote_id` comparison. Records Go's own **round-trip** alongside its output, because one case is lossy in Go. |
 | — (tooling) | `reference/dump/behaviour_file_info.go` → `fixtures/behaviour_file_info.json` | DONE | 11 diff tests | 12 byte-exact wire probes, 25 `IsValid` cases, a 44-name filename corpus run through **both** `IsValidFilename` and `SanitizeFilename`, plus `PreSave`, mime predicates, etags and `MakeContentInaccessible`. |
 | — (tooling) | `reference/dump/behaviour_reaction.go` → `fixtures/behaviour_reaction.json` | DONE | 4 diff tests | 22 `IsValid` cases, `PreSave`/`PreUpdate` invariants over 5 starting states each, and a 32-input **regex-equivalence** corpus running Go's two emoji-name patterns side by side. |
 | — (tooling) | `reference/dump/behaviour_emoji.go` → `fixtures/behaviour_emoji.json` + `emoji_generated.rs` | DONE | 8 diff tests | The first generator that emits **Rust source**, not just a fixture. Also pins 22 `IsValidEmojiName` cases, 16 `IsValid` cases, `PreSave` invariants, the reverse-unicode map and 16 `EmojiPattern` scans. |
@@ -382,6 +385,44 @@ All of these are oracle results, not readings. Several contradict what the sourc
 11. **`RuneToHexadecimalString` pads to four digits but never truncates**, so `U+1F600` renders
     as five (`1f600`). Go's parameter is an `int32` that can be negative, where `%04x` would
     emit a sign; a Rust `char` cannot be, and no call site passes one.
+
+## Notes — model/post_embed.go, model/post_acknowledgement.go
+
+Both are leaves under `post_metadata.go`, which is a leaf under `post.go`. `post.go` is **not**
+the next file after `file_info.go`: `Post.Metadata` is a `*PostMetadata`, and `PostMetadata`
+needs `PostEmbed` and `PostAcknowledgement` first.
+
+1. **`omitempty` on a Go `any` tests `IsNil()`, not emptiness.** `PostEmbed.Data` therefore
+   *emits* `""`, `0`, `false`, `{}` and `[]` — only a nil interface is dropped. Every intuition
+   about `omitempty` from the string and int fields is wrong here.
+
+2. **`Data` has three output states, not two.** Nil interface → key omitted. Typed nil pointer
+   stored in the interface → `"data":null`, because the interface itself is not nil. Anything
+   else → the value. `Option<Value>` covers all three.
+
+3. **That round trip is lossy in Go too.** An explicit `data: null` decodes to a nil interface,
+   so re-marshalling drops the key — Go loses it exactly as we do. The oracle records Go's own
+   unmarshal→marshal result next to its output, and the Rust test asserts against *that*;
+   asserting against the original bytes would have meant diverging from Go to look "correct".
+
+4. **`PostEmbedType` is a defined string type**, so an unknown value round-trips unchanged. Kept
+   as `String` for the same reason `Channel.Type` is.
+
+5. **`PostAcknowledgement.RemoteId` is the only ported `remote_id` with `omitempty`.**
+   `Reaction.RemoteId` and `FileInfo.RemoteId` are the same `*string` under the same JSON name
+   and write `null` when nil; this one disappears. Pinned by a test that serialises all three
+   zero values side by side.
+
+6. **`PostAcknowledgement.PreSave` does not materialise `remote_id`**, unlike
+   `Reaction::pre_save` and `FileInfo::pre_save`. A nil stays nil and therefore stays off the
+   wire.
+
+7. **`acknowledged_at` is never validated** — zero and negative both pass `IsValid`. That
+   matters because `PreSave` fills it only when it is exactly zero, so a negative timestamp
+   survives both.
+
+8. **The error id says `model.acknowledgement.…`, not `model.post_acknowledgement.…`** — the
+   type name and the error namespace disagree.
 
 ## Notes — model/file_info.go
 

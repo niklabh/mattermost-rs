@@ -1,0 +1,258 @@
+{
+    "acknowledgement_is_valid": [
+        {
+            "name": "valid",
+            "ack": {
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "post_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "acknowledged_at": 1700000000000,
+                "channel_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "remote_id": "cluster-a"
+            },
+            "error_id": "",
+            "detailed": ""
+        },
+        {
+            "name": "user_id_empty",
+            "ack": {
+                "user_id": "",
+                "post_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "acknowledged_at": 1700000000000,
+                "channel_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "remote_id": "cluster-a"
+            },
+            "error_id": "model.acknowledgement.is_valid.user_id.app_error",
+            "detailed": "user_id="
+        },
+        {
+            "name": "user_id_short",
+            "ack": {
+                "user_id": "aaaaaaaaaaaaaaaaaaaaaaaaa",
+                "post_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "acknowledged_at": 1700000000000,
+                "channel_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "remote_id": "cluster-a"
+            },
+            "error_id": "model.acknowledgement.is_valid.user_id.app_error",
+            "detailed": "user_id=aaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "name": "post_id_empty",
+            "ack": {
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "post_id": "",
+                "acknowledged_at": 1700000000000,
+                "channel_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "remote_id": "cluster-a"
+            },
+            "error_id": "model.acknowledgement.is_valid.post_id.app_error",
+            "detailed": "post_id="
+        },
+        {
+            "name": "post_id_nonsense",
+            "ack": {
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "post_id": "nope",
+                "acknowledged_at": 1700000000000,
+                "channel_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "remote_id": "cluster-a"
+            },
+            "error_id": "model.acknowledgement.is_valid.post_id.app_error",
+            "detailed": "post_id=nope"
+        },
+        {
+            "name": "channel_id_empty",
+            "ack": {
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "post_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "acknowledged_at": 1700000000000,
+                "channel_id": "",
+                "remote_id": "cluster-a"
+            },
+            "error_id": "model.acknowledgement.is_valid.channel_id.app_error",
+            "detailed": "channel_id="
+        },
+        {
+            "name": "channel_id_nonsense",
+            "ack": {
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "post_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "acknowledged_at": 1700000000000,
+                "channel_id": "nope",
+                "remote_id": "cluster-a"
+            },
+            "error_id": "model.acknowledgement.is_valid.channel_id.app_error",
+            "detailed": "channel_id=nope"
+        },
+        {
+            "name": "acknowledged_at_zero",
+            "ack": {
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "post_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "acknowledged_at": 0,
+                "channel_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "remote_id": "cluster-a"
+            },
+            "error_id": "",
+            "detailed": ""
+        },
+        {
+            "name": "acknowledged_at_negative",
+            "ack": {
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "post_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "acknowledged_at": -1,
+                "channel_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "remote_id": "cluster-a"
+            },
+            "error_id": "",
+            "detailed": ""
+        },
+        {
+            "name": "remote_id_nil",
+            "ack": {
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "post_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "acknowledged_at": 1700000000000,
+                "channel_id": "g1ku9ozj3bhub3hs89bqu1m3gy"
+            },
+            "error_id": "",
+            "detailed": ""
+        }
+    ],
+    "acknowledgement_pre_save": [
+        {
+            "name": "zero_is_filled",
+            "in_acknowledged_at": 0,
+            "preserved": false,
+            "generated": true,
+            "out_remote_nil": true
+        },
+        {
+            "name": "existing_is_kept",
+            "in_acknowledged_at": 1700000000000,
+            "preserved": true,
+            "generated": false,
+            "out_remote_nil": true
+        },
+        {
+            "name": "negative_is_kept",
+            "in_acknowledged_at": -1,
+            "preserved": true,
+            "generated": false,
+            "out_remote_nil": true
+        }
+    ],
+    "acknowledgement_remote_id": {
+        "empty": "",
+        "nil": "",
+        "set": "cluster-a"
+    },
+    "acknowledgement_wire": [
+        {
+            "name": "zero",
+            "json": "{\"user_id\":\"\",\"post_id\":\"\",\"acknowledged_at\":0,\"channel_id\":\"\"}",
+            "roundtrip": "{\"user_id\":\"\",\"post_id\":\"\",\"acknowledged_at\":0,\"channel_id\":\"\"}"
+        },
+        {
+            "name": "remote_id_nil_is_omitted",
+            "json": "{\"user_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"post_id\":\"\",\"acknowledged_at\":0,\"channel_id\":\"\"}",
+            "roundtrip": "{\"user_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"post_id\":\"\",\"acknowledged_at\":0,\"channel_id\":\"\"}"
+        },
+        {
+            "name": "remote_id_empty_is_kept",
+            "json": "{\"user_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"post_id\":\"\",\"acknowledged_at\":0,\"channel_id\":\"\",\"remote_id\":\"\"}",
+            "roundtrip": "{\"user_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"post_id\":\"\",\"acknowledged_at\":0,\"channel_id\":\"\",\"remote_id\":\"\"}"
+        },
+        {
+            "name": "remote_id_set",
+            "json": "{\"user_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"post_id\":\"\",\"acknowledged_at\":0,\"channel_id\":\"\",\"remote_id\":\"cluster-a\"}",
+            "roundtrip": "{\"user_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"post_id\":\"\",\"acknowledged_at\":0,\"channel_id\":\"\",\"remote_id\":\"cluster-a\"}"
+        },
+        {
+            "name": "complete",
+            "json": "{\"user_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"post_id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"acknowledged_at\":1700000000000,\"channel_id\":\"g1ku9ozj3bhub3hs89bqu1m3gy\",\"remote_id\":\"cluster-a\"}",
+            "roundtrip": "{\"user_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"post_id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"acknowledged_at\":1700000000000,\"channel_id\":\"g1ku9ozj3bhub3hs89bqu1m3gy\",\"remote_id\":\"cluster-a\"}"
+        }
+    ],
+    "embed_constants": {
+        "boards": "boards",
+        "image": "image",
+        "link": "link",
+        "message_attachment": "message_attachment",
+        "opengraph": "opengraph",
+        "permalink": "permalink"
+    },
+    "embed_wire": [
+        {
+            "name": "zero",
+            "json": "{\"type\":\"\"}",
+            "roundtrip": "{\"type\":\"\"}"
+        },
+        {
+            "name": "type_only",
+            "json": "{\"type\":\"opengraph\"}",
+            "roundtrip": "{\"type\":\"opengraph\"}"
+        },
+        {
+            "name": "url_set",
+            "json": "{\"type\":\"image\",\"url\":\"https://example.com/a.png\"}",
+            "roundtrip": "{\"type\":\"image\",\"url\":\"https://example.com/a.png\"}"
+        },
+        {
+            "name": "url_empty_is_omitted",
+            "json": "{\"type\":\"link\"}",
+            "roundtrip": "{\"type\":\"link\"}"
+        },
+        {
+            "name": "data_nil_is_omitted",
+            "json": "{\"type\":\"\"}",
+            "roundtrip": "{\"type\":\"\"}"
+        },
+        {
+            "name": "data_empty_string_is_kept",
+            "json": "{\"type\":\"\",\"data\":\"\"}",
+            "roundtrip": "{\"type\":\"\",\"data\":\"\"}"
+        },
+        {
+            "name": "data_zero_number_is_kept",
+            "json": "{\"type\":\"\",\"data\":0}",
+            "roundtrip": "{\"type\":\"\",\"data\":0}"
+        },
+        {
+            "name": "data_false_is_kept",
+            "json": "{\"type\":\"\",\"data\":false}",
+            "roundtrip": "{\"type\":\"\",\"data\":false}"
+        },
+        {
+            "name": "data_empty_object_is_kept",
+            "json": "{\"type\":\"\",\"data\":{}}",
+            "roundtrip": "{\"type\":\"\",\"data\":{}}"
+        },
+        {
+            "name": "data_object",
+            "json": "{\"type\":\"\",\"data\":{\"site_name\":\"Example\"}}",
+            "roundtrip": "{\"type\":\"\",\"data\":{\"site_name\":\"Example\"}}"
+        },
+        {
+            "name": "data_array",
+            "json": "{\"type\":\"\",\"data\":[1,\"two\"]}",
+            "roundtrip": "{\"type\":\"\",\"data\":[1,\"two\"]}"
+        },
+        {
+            "name": "data_typed_nil_pointer",
+            "json": "{\"type\":\"\",\"data\":null}",
+            "roundtrip": "{\"type\":\"\"}"
+        },
+        {
+            "name": "unknown_type",
+            "json": "{\"type\":\"something_new\"}",
+            "roundtrip": "{\"type\":\"something_new\"}"
+        }
+    ],
+    "remote_id_omitempty_across": {
+        "file_info": "{\"id\":\"\",\"user_id\":\"\",\"channel_id\":\"\",\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"name\":\"\",\"extension\":\"\",\"size\":0,\"mime_type\":\"\",\"mini_preview\":null,\"remote_id\":null,\"archived\":false}",
+        "post_acknowledgement": "{\"user_id\":\"\",\"post_id\":\"\",\"acknowledged_at\":0,\"channel_id\":\"\"}",
+        "reaction": "{\"user_id\":\"\",\"post_id\":\"\",\"emoji_name\":\"\",\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"remote_id\":null,\"channel_id\":\"\"}"
+    }
+}
