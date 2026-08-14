@@ -916,13 +916,16 @@ dependencies = [
 name = "mm-model"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "chrono",
  "rand 0.9.5",
  "regex",
  "serde",
  "serde_json",
+ "sha1",
  "thiserror",
  "unicode-general-category",
+ "unicode-normalization",
 ]
 
 [[package]]

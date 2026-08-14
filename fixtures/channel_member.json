@@ -9,8 +9,12 @@
     "urgent_mention_count": 73,
     "msg_count_root": 21,
     "notify_props": {
-        "key0-932788": "val0-209faf",
-        "key1-94293b": "val1-21a162"
+        "channel_auto_follow_threads": "off",
+        "desktop": "default",
+        "email": "default",
+        "ignore_channel_mentions": "default",
+        "mark_unread": "all",
+        "push": "default"
     },
     "last_update_at": 1707722148000,
     "scheme_guest": true,

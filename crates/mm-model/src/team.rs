@@ -6,7 +6,6 @@
 //!
 //! # Deliberately not translated here
 //!
-//! - `Team::Etag` needs `CurrentVersion` from `version.go` (D-010).
 //! - `Auditable`/`LogClone` are audit-log projections; they follow the audit layer.
 //! - `ShallowCopy` is `#[derive(Clone)]`.
 
@@ -15,7 +14,7 @@ use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
 
 use crate::utils::{
-    AppError, AppResult, RESERVED_NAMES, get_millis, is_valid_alpha_num, is_valid_email,
+    AppError, AppResult, RESERVED_NAMES, etag, get_millis, is_valid_alpha_num, is_valid_email,
     is_valid_id, new_id, sanitize_unicode,
 };
 
@@ -300,6 +299,13 @@ impl Team {
     ///
     /// Unlike `User::PreSave`, `CreateAt` is overwritten unconditionally — an inbound
     /// `create_at` is discarded even when set.
+    /// Port of `(*Team).Etag` (team.go:130).
+    ///
+    /// A zero team yields `<version>..0` — the empty id is an empty component, not a bug.
+    pub fn etag(&self) -> String {
+        etag(&[&self.id, &self.update_at])
+    }
+
     pub fn pre_save(&mut self) {
         if self.id.is_empty() {
             self.id = new_id();
@@ -364,7 +370,7 @@ impl Team {
 /// `strings.Index(s, value) == 0` is a **prefix** test, not equality — so `administrators`,
 /// `apiary` and `postmaster` are all reserved.
 pub fn is_reserved_team_name(s: &str) -> bool {
-    let s = s.to_lowercase();
+    let s = crate::utils::go_to_lower(s);
     RESERVED_NAMES.iter().any(|value| s.starts_with(value))
 }
 
@@ -381,7 +387,7 @@ pub fn is_valid_team_name(s: &str) -> bool {
 ///   that triggered it (`strings.Replace(s, value, "", -1)`). `adminadmin` cleans to `""`.
 /// - The fallback is `NewId()`, not `NewUsername()` — a bare 26-character id.
 pub fn clean_team_name(s: &str) -> String {
-    let mut s = s.replace(' ', "-").to_lowercase();
+    let mut s = crate::utils::go_to_lower(&s.replace(' ', "-"));
 
     for value in RESERVED_NAMES {
         if s.starts_with(value) {

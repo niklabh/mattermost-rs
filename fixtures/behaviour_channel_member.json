@@ -1,0 +1,1480 @@
+{
+    "channel_member_is_valid": [
+        {
+            "name": "valid",
+            "member": {
+                "channel_id": "6bdz674pgq767e4jx75w4pf57a",
+                "user_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "roles": "channel_user",
+                "last_viewed_at": 0,
+                "msg_count": 0,
+                "mention_count": 0,
+                "mention_count_root": 0,
+                "urgent_mention_count": 0,
+                "msg_count_root": 0,
+                "notify_props": {
+                    "channel_auto_follow_threads": "off",
+                    "desktop": "default",
+                    "email": "default",
+                    "ignore_channel_mentions": "default",
+                    "mark_unread": "all",
+                    "push": "default"
+                },
+                "last_update_at": 1705492114000,
+                "scheme_guest": false,
+                "scheme_user": false,
+                "scheme_admin": false,
+                "explicit_roles": "",
+                "autotranslation_disabled": false
+            },
+            "error_id": "",
+            "detailed": ""
+        },
+        {
+            "name": "channel_id_empty",
+            "member": {
+                "channel_id": "",
+                "user_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "roles": "channel_user",
+                "last_viewed_at": 0,
+                "msg_count": 0,
+                "mention_count": 0,
+                "mention_count_root": 0,
+                "urgent_mention_count": 0,
+                "msg_count_root": 0,
+                "notify_props": {
+                    "channel_auto_follow_threads": "off",
+                    "desktop": "default",
+                    "email": "default",
+                    "ignore_channel_mentions": "default",
+                    "mark_unread": "all",
+                    "push": "default"
+                },
+                "last_update_at": 1705492114000,
+                "scheme_guest": false,
+                "scheme_user": false,
+                "scheme_admin": false,
+                "explicit_roles": "",
+                "autotranslation_disabled": false
+            },
+            "error_id": "model.channel_member.is_valid.channel_id.app_error",
+            "detailed": ""
+        },
+        {
+            "name": "channel_id_short",
+            "member": {
+                "channel_id": "aaaaaaaaaaaaaaaaaaaaaaaaa",
+                "user_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "roles": "channel_user",
+                "last_viewed_at": 0,
+                "msg_count": 0,
+                "mention_count": 0,
+                "mention_count_root": 0,
+                "urgent_mention_count": 0,
+                "msg_count_root": 0,
+                "notify_props": {
+                    "channel_auto_follow_threads": "off",
+                    "desktop": "default",
+                    "email": "default",
+                    "ignore_channel_mentions": "default",
+                    "mark_unread": "all",
+                    "push": "default"
+                },
+                "last_update_at": 1705492114000,
+                "scheme_guest": false,
+                "scheme_user": false,
+                "scheme_admin": false,
+                "explicit_roles": "",
+                "autotranslation_disabled": false
+            },
+            "error_id": "model.channel_member.is_valid.channel_id.app_error",
+            "detailed": ""
+        },
+        {
+            "name": "user_id_empty",
+            "member": {
+                "channel_id": "6bdz674pgq767e4jx75w4pf57a",
+                "user_id": "",
+                "roles": "channel_user",
+                "last_viewed_at": 0,
+                "msg_count": 0,
+                "mention_count": 0,
+                "mention_count_root": 0,
+                "urgent_mention_count": 0,
+                "msg_count_root": 0,
+                "notify_props": {
+                    "channel_auto_follow_threads": "off",
+                    "desktop": "default",
+                    "email": "default",
+                    "ignore_channel_mentions": "default",
+                    "mark_unread": "all",
+                    "push": "default"
+                },
+                "last_update_at": 1705492114000,
+                "scheme_guest": false,
+                "scheme_user": false,
+                "scheme_admin": false,
+                "explicit_roles": "",
+                "autotranslation_disabled": false
+            },
+            "error_id": "model.channel_member.is_valid.user_id.app_error",
+            "detailed": ""
+        },
+        {
+            "name": "notify_props_nil",
+            "member": {
+                "channel_id": "6bdz674pgq767e4jx75w4pf57a",
+                "user_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "roles": "channel_user",
+                "last_viewed_at": 0,
+                "msg_count": 0,
+                "mention_count": 0,
+                "mention_count_root": 0,
+                "urgent_mention_count": 0,
+                "msg_count_root": 0,
+                "notify_props": null,
+                "last_update_at": 1705492114000,
+                "scheme_guest": false,
+                "scheme_user": false,
+                "scheme_admin": false,
+                "explicit_roles": "",
+                "autotranslation_disabled": false
+            },
+            "error_id": "model.channel_member.is_valid.notify_level.app_error",
+            "detailed": "notify_level="
+        },
+        {
+            "name": "notify_props_empty",
+            "member": {
+                "channel_id": "6bdz674pgq767e4jx75w4pf57a",
+                "user_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "roles": "channel_user",
+                "last_viewed_at": 0,
+                "msg_count": 0,
+                "mention_count": 0,
+                "mention_count_root": 0,
+                "urgent_mention_count": 0,
+                "msg_count_root": 0,
+                "notify_props": {},
+                "last_update_at": 1705492114000,
+                "scheme_guest": false,
+                "scheme_user": false,
+                "scheme_admin": false,
+                "explicit_roles": "",
+                "autotranslation_disabled": false
+            },
+            "error_id": "model.channel_member.is_valid.notify_level.app_error",
+            "detailed": "notify_level="
+        },
+        {
+            "name": "notify_props_missing_desktop",
+            "member": {
+                "channel_id": "6bdz674pgq767e4jx75w4pf57a",
+                "user_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "roles": "channel_user",
+                "last_viewed_at": 0,
+                "msg_count": 0,
+                "mention_count": 0,
+                "mention_count_root": 0,
+                "urgent_mention_count": 0,
+                "msg_count_root": 0,
+                "notify_props": {
+                    "channel_auto_follow_threads": "off",
+                    "email": "default",
+                    "ignore_channel_mentions": "default",
+                    "mark_unread": "all",
+                    "push": "default"
+                },
+                "last_update_at": 1705492114000,
+                "scheme_guest": false,
+                "scheme_user": false,
+                "scheme_admin": false,
+                "explicit_roles": "",
+                "autotranslation_disabled": false
+            },
+            "error_id": "model.channel_member.is_valid.notify_level.app_error",
+            "detailed": "notify_level="
+        },
+        {
+            "name": "notify_props_bad_push",
+            "member": {
+                "channel_id": "6bdz674pgq767e4jx75w4pf57a",
+                "user_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "roles": "channel_user",
+                "last_viewed_at": 0,
+                "msg_count": 0,
+                "mention_count": 0,
+                "mention_count_root": 0,
+                "urgent_mention_count": 0,
+                "msg_count_root": 0,
+                "notify_props": {
+                    "channel_auto_follow_threads": "off",
+                    "desktop": "default",
+                    "email": "default",
+                    "ignore_channel_mentions": "default",
+                    "mark_unread": "all",
+                    "push": "nope"
+                },
+                "last_update_at": 1705492114000,
+                "scheme_guest": false,
+                "scheme_user": false,
+                "scheme_admin": false,
+                "explicit_roles": "",
+                "autotranslation_disabled": false
+            },
+            "error_id": "model.channel_member.is_valid.push_level.app_error",
+            "detailed": "push_notification_level=nope"
+        },
+        {
+            "name": "roles_256",
+            "member": {
+                "channel_id": "6bdz674pgq767e4jx75w4pf57a",
+                "user_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "roles": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "last_viewed_at": 0,
+                "msg_count": 0,
+                "mention_count": 0,
+                "mention_count_root": 0,
+                "urgent_mention_count": 0,
+                "msg_count_root": 0,
+                "notify_props": {
+                    "channel_auto_follow_threads": "off",
+                    "desktop": "default",
+                    "email": "default",
+                    "ignore_channel_mentions": "default",
+                    "mark_unread": "all",
+                    "push": "default"
+                },
+                "last_update_at": 1705492114000,
+                "scheme_guest": false,
+                "scheme_user": false,
+                "scheme_admin": false,
+                "explicit_roles": "",
+                "autotranslation_disabled": false
+            },
+            "error_id": "",
+            "detailed": ""
+        },
+        {
+            "name": "roles_257",
+            "member": {
+                "channel_id": "6bdz674pgq767e4jx75w4pf57a",
+                "user_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "roles": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "last_viewed_at": 0,
+                "msg_count": 0,
+                "mention_count": 0,
+                "mention_count_root": 0,
+                "urgent_mention_count": 0,
+                "msg_count_root": 0,
+                "notify_props": {
+                    "channel_auto_follow_threads": "off",
+                    "desktop": "default",
+                    "email": "default",
+                    "ignore_channel_mentions": "default",
+                    "mark_unread": "all",
+                    "push": "default"
+                },
+                "last_update_at": 1705492114000,
+                "scheme_guest": false,
+                "scheme_user": false,
+                "scheme_admin": false,
+                "explicit_roles": "",
+                "autotranslation_disabled": false
+            },
+            "error_id": "model.channel_member.is_valid.roles_limit.app_error",
+            "detailed": ""
+        },
+        {
+            "name": "roles_empty",
+            "member": {
+                "channel_id": "6bdz674pgq767e4jx75w4pf57a",
+                "user_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "roles": "",
+                "last_viewed_at": 0,
+                "msg_count": 0,
+                "mention_count": 0,
+                "mention_count_root": 0,
+                "urgent_mention_count": 0,
+                "msg_count_root": 0,
+                "notify_props": {
+                    "channel_auto_follow_threads": "off",
+                    "desktop": "default",
+                    "email": "default",
+                    "ignore_channel_mentions": "default",
+                    "mark_unread": "all",
+                    "push": "default"
+                },
+                "last_update_at": 1705492114000,
+                "scheme_guest": false,
+                "scheme_user": false,
+                "scheme_admin": false,
+                "explicit_roles": "",
+                "autotranslation_disabled": false
+            },
+            "error_id": "",
+            "detailed": ""
+        },
+        {
+            "name": "bad_user_id_and_bad_props",
+            "member": {
+                "channel_id": "6bdz674pgq767e4jx75w4pf57a",
+                "user_id": "",
+                "roles": "channel_user",
+                "last_viewed_at": 0,
+                "msg_count": 0,
+                "mention_count": 0,
+                "mention_count_root": 0,
+                "urgent_mention_count": 0,
+                "msg_count_root": 0,
+                "notify_props": {},
+                "last_update_at": 1705492114000,
+                "scheme_guest": false,
+                "scheme_user": false,
+                "scheme_admin": false,
+                "explicit_roles": "",
+                "autotranslation_disabled": false
+            },
+            "error_id": "model.channel_member.is_valid.user_id.app_error",
+            "detailed": ""
+        },
+        {
+            "name": "bad_props_and_long_roles",
+            "member": {
+                "channel_id": "6bdz674pgq767e4jx75w4pf57a",
+                "user_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "roles": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "last_viewed_at": 0,
+                "msg_count": 0,
+                "mention_count": 0,
+                "mention_count_root": 0,
+                "urgent_mention_count": 0,
+                "msg_count_root": 0,
+                "notify_props": {},
+                "last_update_at": 1705492114000,
+                "scheme_guest": false,
+                "scheme_user": false,
+                "scheme_admin": false,
+                "explicit_roles": "",
+                "autotranslation_disabled": false
+            },
+            "error_id": "model.channel_member.is_valid.notify_level.app_error",
+            "detailed": "notify_level="
+        }
+    ],
+    "default_channel_notify_props": {
+        "channel_auto_follow_threads": "off",
+        "desktop": "default",
+        "email": "default",
+        "ignore_channel_mentions": "default",
+        "mark_unread": "all",
+        "push": "default"
+    },
+    "is_channel_auto_follow_thread": {
+        "": false,
+        " all": false,
+        "0": false,
+        "1": false,
+        "ALL": false,
+        "Default": false,
+        "None": false,
+        "OFF": false,
+        "ON": false,
+        "True": false,
+        "all": false,
+        "all ": false,
+        "auto": false,
+        "default": false,
+        "false": false,
+        "mention": false,
+        "mentions": false,
+        "none": false,
+        "off": true,
+        "on": true,
+        "true": false,
+        "unknown": false
+    },
+    "is_channel_mark_unread_level": {
+        "": false,
+        " all": false,
+        "0": false,
+        "1": false,
+        "ALL": false,
+        "Default": false,
+        "None": false,
+        "OFF": false,
+        "ON": false,
+        "True": false,
+        "all": true,
+        "all ": false,
+        "auto": false,
+        "default": false,
+        "false": false,
+        "mention": true,
+        "mentions": false,
+        "none": false,
+        "off": false,
+        "on": false,
+        "true": false,
+        "unknown": false
+    },
+    "is_channel_notify_level": {
+        "": false,
+        " all": false,
+        "0": false,
+        "1": false,
+        "ALL": false,
+        "Default": false,
+        "None": false,
+        "OFF": false,
+        "ON": false,
+        "True": false,
+        "all": true,
+        "all ": false,
+        "auto": false,
+        "default": true,
+        "false": false,
+        "mention": true,
+        "mentions": false,
+        "none": true,
+        "off": false,
+        "on": false,
+        "true": false,
+        "unknown": false
+    },
+    "is_ignore_channel_mentions": {
+        "": false,
+        " all": false,
+        "0": false,
+        "1": false,
+        "ALL": false,
+        "Default": false,
+        "None": false,
+        "OFF": false,
+        "ON": false,
+        "True": false,
+        "all": false,
+        "all ": false,
+        "auto": false,
+        "default": true,
+        "false": false,
+        "mention": false,
+        "mentions": false,
+        "none": false,
+        "off": true,
+        "on": true,
+        "true": false,
+        "unknown": false
+    },
+    "is_send_email": {
+        "": false,
+        " all": false,
+        "0": false,
+        "1": false,
+        "ALL": false,
+        "Default": false,
+        "None": false,
+        "OFF": false,
+        "ON": false,
+        "True": false,
+        "all": false,
+        "all ": false,
+        "auto": false,
+        "default": true,
+        "false": true,
+        "mention": false,
+        "mentions": false,
+        "none": false,
+        "off": false,
+        "on": false,
+        "true": true,
+        "unknown": false
+    },
+    "member_get_roles": {
+        "": [],
+        " ": [],
+        " channel_user ": [
+            "channel_user"
+        ],
+        "a b": [
+            "a",
+            "b"
+        ],
+        "channel_user": [
+            "channel_user"
+        ],
+        "channel_user\tchannel_admin": [
+            "channel_user",
+            "channel_admin"
+        ],
+        "channel_user\nchannel_admin": [
+            "channel_user",
+            "channel_admin"
+        ],
+        "channel_user  channel_admin": [
+            "channel_user",
+            "channel_admin"
+        ],
+        "channel_user channel_admin": [
+            "channel_user",
+            "channel_admin"
+        ]
+    },
+    "notify_props_valid": [
+        {
+            "name": "defaults",
+            "props": {
+                "channel_auto_follow_threads": "off",
+                "desktop": "default",
+                "email": "default",
+                "ignore_channel_mentions": "default",
+                "mark_unread": "all",
+                "push": "default"
+            },
+            "allow_missing_fields": false,
+            "error_id": "",
+            "detailed": ""
+        },
+        {
+            "name": "defaults",
+            "props": {
+                "channel_auto_follow_threads": "off",
+                "desktop": "default",
+                "email": "default",
+                "ignore_channel_mentions": "default",
+                "mark_unread": "all",
+                "push": "default"
+            },
+            "allow_missing_fields": true,
+            "error_id": "",
+            "detailed": ""
+        },
+        {
+            "name": "empty",
+            "props": {},
+            "allow_missing_fields": false,
+            "error_id": "model.channel_member.is_valid.notify_level.app_error",
+            "detailed": "notify_level="
+        },
+        {
+            "name": "empty",
+            "props": {},
+            "allow_missing_fields": true,
+            "error_id": "",
+            "detailed": ""
+        },
+        {
+            "name": "nil",
+            "props": null,
+            "allow_missing_fields": false,
+            "error_id": "model.channel_member.is_valid.notify_level.app_error",
+            "detailed": "notify_level="
+        },
+        {
+            "name": "nil",
+            "props": null,
+            "allow_missing_fields": true,
+            "error_id": "",
+            "detailed": ""
+        },
+        {
+            "name": "only_desktop",
+            "props": {
+                "desktop": "all"
+            },
+            "allow_missing_fields": false,
+            "error_id": "model.channel_member.is_valid.unread_level.app_error",
+            "detailed": "mark_unread_level="
+        },
+        {
+            "name": "only_desktop",
+            "props": {
+                "desktop": "all"
+            },
+            "allow_missing_fields": true,
+            "error_id": "",
+            "detailed": ""
+        },
+        {
+            "name": "only_mark_unread",
+            "props": {
+                "mark_unread": "all"
+            },
+            "allow_missing_fields": false,
+            "error_id": "model.channel_member.is_valid.notify_level.app_error",
+            "detailed": "notify_level="
+        },
+        {
+            "name": "only_mark_unread",
+            "props": {
+                "mark_unread": "all"
+            },
+            "allow_missing_fields": true,
+            "error_id": "",
+            "detailed": ""
+        },
+        {
+            "name": "desktop_and_mark_unread",
+            "props": {
+                "desktop": "all",
+                "mark_unread": "all"
+            },
+            "allow_missing_fields": false,
+            "error_id": "",
+            "detailed": ""
+        },
+        {
+            "name": "desktop_and_mark_unread",
+            "props": {
+                "desktop": "all",
+                "mark_unread": "all"
+            },
+            "allow_missing_fields": true,
+            "error_id": "",
+            "detailed": ""
+        },
+        {
+            "name": "desktop_empty",
+            "props": {
+                "channel_auto_follow_threads": "off",
+                "desktop": "",
+                "email": "default",
+                "ignore_channel_mentions": "default",
+                "mark_unread": "all",
+                "push": "default"
+            },
+            "allow_missing_fields": false,
+            "error_id": "model.channel_member.is_valid.notify_level.app_error",
+            "detailed": "notify_level="
+        },
+        {
+            "name": "desktop_empty",
+            "props": {
+                "channel_auto_follow_threads": "off",
+                "desktop": "",
+                "email": "default",
+                "ignore_channel_mentions": "default",
+                "mark_unread": "all",
+                "push": "default"
+            },
+            "allow_missing_fields": true,
+            "error_id": "model.channel_member.is_valid.notify_level.app_error",
+            "detailed": "notify_level="
+        },
+        {
+            "name": "desktop_bad",
+            "props": {
+                "channel_auto_follow_threads": "off",
+                "desktop": "nope",
+                "email": "default",
+                "ignore_channel_mentions": "default",
+                "mark_unread": "all",
+                "push": "default"
+            },
+            "allow_missing_fields": false,
+            "error_id": "model.channel_member.is_valid.notify_level.app_error",
+            "detailed": "notify_level=nope"
+        },
+        {
+            "name": "desktop_bad",
+            "props": {
+                "channel_auto_follow_threads": "off",
+                "desktop": "nope",
+                "email": "default",
+                "ignore_channel_mentions": "default",
+                "mark_unread": "all",
+                "push": "default"
+            },
+            "allow_missing_fields": true,
+            "error_id": "model.channel_member.is_valid.notify_level.app_error",
+            "detailed": "notify_level=nope"
+        },
+        {
+            "name": "desktop_none",
+            "props": {
+                "channel_auto_follow_threads": "off",
+                "desktop": "none",
+                "email": "default",
+                "ignore_channel_mentions": "default",
+                "mark_unread": "all",
+                "push": "default"
+            },
+            "allow_missing_fields": false,
+            "error_id": "",
+            "detailed": ""
+        },
+        {
+            "name": "desktop_none",
+            "props": {
+                "channel_auto_follow_threads": "off",
+                "desktop": "none",
+                "email": "default",
+                "ignore_channel_mentions": "default",
+                "mark_unread": "all",
+                "push": "default"
+            },
+            "allow_missing_fields": true,
+            "error_id": "",
+            "detailed": ""
+        },
+        {
+            "name": "desktop_21_chars",
+            "props": {
+                "channel_auto_follow_threads": "off",
+                "desktop": "aaaaaaaaaaaaaaaaaaaaa",
+                "email": "default",
+                "ignore_channel_mentions": "default",
+                "mark_unread": "all",
+                "push": "default"
+            },
+            "allow_missing_fields": false,
+            "error_id": "model.channel_member.is_valid.notify_level.app_error",
+            "detailed": "notify_level=aaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "name": "desktop_21_chars",
+            "props": {
+                "channel_auto_follow_threads": "off",
+                "desktop": "aaaaaaaaaaaaaaaaaaaaa",
+                "email": "default",
+                "ignore_channel_mentions": "default",
+                "mark_unread": "all",
+                "push": "default"
+            },
+            "allow_missing_fields": true,
+            "error_id": "model.channel_member.is_valid.notify_level.app_error",
+            "detailed": "notify_level=aaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "name": "mark_unread_bad",
+            "props": {
+                "channel_auto_follow_threads": "off",
+                "desktop": "default",
+                "email": "default",
+                "ignore_channel_mentions": "default",
+                "mark_unread": "none",
+                "push": "default"
+            },
+            "allow_missing_fields": false,
+            "error_id": "model.channel_member.is_valid.unread_level.app_error",
+            "detailed": "mark_unread_level=none"
+        },
+        {
+            "name": "mark_unread_bad",
+            "props": {
+                "channel_auto_follow_threads": "off",
+                "desktop": "default",
+                "email": "default",
+                "ignore_channel_mentions": "default",
+                "mark_unread": "none",
+                "push": "default"
+            },
+            "allow_missing_fields": true,
+            "error_id": "model.channel_member.is_valid.unread_level.app_error",
+            "detailed": "mark_unread_level=none"
+        },
+        {
+            "name": "mark_unread_mention",
+            "props": {
+                "channel_auto_follow_threads": "off",
+                "desktop": "default",
+                "email": "default",
+                "ignore_channel_mentions": "default",
+                "mark_unread": "mention",
+                "push": "default"
+            },
+            "allow_missing_fields": false,
+            "error_id": "",
+            "detailed": ""
+        },
+        {
+            "name": "mark_unread_mention",
+            "props": {
+                "channel_auto_follow_threads": "off",
+                "desktop": "default",
+                "email": "default",
+                "ignore_channel_mentions": "default",
+                "mark_unread": "mention",
+                "push": "default"
+            },
+            "allow_missing_fields": true,
+            "error_id": "",
+            "detailed": ""
+        },
+        {
+            "name": "mark_unread_default_is_invalid",
+            "props": {
+                "channel_auto_follow_threads": "off",
+                "desktop": "default",
+                "email": "default",
+                "ignore_channel_mentions": "default",
+                "mark_unread": "default",
+                "push": "default"
+            },
+            "allow_missing_fields": false,
+            "error_id": "model.channel_member.is_valid.unread_level.app_error",
+            "detailed": "mark_unread_level=default"
+        },
+        {
+            "name": "mark_unread_default_is_invalid",
+            "props": {
+                "channel_auto_follow_threads": "off",
+                "desktop": "default",
+                "email": "default",
+                "ignore_channel_mentions": "default",
+                "mark_unread": "default",
+                "push": "default"
+            },
+            "allow_missing_fields": true,
+            "error_id": "model.channel_member.is_valid.unread_level.app_error",
+            "detailed": "mark_unread_level=default"
+        },
+        {
+            "name": "push_bad",
+            "props": {
+                "channel_auto_follow_threads": "off",
+                "desktop": "default",
+                "email": "default",
+                "ignore_channel_mentions": "default",
+                "mark_unread": "all",
+                "push": "nope"
+            },
+            "allow_missing_fields": false,
+            "error_id": "model.channel_member.is_valid.push_level.app_error",
+            "detailed": "push_notification_level=nope"
+        },
+        {
+            "name": "push_bad",
+            "props": {
+                "channel_auto_follow_threads": "off",
+                "desktop": "default",
+                "email": "default",
+                "ignore_channel_mentions": "default",
+                "mark_unread": "all",
+                "push": "nope"
+            },
+            "allow_missing_fields": true,
+            "error_id": "model.channel_member.is_valid.push_level.app_error",
+            "detailed": "push_notification_level=nope"
+        },
+        {
+            "name": "push_none",
+            "props": {
+                "channel_auto_follow_threads": "off",
+                "desktop": "default",
+                "email": "default",
+                "ignore_channel_mentions": "default",
+                "mark_unread": "all",
+                "push": "none"
+            },
+            "allow_missing_fields": false,
+            "error_id": "",
+            "detailed": ""
+        },
+        {
+            "name": "push_none",
+            "props": {
+                "channel_auto_follow_threads": "off",
+                "desktop": "default",
+                "email": "default",
+                "ignore_channel_mentions": "default",
+                "mark_unread": "all",
+                "push": "none"
+            },
+            "allow_missing_fields": true,
+            "error_id": "",
+            "detailed": ""
+        },
+        {
+            "name": "push_missing",
+            "props": {
+                "channel_auto_follow_threads": "off",
+                "desktop": "default",
+                "email": "default",
+                "ignore_channel_mentions": "default",
+                "mark_unread": "all"
+            },
+            "allow_missing_fields": false,
+            "error_id": "",
+            "detailed": ""
+        },
+        {
+            "name": "push_missing",
+            "props": {
+                "channel_auto_follow_threads": "off",
+                "desktop": "default",
+                "email": "default",
+                "ignore_channel_mentions": "default",
+                "mark_unread": "all"
+            },
+            "allow_missing_fields": true,
+            "error_id": "",
+            "detailed": ""
+        },
+        {
+            "name": "email_true",
+            "props": {
+                "channel_auto_follow_threads": "off",
+                "desktop": "default",
+                "email": "true",
+                "ignore_channel_mentions": "default",
+                "mark_unread": "all",
+                "push": "default"
+            },
+            "allow_missing_fields": false,
+            "error_id": "",
+            "detailed": ""
+        },
+        {
+            "name": "email_true",
+            "props": {
+                "channel_auto_follow_threads": "off",
+                "desktop": "default",
+                "email": "true",
+                "ignore_channel_mentions": "default",
+                "mark_unread": "all",
+                "push": "default"
+            },
+            "allow_missing_fields": true,
+            "error_id": "",
+            "detailed": ""
+        },
+        {
+            "name": "email_false",
+            "props": {
+                "channel_auto_follow_threads": "off",
+                "desktop": "default",
+                "email": "false",
+                "ignore_channel_mentions": "default",
+                "mark_unread": "all",
+                "push": "default"
+            },
+            "allow_missing_fields": false,
+            "error_id": "",
+            "detailed": ""
+        },
+        {
+            "name": "email_false",
+            "props": {
+                "channel_auto_follow_threads": "off",
+                "desktop": "default",
+                "email": "false",
+                "ignore_channel_mentions": "default",
+                "mark_unread": "all",
+                "push": "default"
+            },
+            "allow_missing_fields": true,
+            "error_id": "",
+            "detailed": ""
+        },
+        {
+            "name": "email_all_is_invalid",
+            "props": {
+                "channel_auto_follow_threads": "off",
+                "desktop": "default",
+                "email": "all",
+                "ignore_channel_mentions": "default",
+                "mark_unread": "all",
+                "push": "default"
+            },
+            "allow_missing_fields": false,
+            "error_id": "model.channel_member.is_valid.email_value.app_error",
+            "detailed": "push_notification_level=all"
+        },
+        {
+            "name": "email_all_is_invalid",
+            "props": {
+                "channel_auto_follow_threads": "off",
+                "desktop": "default",
+                "email": "all",
+                "ignore_channel_mentions": "default",
+                "mark_unread": "all",
+                "push": "default"
+            },
+            "allow_missing_fields": true,
+            "error_id": "model.channel_member.is_valid.email_value.app_error",
+            "detailed": "push_notification_level=all"
+        },
+        {
+            "name": "email_missing",
+            "props": {
+                "channel_auto_follow_threads": "off",
+                "desktop": "default",
+                "ignore_channel_mentions": "default",
+                "mark_unread": "all",
+                "push": "default"
+            },
+            "allow_missing_fields": false,
+            "error_id": "",
+            "detailed": ""
+        },
+        {
+            "name": "email_missing",
+            "props": {
+                "channel_auto_follow_threads": "off",
+                "desktop": "default",
+                "ignore_channel_mentions": "default",
+                "mark_unread": "all",
+                "push": "default"
+            },
+            "allow_missing_fields": true,
+            "error_id": "",
+            "detailed": ""
+        },
+        {
+            "name": "ignore_mentions_on",
+            "props": {
+                "channel_auto_follow_threads": "off",
+                "desktop": "default",
+                "email": "default",
+                "ignore_channel_mentions": "on",
+                "mark_unread": "all",
+                "push": "default"
+            },
+            "allow_missing_fields": false,
+            "error_id": "",
+            "detailed": ""
+        },
+        {
+            "name": "ignore_mentions_on",
+            "props": {
+                "channel_auto_follow_threads": "off",
+                "desktop": "default",
+                "email": "default",
+                "ignore_channel_mentions": "on",
+                "mark_unread": "all",
+                "push": "default"
+            },
+            "allow_missing_fields": true,
+            "error_id": "",
+            "detailed": ""
+        },
+        {
+            "name": "ignore_mentions_bad",
+            "props": {
+                "channel_auto_follow_threads": "off",
+                "desktop": "default",
+                "email": "default",
+                "ignore_channel_mentions": "yes",
+                "mark_unread": "all",
+                "push": "default"
+            },
+            "allow_missing_fields": false,
+            "error_id": "model.channel_member.is_valid.ignore_channel_mentions_value.app_error",
+            "detailed": "ignore_channel_mentions=yes"
+        },
+        {
+            "name": "ignore_mentions_bad",
+            "props": {
+                "channel_auto_follow_threads": "off",
+                "desktop": "default",
+                "email": "default",
+                "ignore_channel_mentions": "yes",
+                "mark_unread": "all",
+                "push": "default"
+            },
+            "allow_missing_fields": true,
+            "error_id": "model.channel_member.is_valid.ignore_channel_mentions_value.app_error",
+            "detailed": "ignore_channel_mentions=yes"
+        },
+        {
+            "name": "ignore_mentions_41_chars",
+            "props": {
+                "channel_auto_follow_threads": "off",
+                "desktop": "default",
+                "email": "default",
+                "ignore_channel_mentions": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "mark_unread": "all",
+                "push": "default"
+            },
+            "allow_missing_fields": false,
+            "error_id": "model.channel_member.is_valid.ignore_channel_mentions_value.app_error",
+            "detailed": "ignore_channel_mentions=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "name": "ignore_mentions_41_chars",
+            "props": {
+                "channel_auto_follow_threads": "off",
+                "desktop": "default",
+                "email": "default",
+                "ignore_channel_mentions": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "mark_unread": "all",
+                "push": "default"
+            },
+            "allow_missing_fields": true,
+            "error_id": "model.channel_member.is_valid.ignore_channel_mentions_value.app_error",
+            "detailed": "ignore_channel_mentions=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "name": "auto_follow_on",
+            "props": {
+                "channel_auto_follow_threads": "on",
+                "desktop": "default",
+                "email": "default",
+                "ignore_channel_mentions": "default",
+                "mark_unread": "all",
+                "push": "default"
+            },
+            "allow_missing_fields": false,
+            "error_id": "",
+            "detailed": ""
+        },
+        {
+            "name": "auto_follow_on",
+            "props": {
+                "channel_auto_follow_threads": "on",
+                "desktop": "default",
+                "email": "default",
+                "ignore_channel_mentions": "default",
+                "mark_unread": "all",
+                "push": "default"
+            },
+            "allow_missing_fields": true,
+            "error_id": "",
+            "detailed": ""
+        },
+        {
+            "name": "auto_follow_bad",
+            "props": {
+                "channel_auto_follow_threads": "yes",
+                "desktop": "default",
+                "email": "default",
+                "ignore_channel_mentions": "default",
+                "mark_unread": "all",
+                "push": "default"
+            },
+            "allow_missing_fields": false,
+            "error_id": "model.channel_member.is_valid.channel_auto_follow_threads_value.app_error",
+            "detailed": "channel_auto_follow_threads=yes"
+        },
+        {
+            "name": "auto_follow_bad",
+            "props": {
+                "channel_auto_follow_threads": "yes",
+                "desktop": "default",
+                "email": "default",
+                "ignore_channel_mentions": "default",
+                "mark_unread": "all",
+                "push": "default"
+            },
+            "allow_missing_fields": true,
+            "error_id": "model.channel_member.is_valid.channel_auto_follow_threads_value.app_error",
+            "detailed": "channel_auto_follow_threads=yes"
+        },
+        {
+            "name": "auto_follow_default_is_invalid",
+            "props": {
+                "channel_auto_follow_threads": "default",
+                "desktop": "default",
+                "email": "default",
+                "ignore_channel_mentions": "default",
+                "mark_unread": "all",
+                "push": "default"
+            },
+            "allow_missing_fields": false,
+            "error_id": "model.channel_member.is_valid.channel_auto_follow_threads_value.app_error",
+            "detailed": "channel_auto_follow_threads=default"
+        },
+        {
+            "name": "auto_follow_default_is_invalid",
+            "props": {
+                "channel_auto_follow_threads": "default",
+                "desktop": "default",
+                "email": "default",
+                "ignore_channel_mentions": "default",
+                "mark_unread": "all",
+                "push": "default"
+            },
+            "allow_missing_fields": true,
+            "error_id": "model.channel_member.is_valid.channel_auto_follow_threads_value.app_error",
+            "detailed": "channel_auto_follow_threads=default"
+        },
+        {
+            "name": "unknown_key_is_ignored",
+            "props": {
+                "channel_auto_follow_threads": "off",
+                "desktop": "default",
+                "email": "default",
+                "ignore_channel_mentions": "default",
+                "mark_unread": "all",
+                "push": "default",
+                "totally_unknown": "whatever"
+            },
+            "allow_missing_fields": false,
+            "error_id": "",
+            "detailed": ""
+        },
+        {
+            "name": "unknown_key_is_ignored",
+            "props": {
+                "channel_auto_follow_threads": "off",
+                "desktop": "default",
+                "email": "default",
+                "ignore_channel_mentions": "default",
+                "mark_unread": "all",
+                "push": "default",
+                "totally_unknown": "whatever"
+            },
+            "allow_missing_fields": true,
+            "error_id": "",
+            "detailed": ""
+        },
+        {
+            "name": "desktop_and_push_bad",
+            "props": {
+                "channel_auto_follow_threads": "off",
+                "desktop": "nope",
+                "email": "default",
+                "ignore_channel_mentions": "default",
+                "mark_unread": "all",
+                "push": "nope"
+            },
+            "allow_missing_fields": false,
+            "error_id": "model.channel_member.is_valid.notify_level.app_error",
+            "detailed": "notify_level=nope"
+        },
+        {
+            "name": "desktop_and_push_bad",
+            "props": {
+                "channel_auto_follow_threads": "off",
+                "desktop": "nope",
+                "email": "default",
+                "ignore_channel_mentions": "default",
+                "mark_unread": "all",
+                "push": "nope"
+            },
+            "allow_missing_fields": true,
+            "error_id": "model.channel_member.is_valid.notify_level.app_error",
+            "detailed": "notify_level=nope"
+        },
+        {
+            "name": "push_and_email_bad",
+            "props": {
+                "channel_auto_follow_threads": "off",
+                "desktop": "default",
+                "email": "nope",
+                "ignore_channel_mentions": "default",
+                "mark_unread": "all",
+                "push": "nope"
+            },
+            "allow_missing_fields": false,
+            "error_id": "model.channel_member.is_valid.push_level.app_error",
+            "detailed": "push_notification_level=nope"
+        },
+        {
+            "name": "push_and_email_bad",
+            "props": {
+                "channel_auto_follow_threads": "off",
+                "desktop": "default",
+                "email": "nope",
+                "ignore_channel_mentions": "default",
+                "mark_unread": "all",
+                "push": "nope"
+            },
+            "allow_missing_fields": true,
+            "error_id": "model.channel_member.is_valid.push_level.app_error",
+            "detailed": "push_notification_level=nope"
+        }
+    ],
+    "sanitize_for_current_user": [
+        {
+            "current_user": "qr6kf7ztp7yifxt4wm5xn51bke",
+            "last_update_at": 1707722148000,
+            "last_viewed_at": 1700557221000,
+            "member_user_id": "qr6kf7ztp7yifxt4wm5xn51bke"
+        },
+        {
+            "current_user": "6bdz674pgq767e4jx75w4pf57a",
+            "last_update_at": -1,
+            "last_viewed_at": -1,
+            "member_user_id": "qr6kf7ztp7yifxt4wm5xn51bke"
+        },
+        {
+            "current_user": "",
+            "last_update_at": -1,
+            "last_viewed_at": -1,
+            "member_user_id": "qr6kf7ztp7yifxt4wm5xn51bke"
+        },
+        {
+            "current_user": "stranger",
+            "last_update_at": -1,
+            "last_viewed_at": -1,
+            "member_user_id": "qr6kf7ztp7yifxt4wm5xn51bke"
+        }
+    ],
+    "set_channel_muted": [
+        {
+            "arg": true,
+            "mark_unread": "mention",
+            "muted_after": true,
+            "muted_before": false,
+            "start": "all"
+        },
+        {
+            "arg": false,
+            "mark_unread": "mention",
+            "muted_after": true,
+            "muted_before": false,
+            "start": "all"
+        },
+        {
+            "arg": true,
+            "mark_unread": "all",
+            "muted_after": false,
+            "muted_before": true,
+            "start": "mention"
+        },
+        {
+            "arg": false,
+            "mark_unread": "all",
+            "muted_after": false,
+            "muted_before": true,
+            "start": "mention"
+        },
+        {
+            "arg": true,
+            "mark_unread": "mention",
+            "muted_after": true,
+            "muted_before": false,
+            "start": ""
+        },
+        {
+            "arg": false,
+            "mark_unread": "mention",
+            "muted_after": true,
+            "muted_before": false,
+            "start": ""
+        },
+        {
+            "arg": true,
+            "mark_unread": "mention",
+            "muted_after": true,
+            "muted_before": false,
+            "start": "garbage"
+        },
+        {
+            "arg": false,
+            "mark_unread": "mention",
+            "muted_after": true,
+            "muted_before": false,
+            "start": "garbage"
+        },
+        {
+            "arg": true,
+            "mark_unread": "mention",
+            "muted_after": true,
+            "muted_before": false,
+            "start": "\u003cabsent\u003e"
+        }
+    ],
+    "to_json_string_map": [
+        {
+            "name": "nil",
+            "props": null,
+            "encoded": "null",
+            "bytes": 4,
+            "rune_count": 4
+        },
+        {
+            "name": "empty",
+            "props": {},
+            "encoded": "{}",
+            "bytes": 2,
+            "rune_count": 2
+        },
+        {
+            "name": "one",
+            "props": {
+                "a": "b"
+            },
+            "encoded": "{\"a\":\"b\"}",
+            "bytes": 9,
+            "rune_count": 9
+        },
+        {
+            "name": "defaults",
+            "props": {
+                "channel_auto_follow_threads": "off",
+                "desktop": "default",
+                "email": "default",
+                "ignore_channel_mentions": "default",
+                "mark_unread": "all",
+                "push": "default"
+            },
+            "encoded": "{\"channel_auto_follow_threads\":\"off\",\"desktop\":\"default\",\"email\":\"default\",\"ignore_channel_mentions\":\"default\",\"mark_unread\":\"all\",\"push\":\"default\"}",
+            "bytes": 148,
+            "rune_count": 148
+        },
+        {
+            "name": "ordering",
+            "props": {
+                "0": "5",
+                "C": "3",
+                "_": "4",
+                "a": "2",
+                "b": "1",
+                "é": "6"
+            },
+            "encoded": "{\"0\":\"5\",\"C\":\"3\",\"_\":\"4\",\"a\":\"2\",\"b\":\"1\",\"é\":\"6\"}",
+            "bytes": 50,
+            "rune_count": 49
+        },
+        {
+            "name": "html_escapes",
+            "props": {
+                "\u0026": "\u003c",
+                "\u003ck\u003e": "a\u0026b",
+                "\u003e": "\u0026"
+            },
+            "encoded": "{\"\\u0026\":\"\\u003c\",\"\\u003ck\\u003e\":\"a\\u0026b\",\"\\u003e\":\"\\u0026\"}",
+            "bytes": 64,
+            "rune_count": 64
+        },
+        {
+            "name": "control_chars",
+            "props": {
+                "a": "\u0000\u0001\u0007\b\f\n\r\t\u001f"
+            },
+            "encoded": "{\"a\":\"\\u0000\\u0001\\u0007\\b\\f\\n\\r\\t\\u001f\"}",
+            "bytes": 42,
+            "rune_count": 42
+        },
+        {
+            "name": "quote_and_backslash",
+            "props": {
+                "q\"k": "v\\a"
+            },
+            "encoded": "{\"q\\\"k\":\"v\\\\a\"}",
+            "bytes": 15,
+            "rune_count": 15
+        },
+        {
+            "name": "line_separators",
+            "props": {
+                "a": "x\u2028y\u2029z"
+            },
+            "encoded": "{\"a\":\"x\\u2028y\\u2029z\"}",
+            "bytes": 23,
+            "rune_count": 23
+        },
+        {
+            "name": "multibyte",
+            "props": {
+                "emoji": "🙂",
+                "日本": "☃é"
+            },
+            "encoded": "{\"emoji\":\"🙂\",\"日本\":\"☃é\"}",
+            "bytes": 33,
+            "rune_count": 23
+        },
+        {
+            "name": "del_and_high",
+            "props": {
+                "a": " ﻿"
+            },
+            "encoded": "{\"a\":\" ﻿\"}",
+            "bytes": 14,
+            "rune_count": 11
+        }
+    ]
+}

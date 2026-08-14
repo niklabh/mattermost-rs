@@ -15,8 +15,9 @@
 //!   use `serde_json` directly.
 //! - `GetServerIPAddress` (network interfaces), `IsCloud` (env var), `NewTestPassword`
 //!   (test-only), `SliceToMapKey` (panics by design).
-//! - `NewRandomTeamName` and `Etag` depend on `IsReservedTeamName` / `CurrentVersion`, which
-//!   live in other Go files; they follow those files.
+//! - `NewRandomTeamName` depends on `IsReservedTeamName`, which lives in `team.go`; it follows
+//!   that file. `Etag` needed `CurrentVersion` from `version.go` and now has it — see
+//!   [`CURRENT_VERSION`].
 //!
 //! Go's `StringMap`/`StringArray`/`StringSet`/`StringInterface` methods (`Has`, `Add`,
 //! `Contains`, `Equals`, `Remove`, `CopyStringMap`) are all std operations in Rust —
@@ -318,8 +319,7 @@ pub fn is_valid_alpha_num_hyphen_underscore_plus(s: &str) -> bool {
 }
 
 /// Port of the `validSimpleAlphaNum` half of `model.IsValidChannelIdentifier`
-/// (utils.go:705). The minimum-length half needs `ChannelNameMinLength` from `channel.go`
-/// and lands with that file.
+/// (utils.go:705). See [`crate::channel::is_valid_channel_identifier`] for the whole check.
 pub fn is_valid_simple_alpha_num(s: &str) -> bool {
     matches(&VALID_SIMPLE_ALPHA_NUM, s)
 }
@@ -388,7 +388,8 @@ fn is_dot_atom(s: &str) -> bool {
 /// Every claim above is asserted against Go's own answers over a 128-case corpus; see
 /// `go_parity::is_valid_email_matches_go`.
 pub fn is_valid_email(input: &str) -> bool {
-    if input.to_lowercase() != input {
+    // `strings.ToLower`, not `str::to_lowercase` — see [`go_to_lower`].
+    if go_to_lower(input) != input {
         return false;
     }
 
@@ -444,6 +445,200 @@ pub fn get_preferred_timezone(timezone: &StringMap) -> &str {
         "manualTimezone"
     };
     timezone.get(key).map_or("", String::as_str)
+}
+
+// ---------------------------------------------------------------------------
+// Etag
+// ---------------------------------------------------------------------------
+
+/// `model.CurrentVersion` (version.go:155), which is `versions[0]` — the newest entry in the
+/// release list at version.go:15.
+///
+/// Re-exported from [`crate::version`], which now owns it. It was transcribed here first
+/// because every `Etag` in the tree prefixes it and `Etag` is the whole content of
+/// `channel_list.go`; the alias stays so the `utils::CURRENT_VERSION` path keeps working, but
+/// there is only one definition.
+pub use crate::version::CURRENT_VERSION;
+
+/// Port of `model.Etag` (utils.go:732).
+///
+/// Go is variadic over `any` and renders each part with `%v`; Rust takes a slice of
+/// `Display`, which agrees with `%v` for every type a call site actually passes — strings,
+/// integers and bools (`true`/`false` in both). It would *not* agree for floats, where Go's
+/// `%v` is `%g`; no call site passes one.
+///
+/// Note the parts are joined with `.` and nothing is escaped, so a part containing a dot
+/// silently changes the component count. `Team::etag` on a zero team yields `11.11.0..0` — an
+/// empty component is normal, not a bug.
+pub fn etag(parts: &[&dyn std::fmt::Display]) -> String {
+    let mut out = String::from(CURRENT_VERSION);
+    for part in parts {
+        out.push('.');
+        out.push_str(&part.to_string());
+    }
+    out
+}
+
+// ---------------------------------------------------------------------------
+// Go's encoding/json, for the cases where its *output* is load-bearing
+// ---------------------------------------------------------------------------
+
+/// The `map[string]string` case of `model.ToJSON` (utils.go:611), which is
+/// `json.Marshal` with the error discarded.
+///
+/// `serde_json::to_string` is **not** a drop-in substitute when the result is measured rather
+/// than transmitted, and `ChannelMember`'s 800,000-rune notify-props check measures it. Three
+/// differences, all verified against Go:
+///
+/// 1. **Key order.** Go sorts map keys by byte value; a `HashMap` iterates arbitrarily.
+/// 2. **HTML escaping is on.** `<`, `>` and `&` become `<`, `>`, `&` — one rune
+///    becomes six, so an adversarial notify-props value counts six times over in Go and once
+///    in serde_json.
+/// 3. **U+2028 / U+2029 are escaped**, though both are legal raw in JSON.
+///
+/// A nil map marshals to `null`, not `{}`, hence the `Option`.
+pub fn go_json_marshal_string_map(map: Option<&StringMap>) -> String {
+    let Some(map) = map else {
+        return "null".to_string();
+    };
+
+    let mut keys: Vec<&str> = map.keys().map(String::as_str).collect();
+    keys.sort_unstable(); // `str: Ord` is byte-wise, matching Go's sort.Strings.
+
+    let mut out = String::from("{");
+    for (i, key) in keys.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        go_json_quote(key, &mut out);
+        out.push(':');
+        // The key came from the map, so the lookup cannot miss.
+        go_json_quote(map.get(*key).map_or("", String::as_str), &mut out);
+    }
+    out.push('}');
+    out
+}
+
+/// Go's `encodeState.string` with `escapeHTML` left at its default of true.
+fn go_json_quote(s: &str, out: &mut String) {
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '\u{8}' => out.push_str("\\b"),
+            '\u{c}' => out.push_str("\\f"),
+            // The HTML trio and the two separators are the escapes serde_json does not make.
+            '<' => out.push_str("\\u003c"),
+            '>' => out.push_str("\\u003e"),
+            '&' => out.push_str("\\u0026"),
+            '\u{2028}' => out.push_str("\\u2028"),
+            '\u{2029}' => out.push_str("\\u2029"),
+            c if (c as u32) < 0x20 => {
+                // Remaining C0 controls have no shorthand; Go writes \u00XX lowercase.
+                let n = c as u32;
+                out.push_str("\\u00");
+                out.push(HEX_LOWER[(n >> 4) as usize]);
+                out.push(HEX_LOWER[(n & 0xf) as usize]);
+            }
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+}
+
+const HEX_LOWER: [char; 16] = [
+    '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f',
+];
+
+/// `json.Marshal` for any `Serialize` value, with Go's default HTML escaping.
+///
+/// [`go_json_marshal_string_map`] above solves this for one shape (`map[string]string`) by
+/// building the JSON itself. That does not generalise to structs, and it needs to: a marshalled
+/// `CustomStatus` is **stored** in `User.Props["customStatus"]`, in a column the Go server reads
+/// and writes too. If we write `<b>` where Go writes `<b>`, the two servers disagree
+/// byte-for-byte about a value that is later compared as a string.
+///
+/// serde_json and Go's `encoding/json` differ on exactly five characters — `<`, `>`, `&`,
+/// U+2028 and U+2029 — so rather than reimplementing a serializer this re-escapes serde_json's
+/// output. Every other escape (`\"`, `\\`, `\n`, `\r`, `\t`, `\b`, `\f`, and `\u00XX` in
+/// lower-case hex for the remaining C0 controls) already agrees.
+///
+/// **Structs only — do not pass a `HashMap`.** This adjusts escaping, never key order. Struct
+/// fields serialize in declaration order in both languages, so those agree. Go sorts *map* keys
+/// by byte value, and a `HashMap` serializes in iteration order, which is neither sorted nor
+/// stable across runs. Use [`go_json_marshal_string_map`] for a [`StringMap`]; it sorts. A
+/// `BTreeMap` or a `serde_json::Map` would also be safe, since both are already ordered.
+pub fn go_json_marshal<T: Serialize>(value: &T) -> Result<String, serde_json::Error> {
+    Ok(go_json_escape(&serde_json::to_string(value)?))
+}
+
+/// Port of Go's `strings.ToLower`.
+///
+/// **Not the same function as `str::to_lowercase`**, which is why this exists. Go applies
+/// Unicode's *simple* (1:1) lowercase mapping to each rune; Rust applies the *full* (1:many)
+/// mapping and implements the Final_Sigma context rule. Measured, they disagree twice:
+///
+/// | input | Go | `str::to_lowercase` |
+/// |---|---|---|
+/// | `İ` (U+0130) | `i` | `i` + U+0307 |
+/// | `ΟΔΟΣ` | `οδοσ` | `οδος` |
+///
+/// Taking the first character of Rust's full mapping reproduces the simple mapping, and the
+/// character-level API has no context so it cannot apply Final_Sigma. Pinned over 30 inputs by
+/// `go_parity::go_to_lower_matches_go`.
+///
+/// Anywhere Go calls `strings.ToLower` on user input that is later **stored or compared**, this
+/// is the function to use — a team slug or an emoji name that lowercases differently in the two
+/// servers is a divergence on a shared database.
+pub fn go_to_lower(s: &str) -> String {
+    s.chars()
+        .map(|c| c.to_lowercase().next().unwrap_or(c))
+        .collect()
+}
+
+/// Applies Go's five extra string escapes to already-serialized JSON.
+///
+/// Walks the document tracking whether it is inside a string literal, so a `<` appearing in
+/// structural position — which valid JSON has no way to produce — is never touched, and a
+/// backslash-escaped character is never re-interpreted.
+pub fn go_json_escape(json: &str) -> String {
+    let mut out = String::with_capacity(json.len());
+    let mut in_string = false;
+    let mut after_backslash = false;
+
+    for c in json.chars() {
+        if !in_string {
+            in_string = c == '"';
+            out.push(c);
+            continue;
+        }
+        if after_backslash {
+            after_backslash = false;
+            out.push(c);
+            continue;
+        }
+        match c {
+            '\\' => {
+                after_backslash = true;
+                out.push(c);
+            }
+            '"' => {
+                in_string = false;
+                out.push(c);
+            }
+            '<' => out.push_str("\\u003c"),
+            '>' => out.push_str("\\u003e"),
+            '&' => out.push_str("\\u0026"),
+            '\u{2028}' => out.push_str("\\u2028"),
+            '\u{2029}' => out.push_str("\\u2029"),
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 /// Port of `model.SanitizeUnicode` (utils.go:859).
@@ -673,6 +868,210 @@ impl std::error::Error for AppError {
     /// Port of `(*AppError).Unwrap` (utils.go:330).
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         self.wrapped.as_ref().map(|e| e.as_ref() as _)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// go_time — Go's `time.Time` JSON encoding
+// ---------------------------------------------------------------------------
+
+/// Go's `time.Time` as `encoding/json` writes and reads it.
+///
+/// Almost every timestamp in the model package is an `int64` of epoch milliseconds, but a
+/// handful of types (`CustomStatus.ExpiresAt` first among them) hold a real `time.Time`, which
+/// marshals to RFC 3339. This module is a port of `(Time).MarshalJSON` and
+/// `(Time).UnmarshalJSON`, not of any single Mattermost source file — it lives here for the
+/// same reason [`go_json_marshal_string_map`] does: it is `encoding/json` behaviour that more
+/// than one model type needs.
+///
+/// **chrono's own serde impl is not a substitute.** Four things differ:
+///
+/// | | Go | chrono default |
+/// |---|---|---|
+/// | `.5` seconds | `.5` | `.500` (`SecondsFormat::AutoSi` pads to 3/6/9) |
+/// | zero fraction | omitted | omitted |
+/// | zero offset | `Z` | `+00:00` for `FixedOffset` |
+/// | `null` | leaves the value untouched | error |
+///
+/// The offset is preserved rather than normalised: Go re-emits whatever zone the value holds,
+/// so `12:00:00+05:30` round-trips as `+05:30` and **not** as `06:30:00Z`. That is why the
+/// Rust type is `DateTime<FixedOffset>` and not `DateTime<Utc>`.
+///
+/// Every claim here is pinned by `fixtures/behaviour_custom_status.json` (`time_marshal`,
+/// `time_unmarshal`) over 51 cases.
+pub mod go_time {
+    use chrono::{DateTime, Datelike, FixedOffset, NaiveDate, NaiveDateTime, Timelike};
+    use serde::de::{Error as DeError, Unexpected};
+    use serde::{Deserialize, Deserializer, Serializer};
+    use std::sync::LazyLock;
+
+    /// Go's zero `time.Time`: January 1 of year 1, UTC.
+    ///
+    /// Built from a `const` naive value, so the fallible constructors are resolved at compile
+    /// time — an impossible date would fail the build rather than panic at runtime.
+    pub static ZERO: LazyLock<DateTime<FixedOffset>> =
+        LazyLock::new(|| ZERO_NAIVE.and_utc().fixed_offset());
+
+    const ZERO_NAIVE: NaiveDateTime = match NaiveDate::from_ymd_opt(1, 1, 1) {
+        Some(date) => match date.and_hms_opt(0, 0, 0) {
+            Some(dt) => dt,
+            None => panic!("00:00:00 is a valid time"),
+        },
+        None => panic!("0001-01-01 is a valid date"),
+    };
+
+    /// Port of `(Time).IsZero` — true only for the exact zero value, offset included.
+    pub fn is_zero(t: &DateTime<FixedOffset>) -> bool {
+        t.naive_utc() == ZERO_NAIVE && t.offset().local_minus_utc() == 0
+    }
+
+    /// Port of `(Time).MarshalJSON` — the string body, without the surrounding quotes.
+    ///
+    /// `None` is Go's `"Time.MarshalJSON: year outside of range [0,9999]"`. The bound is on the
+    /// year in the value's *own* zone, and it is exclusive at the top: 9999 marshals, 10000
+    /// does not, and so does no negative year.
+    pub fn format(t: &DateTime<FixedOffset>) -> Option<String> {
+        let year = t.year();
+        if !(0..10000).contains(&year) {
+            return None;
+        }
+
+        let mut out = format!(
+            "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}",
+            year,
+            t.month(),
+            t.day(),
+            t.hour(),
+            t.minute(),
+            t.second()
+        );
+
+        // RFC3339Nano's ".999999999" means: drop trailing zeros, and drop the point too when
+        // nothing survives. Go's own leap-second representation (nanosecond >= 1e9) cannot be
+        // constructed by the parser, so `nanosecond()` is taken modulo a second the way Go's
+        // formatter reads it.
+        let nanos = t.nanosecond() % 1_000_000_000;
+        if nanos != 0 {
+            let frac = format!("{nanos:09}");
+            out.push('.');
+            out.push_str(frac.trim_end_matches('0'));
+        }
+
+        let offset = t.offset().local_minus_utc();
+        if offset == 0 {
+            out.push('Z');
+        } else {
+            let sign = if offset < 0 { '-' } else { '+' };
+            let abs = offset.abs();
+            out.push(sign);
+            out.push_str(&format!("{:02}:{:02}", abs / 3600, (abs % 3600) / 60));
+        }
+        Some(out)
+    }
+
+    /// Port of `time.Parse(time.RFC3339, …)` as `(Time).UnmarshalJSON` reaches it.
+    ///
+    /// The grammar is strict and deliberately narrower than RFC 3339 itself:
+    /// `YYYY-MM-DDTHH:MM:SS` with an optional `.` and one or more digits, then `Z` or `±HH:MM`.
+    /// Measured against Go over 38 inputs:
+    ///
+    /// - **`T` and `Z` must be uppercase.** `2026-08-14t12:00:00z` is rejected, although RFC
+    ///   3339 says the separators are case-insensitive.
+    /// - **More than nine fractional digits is accepted and truncated**, not rounded and not
+    ///   an error: `.1234567891` becomes `.123456789`.
+    /// - **A zone offset must be `±HH:MM`** with `HH <= 23` and `MM <= 59`; `+0530` and
+    ///   `+99:99` are both rejected, `+23:59` is accepted, and `+00:00`/`-00:00` collapse to
+    ///   UTC so they re-marshal as `Z`.
+    /// - **Calendar validity is enforced**: `2023-02-29` and `2026-02-30` are rejected,
+    ///   `2024-02-29` is not. So is the leap second `23:59:60`.
+    pub fn parse(s: &str) -> Option<DateTime<FixedOffset>> {
+        let b = s.as_bytes();
+        if b.len() < 20 || b[4] != b'-' || b[7] != b'-' || b[10] != b'T' {
+            return None;
+        }
+        if b[13] != b':' || b[16] != b':' {
+            return None;
+        }
+
+        let year = digits(&b[0..4])?;
+        let month = digits(&b[5..7])?;
+        let day = digits(&b[8..10])?;
+        let hour = digits(&b[11..13])?;
+        let minute = digits(&b[14..16])?;
+        let second = digits(&b[17..19])?;
+
+        let mut rest = &b[19..];
+
+        // The fraction is only taken when the point is followed by at least one digit; a bare
+        // "." falls through and then fails the zone check, which is how Go rejects "…00.Z".
+        let mut nanos = 0u32;
+        if rest.first() == Some(&b'.') && rest.get(1).is_some_and(u8::is_ascii_digit) {
+            let run = rest[1..].iter().take_while(|c| c.is_ascii_digit()).count();
+            // Truncate to nanosecond precision, then scale a short run up.
+            let taken = run.min(9);
+            nanos = digits(&rest[1..=taken])?;
+            for _ in taken..9 {
+                nanos *= 10;
+            }
+            rest = &rest[1 + run..];
+        }
+
+        let offset_seconds = match rest {
+            b"Z" => 0,
+            [sign @ (b'+' | b'-'), h1, h2, b':', m1, m2] => {
+                let hours = digits(&[*h1, *h2])?;
+                let minutes = digits(&[*m1, *m2])?;
+                if hours > 23 || minutes > 59 {
+                    return None;
+                }
+                let magnitude = (hours * 3600 + minutes * 60) as i32;
+                if *sign == b'-' { -magnitude } else { magnitude }
+            }
+            _ => return None,
+        };
+
+        let date = NaiveDate::from_ymd_opt(year as i32, month, day)?;
+        let naive = date.and_hms_nano_opt(hour, minute, second, nanos)?;
+        let offset = FixedOffset::east_opt(offset_seconds)?;
+        naive.and_local_timezone(offset).single()
+    }
+
+    /// Parses an exact-width ASCII digit run. Rejects signs, so `-026-08-14T…` fails on the
+    /// year the way Go does.
+    fn digits(b: &[u8]) -> Option<u32> {
+        if b.is_empty() || !b.iter().all(u8::is_ascii_digit) {
+            return None;
+        }
+        let mut out: u32 = 0;
+        for c in b {
+            out = out.checked_mul(10)?.checked_add(u32::from(c - b'0'))?;
+        }
+        Some(out)
+    }
+
+    /// `#[serde(with = "…::go_time")]` serializer.
+    pub fn serialize<S: Serializer>(t: &DateTime<FixedOffset>, s: S) -> Result<S::Ok, S::Error> {
+        match format(t) {
+            Some(rendered) => s.serialize_str(&rendered),
+            None => Err(serde::ser::Error::custom(
+                "Time.MarshalJSON: year outside of range [0,9999]",
+            )),
+        }
+    }
+
+    /// `#[serde(with = "…::go_time")]` deserializer.
+    ///
+    /// Go's `UnmarshalJSON` returns early on `null` **without touching the receiver**, which a
+    /// struct-level deserialize cannot express — there is no prior value to keep. The nearest
+    /// faithful behaviour is the zero value, which is what a freshly allocated Go struct would
+    /// have held. Noted in `docs/TECH_DEBT.md` as D-023.
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<DateTime<FixedOffset>, D::Error> {
+        let raw = Option::<String>::deserialize(d)?;
+        let Some(raw) = raw else {
+            return Ok(*ZERO);
+        };
+        parse(&raw)
+            .ok_or_else(|| D::Error::invalid_value(Unexpected::Str(&raw), &"an RFC 3339 timestamp"))
     }
 }
 
@@ -1380,5 +1779,90 @@ mod go_parity {
             let theirs: Value = serde_json::from_str(case["to_json"].as_str().unwrap()).unwrap();
             assert_eq!(ours, theirs, "AppError::ToJSON() for {case:?}");
         }
+    }
+}
+
+/// Unit tests for [`go_json_escape`], which has no Go counterpart to name — it is the delta
+/// between serde_json's escaping and Go's. The parity evidence is in
+/// `user::custom_status_go_parity::set_custom_status_stores_gos_bytes`, which compares a
+/// marshalled struct against bytes Go produced.
+#[cfg(test)]
+mod go_json_escape_tests {
+    use super::*;
+
+    #[test]
+    fn escapes_the_five_characters_serde_json_leaves_alone() {
+        assert_eq!(go_json_escape(r#""<b>""#), r#""\u003cb\u003e""#);
+        assert_eq!(go_json_escape(r#""a&b""#), r#""a\u0026b""#);
+        assert_eq!(go_json_escape("\"\u{2028}\u{2029}\""), r#""\u2028\u2029""#);
+    }
+
+    #[test]
+    fn leaves_structure_and_existing_escapes_alone() {
+        // `<` cannot appear outside a string in valid JSON, but the walker must not treat the
+        // structural characters around one as string content either.
+        assert_eq!(
+            go_json_escape(r#"{"k":["<",1,true,null]}"#),
+            r#"{"k":["\u003c",1,true,null]}"#
+        );
+        // A quote inside a string ends nothing, and a backslash run is not re-interpreted.
+        assert_eq!(
+            go_json_escape(r#"{"a\"<":"\\","b":">"}"#),
+            r#"{"a\"\u003c":"\\","b":"\u003e"}"#
+        );
+    }
+
+    /// The two marshallers reach Go's bytes by different routes —
+    /// [`go_json_marshal_string_map`] builds them directly, [`go_json_marshal`] re-escapes
+    /// serde_json's — so their *escaping* must agree.
+    ///
+    /// A single entry, because their **key order** does not agree and cannot: `StringMap` is a
+    /// `HashMap`, so serde_json emits it in iteration order while Go sorts. That is why
+    /// `go_json_marshal` is documented as struct-only, and why `StringMap` still has its own
+    /// marshaller rather than delegating to the general one.
+    #[test]
+    fn escapes_the_same_way_as_the_hand_written_string_map_marshaller() {
+        for (key, value) in [("a<", "b&c"), ("k", "\u{2028}x"), ("q\"", "tab\there")] {
+            let mut map = StringMap::new();
+            map.insert(key.to_string(), value.to_string());
+            assert_eq!(
+                go_json_marshal(&map).unwrap(),
+                go_json_marshal_string_map(Some(&map)),
+                "{key:?} => {value:?}"
+            );
+        }
+    }
+}
+
+/// Parity test for [`go_to_lower`], driven by `fixtures/behaviour_utils.json`.
+#[cfg(test)]
+mod go_to_lower_parity {
+    use super::*;
+    use serde_json::Value;
+
+    #[test]
+    fn go_to_lower_matches_go() {
+        let oracle: Value =
+            serde_json::from_str(include_str!("../../../fixtures/behaviour_utils.json")).unwrap();
+        let cases = oracle["go_to_lower"].as_object().unwrap();
+        assert!(!cases.is_empty());
+        for (input, want) in cases {
+            assert_eq!(
+                go_to_lower(input),
+                want.as_str().unwrap(),
+                "input {input:?}"
+            );
+        }
+    }
+
+    /// The two inputs that made this function necessary. Asserted directly as well as through
+    /// the corpus, so the reason the helper exists survives a corpus edit.
+    #[test]
+    fn str_to_lowercase_would_disagree() {
+        assert_eq!(go_to_lower("İ"), "i");
+        assert_ne!("İ".to_lowercase(), "i");
+
+        assert_eq!(go_to_lower("ΟΔΟΣ"), "οδοσ");
+        assert_ne!("ΟΔΟΣ".to_lowercase(), "οδοσ");
     }
 }

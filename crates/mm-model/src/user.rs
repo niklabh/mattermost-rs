@@ -7,9 +7,7 @@
 //!   `IsValidLocale` (`golang.org/x/text/language`, BCP 47) — plus `CustomStatus` and
 //!   `timezones.DefaultUserTimezone()`. Shipping them against a guessed email or locale rule
 //!   would put a wrong validator on the write path, which is worse than not having one.
-//! - Custom-status accessors (user.go:781–823) need `custom_status.go`.
 //! - `IsValidUserRoles` needs `IsValidRoleName` from `role.go`.
-//! - `Etag` needs `CurrentVersion` from `version.go`.
 //! - `CleanUsername` takes an mlog logger; it belongs with the logging layer.
 //! - `GetTimezoneLocation` needs a tz database lookup (`chrono-tz`), deferred with `IsValid`.
 //! - `Auditable`/`LogClone` are audit-log projections, not wire types; they follow the audit
@@ -22,8 +20,9 @@ use std::sync::LazyLock;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 
+use crate::custom_status::{CustomStatus, CustomStatusError};
 use crate::utils::{
-    self, StringArray, StringMap, get_millis, get_preferred_timezone, new_id, new_username,
+    self, StringArray, StringMap, etag, get_millis, get_preferred_timezone, new_id, new_username,
     sanitize_unicode,
 };
 
@@ -98,14 +97,16 @@ pub mod external {
     pub const SHOW_USERNAME: &str = "username";
     pub const SHOW_NICKNAME_FULL_NAME: &str = "nickname_full_name";
     pub const SHOW_FULL_NAME: &str = "full_name";
-    /// custom_status.go:14
-    pub const USER_PROPS_KEY_CUSTOM_STATUS: &str = "customStatus";
+    /// custom_status.go:14 — now owned by [`crate::custom_status`], re-exported so the
+    /// `external::` path keeps working. No longer a borrow: there is one definition.
+    pub use crate::custom_status::USER_PROPS_KEY_CUSTOM_STATUS;
     /// shared_channel.go:18-20
     pub const USER_PROPS_KEY_REMOTE_EMAIL: &str = "RemoteEmail";
     pub const USER_PROPS_KEY_ORIGINAL_REMOTE_ID: &str = "OriginalRemoteId";
     pub const USER_ORIGINAL_REMOTE_ID_UNKNOWN: &str = "UNKNOWN";
-    /// status.go:16
-    pub const STATUS_ONLINE: &str = "online";
+    /// status.go:16 — now owned by [`crate::status`], re-exported so the `external::` path
+    /// keeps working. No longer a borrow: there is one definition.
+    pub use crate::status::STATUS_ONLINE;
 }
 
 use external::*;
@@ -404,6 +405,22 @@ impl User {
         &self.roles
     }
 
+    /// Port of `(*User).Etag` (user.go:691).
+    ///
+    /// The two display flags are part of the key because they change what `Sanitize` leaves on
+    /// the wire, so the same user rendered for two viewers must not share a cache entry.
+    pub fn etag(&self, show_full_name: bool, show_email: bool) -> String {
+        etag(&[
+            &self.id,
+            &self.update_at,
+            &self.terms_of_service_id,
+            &self.terms_of_service_create_at,
+            &show_full_name,
+            &show_email,
+            &self.bot_last_icon_update,
+        ])
+    }
+
     /// Port of `(*User).IsInRole` (user.go:908).
     pub fn is_in_role(&self, in_role: &str) -> bool {
         is_in_role(&self.roles, in_role)
@@ -508,6 +525,83 @@ impl User {
         if let Some(props) = self.notify_props.as_mut() {
             props.insert(key.into(), value.into());
         }
+    }
+
+    /// Port of `(*User).SetCustomStatus` (user.go:781).
+    ///
+    /// Stores the status as a **marshalled string** under `props["customStatus"]`, so the
+    /// bytes matter — see [`CustomStatus::marshal`], which applies Go's HTML escaping.
+    ///
+    /// Go marshals the *pointer*, so `SetCustomStatus(nil)` is not an error and not a no-op: it
+    /// writes the four bytes `null`. That branch is unrepresentable here.
+    pub fn set_custom_status(&mut self, cs: &CustomStatus) -> Result<(), CustomStatusError> {
+        self.make_non_nil();
+        let encoded = cs.marshal()?;
+        self.set_prop(USER_PROPS_KEY_CUSTOM_STATUS, encoded);
+        Ok(())
+    }
+
+    /// Port of `(*User).GetCustomStatus` (user.go:791).
+    ///
+    /// **The unmarshal error is discarded** (`_ = json.Unmarshal(...)`), which is what makes
+    /// this subtle. Go returns a non-nil status far more often than it looks: `{}` decodes to a
+    /// zero status, missing keys are zero-filled, and even `"a string"`, `0`, `true` and `[]`
+    /// come back non-nil, because the decoder allocates the pointer before it discovers the
+    /// value is not an object. Only a *syntax* error, an absent key, an empty string and the
+    /// literal `null` yield nil.
+    ///
+    /// One case is not reproduced exactly: Go's decoder is not all-or-nothing, so a **type**
+    /// error (`{"emoji":123,"text":"kept"}`) leaves the successfully decoded fields in place.
+    /// This returns a zero status there instead of a partially populated one — the non-nil-ness
+    /// matches, the field values do not. See D-026; `validate_custom_status` below, which is
+    /// the only caller whose answer reaches the wire, is exact.
+    pub fn get_custom_status(&self) -> Option<CustomStatus> {
+        let data = self.get_prop(USER_PROPS_KEY_CUSTOM_STATUS)?;
+
+        // Go's two-stage behaviour: nothing is written for a malformed document, but a
+        // well-formed one that simply is not a CustomStatus still allocates the value.
+        let value: serde_json::Value = serde_json::from_str(data).ok()?;
+        if value.is_null() {
+            return None;
+        }
+        Some(serde_json::from_value(value).unwrap_or_default())
+    }
+
+    /// Port of `(*User).CustomStatus` (user.go:799).
+    ///
+    /// Byte-for-byte identical to `GetCustomStatus` in the Go source — two names for one
+    /// function. Kept so call-site ports stay mechanical.
+    pub fn custom_status(&self) -> Option<CustomStatus> {
+        self.get_custom_status()
+    }
+
+    /// Port of `(*User).ClearCustomStatus` (user.go:809).
+    ///
+    /// Writes an empty string rather than removing the key, so the prop still exists
+    /// afterwards. `validate_custom_status` treats that as valid.
+    pub fn clear_custom_status(&mut self) {
+        self.make_non_nil();
+        self.set_prop(USER_PROPS_KEY_CUSTOM_STATUS, "");
+    }
+
+    /// Port of `(*User).ValidateCustomStatus` (user.go:814).
+    ///
+    /// True unless the prop is present, non-empty, and decodes to nothing. Go expresses that as
+    /// "`GetCustomStatus()` returned nil", which reduces to a much narrower test than a full
+    /// decode: the prop must be **syntactically valid JSON and not `null`**. A type error, a
+    /// bare string, a number and `{}` all pass, because Go still produces a value for them.
+    ///
+    /// Written against that predicate rather than against `get_custom_status` so the
+    /// partial-decode divergence in D-026 cannot leak into `User::is_valid`, which is where
+    /// this answer ends up.
+    pub fn validate_custom_status(&self) -> bool {
+        let Some(status) = self.get_prop(USER_PROPS_KEY_CUSTOM_STATUS) else {
+            return true;
+        };
+        if status.is_empty() {
+            return true;
+        }
+        serde_json::from_str::<serde_json::Value>(status).is_ok_and(|v| !v.is_null())
     }
 
     /// Port of `(*User).SetDefaultNotifications` (user.go:597). Replaces the map wholesale.
@@ -715,7 +809,7 @@ impl User {
                 .map_or(String::new(), |raw| {
                     raw.split(',')
                         .filter(|k| !k.is_empty())
-                        .map(str::to_lowercase)
+                        .map(utils::go_to_lower)
                         .collect::<Vec<_>>()
                         .join(",")
                 });
@@ -871,13 +965,17 @@ impl UserPatch {
 // ---------------------------------------------------------------------------
 
 /// Port of `model.NormalizeUsername` (user.go:475).
+///
+/// Go's `strings.ToLower`, which is not `str::to_lowercase` — see [`crate::utils::go_to_lower`].
 pub fn normalize_username(username: &str) -> String {
-    username.to_lowercase()
+    utils::go_to_lower(username)
 }
 
 /// Port of `model.NormalizeEmail` (user.go:479).
+///
+/// Go's `strings.ToLower`, which is not `str::to_lowercase` — see [`crate::utils::go_to_lower`].
 pub fn normalize_email(email: &str) -> String {
-    email.to_lowercase()
+    utils::go_to_lower(email)
 }
 
 /// Port of `model.IsInRole` (user.go:914).
@@ -1796,5 +1894,177 @@ mod go_parity {
                 );
             }
         }
+    }
+}
+
+/// Parity tests for the custom-status accessors, driven by
+/// `fixtures/behaviour_custom_status.json`. They live in a module of their own because the
+/// corpus belongs to `custom_status.go`'s oracle even though the methods are `user.go`'s.
+#[cfg(test)]
+mod custom_status_go_parity {
+    use super::*;
+    use crate::custom_status::USER_PROPS_KEY_CUSTOM_STATUS;
+    use crate::utils::go_time;
+    use serde_json::Value;
+
+    fn oracle() -> Value {
+        serde_json::from_str(include_str!(
+            "../../../fixtures/behaviour_custom_status.json"
+        ))
+        .unwrap()
+    }
+
+    fn user_with_prop(case: &Value) -> User {
+        let mut user = User::default();
+        if case["prop_present"].as_bool().unwrap() {
+            user.set_prop(USER_PROPS_KEY_CUSTOM_STATUS, case["prop"].as_str().unwrap());
+        }
+        user
+    }
+
+    /// `ValidateCustomStatus` gates `User::is_valid`, so this is the answer that reaches the
+    /// wire. It must match Go on every case, including the ones where `get_custom_status`
+    /// deliberately does not (D-026).
+    #[test]
+    fn validate_custom_status_matches_go() {
+        let oracle = oracle();
+        let cases = oracle["user_custom_status"].as_array().unwrap();
+        assert!(!cases.is_empty());
+        for case in cases {
+            let name = case["name"].as_str().unwrap();
+            assert_eq!(
+                user_with_prop(case).validate_custom_status(),
+                case["validate"].as_bool().unwrap(),
+                "case {name}"
+            );
+        }
+    }
+
+    /// `GetCustomStatus` must agree with Go on **whether** a status comes back for every case,
+    /// and on its contents for every case Go decodes cleanly. The exceptions are the
+    /// partial-decode cases, which are asserted as the known divergence rather than skipped.
+    #[test]
+    fn get_custom_status_matches_go() {
+        // Go's decoder keeps the fields it managed to decode before a type error or a failing
+        // Unmarshaler; serde_json returns Err and we substitute a zero status. See D-026.
+        const PARTIAL_DECODE: &[&str] = &[
+            "type_error_first",
+            "type_error_last",
+            "bad_expires_at_middle",
+            "bad_expires_at_last",
+        ];
+
+        let oracle = oracle();
+        let cases = oracle["user_custom_status"].as_array().unwrap();
+        assert!(!cases.is_empty());
+
+        for case in cases {
+            let name = case["name"].as_str().unwrap();
+            let got = user_with_prop(case).get_custom_status();
+            let want = &case["get"];
+
+            if want.is_null() {
+                assert!(got.is_none(), "case {name}: got a status, Go got nil");
+                continue;
+            }
+            let got = got.unwrap_or_else(|| panic!("case {name}: got nil, Go got a status"));
+
+            if PARTIAL_DECODE.contains(&name) {
+                // Non-nil-ness matches; the fields do not. Pin what we actually produce so the
+                // divergence is visible here rather than discovered downstream.
+                assert_eq!(got, CustomStatus::default(), "case {name}");
+                assert_ne!(*want, serde_json::to_value(&got).unwrap(), "case {name}");
+                continue;
+            }
+            assert_eq!(serde_json::to_value(&got).unwrap(), *want, "case {name}");
+        }
+    }
+
+    /// The stored string is compared byte-for-byte: it is what lands in the shared
+    /// `Users.Props` column, HTML escaping included.
+    #[test]
+    fn set_custom_status_stores_gos_bytes() {
+        let oracle = oracle();
+        let cases = oracle["set_custom_status"].as_object().unwrap();
+        let recent = go_time::parse("2026-08-14T12:00:00Z").unwrap();
+
+        let inputs: Vec<(&str, CustomStatus)> = vec![
+            ("zero", CustomStatus::default()),
+            (
+                "complete",
+                CustomStatus {
+                    emoji: "a".into(),
+                    text: "b".into(),
+                    duration: "date_and_time".into(),
+                    expires_at: recent,
+                },
+            ),
+            (
+                "html",
+                CustomStatus {
+                    emoji: "<b>".into(),
+                    text: "a&b".into(),
+                    duration: "date_and_time".into(),
+                    expires_at: recent,
+                },
+            ),
+        ];
+
+        for (name, cs) in inputs {
+            let mut user = User::default();
+            user.set_custom_status(&cs).unwrap();
+            assert_eq!(
+                user.get_prop(USER_PROPS_KEY_CUSTOM_STATUS).unwrap(),
+                cases[name].as_str().unwrap(),
+                "case {name}"
+            );
+        }
+
+        // Go's nil case stores the literal "null"; a Rust `&CustomStatus` cannot be nil, so
+        // assert only that the oracle still records what we chose not to reproduce.
+        assert_eq!(cases["nil"].as_str().unwrap(), "null");
+    }
+
+    #[test]
+    fn clear_custom_status_empties_the_key_without_removing_it() {
+        let oracle = oracle();
+        let want = &oracle["clear_custom_status"];
+
+        let mut user = User::default();
+        user.clear_custom_status();
+
+        assert_eq!(
+            user.get_prop(USER_PROPS_KEY_CUSTOM_STATUS),
+            Some(want["value"].as_str().unwrap())
+        );
+        assert!(want["key_exists"].as_bool().unwrap());
+        // The key surviving is what keeps a cleared status valid rather than absent.
+        assert!(user.validate_custom_status());
+    }
+
+    #[test]
+    fn custom_status_is_an_alias_for_get_custom_status() {
+        let mut user = User::default();
+        user.set_custom_status(&CustomStatus {
+            emoji: "a".into(),
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(user.custom_status(), user.get_custom_status());
+    }
+
+    /// The round trip that matters: a status set by one server must be readable by the other.
+    #[test]
+    fn set_then_get_round_trips_through_props() {
+        let cs = CustomStatus {
+            emoji: "<tada>".into(),
+            text: "a&b".into(),
+            duration: "date_and_time".into(),
+            expires_at: go_time::parse("2026-08-14T12:00:00+05:30").unwrap(),
+        };
+
+        let mut user = User::default();
+        user.set_custom_status(&cs).unwrap();
+        assert_eq!(user.get_custom_status(), Some(cs));
     }
 }

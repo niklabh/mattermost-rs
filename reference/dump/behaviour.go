@@ -23,6 +23,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 
 	"github.com/mattermost/mattermost/server/public/model"
 )
@@ -88,6 +89,7 @@ func writeBehaviourFixture(outDir string) error {
 		"valid_simple_alpha_num_hyphen_underscore":      matchAll(validSimpleAlphaNumHyphenUnderscore),
 		"valid_simple_alpha_num_hyphen_underscore_plus": matchAll(validSimpleAlphaNumHyphenUnderscorePlus),
 		"is_valid_id":                                   isValidIDAll(),
+		"go_to_lower":                                   goToLowerAll(),
 		"pad_date_string_zeros":                         padAll(),
 		"clear_mention_tags":                            clearMentionAll(),
 		"sanitize_unicode":                              sanitizeAll(),
@@ -566,6 +568,43 @@ func sessionBoolAll() map[string]bool {
 	for _, v := range values {
 		s := &model.Session{Props: model.StringMap{model.UserAuthServiceIsMobile: v}}
 		res[v] = s.IsMobile()
+	}
+	return res
+}
+
+// --- strings.ToLower ---------------------------------------------------------------
+
+// goToLowerAll pins Go's strings.ToLower against Rust's str::to_lowercase.
+//
+// They are not obviously the same function. Go applies Unicode's **simple** (1:1) lowercase
+// mapping per rune; Rust applies the **full** (1:many) mapping and implements the Final_Sigma
+// context rule. Unicode has exactly one multi-character lowercase mapping (U+0130 İ →
+// "i̇") plus that sigma rule, so the two can disagree — and `to_lowercase` is already
+// called in six places across mm-model, so if they do disagree it is a pre-existing divergence
+// rather than an emoji one.
+//
+// Emoji.PreSave lowercases a user-supplied name, which is what brought this up.
+func goToLowerAll() map[string]string {
+	inputs := []string{
+		"", "a", "A", "ABC", "AbC123", "already_lower", "A+B", "MiXeD-_+",
+		// The one multi-character lowercase mapping in Unicode.
+		"İ", "İSTANBUL", "İ",
+		// Final_Sigma: Rust's full mapping writes ς at a word end, Go's simple mapping does not.
+		"Σ", "ΟΔΟΣ", "ΑΣΒ", "ΣΑ",
+		// Other awkward pairs: capital sharp s, the three-way DŽ digraph, Kelvin and Angstrom
+		// signs, a Cherokee letter (which only gained a lowercase form in Unicode 8).
+		"ẞ", "Ǆ", "ǅ", "K", "Å", "Ꭰ",
+		// Turkish dotless I has an ordinary mapping; the locale-sensitive rule is not applied
+		// by either language.
+		"I", "ı", "ÉCLAIR", "ß",
+		// Ligatures have no lowercase mapping at all.
+		"ﬁ", "ﬀ",
+		// Non-letters pass through.
+		"123", "\U0001F600", "☃",
+	}
+	res := make(map[string]string, len(inputs))
+	for _, in := range inputs {
+		res[in] = strings.ToLower(in)
 	}
 	return res
 }

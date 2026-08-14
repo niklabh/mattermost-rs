@@ -1,0 +1,49 @@
+{
+    "channels": [
+        {
+            "id": "wpo5u96kbttsphn9z89hwn5dca",
+            "create_at": 1704953800000,
+            "update_at": 1702177513000,
+            "delete_at": 1701180375000,
+            "team_id": "tehsqomweumo6xj5c7yzetqzbh",
+            "type": "type-2f174a",
+            "display_name": "displayname-bd1351",
+            "name": "name-7d589f",
+            "header": "header-ca54c7",
+            "purpose": "purpose-e5e9fb",
+            "last_post_at": 1704716758000,
+            "total_msg_count": 74,
+            "extra_update_at": 1702694101000,
+            "creator_id": "3fc996taqr8anf1a997dohyxor",
+            "scheme_id": "41w8jn3pac1spb7kq1f15tbfca",
+            "props": {
+                "key0-9bfbcc": "val0-0bcbf5",
+                "key1-9cfd7f": "val1-0ccda8"
+            },
+            "group_constrained": true,
+            "autotranslation": true,
+            "shared": true,
+            "total_msg_count_root": 26,
+            "policy_id": "c8o8936g9oyjxms6x9uhp6ay1h",
+            "last_root_post_at": 1700927150000,
+            "banner_info": {
+                "enabled": true,
+                "text": "text-4f0e0d",
+                "background_color": "backgroundcolor-732d4c"
+            },
+            "policy_enforced": true,
+            "policy_actions": {
+                "key0-766ce7": true,
+                "key1-756b34": true
+            },
+            "policy_is_active": true,
+            "default_category_name": "defaultcategoryname-f5f226",
+            "managed_category_name": "managedcategoryname-8f1360",
+            "discoverable": true,
+            "team_display_name": "teamdisplayname-2e15af",
+            "team_name": "teamname-0585b6",
+            "team_update_at": 1702198507000
+        }
+    ],
+    "total_count": 20
+}

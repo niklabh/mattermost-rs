@@ -1,0 +1,314 @@
+{
+    "constants": {
+        "away": "away",
+        "cache_size": 35000,
+        "channel_timeout": 20000,
+        "dnd": "dnd",
+        "dnd_expiry_interval_nanos": 60000000000,
+        "min_update_time": 120000,
+        "offline": "offline",
+        "online": "online",
+        "out_of_office": "ooo"
+    },
+    "status_list_to_json": [
+        {
+            "name": "nil",
+            "nil": true,
+            "in": null,
+            "out": [],
+            "out_bytes": "[]"
+        },
+        {
+            "name": "empty",
+            "nil": false,
+            "in": [],
+            "out": [],
+            "out_bytes": "[]"
+        },
+        {
+            "name": "single",
+            "nil": false,
+            "in": [
+                {
+                    "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                    "status": "online",
+                    "manual": true,
+                    "last_activity_at": 1700000000000,
+                    "active_channel": "qr6kf7ztp7yifxt4wm5xn51bke",
+                    "dnd_end_time": 1700000060
+                }
+            ],
+            "out": [
+                {
+                    "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                    "status": "online",
+                    "manual": true,
+                    "last_activity_at": 1700000000000,
+                    "dnd_end_time": 1700000060
+                }
+            ],
+            "out_bytes": "[{\"user_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"status\":\"online\",\"manual\":true,\"last_activity_at\":1700000000000,\"dnd_end_time\":1700000060}]"
+        },
+        {
+            "name": "several",
+            "nil": false,
+            "in": [
+                {
+                    "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                    "status": "online",
+                    "manual": true,
+                    "last_activity_at": 1700000000000,
+                    "active_channel": "qr6kf7ztp7yifxt4wm5xn51bke",
+                    "dnd_end_time": 1700000060
+                },
+                {
+                    "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                    "status": "dnd",
+                    "manual": false,
+                    "last_activity_at": 1700000000000,
+                    "dnd_end_time": 1700000060
+                },
+                {
+                    "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                    "status": "offline",
+                    "manual": false,
+                    "last_activity_at": 0,
+                    "dnd_end_time": 0
+                }
+            ],
+            "out": [
+                {
+                    "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                    "status": "online",
+                    "manual": true,
+                    "last_activity_at": 1700000000000,
+                    "dnd_end_time": 1700000060
+                },
+                {
+                    "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                    "status": "dnd",
+                    "manual": false,
+                    "last_activity_at": 1700000000000,
+                    "dnd_end_time": 1700000060
+                },
+                {
+                    "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                    "status": "offline",
+                    "manual": false,
+                    "last_activity_at": 0,
+                    "dnd_end_time": 0
+                }
+            ],
+            "out_bytes": "[{\"user_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"status\":\"online\",\"manual\":true,\"last_activity_at\":1700000000000,\"dnd_end_time\":1700000060},{\"user_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"status\":\"dnd\",\"manual\":false,\"last_activity_at\":1700000000000,\"dnd_end_time\":1700000060},{\"user_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"status\":\"offline\",\"manual\":false,\"last_activity_at\":0,\"dnd_end_time\":0}]"
+        }
+    ],
+    "status_map_to_interface_map": [
+        {
+            "name": "empty",
+            "in": {},
+            "out": {}
+        },
+        {
+            "name": "nil",
+            "in": {},
+            "out": {}
+        },
+        {
+            "name": "all_offline",
+            "in": {
+                "6bdz674pgq767e4jx75w4pf57a": {
+                    "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                    "status": "offline",
+                    "manual": false,
+                    "last_activity_at": 0,
+                    "dnd_end_time": 0
+                },
+                "qr6kf7ztp7yifxt4wm5xn51bke": {
+                    "user_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                    "status": "offline",
+                    "manual": false,
+                    "last_activity_at": 0,
+                    "dnd_end_time": 0
+                }
+            },
+            "out": {}
+        },
+        {
+            "name": "mixed",
+            "in": {
+                "6bdz674pgq767e4jx75w4pf57a": {
+                    "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                    "status": "online",
+                    "manual": false,
+                    "last_activity_at": 0,
+                    "dnd_end_time": 0
+                },
+                "g1ku9ozj3bhub3hs89bqu1m3gy": {
+                    "user_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                    "status": "dnd",
+                    "manual": false,
+                    "last_activity_at": 0,
+                    "dnd_end_time": 0
+                },
+                "qr6kf7ztp7yifxt4wm5xn51bke": {
+                    "user_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                    "status": "offline",
+                    "manual": false,
+                    "last_activity_at": 0,
+                    "dnd_end_time": 0
+                }
+            },
+            "out": {
+                "6bdz674pgq767e4jx75w4pf57a": "online",
+                "g1ku9ozj3bhub3hs89bqu1m3gy": "dnd"
+            }
+        },
+        {
+            "name": "key_differs_from_user_id",
+            "in": {
+                "not-a-user-id": {
+                    "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                    "status": "away",
+                    "manual": false,
+                    "last_activity_at": 0,
+                    "dnd_end_time": 0
+                }
+            },
+            "out": {
+                "6bdz674pgq767e4jx75w4pf57a": "away"
+            }
+        },
+        {
+            "name": "empty_status_string",
+            "in": {
+                "6bdz674pgq767e4jx75w4pf57a": {
+                    "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                    "status": "",
+                    "manual": false,
+                    "last_activity_at": 0,
+                    "dnd_end_time": 0
+                }
+            },
+            "out": {
+                "6bdz674pgq767e4jx75w4pf57a": ""
+            }
+        }
+    ],
+    "to_json": [
+        {
+            "name": "zero",
+            "plain": {
+                "user_id": "",
+                "status": "",
+                "manual": false,
+                "last_activity_at": 0,
+                "dnd_end_time": 0
+            },
+            "out": {
+                "user_id": "",
+                "status": "",
+                "manual": false,
+                "last_activity_at": 0,
+                "dnd_end_time": 0
+            },
+            "out_bytes": "{\"user_id\":\"\",\"status\":\"\",\"manual\":false,\"last_activity_at\":0,\"dnd_end_time\":0}",
+            "active_channel_after": ""
+        },
+        {
+            "name": "complete",
+            "plain": {
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "status": "online",
+                "manual": true,
+                "last_activity_at": 1700000000000,
+                "active_channel": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "dnd_end_time": 1700000060
+            },
+            "out": {
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "status": "online",
+                "manual": true,
+                "last_activity_at": 1700000000000,
+                "dnd_end_time": 1700000060
+            },
+            "out_bytes": "{\"user_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"status\":\"online\",\"manual\":true,\"last_activity_at\":1700000000000,\"dnd_end_time\":1700000060}",
+            "active_channel_after": "qr6kf7ztp7yifxt4wm5xn51bke"
+        },
+        {
+            "name": "no_active_channel",
+            "plain": {
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "status": "dnd",
+                "manual": false,
+                "last_activity_at": 1700000000000,
+                "dnd_end_time": 1700000060
+            },
+            "out": {
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "status": "dnd",
+                "manual": false,
+                "last_activity_at": 1700000000000,
+                "dnd_end_time": 1700000060
+            },
+            "out_bytes": "{\"user_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"status\":\"dnd\",\"manual\":false,\"last_activity_at\":1700000000000,\"dnd_end_time\":1700000060}",
+            "active_channel_after": ""
+        },
+        {
+            "name": "offline",
+            "plain": {
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "status": "offline",
+                "manual": false,
+                "last_activity_at": 0,
+                "dnd_end_time": 0
+            },
+            "out": {
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "status": "offline",
+                "manual": false,
+                "last_activity_at": 0,
+                "dnd_end_time": 0
+            },
+            "out_bytes": "{\"user_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"status\":\"offline\",\"manual\":false,\"last_activity_at\":0,\"dnd_end_time\":0}",
+            "active_channel_after": ""
+        },
+        {
+            "name": "prev_status_only",
+            "plain": {
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "status": "",
+                "manual": false,
+                "last_activity_at": 0,
+                "dnd_end_time": 0
+            },
+            "out": {
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "status": "",
+                "manual": false,
+                "last_activity_at": 0,
+                "dnd_end_time": 0
+            },
+            "out_bytes": "{\"user_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"status\":\"\",\"manual\":false,\"last_activity_at\":0,\"dnd_end_time\":0}",
+            "active_channel_after": ""
+        },
+        {
+            "name": "dnd_seconds",
+            "plain": {
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "status": "dnd",
+                "manual": false,
+                "last_activity_at": 0,
+                "dnd_end_time": 1
+            },
+            "out": {
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "status": "dnd",
+                "manual": false,
+                "last_activity_at": 0,
+                "dnd_end_time": 1
+            },
+            "out_bytes": "{\"user_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"status\":\"dnd\",\"manual\":false,\"last_activity_at\":0,\"dnd_end_time\":1}",
+            "active_channel_after": ""
+        }
+    ]
+}

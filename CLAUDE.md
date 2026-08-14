@@ -76,11 +76,22 @@ fixture by hand — a hand-written fixture asserts what you already believe and 
   parity test as provisional rather than evidence.
 - **Extending the oracle is part of translating a type.** If the file you are translating
   declares a type with `json:` tags and no fixture exists, append it to the registry in
-  `reference/dump/main.go` — one line, fully populated. Do not run the generator; report that it
-  needs re-running.
-- If a fixture doesn't exist for a type you're translating, say so and write the test against
-  values transcribed from the Go source — do not invent a fixture file. Record in `MIGRATION.md`
-  that the test is provisional until the fixture lands.
+  `reference/dump/main.go` — one line, fully populated.
+- **Run the generator** (`cd reference/dump && go run .`), then show the fixture diff in your
+  report. Output is deterministic, so a clean run touches only the new files; anything else in
+  `git status` is a signal. Decided 2026-08-14 — the earlier rule was "add the line, report that
+  it needs re-running", which bought hand-transcribed test values, i.e. exactly the guessing the
+  oracle exists to eliminate.
+- **Changing an `overrides` entry rewrites a committed fixture. Call that out separately.** It
+  is the one edit that can move a value the Rust tests already assert against, so it does not
+  belong buried in a list of new files. It is legitimate — a fixture that fails its own type's
+  `IsValid` is worth pinning to valid values — but say which key changed and why.
+- **Behavioural oracles get the same treatment.** Anything with branching logic gets a corpus in
+  `reference/dump/behaviour*.go` and a `go_parity` test module asserting against it. Reading a Go
+  branch and reasoning about it is what produces confident, wrong translations.
+- If a fixture genuinely cannot be generated, say so and write the test against values
+  transcribed from the Go source — do not invent a fixture file. Record in `MIGRATION.md` that
+  the test is provisional until the fixture lands.
 
 ## Rust practice
 

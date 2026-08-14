@@ -61,8 +61,24 @@ regex = "1"
 # CSPRNG for NewId / NewRandomString.
 rand = "0.9"
 
+# GetGroupNameFromUserIds hashes the sorted member ids with SHA-1 and hex-encodes the digest.
+# The result is the channel's Name and is therefore persisted and on the wire, so it must match
+# Go's crypto/sha1 bit for bit — this is a compatibility requirement, not a security choice.
+sha1 = "0.10"
+
 # Go's unicode.IsLetter is Unicode general category L. Rust's char::is_alphabetic is the
 # Alphabetic *property*, which also covers Other_Alphabetic — so it accepts combining marks
 # (U+0345 and friends) that Go rejects. The behavioural oracle caught this in IsValidId.
 # std cannot express general categories, hence this data-only crate.
 unicode-general-category = "1"
+
+# Go's encoding/json special-cases []byte and emits base64 (StdEncoding, padded); serde_json
+# emits an array of numbers. FileInfo.MiniPreview is a *[]byte on the wire, so the difference is
+# `"AQID"` against `[1,2,3]` — measured, not assumed. Hand-rolling base64 is exactly the kind of
+# thing that goes subtly wrong, so take the dependency.
+base64 = "0.22"
+
+# SanitizeFilename NFC-normalizes before truncating to 256 codepoints, so a decomposed name is a
+# different length than its composed form: 200 * "e+combining acute" is 400 runes in and 200 out.
+# Without normalization the Rust port truncates at a different point and stores a different name.
+unicode-normalization = "0.1"

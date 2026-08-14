@@ -1,0 +1,507 @@
+{
+    "constants": {
+        "name_max_length": 64,
+        "pattern": ":[a-zA-Z0-9_+-]+:",
+        "sort_by_name": "name"
+    },
+    "emoji_pattern": [
+        {
+            "in": "",
+            "matches": []
+        },
+        {
+            "in": ":grinning:",
+            "matches": [
+                ":grinning:"
+            ]
+        },
+        {
+            "in": "hello :smile: world",
+            "matches": [
+                ":smile:"
+            ]
+        },
+        {
+            "in": ":a::b:",
+            "matches": [
+                ":a:",
+                ":b:"
+            ]
+        },
+        {
+            "in": ":a:b:c:",
+            "matches": [
+                ":a:",
+                ":c:"
+            ]
+        },
+        {
+            "in": "::",
+            "matches": []
+        },
+        {
+            "in": ":::",
+            "matches": []
+        },
+        {
+            "in": ":no_spaces here:",
+            "matches": []
+        },
+        {
+            "in": ":+1: :-1:",
+            "matches": [
+                ":+1:",
+                ":-1:"
+            ]
+        },
+        {
+            "in": ":UPPER:",
+            "matches": [
+                ":UPPER:"
+            ]
+        },
+        {
+            "in": "text:notanemoji",
+            "matches": []
+        },
+        {
+            "in": ":has space:",
+            "matches": []
+        },
+        {
+            "in": ":a-b_c+d:",
+            "matches": [
+                ":a-b_c+d:"
+            ]
+        },
+        {
+            "in": ":é:",
+            "matches": []
+        },
+        {
+            "in": "::::",
+            "matches": []
+        },
+        {
+            "in": "a :one: b :two: c",
+            "matches": [
+                ":one:",
+                ":two:"
+            ]
+        }
+    ],
+    "get_emoji_name_from_unicode": [
+        {
+            "unicode": "1f600",
+            "name": "grinning",
+            "count": 1
+        },
+        {
+            "unicode": "not-a-codepoint",
+            "name": "",
+            "count": 0
+        },
+        {
+            "unicode": "",
+            "name": "",
+            "count": 0
+        },
+        {
+            "unicode": "1F600",
+            "name": "",
+            "count": 0
+        },
+        {
+            "unicode": "1f1e8-1f1e6",
+            "name": "ca",
+            "count": 3
+        },
+        {
+            "unicode": "1f1ea-1f1fa",
+            "name": "eu",
+            "count": 3
+        },
+        {
+            "unicode": "1f1ec-1f1e7",
+            "name": "flag-gb",
+            "count": 3
+        },
+        {
+            "unicode": "1f1f5-1f1f0",
+            "name": "flag-pk",
+            "count": 3
+        }
+    ],
+    "is_system_emoji_name": {
+        "": false,
+        " grinning": false,
+        "+1": true,
+        "100": true,
+        "1f600": false,
+        ":grinning:": false,
+        "GRINNING": false,
+        "Grinning": false,
+        "grinning": true,
+        "grinning ": false,
+        "mattermost": true,
+        "not_an_emoji": false
+    },
+    "is_valid": [
+        {
+            "name": "valid",
+            "emoji": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "create_at": 1700000000000,
+                "update_at": 1700000000000,
+                "delete_at": 0,
+                "creator_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "name": "custom_emoji"
+            },
+            "error_id": "",
+            "detailed": ""
+        },
+        {
+            "name": "id_empty",
+            "emoji": {
+                "id": "",
+                "create_at": 1700000000000,
+                "update_at": 1700000000000,
+                "delete_at": 0,
+                "creator_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "name": "custom_emoji"
+            },
+            "error_id": "model.emoji.id.app_error",
+            "detailed": ""
+        },
+        {
+            "name": "id_short",
+            "emoji": {
+                "id": "aaaaaaaaaaaaaaaaaaaaaaaaa",
+                "create_at": 1700000000000,
+                "update_at": 1700000000000,
+                "delete_at": 0,
+                "creator_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "name": "custom_emoji"
+            },
+            "error_id": "model.emoji.id.app_error",
+            "detailed": ""
+        },
+        {
+            "name": "create_at_zero",
+            "emoji": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "create_at": 0,
+                "update_at": 1700000000000,
+                "delete_at": 0,
+                "creator_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "name": "custom_emoji"
+            },
+            "error_id": "model.emoji.create_at.app_error",
+            "detailed": "id=6bdz674pgq767e4jx75w4pf57a"
+        },
+        {
+            "name": "update_at_zero",
+            "emoji": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "create_at": 1700000000000,
+                "update_at": 0,
+                "delete_at": 0,
+                "creator_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "name": "custom_emoji"
+            },
+            "error_id": "model.emoji.update_at.app_error",
+            "detailed": "id=6bdz674pgq767e4jx75w4pf57a"
+        },
+        {
+            "name": "delete_at_set",
+            "emoji": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "create_at": 1700000000000,
+                "update_at": 1700000000000,
+                "delete_at": 1700000000000,
+                "creator_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "name": "custom_emoji"
+            },
+            "error_id": "",
+            "detailed": ""
+        },
+        {
+            "name": "creator_id_empty",
+            "emoji": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "create_at": 1700000000000,
+                "update_at": 1700000000000,
+                "delete_at": 0,
+                "creator_id": "",
+                "name": "custom_emoji"
+            },
+            "error_id": "",
+            "detailed": ""
+        },
+        {
+            "name": "creator_id_nonsense",
+            "emoji": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "create_at": 1700000000000,
+                "update_at": 1700000000000,
+                "delete_at": 0,
+                "creator_id": "nope",
+                "name": "custom_emoji"
+            },
+            "error_id": "",
+            "detailed": ""
+        },
+        {
+            "name": "creator_id_26",
+            "emoji": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "create_at": 1700000000000,
+                "update_at": 1700000000000,
+                "delete_at": 0,
+                "creator_id": "aaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "name": "custom_emoji"
+            },
+            "error_id": "",
+            "detailed": ""
+        },
+        {
+            "name": "creator_id_27",
+            "emoji": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "create_at": 1700000000000,
+                "update_at": 1700000000000,
+                "delete_at": 0,
+                "creator_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "name": "custom_emoji"
+            },
+            "error_id": "model.emoji.user_id.app_error",
+            "detailed": ""
+        },
+        {
+            "name": "creator_id_multibyte_26_bytes",
+            "emoji": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "create_at": 1700000000000,
+                "update_at": 1700000000000,
+                "delete_at": 0,
+                "creator_id": "ééééééééééééé",
+                "name": "custom_emoji"
+            },
+            "error_id": "",
+            "detailed": ""
+        },
+        {
+            "name": "creator_id_multibyte_28_bytes",
+            "emoji": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "create_at": 1700000000000,
+                "update_at": 1700000000000,
+                "delete_at": 0,
+                "creator_id": "éééééééééééééé",
+                "name": "custom_emoji"
+            },
+            "error_id": "model.emoji.user_id.app_error",
+            "detailed": ""
+        },
+        {
+            "name": "name_empty",
+            "emoji": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "create_at": 1700000000000,
+                "update_at": 1700000000000,
+                "delete_at": 0,
+                "creator_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "name": ""
+            },
+            "error_id": "model.emoji.name.app_error",
+            "detailed": ""
+        },
+        {
+            "name": "name_system",
+            "emoji": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "create_at": 1700000000000,
+                "update_at": 1700000000000,
+                "delete_at": 0,
+                "creator_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "name": "grinning"
+            },
+            "error_id": "model.emoji.system_emoji_name.app_error",
+            "detailed": ""
+        },
+        {
+            "name": "name_bad_pattern",
+            "emoji": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "create_at": 1700000000000,
+                "update_at": 1700000000000,
+                "delete_at": 0,
+                "creator_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "name": "has space"
+            },
+            "error_id": "model.emoji.name.app_error",
+            "detailed": ""
+        },
+        {
+            "name": "name_65",
+            "emoji": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "create_at": 1700000000000,
+                "update_at": 1700000000000,
+                "delete_at": 0,
+                "creator_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "error_id": "model.emoji.name.app_error",
+            "detailed": ""
+        }
+    ],
+    "is_valid_emoji_name": {
+        "": "model.emoji.name.app_error",
+        "+1": "model.emoji.system_emoji_name.app_error",
+        "100": "model.emoji.system_emoji_name.app_error",
+        "123": "",
+        "CustomEmoji": "",
+        "a": "model.emoji.system_emoji_name.app_error",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": "",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": "model.emoji.name.app_error",
+        "custom+emoji": "",
+        "custom-emoji": "",
+        "custom_emoji": "",
+        "grinning": "model.emoji.system_emoji_name.app_error",
+        "has space": "model.emoji.name.app_error",
+        "has.dot": "model.emoji.name.app_error",
+        "has/slash": "model.emoji.name.app_error",
+        "has:colon": "model.emoji.name.app_error",
+        "héllo": "model.emoji.name.app_error",
+        "mattermost": "model.emoji.system_emoji_name.app_error",
+        "éééééééééééééééééééééééééééééééé": "model.emoji.name.app_error",
+        "ééééééééééééééééééééééééééééééééé": "model.emoji.name.app_error",
+        "😀": "model.emoji.name.app_error"
+    },
+    "pre_save": [
+        {
+            "name": "empty_id_is_generated",
+            "in_id": "",
+            "in_name": "Custom_Emoji",
+            "out_name": "custom_emoji",
+            "id_preserved": false,
+            "id_generated": true,
+            "times_are_equal": true,
+            "create_at_overwritten": true
+        },
+        {
+            "name": "existing_id_kept",
+            "in_id": "6bdz674pgq767e4jx75w4pf57a",
+            "in_name": "MiXeD",
+            "out_name": "mixed",
+            "id_preserved": true,
+            "id_generated": false,
+            "times_are_equal": true,
+            "create_at_overwritten": true
+        },
+        {
+            "name": "name_lowercased",
+            "in_id": "6bdz674pgq767e4jx75w4pf57a",
+            "in_name": "ALLCAPS",
+            "out_name": "allcaps",
+            "id_preserved": true,
+            "id_generated": false,
+            "times_are_equal": true,
+            "create_at_overwritten": true
+        },
+        {
+            "name": "name_already_lower",
+            "in_id": "6bdz674pgq767e4jx75w4pf57a",
+            "in_name": "already_lower",
+            "out_name": "already_lower",
+            "id_preserved": true,
+            "id_generated": false,
+            "times_are_equal": true,
+            "create_at_overwritten": true
+        },
+        {
+            "name": "name_with_plus",
+            "in_id": "6bdz674pgq767e4jx75w4pf57a",
+            "in_name": "A+B",
+            "out_name": "a+b",
+            "id_preserved": true,
+            "id_generated": false,
+            "times_are_equal": true,
+            "create_at_overwritten": true
+        },
+        {
+            "name": "name_non_ascii",
+            "in_id": "6bdz674pgq767e4jx75w4pf57a",
+            "in_name": "ÉCLAIR",
+            "out_name": "éclair",
+            "id_preserved": true,
+            "id_generated": false,
+            "times_are_equal": true,
+            "create_at_overwritten": true
+        }
+    ],
+    "system_emoji_count": 4464,
+    "system_emoji_sample": {
+        "+1": {
+            "id": "1f44d",
+            "found": true
+        },
+        "-1": {
+            "id": "1f44e",
+            "found": true
+        },
+        "100": {
+            "id": "1f4af",
+            "found": true
+        },
+        "1234": {
+            "id": "1f522",
+            "found": true
+        },
+        "e-mail": {
+            "id": "1f4e7",
+            "found": true
+        },
+        "flag-gb": {
+            "id": "1f1ec-1f1e7",
+            "found": true
+        },
+        "flag_gb": {
+            "id": "",
+            "found": false
+        },
+        "grinning": {
+            "id": "1f600",
+            "found": true
+        },
+        "heart": {
+            "id": "2764-fe0f",
+            "found": true
+        },
+        "man_technologist_dark_skin_tone": {
+            "id": "1f468-1f3ff-200d-1f4bb",
+            "found": true
+        },
+        "mattermost": {
+            "id": "mattermost",
+            "found": true
+        },
+        "smile": {
+            "id": "1f604",
+            "found": true
+        },
+        "thumbsup": {
+            "id": "1f44d",
+            "found": true
+        },
+        "u5272": {
+            "id": "1f239",
+            "found": true
+        },
+        "woman_judge": {
+            "id": "1f469-200d-2696-fe0f",
+            "found": true
+        }
+    }
+}

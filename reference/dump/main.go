@@ -51,11 +51,39 @@ var registry = map[string]any{
 	"team":           &model.Team{},
 	"channel":        &model.Channel{},
 	"channel_member": &model.ChannelMember{},
-	"post":           &model.Post{},
-	"session":        &model.Session{},
-	"team_member":    &model.TeamMember{},
-	"status":         &model.Status{},
-	"preference":     &model.Preference{},
+
+	// channel.go's other wire types.
+	"channel_banner_info":                   &model.ChannelBannerInfo{},
+	"channel_with_team_data":                &model.ChannelWithTeamData{},
+	"channel_patch":                         &model.ChannelPatch{},
+	"channel_for_export":                    &model.ChannelForExport{},
+	"channel_moderation":                    &model.ChannelModeration{},
+	"channel_moderation_patch":              &model.ChannelModerationPatch{},
+	"channel_member_count_by_group":         &model.ChannelMemberCountByGroup{},
+	"group_message_conversion_request_body": &model.GroupMessageConversionRequestBody{},
+	"direct_channel_for_export":             &model.DirectChannelForExport{},
+	"channels_with_count":                   &model.ChannelsWithCount{},
+
+	// channel_member.go's other wire types.
+	"channel_unread":                &model.ChannelUnread{},
+	"channel_unread_at":             &model.ChannelUnreadAt{},
+	"channel_member_with_team_data": &model.ChannelMemberWithTeamData{},
+	"channel_member_for_export":     &model.ChannelMemberForExport{},
+	"channel_member_identifier":     &model.ChannelMemberIdentifier{},
+	"set_channel_members_request":   &model.SetChannelMembersRequest{},
+	"set_channel_members_response":  &model.SetChannelMembersResponse{},
+	"set_channel_members_error":     &model.SetChannelMembersError{},
+
+	"emoji":                  &model.Emoji{},
+	"reaction":               &model.Reaction{},
+	"file_info":              &model.FileInfo{},
+	"get_file_infos_options": &model.GetFileInfosOptions{},
+	"post":                   &model.Post{},
+	"session":                &model.Session{},
+	"team_member":            &model.TeamMember{},
+	"status":                 &model.Status{},
+	"preference":             &model.Preference{},
+	"custom_status":          &model.CustomStatus{},
 }
 
 // overrides pins specific fields to semantically valid values, keyed by the
@@ -72,20 +100,26 @@ var registry = map[string]any{
 // the JSON and the parity signal is preserved. The top-level key check in
 // missingKeys enforces that — pin "" on an omitempty field and the run fails.
 var overrides = map[string]any{
-	"channel.type":        "O",
+	// "P", not "O": the reflective filler sets Discoverable and GroupConstrained to
+	// true, and Channel.IsValid only accepts Discoverable on a private channel. Pinning
+	// the type keeps every other field non-zero — pinning Discoverable to false instead
+	// would trade a real parity signal for a cosmetic one.
+	"channel.type":        "P",
 	"channel.displayname": "Town Square",
 	"channel.name":        "town-square",
-	"post.type":           "",
-	"status.status":       "online",
-	"team.type":           "O",
-	"team.name":           "core-team",
-	"team.displayname":    "Core Team",
-	"user.username":       "parity-user",
-	"user.email":          "parity-user@example.com",
-	"user.roles":          "system_user",
-	"user.locale":         "en",
-	"user.authservice":    "",
-	"user.position":       "Staff Engineer",
+	// Must satisfy channelHexColorRegex or the fixture is not a valid channel.
+	"channel.bannerinfo.backgroundcolor": "#1153ab",
+	"post.type":                          "",
+	"status.status":                      "online",
+	"team.type":                          "O",
+	"team.name":                          "core-team",
+	"team.displayname":                   "Core Team",
+	"user.username":                      "parity-user",
+	"user.email":                         "parity-user@example.com",
+	"user.roles":                         "system_user",
+	"user.locale":                        "en",
+	"user.authservice":                   "",
+	"user.position":                      "Staff Engineer",
 	"user.timezone": model.StringMap{
 		"automaticTimezone":    "America/New_York",
 		"manualTimezone":       "Europe/Berlin",
@@ -96,7 +130,17 @@ var overrides = map[string]any{
 	"preference.name":     "use_military_time",
 	"preference.value":    "true",
 	"channelmember.roles": "channel_user",
-	"teammember.roles":    "team_user",
+	// The generic filler produces "key0-…"/"val0-…", which makes the fixture fail
+	// ChannelMember.IsValid: with allowMissingFields=false a missing "desktop" or
+	// "mark_unread" prop is itself an error. Pin Go's own defaults so the fixture is a
+	// valid member as well as a serialization oracle. Every value is non-empty, so no
+	// parity signal is lost.
+	"channelmember.notifyprops": model.GetDefaultChannelNotifyProps(),
+	"teammember.roles":          "team_user",
+	// The generic filler produces "duration0-…", which is not in validCustomStatusDuration and
+	// would make the fixture fail AreDurationAndExpirationTimeValid. "date_and_time" is the
+	// value PreSave itself writes; it is non-empty, so no parity signal is lost.
+	"customstatus.duration": "date_and_time",
 }
 
 // idEncoding matches model.NewId (utils.go:378) — z-base-32, no padding. 16
@@ -117,6 +161,7 @@ var (
 
 func main() {
 	out := flag.String("out", "../../fixtures", "directory to write fixtures into")
+	rustOut := flag.String("rust-out", "../../crates/mm-model/src", "directory to write generated Rust into")
 	flag.Parse()
 
 	if err := os.MkdirAll(*out, 0o755); err != nil {
@@ -180,7 +225,75 @@ func main() {
 	}
 	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_utils.json"))
 
-	fmt.Printf("\n%d fixtures written, all top-level fields present.\n", len(names)+1)
+	if err := writeChannelBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: channel behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_channel.json"))
+
+	if err := writeChannelMemberBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: channel member behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_channel_member.json"))
+
+	if err := writeChannelListBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: channel list behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_channel_list.json"))
+
+	if err := writeVersionBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: version behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_version.json"))
+
+	if err := writeCustomStatusBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: custom status behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_custom_status.json"))
+
+	if err := writeStatusBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: status behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_status.json"))
+
+	if err := writePreferenceBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: preference behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_preference.json"))
+
+	if err := writeEmojiBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: emoji behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_emoji.json"))
+
+	if err := writeReactionBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: reaction behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_reaction.json"))
+
+	if err := writeFileInfoBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: file info behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_file_info.json"))
+
+	// Not a fixture: a generated Rust source file. See behaviour_emoji.go for why the emoji
+	// table is emitted rather than transcribed.
+	if err := writeEmojiTable(*rustOut); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: emoji table: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*rustOut, "emoji_generated.rs"))
+
+	fmt.Printf("\n%d fixtures written, all top-level fields present.\n", len(names)+11)
 }
 
 type populator struct {

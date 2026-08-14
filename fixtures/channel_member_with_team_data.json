@@ -1,0 +1,24 @@
+{
+    "channel_id": "mco9k365wx5e9ky96iu7zezsth",
+    "user_id": "5qjq4pibmz5nykrt7w5knz8sry",
+    "roles": "roles-d853dd",
+    "last_viewed_at": 1704903699000,
+    "msg_count": 35,
+    "mention_count": 80,
+    "mention_count_root": 52,
+    "urgent_mention_count": 19,
+    "msg_count_root": 55,
+    "notify_props": {
+        "key0-ced7c7": "val0-dfd1f0",
+        "key1-cfd97a": "val1-e0d3a3"
+    },
+    "last_update_at": 1705724442000,
+    "scheme_guest": true,
+    "scheme_user": true,
+    "scheme_admin": true,
+    "explicit_roles": "explicitroles-ecc466",
+    "autotranslation_disabled": true,
+    "team_display_name": "teamdisplayname-2dd8d0",
+    "team_name": "teamname-b29cab",
+    "team_update_at": 1707366962000
+}
