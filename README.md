@@ -167,7 +167,21 @@ survives a context reset.
 
 ## License
 
-`AGPL-3.0-only`, matching upstream Mattermost's server license. No `LICENSE` file has been added
-to this repository yet; the declaration currently lives only in `Cargo.toml`.
+**Apache-2.0** — see [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE).
 
-This is an unofficial port and is not affiliated with or endorsed by Mattermost, Inc.
+Upstream Mattermost is licensed in two parts. `server/public/`, `server/templates/`,
+`server/i18n/` and `webapp/` are Apache-2.0; the rest of the platform is GNU AGPL v3.0 or a
+commercial license. Everything translated here so far derives from `server/public/model/` — the
+Apache-2.0 portion — so that is what this repository carries, and `LICENSE` is a byte-identical
+copy of upstream's `server/public/LICENSE.txt`.
+
+> **This must change before phase 2.** `server/channels/` is AGPL v3.0, and a translation of it
+> is a derivative work that cannot be redistributed under Apache-2.0. The license has to move to
+> `AGPL-3.0-only` (or be split the way upstream splits it) before the first `mm-store` commit.
+> Tracked as **D-031** in [`docs/TECH_DEBT.md`](docs/TECH_DEBT.md).
+
+This is a translation, not a copy: no file here is copied from upstream, and a few functions
+deliberately diverge. `NOTICE` records that, as Apache-2.0 §4(b) requires.
+
+"Mattermost" is a trademark of Mattermost, Inc. This is an unofficial port, not affiliated with,
+endorsed by, or supported by Mattermost, Inc.

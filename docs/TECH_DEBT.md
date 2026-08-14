@@ -683,3 +683,44 @@ target.
 
 **(c) is recommended**, and it needs a decision from the project owner because it changes
 deployment. Until then the mime type is whatever the caller passes.
+
+---
+
+## D-031 · The project licence must become AGPL-3.0 before phase 2 lands
+
+**Status** OPEN · **Severity** blocking · **Raised** 2026-08-14 (licensing)
+**Blocks** every commit of code derived from `server/channels/` — i.e. all of phases 2 to 5.
+
+Upstream Mattermost is licensed in two parts, and the boundary falls exactly where this port
+currently sits. From the root `LICENSE.txt` of the pinned tree:
+
+> You are licensed to use the source code in Admin Tools and Configuration Files
+> (`server/templates/`, `server/i18n/`, **`server/public/`**, `webapp/` and all subdirectories
+> thereof) under the **Apache License v2.0**.
+
+The rest of the platform is **GNU AGPL v3.0**, or a commercial licence from Mattermost, Inc.
+
+Everything translated to date comes from `server/public/model/`, so the repository is currently
+licensed **Apache-2.0** and that is accurate. `server/public/LICENSE.txt` carries the Apache-2.0
+text confirming it, and our `LICENSE` is a byte-identical copy.
+
+**The moment phase 2 begins this becomes wrong.** `server/channels/store/`,
+`server/channels/app/` and `server/channels/api4/` are AGPL v3.0. A Rust translation of them is a
+derivative work, and a derivative of AGPL code cannot be redistributed under Apache-2.0.
+
+**Decision required before the first `mm-store` commit** — chosen 2026-08-14 by the project owner
+to defer, taking Apache-2.0 "for now" with this entry as the tripwire.
+
+**To pay off**, one of:
+- **(a) Relicense the repository to `AGPL-3.0-only`.** Apache-2.0 is one-way compatible with
+  AGPL-3.0, so the existing `mm-model` code can be carried forward without permission. This is
+  the default and the cheapest path. Note it is not retroactive: anything already published under
+  Apache-2.0 stays available under Apache-2.0 to whoever received it.
+- **(b) Split the licence the way upstream does** — keep `mm-model` Apache-2.0 with its own
+  `LICENSE`, and put AGPL-3.0 at the root for the crates that need it. Mirrors Mattermost
+  exactly, and preserves the more permissive terms for the wire types, which are the part
+  another project is most likely to want to reuse.
+- **(c) Obtain a commercial licence** from Mattermost, Inc.
+
+Whichever is chosen, `Cargo.toml`'s `license` field, `LICENSE`, `NOTICE` and the README all have
+to move together. `NOTICE` already states the current scope and the coming change.

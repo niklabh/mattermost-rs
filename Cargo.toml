@@ -12,8 +12,11 @@ members = [
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
-license = "AGPL-3.0-only"
-repository = "https://github.com/mattermost/mattermost"
+# Everything translated so far derives from Go's `server/public/`, which upstream licenses under
+# Apache-2.0 (see NOTICE). This MUST become AGPL-3.0-only before any code derived from
+# `server/channels/` — i.e. all of phase 2 onward — is committed. Tracked as D-031.
+license = "Apache-2.0"
+repository = "https://github.com/niklabh/mattermost-rs"
 
 [workspace.dependencies]
 # Internal crates. Dependency direction is strict and enforced by review:
