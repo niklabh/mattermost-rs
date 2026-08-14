@@ -4,9 +4,16 @@ Go source pinned at: mattermost@9dfbaeca99f4096388fd1c048a9e6d1d0a86743e (2026-0
 Current phase: 1 — Core Types
 Next file: server/public/model/post.go — large (1,640 ln); plan on more than one session
 
-Re-clone the reference source with:
-`git clone --depth 1 https://github.com/mattermost/mattermost.git reference/mattermost`
-then `git -C reference/mattermost checkout 9dfbaeca99f4096388fd1c048a9e6d1d0a86743e`
+Re-clone the reference source by fetching the pinned SHA directly. A plain
+`git clone --depth 1` fetches only the current tip, so the subsequent `checkout` fails as soon as
+upstream moves past the pin:
+
+```sh
+git init reference/mattermost
+git -C reference/mattermost remote add origin https://github.com/mattermost/mattermost.git
+git -C reference/mattermost fetch --depth 1 origin 9dfbaeca99f4096388fd1c048a9e6d1d0a86743e
+git -C reference/mattermost checkout FETCH_HEAD
+```
 
 ## Verified line ranges (valid at the pinned SHA)
 
