@@ -757,3 +757,82 @@ own. Verified fixed by running the generator twice and diffing all 47 fixtures: 
 **Residual risk:** nothing enforces this. A future oracle that calls `NewId`, `GetMillis` or
 `time.Now` will reintroduce it, and will again go unnoticed for exactly one session. A cheap
 guard would be a CI step that runs the generator twice and fails on any diff.
+
+---
+
+## D-033 · Go's `[]*T` accepts a nil element; our `Vec<T>` rejects the document
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-08-14 (phase 1, `post_metadata.go`)
+
+Go models every collection of model types as a slice of **pointers**, so `[null]` is a legal
+value: `json.Unmarshal` stores a nil element and `json.Marshal` re-emits it as `null`. Rust's
+`Vec<T>` cannot hold that, so `serde_json` fails the whole document with
+`invalid type: null, expected struct PostEmbed`.
+
+This is **not** new to `post_metadata.go` — it is a convention already shipped in two modules:
+
+| Go | Rust | file |
+|---|---|---|
+| `Session.TeamMembers []*TeamMember` | `Option<Vec<TeamMember>>` | `session.rs` |
+| `ChannelList []*Channel` | `Vec<Channel>` | `channel_list.rs` |
+| `ChannelListWithTeamData []*ChannelWithTeamData` | `Vec<ChannelWithTeamData>` | `channel_list.rs` |
+| `PostMetadata.{Embeds,Emojis,Files,Reactions,Acknowledgements}` | `Vec<T>` | `post_metadata.rs` |
+| `PostMetadata.{Images,Translations}` `map[string]*T` | `HashMap<String, T>` | `post_metadata.rs` |
+
+`post_metadata.go` is only where it stopped being hypothetical: the `embeds_nil_element` oracle
+case is a **failing** decode, asserted explicitly in
+`post_metadata::go_parity::the_wire_format_matches_go` so it cannot rot.
+
+**Reachability is low but non-zero.** These collections are server-generated, and a nil element
+would be a bug in the producer. The exposure is inbound: a client posting
+`{"metadata":{"embeds":[null]}}` gets a 400 from us and a 200 from Go. That is the
+stricter-than-Go failure mode the project rejected for [D-001] option (b), which is why this is
+logged rather than shrugged off.
+
+**Options**
+- **(a) `Vec<Option<T>>` everywhere Go has `[]*T`.** Exactly faithful. Costs `.flatten()` at
+  every call site across the whole app layer, for a state no correct producer emits.
+- **(b) A tolerant deserialiser that drops nulls.** Cheap, but then re-marshalling loses the
+  element where Go keeps it, trading a decode divergence for a *silent* wire divergence. Worse.
+- **(c) Leave it.** Current state. Consistent across the crate, and the one measured case is
+  pinned.
+
+**(c) for now**, revisit if the app layer ever sees a real nil element. Whatever is chosen must
+be applied to all five types above at once — the value of the current state is that it is
+uniform.
+
+---
+
+## D-034 · `PostMetadata::Copy` drops `expire_at` and `recipients`
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-14 (phase 1, `post_metadata.go`)
+
+`(*PostMetadata).Copy` (post_metadata.go:92) is documented "does a deep copy". It is neither
+complete nor deep:
+
+```go
+return &PostMetadata{
+    Embeds: …, Emojis: …, Files: …, Images: …, Reactions: …,
+    Priority: …, Acknowledgements: …, Translations: …, RedactedFileCount: …,
+}   // ExpireAt and Recipients are simply not here
+```
+
+Measured: copying a metadata with `expire_at: 1700000000000` and two `recipients` returns one
+with `expire_at: 0` and no recipients. Almost certainly fields added to the struct without
+updating `Copy`.
+
+**Reproduced verbatim**, with the two fields written explicitly as `0`/`Vec::new()` rather than
+omitted from the Rust literal, so the omission is visible at the site rather than looking like an
+oversight of ours. Pinned by `copy_matches_go`, which asserts the output JSON byte-for-byte and
+separately asserts Go's own `expire_at_survived`/`recipients_survived` flags — if upstream fixes
+`Copy`, the test fails, which is the signal we want.
+
+**Do not "fix" it.** A Rust copy that preserved the fields would carry data the Go server
+discards, and the two would disagree about a value both write.
+
+**Separately, `Copy` is shallow for every collection.** `copy`/`maps.Copy` duplicate the element
+*pointers*, so Go's copy shares its embeds, emojis, files, reactions, acknowledgements, images
+and translations with the original — mutating one mutates the other. Only `Priority` is rebuilt.
+Rust owns its values, so ours is genuinely independent. Same class as [D-015] on
+`Channel::deep_copy`, accepted for the same reason, and the oracle records the aliasing flags so
+the divergence stays visible.

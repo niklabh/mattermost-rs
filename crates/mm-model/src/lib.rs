@@ -13,6 +13,7 @@ mod emoji_generated;
 pub mod file_info;
 pub mod post_acknowledgement;
 pub mod post_embed;
+pub mod post_metadata;
 pub mod preference;
 pub mod reaction;
 pub mod session;

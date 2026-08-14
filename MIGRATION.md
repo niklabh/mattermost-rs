@@ -2,7 +2,7 @@
 
 Go source pinned at: mattermost@9dfbaeca99f4096388fd1c048a9e6d1d0a86743e (2026-08-13)
 Current phase: 1 — Core Types
-Next file: server/public/model/post_metadata.go (136 ln) — both its leaf deps have landed
+Next file: server/public/model/post.go (1,640 ln) — all deps landed; split across sessions
 
 Re-clone the reference source by fetching the pinned SHA directly. A plain
 `git clone --depth 1` fetches only the current tip, so the subsequent `checkout` fails as soon as
@@ -55,6 +55,7 @@ whenever a session skips, approximates, or discovers-but-does-not-close somethin
 | model/channel_list.go | `mm-model/src/channel_list.rs` | DONE | 13 pass | Two `#[serde(transparent)]` newtypes plus their `Etag`. Unblocked by `CURRENT_VERSION`; also closed `Team::etag`, `User::etag` and `ChannelsWithCount` — D-010 and D-014 are both paid off. |
 | model/utils.go (Etag) | `mm-model/src/utils.rs` | DONE | 11 diff cases | `etag(&[&dyn Display])` — Go is variadic over `any` with `%v`. `CURRENT_VERSION` is borrowed from `version.go` but **cannot drift**: the oracle records it and a test fails when the pinned SHA moves. |
 | model/channel_member.go | `mm-model/src/channel_member.rs` | DONE | 30 pass | Complete `IsValid`, the six-key notify-props validator with both `allowMissingFields` modes, all 9 wire types with a fixture. Also closed the `DirectChannelForExport` half of D-014 in `channel.rs`. Deferred: `Auditable`. |
+| model/post_metadata.go | `mm-model/src/post_metadata.rs` | DONE | 10 pass | `PostMetadata`, `PostImage`, `PostTranslation`, plus `PostPriority` (whose Go home is post.go — the two files are mutually dependent). `Copy` reproduced including the two fields it drops. Deferred: `Auditable` ([D-028]). |
 | model/post_embed.go | `mm-model/src/post_embed.rs` | DONE | 9 pass | Whole file except `Auditable` ([D-028]). Three output states for `data`, an `any` with `omitempty`. Wire format byte-for-byte against Go's **round-trip**, not its output — `data: null` is lossy in Go too. |
 | model/post_acknowledgement.go | `mm-model/src/post_acknowledgement.rs` | DONE | 9 pass | Whole file. The only ported type whose `remote_id` has `omitempty`. Deferred: nothing. |
 | model/file_info.go | `mm-model/src/file_info.rs` | PARTIAL | 23 pass | `FileInfo`, `GetFileInfosOptions`, `IsValid`, `PreSave`, `IsValidFilename`, `SanitizeFilename`, `IsImage`/`IsSvg`, `GetEtagForFileInfos`, `MakeContentInaccessible`. Wire format asserted **byte-for-byte**. Deferred: `Auditable` ([D-028]) and `NewInfo`'s mime lookup ([D-030]). |
@@ -69,6 +70,7 @@ whenever a session skips, approximates, or discovers-but-does-not-close somethin
 | — (shared) | `mm-model/src/utils.rs::go_json_marshal` | DONE | 3 unit + 1 diff | `json.Marshal` with Go's HTML escaping for any `Serialize` value. Closes [D-022]. Use it — not `serde_json::to_string` — whenever a marshalled string is **stored** rather than sent. |
 | model/version.go | `mm-model/src/version.rs` | DONE | 14 pass | Whole file. `CURRENT_VERSION` moved here from `utils.rs`, which now re-exports it — one definition, D-005's borrow closed. `VERSIONS`/`VERSIONS_WITHOUT_HOTFIXES` are unexported in Go; the oracle extracts the literal with `go/parser` so the transcription is checked. Deferred: nothing. |
 | model/utils.go (ToJSON) | `mm-model/src/utils.rs` | DONE | 11 diff cases | `go_json_marshal_string_map` — the `map[string]string` case. Needed because the notify-props size cap **measures** Go's JSON, and serde_json escapes differently. |
+| — (tooling) | `reference/dump/behaviour_post_metadata.go` → `fixtures/behaviour_post_metadata.json` | DONE | 3 diff tests | 22 wire probes driving nil-against-empty for all seven collections, 9 `PostPriority` probes for the capitalised keys, and `Copy` measured for dropped fields and pointer aliasing. |
 | — (tooling) | `reference/dump/behaviour_post_leaves.go` → `fixtures/behaviour_post_leaves.json` | DONE | 8 diff tests | 13 `PostEmbed` wire probes driving `omitempty`-on-an-interface, 5 acknowledgement probes, 10 `IsValid` cases, and the three-way `remote_id` comparison. Records Go's own **round-trip** alongside its output, because one case is lossy in Go. |
 | — (tooling) | `reference/dump/behaviour_file_info.go` → `fixtures/behaviour_file_info.json` | DONE | 11 diff tests | 12 byte-exact wire probes, 25 `IsValid` cases, a 44-name filename corpus run through **both** `IsValidFilename` and `SanitizeFilename`, plus `PreSave`, mime predicates, etags and `MakeContentInaccessible`. |
 | — (tooling) | `reference/dump/behaviour_reaction.go` → `fixtures/behaviour_reaction.json` | DONE | 4 diff tests | 22 `IsValid` cases, `PreSave`/`PreUpdate` invariants over 5 starting states each, and a 32-input **regex-equivalence** corpus running Go's two emoji-name patterns side by side. |
@@ -385,6 +387,42 @@ All of these are oracle results, not readings. Several contradict what the sourc
 11. **`RuneToHexadecimalString` pads to four digits but never truncates**, so `U+1F600` renders
     as five (`1f600`). Go's parameter is an `int32` that can be negative, where `%04x` would
     emit a sign; a Rust `char` cannot be, and no call site passes one.
+
+## Notes — model/post_metadata.go
+
+1. **`PostPriority` lives in post.go, and the two files are mutually dependent.** `PostMetadata`
+   embeds `*PostPriority`; `Post` embeds `*PostMetadata`. Something has to break the cycle, so
+   `PostPriority` is defined in `post_metadata.rs` and `post.rs` should re-export it — the same
+   shape as `CURRENT_VERSION` living in `version.rs` with a `utils` re-export.
+
+2. **`PostPriority.PostId` and `.ChannelId` serialise as `PostId` and `ChannelId`.** Go tags them
+   `json:",omitempty"` — an *empty name* — and falls back to the Go field name, so two
+   capitalised keys sit beside three snake_case ones in the same object. Third instance of this
+   trap after `TeamForExport.SchemeName`; the comment calls them internal DB plumbing and they
+   reach the wire anyway.
+
+3. **Every `PostMetadata` field carries `omitempty`, collections included**, and Go's `omitempty`
+   drops a nil slice *and* an empty one. So the two are indistinguishable on the wire, and a
+   plain `Vec` with a length predicate is faithful — `Option<Vec>` would invent a distinction Go
+   cannot express.
+
+4. **`redacted_file_count` sits between `files` and `images`**, not at the end. Field order is
+   emission order, so this matters for byte-exact comparison.
+
+5. **`PostTranslation.Object` is a `json.RawMessage`, and an explicit `null` survives.**
+   `RawMessage` is a `[]byte`; `omitempty` drops it when *empty*, but a RawMessage holding the
+   four bytes `null` is not empty and re-emits as `null`. serde's `Option` collapses that by
+   default — `null` deserialises to `None` and then disappears. Ported with a deserialiser that
+   wraps `Value::Null` in `Some`, leaving `None` to mean only "key absent".
+
+6. **`Copy()` drops `expire_at` and `recipients`.** It is documented "does a deep copy"; the two
+   fields are simply absent from the struct literal it returns. Almost certainly fields added to
+   the struct and not to `Copy`. Reproduced verbatim and pinned — see [D-034].
+
+7. **`Copy()` is also shallow for everything except `Priority`.** `copy`/`maps.Copy` duplicate
+   the *pointers*, so the copy shares every embed, emoji, file, reaction, acknowledgement, image
+   and translation with the original. Only `Priority` is rebuilt. Rust owns its values, so ours
+   is genuinely independent — a divergence in the safe direction, same class as [D-015].
 
 ## Notes — model/post_embed.go, model/post_acknowledgement.go
 

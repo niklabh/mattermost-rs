@@ -80,6 +80,10 @@ var registry = map[string]any{
 	"get_file_infos_options": &model.GetFileInfosOptions{},
 	"post_embed":             &model.PostEmbed{},
 	"post_acknowledgement":   &model.PostAcknowledgement{},
+	"post_metadata":          &model.PostMetadata{},
+	"post_image":             &model.PostImage{},
+	"post_translation":       &model.PostTranslation{},
+	"post_priority":          &model.PostPriority{},
 	"post":                   &model.Post{},
 	"session":                &model.Session{},
 	"team_member":            &model.TeamMember{},
@@ -293,6 +297,12 @@ func main() {
 	}
 	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_post_leaves.json"))
 
+	if err := writePostMetadataBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: post metadata behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_post_metadata.json"))
+
 	// Not a fixture: a generated Rust source file. See behaviour_emoji.go for why the emoji
 	// table is emitted rather than transcribed.
 	if err := writeEmojiTable(*rustOut); err != nil {
@@ -301,7 +311,7 @@ func main() {
 	}
 	fmt.Printf("wrote %s\n", filepath.Join(*rustOut, "emoji_generated.rs"))
 
-	fmt.Printf("\n%d fixtures written, all top-level fields present.\n", len(names)+12)
+	fmt.Printf("\n%d fixtures written, all top-level fields present.\n", len(names)+13)
 }
 
 type populator struct {
