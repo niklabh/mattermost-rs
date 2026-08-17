@@ -78,6 +78,31 @@ fn invalid_token(details: &str) -> AppError {
     AppError::new("GetSession", INVALID_TOKEN, Some(params), details, 401)
 }
 
+impl App {
+    /// Port of `app.App.GetSessions` (channels/app/session.go:144).
+    ///
+    /// Go's mapping here is blunt on purpose: *any* store failure becomes
+    /// `app.session.get_sessions.app_error` with a 500. There is no not-found branch, because a
+    /// user with no sessions is an empty list rather than a miss.
+    #[tracing::instrument(skip_all, fields(user_id = %user_id))]
+    pub async fn get_sessions(&self, user_id: &str) -> Result<Vec<Session>, AppError> {
+        self.store()
+            .session()
+            .get_sessions(user_id)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "sessions lookup failed");
+                AppError::new(
+                    "GetSessions",
+                    "app.session.get_sessions.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

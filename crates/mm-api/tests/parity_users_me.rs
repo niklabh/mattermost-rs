@@ -18,65 +18,9 @@
 //! on a laptop with no Docker must stay green, and a test that silently passes because it could
 //! not reach anything is worse than one that is explicitly skipped.
 
-use std::time::Duration;
+mod common;
 
-const GO: &str = "http://localhost:8065";
-const RUST: &str = "http://127.0.0.1:8066";
-const LOGIN_ID: &str = "slice@example.com";
-const PASSWORD: &str = "Slice-Test-1234";
-
-/// True when the caller asked for the stack-backed tests.
-fn stack_enabled() -> bool {
-    std::env::var("MM_PARITY_STACK").is_ok_and(|v| v == "1")
-}
-
-fn client() -> reqwest::Client {
-    reqwest::Client::builder()
-        .timeout(Duration::from_secs(20))
-        .build()
-        .expect("client builds")
-}
-
-/// One login for the whole test binary.
-///
-/// This is not an optimisation. **A login mutates the user row** — it bumps `UpdateAt`, which
-/// appears both in `/users/me`'s body and in its etag. With a login per test, tests running in
-/// parallel move `UpdateAt` underneath each other, and the byte-comparison below fails against a
-/// four-second-old value while both servers were in fact perfectly agreed. Logging in once
-/// removes the only writer, so a diff means a real divergence.
-static TOKEN: tokio::sync::OnceCell<String> = tokio::sync::OnceCell::const_new();
-
-/// Log in against the **Go** server and return the token it mints.
-///
-/// The token has to come from Go: the whole point is that a credential this port never issued is
-/// nonetheless accepted by it, against a row it never wrote.
-async fn go_minted_token(client: &reqwest::Client) -> String {
-    TOKEN
-        .get_or_init(|| async {
-            let response = client
-                .post(format!("{GO}/api/v4/users/login"))
-                .json(&serde_json::json!({ "login_id": LOGIN_ID, "password": PASSWORD }))
-                .send()
-                .await
-                .expect("the Go server is reachable — is `docker compose up -d` running?");
-
-            assert_eq!(
-                response.status(),
-                200,
-                "login against Go failed; the fixture user may not exist yet"
-            );
-
-            response
-                .headers()
-                .get("token")
-                .expect("Go returns the session token in a `Token` header")
-                .to_str()
-                .expect("the token is ASCII")
-                .to_owned()
-        })
-        .await
-        .clone()
-}
+use common::{GO, LOGIN_ID, RUST, client, go_minted_token, stack_enabled};
 
 /// The claim the whole slice rests on: same token, same bytes.
 #[tokio::test]

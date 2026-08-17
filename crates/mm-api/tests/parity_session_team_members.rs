@@ -12,17 +12,10 @@
 //!   cargo test -p mm-api --test parity_session_team_members
 //! ```
 
-use std::time::Duration;
+mod common;
 
+use common::{GO, client, go_minted_token, stack_enabled};
 use mm_store::{SessionStore, SqlStore};
-
-const GO: &str = "http://localhost:8065";
-const LOGIN_ID: &str = "slice@example.com";
-const PASSWORD: &str = "Slice-Test-1234";
-
-fn stack_enabled() -> bool {
-    std::env::var("MM_PARITY_STACK").is_ok_and(|v| v == "1")
-}
 
 /// What the Go server says this user's team memberships are.
 async fn go_team_members(client: &reqwest::Client, token: &str) -> Vec<serde_json::Value> {
@@ -43,25 +36,9 @@ async fn session_team_members_match_the_go_servers_computed_roles() {
         return;
     }
 
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(20))
-        .build()
-        .expect("client builds");
+    let client = client();
 
-    let login = client
-        .post(format!("{GO}/api/v4/users/login"))
-        .json(&serde_json::json!({ "login_id": LOGIN_ID, "password": PASSWORD }))
-        .send()
-        .await
-        .expect("login reaches the Go server");
-    assert_eq!(login.status(), 200, "the fixture user should exist");
-    let token = login
-        .headers()
-        .get("token")
-        .expect("Go returns the token in a header")
-        .to_str()
-        .expect("ASCII")
-        .to_owned();
+    let token = go_minted_token(&client).await;
 
     let go_members = go_team_members(&client, &token).await;
 
@@ -134,23 +111,8 @@ async fn the_fixture_user_actually_belongs_to_a_team() {
         return;
     }
 
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(20))
-        .build()
-        .expect("client builds");
-    let login = client
-        .post(format!("{GO}/api/v4/users/login"))
-        .json(&serde_json::json!({ "login_id": LOGIN_ID, "password": PASSWORD }))
-        .send()
-        .await
-        .expect("login reaches the Go server");
-    let token = login
-        .headers()
-        .get("token")
-        .expect("token header")
-        .to_str()
-        .expect("ASCII")
-        .to_owned();
+    let client = client();
+    let token = go_minted_token(&client).await;
 
     let members = go_team_members(&client, &token).await;
     assert!(

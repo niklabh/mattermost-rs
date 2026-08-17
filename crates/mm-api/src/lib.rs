@@ -8,6 +8,7 @@
 pub mod auth;
 pub mod error;
 pub mod proxy;
+pub mod sessions;
 pub mod users;
 
 use axum::Router;
@@ -62,6 +63,7 @@ impl AppState {
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/api/v4/users/me", get(users::get_user_me))
+        .route("/api/v4/users/me/sessions", get(sessions::get_sessions_me))
         .fallback(proxy::forward_to_go)
         .with_state(state)
 }
