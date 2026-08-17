@@ -1,0 +1,1041 @@
+{
+    "admin_only": [
+        {
+            "audience": "nil",
+            "sys_admin_only": false,
+            "team_admin_only": false
+        },
+        {
+            "audience": "all",
+            "sys_admin_only": false,
+            "team_admin_only": false
+        },
+        {
+            "audience": "member",
+            "sys_admin_only": false,
+            "team_admin_only": false
+        },
+        {
+            "audience": "sysadmin",
+            "sys_admin_only": true,
+            "team_admin_only": false
+        },
+        {
+            "audience": "teamadmin",
+            "sys_admin_only": false,
+            "team_admin_only": true
+        },
+        {
+            "audience": "unknown",
+            "sys_admin_only": false,
+            "team_admin_only": false
+        }
+    ],
+    "audience_matches": [
+        {
+            "audience": "all",
+            "matches": true,
+            "sys_admin": false,
+            "team_admin": false
+        },
+        {
+            "audience": "all",
+            "matches": true,
+            "sys_admin": true,
+            "team_admin": false
+        },
+        {
+            "audience": "all",
+            "matches": true,
+            "sys_admin": false,
+            "team_admin": true
+        },
+        {
+            "audience": "all",
+            "matches": true,
+            "sys_admin": true,
+            "team_admin": true
+        },
+        {
+            "audience": "member",
+            "matches": true,
+            "sys_admin": false,
+            "team_admin": false
+        },
+        {
+            "audience": "member",
+            "matches": false,
+            "sys_admin": true,
+            "team_admin": false
+        },
+        {
+            "audience": "member",
+            "matches": false,
+            "sys_admin": false,
+            "team_admin": true
+        },
+        {
+            "audience": "member",
+            "matches": false,
+            "sys_admin": true,
+            "team_admin": true
+        },
+        {
+            "audience": "sysadmin",
+            "matches": false,
+            "sys_admin": false,
+            "team_admin": false
+        },
+        {
+            "audience": "sysadmin",
+            "matches": true,
+            "sys_admin": true,
+            "team_admin": false
+        },
+        {
+            "audience": "sysadmin",
+            "matches": false,
+            "sys_admin": false,
+            "team_admin": true
+        },
+        {
+            "audience": "sysadmin",
+            "matches": true,
+            "sys_admin": true,
+            "team_admin": true
+        },
+        {
+            "audience": "teamadmin",
+            "matches": false,
+            "sys_admin": false,
+            "team_admin": false
+        },
+        {
+            "audience": "teamadmin",
+            "matches": false,
+            "sys_admin": true,
+            "team_admin": false
+        },
+        {
+            "audience": "teamadmin",
+            "matches": true,
+            "sys_admin": false,
+            "team_admin": true
+        },
+        {
+            "audience": "teamadmin",
+            "matches": true,
+            "sys_admin": true,
+            "team_admin": true
+        },
+        {
+            "audience": "",
+            "matches": false,
+            "sys_admin": false,
+            "team_admin": false
+        },
+        {
+            "audience": "",
+            "matches": false,
+            "sys_admin": true,
+            "team_admin": false
+        },
+        {
+            "audience": "",
+            "matches": false,
+            "sys_admin": false,
+            "team_admin": true
+        },
+        {
+            "audience": "",
+            "matches": false,
+            "sys_admin": true,
+            "team_admin": true
+        },
+        {
+            "audience": "unknown",
+            "matches": false,
+            "sys_admin": false,
+            "team_admin": false
+        },
+        {
+            "audience": "unknown",
+            "matches": false,
+            "sys_admin": true,
+            "team_admin": false
+        },
+        {
+            "audience": "unknown",
+            "matches": false,
+            "sys_admin": false,
+            "team_admin": true
+        },
+        {
+            "audience": "unknown",
+            "matches": false,
+            "sys_admin": true,
+            "team_admin": true
+        },
+        {
+            "audience": "SYSADMIN",
+            "matches": false,
+            "sys_admin": false,
+            "team_admin": false
+        },
+        {
+            "audience": "SYSADMIN",
+            "matches": false,
+            "sys_admin": true,
+            "team_admin": false
+        },
+        {
+            "audience": "SYSADMIN",
+            "matches": false,
+            "sys_admin": false,
+            "team_admin": true
+        },
+        {
+            "audience": "SYSADMIN",
+            "matches": false,
+            "sys_admin": true,
+            "team_admin": true
+        }
+    ],
+    "client_from_str": [
+        {
+            "input": "web",
+            "ok": true,
+            "value": "web"
+        },
+        {
+            "input": "mobile-ios",
+            "ok": true,
+            "value": "mobile-ios"
+        },
+        {
+            "input": "mobile-android",
+            "ok": true,
+            "value": "mobile-android"
+        },
+        {
+            "input": "desktop",
+            "ok": true,
+            "value": "desktop"
+        },
+        {
+            "error": "Invalid client type supplied",
+            "input": "mobile",
+            "ok": false,
+            "value": "all"
+        },
+        {
+            "error": "Invalid client type supplied",
+            "input": "all",
+            "ok": false,
+            "value": "all"
+        },
+        {
+            "error": "Invalid client type supplied",
+            "input": "",
+            "ok": false,
+            "value": "all"
+        },
+        {
+            "error": "Invalid client type supplied",
+            "input": "Web",
+            "ok": false,
+            "value": "all"
+        },
+        {
+            "error": "Invalid client type supplied",
+            "input": "WEB",
+            "ok": false,
+            "value": "all"
+        },
+        {
+            "error": "Invalid client type supplied",
+            "input": "unknown",
+            "ok": false,
+            "value": "all"
+        },
+        {
+            "error": "Invalid client type supplied",
+            "input": " web",
+            "ok": false,
+            "value": "all"
+        }
+    ],
+    "client_matches": [
+        {
+            "client": "all",
+            "matches": true,
+            "other": "all"
+        },
+        {
+            "client": "all",
+            "matches": true,
+            "other": "desktop"
+        },
+        {
+            "client": "all",
+            "matches": true,
+            "other": "mobile"
+        },
+        {
+            "client": "all",
+            "matches": true,
+            "other": "mobile-android"
+        },
+        {
+            "client": "all",
+            "matches": true,
+            "other": "mobile-ios"
+        },
+        {
+            "client": "all",
+            "matches": true,
+            "other": "web"
+        },
+        {
+            "client": "all",
+            "matches": true,
+            "other": ""
+        },
+        {
+            "client": "all",
+            "matches": true,
+            "other": "unknown"
+        },
+        {
+            "client": "desktop",
+            "matches": false,
+            "other": "all"
+        },
+        {
+            "client": "desktop",
+            "matches": true,
+            "other": "desktop"
+        },
+        {
+            "client": "desktop",
+            "matches": false,
+            "other": "mobile"
+        },
+        {
+            "client": "desktop",
+            "matches": false,
+            "other": "mobile-android"
+        },
+        {
+            "client": "desktop",
+            "matches": false,
+            "other": "mobile-ios"
+        },
+        {
+            "client": "desktop",
+            "matches": false,
+            "other": "web"
+        },
+        {
+            "client": "desktop",
+            "matches": false,
+            "other": ""
+        },
+        {
+            "client": "desktop",
+            "matches": false,
+            "other": "unknown"
+        },
+        {
+            "client": "mobile",
+            "matches": false,
+            "other": "all"
+        },
+        {
+            "client": "mobile",
+            "matches": false,
+            "other": "desktop"
+        },
+        {
+            "client": "mobile",
+            "matches": false,
+            "other": "mobile"
+        },
+        {
+            "client": "mobile",
+            "matches": true,
+            "other": "mobile-android"
+        },
+        {
+            "client": "mobile",
+            "matches": true,
+            "other": "mobile-ios"
+        },
+        {
+            "client": "mobile",
+            "matches": false,
+            "other": "web"
+        },
+        {
+            "client": "mobile",
+            "matches": false,
+            "other": ""
+        },
+        {
+            "client": "mobile",
+            "matches": false,
+            "other": "unknown"
+        },
+        {
+            "client": "mobile-android",
+            "matches": false,
+            "other": "all"
+        },
+        {
+            "client": "mobile-android",
+            "matches": false,
+            "other": "desktop"
+        },
+        {
+            "client": "mobile-android",
+            "matches": false,
+            "other": "mobile"
+        },
+        {
+            "client": "mobile-android",
+            "matches": true,
+            "other": "mobile-android"
+        },
+        {
+            "client": "mobile-android",
+            "matches": false,
+            "other": "mobile-ios"
+        },
+        {
+            "client": "mobile-android",
+            "matches": false,
+            "other": "web"
+        },
+        {
+            "client": "mobile-android",
+            "matches": false,
+            "other": ""
+        },
+        {
+            "client": "mobile-android",
+            "matches": false,
+            "other": "unknown"
+        },
+        {
+            "client": "mobile-ios",
+            "matches": false,
+            "other": "all"
+        },
+        {
+            "client": "mobile-ios",
+            "matches": false,
+            "other": "desktop"
+        },
+        {
+            "client": "mobile-ios",
+            "matches": false,
+            "other": "mobile"
+        },
+        {
+            "client": "mobile-ios",
+            "matches": false,
+            "other": "mobile-android"
+        },
+        {
+            "client": "mobile-ios",
+            "matches": true,
+            "other": "mobile-ios"
+        },
+        {
+            "client": "mobile-ios",
+            "matches": false,
+            "other": "web"
+        },
+        {
+            "client": "mobile-ios",
+            "matches": false,
+            "other": ""
+        },
+        {
+            "client": "mobile-ios",
+            "matches": false,
+            "other": "unknown"
+        },
+        {
+            "client": "web",
+            "matches": false,
+            "other": "all"
+        },
+        {
+            "client": "web",
+            "matches": false,
+            "other": "desktop"
+        },
+        {
+            "client": "web",
+            "matches": false,
+            "other": "mobile"
+        },
+        {
+            "client": "web",
+            "matches": false,
+            "other": "mobile-android"
+        },
+        {
+            "client": "web",
+            "matches": false,
+            "other": "mobile-ios"
+        },
+        {
+            "client": "web",
+            "matches": true,
+            "other": "web"
+        },
+        {
+            "client": "web",
+            "matches": false,
+            "other": ""
+        },
+        {
+            "client": "web",
+            "matches": false,
+            "other": "unknown"
+        },
+        {
+            "client": "",
+            "matches": false,
+            "other": "all"
+        },
+        {
+            "client": "",
+            "matches": false,
+            "other": "desktop"
+        },
+        {
+            "client": "",
+            "matches": false,
+            "other": "mobile"
+        },
+        {
+            "client": "",
+            "matches": false,
+            "other": "mobile-android"
+        },
+        {
+            "client": "",
+            "matches": false,
+            "other": "mobile-ios"
+        },
+        {
+            "client": "",
+            "matches": false,
+            "other": "web"
+        },
+        {
+            "client": "",
+            "matches": true,
+            "other": ""
+        },
+        {
+            "client": "",
+            "matches": false,
+            "other": "unknown"
+        },
+        {
+            "client": "unknown",
+            "matches": false,
+            "other": "all"
+        },
+        {
+            "client": "unknown",
+            "matches": false,
+            "other": "desktop"
+        },
+        {
+            "client": "unknown",
+            "matches": false,
+            "other": "mobile"
+        },
+        {
+            "client": "unknown",
+            "matches": false,
+            "other": "mobile-android"
+        },
+        {
+            "client": "unknown",
+            "matches": false,
+            "other": "mobile-ios"
+        },
+        {
+            "client": "unknown",
+            "matches": false,
+            "other": "web"
+        },
+        {
+            "client": "unknown",
+            "matches": false,
+            "other": ""
+        },
+        {
+            "client": "unknown",
+            "matches": true,
+            "other": "unknown"
+        }
+    ],
+    "constants": {
+        "NoticeAudienceAll": "all",
+        "NoticeAudienceMember": "member",
+        "NoticeAudienceSysadmin": "sysadmin",
+        "NoticeAudienceTeamAdmin": "teamadmin",
+        "NoticeClientTypeAll": "all",
+        "NoticeClientTypeDesktop": "desktop",
+        "NoticeClientTypeMobile": "mobile",
+        "NoticeClientTypeMobileAndroid": "mobile-android",
+        "NoticeClientTypeMobileIos": "mobile-ios",
+        "NoticeClientTypeWeb": "web",
+        "NoticeInstanceTypeBoth": "both",
+        "NoticeInstanceTypeCloud": "cloud",
+        "NoticeInstanceTypeOnPrem": "onprem",
+        "NoticeSKUAll": "all",
+        "NoticeSKUE0": "e0",
+        "NoticeSKUE10": "e10",
+        "NoticeSKUE20": "e20",
+        "NoticeSKUTeam": "team",
+        "URL": "url"
+    },
+    "instance_matches": [
+        {
+            "instance": "both",
+            "is_cloud": false,
+            "matches": true
+        },
+        {
+            "instance": "both",
+            "is_cloud": true,
+            "matches": true
+        },
+        {
+            "instance": "cloud",
+            "is_cloud": false,
+            "matches": false
+        },
+        {
+            "instance": "cloud",
+            "is_cloud": true,
+            "matches": true
+        },
+        {
+            "instance": "onprem",
+            "is_cloud": false,
+            "matches": true
+        },
+        {
+            "instance": "onprem",
+            "is_cloud": true,
+            "matches": false
+        },
+        {
+            "instance": "",
+            "is_cloud": false,
+            "matches": true
+        },
+        {
+            "instance": "",
+            "is_cloud": true,
+            "matches": true
+        },
+        {
+            "instance": "unknown",
+            "is_cloud": false,
+            "matches": true
+        },
+        {
+            "instance": "unknown",
+            "is_cloud": true,
+            "matches": true
+        }
+    ],
+    "keys": {
+        "conditions": [
+            "audience",
+            "clientType",
+            "desktopVersion",
+            "displayDate",
+            "instanceType",
+            "mobileVersion",
+            "numberOfPosts",
+            "numberOfUsers",
+            "serverConfig",
+            "serverVersion",
+            "sku",
+            "userConfig",
+            "deprecating_dependency"
+        ],
+        "external_dep": [
+            "name",
+            "minimum_version"
+        ],
+        "message_internal": [
+            "action",
+            "actionParam",
+            "actionText",
+            "description",
+            "image",
+            "title"
+        ],
+        "notice": [
+            "conditions",
+            "id",
+            "localizedMessages",
+            "repeatable"
+        ],
+        "view_state": [
+            "UserId",
+            "NoticeId",
+            "Viewed",
+            "Timestamp"
+        ]
+    },
+    "nil_receivers": [
+        {
+            "name": "audience",
+            "panics": true
+        },
+        {
+            "name": "client_type",
+            "panics": true
+        },
+        {
+            "name": "instance_type",
+            "panics": true
+        },
+        {
+            "name": "sku",
+            "panics": true
+        }
+    ],
+    "round_trip": [
+        {
+            "marshal": "[{\"conditions\":{},\"id\":\"a\",\"localizedMessages\":null,\"repeatable\":true},{\"conditions\":{},\"id\":\"b\",\"localizedMessages\":null}]",
+            "name": "notices",
+            "remarshal": "[{\"conditions\":{},\"id\":\"a\",\"localizedMessages\":null,\"repeatable\":true},{\"conditions\":{},\"id\":\"b\",\"localizedMessages\":null}]"
+        },
+        {
+            "marshal": "[{\"description\":\"d\",\"title\":\"t\",\"id\":\"a\",\"sysAdminOnly\":true,\"teamAdminOnly\":false}]",
+            "name": "messages",
+            "remarshal": "[{\"description\":\"d\",\"title\":\"t\",\"id\":\"a\",\"sysAdminOnly\":true,\"teamAdminOnly\":false}]"
+        },
+        {
+            "is_nil": true,
+            "name": "notices_from_null",
+            "ok": true,
+            "remarshal": "null"
+        }
+    ],
+    "sku_matches": [
+        {
+            "matches": true,
+            "other": "",
+            "sku": "all"
+        },
+        {
+            "matches": true,
+            "other": "e0",
+            "sku": "all"
+        },
+        {
+            "matches": true,
+            "other": "e10",
+            "sku": "all"
+        },
+        {
+            "matches": true,
+            "other": "e20",
+            "sku": "all"
+        },
+        {
+            "matches": true,
+            "other": "team",
+            "sku": "all"
+        },
+        {
+            "matches": true,
+            "other": "all",
+            "sku": "all"
+        },
+        {
+            "matches": true,
+            "other": "unknown",
+            "sku": "all"
+        },
+        {
+            "matches": true,
+            "other": "",
+            "sku": "e0"
+        },
+        {
+            "matches": false,
+            "other": "e0",
+            "sku": "e0"
+        },
+        {
+            "matches": false,
+            "other": "e10",
+            "sku": "e0"
+        },
+        {
+            "matches": false,
+            "other": "e20",
+            "sku": "e0"
+        },
+        {
+            "matches": false,
+            "other": "team",
+            "sku": "e0"
+        },
+        {
+            "matches": false,
+            "other": "all",
+            "sku": "e0"
+        },
+        {
+            "matches": false,
+            "other": "unknown",
+            "sku": "e0"
+        },
+        {
+            "matches": false,
+            "other": "",
+            "sku": "e10"
+        },
+        {
+            "matches": false,
+            "other": "e0",
+            "sku": "e10"
+        },
+        {
+            "matches": true,
+            "other": "e10",
+            "sku": "e10"
+        },
+        {
+            "matches": false,
+            "other": "e20",
+            "sku": "e10"
+        },
+        {
+            "matches": false,
+            "other": "team",
+            "sku": "e10"
+        },
+        {
+            "matches": false,
+            "other": "all",
+            "sku": "e10"
+        },
+        {
+            "matches": false,
+            "other": "unknown",
+            "sku": "e10"
+        },
+        {
+            "matches": false,
+            "other": "",
+            "sku": "e20"
+        },
+        {
+            "matches": false,
+            "other": "e0",
+            "sku": "e20"
+        },
+        {
+            "matches": false,
+            "other": "e10",
+            "sku": "e20"
+        },
+        {
+            "matches": true,
+            "other": "e20",
+            "sku": "e20"
+        },
+        {
+            "matches": false,
+            "other": "team",
+            "sku": "e20"
+        },
+        {
+            "matches": false,
+            "other": "all",
+            "sku": "e20"
+        },
+        {
+            "matches": false,
+            "other": "unknown",
+            "sku": "e20"
+        },
+        {
+            "matches": true,
+            "other": "",
+            "sku": "team"
+        },
+        {
+            "matches": false,
+            "other": "e0",
+            "sku": "team"
+        },
+        {
+            "matches": false,
+            "other": "e10",
+            "sku": "team"
+        },
+        {
+            "matches": false,
+            "other": "e20",
+            "sku": "team"
+        },
+        {
+            "matches": false,
+            "other": "team",
+            "sku": "team"
+        },
+        {
+            "matches": false,
+            "other": "all",
+            "sku": "team"
+        },
+        {
+            "matches": false,
+            "other": "unknown",
+            "sku": "team"
+        },
+        {
+            "matches": true,
+            "other": "",
+            "sku": ""
+        },
+        {
+            "matches": false,
+            "other": "e0",
+            "sku": ""
+        },
+        {
+            "matches": false,
+            "other": "e10",
+            "sku": ""
+        },
+        {
+            "matches": false,
+            "other": "e20",
+            "sku": ""
+        },
+        {
+            "matches": false,
+            "other": "team",
+            "sku": ""
+        },
+        {
+            "matches": false,
+            "other": "all",
+            "sku": ""
+        },
+        {
+            "matches": false,
+            "other": "unknown",
+            "sku": ""
+        },
+        {
+            "matches": false,
+            "other": "",
+            "sku": "unknown"
+        },
+        {
+            "matches": false,
+            "other": "e0",
+            "sku": "unknown"
+        },
+        {
+            "matches": false,
+            "other": "e10",
+            "sku": "unknown"
+        },
+        {
+            "matches": false,
+            "other": "e20",
+            "sku": "unknown"
+        },
+        {
+            "matches": false,
+            "other": "team",
+            "sku": "unknown"
+        },
+        {
+            "matches": false,
+            "other": "all",
+            "sku": "unknown"
+        },
+        {
+            "matches": true,
+            "other": "unknown",
+            "sku": "unknown"
+        }
+    ],
+    "wire": [
+        {
+            "json": "{\"conditions\":{},\"id\":\"\",\"localizedMessages\":null}",
+            "name": "notice_zero"
+        },
+        {
+            "json": "{\"conditions\":{\"audience\":\"sysadmin\",\"clientType\":\"mobile\",\"desktopVersion\":[\"\\u003e=1.2.3\"],\"displayDate\":\"\\u003e= 2020-03-01T00:00:00Z\",\"instanceType\":\"cloud\",\"mobileVersion\":[\"\\u003cv5.19\"],\"numberOfPosts\":100,\"numberOfUsers\":10,\"serverConfig\":{\"PluginSettings.Enable\":true},\"serverVersion\":[\"\\u003e=5.20\"],\"sku\":\"e20\",\"userConfig\":{\"new_sidebar.disabled\":true},\"deprecating_dependency\":{\"name\":\"postgres\",\"minimum_version\":\"11\"}},\"id\":\"notice-1\",\"localizedMessages\":{\"en\":{\"description\":\"English description\",\"title\":\"English\"}},\"repeatable\":true}",
+            "name": "notice_full"
+        },
+        {
+            "json": "{\"conditions\":{},\"id\":\"notice-2\",\"localizedMessages\":null,\"repeatable\":false}",
+            "name": "notice_repeatable_false"
+        },
+        {
+            "json": "{\"action\":\"url\",\"actionParam\":\"/console/some-page\",\"actionText\":\"Go\",\"description\":\"the description\",\"image\":\"https://example.com/i.png\",\"title\":\"the title\",\"id\":\"notice-1\",\"sysAdminOnly\":true,\"teamAdminOnly\":false}",
+            "name": "message_full"
+        },
+        {
+            "json": "{\"description\":\"\",\"title\":\"\",\"id\":\"\",\"sysAdminOnly\":false,\"teamAdminOnly\":false}",
+            "name": "message_zero"
+        },
+        {
+            "json": "{\"description\":\"\",\"title\":\"\"}",
+            "name": "message_internal_zero"
+        },
+        {
+            "json": "{\"action\":\"url\",\"actionParam\":\"/console/some-page\",\"actionText\":\"Go\",\"description\":\"the description\",\"image\":\"https://example.com/i.png\",\"title\":\"the title\"}",
+            "name": "message_internal_full"
+        },
+        {
+            "json": "{\"UserId\":\"y9i4er48tt8bukijy7i3u5y9ar\",\"NoticeId\":\"notice-1\",\"Viewed\":3,\"Timestamp\":1700000000000}",
+            "name": "view_state"
+        },
+        {
+            "json": "{\"UserId\":\"\",\"NoticeId\":\"\",\"Viewed\":0,\"Timestamp\":0}",
+            "name": "view_state_zero"
+        },
+        {
+            "json": "{\"name\":\"postgres\",\"minimum_version\":\"11\"}",
+            "name": "external_dependency"
+        },
+        {
+            "json": "[{\"conditions\":{},\"id\":\"a\",\"localizedMessages\":null},{\"conditions\":{},\"id\":\"b\",\"localizedMessages\":null}]",
+            "name": "notices_list"
+        },
+        {
+            "json": "[]",
+            "name": "notices_list_empty"
+        },
+        {
+            "json": "[{\"description\":\"\",\"title\":\"\",\"id\":\"a\",\"sysAdminOnly\":false,\"teamAdminOnly\":false},{\"description\":\"\",\"title\":\"\",\"id\":\"b\",\"sysAdminOnly\":false,\"teamAdminOnly\":false}]",
+            "name": "messages_list"
+        }
+    ]
+}

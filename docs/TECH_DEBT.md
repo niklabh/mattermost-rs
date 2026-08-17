@@ -3414,3 +3414,75 @@ all strings — a pattern shape outside those alphabets is still unmeasured. Wid
 is cheap when a specific shape becomes a concern; enumerating everything is not possible.
 
 And the recursion note above stands unchanged: no depth limit, exactly as Go has none.
+
+---
+
+## D-102 · `product_notices.go`'s four matchers disagree about unknown values
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-17 (phase 1, `product_notices.go`)
+
+Not a divergence from Go — a divergence *within* Go, reproduced faithfully, and the reason this
+file could not be tidied.
+
+| method | an unrecognised value |
+|---|---|
+| `NoticeAudience.Matches` | **`false`** — a `switch` with no default, falling to `return false` |
+| `NoticeInstanceType.Matches` | **`true`** — three `if`s, then `return true` |
+| `NoticeClientType.Matches` | exact equality only |
+| `NoticeSKU.Matches` | exact equality only |
+
+So an audience nobody recognises **hides** a notice and an instance type nobody recognises
+**shows** it. Measured both ways, including for the zero value.
+
+The obvious tidy — one shared enum with a uniform fallback, or four `match` expressions written
+the same way — silently changes who sees a notice, in opposite directions depending on the field.
+`NoticeInstanceType::matches` is therefore written as Go writes it, three `if`s and a trailing
+`true`, so the permissive fallthrough stays visible rather than becoming a `_ =>` arm that reads
+like a decision.
+
+**Two smaller traps in the same file**, both pinned:
+
+* `NoticeSKU.Matches` treats `e0` and `team` as "unlicensed", so they match the **empty string**
+  and not their own names — `NoticeSKUE0.Matches("e0")` is `false`.
+* `NoticeClientType`'s `mobile` alias is **one-directional**: `mobile` matches `mobile-ios`, and
+  `mobile-ios` does not match `mobile`.
+
+---
+
+## D-103 · `NoticeClientTypeFromString` rejects two of its own constants
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-17 (phase 1, `product_notices.go`)
+
+The function accepts `web`, `mobile-ios`, `mobile-android` and `desktop`. It does **not** accept
+`mobile` or `all` — both declared `NoticeClientType` constants, and `all` is the type's documented
+default. Measured; every other input, those two included, is an error.
+
+On failure Go returns `NoticeClientTypeAll` **alongside** the error, so a caller that ignores the
+error gets the *permissive* value rather than a zero one. That is easy to lose in translation: a
+Rust `Result<NoticeClientType, SomeError>` would discard it.
+
+**Reproduced** by returning `Result<NoticeClientType, NoticeClientType>` — the error arm carries
+the fallback Go returns. Ugly, and deliberately so: the alternative is an error type that silently
+drops a value real callers may be reading.
+
+---
+
+## D-104 · `NoticeMessage`'s embed forces a hand-written `Serialize`
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-17 (phase 1, `product_notices.go`)
+
+`NoticeMessage` embeds `NoticeMessageInternal` anonymously, so Go inlines its keys and emits them
+**first**. Measured:
+
+```
+action actionParam actionText description image title id sysAdminOnly teamAdminOnly
+```
+
+serde's `#[serde(flatten)]` emits flattened keys **last**. This is [D-067] a second time — the
+same problem `ScheduledPost` has — so it is solved the same way: `Serialize` is hand-written and
+`Deserialize` still derives with `flatten`, since input order does not matter.
+
+The cost is the one [D-067] already records: the hand-written impl restates the embedded type's
+field list, so a field added to `NoticeMessageInternal` must be added here too or it silently
+vanishes from `NoticeMessage`'s output. The wire test covers it only if the fixture is
+regenerated.

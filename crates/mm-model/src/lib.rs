@@ -44,6 +44,7 @@ pub mod post_list;
 pub mod post_metadata;
 pub mod post_search_results;
 pub mod preference;
+pub mod product_notices;
 pub mod reaction;
 pub mod scheduled_post;
 pub mod scheduled_post_recurrence;

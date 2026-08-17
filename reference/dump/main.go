@@ -128,6 +128,10 @@ var registry = map[string]any{
 	"client_registration_request":   &model.ClientRegistrationRequest{},
 	"client_registration_response":  &model.ClientRegistrationResponse{},
 	"dcr_error":                     &model.DCRError{},
+	"product_notice":                &model.ProductNotice{},
+	"notice_message":                &model.NoticeMessage{},
+	"product_notice_view_state":     &model.ProductNoticeViewState{},
+	"external_dependency":           &model.ExternalDependency{},
 }
 
 // overrides pins specific fields to semantically valid values, keyed by the
@@ -514,6 +518,12 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_channel_search.json"))
+
+	if err := writeProductNoticesBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: product notices behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_product_notices.json"))
 
 	if err := writeOAuthDCRBehaviourFixture(*out); err != nil {
 		fmt.Fprintf(os.Stderr, "FAIL: oauth dcr behaviour fixture: %v\n", err)
