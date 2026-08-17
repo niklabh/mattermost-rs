@@ -668,6 +668,30 @@ remains the whole of this entry — `serde_json::to_string` still does not escap
 U+2028 or U+2029, and nothing enforces the choice. The `clippy.toml` `disallowed-methods` entry
 is still the recommended fix and is still unwritten.
 
+**Measured 2026-08-17**, after `product_notices.go` shipped a wire test that used
+`serde_json::to_string`, passed every probe in the file, and failed only on the realistic one —
+`Conditions` holds semver ranges like `">=1.2.3"`, which is exactly the shape [D-022] escapes.
+
+The current spread across the crate:
+
+| | |
+|---|---|
+| modules calling `go_json_marshal` | 29 |
+| modules with a byte-exact wire test | 16 |
+| fixtures containing `<`, `>` or `&` | 23 of 132 |
+
+So the habit is largely established, and the exposure is narrower than the "nothing enforces it"
+framing suggests — but it is real, and the failure mode is now demonstrated rather than
+hypothetical: **a wire test whose fixture happens to contain no escapable character passes with
+either marshaller**, and only starts failing when the type's real data grows one.
+
+That matters beyond byte-comparison because `Post::is_valid` measures its length caps against
+Go's JSON, where each escaped character is six bytes instead of one.
+
+**Still open**, and the enforcement idea is unchanged: a test that walks every fixture, decodes it
+into its type and asserts `go_json_marshal` reproduces the file, would catch a wrong marshaller
+at the point it is introduced rather than when the data changes.
+
 ---
 
 ## D-028 · `Auditable` is unported on three types, and `Emoji`'s has an upstream bug
@@ -3486,3 +3510,72 @@ The cost is the one [D-067] already records: the hand-written impl restates the 
 field list, so a field added to `NoticeMessageInternal` must be added here too or it silently
 vanishes from `NoticeMessage`'s output. The wire test covers it only if the fixture is
 regenerated.
+
+---
+
+## D-105 · `link_metadata.go`'s OpenGraph half needs a third-party package
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-08-17 (phase 1, `link_metadata.go`)
+**Blocks** `TruncateOpenGraph`, `FilterSVGImages`, `firstNImages`, `truncateText`, and the
+OpenGraph branches of `IsValid` and `DeserializeDataToConcreteType`.
+
+`link_metadata.go` imports `github.com/dyatlov/go-opengraph/opengraph` and its `types/image`
+package. `LinkMetadata.Data` holds a `*opengraph.OpenGraph` for HTML links, and five functions
+manipulate its fields — truncating `Title`/`Description`/`SiteName`, blanking `Article`, `Book`,
+`Profile`, `Determiner`, `Locale`, `LocalesAlternate`, `Audios` and `Videos`, and filtering
+`Images`.
+
+This is the fourth "a package does the real work" case after `net/mail`, `x/text/language`
+([D-001]), `net/url` ([D-003]) and `shared/markdown` ([D-044]) — but unlike those it is a
+**third-party** dependency rather than the Go standard library or Mattermost's own tree, which
+makes the decision different:
+
+- **(a) Port the OpenGraph types.** They are data structs plus a parser; only the structs are
+  needed here, since parsing happens elsewhere. Probably the smallest real option.
+- **(b) Find a Rust OpenGraph crate.** Risky in the way the `url` crate was for [D-003]: the wire
+  shape has to match `dyatlov`'s struct tags exactly, and a crate written to the OpenGraph spec
+  rather than to that library will differ.
+- **(c) Leave the OpenGraph link-preview path proxied to Go**, as [D-044] does for interactive
+  webhooks. Costs nothing and is reversible.
+
+**Not decided.** The portable half — the hash, the hour rounding, `IsSVGImageURL`, the wire type
+and `PreSave` — is ported and pinned; nothing depends on the rest yet.
+
+**Worth knowing before choosing:** `truncateText` uses `fmt.Sprintf("%.300s[...]", …)`, where Go's
+precision for `%s` is measured in **runes**, not bytes. It is unexported and only reachable
+through `TruncateOpenGraph`, so it is untested here and lands with whichever option is taken.
+
+---
+
+## D-106 · `LinkMetadata.Data` is a `Value`, so a struct inside it loses field order
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-08-17 (phase 1, `link_metadata.go`)
+
+`Data` is `any` in Go, holding `*PostImage`, `*opengraph.OpenGraph` or nil according to `Type`.
+It is `Option<serde_json::Value>` here, and `serde_json::Value::Object` is a **BTreeMap** — so it
+sorts keys. Measured:
+
+```
+go   "Data":{"width":100,"height":200,"format":"png","frame_count":1}
+ours "Data":{"format":"png","frame_count":1,"height":200,"width":100}
+```
+
+The values are identical and every JSON reader sees the same document, so this is a byte-level
+difference only — but this project's bar is byte-level, and the wire test says so explicitly
+rather than comparing parsed values and moving on.
+
+**It also blocks `IsValid`.** Go's validation is a *type assertion* — `o.Data.(*PostImage)` — on
+the concrete Go type. A `Value` cannot answer that question: an arbitrary object and a serialised
+`PostImage` are indistinguishable. So `IsValid` and `DeserializeDataToConcreteType` are deferred
+with the OpenGraph half rather than approximated, since approximating a validation is the
+dangerous direction.
+
+**To pay off**, type `Data` as an enum over the concrete variants:
+
+```rust
+enum LinkMetadataData { Image(PostImage), OpenGraph(/* D-105 */), Raw(serde_json::Value) }
+```
+
+which restores both field order and the type test in one move. It needs [D-105] resolved first for
+the middle variant, and needs care on the deserialise side: `#[serde(untagged)]` would try
+`PostImage` against every object, and `PostImage`'s fields all have defaults.

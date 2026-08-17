@@ -27,6 +27,7 @@ pub mod file_info_search_results;
 pub mod go_url;
 pub mod integration_action;
 pub mod limits;
+pub mod link_metadata;
 pub mod mention_map;
 pub mod message_attachment;
 pub mod mm_blocks_actions;

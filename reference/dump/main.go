@@ -519,6 +519,12 @@ func main() {
 	}
 	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_channel_search.json"))
 
+	if err := writeLinkMetadataBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: link metadata behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_link_metadata.json"))
+
 	if err := writeProductNoticesBehaviourFixture(*out); err != nil {
 		fmt.Fprintf(os.Stderr, "FAIL: product notices behaviour fixture: %v\n", err)
 		os.Exit(1)
