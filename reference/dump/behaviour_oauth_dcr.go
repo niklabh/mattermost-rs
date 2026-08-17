@@ -51,15 +51,16 @@ import (
 
 func writeOAuthDCRBehaviourFixture(outDir string) error {
 	out := map[string]any{
-		"constants":     dcrConstants(),
-		"keys":          dcrKeys(),
-		"wire":          dcrWireAll(),
-		"defaults":      dcrDefaultsAll(),
-		"request_valid": dcrRequestIsValidAll(),
-		"pattern_valid": dcrPatternValidAll(),
-		"glob":          dcrGlobAll(),
-		"allowlist":     dcrAllowlistAll(),
-		"dcr_error":     dcrErrorAll(),
+		"constants":      dcrConstants(),
+		"keys":           dcrKeys(),
+		"wire":           dcrWireAll(),
+		"defaults":       dcrDefaultsAll(),
+		"request_valid":  dcrRequestIsValidAll(),
+		"pattern_valid":  dcrPatternValidAll(),
+		"glob":           dcrGlobAll(),
+		"allowlist":      dcrAllowlistAll(),
+		"dcr_error":      dcrErrorAll(),
+		"glob_generated": dcrGlobGeneratedAll(),
 	}
 
 	blob, err := json.MarshalIndent(out, "", "    ")
@@ -453,6 +454,63 @@ func dcrAllowlistAll() []map[string]any {
 			"uri":     c.uri,
 			"allowed": model.RedirectURIMatchesAllowlist(c.uri, c.allowlist),
 		})
+	}
+	return out
+}
+
+// --- the generated sweep ----------------------------------------------------------------------
+
+// dcrGlobGeneratedAll is the systematic half of the glob corpus.
+//
+// The hand-written cases above are adversarial but finite, and a security boundary deserves the
+// treatment IsValidHTTPURL got in [D-003]: enumerate the input space rather than imagining it.
+// This crosses every URI built from a small component alphabet with every pattern built from a
+// small wildcard alphabet — 3,240 pairs — and records Go's answer for each.
+//
+// Generation is **systematic, not random**: no rand, no seed, so the output is byte-identical on
+// every run and the fixture diff stays empty unless behaviour actually changed. See [D-032].
+//
+// The alphabets are chosen so the interesting interactions are all reachable: a host that is a
+// subdomain (does `*` cross a dot?), a path with several segments (does `*` cross a slash?), a
+// percent-encoded path (is EscapedPath matched or the decoded form?), a multi-byte path (is
+// matching byte-wise?), a port (does a wildcard cover it?), and every combination of present and
+// absent query on both sides.
+func dcrGlobGeneratedAll() []map[string]any {
+	uriHosts := []string{"example.com", "a.example.com", "localhost:8080"}
+	uriPaths := []string{"/", "/a", "/a/b", "/a%20b", "/café"}
+	uriQueries := []string{"", "?x=1", "?x=2&y=3"}
+
+	patternHosts := []string{"example.com", "*.example.com", "*", "localhost:*"}
+	patternPaths := []string{"/", "/a", "/*", "/**", "/a/*", "/**/b"}
+	patternQueries := []string{"", "?x=1", "?*"}
+
+	uris := make([]string, 0, len(uriHosts)*len(uriPaths)*len(uriQueries))
+	for _, h := range uriHosts {
+		for _, p := range uriPaths {
+			for _, q := range uriQueries {
+				uris = append(uris, "https://"+h+p+q)
+			}
+		}
+	}
+
+	patterns := make([]string, 0, len(patternHosts)*len(patternPaths)*len(patternQueries))
+	for _, h := range patternHosts {
+		for _, p := range patternPaths {
+			for _, q := range patternQueries {
+				patterns = append(patterns, "https://"+h+p+q)
+			}
+		}
+	}
+
+	out := make([]map[string]any, 0, len(uris)*len(patterns))
+	for _, uri := range uris {
+		for _, pattern := range patterns {
+			out = append(out, map[string]any{
+				"uri":     uri,
+				"pattern": pattern,
+				"matches": model.RedirectURIMatchesGlob(uri, pattern),
+			})
+		}
 	}
 	return out
 }

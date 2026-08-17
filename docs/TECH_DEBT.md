@@ -3387,9 +3387,21 @@ itself rather than pointing at a case index:
 - a pattern with no query requires a candidate with none;
 - an invalid pattern never matches.
 
-**What is accepted:** the corpus is finite and adversarial-by-construction rather than exhaustive.
-A property-based sweep would be stronger, and the `IsValidHTTPURL` work ([D-003]) showed what that
-buys — 3,529 generated cases against 136 hand-picked ones. This file has no generated sweep.
+**The generated sweep landed 2026-08-17, same day.** The concern above said "a property-based
+sweep would be stronger, and [D-003] showed what that buys". So it was built rather than left on
+a pile: `dcrGlobGeneratedAll` crosses 45 URIs against 72 patterns — **3,240 pairs** — and records
+Go's answer for each. Every one passes.
+
+The alphabets are chosen so each interaction is reachable rather than merely plausible: a
+subdomain host (does `*` cross a dot?), a multi-segment path (does `*` cross a slash?), a
+percent-encoded path (is `EscapedPath` matched or the decoded form?), a multi-byte path (is
+matching byte-wise?), a port (does a wildcard cover it?), and every present/absent query
+combination on both sides.
+
+Generation is **systematic, not random** — no rand, no seed — so the fixture is byte-identical on
+every run and a diff means behaviour changed. The Rust test additionally asserts the corpus is not
+degenerate: 312 of the 3,240 match, so a matcher hard-coded to `false` would fail 312 cases rather
+than passing 2,928.
 
 **Also accepted:** `redirect_uri_matches_glob_recur` is recursive with no depth limit, exactly as
 Go's is, so a pathological pattern can exhaust the stack on both servers equally. Reproducing the
@@ -3397,6 +3409,8 @@ recursion rather than rewriting it iteratively keeps the matching semantics iden
 matters more here than the shared exposure — and the patterns are operator-configured, not
 attacker-supplied.
 
-**To strengthen**, add a generated corpus: random patterns and URIs over a small alphabet
-including `/`, `*` and `?`, compared against Go for a few thousand pairs. Worth doing before this
-is exposed to real traffic.
+**What remains accepted:** the sweep is systematic over a chosen alphabet, not exhaustive over
+all strings — a pattern shape outside those alphabets is still unmeasured. Widening the alphabet
+is cheap when a specific shape becomes a concern; enumerating everything is not possible.
+
+And the recursion note above stands unchanged: no depth limit, exactly as Go has none.

@@ -737,6 +737,42 @@ mod go_parity {
         ));
     }
 
+    /// The systematic half of the corpus: 3,240 (URI, pattern) pairs crossing a small component
+    /// alphabet against a small wildcard alphabet, with Go's answer for each.
+    ///
+    /// This is what [D-101] asked for. The hand-written probes above are adversarial but finite;
+    /// this enumerates the space rather than imagining it, which is the treatment
+    /// `IsValidHTTPURL` got in [D-003] and which a security boundary deserves.
+    #[test]
+    fn generated_glob_sweep_matches_go() {
+        let oracle = oracle();
+        let cases = oracle["glob_generated"].as_array().unwrap();
+
+        let mut matched = 0usize;
+        for case in cases {
+            let uri = case["uri"].as_str().unwrap();
+            let pattern = case["pattern"].as_str().unwrap();
+            let expected = case["matches"].as_bool().unwrap();
+            if expected {
+                matched += 1;
+            }
+            assert_eq!(
+                redirect_uri_matches_glob(uri, pattern),
+                expected,
+                "generated sweep mismatch: {uri:?} against {pattern:?}"
+            );
+        }
+
+        // A sweep whose answers are all one value proves nothing — a matcher hard-coded to
+        // `false` would pass 2,928 of 3,240 cases. Assert the corpus is genuinely mixed, and
+        // that it is the size it should be.
+        assert_eq!(cases.len(), 3_240, "45 URIs x 72 patterns");
+        assert!(
+            matched > 100 && matched < cases.len() - 100,
+            "the sweep must contain both outcomes in quantity, got {matched} matches"
+        );
+    }
+
     #[test]
     fn allowlist_matches_go() {
         let allowlist_for = |name: &str| -> Vec<String> {
