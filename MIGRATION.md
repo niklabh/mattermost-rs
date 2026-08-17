@@ -78,32 +78,45 @@ depend on `mm-model`, and `mm-model` may never depend on an AGPL crate or read
 `channel_count.go` **does not exist** — checked 2026-08-17. The earlier note guessed at the name;
 do not look for it again.
 
-## Next: the permission system, or more model files
+## Next: [D-108] — the password hasher, then `User::pre_save`
 
-Four routes are migrated and the easy seam has run out. `GET /users/me/teams/members` landed —
-see the rows below — but its sibling `GET /users/me/teams` did **not**, and the reason is now the
-shape of the whole roadmap. Measured across `channels/api4/`: **687 handlers, 674
-`SessionHasPermission*` call sites, 59 files.** The four routes migrated so far are the exception,
-not a sample — each is `me`-scoped, and Go's checks short-circuit for self.
+`User::is_valid` landed 2026-08-17 and closed [D-002]'s first half. `PreSave` did not, and it is
+the highest-value remaining item because of what it guards:
 
-[D-094] records the two shapes of blocker, and the distinction is the useful part:
+**`pre_save_partial` is named that way deliberately, and the name is the only guard.** A caller
+mistaking it for Go's `PreSave` stores a **plaintext password**. It is the one genuinely dangerous
+thing in the crate. Renaming it is the last step of this task, not the first.
 
-- **Escapable** — the check guards something that cannot act here. `/users/me/teams/members`
-  gates `SanitizeRoleData`, which is a no-op for one's own membership. Portable; migrated.
+Two dependencies, and the first is a decision:
+
+1. **A bcrypt hasher.** Go uses `golang.org/x/crypto/bcrypt`. Both servers read the same
+   `Users.Password` column, so the **cost factor and hash format are load-bearing** — this is a
+   cross-server compatibility problem like [D-046], not a free choice. Pin it against Go's output
+   for a known password and cost before trusting it; a Rust-only round trip proves nothing.
+2. **`timezones.DefaultUserTimezone()`**, which reads a timezone list Mattermost ships.
+
+### After that
+
+Two seams, both open, neither blocked:
+
+- **More `mm-model` files** — 134 in scope. Every one of the last six turned up an upstream bug or
+  an inverted rule, so the oracle discipline is still paying. By logic density the next candidates
+  are `authorize.go` (300 lines, 10 funcs), `view.go` (267/10) and `job.go` (254/8).
+- **The permission system** ([D-094]) — 687 api4 handlers, **674** `SessionHasPermission*` call
+  sites across 59 files. The four migrated routes are the exception, not a sample: each is
+  `me`-scoped, and Go's checks short-circuit for self. Until this lands, anything permission-gated
+  is forwarded, which is correct and free.
+
+[D-094] records the distinction that decides whether a given route is portable *without* the
+permission system, and it is the useful part:
+
+- **Escapable** — the check guards something that cannot act on this route.
+  `/users/me/teams/members` gates `SanitizeRoleData`, which is a no-op for one's own membership.
+  Portable; migrated.
 - **Not escapable** — the check decides the response. `/users/me/teams` gates `SanitizeTeam`,
   which strips `email` and `invite_id` per permission, with no self-shortcut. Serving it without
-  the check leaks an invite id, which is enough to join the team. Forwarded, with a test that
-  keeps it forwarded.
-
-So the next substantial step is **the permission system** — generate `model/permission.go`
-(2,789 lines, already out of scope for hand-translation), port `model/role.go` (1,311), and reuse
-the scheme-roles resolution already written in `mm-store/src/team_store.rs`, which is the same
-shape one layer down.
-
-The alternative is to **keep porting `mm-model`** — 141 files remain and nothing there is blocked.
-Forwarding anything permission-gated stays correct and free in the meantime; [D-091] was closed
-that way rather than by porting, which is worth remembering: **forwarding is a correctness tool,
-not only a stopgap.**
+  the check leaks an invite id, which is enough to join the team. Forwarded, with a test keeping
+  it forwarded.
 
 ### If porting model files instead
 
