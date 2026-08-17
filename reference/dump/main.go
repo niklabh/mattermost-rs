@@ -125,6 +125,9 @@ var registry = map[string]any{
 	"oauth_app":                     &model.OAuthApp{},
 	"oauth_app_request":             &model.OAuthAppRequest{},
 	"intune_login_request":          &model.IntuneLoginRequest{},
+	"client_registration_request":   &model.ClientRegistrationRequest{},
+	"client_registration_response":  &model.ClientRegistrationResponse{},
+	"dcr_error":                     &model.DCRError{},
 }
 
 // overrides pins specific fields to semantically valid values, keyed by the
@@ -511,6 +514,12 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_channel_search.json"))
+
+	if err := writeOAuthDCRBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: oauth dcr behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_oauth_dcr.json"))
 
 	if err := writeOAuthBehaviourFixture(*out); err != nil {
 		fmt.Fprintf(os.Stderr, "FAIL: oauth behaviour fixture: %v\n", err)

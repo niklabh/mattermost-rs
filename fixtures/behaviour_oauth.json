@@ -81,6 +81,128 @@
             "name": "zero"
         }
     ],
+    "from_registration": [
+        {
+            "callback_urls": [
+                "https://example.com/cb"
+            ],
+            "client_secret_length": 26,
+            "create_at": 0,
+            "creator_id": "aaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "has_client_secret": true,
+            "homepage": "",
+            "id": "",
+            "is_dynamically_registered": true,
+            "name": "minimal",
+            "name_field": "Dynamically Registered Client",
+            "update_at": 0
+        },
+        {
+            "callback_urls": [
+                "https://example.com/cb"
+            ],
+            "client_secret_length": 26,
+            "create_at": 0,
+            "creator_id": "aaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "has_client_secret": true,
+            "homepage": "",
+            "id": "",
+            "is_dynamically_registered": true,
+            "name": "with_name",
+            "name_field": "My Client",
+            "update_at": 0
+        },
+        {
+            "callback_urls": [
+                "https://example.com/cb"
+            ],
+            "client_secret_length": 26,
+            "create_at": 0,
+            "creator_id": "aaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "has_client_secret": true,
+            "homepage": "",
+            "id": "",
+            "is_dynamically_registered": true,
+            "name": "empty_name_pointer",
+            "name_field": "",
+            "update_at": 0
+        },
+        {
+            "callback_urls": [
+                "https://example.com/cb"
+            ],
+            "client_secret_length": 26,
+            "create_at": 0,
+            "creator_id": "aaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "has_client_secret": true,
+            "homepage": "",
+            "id": "",
+            "is_dynamically_registered": true,
+            "name": "auth_method_nil_is_confidential",
+            "name_field": "Dynamically Registered Client",
+            "update_at": 0
+        },
+        {
+            "callback_urls": [
+                "https://example.com/cb"
+            ],
+            "client_secret_length": 0,
+            "create_at": 0,
+            "creator_id": "aaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "has_client_secret": false,
+            "homepage": "",
+            "id": "",
+            "is_dynamically_registered": true,
+            "name": "auth_method_none_is_public",
+            "name_field": "Dynamically Registered Client",
+            "update_at": 0
+        },
+        {
+            "callback_urls": [
+                "https://example.com/cb"
+            ],
+            "client_secret_length": 26,
+            "create_at": 0,
+            "creator_id": "aaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "has_client_secret": true,
+            "homepage": "",
+            "id": "",
+            "is_dynamically_registered": true,
+            "name": "auth_method_secret_post",
+            "name_field": "Dynamically Registered Client",
+            "update_at": 0
+        },
+        {
+            "callback_urls": [
+                "https://example.com/cb"
+            ],
+            "client_secret_length": 26,
+            "create_at": 0,
+            "creator_id": "aaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "has_client_secret": true,
+            "homepage": "",
+            "id": "",
+            "is_dynamically_registered": true,
+            "name": "auth_method_unknown_still_mints",
+            "name_field": "Dynamically Registered Client",
+            "update_at": 0
+        },
+        {
+            "callback_urls": [
+                "https://example.com/cb"
+            ],
+            "client_secret_length": 26,
+            "create_at": 0,
+            "creator_id": "aaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "has_client_secret": true,
+            "homepage": "https://example.com",
+            "id": "",
+            "is_dynamically_registered": true,
+            "name": "with_client_uri",
+            "name_field": "Dynamically Registered Client",
+            "update_at": 0
+        }
+    ],
     "is_valid": [
         {
             "name": "valid",
@@ -374,6 +496,40 @@
             "is_trusted_unchanged": true,
             "json_after": "{\"id\":\"y9i4er48tt8bukijy7i3u5y9ar\",\"creator_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaa\",\"create_at\":1600000000000,\"update_at\":1650000000000,\"client_secret\":\"\",\"name\":\"My OAuth App\",\"description\":\"does oauth things\",\"icon_url\":\"https://example.com/icon.png\",\"callback_urls\":[\"https://example.com/callback\"],\"homepage\":\"https://example.com\",\"is_trusted\":true,\"mattermost_app_id\":\"mmapp\"}",
             "name": "sanitize"
+        }
+    ],
+    "to_registration": [
+        {
+            "has_client_name": true,
+            "has_client_secret": true,
+            "has_client_uri": true,
+            "json": "{\"client_id\":\"y9i4er48tt8bukijy7i3u5y9ar\",\"client_secret\":\"a-client-secret\",\"redirect_uris\":[\"https://example.com/callback\"],\"token_endpoint_auth_method\":\"client_secret_post\",\"grant_types\":[\"authorization_code\",\"refresh_token\"],\"response_types\":[\"code\"],\"scope\":\"user\",\"client_name\":\"My OAuth App\",\"client_uri\":\"https://example.com\"}",
+            "name": "confidential",
+            "site_url_is_ignored": true
+        },
+        {
+            "has_client_name": true,
+            "has_client_secret": false,
+            "has_client_uri": true,
+            "json": "{\"client_id\":\"y9i4er48tt8bukijy7i3u5y9ar\",\"redirect_uris\":[\"https://example.com/callback\"],\"token_endpoint_auth_method\":\"none\",\"grant_types\":[\"authorization_code\",\"refresh_token\"],\"response_types\":[\"code\"],\"scope\":\"user\",\"client_name\":\"My OAuth App\",\"client_uri\":\"https://example.com\"}",
+            "name": "public",
+            "site_url_is_ignored": true
+        },
+        {
+            "has_client_name": false,
+            "has_client_secret": true,
+            "has_client_uri": true,
+            "json": "{\"client_id\":\"y9i4er48tt8bukijy7i3u5y9ar\",\"client_secret\":\"a-client-secret\",\"redirect_uris\":[\"https://example.com/callback\"],\"token_endpoint_auth_method\":\"client_secret_post\",\"grant_types\":[\"authorization_code\",\"refresh_token\"],\"response_types\":[\"code\"],\"scope\":\"user\",\"client_uri\":\"https://example.com\"}",
+            "name": "no_name",
+            "site_url_is_ignored": true
+        },
+        {
+            "has_client_name": true,
+            "has_client_secret": true,
+            "has_client_uri": false,
+            "json": "{\"client_id\":\"y9i4er48tt8bukijy7i3u5y9ar\",\"client_secret\":\"a-client-secret\",\"redirect_uris\":[\"https://example.com/callback\"],\"token_endpoint_auth_method\":\"client_secret_post\",\"grant_types\":[\"authorization_code\",\"refresh_token\"],\"response_types\":[\"code\"],\"scope\":\"user\",\"client_name\":\"My OAuth App\"}",
+            "name": "no_homepage",
+            "site_url_is_ignored": true
         }
     ],
     "validate_grant": [

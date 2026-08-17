@@ -445,6 +445,91 @@ impl OAuthApp {
     }
 }
 
+/// Port of `NewOAuthAppFromClientRegistration` (oauth.go:224). Closes [D-099].
+///
+/// # This is the only place in the file that mints a client secret
+///
+/// `PreSave` explicitly does not, so the public-versus-confidential decision is made here and
+/// nowhere else — and it is made from the *requested* auth method, not a validated one. Measured:
+/// a `token_endpoint_auth_method` of `client_secret_basic`, which
+/// [`ClientRegistrationRequest::is_valid`] rejects, **still mints a secret** if it reaches this
+/// function, because the test is `!= none` rather than `== client_secret_post`. Callers must
+/// validate first.
+///
+/// A nil auth method defaults to **confidential**.
+///
+/// The client name falls back to the literal `"Dynamically Registered Client"` only when the
+/// field is absent; a request carrying an explicit empty string gets an empty name.
+pub fn new_oauth_app_from_client_registration(
+    request: &crate::oauth_dcr::ClientRegistrationRequest,
+    creator_id: &str,
+) -> OAuthApp {
+    let requested_auth_method = request
+        .token_endpoint_auth_method
+        .as_deref()
+        .unwrap_or(CLIENT_AUTH_METHOD_CLIENT_SECRET_POST);
+
+    OAuthApp {
+        creator_id: creator_id.to_owned(),
+        callback_urls: request.redirect_uris.clone(),
+        is_dynamically_registered: true,
+        name: request
+            .client_name
+            .clone()
+            .unwrap_or_else(|| "Dynamically Registered Client".to_owned()),
+        client_secret: if requested_auth_method != CLIENT_AUTH_METHOD_NONE {
+            new_id()
+        } else {
+            String::new()
+        },
+        homepage: request.client_uri.clone().unwrap_or_default(),
+        ..Default::default()
+    }
+}
+
+impl OAuthApp {
+    /// Port of `(*OAuthApp).ToClientRegistrationResponse` (oauth.go:252). Closes [D-099].
+    ///
+    /// # `site_url` is accepted and never read
+    ///
+    /// Go's signature takes `siteURL string` and the body does not reference it — measured by
+    /// calling with two different values and comparing the marshalled results, which are
+    /// identical. The parameter is kept so the signature matches Go's and a caller porting a call
+    /// site does not have to think about it; the doc says why it does nothing.
+    ///
+    /// The three optional fields are populated from emptiness, not from a flag: a public client
+    /// gets no `client_secret`, an unnamed app no `client_name`, one with no homepage no
+    /// `client_uri`.
+    pub fn to_client_registration_response(
+        &self,
+        _site_url: &str,
+    ) -> crate::oauth_dcr::ClientRegistrationResponse {
+        crate::oauth_dcr::ClientRegistrationResponse {
+            client_id: self.id.clone(),
+            client_secret: if self.is_public_client() {
+                None
+            } else {
+                Some(self.client_secret.clone())
+            },
+            redirect_uris: self.callback_urls.clone(),
+            token_endpoint_auth_method: self.get_token_endpoint_auth_method().to_owned(),
+            grant_types: Some(crate::oauth_dcr::get_default_grant_types()),
+            response_types: Some(crate::oauth_dcr::get_default_response_types()),
+            scope: SCOPE_USER.to_owned(),
+            client_name: if self.name.is_empty() {
+                None
+            } else {
+                Some(self.name.clone())
+            },
+            client_uri: if self.homepage.is_empty() {
+                None
+            } else {
+                Some(self.homepage.clone())
+            },
+        }
+    }
+}
+
 impl crate::audit_record::Auditable for OAuthApp {
     fn auditable(&self) -> StringInterface {
         OAuthApp::auditable(self)
@@ -835,6 +920,120 @@ mod go_parity {
             serde_json::Value::Object(public.auditable()),
             expected_public
         );
+    }
+
+    #[test]
+    fn new_from_client_registration_matches_go() {
+        use crate::oauth_dcr::ClientRegistrationRequest;
+
+        for case in oracle()["from_registration"].as_array().unwrap() {
+            let name = case["name"].as_str().unwrap();
+            let mut request = ClientRegistrationRequest {
+                redirect_uris: Some(vec!["https://example.com/cb".to_owned()]),
+                ..Default::default()
+            };
+            match name {
+                "minimal" | "auth_method_nil_is_confidential" => {}
+                "with_name" => request.client_name = Some("My Client".to_owned()),
+                "empty_name_pointer" => request.client_name = Some(String::new()),
+                "auth_method_none_is_public" => {
+                    request.token_endpoint_auth_method = Some(CLIENT_AUTH_METHOD_NONE.to_owned())
+                }
+                "auth_method_secret_post" => {
+                    request.token_endpoint_auth_method =
+                        Some(CLIENT_AUTH_METHOD_CLIENT_SECRET_POST.to_owned())
+                }
+                "auth_method_unknown_still_mints" => {
+                    request.token_endpoint_auth_method = Some("client_secret_basic".to_owned())
+                }
+                "with_client_uri" => request.client_uri = Some("https://example.com".to_owned()),
+                other => panic!("unmapped: {other}"),
+            }
+
+            let app =
+                new_oauth_app_from_client_registration(&request, "aaaaaaaaaaaaaaaaaaaaaaaaaa");
+            assert_eq!(
+                app.creator_id,
+                case["creator_id"].as_str().unwrap(),
+                "{name}"
+            );
+            assert_eq!(
+                app.name,
+                case["name_field"].as_str().unwrap(),
+                "{name}: name"
+            );
+            assert_eq!(app.homepage, case["homepage"].as_str().unwrap(), "{name}");
+            assert!(app.is_dynamically_registered, "{name}");
+            assert_eq!(
+                !app.client_secret.is_empty(),
+                case["has_client_secret"].as_bool().unwrap(),
+                "{name}: secret presence"
+            );
+            if !app.client_secret.is_empty() {
+                assert_eq!(
+                    app.client_secret.len(),
+                    case["client_secret_length"].as_u64().unwrap() as usize,
+                    "{name}: secret length"
+                );
+            }
+            // The fields the function leaves for PreSave.
+            assert!(app.id.is_empty(), "{name}: id is not set here");
+            assert_eq!(app.create_at, 0);
+            assert_eq!(app.update_at, 0);
+        }
+    }
+
+    /// An unsupported auth method still mints a secret — the test is `!= none`, not
+    /// `== client_secret_post`. Asserted on its own because it is the sharp edge.
+    #[test]
+    fn an_unsupported_auth_method_still_mints_a_secret() {
+        use crate::oauth_dcr::ClientRegistrationRequest;
+
+        let request = ClientRegistrationRequest {
+            redirect_uris: Some(vec!["https://example.com/cb".to_owned()]),
+            token_endpoint_auth_method: Some("client_secret_basic".to_owned()),
+            ..Default::default()
+        };
+        // IsValid rejects it...
+        assert!(request.is_valid().is_err());
+        // ...but this function does not re-check, so callers must validate first.
+        let app = new_oauth_app_from_client_registration(&request, "aaaaaaaaaaaaaaaaaaaaaaaaaa");
+        assert!(!app.client_secret.is_empty());
+    }
+
+    #[test]
+    fn to_client_registration_response_matches_go() {
+        for case in oracle()["to_registration"].as_array().unwrap() {
+            let name = case["name"].as_str().unwrap();
+            let mut app = valid_app();
+            match name {
+                "confidential" => {}
+                "public" => app.client_secret = String::new(),
+                "no_name" => app.name = String::new(),
+                "no_homepage" => app.homepage = String::new(),
+                other => panic!("unmapped: {other}"),
+            }
+
+            let response = app.to_client_registration_response("https://site.example.com");
+            assert_eq!(
+                serde_json::to_string(&response).unwrap(),
+                case["json"].as_str().unwrap(),
+                "response mismatch for {name}"
+            );
+
+            // The parameter is never read: a different site URL gives the same answer.
+            let alt =
+                app.to_client_registration_response("https://completely-different.example.org");
+            assert_eq!(
+                serde_json::to_string(&alt).unwrap(),
+                serde_json::to_string(&response).unwrap(),
+                "{name}: site_url must not affect the output"
+            );
+            assert!(
+                case["site_url_is_ignored"].as_bool().unwrap(),
+                "{name}: Go ignores it too"
+            );
+        }
     }
 
     #[test]

@@ -49,18 +49,20 @@ import (
 
 func writeOAuthBehaviourFixture(outDir string) error {
 	out := map[string]any{
-		"constants":       oauthConstants(),
-		"keys":            oauthKeys(),
-		"wire":            oauthWireAll(),
-		"callback_format": oauthCallbackFormatAll(),
-		"is_valid":        oauthIsValidAll(),
-		"pre_save":        oauthPreSaveAll(),
-		"etag":            oauthEtagAll(),
-		"sanitize":        oauthSanitizeAll(),
-		"redirect_url":    oauthRedirectURLAll(),
-		"auth_method":     oauthAuthMethodAll(),
-		"validate_grant":  oauthValidateGrantAll(),
-		"auditable":       oauthAuditableAll(),
+		"constants":         oauthConstants(),
+		"keys":              oauthKeys(),
+		"wire":              oauthWireAll(),
+		"callback_format":   oauthCallbackFormatAll(),
+		"is_valid":          oauthIsValidAll(),
+		"pre_save":          oauthPreSaveAll(),
+		"etag":              oauthEtagAll(),
+		"sanitize":          oauthSanitizeAll(),
+		"redirect_url":      oauthRedirectURLAll(),
+		"auth_method":       oauthAuthMethodAll(),
+		"validate_grant":    oauthValidateGrantAll(),
+		"auditable":         oauthAuditableAll(),
+		"from_registration": oauthFromRegistrationAll(),
+		"to_registration":   oauthToRegistrationAll(),
 	}
 
 	blob, err := json.MarshalIndent(out, "", "    ")
@@ -570,4 +572,121 @@ func oauthAuditableAll() map[string]any {
 		"confidential": string(blob),
 		"public":       string(publicBlob),
 	}
+}
+
+// --- the two DCR bridge functions ------------------------------------------------------------
+
+func oauthFromRegistrationAll() []map[string]any {
+	s := func(v string) *string { return &v }
+
+	corpus := []struct {
+		name string
+		req  model.ClientRegistrationRequest
+	}{
+		// No ClientName: Go substitutes a literal default.
+		{"minimal", model.ClientRegistrationRequest{
+			RedirectURIs: []string{"https://example.com/cb"},
+		}},
+		{"with_name", model.ClientRegistrationRequest{
+			RedirectURIs: []string{"https://example.com/cb"},
+			ClientName:   s("My Client"),
+		}},
+		// A pointer to "" is not nil, so the name becomes empty rather than the default.
+		{"empty_name_pointer", model.ClientRegistrationRequest{
+			RedirectURIs: []string{"https://example.com/cb"},
+			ClientName:   s(""),
+		}},
+		// The auth method decides whether a secret is minted. Default (nil) is confidential.
+		{"auth_method_nil_is_confidential", model.ClientRegistrationRequest{
+			RedirectURIs: []string{"https://example.com/cb"},
+		}},
+		{"auth_method_none_is_public", model.ClientRegistrationRequest{
+			RedirectURIs:            []string{"https://example.com/cb"},
+			TokenEndpointAuthMethod: s(model.ClientAuthMethodNone),
+		}},
+		{"auth_method_secret_post", model.ClientRegistrationRequest{
+			RedirectURIs:            []string{"https://example.com/cb"},
+			TokenEndpointAuthMethod: s(model.ClientAuthMethodClientSecretPost),
+		}},
+		// Anything that is not "none" mints a secret, including an unsupported method — IsValid
+		// would have rejected it, but this function does not re-check.
+		{"auth_method_unknown_still_mints", model.ClientRegistrationRequest{
+			RedirectURIs:            []string{"https://example.com/cb"},
+			TokenEndpointAuthMethod: s("client_secret_basic"),
+		}},
+		{"with_client_uri", model.ClientRegistrationRequest{
+			RedirectURIs: []string{"https://example.com/cb"},
+			ClientURI:    s("https://example.com"),
+		}},
+	}
+
+	out := make([]map[string]any, 0, len(corpus))
+	for _, c := range corpus {
+		req := c.req
+		app := model.NewOAuthAppFromClientRegistration(&req, "aaaaaaaaaaaaaaaaaaaaaaaaaa")
+		out = append(out, map[string]any{
+			"name":                      c.name,
+			"creator_id":                app.CreatorId,
+			"name_field":                app.Name,
+			"homepage":                  app.Homepage,
+			"is_dynamically_registered": app.IsDynamicallyRegistered,
+			"callback_urls":             app.CallbackUrls,
+			// The secret is generated, so record only whether one exists and how long it is.
+			"has_client_secret":    app.ClientSecret != "",
+			"client_secret_length": len(app.ClientSecret),
+			// Everything the function does NOT set.
+			"id":        app.Id,
+			"create_at": app.CreateAt,
+			"update_at": app.UpdateAt,
+		})
+	}
+	return out
+}
+
+func oauthToRegistrationAll() []map[string]any {
+	confidential := validOAuthApp()
+	public := validOAuthApp()
+	public.ClientSecret = ""
+	noName := validOAuthApp()
+	noName.Name = ""
+	noHomepage := validOAuthApp()
+	noHomepage.Homepage = ""
+
+	corpus := []struct {
+		name string
+		app  model.OAuthApp
+	}{
+		{"confidential", confidential},
+		{"public", public},
+		{"no_name", noName},
+		{"no_homepage", noHomepage},
+	}
+
+	out := make([]map[string]any, 0, len(corpus))
+	for _, c := range corpus {
+		app := c.app
+		// siteURL is a parameter the body never reads — passing two different values must give
+		// the same answer, which is what the second call establishes.
+		resp := app.ToClientRegistrationResponse("https://site.example.com")
+		alt := app.ToClientRegistrationResponse("https://completely-different.example.org")
+
+		blob, err := json.Marshal(resp)
+		if err != nil {
+			panic(err)
+		}
+		altBlob, err := json.Marshal(alt)
+		if err != nil {
+			panic(err)
+		}
+
+		out = append(out, map[string]any{
+			"name":                c.name,
+			"json":                string(blob),
+			"site_url_is_ignored": string(blob) == string(altBlob),
+			"has_client_secret":   resp.ClientSecret != nil,
+			"has_client_name":     resp.ClientName != nil,
+			"has_client_uri":      resp.ClientURI != nil,
+		})
+	}
+	return out
 }

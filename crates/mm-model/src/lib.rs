@@ -31,6 +31,7 @@ pub mod mention_map;
 pub mod message_attachment;
 pub mod mm_blocks_actions;
 pub mod oauth;
+pub mod oauth_dcr;
 pub mod post;
 pub mod post_acknowledgement;
 pub mod post_attributes;

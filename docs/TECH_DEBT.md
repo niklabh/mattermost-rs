@@ -3297,8 +3297,9 @@ that closed set.
 
 ## D-099 · `oauth.go`'s two client-registration functions are unported
 
-**Status** OPEN · **Severity** incomplete · **Raised** 2026-08-17 (phase 1, `oauth.go`)
-**Depends on** `model/oauth_dcr.go` (254 lines), unported.
+**Status** CLOSED · **Severity** incomplete · **Raised** 2026-08-17 (phase 1, `oauth.go`)
+**Closed** 2026-08-17, same day, by porting `oauth_dcr.go`.
+**Depended on** `model/oauth_dcr.go` (254 lines), now ported.
 
 `NewOAuthAppFromClientRegistration` (oauth.go:224) and `(*OAuthApp).ToClientRegistrationResponse`
 (oauth.go:252) are the OAuth 2.0 Dynamic Client Registration surface. Both take or return types
@@ -3313,7 +3314,17 @@ with `NewId()` when the requested auth method is not `none`, which is the *only*
 file that creates a secret — `PreSave` explicitly does not. So the public/confidential decision is
 made at registration and nowhere else.
 
-**To pay off** port `oauth_dcr.go`, then these two functions come almost free.
+**Paid off** exactly that way. Two findings came with them, both measured:
+
+**`NewOAuthAppFromClientRegistration` does not re-validate.** The secret is minted when the
+requested auth method is `!= none`, not when it is `== client_secret_post` — so a
+`client_secret_basic` request, which `ClientRegistrationRequest.IsValid` **rejects**, still gets a
+confidential client if it reaches this function. Callers must validate first, and the port says so
+at the call site. A nil auth method defaults to confidential.
+
+**`ToClientRegistrationResponse` takes a `siteURL` it never reads.** Confirmed by calling with two
+different values and comparing the marshalled results, which are identical. The parameter is kept
+so the signature matches Go's, with a doc comment explaining that it does nothing.
 
 ---
 
@@ -3351,3 +3362,41 @@ Also reproduced, and not an oddity but a security property worth naming: the con
 secret comparison uses `crypto/subtle.ConstantTimeCompare`, so the port takes the `subtle` crate
 rather than `==`. A short-circuiting comparison leaks the secret's length and matching prefix
 through timing, and hand-rolling the loop is liable to be optimised back into a short-circuit.
+
+---
+
+## D-101 · The DCR redirect-URI matcher is security-critical and entirely oracle-driven
+
+**Status** ACCEPTED · **Severity** unverified · **Raised** 2026-08-17 (phase 1, `oauth_dcr.go`)
+
+Not a divergence — a note about *why* this file's tests look disproportionate, and what would make
+them insufficient.
+
+`RedirectURIMatchesGlob` decides whether an OAuth redirect target is allowed. One case too
+permissive is an open redirect and hands an attacker a token; one case too strict breaks a working
+client. Neither shows up in a happy-path test, and the matcher is a hand-rolled recursive globber
+with three interacting layers — pattern validation, component splitting, byte-wise matching.
+
+So it is pinned by 44 glob probes, 25 pattern-validity probes and 11 allowlist probes, all
+answered by Go. Four properties are additionally asserted on their own so a regression names
+itself rather than pointing at a case index:
+
+- a host wildcard must not satisfy a path requirement (`https://example.com/evil` must **not**
+  match `https://*/cb`);
+- `*` stops at `/` and `**` does not;
+- a pattern with no query requires a candidate with none;
+- an invalid pattern never matches.
+
+**What is accepted:** the corpus is finite and adversarial-by-construction rather than exhaustive.
+A property-based sweep would be stronger, and the `IsValidHTTPURL` work ([D-003]) showed what that
+buys — 3,529 generated cases against 136 hand-picked ones. This file has no generated sweep.
+
+**Also accepted:** `redirect_uri_matches_glob_recur` is recursive with no depth limit, exactly as
+Go's is, so a pathological pattern can exhaust the stack on both servers equally. Reproducing the
+recursion rather than rewriting it iteratively keeps the matching semantics identical, which
+matters more here than the shared exposure — and the patterns are operator-configured, not
+attacker-supplied.
+
+**To strengthen**, add a generated corpus: random patterns and URIs over a small alphabet
+including `/`, `*` and `?`, compared against Go for a few thousand pairs. Worth doing before this
+is exposed to real traffic.
