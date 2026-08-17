@@ -2648,8 +2648,9 @@ the function to scan, the test fails rather than silently agreeing.
 
 ## D-077 · `Session.TeamMembers` is not populated
 
-**Status** OPEN · **Severity** incomplete · **Raised** 2026-08-17 (phase 2, `session_store.go`)
-**Blocks** anything that reads `Session.TeamMembers` — team-scoped permission checks above all.
+**Status** CLOSED · **Severity** incomplete · **Raised** 2026-08-17 (phase 2, `session_store.go`)
+**Closed** 2026-08-17 by porting `TeamStore::GetTeamsForUser` and its scheme-roles machinery.
+**Blocked** anything that reads `Session.TeamMembers` — team-scoped permission checks above all.
 
 Go's `SqlSessionStore.Get` (session_store.go:111) does two queries, not one: after loading the
 session it calls `Team().GetTeamsForUser(...)` and keeps the members whose `DeleteAt == 0`.
@@ -2662,8 +2663,41 @@ authenticate — `user_id` and expiry — and `/users/me` never reads team membe
 team-scoped route ported will read it, and an empty list is indistinguishable from "member of no
 teams", so the failure is a **silent** permission denial rather than an error.
 
-**To pay off** port `TeamStore.GetTeamsForUser` with its scheme-roles join, then fill the field
-and drop the `None`.
+**Paid off** in `mm-store/src/team_store.rs`. The wrapper was three lines; the content was
+`getTeamRoles` (team_store.go:100), which computes a member's **effective** roles from three
+booleans on `TeamMembers`, three nullable role names on the team's scheme, and whatever is
+already sitting in the `Roles` column.
+
+**The branch that would have been got wrong by reading:** a scheme role id found in the `Roles`
+column sets its flag *even when the column says false*, and is then excluded from
+`ExplicitRoles`. That is the un-migrated case, and it is invisible in the common data — every row
+in a fresh install has an empty `Roles` column, so a port that ignored the rule would pass every
+casual test and silently mis-grant team admin on any pre-migration row.
+
+**Verified against the running Go server, not reasoned.** `getTeamRoles` is unexported, so the
+usual `reference/dump` oracle cannot call it. Instead the row was mutated in the shared database
+and both servers asked the same question — Go through `GET /api/v4/users/me/teams/members`, ours
+through `SessionStore::get`. Six shapes, all matching:
+
+| `Roles` column | guest / user / admin | both servers answer |
+|---|---|---|
+| `` | f / t / t | `team_user team_admin`, explicit `` |
+| `team_admin custom_role` | t / t / **f** | `custom_role team_guest team_user team_admin`, explicit `custom_role` |
+| `custom_a custom_b` | f / f / f | `custom_a custom_b`, explicit both |
+| `team_guest` | f / f / f | `team_guest`, explicit `` |
+| `team_user team_admin team_guest` | f / f / f | all three implied, explicit `` |
+| `zzz_role team_user` | t / f / t | `zzz_role team_guest team_user team_admin` |
+
+The second row is the un-migrated case: `scheme_admin` comes back **true** from both servers
+although the column said false. `crates/mm-api/tests/parity_session_team_members.rs` keeps the
+comparison as a standing test.
+
+**One branch remains unverified against Go, deliberately.** The scheme-*derived* role names —
+where `Teams.SchemeId` is set and the implied role is the scheme's `DefaultTeamUserRole` rather
+than the constant — cannot be exercised here: `Schemes` is an enterprise feature, the table is
+empty on Team Edition, and creating a scheme needs a licence. Those branches are covered by unit
+tests transcribed from the Go source and are **provisional** in exactly the sense `CLAUDE.md`
+describes. The join is a `LEFT JOIN` precisely so the unset case still returns the member.
 
 ---
 

@@ -15,10 +15,12 @@
 
 pub mod error;
 pub mod session_store;
+pub mod team_store;
 pub mod user_store;
 
 pub use error::StoreError;
 pub use session_store::{SessionStore, SqlSessionStore};
+pub use team_store::{SqlTeamStore, TeamStore};
 pub use user_store::{SqlUserStore, UserStore};
 
 use sqlx::PgPool;
@@ -32,6 +34,7 @@ use sqlx::postgres::PgPoolOptions;
 #[derive(Debug, Clone)]
 pub struct SqlStore {
     session: SqlSessionStore,
+    team: SqlTeamStore,
     user: SqlUserStore,
 }
 
@@ -58,6 +61,7 @@ impl SqlStore {
     pub fn from_pool(pool: PgPool) -> Self {
         Self {
             session: SqlSessionStore::new(pool.clone()),
+            team: SqlTeamStore::new(pool.clone()),
             user: SqlUserStore::new(pool),
         }
     }
@@ -65,6 +69,11 @@ impl SqlStore {
     /// Port of `store.Store.Session()`.
     pub fn session(&self) -> &SqlSessionStore {
         &self.session
+    }
+
+    /// Port of `store.Store.Team()`.
+    pub fn team(&self) -> &SqlTeamStore {
+        &self.team
     }
 
     /// Port of `store.Store.User()`.

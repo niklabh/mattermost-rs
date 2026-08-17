@@ -78,38 +78,20 @@ depend on `mm-model`, and `mm-model` may never depend on an AGPL crate or read
 `channel_count.go` **does not exist** — checked 2026-08-17. The earlier note guessed at the name;
 do not look for it again.
 
-## Next: close [D-077] — `TeamStore::GetTeamsForUser` (team_store.go:1181)
+## Next: `GET /api/v4/users/me/sessions` (api4/user.go:2570)
 
-**Superseded 2026-08-17.** This line previously read "next file: `cluster_info.go` (13 lines)",
-which was written before the vertical slice landed. Two things changed it.
+[D-077] is **closed** — `Session.team_members` is now hydrated, so this route can return what Go
+returns. It is the cheapest next route: *self-scoped*, so it needs no permission system, and it
+sits on `SessionStore::GetSessions` (session_store.go:126), a plain `WHERE UserId = $1 ORDER BY
+LastActivityAt DESC` over a query we already have.
 
-**It is the only incomplete thing in committed code.** `SessionStore::get` returns less than Go
-does *today*: Go's `Get` runs a second query — `Team().GetTeamsForUser(...)`, filtered to
-`DeleteAt == 0` (session_store.go:111) — and we leave `team_members` at `None`. Everything else
-shipped in the slice is either complete or explicitly scoped; this one is a gap in a function we
-already call on every authenticated request.
-
-**It gates the cheapest next route.** `Session.team_members` carries **no `omitempty`**, so the
-key is always present: we would emit `"team_members": null` where Go emits a populated array.
-That is a guaranteed parity failure on `GET /api/v4/users/me/sessions` (api4/user.go:2570) —
-which is otherwise the ideal next route, being *self-scoped* and therefore needing no permission
-system at all.
+**The part to get right is `Session::sanitize`.** Sessions carry tokens; the list endpoint must
+not leak them. That method is already ported in `mm-model` — the work is calling it, and proving
+byte parity against Go for a list response, which the slice has not exercised yet.
 
 Contrast the obvious alternative, `GET /api/v4/users/{user_id}`: it needs `UserCanSeeOtherUser`
 ([D-082]), which drags in the whole roles-and-permissions surface — `role.go` is 1,311 lines and
-`permission.go` (2,789) is out of scope for hand-translation. That is a much larger step and
-should not be the one taken first.
-
-**What the work is.** `GetTeamsForUser` is three lines on top of
-`getTeamMembersWithSchemeSelectQuery`, and *that* is the content: the scheme-roles join is how
-Mattermost computes a member's effective roles from the team and channel schemes. Getting it
-wrong is a **silent permission bug** rather than a visible error, so it wants a behavioural
-oracle, not a reading. `teammembers` is already in the dev stack's schema and the `TeamMember`
-model type is ported.
-
-After that, `GET /api/v4/users/me/sessions` is a small route on top of `SessionStore::GetSessions`
-(session_store.go:126) — and it will exercise `Session::sanitize`, which matters because sessions
-carry tokens.
+`permission.go` (2,789) is out of scope for hand-translation. Still not the one to take first.
 
 ### If porting model files instead
 
@@ -289,6 +271,7 @@ whenever a session skips, approximates, or discovers-but-does-not-close somethin
 | — (shared) | `mm-model/src/utils.rs::go_time::date_in_zone`, `::add_date_days` | DONE | 280 cases | Go's `time.Date` **normalisation** and `AddDate`. Go's doc declines to specify it ("the choice of time zone… is not guaranteed"), so the implementation is what is ported — reduced to two offset lookups, which the corpus proves exact. chrono's `LocalResult` is **not** substitutable and its obvious mapping is wrong in both arms; see the notes. |
 | — (tooling) | `reference/dump/behaviour_scheduled_post_recurrence.go` → `fixtures/behaviour_scheduled_post_recurrence.json` | DONE | 8 diff tests | 280 `time.Date` probes and 295 `ComputeNextScheduledAt` cases, both **generated** rather than listed: the 16 DST transitions of ten zones are discovered by scanning the host's tzdata and bisecting, then every probe is placed relative to a discovered boundary. The transitions are written out as their own section so the Rust side asserts `chrono-tz` agrees with them *before* trusting an answer. Corrected one conclusion the Go source had produced — see note 2. |
 | model/post_search_results.go | `mm-model/src/post_search_results.rs` | PARTIAL | 15 pass | Whole file except `Auditable` ([D-028]). `PostSearchResults`, `PostSearchMatches`, `MakePostSearchResults`, `ToJSON`, `EncodeJSON`, `ForPlugin`. Wire format asserted **byte-for-byte** over 18 of the 19 corpus documents. Carries a hand-written `Deserialize`: Go allocates the embedded `*PostList` from **which keys are present** and serde's `flatten` on an `Option` cannot express that. Two divergences ([D-054] three panics, [D-055] the shared `Matches` map) plus one instance of [D-040]. |
+| store/sqlstore/team_store.go (`GetTeamsForUser`) | `mm-store/src/team_store.rs` | PARTIAL | 9 pass | **Closes [D-077].** The wrapper is three lines; the content is `getTeamRoles` (team_store.go:100), which computes a member's **effective** roles from three booleans, three nullable scheme role names and whatever is already in the `Roles` column. The branch a reading would have missed: a scheme role id **in the `Roles` column sets its flag even when the column says false**, and is then excluded from `ExplicitRoles` — invisible in fresh data, where every `Roles` column is empty. `getTeamRoles` is unexported so `reference/dump` cannot reach it; verified instead by mutating the shared row and asking **both servers** the same question across six role shapes, all matching. The scheme-*derived* names stay provisional — `Schemes` is enterprise and the table is empty on Team Edition. |
 | store/sqlstore/session_store.go (`Get`) | `mm-store/src/session_store.rs` | PARTIAL | 2 pass | **First `mm-store` content.** The Strangler Fig's load-bearing query: `Token = $1 OR Id = $1 LIMIT 1`, one bind parameter against two columns. Compile-time checked by sqlx against the real schema, which is how the v11-only `NOT NULL` on `VoipDeviceId` was found rather than assumed. Deferred: the `TeamMembers` second query ([D-077]) and the other 19 interface methods. Two divergences ([D-078] NULL defaulting, [D-079] token redaction). |
 | store/sqlstore/user_store.go (`Get`) | `mm-store/src/user_store.rs` | PARTIAL | 1 pass | The `Users` LEFT JOIN `Bots` query, all 31 columns in Go's order. The join is not decoration: `is_bot` is `b.UserId IS NOT NULL`, so dropping it would make every bot a non-bot. Go's two `COALESCE`s are reproduced in SQL rather than defaulted Rust-side, so the database answers the same question for both servers. Deferred: the other ~100 interface methods. |
 | app/session.go (`GetSession`) | `mm-app/src/session.rs` | PARTIAL | 3 pass | **First `mm-app` content.** Reproduces the `session.Token != token` check that stops a session **id** authenticating — the single most consequential line in the slice. Deferred: the session cache, the user-access-token path, and the idle timeout ([D-088]). |

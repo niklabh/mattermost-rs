@@ -95,7 +95,7 @@ impl SessionStore for SqlSessionStore {
                 None => None,
             };
 
-        Ok(Session {
+        let mut session = Session {
             id: row.id,
             token: row.token.unwrap_or_default(),
             create_at: row.createat.unwrap_or_default(),
@@ -110,13 +110,40 @@ impl SessionStore for SqlSessionStore {
             is_oauth: row.isoauth.unwrap_or_default(),
             expired_notify: row.expirednotify.unwrap_or_default(),
             props,
-            // Go's Get populates this from `Team().GetTeamsForUser`, filtered to `DeleteAt == 0`.
-            // That query carries the scheme-roles join, which is a store method in its own right
-            // and is not ported. Left as Go's zero value. See D-077 — this is the one place the
-            // slice knowingly returns less than Go does.
+            // Filled immediately below — the field is `db:"-"` in Go and hydrated by a second
+            // query, so it cannot come out of the row.
             team_members: None,
             local: false,
-        })
+        };
+
+        // Port of session_store.go:111-124. Go passes `includeDeleted = true` and then discards
+        // the deleted members in Go code rather than in SQL. The net result is the same as
+        // asking the database for `DeleteAt = 0`, and it is reproduced as written because the
+        // difference is observable if either side is ever changed independently.
+        let members = crate::team_store::get_teams_for_user(&self.pool, &session.user_id, "", true)
+            .await
+            .map_err(|err| match err {
+                // Go wraps this as "failed to find TeamMembers for Session with userId=%s".
+                // A missing team member is not a missing session, so the not-found variant
+                // must not leak out of here as a 401.
+                StoreError::NotFound { .. } => StoreError::Db {
+                    context: format!(
+                        "failed to find TeamMembers for Session with userId={}",
+                        session.user_id
+                    ),
+                    source: sqlx::Error::RowNotFound,
+                },
+                other => other,
+            })?;
+
+        session.team_members = Some(
+            members
+                .into_iter()
+                .filter(|member| member.delete_at == 0)
+                .collect(),
+        );
+
+        Ok(session)
     }
 }
 
