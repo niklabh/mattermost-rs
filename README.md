@@ -92,6 +92,20 @@ cargo test -p mm-model
 
 ### Running the two servers
 
+**You probably don't need this.** Porting a model file needs `cargo test -p mm-model` and the
+committed fixtures, nothing else; `SQLX_OFFLINE=true` builds the whole workspace without a
+database, and the cross-server tests skip themselves unless you ask for them. Since no arm64
+image is published, the Go server runs under emulation on Apple silicon and is slow to boot —
+so start the stack when you need it, not by habit.
+
+You need it for exactly three things:
+
+- **the schema** — this repo contains no DDL and never will; the Go server's migrations create
+  every table `mm-store` reads
+- **the parity oracle** — the only way to claim our bytes match Go's is to ask Go for the same
+  request and diff. This is what caught both wrong beliefs in the vertical slice
+- **a forward target** — for exercising the proxy
+
 The Strangler Fig needs a Go server to forward to and a Postgres both servers share. Both are in
 `docker-compose.yml`; the Rust server runs on the host so it can be rebuilt without a container
 cycle.
