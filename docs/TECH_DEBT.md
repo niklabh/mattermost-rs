@@ -9,6 +9,30 @@ client bug is not.
 
 **Status:** `OPEN` (owed) · `ACCEPTED` (deliberate permanent divergence) · `CLOSED` (paid off).
 
+## Standing decision: reproduce what we can measure, forward what we cannot
+
+Settled 2026-08-17, after four separate entries turned out to be the same question wearing
+different clothes — [D-044] (`shared/markdown`, 4,688 lines), [D-046] (ECDSA and AES-GCM),
+[D-105] (a third-party OpenGraph package) and [D-001] (the IANA subtag registry).
+
+Each is "Go leans on a package we would have to reproduce". The answer depends on **whether the
+dependency's behaviour is measurable from outside**:
+
+- **Measurable and mechanical** — the input space can be enumerated from Go itself and turned
+  into a table or a corpus. Port it. [D-001] is this: `UserLocaleMaxLength` is 5, so the accepted
+  set is finite and generable.
+- **Measurable only by reimplementing the package** — a parser, a renderer, a protocol. **Do not
+  port it; forward the routes that need it to the Go server.** That is what the Strangler Fig is
+  for, and [D-091] already demonstrated that forwarding is a *correctness* tool rather than a
+  stopgap: a handler that cannot do part of its job correctly can decline that part, and the
+  client sees no difference.
+- **Cryptographic** — a third case, because "close enough" fails open rather than loudly. Port
+  it, but only with an oracle recording Go's actual ciphertext, and only with a crate that
+  exposes the raw encoding Go emits.
+
+This is a hobby project with no users ([[licensing-must-not-gate-development]] applies): none of
+these blocks anything, and forwarding costs nothing because unmigrated is already the default.
+
 **Severity:**
 - `blocking` — something downstream cannot be built correctly until this is paid.
 - `divergence` — Rust and Go behave differently on reachable input.
@@ -688,9 +712,27 @@ either marshaller**, and only starts failing when the type's real data grows one
 That matters beyond byte-comparison because `Post::is_valid` measures its length caps against
 Go's JSON, where each escaped character is six bytes instead of one.
 
-**Still open**, and the enforcement idea is unchanged: a test that walks every fixture, decodes it
-into its type and asserts `go_json_marshal` reproduces the file, would catch a wrong marshaller
-at the point it is introduced rather than when the data changes.
+**Swept 2026-08-17.** Eleven modules had a byte-exact wire test and did not reference
+`go_json_marshal` at all — `audit_record`, `bot`, `channel`, `file_info`, `oauth`, `oauth_dcr`,
+`post_acknowledgement`, `post_embed`, `post_metadata`, `team_member`, `wrangler`. **37 call sites**
+were switched to the correct marshaller and every test still passed, which is the point: they were
+passing because their probes happened to contain no escapable character, and each was one data
+change away from being wrong.
+
+**The enforcement idea does not survive contact.** A source lint of the form "a file comparing
+against a fixture's `json` field must not use `serde_json::to_string`" produces false positives
+that are all legitimate: `analytics_row` asserts serde's float rendering precisely *because* it
+differs from Go's, `post_list` checks a default's shape with `contains`, `custom_status` mentions
+the function only in a doc comment. Nine files trip that rule and none of them is wrong.
+
+Nor does the stronger version work: walking every fixture and re-marshalling it would need a
+fixture-name-to-Rust-type registry, i.e. a second copy of the mapping the `#[test]`s already
+encode, which would rot separately.
+
+**Status stays OPEN, with the scope narrowed to what is actually left:** the *known* instances are
+fixed, and no mechanical guard is available. The practical defence is the habit plus this entry —
+when adding a byte-exact wire test, use `go_json_marshal`, and treat a fixture with no `<`, `>` or
+`&` in it as evidence of nothing.
 
 ---
 
@@ -1446,7 +1488,7 @@ round-trip fixtures are all **complete** objects, which is precisely why this su
 
 ## D-044 · The `mmaction://` id scan needs `shared/markdown`
 
-**Status** OPEN · **Severity** blocking · **Raised** 2026-08-14 (phase 1, `post_interactive_blocks.go`)
+**Status** ACCEPTED · **Severity** blocking · **Raised** 2026-08-14 (phase 1, `post_interactive_blocks.go`)
 **Blocks** [D-042] (`propsIsValid`), and with it `ValidateMmBlocksActions`,
 `RefreshInteractiveActionsOnPost` and the interactive-webhook path.
 
@@ -2354,7 +2396,8 @@ Two smaller pieces of the same divergence are in the same enum arm: a `scheduled
 
 ## D-069 · A generator run rewrites `behaviour_utils.json` when the host's timezone differs
 
-**Status** OPEN · **Severity** unverified · **Raised** 2026-08-16 (phase 1, `scheduled_post_recurrence.go`)
+**Status** CLOSED · **Severity** unverified · **Raised** 2026-08-16 (phase 1, `scheduled_post_recurrence.go`)
+**Closed** 2026-08-17 — the generator now pins the zone itself; see below.
 **Related** [D-032] (the rule this weakens), [D-008] (the Go behaviour underneath it)
 
 `behaviourDayBounds` records `GetStartOfDayMillis`/`GetEndOfDayMillis`, which read the calendar
@@ -3030,7 +3073,7 @@ write would revoke sessions that are in fact active.
 
 ## D-089 · A write served here publishes no WebSocket event
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-08-17 (phase 2, first write route)
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-17 (phase 2, first write route)
 **Affects** every write route from here on.
 
 Go's write paths end with `a.Publish(message)` — `UpdatePreferences` publishes
@@ -3108,7 +3151,7 @@ here, but nothing is broken until then.
 
 ## D-092 · Error messages are untranslated ids where Go sends prose
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-08-17 (phase 2, first error compared)
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-17 (phase 2, first error compared)
 **Affects** every error body this server produces.
 
 Go turns an `AppError` into a response in `web.Handler.ServeHTTP` (handlers.go:424-455), and
@@ -3515,7 +3558,7 @@ regenerated.
 
 ## D-105 · `link_metadata.go`'s OpenGraph half needs a third-party package
 
-**Status** OPEN · **Severity** incomplete · **Raised** 2026-08-17 (phase 1, `link_metadata.go`)
+**Status** ACCEPTED · **Severity** incomplete · **Raised** 2026-08-17 (phase 1, `link_metadata.go`)
 **Blocks** `TruncateOpenGraph`, `FilterSVGImages`, `firstNImages`, `truncateText`, and the
 OpenGraph branches of `IsValid` and `DeserializeDataToConcreteType`.
 
@@ -3579,3 +3622,72 @@ enum LinkMetadataData { Image(PostImage), OpenGraph(/* D-105 */), Raw(serde_json
 which restores both field order and the type test in one move. It needs [D-105] resolved first for
 the middle variant, and needs care on the deserialise side: `#[serde(untagged)]` would try
 `PostImage` against every object, and `PostImage`'s fields all have defaults.
+
+---
+
+## Batch resolutions, 2026-08-17
+
+Six entries settled together rather than one per encounter, under the standing decision at the
+top of this file.
+
+### [D-001] — generate the locale table. **Decided: option (a).**
+
+The entry already recommended it and the project owner deferred once. It is the "measurable and
+mechanical" case: `UserLocaleMaxLength` is 5, so the accepted set is finite and enumerable *from
+Go*, and the output is a generated table beside `emoji_generated.rs` and `unicode_generated.rs`.
+
+Deciding it matters more than the table does, because it unblocks **[D-002]** — `User::is_valid`
+and `User::pre_save` — which is the highest-severity open pair and the reason `pre_save_partial`
+still carries a name warning that it does not hash passwords.
+
+Still **OPEN** as work; no longer open as a question.
+
+### [D-044] — do not port `shared/markdown`. **Decided: forward.**
+
+4,688 lines of CommonMark to serve one route family. The interactive-webhook routes stay proxied
+to the Go server indefinitely, alongside `enterprise/` and the plugin host. Reversible at any
+time, costs nothing today, and the entry's own analysis already showed the tempting shortcut —
+a stubbed scanner — **under-reports** action ids and silently rejects payloads Go accepts.
+
+Status moves to **ACCEPTED**: this is now a deliberate permanent divergence, not owed work.
+
+### [D-105] — do not port the OpenGraph package. **Decided: forward.**
+
+Same shape as [D-044] and, being third-party, worse: option (b), a Rust OpenGraph crate, would
+have to match `dyatlov`'s struct tags rather than the OpenGraph spec, which is the trap the `url`
+crate would have been for [D-003]. The link-preview path stays proxied.
+
+Status moves to **ACCEPTED**. [D-106] stays open, since it is about our own modelling rather than
+the package — but its enum needs this decision, and "forward" means the `OpenGraph` variant can
+simply hold raw JSON.
+
+### [D-046] — use RustCrypto. **Decided.**
+
+`p256`/`ecdsa` and `aes-gcm` rather than `ring`. Two reasons: Go emits an ASN.1 DER signature over
+P-256 and reads it back, which needs the raw encoding `ring` deliberately hides; and `subtle` is
+already a workspace dependency from the same family ([D-100]).
+
+The entry's other requirement stands and is the harder half: **an oracle recording Go's actual
+ciphertext** for a fixed key and nonce. A Rust-only round-trip proves nothing about cross-server
+compatibility, and this is the one area where a near-miss fails open.
+
+Still **OPEN** as work.
+
+### [D-089] — accept the missing WebSocket event.
+
+Consistent with [D-087]'s calibration: a missed live update is invisible on a project with no
+users, and a developer reloads the page. Revisit when `mm-ws` lands, which is phase 5 and the
+proper fix.
+
+Status moves to **ACCEPTED**, with the caveat the entry already carries: it is **reasoned, not
+measured** — no WebSocket client was available to watch it happen.
+
+### [D-092] — accept untranslated error ids.
+
+The remaining third of the entry needs the i18n bundle. The webapp branches on `id`, not
+`message`, so the practical cost is to humans reading errors rather than to clients. Port the
+bundle when a human-facing surface needs it — the same trigger `post_deletion_report.go` is
+waiting on.
+
+Status moves to **ACCEPTED** for the `message` field specifically; the two fixed thirds stay
+closed.

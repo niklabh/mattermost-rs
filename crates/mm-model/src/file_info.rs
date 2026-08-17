@@ -545,7 +545,7 @@ mod tests {
     #[test]
     fn a_file_info_decoded_from_the_wire_is_always_invalid() {
         // path is required by IsValid and carries json:"-", so it cannot survive a round trip.
-        let encoded = serde_json::to_string(&valid()).unwrap();
+        let encoded = crate::utils::go_json_marshal(&valid()).unwrap();
         let decoded: FileInfo = serde_json::from_str(&encoded).unwrap();
         assert_eq!(decoded.path, "");
         assert_eq!(
@@ -718,7 +718,11 @@ mod go_parity {
             let want = case["json"].as_str().unwrap();
             // Rebuild the value from Go's own bytes, then re-emit it.
             let parsed: FileInfo = serde_json::from_str(want).unwrap();
-            assert_eq!(serde_json::to_string(&parsed).unwrap(), want, "case {name}");
+            assert_eq!(
+                crate::utils::go_json_marshal(&parsed).unwrap(),
+                want,
+                "case {name}"
+            );
         }
     }
 
@@ -970,7 +974,7 @@ mod go_parity {
         assert_eq!(fi.size, want["size"].as_i64().unwrap());
         // And the whole thing still marshals the way Go's does.
         assert_eq!(
-            serde_json::to_string(&fi).unwrap(),
+            crate::utils::go_json_marshal(&fi).unwrap(),
             want["json"].as_str().unwrap()
         );
     }

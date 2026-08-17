@@ -83,7 +83,7 @@ mod tests {
     #[test]
     fn the_wire_keys_are_the_go_field_names_in_declaration_order() {
         assert_eq!(
-            serde_json::to_string(&WranglerPostList::default()).unwrap(),
+            crate::utils::go_json_marshal(&WranglerPostList::default()).unwrap(),
             r#"{"Posts":null,"ThreadUserIDs":null,"EarlistPostTimestamp":0,"LatestPostTimestamp":0,"FileAttachmentCount":0}"#
         );
     }

@@ -197,7 +197,7 @@ mod go_parity {
             let input = case["json"].as_str().unwrap();
             let parsed: PostAcknowledgement = serde_json::from_str(input).unwrap();
             assert_eq!(
-                serde_json::to_string(&parsed).unwrap(),
+                crate::utils::go_json_marshal(&parsed).unwrap(),
                 case["roundtrip"].as_str().unwrap(),
                 "case {name}"
             );
@@ -213,15 +213,17 @@ mod go_parity {
         let oracle = oracle();
         let want = &oracle["remote_id_omitempty_across"];
 
-        let ours = serde_json::to_string(&PostAcknowledgement::default()).unwrap();
+        let ours = crate::utils::go_json_marshal(&PostAcknowledgement::default()).unwrap();
         assert_eq!(ours, want["post_acknowledgement"].as_str().unwrap());
         assert!(!ours.contains("remote_id"), "ours should omit it");
 
-        let reaction = serde_json::to_string(&crate::reaction::Reaction::default()).unwrap();
+        let reaction =
+            crate::utils::go_json_marshal(&crate::reaction::Reaction::default()).unwrap();
         assert_eq!(reaction, want["reaction"].as_str().unwrap());
         assert!(reaction.contains(r#""remote_id":null"#));
 
-        let file_info = serde_json::to_string(&crate::file_info::FileInfo::default()).unwrap();
+        let file_info =
+            crate::utils::go_json_marshal(&crate::file_info::FileInfo::default()).unwrap();
         assert_eq!(file_info, want["file_info"].as_str().unwrap());
         assert!(file_info.contains(r#""remote_id":null"#));
     }

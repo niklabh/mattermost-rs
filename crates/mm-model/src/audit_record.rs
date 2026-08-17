@@ -443,7 +443,7 @@ mod go_parity {
         );
 
         // And our own serialisation emits them in the same order.
-        let ours = serde_json::to_string(&AuditRecord::default()).unwrap();
+        let ours = crate::utils::go_json_marshal(&AuditRecord::default()).unwrap();
         assert_eq!(ordered_keys(&ours), keys);
     }
 
@@ -462,21 +462,21 @@ mod go_parity {
 
         expect(
             "event_data",
-            serde_json::to_string(&AuditEventData::default()).unwrap(),
+            crate::utils::go_json_marshal(&AuditEventData::default()).unwrap(),
         );
         expect(
             "actor",
-            serde_json::to_string(&AuditEventActor::default()).unwrap(),
+            crate::utils::go_json_marshal(&AuditEventActor::default()).unwrap(),
         );
         expect(
             "event_meta",
-            serde_json::to_string(&EventMeta::default()).unwrap(),
+            crate::utils::go_json_marshal(&EventMeta::default()).unwrap(),
         );
         // AuditEventError's fields are both omitempty, so the zero value has no keys at all —
         // serialise a populated one instead.
         expect(
             "event_error",
-            serde_json::to_string(&AuditEventError {
+            crate::utils::go_json_marshal(&AuditEventError {
                 description: "d".to_owned(),
                 code: 1,
             })
@@ -491,10 +491,10 @@ mod go_parity {
             let expected = case["json"].as_str().unwrap();
             let ours = if name.starts_with("event_meta") {
                 let meta: EventMeta = serde_json::from_str(expected).unwrap();
-                serde_json::to_string(&meta).unwrap()
+                crate::utils::go_json_marshal(&meta).unwrap()
             } else {
                 let record: AuditRecord = serde_json::from_str(expected).unwrap();
-                serde_json::to_string(&record).unwrap()
+                crate::utils::go_json_marshal(&record).unwrap()
             };
             assert_eq!(ours, expected, "wire mismatch for {name}");
         }

@@ -670,15 +670,15 @@ mod go_parity {
             let ours = match name {
                 "app_request" => {
                     let v: OAuthAppRequest = serde_json::from_str(expected).unwrap();
-                    serde_json::to_string(&v).unwrap()
+                    crate::utils::go_json_marshal(&v).unwrap()
                 }
                 n if n.starts_with("intune_login") => {
                     let v: IntuneLoginRequest = serde_json::from_str(expected).unwrap();
-                    serde_json::to_string(&v).unwrap()
+                    crate::utils::go_json_marshal(&v).unwrap()
                 }
                 _ => {
                     let v: OAuthApp = serde_json::from_str(expected).unwrap();
-                    serde_json::to_string(&v).unwrap()
+                    crate::utils::go_json_marshal(&v).unwrap()
                 }
             };
             assert_eq!(ours, expected, "wire mismatch for {name}");
@@ -807,7 +807,7 @@ mod go_parity {
             case["client_secret_after"].as_str().unwrap()
         );
         assert_eq!(
-            serde_json::to_string(&app).unwrap(),
+            crate::utils::go_json_marshal(&app).unwrap(),
             case["json_after"].as_str().unwrap()
         );
         assert_eq!(app.id, before.id);
@@ -1016,7 +1016,7 @@ mod go_parity {
 
             let response = app.to_client_registration_response("https://site.example.com");
             assert_eq!(
-                serde_json::to_string(&response).unwrap(),
+                crate::utils::go_json_marshal(&response).unwrap(),
                 case["json"].as_str().unwrap(),
                 "response mismatch for {name}"
             );
@@ -1025,8 +1025,8 @@ mod go_parity {
             let alt =
                 app.to_client_registration_response("https://completely-different.example.org");
             assert_eq!(
-                serde_json::to_string(&alt).unwrap(),
-                serde_json::to_string(&response).unwrap(),
+                crate::utils::go_json_marshal(&alt).unwrap(),
+                crate::utils::go_json_marshal(&response).unwrap(),
                 "{name}: site_url must not affect the output"
             );
             assert!(

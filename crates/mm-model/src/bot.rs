@@ -476,7 +476,7 @@ mod go_parity {
             let name = case["name"].as_str().unwrap();
             let expected = case["json"].as_str().unwrap();
             let bot: Bot = serde_json::from_str(expected).unwrap();
-            let ours = serde_json::to_string(&bot).unwrap();
+            let ours = crate::utils::go_json_marshal(&bot).unwrap();
             assert_eq!(ours, expected, "wire mismatch for {name}");
         }
     }
@@ -565,7 +565,7 @@ mod go_parity {
             let patch = patch_for(name).expect("non-nil");
             let mut bot = valid_bot_local();
             bot.patch(&patch);
-            let ours = serde_json::to_string(&bot).unwrap();
+            let ours = crate::utils::go_json_marshal(&bot).unwrap();
             assert_eq!(
                 ours,
                 case["json"].as_str().unwrap(),

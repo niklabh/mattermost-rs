@@ -207,7 +207,36 @@ var (
 	byteSliceType  = reflect.TypeOf([]byte(nil))
 )
 
+// fixtureTimeZone is the zone every fixture is generated in.
+//
+// Some corpora legitimately depend on the server's local calendar — `GetTimeForMillis` returns
+// server-local time ([D-008]), so the day-bounds cases in behaviour_utils.json record whatever
+// zone the generator ran in. That made a plain `go run .` rewrite twenty rows on any host whose
+// zone differed, destroying the "a clean run touches only new files" signal that the whole
+// oracle discipline leans on ([D-069]).
+//
+// Pinning it here rather than asking the operator to remember `TZ=Asia/Kolkata` makes the run
+// reproducible by construction. The Rust side rebuilds each instant in the *recorded* zone, so
+// nothing depends on this particular choice — only on it being stable.
+const fixtureTimeZone = "Asia/Kolkata"
+
 func main() {
+	// Must happen before anything touches `time.Local`, which Go initialises lazily from TZ on
+	// first use. Setting it here means no caller has to.
+	if err := os.Setenv("TZ", fixtureTimeZone); err != nil {
+		fmt.Fprintf(os.Stderr, "dump: cannot pin TZ: %v\n", err)
+		os.Exit(1)
+	}
+	if time.Local.String() != fixtureTimeZone {
+		// Go may already have resolved time.Local before main ran. Fail loudly rather than write
+		// a fixture in the wrong zone — a silently zone-shifted corpus is exactly what D-069 is
+		// about.
+		fmt.Fprintf(os.Stderr,
+			"dump: TZ pinning failed: time.Local is %q, expected %q; run with TZ=%s\n",
+			time.Local.String(), fixtureTimeZone, fixtureTimeZone)
+		os.Exit(1)
+	}
+
 	out := flag.String("out", "../../fixtures", "directory to write fixtures into")
 	rustOut := flag.String("rust-out", "../../crates/mm-model/src", "directory to write generated Rust into")
 	flag.Parse()

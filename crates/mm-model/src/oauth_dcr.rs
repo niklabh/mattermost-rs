@@ -563,13 +563,13 @@ mod go_parity {
             let expected = case["json"].as_str().unwrap();
             let ours = if name.starts_with("request") {
                 let v: ClientRegistrationRequest = serde_json::from_str(expected).unwrap();
-                serde_json::to_string(&v).unwrap()
+                crate::utils::go_json_marshal(&v).unwrap()
             } else if name.starts_with("response") {
                 let v: ClientRegistrationResponse = serde_json::from_str(expected).unwrap();
-                serde_json::to_string(&v).unwrap()
+                crate::utils::go_json_marshal(&v).unwrap()
             } else {
                 let v: DcrError = serde_json::from_str(expected).unwrap();
-                serde_json::to_string(&v).unwrap()
+                crate::utils::go_json_marshal(&v).unwrap()
             };
             assert_eq!(ours, expected, "wire mismatch for {name}");
         }
