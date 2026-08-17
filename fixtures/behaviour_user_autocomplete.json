@@ -1,0 +1,272 @@
+{
+    "autocomplete_keys": [
+        "users",
+        "out_of_channel",
+        "agents"
+    ],
+    "autocomplete_wire": [
+        {
+            "agents_is_null": false,
+            "agents_nil": true,
+            "agents_present": false,
+            "json": "{\"users\":null}",
+            "name": "all_nil",
+            "out_of_channel_is_null": false,
+            "out_of_channel_nil": true,
+            "out_of_channel_present": false,
+            "panicked": false,
+            "users_is_null": true,
+            "users_nil": true,
+            "users_present": true
+        },
+        {
+            "agents_is_null": false,
+            "agents_nil": false,
+            "agents_present": false,
+            "json": "{\"users\":[]}",
+            "name": "all_empty",
+            "out_of_channel_is_null": false,
+            "out_of_channel_nil": false,
+            "out_of_channel_present": false,
+            "panicked": false,
+            "users_is_null": false,
+            "users_nil": false,
+            "users_present": true
+        },
+        {
+            "agents_is_null": false,
+            "agents_nil": true,
+            "agents_present": false,
+            "json": "{\"users\":[{\"id\":\"6bdz674pgq767e4jx75w4pf57a\",\"create_at\":100,\"update_at\":200,\"delete_at\":0,\"username\":\"alice\",\"auth_service\":\"\",\"email\":\"alice@example.com\",\"nickname\":\"\",\"first_name\":\"\",\"last_name\":\"\",\"position\":\"\",\"roles\":\"system_user\",\"locale\":\"en\",\"timezone\":null,\"disable_welcome_email\":false},{\"id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"create_at\":100,\"update_at\":200,\"delete_at\":0,\"username\":\"bob\",\"auth_service\":\"\",\"email\":\"bob@example.com\",\"nickname\":\"\",\"first_name\":\"\",\"last_name\":\"\",\"position\":\"\",\"roles\":\"system_user\",\"locale\":\"en\",\"timezone\":null,\"disable_welcome_email\":false}]}",
+            "name": "optional_nil",
+            "out_of_channel_is_null": false,
+            "out_of_channel_nil": true,
+            "out_of_channel_present": false,
+            "panicked": false,
+            "users_is_null": false,
+            "users_nil": false,
+            "users_present": true
+        },
+        {
+            "agents_is_null": false,
+            "agents_nil": false,
+            "agents_present": false,
+            "json": "{\"users\":[{\"id\":\"6bdz674pgq767e4jx75w4pf57a\",\"create_at\":100,\"update_at\":200,\"delete_at\":0,\"username\":\"alice\",\"auth_service\":\"\",\"email\":\"alice@example.com\",\"nickname\":\"\",\"first_name\":\"\",\"last_name\":\"\",\"position\":\"\",\"roles\":\"system_user\",\"locale\":\"en\",\"timezone\":null,\"disable_welcome_email\":false},{\"id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"create_at\":100,\"update_at\":200,\"delete_at\":0,\"username\":\"bob\",\"auth_service\":\"\",\"email\":\"bob@example.com\",\"nickname\":\"\",\"first_name\":\"\",\"last_name\":\"\",\"position\":\"\",\"roles\":\"system_user\",\"locale\":\"en\",\"timezone\":null,\"disable_welcome_email\":false}]}",
+            "name": "optional_empty",
+            "out_of_channel_is_null": false,
+            "out_of_channel_nil": false,
+            "out_of_channel_present": false,
+            "panicked": false,
+            "users_is_null": false,
+            "users_nil": false,
+            "users_present": true
+        },
+        {
+            "agents_is_null": false,
+            "agents_nil": false,
+            "agents_present": true,
+            "json": "{\"users\":null,\"out_of_channel\":[{\"id\":\"6bdz674pgq767e4jx75w4pf57a\",\"create_at\":100,\"update_at\":200,\"delete_at\":0,\"username\":\"alice\",\"auth_service\":\"\",\"email\":\"alice@example.com\",\"nickname\":\"\",\"first_name\":\"\",\"last_name\":\"\",\"position\":\"\",\"roles\":\"system_user\",\"locale\":\"en\",\"timezone\":null,\"disable_welcome_email\":false},{\"id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"create_at\":100,\"update_at\":200,\"delete_at\":0,\"username\":\"bob\",\"auth_service\":\"\",\"email\":\"bob@example.com\",\"nickname\":\"\",\"first_name\":\"\",\"last_name\":\"\",\"position\":\"\",\"roles\":\"system_user\",\"locale\":\"en\",\"timezone\":null,\"disable_welcome_email\":false}],\"agents\":[{\"id\":\"6bdz674pgq767e4jx75w4pf57a\",\"create_at\":100,\"update_at\":200,\"delete_at\":0,\"username\":\"alice\",\"auth_service\":\"\",\"email\":\"alice@example.com\",\"nickname\":\"\",\"first_name\":\"\",\"last_name\":\"\",\"position\":\"\",\"roles\":\"system_user\",\"locale\":\"en\",\"timezone\":null,\"disable_welcome_email\":false},{\"id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"create_at\":100,\"update_at\":200,\"delete_at\":0,\"username\":\"bob\",\"auth_service\":\"\",\"email\":\"bob@example.com\",\"nickname\":\"\",\"first_name\":\"\",\"last_name\":\"\",\"position\":\"\",\"roles\":\"system_user\",\"locale\":\"en\",\"timezone\":null,\"disable_welcome_email\":false}]}",
+            "name": "users_nil_others_set",
+            "out_of_channel_is_null": false,
+            "out_of_channel_nil": false,
+            "out_of_channel_present": true,
+            "panicked": false,
+            "users_is_null": true,
+            "users_nil": true,
+            "users_present": true
+        },
+        {
+            "agents_is_null": false,
+            "agents_nil": true,
+            "agents_present": false,
+            "json": "{\"users\":null,\"out_of_channel\":[{\"id\":\"6bdz674pgq767e4jx75w4pf57a\",\"create_at\":100,\"update_at\":200,\"delete_at\":0,\"username\":\"alice\",\"auth_service\":\"\",\"email\":\"alice@example.com\",\"nickname\":\"\",\"first_name\":\"\",\"last_name\":\"\",\"position\":\"\",\"roles\":\"system_user\",\"locale\":\"en\",\"timezone\":null,\"disable_welcome_email\":false}]}",
+            "name": "out_of_channel_only",
+            "out_of_channel_is_null": false,
+            "out_of_channel_nil": false,
+            "out_of_channel_present": true,
+            "panicked": false,
+            "users_is_null": true,
+            "users_nil": true,
+            "users_present": true
+        },
+        {
+            "agents_is_null": false,
+            "agents_nil": false,
+            "agents_present": true,
+            "json": "{\"users\":null,\"agents\":[{\"id\":\"6bdz674pgq767e4jx75w4pf57a\",\"create_at\":100,\"update_at\":200,\"delete_at\":0,\"username\":\"alice\",\"auth_service\":\"\",\"email\":\"alice@example.com\",\"nickname\":\"\",\"first_name\":\"\",\"last_name\":\"\",\"position\":\"\",\"roles\":\"system_user\",\"locale\":\"en\",\"timezone\":null,\"disable_welcome_email\":false}]}",
+            "name": "agents_only",
+            "out_of_channel_is_null": false,
+            "out_of_channel_nil": true,
+            "out_of_channel_present": false,
+            "panicked": false,
+            "users_is_null": true,
+            "users_nil": true,
+            "users_present": true
+        },
+        {
+            "agents_is_null": false,
+            "agents_nil": false,
+            "agents_present": true,
+            "json": "{\"users\":[{\"id\":\"6bdz674pgq767e4jx75w4pf57a\",\"create_at\":100,\"update_at\":200,\"delete_at\":0,\"username\":\"alice\",\"auth_service\":\"\",\"email\":\"alice@example.com\",\"nickname\":\"\",\"first_name\":\"\",\"last_name\":\"\",\"position\":\"\",\"roles\":\"system_user\",\"locale\":\"en\",\"timezone\":null,\"disable_welcome_email\":false},{\"id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"create_at\":100,\"update_at\":200,\"delete_at\":0,\"username\":\"bob\",\"auth_service\":\"\",\"email\":\"bob@example.com\",\"nickname\":\"\",\"first_name\":\"\",\"last_name\":\"\",\"position\":\"\",\"roles\":\"system_user\",\"locale\":\"en\",\"timezone\":null,\"disable_welcome_email\":false}],\"out_of_channel\":[{\"id\":\"6bdz674pgq767e4jx75w4pf57a\",\"create_at\":100,\"update_at\":200,\"delete_at\":0,\"username\":\"alice\",\"auth_service\":\"\",\"email\":\"alice@example.com\",\"nickname\":\"\",\"first_name\":\"\",\"last_name\":\"\",\"position\":\"\",\"roles\":\"system_user\",\"locale\":\"en\",\"timezone\":null,\"disable_welcome_email\":false}],\"agents\":[{\"id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"create_at\":100,\"update_at\":200,\"delete_at\":0,\"username\":\"bob\",\"auth_service\":\"\",\"email\":\"bob@example.com\",\"nickname\":\"\",\"first_name\":\"\",\"last_name\":\"\",\"position\":\"\",\"roles\":\"system_user\",\"locale\":\"en\",\"timezone\":null,\"disable_welcome_email\":false}]}",
+            "name": "all_populated",
+            "out_of_channel_is_null": false,
+            "out_of_channel_nil": false,
+            "out_of_channel_present": true,
+            "panicked": false,
+            "users_is_null": false,
+            "users_nil": false,
+            "users_present": true
+        }
+    ],
+    "in_channel_keys": [
+        "in_channel",
+        "out_of_channel"
+    ],
+    "in_channel_wire": [
+        {
+            "in_channel_is_null": true,
+            "in_channel_nil": true,
+            "in_channel_present": true,
+            "json": "{\"in_channel\":null,\"out_of_channel\":null}",
+            "name": "both_nil",
+            "out_of_channel_is_null": true,
+            "out_of_channel_nil": true,
+            "out_of_channel_present": true,
+            "panicked": false
+        },
+        {
+            "in_channel_is_null": false,
+            "in_channel_nil": false,
+            "in_channel_present": true,
+            "json": "{\"in_channel\":[],\"out_of_channel\":[]}",
+            "name": "both_empty",
+            "out_of_channel_is_null": false,
+            "out_of_channel_nil": false,
+            "out_of_channel_present": true,
+            "panicked": false
+        },
+        {
+            "in_channel_is_null": true,
+            "in_channel_nil": true,
+            "in_channel_present": true,
+            "json": "{\"in_channel\":null,\"out_of_channel\":[]}",
+            "name": "in_nil_out_empty",
+            "out_of_channel_is_null": false,
+            "out_of_channel_nil": false,
+            "out_of_channel_present": true,
+            "panicked": false
+        },
+        {
+            "in_channel_is_null": false,
+            "in_channel_nil": false,
+            "in_channel_present": true,
+            "json": "{\"in_channel\":[],\"out_of_channel\":null}",
+            "name": "in_empty_out_nil",
+            "out_of_channel_is_null": true,
+            "out_of_channel_nil": true,
+            "out_of_channel_present": true,
+            "panicked": false
+        },
+        {
+            "in_channel_is_null": false,
+            "in_channel_nil": false,
+            "in_channel_present": true,
+            "json": "{\"in_channel\":[{\"id\":\"6bdz674pgq767e4jx75w4pf57a\",\"create_at\":100,\"update_at\":200,\"delete_at\":0,\"username\":\"alice\",\"auth_service\":\"\",\"email\":\"alice@example.com\",\"nickname\":\"\",\"first_name\":\"\",\"last_name\":\"\",\"position\":\"\",\"roles\":\"system_user\",\"locale\":\"en\",\"timezone\":null,\"disable_welcome_email\":false},{\"id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"create_at\":100,\"update_at\":200,\"delete_at\":0,\"username\":\"bob\",\"auth_service\":\"\",\"email\":\"bob@example.com\",\"nickname\":\"\",\"first_name\":\"\",\"last_name\":\"\",\"position\":\"\",\"roles\":\"system_user\",\"locale\":\"en\",\"timezone\":null,\"disable_welcome_email\":false}],\"out_of_channel\":null}",
+            "name": "in_populated",
+            "out_of_channel_is_null": true,
+            "out_of_channel_nil": true,
+            "out_of_channel_present": true,
+            "panicked": false
+        },
+        {
+            "in_channel_is_null": false,
+            "in_channel_nil": false,
+            "in_channel_present": true,
+            "json": "{\"in_channel\":[{\"id\":\"6bdz674pgq767e4jx75w4pf57a\",\"create_at\":100,\"update_at\":200,\"delete_at\":0,\"username\":\"alice\",\"auth_service\":\"\",\"email\":\"alice@example.com\",\"nickname\":\"\",\"first_name\":\"\",\"last_name\":\"\",\"position\":\"\",\"roles\":\"system_user\",\"locale\":\"en\",\"timezone\":null,\"disable_welcome_email\":false},{\"id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"create_at\":100,\"update_at\":200,\"delete_at\":0,\"username\":\"bob\",\"auth_service\":\"\",\"email\":\"bob@example.com\",\"nickname\":\"\",\"first_name\":\"\",\"last_name\":\"\",\"position\":\"\",\"roles\":\"system_user\",\"locale\":\"en\",\"timezone\":null,\"disable_welcome_email\":false}],\"out_of_channel\":[{\"id\":\"6bdz674pgq767e4jx75w4pf57a\",\"create_at\":100,\"update_at\":200,\"delete_at\":0,\"username\":\"alice\",\"auth_service\":\"\",\"email\":\"alice@example.com\",\"nickname\":\"\",\"first_name\":\"\",\"last_name\":\"\",\"position\":\"\",\"roles\":\"system_user\",\"locale\":\"en\",\"timezone\":null,\"disable_welcome_email\":false}]}",
+            "name": "both_populated",
+            "out_of_channel_is_null": false,
+            "out_of_channel_nil": false,
+            "out_of_channel_present": true,
+            "panicked": false
+        }
+    ],
+    "in_team_keys": [
+        "in_team"
+    ],
+    "in_team_wire": [
+        {
+            "in_team_is_null": true,
+            "in_team_nil": true,
+            "in_team_present": true,
+            "json": "{\"in_team\":null}",
+            "name": "nil",
+            "panicked": false
+        },
+        {
+            "in_team_is_null": false,
+            "in_team_nil": false,
+            "in_team_present": true,
+            "json": "{\"in_team\":[]}",
+            "name": "empty",
+            "panicked": false
+        },
+        {
+            "in_team_is_null": false,
+            "in_team_nil": false,
+            "in_team_present": true,
+            "json": "{\"in_team\":[{\"id\":\"6bdz674pgq767e4jx75w4pf57a\",\"create_at\":100,\"update_at\":200,\"delete_at\":0,\"username\":\"alice\",\"auth_service\":\"\",\"email\":\"alice@example.com\",\"nickname\":\"\",\"first_name\":\"\",\"last_name\":\"\",\"position\":\"\",\"roles\":\"system_user\",\"locale\":\"en\",\"timezone\":null,\"disable_welcome_email\":false},{\"id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"create_at\":100,\"update_at\":200,\"delete_at\":0,\"username\":\"bob\",\"auth_service\":\"\",\"email\":\"bob@example.com\",\"nickname\":\"\",\"first_name\":\"\",\"last_name\":\"\",\"position\":\"\",\"roles\":\"system_user\",\"locale\":\"en\",\"timezone\":null,\"disable_welcome_email\":false}]}",
+            "name": "populated",
+            "panicked": false
+        }
+    ],
+    "nil_elements": [
+        {
+            "element_nil": true,
+            "field": "in_channel",
+            "in": "{\"in_channel\":[null],\"out_of_channel\":null}",
+            "json_after": "{\"in_channel\":[null],\"out_of_channel\":null}",
+            "name": "in_channel",
+            "panicked": false
+        },
+        {
+            "element_nil": true,
+            "field": "out_of_channel",
+            "in": "{\"in_channel\":null,\"out_of_channel\":[null]}",
+            "json_after": "{\"in_channel\":null,\"out_of_channel\":[null]}",
+            "name": "in_channel_out_of_channel",
+            "panicked": false
+        },
+        {
+            "element_nil": true,
+            "field": "in_team",
+            "in": "{\"in_team\":[null]}",
+            "json_after": "{\"in_team\":[null]}",
+            "name": "in_team",
+            "panicked": false
+        },
+        {
+            "element_nil": true,
+            "field": "users",
+            "in": "{\"users\":[null]}",
+            "json_after": "{\"users\":[null]}",
+            "name": "autocomplete_users",
+            "panicked": false
+        },
+        {
+            "element_nil": true,
+            "field": "out_of_channel",
+            "in": "{\"users\":null,\"out_of_channel\":[null]}",
+            "json_after": "{\"users\":null,\"out_of_channel\":[null]}",
+            "name": "autocomplete_out_of_channel",
+            "panicked": false
+        },
+        {
+            "element_nil": true,
+            "field": "agents",
+            "in": "{\"users\":null,\"agents\":[null]}",
+            "json_after": "{\"users\":null,\"agents\":[null]}",
+            "name": "autocomplete_agents",
+            "panicked": false
+        }
+    ]
+}

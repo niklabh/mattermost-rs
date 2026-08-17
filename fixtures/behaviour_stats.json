@@ -1,0 +1,395 @@
+{
+    "cluster_wire": [
+        {
+            "json": "{\"id\":\"\",\"total_websocket_connections\":0,\"total_read_db_connections\":0,\"total_master_db_connections\":0}",
+            "name": "zero",
+            "panicked": false
+        },
+        {
+            "json": "{\"id\":\"node-1\",\"total_websocket_connections\":512,\"total_read_db_connections\":16,\"total_master_db_connections\":8}",
+            "name": "typical",
+            "panicked": false
+        },
+        {
+            "json": "{\"id\":\"\",\"total_websocket_connections\":1,\"total_read_db_connections\":0,\"total_master_db_connections\":0}",
+            "name": "empty_id",
+            "panicked": false
+        },
+        {
+            "json": "{\"id\":\"n\",\"total_websocket_connections\":-1,\"total_read_db_connections\":0,\"total_master_db_connections\":0}",
+            "name": "negative",
+            "panicked": false
+        },
+        {
+            "json": "{\"id\":\"n\",\"total_websocket_connections\":9223372036854775807,\"total_read_db_connections\":0,\"total_master_db_connections\":0}",
+            "name": "max_int",
+            "panicked": false
+        },
+        {
+            "json": "{\"id\":\"n\",\"total_websocket_connections\":-9223372036854775808,\"total_read_db_connections\":0,\"total_master_db_connections\":0}",
+            "name": "min_int",
+            "panicked": false
+        }
+    ],
+    "int_bounds": [
+        {
+            "agree": true,
+            "int64_err": null,
+            "int64_ok": true,
+            "int64_value": 0,
+            "int_err": null,
+            "int_ok": true,
+            "int_value": 0,
+            "name": "zero",
+            "panicked": false,
+            "raw": "0"
+        },
+        {
+            "agree": true,
+            "int64_err": null,
+            "int64_ok": true,
+            "int64_value": 1,
+            "int_err": null,
+            "int_ok": true,
+            "int_value": 1,
+            "name": "one",
+            "panicked": false,
+            "raw": "1"
+        },
+        {
+            "agree": true,
+            "int64_err": null,
+            "int64_ok": true,
+            "int64_value": -1,
+            "int_err": null,
+            "int_ok": true,
+            "int_value": -1,
+            "name": "negative_one",
+            "panicked": false,
+            "raw": "-1"
+        },
+        {
+            "agree": true,
+            "int64_err": null,
+            "int64_ok": true,
+            "int64_value": 2147483647,
+            "int_err": null,
+            "int_ok": true,
+            "int_value": 2147483647,
+            "name": "max_int32",
+            "panicked": false,
+            "raw": "2147483647"
+        },
+        {
+            "agree": true,
+            "int64_err": null,
+            "int64_ok": true,
+            "int64_value": 2147483648,
+            "int_err": null,
+            "int_ok": true,
+            "int_value": 2147483648,
+            "name": "max_int32_plus_one",
+            "panicked": false,
+            "raw": "2147483648"
+        },
+        {
+            "agree": true,
+            "int64_err": null,
+            "int64_ok": true,
+            "int64_value": -2147483648,
+            "int_err": null,
+            "int_ok": true,
+            "int_value": -2147483648,
+            "name": "min_int32",
+            "panicked": false,
+            "raw": "-2147483648"
+        },
+        {
+            "agree": true,
+            "int64_err": null,
+            "int64_ok": true,
+            "int64_value": -2147483649,
+            "int_err": null,
+            "int_ok": true,
+            "int_value": -2147483649,
+            "name": "min_int32_minus_one",
+            "panicked": false,
+            "raw": "-2147483649"
+        },
+        {
+            "agree": true,
+            "int64_err": null,
+            "int64_ok": true,
+            "int64_value": 9223372036854775807,
+            "int_err": null,
+            "int_ok": true,
+            "int_value": 9223372036854775807,
+            "name": "max_int64",
+            "panicked": false,
+            "raw": "9223372036854775807"
+        },
+        {
+            "agree": true,
+            "int64_err": null,
+            "int64_ok": true,
+            "int64_value": -9223372036854775808,
+            "int_err": null,
+            "int_ok": true,
+            "int_value": -9223372036854775808,
+            "name": "min_int64",
+            "panicked": false,
+            "raw": "-9223372036854775808"
+        },
+        {
+            "agree": true,
+            "int64_err": "json: cannot unmarshal number 9223372036854775808 into Go struct field UsersStats.total_users_count of type int64",
+            "int64_ok": false,
+            "int64_value": 0,
+            "int_err": "json: cannot unmarshal number 9223372036854775808 into Go struct field ClusterStats.total_websocket_connections of type int",
+            "int_ok": false,
+            "int_value": 0,
+            "name": "max_int64_plus_one",
+            "panicked": false,
+            "raw": "9223372036854775808"
+        },
+        {
+            "agree": true,
+            "int64_err": "json: cannot unmarshal number -9223372036854775809 into Go struct field UsersStats.total_users_count of type int64",
+            "int64_ok": false,
+            "int64_value": 0,
+            "int_err": "json: cannot unmarshal number -9223372036854775809 into Go struct field ClusterStats.total_websocket_connections of type int",
+            "int_ok": false,
+            "int_value": 0,
+            "name": "min_int64_minus_one",
+            "panicked": false,
+            "raw": "-9223372036854775809"
+        }
+    ],
+    "int_size": 64,
+    "scalar_decode": [
+        {
+            "active_member_count": 3,
+            "err": null,
+            "in": "{\"team_id\":\"t1\",\"total_member_count\":5,\"active_member_count\":3}",
+            "json_after": "{\"team_id\":\"t1\",\"total_member_count\":5,\"active_member_count\":3}",
+            "name": "full",
+            "ok": true,
+            "panicked": false,
+            "team_id": "t1",
+            "total_member_count": 5
+        },
+        {
+            "active_member_count": 0,
+            "err": null,
+            "in": "{\"team_id\":\"t1\"}",
+            "json_after": "{\"team_id\":\"t1\",\"total_member_count\":0,\"active_member_count\":0}",
+            "name": "partial",
+            "ok": true,
+            "panicked": false,
+            "team_id": "t1",
+            "total_member_count": 0
+        },
+        {
+            "active_member_count": 0,
+            "err": null,
+            "in": "{}",
+            "json_after": "{\"team_id\":\"\",\"total_member_count\":0,\"active_member_count\":0}",
+            "name": "empty",
+            "ok": true,
+            "panicked": false,
+            "team_id": "",
+            "total_member_count": 0
+        },
+        {
+            "active_member_count": 0,
+            "err": null,
+            "in": "{\"nope\":1}",
+            "json_after": "{\"team_id\":\"\",\"total_member_count\":0,\"active_member_count\":0}",
+            "name": "unknown_key",
+            "ok": true,
+            "panicked": false,
+            "team_id": "",
+            "total_member_count": 0
+        },
+        {
+            "active_member_count": 0,
+            "err": null,
+            "in": "{\"TEAM_ID\":\"t1\"}",
+            "json_after": "{\"team_id\":\"t1\",\"total_member_count\":0,\"active_member_count\":0}",
+            "name": "uppercase_key",
+            "ok": true,
+            "panicked": false,
+            "team_id": "t1",
+            "total_member_count": 0
+        },
+        {
+            "active_member_count": 0,
+            "err": null,
+            "in": "{\"Total_Member_Count\":5}",
+            "json_after": "{\"team_id\":\"\",\"total_member_count\":5,\"active_member_count\":0}",
+            "name": "mixed_case_key",
+            "ok": true,
+            "panicked": false,
+            "team_id": "",
+            "total_member_count": 5
+        },
+        {
+            "active_member_count": 0,
+            "err": null,
+            "in": "{\"team_id\":null}",
+            "json_after": "{\"team_id\":\"\",\"total_member_count\":0,\"active_member_count\":0}",
+            "name": "null_string",
+            "ok": true,
+            "panicked": false,
+            "team_id": "",
+            "total_member_count": 0
+        },
+        {
+            "active_member_count": 0,
+            "err": null,
+            "in": "{\"total_member_count\":null}",
+            "json_after": "{\"team_id\":\"\",\"total_member_count\":0,\"active_member_count\":0}",
+            "name": "null_int",
+            "ok": true,
+            "panicked": false,
+            "team_id": "",
+            "total_member_count": 0
+        },
+        {
+            "active_member_count": 0,
+            "err": "json: cannot unmarshal number 1.5 into Go struct field TeamStats.total_member_count of type int64",
+            "in": "{\"total_member_count\":1.5}",
+            "json_after": "{\"team_id\":\"\",\"total_member_count\":0,\"active_member_count\":0}",
+            "name": "fractional",
+            "ok": false,
+            "panicked": false,
+            "team_id": "",
+            "total_member_count": 0
+        },
+        {
+            "active_member_count": 0,
+            "err": "json: cannot unmarshal number 1.0 into Go struct field TeamStats.total_member_count of type int64",
+            "in": "{\"total_member_count\":1.0}",
+            "json_after": "{\"team_id\":\"\",\"total_member_count\":0,\"active_member_count\":0}",
+            "name": "fractional_but_whole",
+            "ok": false,
+            "panicked": false,
+            "team_id": "",
+            "total_member_count": 0
+        },
+        {
+            "active_member_count": 0,
+            "err": "json: cannot unmarshal number 1e3 into Go struct field TeamStats.total_member_count of type int64",
+            "in": "{\"total_member_count\":1e3}",
+            "json_after": "{\"team_id\":\"\",\"total_member_count\":0,\"active_member_count\":0}",
+            "name": "exponent",
+            "ok": false,
+            "panicked": false,
+            "team_id": "",
+            "total_member_count": 0
+        },
+        {
+            "active_member_count": 0,
+            "err": "json: cannot unmarshal string into Go struct field TeamStats.total_member_count of type int64",
+            "in": "{\"total_member_count\":\"5\"}",
+            "json_after": "{\"team_id\":\"\",\"total_member_count\":0,\"active_member_count\":0}",
+            "name": "quoted_number",
+            "ok": false,
+            "panicked": false,
+            "team_id": "",
+            "total_member_count": 0
+        },
+        {
+            "active_member_count": 0,
+            "err": "json: cannot unmarshal bool into Go struct field TeamStats.total_member_count of type int64",
+            "in": "{\"total_member_count\":true}",
+            "json_after": "{\"team_id\":\"\",\"total_member_count\":0,\"active_member_count\":0}",
+            "name": "bool_into_int",
+            "ok": false,
+            "panicked": false,
+            "team_id": "",
+            "total_member_count": 0
+        },
+        {
+            "active_member_count": 0,
+            "err": "json: cannot unmarshal number into Go struct field TeamStats.team_id of type string",
+            "in": "{\"team_id\":5}",
+            "json_after": "{\"team_id\":\"\",\"total_member_count\":0,\"active_member_count\":0}",
+            "name": "number_into_string",
+            "ok": false,
+            "panicked": false,
+            "team_id": "",
+            "total_member_count": 0
+        },
+        {
+            "active_member_count": 0,
+            "err": null,
+            "in": "{\"team_id\":\"first\",\"team_id\":\"second\"}",
+            "json_after": "{\"team_id\":\"second\",\"total_member_count\":0,\"active_member_count\":0}",
+            "name": "duplicate_key",
+            "ok": true,
+            "panicked": false,
+            "team_id": "second",
+            "total_member_count": 0
+        }
+    ],
+    "team_wire": [
+        {
+            "json": "{\"team_id\":\"\",\"total_member_count\":0,\"active_member_count\":0}",
+            "name": "zero",
+            "panicked": false
+        },
+        {
+            "json": "{\"team_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"total_member_count\":120,\"active_member_count\":97}",
+            "name": "typical",
+            "panicked": false
+        },
+        {
+            "json": "{\"team_id\":\"\",\"total_member_count\":1,\"active_member_count\":0}",
+            "name": "empty_team_id",
+            "panicked": false
+        },
+        {
+            "json": "{\"team_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"total_member_count\":1,\"active_member_count\":99}",
+            "name": "active_exceeds_total",
+            "panicked": false
+        },
+        {
+            "json": "{\"team_id\":\"t\",\"total_member_count\":-1,\"active_member_count\":-2}",
+            "name": "negative",
+            "panicked": false
+        },
+        {
+            "json": "{\"team_id\":\"\\u003ca\\u003e\\u0026b\",\"total_member_count\":0,\"active_member_count\":0}",
+            "name": "escaped_id",
+            "panicked": false
+        }
+    ],
+    "users_wire": [
+        {
+            "json": "{\"total_users_count\":0}",
+            "name": "zero",
+            "panicked": false
+        },
+        {
+            "json": "{\"total_users_count\":4321}",
+            "name": "typical",
+            "panicked": false
+        },
+        {
+            "json": "{\"total_users_count\":-1}",
+            "name": "negative",
+            "panicked": false
+        },
+        {
+            "json": "{\"total_users_count\":9223372036854775807}",
+            "name": "max_int64",
+            "panicked": false
+        },
+        {
+            "json": "{\"total_users_count\":-9223372036854775808}",
+            "name": "min_int64",
+            "panicked": false
+        }
+    ]
+}

@@ -1,0 +1,15 @@
+{
+    "user_ids": [
+        "userids-5c37b4",
+        "userids-19fa02"
+    ],
+    "channel_ids": [
+        "channelids-8727f7",
+        "channelids-44ea45"
+    ],
+    "since": 89,
+    "include_deleted": true,
+    "sort_by": "sortby-4356de",
+    "sort_descending": true,
+    "only_empty_content": true
+}

@@ -1,0 +1,104 @@
+{
+    "in_channel": [
+        {
+            "id": "3kg8j1thbe7bq9cqqufdan34nh",
+            "create_at": 1702356309000,
+            "update_at": 1706240296000,
+            "delete_at": 1700192218000,
+            "username": "username-18b83f",
+            "password": "correct-horse-battery-a12060",
+            "auth_data": "authdata-86c97b",
+            "auth_service": "authservice-237bc1",
+            "email": "email-e65ebf@example.com",
+            "email_verified": true,
+            "nickname": "nickname-6c2977",
+            "first_name": "firstname-8eadde",
+            "last_name": "lastname-903c95",
+            "position": "position-b61b81",
+            "roles": "roles-7e13b0",
+            "allow_marketing": true,
+            "props": {
+                "key0-e0ddf0": "val0-566282",
+                "key1-dfdc3d": "val1-5560cf"
+            },
+            "notify_props": {
+                "key0-2dbf0a": "val0-862c85",
+                "key1-2ec0bd": "val1-872e38"
+            },
+            "last_password_update": 1701474356000,
+            "last_picture_update": 1704323903000,
+            "failed_attempts": 12,
+            "locale": "locale-fc1ba6",
+            "timezone": {
+                "key0-669f7b": "val0-5209b3",
+                "key1-67a12e": "val1-530b66"
+            },
+            "mfa_active": true,
+            "mfa_secret": "mfasecret-ea964b",
+            "remote_id": "9ui7hxyxrj3q3m9p5a6y6e517o",
+            "last_activity_at": 1702418484000,
+            "is_bot": true,
+            "bot_description": "botdescription-31a1a3",
+            "bot_last_icon_update": 1707664361000,
+            "terms_of_service_id": "7hywrc7wxybahxyyee35e7adta",
+            "terms_of_service_create_at": 1707539164000,
+            "disable_welcome_email": true,
+            "last_login": 1705433977000,
+            "mfa_used_timestamps": [
+                "mfausedtimestamps-c86748",
+                "mfausedtimestamps-ca383a"
+            ]
+        }
+    ],
+    "out_of_channel": [
+        {
+            "id": "7y8k8j783y4czgaowqu4x1jw3c",
+            "create_at": 1704188567000,
+            "update_at": 1704937146000,
+            "delete_at": 1705101756000,
+            "username": "username-d14a2e",
+            "password": "correct-horse-battery-354ccd",
+            "auth_data": "authdata-88eb49",
+            "auth_service": "authservice-3aad70",
+            "email": "email-76b0eb@example.com",
+            "email_verified": true,
+            "nickname": "nickname-8f61f5",
+            "first_name": "firstname-d97636",
+            "last_name": "lastname-0e2eff",
+            "position": "position-320e81",
+            "roles": "roles-2d041f",
+            "allow_marketing": true,
+            "props": {
+                "key0-9a63b8": "val0-8545aa",
+                "key1-996205": "val1-8443f7"
+            },
+            "notify_props": {
+                "key0-aafed3": "val0-471f32",
+                "key1-ac0086": "val1-4820e5"
+            },
+            "last_password_update": 1707570038000,
+            "last_picture_update": 1704944817000,
+            "failed_attempts": 74,
+            "locale": "locale-3ba112",
+            "timezone": {
+                "key0-bfe875": "val0-4d609c",
+                "key1-c0ea28": "val1-4e624f"
+            },
+            "mfa_active": true,
+            "mfa_secret": "mfasecret-335c16",
+            "remote_id": "5mnohntecierbdq8bafno31oey",
+            "last_activity_at": 1707093378000,
+            "is_bot": true,
+            "bot_description": "botdescription-69c475",
+            "bot_last_icon_update": 1704610927000,
+            "terms_of_service_id": "uza8ysfmmujhd4zqqbckss6uar",
+            "terms_of_service_create_at": 1703433422000,
+            "disable_welcome_email": true,
+            "last_login": 1700689663000,
+            "mfa_used_timestamps": [
+                "mfausedtimestamps-2e3fda",
+                "mfausedtimestamps-280334"
+            ]
+        }
+    ]
+}

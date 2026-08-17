@@ -1,0 +1,2090 @@
+{
+    "equals": [
+        {
+            "name": "identical",
+            "equals": true
+        },
+        {
+            "name": "id",
+            "equals": false
+        },
+        {
+            "name": "fallback",
+            "equals": false
+        },
+        {
+            "name": "color",
+            "equals": false
+        },
+        {
+            "name": "pretext",
+            "equals": false
+        },
+        {
+            "name": "author_name",
+            "equals": false
+        },
+        {
+            "name": "author_link",
+            "equals": false
+        },
+        {
+            "name": "author_icon",
+            "equals": false
+        },
+        {
+            "name": "title",
+            "equals": false
+        },
+        {
+            "name": "title_link",
+            "equals": false
+        },
+        {
+            "name": "text",
+            "equals": false
+        },
+        {
+            "name": "image_url",
+            "equals": false
+        },
+        {
+            "name": "thumb_url",
+            "equals": false
+        },
+        {
+            "name": "footer",
+            "equals": false
+        },
+        {
+            "name": "footer_icon",
+            "equals": false
+        },
+        {
+            "name": "field_count",
+            "equals": false
+        },
+        {
+            "name": "field_title",
+            "equals": false
+        },
+        {
+            "name": "field_value",
+            "equals": false
+        },
+        {
+            "name": "field_short",
+            "equals": false
+        },
+        {
+            "name": "action_count",
+            "equals": false
+        },
+        {
+            "name": "action_id",
+            "equals": false
+        },
+        {
+            "name": "ts_same",
+            "equals": true
+        },
+        {
+            "name": "ts_different_value",
+            "equals": false
+        },
+        {
+            "name": "ts_same_value_different_type",
+            "equals": false
+        },
+        {
+            "name": "ts_string_vs_int",
+            "equals": false
+        },
+        {
+            "name": "ts_nil",
+            "equals": false
+        }
+    ],
+    "equals_from_json": [
+        {
+            "a": "{\"ts\":1}",
+            "b": "{\"ts\":1}",
+            "equals": true,
+            "panicked": false
+        },
+        {
+            "a": "{\"ts\":1}",
+            "b": "{\"ts\":1.0}",
+            "equals": true,
+            "panicked": false
+        },
+        {
+            "a": "{\"ts\":1}",
+            "b": "{\"ts\":2}",
+            "equals": false,
+            "panicked": false
+        },
+        {
+            "a": "{\"ts\":1}",
+            "b": "{\"ts\":\"1\"}",
+            "equals": false,
+            "panicked": false
+        },
+        {
+            "a": "{\"ts\":null}",
+            "b": "{\"ts\":null}",
+            "equals": true,
+            "panicked": false
+        },
+        {
+            "a": "{\"ts\":1}",
+            "b": "{\"ts\":null}",
+            "equals": false,
+            "panicked": false
+        },
+        {
+            "a": "{\"ts\":1e2}",
+            "b": "{\"ts\":100}",
+            "equals": true,
+            "panicked": false
+        },
+        {
+            "a": "{\"fields\":[{\"value\":1}]}",
+            "b": "{\"fields\":[{\"value\":1.0}]}",
+            "equals": true,
+            "panicked": false
+        },
+        {
+            "a": "{\"fields\":[{\"value\":1}]}",
+            "b": "{\"fields\":[{\"value\":2}]}",
+            "equals": false,
+            "panicked": false
+        },
+        {
+            "a": "{\"fields\":[{\"value\":\"a\"}]}",
+            "b": "{\"fields\":[{\"value\":\"a\"}]}",
+            "equals": true,
+            "panicked": false
+        },
+        {
+            "a": "{\"fields\":[{\"value\":{\"a\":1}}]}",
+            "b": "{\"fields\":[{\"value\":{\"a\":1.0}}]}",
+            "equals": true,
+            "panicked": false
+        },
+        {
+            "a": "{\"fields\":[{\"value\":[1,2]}]}",
+            "b": "{\"fields\":[{\"value\":[1.0,2.0]}]}",
+            "equals": true,
+            "panicked": false
+        },
+        {
+            "a": "{\"fields\":[{\"short\":true}]}",
+            "b": "{\"fields\":[{\"short\":\"true\"}]}",
+            "panicked": true
+        }
+    ],
+    "field_equals": [
+        {
+            "equals": true,
+            "name": "identical",
+            "panicked": false
+        },
+        {
+            "equals": false,
+            "name": "title_differs",
+            "panicked": false
+        },
+        {
+            "name": "short_differs_both_values_nil",
+            "panicked": true
+        },
+        {
+            "equals": false,
+            "name": "short_differs_values_set",
+            "panicked": false
+        },
+        {
+            "equals": true,
+            "name": "short_same_values_set",
+            "panicked": false
+        },
+        {
+            "equals": false,
+            "name": "value_differs",
+            "panicked": false
+        },
+        {
+            "equals": true,
+            "name": "value_same_number",
+            "panicked": false
+        },
+        {
+            "equals": false,
+            "name": "value_int_vs_float",
+            "panicked": false
+        },
+        {
+            "equals": false,
+            "name": "value_int_vs_string",
+            "panicked": false
+        },
+        {
+            "name": "value_both_nil",
+            "panicked": true
+        },
+        {
+            "name": "value_nil_vs_set",
+            "panicked": true
+        },
+        {
+            "equals": true,
+            "name": "value_maps_equal",
+            "panicked": false
+        },
+        {
+            "equals": false,
+            "name": "value_maps_differ",
+            "panicked": false
+        },
+        {
+            "equals": true,
+            "name": "value_slices_equal",
+            "panicked": false
+        }
+    ],
+    "field_is_valid": [
+        {
+            "messages": [],
+            "name": "nil"
+        },
+        {
+            "messages": [],
+            "name": "string"
+        },
+        {
+            "messages": [],
+            "name": "empty_string"
+        },
+        {
+            "messages": [],
+            "name": "int"
+        },
+        {
+            "messages": [
+                "value must be either a string or int"
+            ],
+            "name": "int64"
+        },
+        {
+            "messages": [
+                "value must be either a string or int"
+            ],
+            "name": "float64"
+        },
+        {
+            "messages": [
+                "value must be either a string or int"
+            ],
+            "name": "float64_whole"
+        },
+        {
+            "messages": [
+                "value must be either a string or int"
+            ],
+            "name": "bool"
+        },
+        {
+            "messages": [
+                "value must be either a string or int"
+            ],
+            "name": "slice"
+        },
+        {
+            "messages": [
+                "value must be either a string or int"
+            ],
+            "name": "map"
+        }
+    ],
+    "go_format_v_floats": [
+        {
+            "formatted": "0",
+            "json": "0"
+        },
+        {
+            "formatted": "1",
+            "json": "1"
+        },
+        {
+            "formatted": "-1",
+            "json": "-1"
+        },
+        {
+            "formatted": "1.5",
+            "json": "1.5"
+        },
+        {
+            "formatted": "-2.5",
+            "json": "-2.5"
+        },
+        {
+            "formatted": "0.5",
+            "json": "0.5"
+        },
+        {
+            "formatted": "100",
+            "json": "100"
+        },
+        {
+            "formatted": "1e+06",
+            "json": "1000000"
+        },
+        {
+            "formatted": "1e+20",
+            "json": "100000000000000000000"
+        },
+        {
+            "formatted": "1e+21",
+            "json": "1e+21"
+        },
+        {
+            "formatted": "1e+22",
+            "json": "1e+22"
+        },
+        {
+            "formatted": "-1e+21",
+            "json": "-1e+21"
+        },
+        {
+            "formatted": "0.0001",
+            "json": "0.0001"
+        },
+        {
+            "formatted": "1e-05",
+            "json": "0.00001"
+        },
+        {
+            "formatted": "1e-06",
+            "json": "0.000001"
+        },
+        {
+            "formatted": "1e-07",
+            "json": "1e-7"
+        },
+        {
+            "formatted": "1e-20",
+            "json": "1e-20"
+        },
+        {
+            "formatted": "3.14159265358979",
+            "json": "3.14159265358979"
+        },
+        {
+            "formatted": "2.718281828459045",
+            "json": "2.718281828459045"
+        },
+        {
+            "formatted": "1.23456789e+08",
+            "json": "123456789"
+        },
+        {
+            "formatted": "1.2345678901234568e+18",
+            "json": "1234567890123456800"
+        },
+        {
+            "formatted": "1.2345678901234567e+19",
+            "json": "12345678901234567000"
+        },
+        {
+            "formatted": "0.1",
+            "json": "0.1"
+        },
+        {
+            "formatted": "0.2",
+            "json": "0.2"
+        },
+        {
+            "formatted": "0.3",
+            "json": "0.3"
+        },
+        {
+            "formatted": "0.3333333333333333",
+            "json": "0.3333333333333333"
+        },
+        {
+            "formatted": "9.007199254740992e+15",
+            "json": "9007199254740992"
+        },
+        {
+            "formatted": "1e+100",
+            "json": "1e+100"
+        },
+        {
+            "formatted": "1e-100",
+            "json": "1e-100"
+        },
+        {
+            "formatted": "1.7976931348623157e+308",
+            "json": "1.7976931348623157e+308"
+        },
+        {
+            "formatted": "5e-324",
+            "json": "5e-324"
+        },
+        {
+            "formatted": "0",
+            "json": "0"
+        },
+        {
+            "formatted": "1e+15",
+            "json": "1000000000000000"
+        },
+        {
+            "formatted": "1e+16",
+            "json": "10000000000000000"
+        },
+        {
+            "formatted": "1e+17",
+            "json": "100000000000000000"
+        },
+        {
+            "formatted": "1e+21",
+            "json": "1e+21"
+        }
+    ],
+    "go_type_vs_json": [
+        {
+            "json": "{\"ts\":123}",
+            "messages": [
+                "timestamp must be either a string or int64"
+            ]
+        },
+        {
+            "json": "{\"ts\":1.5}",
+            "messages": [
+                "timestamp must be either a string or int64"
+            ]
+        },
+        {
+            "json": "{\"ts\":\"123\"}",
+            "messages": []
+        },
+        {
+            "json": "{\"ts\":null}",
+            "messages": []
+        },
+        {
+            "json": "{\"fields\":[{\"title\":\"t\",\"value\":123}]}",
+            "messages": [
+                "value must be either a string or int"
+            ]
+        },
+        {
+            "json": "{\"fields\":[{\"title\":\"t\",\"value\":\"v\"}]}",
+            "messages": []
+        },
+        {
+            "json": "{\"fields\":[{\"title\":\"t\",\"value\":null}]}",
+            "messages": []
+        },
+        {
+            "json": "{\"fields\":[{\"title\":\"t\",\"value\":1.5}]}",
+            "messages": [
+                "value must be either a string or int"
+            ]
+        }
+    ],
+    "is_valid": [
+        {
+            "name": "zero",
+            "attachment": {
+                "id": 0,
+                "fallback": "",
+                "color": "",
+                "pretext": "",
+                "author_name": "",
+                "author_link": "",
+                "author_icon": "",
+                "title": "",
+                "title_link": "",
+                "text": "",
+                "fields": null,
+                "image_url": "",
+                "thumb_url": "",
+                "footer": "",
+                "footer_icon": "",
+                "ts": null
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "color_good",
+            "attachment": {
+                "id": 0,
+                "fallback": "",
+                "color": "good",
+                "pretext": "",
+                "author_name": "",
+                "author_link": "",
+                "author_icon": "",
+                "title": "",
+                "title_link": "",
+                "text": "",
+                "fields": null,
+                "image_url": "",
+                "thumb_url": "",
+                "footer": "",
+                "footer_icon": "",
+                "ts": null
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "color_warning",
+            "attachment": {
+                "id": 0,
+                "fallback": "",
+                "color": "warning",
+                "pretext": "",
+                "author_name": "",
+                "author_link": "",
+                "author_icon": "",
+                "title": "",
+                "title_link": "",
+                "text": "",
+                "fields": null,
+                "image_url": "",
+                "thumb_url": "",
+                "footer": "",
+                "footer_icon": "",
+                "ts": null
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "color_danger",
+            "attachment": {
+                "id": 0,
+                "fallback": "",
+                "color": "danger",
+                "pretext": "",
+                "author_name": "",
+                "author_link": "",
+                "author_icon": "",
+                "title": "",
+                "title_link": "",
+                "text": "",
+                "fields": null,
+                "image_url": "",
+                "thumb_url": "",
+                "footer": "",
+                "footer_icon": "",
+                "ts": null
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "color_primary_is_not_a_colour",
+            "attachment": {
+                "id": 0,
+                "fallback": "",
+                "color": "primary",
+                "pretext": "",
+                "author_name": "",
+                "author_link": "",
+                "author_icon": "",
+                "title": "",
+                "title_link": "",
+                "text": "",
+                "fields": null,
+                "image_url": "",
+                "thumb_url": "",
+                "footer": "",
+                "footer_icon": "",
+                "ts": null
+            },
+            "messages": [
+                "invalid style 'primary' - must be one of [good, warning, danger] or a hex color"
+            ],
+            "error": "1 error occurred:\n\t* invalid style 'primary' - must be one of [good, warning, danger] or a hex color\n\n"
+        },
+        {
+            "name": "color_default_is_not_a_colour",
+            "attachment": {
+                "id": 0,
+                "fallback": "",
+                "color": "default",
+                "pretext": "",
+                "author_name": "",
+                "author_link": "",
+                "author_icon": "",
+                "title": "",
+                "title_link": "",
+                "text": "",
+                "fields": null,
+                "image_url": "",
+                "thumb_url": "",
+                "footer": "",
+                "footer_icon": "",
+                "ts": null
+            },
+            "messages": [
+                "invalid style 'default' - must be one of [good, warning, danger] or a hex color"
+            ],
+            "error": "1 error occurred:\n\t* invalid style 'default' - must be one of [good, warning, danger] or a hex color\n\n"
+        },
+        {
+            "name": "color_hex6",
+            "attachment": {
+                "id": 0,
+                "fallback": "",
+                "color": "#a1b2c3",
+                "pretext": "",
+                "author_name": "",
+                "author_link": "",
+                "author_icon": "",
+                "title": "",
+                "title_link": "",
+                "text": "",
+                "fields": null,
+                "image_url": "",
+                "thumb_url": "",
+                "footer": "",
+                "footer_icon": "",
+                "ts": null
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "color_hex6_upper",
+            "attachment": {
+                "id": 0,
+                "fallback": "",
+                "color": "#A1B2C3",
+                "pretext": "",
+                "author_name": "",
+                "author_link": "",
+                "author_icon": "",
+                "title": "",
+                "title_link": "",
+                "text": "",
+                "fields": null,
+                "image_url": "",
+                "thumb_url": "",
+                "footer": "",
+                "footer_icon": "",
+                "ts": null
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "color_hex3",
+            "attachment": {
+                "id": 0,
+                "fallback": "",
+                "color": "#abc",
+                "pretext": "",
+                "author_name": "",
+                "author_link": "",
+                "author_icon": "",
+                "title": "",
+                "title_link": "",
+                "text": "",
+                "fields": null,
+                "image_url": "",
+                "thumb_url": "",
+                "footer": "",
+                "footer_icon": "",
+                "ts": null
+            },
+            "messages": [
+                "invalid style '#abc' - must be one of [good, warning, danger] or a hex color"
+            ],
+            "error": "1 error occurred:\n\t* invalid style '#abc' - must be one of [good, warning, danger] or a hex color\n\n"
+        },
+        {
+            "name": "color_hex_no_hash",
+            "attachment": {
+                "id": 0,
+                "fallback": "",
+                "color": "a1b2c3",
+                "pretext": "",
+                "author_name": "",
+                "author_link": "",
+                "author_icon": "",
+                "title": "",
+                "title_link": "",
+                "text": "",
+                "fields": null,
+                "image_url": "",
+                "thumb_url": "",
+                "footer": "",
+                "footer_icon": "",
+                "ts": null
+            },
+            "messages": [
+                "invalid style 'a1b2c3' - must be one of [good, warning, danger] or a hex color"
+            ],
+            "error": "1 error occurred:\n\t* invalid style 'a1b2c3' - must be one of [good, warning, danger] or a hex color\n\n"
+        },
+        {
+            "name": "color_Good_wrong_case",
+            "attachment": {
+                "id": 0,
+                "fallback": "",
+                "color": "Good",
+                "pretext": "",
+                "author_name": "",
+                "author_link": "",
+                "author_icon": "",
+                "title": "",
+                "title_link": "",
+                "text": "",
+                "fields": null,
+                "image_url": "",
+                "thumb_url": "",
+                "footer": "",
+                "footer_icon": "",
+                "ts": null
+            },
+            "messages": [
+                "invalid style 'Good' - must be one of [good, warning, danger] or a hex color"
+            ],
+            "error": "1 error occurred:\n\t* invalid style 'Good' - must be one of [good, warning, danger] or a hex color\n\n"
+        },
+        {
+            "name": "author_link_without_name",
+            "attachment": {
+                "id": 0,
+                "fallback": "",
+                "color": "",
+                "pretext": "",
+                "author_name": "",
+                "author_link": "https://example.com/a",
+                "author_icon": "",
+                "title": "",
+                "title_link": "",
+                "text": "",
+                "fields": null,
+                "image_url": "",
+                "thumb_url": "",
+                "footer": "",
+                "footer_icon": "",
+                "ts": null
+            },
+            "messages": [
+                "author link cannot be set without author name"
+            ],
+            "error": "1 error occurred:\n\t* author link cannot be set without author name\n\n"
+        },
+        {
+            "name": "author_link_with_name",
+            "attachment": {
+                "id": 0,
+                "fallback": "",
+                "color": "",
+                "pretext": "",
+                "author_name": "an",
+                "author_link": "https://example.com/a",
+                "author_icon": "",
+                "title": "",
+                "title_link": "",
+                "text": "",
+                "fields": null,
+                "image_url": "",
+                "thumb_url": "",
+                "footer": "",
+                "footer_icon": "",
+                "ts": null
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "author_link_bad_url_with_name",
+            "attachment": {
+                "id": 0,
+                "fallback": "",
+                "color": "",
+                "pretext": "",
+                "author_name": "an",
+                "author_link": "notaurl",
+                "author_icon": "",
+                "title": "",
+                "title_link": "",
+                "text": "",
+                "fields": null,
+                "image_url": "",
+                "thumb_url": "",
+                "footer": "",
+                "footer_icon": "",
+                "ts": null
+            },
+            "messages": [
+                "invalid author link URL"
+            ],
+            "error": "1 error occurred:\n\t* invalid author link URL\n\n"
+        },
+        {
+            "name": "author_link_bad_url_without_name",
+            "attachment": {
+                "id": 0,
+                "fallback": "",
+                "color": "",
+                "pretext": "",
+                "author_name": "",
+                "author_link": "notaurl",
+                "author_icon": "",
+                "title": "",
+                "title_link": "",
+                "text": "",
+                "fields": null,
+                "image_url": "",
+                "thumb_url": "",
+                "footer": "",
+                "footer_icon": "",
+                "ts": null
+            },
+            "messages": [
+                "author link cannot be set without author name",
+                "invalid author link URL"
+            ],
+            "error": "2 errors occurred:\n\t* author link cannot be set without author name\n\t* invalid author link URL\n\n"
+        },
+        {
+            "name": "author_link_plugin_path_is_not_accepted",
+            "attachment": {
+                "id": 0,
+                "fallback": "",
+                "color": "",
+                "pretext": "",
+                "author_name": "an",
+                "author_link": "/plugins/x",
+                "author_icon": "",
+                "title": "",
+                "title_link": "",
+                "text": "",
+                "fields": null,
+                "image_url": "",
+                "thumb_url": "",
+                "footer": "",
+                "footer_icon": "",
+                "ts": null
+            },
+            "messages": [
+                "invalid author link URL"
+            ],
+            "error": "1 error occurred:\n\t* invalid author link URL\n\n"
+        },
+        {
+            "name": "author_icon_ok",
+            "attachment": {
+                "id": 0,
+                "fallback": "",
+                "color": "",
+                "pretext": "",
+                "author_name": "",
+                "author_link": "",
+                "author_icon": "https://example.com/i.png",
+                "title": "",
+                "title_link": "",
+                "text": "",
+                "fields": null,
+                "image_url": "",
+                "thumb_url": "",
+                "footer": "",
+                "footer_icon": "",
+                "ts": null
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "author_icon_bad",
+            "attachment": {
+                "id": 0,
+                "fallback": "",
+                "color": "",
+                "pretext": "",
+                "author_name": "",
+                "author_link": "",
+                "author_icon": "notaurl",
+                "title": "",
+                "title_link": "",
+                "text": "",
+                "fields": null,
+                "image_url": "",
+                "thumb_url": "",
+                "footer": "",
+                "footer_icon": "",
+                "ts": null
+            },
+            "messages": [
+                "invalid author icon URL"
+            ],
+            "error": "1 error occurred:\n\t* invalid author icon URL\n\n"
+        },
+        {
+            "name": "title_link_without_title",
+            "attachment": {
+                "id": 0,
+                "fallback": "",
+                "color": "",
+                "pretext": "",
+                "author_name": "",
+                "author_link": "",
+                "author_icon": "",
+                "title": "",
+                "title_link": "https://example.com/t",
+                "text": "",
+                "fields": null,
+                "image_url": "",
+                "thumb_url": "",
+                "footer": "",
+                "footer_icon": "",
+                "ts": null
+            },
+            "messages": [
+                "title link cannot be set without title"
+            ],
+            "error": "1 error occurred:\n\t* title link cannot be set without title\n\n"
+        },
+        {
+            "name": "title_link_with_title",
+            "attachment": {
+                "id": 0,
+                "fallback": "",
+                "color": "",
+                "pretext": "",
+                "author_name": "",
+                "author_link": "",
+                "author_icon": "",
+                "title": "t",
+                "title_link": "https://example.com/t",
+                "text": "",
+                "fields": null,
+                "image_url": "",
+                "thumb_url": "",
+                "footer": "",
+                "footer_icon": "",
+                "ts": null
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "title_link_bad_url_without_title",
+            "attachment": {
+                "id": 0,
+                "fallback": "",
+                "color": "",
+                "pretext": "",
+                "author_name": "",
+                "author_link": "",
+                "author_icon": "",
+                "title": "",
+                "title_link": "notaurl",
+                "text": "",
+                "fields": null,
+                "image_url": "",
+                "thumb_url": "",
+                "footer": "",
+                "footer_icon": "",
+                "ts": null
+            },
+            "messages": [
+                "title link cannot be set without title",
+                "invalid title link URL"
+            ],
+            "error": "2 errors occurred:\n\t* title link cannot be set without title\n\t* invalid title link URL\n\n"
+        },
+        {
+            "name": "image_url_bad",
+            "attachment": {
+                "id": 0,
+                "fallback": "",
+                "color": "",
+                "pretext": "",
+                "author_name": "",
+                "author_link": "",
+                "author_icon": "",
+                "title": "",
+                "title_link": "",
+                "text": "",
+                "fields": null,
+                "image_url": "notaurl",
+                "thumb_url": "",
+                "footer": "",
+                "footer_icon": "",
+                "ts": null
+            },
+            "messages": [
+                "invalid image URL"
+            ],
+            "error": "1 error occurred:\n\t* invalid image URL\n\n"
+        },
+        {
+            "name": "thumb_url_bad",
+            "attachment": {
+                "id": 0,
+                "fallback": "",
+                "color": "",
+                "pretext": "",
+                "author_name": "",
+                "author_link": "",
+                "author_icon": "",
+                "title": "",
+                "title_link": "",
+                "text": "",
+                "fields": null,
+                "image_url": "",
+                "thumb_url": "notaurl",
+                "footer": "",
+                "footer_icon": "",
+                "ts": null
+            },
+            "messages": [
+                "invalid thumb URL"
+            ],
+            "error": "1 error occurred:\n\t* invalid thumb URL\n\n"
+        },
+        {
+            "name": "footer_icon_bad",
+            "attachment": {
+                "id": 0,
+                "fallback": "",
+                "color": "",
+                "pretext": "",
+                "author_name": "",
+                "author_link": "",
+                "author_icon": "",
+                "title": "",
+                "title_link": "",
+                "text": "",
+                "fields": null,
+                "image_url": "",
+                "thumb_url": "",
+                "footer": "",
+                "footer_icon": "notaurl",
+                "ts": null
+            },
+            "messages": [
+                "invalid footer icon URL"
+            ],
+            "error": "1 error occurred:\n\t* invalid footer icon URL\n\n"
+        },
+        {
+            "name": "all_urls_bad",
+            "attachment": {
+                "id": 0,
+                "fallback": "",
+                "color": "",
+                "pretext": "",
+                "author_name": "",
+                "author_link": "",
+                "author_icon": "",
+                "title": "",
+                "title_link": "",
+                "text": "",
+                "fields": null,
+                "image_url": "x",
+                "thumb_url": "y",
+                "footer": "",
+                "footer_icon": "z",
+                "ts": null
+            },
+            "messages": [
+                "invalid image URL",
+                "invalid thumb URL",
+                "invalid footer icon URL"
+            ],
+            "error": "3 errors occurred:\n\t* invalid image URL\n\t* invalid thumb URL\n\t* invalid footer icon URL\n\n"
+        },
+        {
+            "name": "field_value_string",
+            "attachment": {
+                "id": 0,
+                "fallback": "",
+                "color": "",
+                "pretext": "",
+                "author_name": "",
+                "author_link": "",
+                "author_icon": "",
+                "title": "",
+                "title_link": "",
+                "text": "",
+                "fields": [
+                    {
+                        "title": "t",
+                        "value": "v",
+                        "short": false
+                    }
+                ],
+                "image_url": "",
+                "thumb_url": "",
+                "footer": "",
+                "footer_icon": "",
+                "ts": null
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "field_value_int",
+            "attachment": {
+                "id": 0,
+                "fallback": "",
+                "color": "",
+                "pretext": "",
+                "author_name": "",
+                "author_link": "",
+                "author_icon": "",
+                "title": "",
+                "title_link": "",
+                "text": "",
+                "fields": [
+                    {
+                        "title": "t",
+                        "value": 3,
+                        "short": false
+                    }
+                ],
+                "image_url": "",
+                "thumb_url": "",
+                "footer": "",
+                "footer_icon": "",
+                "ts": null
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "field_value_int64_is_invalid",
+            "attachment": {
+                "id": 0,
+                "fallback": "",
+                "color": "",
+                "pretext": "",
+                "author_name": "",
+                "author_link": "",
+                "author_icon": "",
+                "title": "",
+                "title_link": "",
+                "text": "",
+                "fields": [
+                    {
+                        "title": "t",
+                        "value": 3,
+                        "short": false
+                    }
+                ],
+                "image_url": "",
+                "thumb_url": "",
+                "footer": "",
+                "footer_icon": "",
+                "ts": null
+            },
+            "messages": [
+                "value must be either a string or int"
+            ],
+            "error": "1 error occurred:\n\t* value must be either a string or int\n\n"
+        },
+        {
+            "name": "field_value_float_is_invalid",
+            "attachment": {
+                "id": 0,
+                "fallback": "",
+                "color": "",
+                "pretext": "",
+                "author_name": "",
+                "author_link": "",
+                "author_icon": "",
+                "title": "",
+                "title_link": "",
+                "text": "",
+                "fields": [
+                    {
+                        "title": "t",
+                        "value": 1.5,
+                        "short": false
+                    }
+                ],
+                "image_url": "",
+                "thumb_url": "",
+                "footer": "",
+                "footer_icon": "",
+                "ts": null
+            },
+            "messages": [
+                "value must be either a string or int"
+            ],
+            "error": "1 error occurred:\n\t* value must be either a string or int\n\n"
+        },
+        {
+            "name": "field_value_bool_is_invalid",
+            "attachment": {
+                "id": 0,
+                "fallback": "",
+                "color": "",
+                "pretext": "",
+                "author_name": "",
+                "author_link": "",
+                "author_icon": "",
+                "title": "",
+                "title_link": "",
+                "text": "",
+                "fields": [
+                    {
+                        "title": "t",
+                        "value": true,
+                        "short": false
+                    }
+                ],
+                "image_url": "",
+                "thumb_url": "",
+                "footer": "",
+                "footer_icon": "",
+                "ts": null
+            },
+            "messages": [
+                "value must be either a string or int"
+            ],
+            "error": "1 error occurred:\n\t* value must be either a string or int\n\n"
+        },
+        {
+            "name": "field_value_nil_is_fine",
+            "attachment": {
+                "id": 0,
+                "fallback": "",
+                "color": "",
+                "pretext": "",
+                "author_name": "",
+                "author_link": "",
+                "author_icon": "",
+                "title": "",
+                "title_link": "",
+                "text": "",
+                "fields": [
+                    {
+                        "title": "t",
+                        "value": null,
+                        "short": false
+                    }
+                ],
+                "image_url": "",
+                "thumb_url": "",
+                "footer": "",
+                "footer_icon": "",
+                "ts": null
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "two_bad_fields",
+            "attachment": {
+                "id": 0,
+                "fallback": "",
+                "color": "",
+                "pretext": "",
+                "author_name": "",
+                "author_link": "",
+                "author_icon": "",
+                "title": "",
+                "title_link": "",
+                "text": "",
+                "fields": [
+                    {
+                        "title": "a",
+                        "value": true,
+                        "short": false
+                    },
+                    {
+                        "title": "b",
+                        "value": 1.5,
+                        "short": false
+                    }
+                ],
+                "image_url": "",
+                "thumb_url": "",
+                "footer": "",
+                "footer_icon": "",
+                "ts": null
+            },
+            "messages": [
+                "value must be either a string or int",
+                "value must be either a string or int"
+            ],
+            "error": "2 errors occurred:\n\t* value must be either a string or int\n\t* value must be either a string or int\n\n"
+        },
+        {
+            "name": "ts_string",
+            "attachment": {
+                "id": 0,
+                "fallback": "",
+                "color": "",
+                "pretext": "",
+                "author_name": "",
+                "author_link": "",
+                "author_icon": "",
+                "title": "",
+                "title_link": "",
+                "text": "",
+                "fields": null,
+                "image_url": "",
+                "thumb_url": "",
+                "footer": "",
+                "footer_icon": "",
+                "ts": "123"
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "ts_int64",
+            "attachment": {
+                "id": 0,
+                "fallback": "",
+                "color": "",
+                "pretext": "",
+                "author_name": "",
+                "author_link": "",
+                "author_icon": "",
+                "title": "",
+                "title_link": "",
+                "text": "",
+                "fields": null,
+                "image_url": "",
+                "thumb_url": "",
+                "footer": "",
+                "footer_icon": "",
+                "ts": 123
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "ts_int_is_invalid",
+            "attachment": {
+                "id": 0,
+                "fallback": "",
+                "color": "",
+                "pretext": "",
+                "author_name": "",
+                "author_link": "",
+                "author_icon": "",
+                "title": "",
+                "title_link": "",
+                "text": "",
+                "fields": null,
+                "image_url": "",
+                "thumb_url": "",
+                "footer": "",
+                "footer_icon": "",
+                "ts": 123
+            },
+            "messages": [
+                "timestamp must be either a string or int64"
+            ],
+            "error": "1 error occurred:\n\t* timestamp must be either a string or int64\n\n"
+        },
+        {
+            "name": "ts_float_is_invalid",
+            "attachment": {
+                "id": 0,
+                "fallback": "",
+                "color": "",
+                "pretext": "",
+                "author_name": "",
+                "author_link": "",
+                "author_icon": "",
+                "title": "",
+                "title_link": "",
+                "text": "",
+                "fields": null,
+                "image_url": "",
+                "thumb_url": "",
+                "footer": "",
+                "footer_icon": "",
+                "ts": 1.5
+            },
+            "messages": [
+                "timestamp must be either a string or int64"
+            ],
+            "error": "1 error occurred:\n\t* timestamp must be either a string or int64\n\n"
+        },
+        {
+            "name": "ts_bool_is_invalid",
+            "attachment": {
+                "id": 0,
+                "fallback": "",
+                "color": "",
+                "pretext": "",
+                "author_name": "",
+                "author_link": "",
+                "author_icon": "",
+                "title": "",
+                "title_link": "",
+                "text": "",
+                "fields": null,
+                "image_url": "",
+                "thumb_url": "",
+                "footer": "",
+                "footer_icon": "",
+                "ts": true
+            },
+            "messages": [
+                "timestamp must be either a string or int64"
+            ],
+            "error": "1 error occurred:\n\t* timestamp must be either a string or int64\n\n"
+        },
+        {
+            "name": "ts_nil_is_fine",
+            "attachment": {
+                "id": 0,
+                "fallback": "",
+                "color": "",
+                "pretext": "",
+                "author_name": "",
+                "author_link": "",
+                "author_icon": "",
+                "title": "",
+                "title_link": "",
+                "text": "",
+                "fields": null,
+                "image_url": "",
+                "thumb_url": "",
+                "footer": "",
+                "footer_icon": "",
+                "ts": null
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "action_invalid",
+            "attachment": {
+                "id": 0,
+                "fallback": "",
+                "color": "",
+                "pretext": "",
+                "author_name": "",
+                "author_link": "",
+                "author_icon": "",
+                "title": "",
+                "title_link": "",
+                "text": "",
+                "fields": null,
+                "image_url": "",
+                "thumb_url": "",
+                "footer": "",
+                "footer_icon": "",
+                "ts": null,
+                "actions": [
+                    {}
+                ]
+            },
+            "messages": [
+                "action at index 0 is invalid: action must have a name",
+                "action at index 0 is invalid: invalid action type: must be 'button' or 'select'",
+                "action at index 0 is invalid: action must have integration settings"
+            ],
+            "error": "3 errors occurred:\n\t* action at index 0 is invalid: action must have a name\n\t* action at index 0 is invalid: invalid action type: must be 'button' or 'select'\n\t* action at index 0 is invalid: action must have integration settings\n\n"
+        },
+        {
+            "name": "action_valid",
+            "attachment": {
+                "id": 0,
+                "fallback": "",
+                "color": "",
+                "pretext": "",
+                "author_name": "",
+                "author_link": "",
+                "author_icon": "",
+                "title": "",
+                "title_link": "",
+                "text": "",
+                "fields": null,
+                "image_url": "",
+                "thumb_url": "",
+                "footer": "",
+                "footer_icon": "",
+                "ts": null,
+                "actions": [
+                    {
+                        "type": "button",
+                        "name": "Go",
+                        "integration": {
+                            "url": "https://example.com/h"
+                        }
+                    }
+                ]
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "second_action_invalid",
+            "attachment": {
+                "id": 0,
+                "fallback": "",
+                "color": "",
+                "pretext": "",
+                "author_name": "",
+                "author_link": "",
+                "author_icon": "",
+                "title": "",
+                "title_link": "",
+                "text": "",
+                "fields": null,
+                "image_url": "",
+                "thumb_url": "",
+                "footer": "",
+                "footer_icon": "",
+                "ts": null,
+                "actions": [
+                    {
+                        "type": "button",
+                        "name": "Go",
+                        "integration": {
+                            "url": "https://example.com/h"
+                        }
+                    },
+                    {}
+                ]
+            },
+            "messages": [
+                "action at index 1 is invalid: action must have a name",
+                "action at index 1 is invalid: invalid action type: must be 'button' or 'select'",
+                "action at index 1 is invalid: action must have integration settings"
+            ],
+            "error": "3 errors occurred:\n\t* action at index 1 is invalid: action must have a name\n\t* action at index 1 is invalid: invalid action type: must be 'button' or 'select'\n\t* action at index 1 is invalid: action must have integration settings\n\n"
+        },
+        {
+            "name": "many_failures",
+            "attachment": {
+                "id": 0,
+                "fallback": "",
+                "color": "nope",
+                "pretext": "",
+                "author_name": "",
+                "author_link": "bad",
+                "author_icon": "",
+                "title": "",
+                "title_link": "bad",
+                "text": "",
+                "fields": [
+                    {
+                        "title": "",
+                        "value": true,
+                        "short": false
+                    }
+                ],
+                "image_url": "bad",
+                "thumb_url": "bad",
+                "footer": "",
+                "footer_icon": "bad",
+                "ts": 1.5,
+                "actions": [
+                    {}
+                ]
+            },
+            "messages": [
+                "invalid style 'nope' - must be one of [good, warning, danger] or a hex color",
+                "author link cannot be set without author name",
+                "invalid author link URL",
+                "title link cannot be set without title",
+                "invalid title link URL",
+                "value must be either a string or int",
+                "invalid image URL",
+                "invalid thumb URL",
+                "invalid footer icon URL",
+                "timestamp must be either a string or int64",
+                "action at index 0 is invalid: action must have a name",
+                "action at index 0 is invalid: invalid action type: must be 'button' or 'select'",
+                "action at index 0 is invalid: action must have integration settings"
+            ],
+            "error": "13 errors occurred:\n\t* invalid style 'nope' - must be one of [good, warning, danger] or a hex color\n\t* author link cannot be set without author name\n\t* invalid author link URL\n\t* title link cannot be set without title\n\t* invalid title link URL\n\t* value must be either a string or int\n\t* invalid image URL\n\t* invalid thumb URL\n\t* invalid footer icon URL\n\t* timestamp must be either a string or int64\n\t* action at index 0 is invalid: action must have a name\n\t* action at index 0 is invalid: invalid action type: must be 'button' or 'select'\n\t* action at index 0 is invalid: action must have integration settings\n\n"
+        }
+    ],
+    "parse_attachment": [
+        {
+            "in_type": "",
+            "name": "empty_type_becomes_slack_attachment",
+            "out_props": {
+                "attachments": [
+                    {
+                        "id": 0,
+                        "fallback": "",
+                        "color": "",
+                        "pretext": "[B](https://b.com)",
+                        "author_name": "",
+                        "author_link": "",
+                        "author_icon": "",
+                        "title": "",
+                        "title_link": "",
+                        "text": "[A](https://a.com)",
+                        "fields": null,
+                        "image_url": "",
+                        "thumb_url": "",
+                        "footer": "",
+                        "footer_icon": "",
+                        "ts": null
+                    }
+                ]
+            },
+            "out_type": "slack_attachment"
+        },
+        {
+            "in_type": "custom_x",
+            "name": "existing_type_is_kept",
+            "out_props": {
+                "attachments": [
+                    {
+                        "id": 0,
+                        "fallback": "",
+                        "color": "",
+                        "pretext": "",
+                        "author_name": "",
+                        "author_link": "",
+                        "author_icon": "",
+                        "title": "",
+                        "title_link": "",
+                        "text": "plain",
+                        "fields": null,
+                        "image_url": "",
+                        "thumb_url": "",
+                        "footer": "",
+                        "footer_icon": "",
+                        "ts": null
+                    }
+                ]
+            },
+            "out_type": "custom_x"
+        },
+        {
+            "in_type": "",
+            "name": "nil_attachments_are_dropped",
+            "out_props": {
+                "attachments": [
+                    {
+                        "id": 0,
+                        "fallback": "",
+                        "color": "",
+                        "pretext": "",
+                        "author_name": "",
+                        "author_link": "",
+                        "author_icon": "",
+                        "title": "",
+                        "title_link": "",
+                        "text": "kept",
+                        "fields": null,
+                        "image_url": "",
+                        "thumb_url": "",
+                        "footer": "",
+                        "footer_icon": "",
+                        "ts": null
+                    }
+                ]
+            },
+            "out_type": "slack_attachment"
+        },
+        {
+            "in_type": "",
+            "name": "nil_fields_are_kept_but_skipped",
+            "out_props": {
+                "attachments": [
+                    {
+                        "id": 0,
+                        "fallback": "",
+                        "color": "",
+                        "pretext": "",
+                        "author_name": "",
+                        "author_link": "",
+                        "author_icon": "",
+                        "title": "",
+                        "title_link": "",
+                        "text": "",
+                        "fields": [
+                            null,
+                            {
+                                "title": "a",
+                                "value": "[A](https://a.com)",
+                                "short": false
+                            },
+                            {
+                                "title": "b",
+                                "value": 3,
+                                "short": false
+                            }
+                        ],
+                        "image_url": "",
+                        "thumb_url": "",
+                        "footer": "",
+                        "footer_icon": "",
+                        "ts": null
+                    }
+                ]
+            },
+            "out_type": "slack_attachment"
+        },
+        {
+            "in_type": "",
+            "name": "no_attachments",
+            "out_props": {
+                "attachments": []
+            },
+            "out_type": "slack_attachment"
+        }
+    ],
+    "parse_slack_links": {
+        "": "",
+        "\u003c#channel|Channel\u003e": "[Channel](#channel)",
+        "\u003c@user|User\u003e": "[User](@user)",
+        "\u003ca\u003cb|c\u003e": "\u003ca[c](b)",
+        "\u003ca|b\u003e \u003cc|d\u003e \u003ce|f\u003e": "[b](a) [d](c) [f](e)",
+        "\u003ca|b\u003ec\u003e": "[b](a)c\u003e",
+        "\u003ca|b|c\u003e": "[b|c](a)",
+        "\u003chttps://a.com|A\u003e and \u003chttps://b.com|B\u003e": "[A](https://a.com) and [B](https://b.com)",
+        "\u003chttps://example.com/(paren)|Text\u003e": "[Text](https://example.com/(paren))",
+        "\u003chttps://example.com\u003e": "\u003chttps://example.com\u003e",
+        "\u003chttps://example.com|\u003e": "\u003chttps://example.com|\u003e",
+        "\u003chttps://example.com|Example\u003e": "[Example](https://example.com)",
+        "\u003chttps://example.com|[bracket]\u003e": "[[bracket]](https://example.com)",
+        "\u003cmailto:a@b.com|Mail\u003e": "[Mail](mailto:a@b.com)",
+        "\u003c|\u003e": "\u003c|\u003e",
+        "\u003c|Example\u003e": "\u003c|Example\u003e",
+        "before \u003chttps://example.com|Example\u003e after": "before [Example](https://example.com) after",
+        "multi\nline \u003chttps://a.com|A\u003e": "multi\nline [A](https://a.com)",
+        "nested \u003c\u003ca|b\u003e|c\u003e": "nested \u003c[b](a)|c\u003e",
+        "no closing \u003chttps://example.com|Example": "no closing \u003chttps://example.com|Example",
+        "plain text": "plain text"
+    },
+    "sprintf_v": [
+        {
+            "formatted": "x",
+            "name": "string"
+        },
+        {
+            "formatted": "",
+            "name": "empty_string"
+        },
+        {
+            "formatted": "3",
+            "name": "int"
+        },
+        {
+            "formatted": "1",
+            "name": "float_whole"
+        },
+        {
+            "formatted": "1.5",
+            "name": "float_frac"
+        },
+        {
+            "formatted": "1e+21",
+            "name": "float_big"
+        },
+        {
+            "formatted": "1e-06",
+            "name": "float_small"
+        },
+        {
+            "formatted": "-2.5",
+            "name": "float_neg"
+        },
+        {
+            "formatted": "true",
+            "name": "bool_true"
+        },
+        {
+            "formatted": "false",
+            "name": "bool_false"
+        },
+        {
+            "formatted": "[1 x true]",
+            "name": "slice"
+        },
+        {
+            "formatted": "[]",
+            "name": "empty_slice"
+        },
+        {
+            "formatted": "map[a:2 z:1]",
+            "name": "map_sorted"
+        },
+        {
+            "formatted": "map[]",
+            "name": "empty_map"
+        },
+        {
+            "formatted": "map[a:[1 map[b:2]]]",
+            "name": "nested"
+        }
+    ],
+    "sprintf_v_from_json": [
+        {
+            "formatted": "x",
+            "json": "\"x\""
+        },
+        {
+            "formatted": "",
+            "json": "\"\""
+        },
+        {
+            "formatted": "a b",
+            "json": "\"a b\""
+        },
+        {
+            "formatted": "map[a:1]",
+            "json": "\"map[a:1]\""
+        },
+        {
+            "formatted": "0",
+            "json": "0"
+        },
+        {
+            "formatted": "1",
+            "json": "1"
+        },
+        {
+            "formatted": "-1",
+            "json": "-1"
+        },
+        {
+            "formatted": "1.5",
+            "json": "1.5"
+        },
+        {
+            "formatted": "1e+21",
+            "json": "1e21"
+        },
+        {
+            "formatted": "1e-07",
+            "json": "1e-7"
+        },
+        {
+            "formatted": "1.23456789e+08",
+            "json": "123456789"
+        },
+        {
+            "formatted": "true",
+            "json": "true"
+        },
+        {
+            "formatted": "false",
+            "json": "false"
+        },
+        {
+            "formatted": "[]",
+            "json": "[]"
+        },
+        {
+            "formatted": "[1 2]",
+            "json": "[1,2]"
+        },
+        {
+            "formatted": "[a b]",
+            "json": "[\"a\",\"b\"]"
+        },
+        {
+            "formatted": "[\u003cnil\u003e]",
+            "json": "[null]"
+        },
+        {
+            "formatted": "[\u003cnil\u003e 1]",
+            "json": "[null,1]"
+        },
+        {
+            "formatted": "[[1 2] [3]]",
+            "json": "[[1,2],[3]]"
+        },
+        {
+            "formatted": "[a b c]",
+            "json": "[\"a b\",\"c\"]"
+        },
+        {
+            "formatted": "map[]",
+            "json": "{}"
+        },
+        {
+            "formatted": "map[a:1]",
+            "json": "{\"a\":1}"
+        },
+        {
+            "formatted": "map[a:2 z:1]",
+            "json": "{\"z\":1,\"a\":2}"
+        },
+        {
+            "formatted": "map[a:\u003cnil\u003e]",
+            "json": "{\"a\":null}"
+        },
+        {
+            "formatted": "map[a:map[b:[1 \u003cnil\u003e]]]",
+            "json": "{\"a\":{\"b\":[1,null]}}"
+        },
+        {
+            "formatted": "map[a b:c d]",
+            "json": "{\"a b\":\"c d\"}"
+        }
+    ],
+    "stringify": [
+        {
+            "in_len": 4,
+            "out": [
+                {
+                    "id": 0,
+                    "fallback": "",
+                    "color": "",
+                    "pretext": "",
+                    "author_name": "",
+                    "author_link": "",
+                    "author_icon": "",
+                    "title": "",
+                    "title_link": "",
+                    "text": "keep",
+                    "fields": [
+                        {
+                            "title": "a",
+                            "value": "string",
+                            "short": false
+                        },
+                        {
+                            "title": "b",
+                            "value": "3",
+                            "short": false
+                        },
+                        {
+                            "title": "c",
+                            "value": "1.5",
+                            "short": false
+                        },
+                        {
+                            "title": "d",
+                            "value": "true",
+                            "short": false
+                        },
+                        {
+                            "title": "e",
+                            "value": null,
+                            "short": false
+                        },
+                        {
+                            "title": "f",
+                            "value": "[1 x]",
+                            "short": false
+                        },
+                        {
+                            "title": "g",
+                            "value": "map[a:2 z:1]",
+                            "short": false
+                        }
+                    ],
+                    "image_url": "",
+                    "thumb_url": "",
+                    "footer": "",
+                    "footer_icon": "",
+                    "ts": null
+                },
+                {
+                    "id": 0,
+                    "fallback": "",
+                    "color": "",
+                    "pretext": "",
+                    "author_name": "",
+                    "author_link": "",
+                    "author_icon": "",
+                    "title": "",
+                    "title_link": "",
+                    "text": "second",
+                    "fields": null,
+                    "image_url": "",
+                    "thumb_url": "",
+                    "footer": "",
+                    "footer_icon": "",
+                    "ts": null
+                }
+            ],
+            "out_len": 2
+        }
+    ],
+    "wire": [
+        {
+            "name": "attachment_zero",
+            "json": "{\"id\":0,\"fallback\":\"\",\"color\":\"\",\"pretext\":\"\",\"author_name\":\"\",\"author_link\":\"\",\"author_icon\":\"\",\"title\":\"\",\"title_link\":\"\",\"text\":\"\",\"fields\":null,\"image_url\":\"\",\"thumb_url\":\"\",\"footer\":\"\",\"footer_icon\":\"\",\"ts\":null}",
+            "roundtrip": "{\"id\":0,\"fallback\":\"\",\"color\":\"\",\"pretext\":\"\",\"author_name\":\"\",\"author_link\":\"\",\"author_icon\":\"\",\"title\":\"\",\"title_link\":\"\",\"text\":\"\",\"fields\":null,\"image_url\":\"\",\"thumb_url\":\"\",\"footer\":\"\",\"footer_icon\":\"\",\"ts\":null}"
+        },
+        {
+            "name": "attachment_fields_empty_slice",
+            "json": "{\"id\":0,\"fallback\":\"\",\"color\":\"\",\"pretext\":\"\",\"author_name\":\"\",\"author_link\":\"\",\"author_icon\":\"\",\"title\":\"\",\"title_link\":\"\",\"text\":\"\",\"fields\":[],\"image_url\":\"\",\"thumb_url\":\"\",\"footer\":\"\",\"footer_icon\":\"\",\"ts\":null}",
+            "roundtrip": "{\"id\":0,\"fallback\":\"\",\"color\":\"\",\"pretext\":\"\",\"author_name\":\"\",\"author_link\":\"\",\"author_icon\":\"\",\"title\":\"\",\"title_link\":\"\",\"text\":\"\",\"fields\":[],\"image_url\":\"\",\"thumb_url\":\"\",\"footer\":\"\",\"footer_icon\":\"\",\"ts\":null}"
+        },
+        {
+            "name": "attachment_actions_empty_slice",
+            "json": "{\"id\":0,\"fallback\":\"\",\"color\":\"\",\"pretext\":\"\",\"author_name\":\"\",\"author_link\":\"\",\"author_icon\":\"\",\"title\":\"\",\"title_link\":\"\",\"text\":\"\",\"fields\":null,\"image_url\":\"\",\"thumb_url\":\"\",\"footer\":\"\",\"footer_icon\":\"\",\"ts\":null}",
+            "roundtrip": "{\"id\":0,\"fallback\":\"\",\"color\":\"\",\"pretext\":\"\",\"author_name\":\"\",\"author_link\":\"\",\"author_icon\":\"\",\"title\":\"\",\"title_link\":\"\",\"text\":\"\",\"fields\":null,\"image_url\":\"\",\"thumb_url\":\"\",\"footer\":\"\",\"footer_icon\":\"\",\"ts\":null}"
+        },
+        {
+            "name": "attachment_ts_string",
+            "json": "{\"id\":0,\"fallback\":\"\",\"color\":\"\",\"pretext\":\"\",\"author_name\":\"\",\"author_link\":\"\",\"author_icon\":\"\",\"title\":\"\",\"title_link\":\"\",\"text\":\"\",\"fields\":null,\"image_url\":\"\",\"thumb_url\":\"\",\"footer\":\"\",\"footer_icon\":\"\",\"ts\":\"123\"}",
+            "roundtrip": "{\"id\":0,\"fallback\":\"\",\"color\":\"\",\"pretext\":\"\",\"author_name\":\"\",\"author_link\":\"\",\"author_icon\":\"\",\"title\":\"\",\"title_link\":\"\",\"text\":\"\",\"fields\":null,\"image_url\":\"\",\"thumb_url\":\"\",\"footer\":\"\",\"footer_icon\":\"\",\"ts\":\"123\"}"
+        },
+        {
+            "name": "attachment_ts_int64",
+            "json": "{\"id\":0,\"fallback\":\"\",\"color\":\"\",\"pretext\":\"\",\"author_name\":\"\",\"author_link\":\"\",\"author_icon\":\"\",\"title\":\"\",\"title_link\":\"\",\"text\":\"\",\"fields\":null,\"image_url\":\"\",\"thumb_url\":\"\",\"footer\":\"\",\"footer_icon\":\"\",\"ts\":123}",
+            "roundtrip": "{\"id\":0,\"fallback\":\"\",\"color\":\"\",\"pretext\":\"\",\"author_name\":\"\",\"author_link\":\"\",\"author_icon\":\"\",\"title\":\"\",\"title_link\":\"\",\"text\":\"\",\"fields\":null,\"image_url\":\"\",\"thumb_url\":\"\",\"footer\":\"\",\"footer_icon\":\"\",\"ts\":123}"
+        },
+        {
+            "name": "attachment_ts_float",
+            "json": "{\"id\":0,\"fallback\":\"\",\"color\":\"\",\"pretext\":\"\",\"author_name\":\"\",\"author_link\":\"\",\"author_icon\":\"\",\"title\":\"\",\"title_link\":\"\",\"text\":\"\",\"fields\":null,\"image_url\":\"\",\"thumb_url\":\"\",\"footer\":\"\",\"footer_icon\":\"\",\"ts\":1.5}",
+            "roundtrip": "{\"id\":0,\"fallback\":\"\",\"color\":\"\",\"pretext\":\"\",\"author_name\":\"\",\"author_link\":\"\",\"author_icon\":\"\",\"title\":\"\",\"title_link\":\"\",\"text\":\"\",\"fields\":null,\"image_url\":\"\",\"thumb_url\":\"\",\"footer\":\"\",\"footer_icon\":\"\",\"ts\":1.5}"
+        },
+        {
+            "name": "attachment_ts_bool",
+            "json": "{\"id\":0,\"fallback\":\"\",\"color\":\"\",\"pretext\":\"\",\"author_name\":\"\",\"author_link\":\"\",\"author_icon\":\"\",\"title\":\"\",\"title_link\":\"\",\"text\":\"\",\"fields\":null,\"image_url\":\"\",\"thumb_url\":\"\",\"footer\":\"\",\"footer_icon\":\"\",\"ts\":true}",
+            "roundtrip": "{\"id\":0,\"fallback\":\"\",\"color\":\"\",\"pretext\":\"\",\"author_name\":\"\",\"author_link\":\"\",\"author_icon\":\"\",\"title\":\"\",\"title_link\":\"\",\"text\":\"\",\"fields\":null,\"image_url\":\"\",\"thumb_url\":\"\",\"footer\":\"\",\"footer_icon\":\"\",\"ts\":true}"
+        },
+        {
+            "name": "attachment_full",
+            "json": "{\"id\":7,\"fallback\":\"fb\",\"color\":\"#a1b2c3\",\"pretext\":\"pre\",\"author_name\":\"an\",\"author_link\":\"https://example.com/a\",\"author_icon\":\"https://example.com/i.png\",\"title\":\"t\",\"title_link\":\"https://example.com/t\",\"text\":\"txt\",\"fields\":[{\"title\":\"ft\",\"value\":\"fv\",\"short\":true}],\"image_url\":\"https://example.com/img.png\",\"thumb_url\":\"https://example.com/th.png\",\"footer\":\"f\",\"footer_icon\":\"https://example.com/f.png\",\"ts\":1700000000,\"actions\":[{\"type\":\"button\",\"name\":\"Go\"}]}",
+            "roundtrip": "{\"id\":7,\"fallback\":\"fb\",\"color\":\"#a1b2c3\",\"pretext\":\"pre\",\"author_name\":\"an\",\"author_link\":\"https://example.com/a\",\"author_icon\":\"https://example.com/i.png\",\"title\":\"t\",\"title_link\":\"https://example.com/t\",\"text\":\"txt\",\"fields\":[{\"title\":\"ft\",\"value\":\"fv\",\"short\":true}],\"image_url\":\"https://example.com/img.png\",\"thumb_url\":\"https://example.com/th.png\",\"footer\":\"f\",\"footer_icon\":\"https://example.com/f.png\",\"ts\":1700000000,\"actions\":[{\"type\":\"button\",\"name\":\"Go\"}]}"
+        },
+        {
+            "name": "field_zero",
+            "json": "{\"title\":\"\",\"value\":null,\"short\":false}",
+            "roundtrip": "{\"title\":\"\",\"value\":null,\"short\":false}"
+        },
+        {
+            "name": "field_short_true",
+            "json": "{\"title\":\"\",\"value\":null,\"short\":true}",
+            "roundtrip": "{\"title\":\"\",\"value\":null,\"short\":true}"
+        },
+        {
+            "name": "field_value_string",
+            "json": "{\"title\":\"\",\"value\":\"v\",\"short\":false}",
+            "roundtrip": "{\"title\":\"\",\"value\":\"v\",\"short\":false}"
+        },
+        {
+            "name": "field_value_number",
+            "json": "{\"title\":\"\",\"value\":3,\"short\":false}",
+            "roundtrip": "{\"title\":\"\",\"value\":3,\"short\":false}"
+        },
+        {
+            "name": "field_value_object",
+            "json": "{\"title\":\"\",\"value\":{\"a\":1,\"b\":2},\"short\":false}",
+            "roundtrip": "{\"title\":\"\",\"value\":{\"a\":1,\"b\":2},\"short\":false}"
+        },
+        {
+            "name": "field_value_array",
+            "json": "{\"title\":\"\",\"value\":[\"x\",1],\"short\":false}",
+            "roundtrip": "{\"title\":\"\",\"value\":[\"x\",1],\"short\":false}"
+        }
+    ]
+}

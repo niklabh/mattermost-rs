@@ -1,0 +1,64 @@
+{
+    "channel": {
+        "id": "1x977t1dqmprpa8755drghq4ea",
+        "create_at": 1701607288000,
+        "update_at": 1703605241000,
+        "delete_at": 1707474727000,
+        "team_id": "uekgwgzgqpcuruespepqc7n3ge",
+        "type": "type-6ac992",
+        "display_name": "displayname-13886d",
+        "name": "name-6df7dd",
+        "header": "header-16da6b",
+        "purpose": "purpose-e9996f",
+        "last_post_at": 1706989414000,
+        "total_msg_count": 30,
+        "extra_update_at": 1700106725000,
+        "creator_id": "9gxbgawfqs5zgtw7nptek7fzqc",
+        "scheme_id": "wodgipm7iuppwiaepk4z5mq45e",
+        "props": {
+            "key0-d5d263": "val0-2e3fdf",
+            "key1-d6d416": "val1-2f4192"
+        },
+        "group_constrained": true,
+        "autotranslation": true,
+        "shared": true,
+        "total_msg_count_root": 30,
+        "policy_id": "18f9wzrf4e34xzsj9jqemwjuwh",
+        "last_root_post_at": 1704224702000,
+        "banner_info": {
+            "enabled": true,
+            "text": "text-18f210",
+            "background_color": "backgroundcolor-e10239"
+        },
+        "policy_enforced": true,
+        "policy_actions": {
+            "key0-1de891": true,
+            "key1-1ce6de": true
+        },
+        "policy_is_active": true,
+        "default_category_name": "defaultcategoryname-7336bb",
+        "managed_category_name": "managedcategoryname-6982fd",
+        "discoverable": true
+    },
+    "member": {
+        "channel_id": "rc773zoi6cxbqhb35uxbmho6nh",
+        "user_id": "qqkxtnnqyuua9or19nrrhy98th",
+        "roles": "roles-cf4e28",
+        "last_viewed_at": 1706449723000,
+        "msg_count": 91,
+        "mention_count": 56,
+        "mention_count_root": 28,
+        "urgent_mention_count": 43,
+        "msg_count_root": 7,
+        "notify_props": {
+            "key0-0ea09f": "val0-b10cd4",
+            "key1-0fa252": "val1-b20e87"
+        },
+        "last_update_at": 1702644978000,
+        "scheme_guest": true,
+        "scheme_user": true,
+        "scheme_admin": true,
+        "explicit_roles": "explicitroles-31d032",
+        "autotranslation_disabled": true
+    }
+}

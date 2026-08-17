@@ -1,0 +1,25 @@
+{
+    "added": [
+        "added-211e8f",
+        "added-22ef81"
+    ],
+    "removed": [
+        "removed-92a243",
+        "removed-8ab29c"
+    ],
+    "promoted": [
+        "promoted-eb3471",
+        "promoted-e344ca"
+    ],
+    "demoted": [
+        "demoted-1035e5",
+        "demoted-09f93f"
+    ],
+    "errors": [
+        {
+            "user_id": "nk6mmgz3zm638tp7sspxuq971c",
+            "id": "zfmyh6sc4idysb1ib37c3ingbc",
+            "error": "error-168dc8"
+        }
+    ]
+}

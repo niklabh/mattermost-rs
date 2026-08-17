@@ -1,0 +1,1315 @@
+{
+    "context_map": [
+        {
+            "name": "empty",
+            "in": "",
+            "nil": true,
+            "out": "null"
+        },
+        {
+            "name": "object",
+            "in": "{\"a\":1,\"b\":\"c\"}",
+            "nil": false,
+            "out": "{\"a\":1,\"b\":\"c\"}"
+        },
+        {
+            "name": "empty_object",
+            "in": "{}",
+            "nil": false,
+            "out": "{}"
+        },
+        {
+            "name": "nested",
+            "in": "{\"a\":{\"b\":[1,2]}}",
+            "nil": false,
+            "out": "{\"a\":{\"b\":[1,2]}}"
+        },
+        {
+            "name": "json_null",
+            "in": "null",
+            "nil": false,
+            "out": "{\"context\":\"null\"}"
+        },
+        {
+            "name": "json_array",
+            "in": "[1,2]",
+            "nil": false,
+            "out": "{\"context\":\"[1,2]\"}"
+        },
+        {
+            "name": "json_string",
+            "in": "\"a string\"",
+            "nil": false,
+            "out": "{\"context\":\"\\\"a string\\\"\"}"
+        },
+        {
+            "name": "json_number",
+            "in": "7",
+            "nil": false,
+            "out": "{\"context\":\"7\"}"
+        },
+        {
+            "name": "json_bool",
+            "in": "true",
+            "nil": false,
+            "out": "{\"context\":\"true\"}"
+        },
+        {
+            "name": "not_json",
+            "in": "nope",
+            "nil": false,
+            "out": "{\"context\":\"nope\"}"
+        },
+        {
+            "name": "trailing_data",
+            "in": "{\"a\":1} junk",
+            "nil": false,
+            "out": "{\"context\":\"{\\\"a\\\":1} junk\"}"
+        },
+        {
+            "name": "whitespace",
+            "in": "   ",
+            "nil": false,
+            "out": "{\"context\":\"   \"}"
+        },
+        {
+            "name": "object_with_spaces",
+            "in": "  {\"a\":1}  ",
+            "nil": false,
+            "out": "{\"a\":1}"
+        }
+    ],
+    "cookie_action_spec": [
+        {
+            "name": "nil_actions",
+            "cookie": "{\"kind\":\"mm_blocks_actions\"}",
+            "action_id": "a1",
+            "nil": true,
+            "type": "",
+            "url": ""
+        },
+        {
+            "name": "empty_actions",
+            "cookie": "{\"kind\":\"mm_blocks_actions\",\"actions\":{}}",
+            "action_id": "a1",
+            "nil": true,
+            "type": "",
+            "url": ""
+        },
+        {
+            "name": "empty_action_id",
+            "cookie": "{\"actions\":{\"a1\":{\"type\":\"external\",\"url\":\"https://x.example.com\"}}}",
+            "action_id": "",
+            "nil": true,
+            "type": "",
+            "url": ""
+        },
+        {
+            "name": "unknown_action_id",
+            "cookie": "{\"actions\":{\"a1\":{\"type\":\"external\",\"url\":\"https://x.example.com\"}}}",
+            "action_id": "nope",
+            "nil": true,
+            "type": "",
+            "url": ""
+        },
+        {
+            "name": "external",
+            "cookie": "{\"actions\":{\"a1\":{\"type\":\"external\",\"url\":\"https://x.example.com\"}}}",
+            "action_id": "a1",
+            "nil": false,
+            "type": "external",
+            "url": "https://x.example.com"
+        },
+        {
+            "name": "openurl",
+            "cookie": "{\"actions\":{\"a1\":{\"type\":\"openURL\",\"url\":\"https://x.example.com\"}}}",
+            "action_id": "a1",
+            "nil": false,
+            "type": "openURL",
+            "url": "https://x.example.com"
+        },
+        {
+            "name": "no_type",
+            "cookie": "{\"actions\":{\"a1\":{\"url\":\"https://x.example.com\"}}}",
+            "action_id": "a1",
+            "nil": true,
+            "type": "",
+            "url": ""
+        }
+    ],
+    "entry_to_spec": [
+        {
+            "name": "props_absent",
+            "post": "{\"id\":\"pppppppppppppppppppppppppp\"}",
+            "action_id": "a1",
+            "nil": true,
+            "type": "",
+            "url": "",
+            "query": null,
+            "query_nil": false,
+            "context": "",
+            "context_nil": false
+        },
+        {
+            "name": "registry_absent",
+            "post": "{\"props\":{\"attachments\":[]}}",
+            "action_id": "a1",
+            "nil": true,
+            "type": "",
+            "url": "",
+            "query": null,
+            "query_nil": false,
+            "context": "",
+            "context_nil": false
+        },
+        {
+            "name": "registry_null",
+            "post": "{\"props\":{\"mm_blocks_actions\":null}}",
+            "action_id": "a1",
+            "nil": true,
+            "type": "",
+            "url": "",
+            "query": null,
+            "query_nil": false,
+            "context": "",
+            "context_nil": false
+        },
+        {
+            "name": "registry_string",
+            "post": "{\"props\":{\"mm_blocks_actions\":\"AAAAcookie\"}}",
+            "action_id": "a1",
+            "nil": true,
+            "type": "",
+            "url": "",
+            "query": null,
+            "query_nil": false,
+            "context": "",
+            "context_nil": false
+        },
+        {
+            "name": "registry_array",
+            "post": "{\"props\":{\"mm_blocks_actions\":[1,2]}}",
+            "action_id": "a1",
+            "nil": true,
+            "type": "",
+            "url": "",
+            "query": null,
+            "query_nil": false,
+            "context": "",
+            "context_nil": false
+        },
+        {
+            "name": "registry_number",
+            "post": "{\"props\":{\"mm_blocks_actions\":7}}",
+            "action_id": "a1",
+            "nil": true,
+            "type": "",
+            "url": "",
+            "query": null,
+            "query_nil": false,
+            "context": "",
+            "context_nil": false
+        },
+        {
+            "name": "empty_action_id",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"type\":\"external\",\"url\":\"https://x.example.com\"}}}}",
+            "action_id": "",
+            "nil": true,
+            "type": "",
+            "url": "",
+            "query": null,
+            "query_nil": false,
+            "context": "",
+            "context_nil": false
+        },
+        {
+            "name": "unknown_action_id",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"type\":\"external\",\"url\":\"https://x.example.com\"}}}}",
+            "action_id": "nope",
+            "nil": true,
+            "type": "",
+            "url": "",
+            "query": null,
+            "query_nil": false,
+            "context": "",
+            "context_nil": false
+        },
+        {
+            "name": "entry_null",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":null}}}",
+            "action_id": "a1",
+            "nil": true,
+            "type": "",
+            "url": "",
+            "query": null,
+            "query_nil": false,
+            "context": "",
+            "context_nil": false
+        },
+        {
+            "name": "entry_string",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":\"nope\"}}}",
+            "action_id": "a1",
+            "nil": true,
+            "type": "",
+            "url": "",
+            "query": null,
+            "query_nil": false,
+            "context": "",
+            "context_nil": false
+        },
+        {
+            "name": "entry_array",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":[1]}}}",
+            "action_id": "a1",
+            "nil": true,
+            "type": "",
+            "url": "",
+            "query": null,
+            "query_nil": false,
+            "context": "",
+            "context_nil": false
+        },
+        {
+            "name": "entry_empty_object",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{}}}}",
+            "action_id": "a1",
+            "nil": true,
+            "type": "",
+            "url": "",
+            "query": null,
+            "query_nil": false,
+            "context": "",
+            "context_nil": false
+        },
+        {
+            "name": "no_type",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"url\":\"https://x.example.com\"}}}}",
+            "action_id": "a1",
+            "nil": true,
+            "type": "",
+            "url": "",
+            "query": null,
+            "query_nil": false,
+            "context": "",
+            "context_nil": false
+        },
+        {
+            "name": "empty_type",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"type\":\"\",\"url\":\"https://x.example.com\"}}}}",
+            "action_id": "a1",
+            "nil": true,
+            "type": "",
+            "url": "",
+            "query": null,
+            "query_nil": false,
+            "context": "",
+            "context_nil": false
+        },
+        {
+            "name": "unknown_type",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"type\":\"nope\",\"url\":\"https://x.example.com\"}}}}",
+            "action_id": "a1",
+            "nil": true,
+            "type": "",
+            "url": "",
+            "query": null,
+            "query_nil": false,
+            "context": "",
+            "context_nil": false
+        },
+        {
+            "name": "type_wrong_case",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"type\":\"External\",\"url\":\"https://x.example.com\"}}}}",
+            "action_id": "a1",
+            "nil": true,
+            "type": "",
+            "url": "",
+            "query": null,
+            "query_nil": false,
+            "context": "",
+            "context_nil": false
+        },
+        {
+            "name": "type_openurl_wrong_case",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"type\":\"openurl\",\"url\":\"https://x.example.com\"}}}}",
+            "action_id": "a1",
+            "nil": true,
+            "type": "",
+            "url": "",
+            "query": null,
+            "query_nil": false,
+            "context": "",
+            "context_nil": false
+        },
+        {
+            "name": "type_not_a_string",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"type\":7,\"url\":\"https://x.example.com\"}}}}",
+            "action_id": "a1",
+            "nil": true,
+            "type": "",
+            "url": "",
+            "query": null,
+            "query_nil": false,
+            "context": "",
+            "context_nil": false
+        },
+        {
+            "name": "external_minimal",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"type\":\"external\",\"url\":\"https://x.example.com/h\"}}}}",
+            "action_id": "a1",
+            "nil": false,
+            "type": "external",
+            "url": "https://x.example.com/h",
+            "query": null,
+            "query_nil": true,
+            "context": "null",
+            "context_nil": true
+        },
+        {
+            "name": "external_no_url",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"type\":\"external\"}}}}",
+            "action_id": "a1",
+            "nil": false,
+            "type": "external",
+            "url": "",
+            "query": null,
+            "query_nil": true,
+            "context": "null",
+            "context_nil": true
+        },
+        {
+            "name": "external_url_not_a_string",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"type\":\"external\",\"url\":7}}}}",
+            "action_id": "a1",
+            "nil": false,
+            "type": "external",
+            "url": "",
+            "query": null,
+            "query_nil": true,
+            "context": "null",
+            "context_nil": true
+        },
+        {
+            "name": "external_with_query",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"type\":\"external\",\"url\":\"https://x.example.com/h\",\"query\":{\"k\":\"v\",\"z\":\"1\"}}}}}",
+            "action_id": "a1",
+            "nil": false,
+            "type": "external",
+            "url": "https://x.example.com/h",
+            "query": {
+                "k": "v",
+                "z": "1"
+            },
+            "query_nil": false,
+            "context": "null",
+            "context_nil": true
+        },
+        {
+            "name": "external_query_empty",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"type\":\"external\",\"url\":\"https://x.example.com/h\",\"query\":{}}}}}",
+            "action_id": "a1",
+            "nil": false,
+            "type": "external",
+            "url": "https://x.example.com/h",
+            "query": null,
+            "query_nil": true,
+            "context": "null",
+            "context_nil": true
+        },
+        {
+            "name": "external_query_mixed_types",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"type\":\"external\",\"url\":\"https://x.example.com/h\",\"query\":{\"k\":\"v\",\"n\":7,\"b\":true}}}}}",
+            "action_id": "a1",
+            "nil": false,
+            "type": "external",
+            "url": "https://x.example.com/h",
+            "query": {
+                "k": "v"
+            },
+            "query_nil": false,
+            "context": "null",
+            "context_nil": true
+        },
+        {
+            "name": "external_query_all_non_strings",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"type\":\"external\",\"url\":\"https://x.example.com/h\",\"query\":{\"n\":7}}}}}",
+            "action_id": "a1",
+            "nil": false,
+            "type": "external",
+            "url": "https://x.example.com/h",
+            "query": null,
+            "query_nil": true,
+            "context": "null",
+            "context_nil": true
+        },
+        {
+            "name": "external_query_not_a_map",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"type\":\"external\",\"url\":\"https://x.example.com/h\",\"query\":\"k=v\"}}}}",
+            "action_id": "a1",
+            "nil": false,
+            "type": "external",
+            "url": "https://x.example.com/h",
+            "query": null,
+            "query_nil": true,
+            "context": "null",
+            "context_nil": true
+        },
+        {
+            "name": "external_context_object",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"type\":\"external\",\"url\":\"https://x.example.com/h\",\"context\":{\"secret\":\"s\",\"n\":3}}}}}",
+            "action_id": "a1",
+            "nil": false,
+            "type": "external",
+            "url": "https://x.example.com/h",
+            "query": null,
+            "query_nil": true,
+            "context": "{\"n\":3,\"secret\":\"s\"}",
+            "context_nil": false
+        },
+        {
+            "name": "external_context_string_json",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"type\":\"external\",\"url\":\"https://x.example.com/h\",\"context\":\"{\\\"a\\\":1}\"}}}}",
+            "action_id": "a1",
+            "nil": false,
+            "type": "external",
+            "url": "https://x.example.com/h",
+            "query": null,
+            "query_nil": true,
+            "context": "{\"a\":1}",
+            "context_nil": false
+        },
+        {
+            "name": "external_context_string_plain",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"type\":\"external\",\"url\":\"https://x.example.com/h\",\"context\":\"plain\"}}}}",
+            "action_id": "a1",
+            "nil": false,
+            "type": "external",
+            "url": "https://x.example.com/h",
+            "query": null,
+            "query_nil": true,
+            "context": "{\"context\":\"plain\"}",
+            "context_nil": false
+        },
+        {
+            "name": "external_context_empty_string",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"type\":\"external\",\"url\":\"https://x.example.com/h\",\"context\":\"\"}}}}",
+            "action_id": "a1",
+            "nil": false,
+            "type": "external",
+            "url": "https://x.example.com/h",
+            "query": null,
+            "query_nil": true,
+            "context": "null",
+            "context_nil": true
+        },
+        {
+            "name": "external_context_null",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"type\":\"external\",\"url\":\"https://x.example.com/h\",\"context\":null}}}}",
+            "action_id": "a1",
+            "nil": false,
+            "type": "external",
+            "url": "https://x.example.com/h",
+            "query": null,
+            "query_nil": true,
+            "context": "null",
+            "context_nil": true
+        },
+        {
+            "name": "external_context_array",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"type\":\"external\",\"url\":\"https://x.example.com/h\",\"context\":[1]}}}}",
+            "action_id": "a1",
+            "nil": false,
+            "type": "external",
+            "url": "https://x.example.com/h",
+            "query": null,
+            "query_nil": true,
+            "context": "null",
+            "context_nil": true
+        },
+        {
+            "name": "external_context_number",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"type\":\"external\",\"url\":\"https://x.example.com/h\",\"context\":7}}}}",
+            "action_id": "a1",
+            "nil": false,
+            "type": "external",
+            "url": "https://x.example.com/h",
+            "query": null,
+            "query_nil": true,
+            "context": "null",
+            "context_nil": true
+        },
+        {
+            "name": "external_bad_url",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"type\":\"external\",\"url\":\"https://a[b/\",\"query\":{\"k\":\"v\"}}}}}",
+            "action_id": "a1",
+            "nil": false,
+            "type": "external",
+            "url": "https://a[b/",
+            "query": {
+                "k": "v"
+            },
+            "query_nil": false,
+            "context": "null",
+            "context_nil": true
+        },
+        {
+            "name": "external_relative_url",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"type\":\"external\",\"url\":\"/plugins/com.example/h\",\"query\":{\"k\":\"v\"}}}}}",
+            "action_id": "a1",
+            "nil": false,
+            "type": "external",
+            "url": "/plugins/com.example/h",
+            "query": {
+                "k": "v"
+            },
+            "query_nil": false,
+            "context": "null",
+            "context_nil": true
+        },
+        {
+            "name": "external_url_with_query",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"type\":\"external\",\"url\":\"https://x.example.com/h?a=1\",\"query\":{\"k\":\"v\"}}}}}",
+            "action_id": "a1",
+            "nil": false,
+            "type": "external",
+            "url": "https://x.example.com/h?a=1",
+            "query": {
+                "k": "v"
+            },
+            "query_nil": false,
+            "context": "null",
+            "context_nil": true
+        },
+        {
+            "name": "external_query_overrides_url",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"type\":\"external\",\"url\":\"https://x.example.com/h?k=old\",\"query\":{\"k\":\"new\"}}}}}",
+            "action_id": "a1",
+            "nil": false,
+            "type": "external",
+            "url": "https://x.example.com/h?k=old",
+            "query": {
+                "k": "new"
+            },
+            "query_nil": false,
+            "context": "null",
+            "context_nil": true
+        },
+        {
+            "name": "openurl_minimal",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"type\":\"openURL\",\"url\":\"https://x.example.com/h\"}}}}",
+            "action_id": "a1",
+            "nil": false,
+            "type": "openURL",
+            "url": "https://x.example.com/h",
+            "query": null,
+            "query_nil": true,
+            "context": "null",
+            "context_nil": true
+        },
+        {
+            "name": "openurl_with_context",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"type\":\"openURL\",\"url\":\"https://x.example.com/h\",\"context\":{\"a\":1}}}}}",
+            "action_id": "a1",
+            "nil": false,
+            "type": "openURL",
+            "url": "https://x.example.com/h",
+            "query": null,
+            "query_nil": true,
+            "context": "null",
+            "context_nil": true
+        },
+        {
+            "name": "openurl_with_query",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"type\":\"openURL\",\"url\":\"https://x.example.com/h\",\"query\":{\"k\":\"v\"}}}}}",
+            "action_id": "a1",
+            "nil": false,
+            "type": "openURL",
+            "url": "https://x.example.com/h",
+            "query": {
+                "k": "v"
+            },
+            "query_nil": false,
+            "context": "null",
+            "context_nil": true
+        },
+        {
+            "name": "openurl_no_url",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"type\":\"openURL\"}}}}",
+            "action_id": "a1",
+            "nil": false,
+            "type": "openURL",
+            "url": "",
+            "query": null,
+            "query_nil": true,
+            "context": "null",
+            "context_nil": true
+        },
+        {
+            "name": "attachment_action_wins",
+            "post": "{\"props\":{\"attachments\":[{\"actions\":[{\"id\":\"a1\",\"name\":\"n\",\"integration\":{\"url\":\"https://att.example.com\"}}]}],\"mm_blocks_actions\":{\"a1\":{\"type\":\"external\",\"url\":\"https://x.example.com/h\"}}}}",
+            "action_id": "a1",
+            "nil": false,
+            "type": "external",
+            "url": "https://x.example.com/h",
+            "query": null,
+            "query_nil": true,
+            "context": "null",
+            "context_nil": true
+        },
+        {
+            "name": "attachment_action_other_id",
+            "post": "{\"props\":{\"attachments\":[{\"actions\":[{\"id\":\"other\",\"name\":\"n\"}]}],\"mm_blocks_actions\":{\"a1\":{\"type\":\"external\",\"url\":\"https://x.example.com/h\"}}}}",
+            "action_id": "a1",
+            "nil": false,
+            "type": "external",
+            "url": "https://x.example.com/h",
+            "query": null,
+            "query_nil": true,
+            "context": "null",
+            "context_nil": true
+        },
+        {
+            "name": "attachment_action_empty_id",
+            "post": "{\"props\":{\"attachments\":[{\"actions\":[{\"name\":\"n\"}]}]}}",
+            "action_id": "",
+            "nil": true,
+            "type": "",
+            "url": "",
+            "query": null,
+            "query_nil": false,
+            "context": "",
+            "context_nil": false
+        }
+    ],
+    "get_action": [
+        {
+            "name": "props_absent",
+            "post": "{\"id\":\"pppppppppppppppppppppppppp\"}",
+            "action_id": "a1",
+            "nil": true,
+            "action": "null"
+        },
+        {
+            "name": "registry_absent",
+            "post": "{\"props\":{\"attachments\":[]}}",
+            "action_id": "a1",
+            "nil": true,
+            "action": "null"
+        },
+        {
+            "name": "registry_null",
+            "post": "{\"props\":{\"mm_blocks_actions\":null}}",
+            "action_id": "a1",
+            "nil": true,
+            "action": "null"
+        },
+        {
+            "name": "registry_string",
+            "post": "{\"props\":{\"mm_blocks_actions\":\"AAAAcookie\"}}",
+            "action_id": "a1",
+            "nil": true,
+            "action": "null"
+        },
+        {
+            "name": "registry_array",
+            "post": "{\"props\":{\"mm_blocks_actions\":[1,2]}}",
+            "action_id": "a1",
+            "nil": true,
+            "action": "null"
+        },
+        {
+            "name": "registry_number",
+            "post": "{\"props\":{\"mm_blocks_actions\":7}}",
+            "action_id": "a1",
+            "nil": true,
+            "action": "null"
+        },
+        {
+            "name": "empty_action_id",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"type\":\"external\",\"url\":\"https://x.example.com\"}}}}",
+            "action_id": "",
+            "nil": true,
+            "action": "null"
+        },
+        {
+            "name": "unknown_action_id",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"type\":\"external\",\"url\":\"https://x.example.com\"}}}}",
+            "action_id": "nope",
+            "nil": true,
+            "action": "null"
+        },
+        {
+            "name": "entry_null",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":null}}}",
+            "action_id": "a1",
+            "nil": true,
+            "action": "null"
+        },
+        {
+            "name": "entry_string",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":\"nope\"}}}",
+            "action_id": "a1",
+            "nil": true,
+            "action": "null"
+        },
+        {
+            "name": "entry_array",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":[1]}}}",
+            "action_id": "a1",
+            "nil": true,
+            "action": "null"
+        },
+        {
+            "name": "entry_empty_object",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{}}}}",
+            "action_id": "a1",
+            "nil": true,
+            "action": "null"
+        },
+        {
+            "name": "no_type",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"url\":\"https://x.example.com\"}}}}",
+            "action_id": "a1",
+            "nil": true,
+            "action": "null"
+        },
+        {
+            "name": "empty_type",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"type\":\"\",\"url\":\"https://x.example.com\"}}}}",
+            "action_id": "a1",
+            "nil": true,
+            "action": "null"
+        },
+        {
+            "name": "unknown_type",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"type\":\"nope\",\"url\":\"https://x.example.com\"}}}}",
+            "action_id": "a1",
+            "nil": true,
+            "action": "null"
+        },
+        {
+            "name": "type_wrong_case",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"type\":\"External\",\"url\":\"https://x.example.com\"}}}}",
+            "action_id": "a1",
+            "nil": true,
+            "action": "null"
+        },
+        {
+            "name": "type_openurl_wrong_case",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"type\":\"openurl\",\"url\":\"https://x.example.com\"}}}}",
+            "action_id": "a1",
+            "nil": true,
+            "action": "null"
+        },
+        {
+            "name": "type_not_a_string",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"type\":7,\"url\":\"https://x.example.com\"}}}}",
+            "action_id": "a1",
+            "nil": true,
+            "action": "null"
+        },
+        {
+            "name": "external_minimal",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"type\":\"external\",\"url\":\"https://x.example.com/h\"}}}}",
+            "action_id": "a1",
+            "nil": false,
+            "action": "{\"id\":\"a1\",\"type\":\"button\",\"integration\":{\"url\":\"https://x.example.com/h\"}}"
+        },
+        {
+            "name": "external_no_url",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"type\":\"external\"}}}}",
+            "action_id": "a1",
+            "nil": true,
+            "action": "null"
+        },
+        {
+            "name": "external_url_not_a_string",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"type\":\"external\",\"url\":7}}}}",
+            "action_id": "a1",
+            "nil": true,
+            "action": "null"
+        },
+        {
+            "name": "external_with_query",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"type\":\"external\",\"url\":\"https://x.example.com/h\",\"query\":{\"k\":\"v\",\"z\":\"1\"}}}}}",
+            "action_id": "a1",
+            "nil": false,
+            "action": "{\"id\":\"a1\",\"type\":\"button\",\"integration\":{\"url\":\"https://x.example.com/h?k=v\\u0026z=1\"}}"
+        },
+        {
+            "name": "external_query_empty",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"type\":\"external\",\"url\":\"https://x.example.com/h\",\"query\":{}}}}}",
+            "action_id": "a1",
+            "nil": false,
+            "action": "{\"id\":\"a1\",\"type\":\"button\",\"integration\":{\"url\":\"https://x.example.com/h\"}}"
+        },
+        {
+            "name": "external_query_mixed_types",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"type\":\"external\",\"url\":\"https://x.example.com/h\",\"query\":{\"k\":\"v\",\"n\":7,\"b\":true}}}}}",
+            "action_id": "a1",
+            "nil": false,
+            "action": "{\"id\":\"a1\",\"type\":\"button\",\"integration\":{\"url\":\"https://x.example.com/h?k=v\"}}"
+        },
+        {
+            "name": "external_query_all_non_strings",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"type\":\"external\",\"url\":\"https://x.example.com/h\",\"query\":{\"n\":7}}}}}",
+            "action_id": "a1",
+            "nil": false,
+            "action": "{\"id\":\"a1\",\"type\":\"button\",\"integration\":{\"url\":\"https://x.example.com/h\"}}"
+        },
+        {
+            "name": "external_query_not_a_map",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"type\":\"external\",\"url\":\"https://x.example.com/h\",\"query\":\"k=v\"}}}}",
+            "action_id": "a1",
+            "nil": false,
+            "action": "{\"id\":\"a1\",\"type\":\"button\",\"integration\":{\"url\":\"https://x.example.com/h\"}}"
+        },
+        {
+            "name": "external_context_object",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"type\":\"external\",\"url\":\"https://x.example.com/h\",\"context\":{\"secret\":\"s\",\"n\":3}}}}}",
+            "action_id": "a1",
+            "nil": false,
+            "action": "{\"id\":\"a1\",\"type\":\"button\",\"integration\":{\"url\":\"https://x.example.com/h\",\"context\":{\"n\":3,\"secret\":\"s\"}}}"
+        },
+        {
+            "name": "external_context_string_json",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"type\":\"external\",\"url\":\"https://x.example.com/h\",\"context\":\"{\\\"a\\\":1}\"}}}}",
+            "action_id": "a1",
+            "nil": false,
+            "action": "{\"id\":\"a1\",\"type\":\"button\",\"integration\":{\"url\":\"https://x.example.com/h\",\"context\":{\"a\":1}}}"
+        },
+        {
+            "name": "external_context_string_plain",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"type\":\"external\",\"url\":\"https://x.example.com/h\",\"context\":\"plain\"}}}}",
+            "action_id": "a1",
+            "nil": false,
+            "action": "{\"id\":\"a1\",\"type\":\"button\",\"integration\":{\"url\":\"https://x.example.com/h\",\"context\":{\"context\":\"plain\"}}}"
+        },
+        {
+            "name": "external_context_empty_string",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"type\":\"external\",\"url\":\"https://x.example.com/h\",\"context\":\"\"}}}}",
+            "action_id": "a1",
+            "nil": false,
+            "action": "{\"id\":\"a1\",\"type\":\"button\",\"integration\":{\"url\":\"https://x.example.com/h\"}}"
+        },
+        {
+            "name": "external_context_null",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"type\":\"external\",\"url\":\"https://x.example.com/h\",\"context\":null}}}}",
+            "action_id": "a1",
+            "nil": false,
+            "action": "{\"id\":\"a1\",\"type\":\"button\",\"integration\":{\"url\":\"https://x.example.com/h\"}}"
+        },
+        {
+            "name": "external_context_array",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"type\":\"external\",\"url\":\"https://x.example.com/h\",\"context\":[1]}}}}",
+            "action_id": "a1",
+            "nil": false,
+            "action": "{\"id\":\"a1\",\"type\":\"button\",\"integration\":{\"url\":\"https://x.example.com/h\"}}"
+        },
+        {
+            "name": "external_context_number",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"type\":\"external\",\"url\":\"https://x.example.com/h\",\"context\":7}}}}",
+            "action_id": "a1",
+            "nil": false,
+            "action": "{\"id\":\"a1\",\"type\":\"button\",\"integration\":{\"url\":\"https://x.example.com/h\"}}"
+        },
+        {
+            "name": "external_bad_url",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"type\":\"external\",\"url\":\"https://a[b/\",\"query\":{\"k\":\"v\"}}}}}",
+            "action_id": "a1",
+            "nil": true,
+            "action": "null"
+        },
+        {
+            "name": "external_relative_url",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"type\":\"external\",\"url\":\"/plugins/com.example/h\",\"query\":{\"k\":\"v\"}}}}}",
+            "action_id": "a1",
+            "nil": false,
+            "action": "{\"id\":\"a1\",\"type\":\"button\",\"integration\":{\"url\":\"/plugins/com.example/h?k=v\"}}"
+        },
+        {
+            "name": "external_url_with_query",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"type\":\"external\",\"url\":\"https://x.example.com/h?a=1\",\"query\":{\"k\":\"v\"}}}}}",
+            "action_id": "a1",
+            "nil": false,
+            "action": "{\"id\":\"a1\",\"type\":\"button\",\"integration\":{\"url\":\"https://x.example.com/h?a=1\\u0026k=v\"}}"
+        },
+        {
+            "name": "external_query_overrides_url",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"type\":\"external\",\"url\":\"https://x.example.com/h?k=old\",\"query\":{\"k\":\"new\"}}}}}",
+            "action_id": "a1",
+            "nil": false,
+            "action": "{\"id\":\"a1\",\"type\":\"button\",\"integration\":{\"url\":\"https://x.example.com/h?k=new\"}}"
+        },
+        {
+            "name": "openurl_minimal",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"type\":\"openURL\",\"url\":\"https://x.example.com/h\"}}}}",
+            "action_id": "a1",
+            "nil": true,
+            "action": "null"
+        },
+        {
+            "name": "openurl_with_context",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"type\":\"openURL\",\"url\":\"https://x.example.com/h\",\"context\":{\"a\":1}}}}}",
+            "action_id": "a1",
+            "nil": true,
+            "action": "null"
+        },
+        {
+            "name": "openurl_with_query",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"type\":\"openURL\",\"url\":\"https://x.example.com/h\",\"query\":{\"k\":\"v\"}}}}}",
+            "action_id": "a1",
+            "nil": true,
+            "action": "null"
+        },
+        {
+            "name": "openurl_no_url",
+            "post": "{\"props\":{\"mm_blocks_actions\":{\"a1\":{\"type\":\"openURL\"}}}}",
+            "action_id": "a1",
+            "nil": true,
+            "action": "null"
+        },
+        {
+            "name": "attachment_action_wins",
+            "post": "{\"props\":{\"attachments\":[{\"actions\":[{\"id\":\"a1\",\"name\":\"n\",\"integration\":{\"url\":\"https://att.example.com\"}}]}],\"mm_blocks_actions\":{\"a1\":{\"type\":\"external\",\"url\":\"https://x.example.com/h\"}}}}",
+            "action_id": "a1",
+            "nil": false,
+            "action": "{\"id\":\"a1\",\"name\":\"n\",\"integration\":{\"url\":\"https://att.example.com\"}}"
+        },
+        {
+            "name": "attachment_action_other_id",
+            "post": "{\"props\":{\"attachments\":[{\"actions\":[{\"id\":\"other\",\"name\":\"n\"}]}],\"mm_blocks_actions\":{\"a1\":{\"type\":\"external\",\"url\":\"https://x.example.com/h\"}}}}",
+            "action_id": "a1",
+            "nil": false,
+            "action": "{\"id\":\"a1\",\"type\":\"button\",\"integration\":{\"url\":\"https://x.example.com/h\"}}"
+        },
+        {
+            "name": "attachment_action_empty_id",
+            "post": "{\"props\":{\"attachments\":[{\"actions\":[{\"name\":\"n\"}]}]}}",
+            "action_id": "",
+            "nil": false,
+            "action": "{\"name\":\"n\"}"
+        }
+    ],
+    "parse_cookie": [
+        {
+            "name": "legacy_full",
+            "in": "{\"type\":\"button\",\"post_id\":\"p\",\"root_id\":\"r\",\"channel_id\":\"c\",\"data_source\":\"users\"}",
+            "ok": true,
+            "err": "",
+            "legacy_nil": false,
+            "mm_blocks_nil": true,
+            "legacy": "{\"type\":\"button\",\"post_id\":\"p\",\"channel_id\":\"c\",\"data_source\":\"users\"}",
+            "mm_blocks": "null"
+        },
+        {
+            "name": "legacy_empty_object",
+            "in": "{}",
+            "ok": true,
+            "err": "",
+            "legacy_nil": false,
+            "mm_blocks_nil": true,
+            "legacy": "{}",
+            "mm_blocks": "null"
+        },
+        {
+            "name": "legacy_unknown_kind",
+            "in": "{\"kind\":\"something_else\",\"post_id\":\"p\"}",
+            "ok": true,
+            "err": "",
+            "legacy_nil": false,
+            "mm_blocks_nil": true,
+            "legacy": "{\"post_id\":\"p\"}",
+            "mm_blocks": "null"
+        },
+        {
+            "name": "mm_blocks",
+            "in": "{\"kind\":\"mm_blocks_actions\",\"post_id\":\"p\",\"actions\":{\"a1\":{\"type\":\"external\"}}}",
+            "ok": true,
+            "err": "",
+            "legacy_nil": true,
+            "mm_blocks_nil": false,
+            "legacy": "null",
+            "mm_blocks": "{\"kind\":\"mm_blocks_actions\",\"post_id\":\"p\",\"actions\":{\"a1\":{\"type\":\"external\"}}}"
+        },
+        {
+            "name": "mm_blocks_no_actions",
+            "in": "{\"kind\":\"mm_blocks_actions\"}",
+            "ok": true,
+            "err": "",
+            "legacy_nil": true,
+            "mm_blocks_nil": false,
+            "legacy": "null",
+            "mm_blocks": "{\"kind\":\"mm_blocks_actions\",\"actions\":null}"
+        },
+        {
+            "name": "kind_wrong_case",
+            "in": "{\"kind\":\"MM_BLOCKS_ACTIONS\"}",
+            "ok": true,
+            "err": "",
+            "legacy_nil": false,
+            "mm_blocks_nil": true,
+            "legacy": "{}",
+            "mm_blocks": "null"
+        },
+        {
+            "name": "kind_not_a_string",
+            "in": "{\"kind\":7}",
+            "ok": false,
+            "err": "json: cannot unmarshal number into Go struct field .kind of type string",
+            "legacy_nil": true,
+            "mm_blocks_nil": true,
+            "legacy": "null",
+            "mm_blocks": "null"
+        },
+        {
+            "name": "json_null",
+            "in": "null",
+            "ok": true,
+            "err": "",
+            "legacy_nil": false,
+            "mm_blocks_nil": true,
+            "legacy": "{}",
+            "mm_blocks": "null"
+        },
+        {
+            "name": "json_number",
+            "in": "7",
+            "ok": false,
+            "err": "json: cannot unmarshal number into Go value of type struct { Kind string \"json:\\\"kind\\\"\" }",
+            "legacy_nil": true,
+            "mm_blocks_nil": true,
+            "legacy": "null",
+            "mm_blocks": "null"
+        },
+        {
+            "name": "json_array",
+            "in": "[]",
+            "ok": false,
+            "err": "json: cannot unmarshal array into Go value of type struct { Kind string \"json:\\\"kind\\\"\" }",
+            "legacy_nil": true,
+            "mm_blocks_nil": true,
+            "legacy": "null",
+            "mm_blocks": "null"
+        },
+        {
+            "name": "json_string",
+            "in": "\"nope\"",
+            "ok": false,
+            "err": "json: cannot unmarshal string into Go value of type struct { Kind string \"json:\\\"kind\\\"\" }",
+            "legacy_nil": true,
+            "mm_blocks_nil": true,
+            "legacy": "null",
+            "mm_blocks": "null"
+        },
+        {
+            "name": "not_json",
+            "in": "nope",
+            "ok": false,
+            "err": "invalid character 'o' in literal null (expecting 'u')",
+            "legacy_nil": true,
+            "mm_blocks_nil": true,
+            "legacy": "null",
+            "mm_blocks": "null"
+        },
+        {
+            "name": "empty",
+            "in": "",
+            "ok": false,
+            "err": "unexpected end of JSON input",
+            "legacy_nil": true,
+            "mm_blocks_nil": true,
+            "legacy": "null",
+            "mm_blocks": "null"
+        }
+    ],
+    "resolve": [
+        {
+            "name": "nil_spec",
+            "spec": "null",
+            "spec_nil": true,
+            "action_id": "act-1",
+            "client_query": null,
+            "err": "mm_blocks action_id=act-1: mm_blocks action not found",
+            "ok": false,
+            "open_url_goto": "",
+            "external_url": "",
+            "context": ""
+        },
+        {
+            "name": "unknown_type",
+            "spec": "{\"Type\":\"nope\",\"URL\":\"https://x.example.com\",\"Query\":null,\"Context\":null}",
+            "spec_nil": false,
+            "action_id": "act-1",
+            "client_query": null,
+            "err": "mm_blocks action_id=act-1: mm_blocks action not found",
+            "ok": false,
+            "open_url_goto": "",
+            "external_url": "",
+            "context": ""
+        },
+        {
+            "name": "empty_type",
+            "spec": "{\"Type\":\"\",\"URL\":\"https://x.example.com\",\"Query\":null,\"Context\":null}",
+            "spec_nil": false,
+            "action_id": "act-1",
+            "client_query": null,
+            "err": "mm_blocks action_id=act-1: mm_blocks action not found",
+            "ok": false,
+            "open_url_goto": "",
+            "external_url": "",
+            "context": ""
+        },
+        {
+            "name": "openurl_no_url",
+            "spec": "{\"Type\":\"openURL\",\"URL\":\"\",\"Query\":null,\"Context\":null}",
+            "spec_nil": false,
+            "action_id": "act-1",
+            "client_query": null,
+            "err": "mm_blocks action_id=act-1: mm_blocks action not found",
+            "ok": false,
+            "open_url_goto": "",
+            "external_url": "",
+            "context": ""
+        },
+        {
+            "name": "openurl",
+            "spec": "{\"Type\":\"openURL\",\"URL\":\"https://x.example.com/h\",\"Query\":null,\"Context\":null}",
+            "spec_nil": false,
+            "action_id": "act-1",
+            "client_query": null,
+            "err": "",
+            "ok": true,
+            "open_url_goto": "https://x.example.com/h",
+            "external_url": "",
+            "context": "null"
+        },
+        {
+            "name": "openurl_with_query",
+            "spec": "{\"Type\":\"openURL\",\"URL\":\"https://x.example.com/h\",\"Query\":{\"k\":\"v\"},\"Context\":null}",
+            "spec_nil": false,
+            "action_id": "act-1",
+            "client_query": null,
+            "err": "",
+            "ok": true,
+            "open_url_goto": "https://x.example.com/h?k=v",
+            "external_url": "",
+            "context": "null"
+        },
+        {
+            "name": "openurl_ignores_client_query",
+            "spec": "{\"Type\":\"openURL\",\"URL\":\"https://x.example.com/h\",\"Query\":null,\"Context\":null}",
+            "spec_nil": false,
+            "action_id": "act-1",
+            "client_query": {
+                "c": "1"
+            },
+            "err": "",
+            "ok": true,
+            "open_url_goto": "https://x.example.com/h",
+            "external_url": "",
+            "context": "null"
+        },
+        {
+            "name": "external_no_url",
+            "spec": "{\"Type\":\"external\",\"URL\":\"\",\"Query\":null,\"Context\":null}",
+            "spec_nil": false,
+            "action_id": "act-1",
+            "client_query": null,
+            "err": "mm_blocks action_id=act-1: mm_blocks action not found",
+            "ok": false,
+            "open_url_goto": "",
+            "external_url": "",
+            "context": ""
+        },
+        {
+            "name": "external",
+            "spec": "{\"Type\":\"external\",\"URL\":\"https://x.example.com/h\",\"Query\":null,\"Context\":null}",
+            "spec_nil": false,
+            "action_id": "act-1",
+            "client_query": null,
+            "err": "",
+            "ok": true,
+            "open_url_goto": "",
+            "external_url": "https://x.example.com/h",
+            "context": "null"
+        },
+        {
+            "name": "external_static_query",
+            "spec": "{\"Type\":\"external\",\"URL\":\"https://x.example.com/h\",\"Query\":{\"s\":\"1\"},\"Context\":null}",
+            "spec_nil": false,
+            "action_id": "act-1",
+            "client_query": null,
+            "err": "",
+            "ok": true,
+            "open_url_goto": "",
+            "external_url": "https://x.example.com/h?s=1",
+            "context": "null"
+        },
+        {
+            "name": "external_client_query",
+            "spec": "{\"Type\":\"external\",\"URL\":\"https://x.example.com/h\",\"Query\":null,\"Context\":null}",
+            "spec_nil": false,
+            "action_id": "act-1",
+            "client_query": {
+                "c": "1"
+            },
+            "err": "",
+            "ok": true,
+            "open_url_goto": "",
+            "external_url": "https://x.example.com/h?c=1",
+            "context": "null"
+        },
+        {
+            "name": "client_query_overrides_static",
+            "spec": "{\"Type\":\"external\",\"URL\":\"https://x.example.com/h\",\"Query\":{\"k\":\"static\"},\"Context\":null}",
+            "spec_nil": false,
+            "action_id": "act-1",
+            "client_query": {
+                "k": "client"
+            },
+            "err": "",
+            "ok": true,
+            "open_url_goto": "",
+            "external_url": "https://x.example.com/h?k=client",
+            "context": "null"
+        },
+        {
+            "name": "external_with_context",
+            "spec": "{\"Type\":\"external\",\"URL\":\"https://x.example.com/h\",\"Query\":null,\"Context\":{\"secret\":\"s\"}}",
+            "spec_nil": false,
+            "action_id": "act-1",
+            "client_query": null,
+            "err": "",
+            "ok": true,
+            "open_url_goto": "",
+            "external_url": "https://x.example.com/h",
+            "context": "{\"secret\":\"s\"}"
+        },
+        {
+            "name": "external_bad_url",
+            "spec": "{\"Type\":\"external\",\"URL\":\"https://a[b/\",\"Query\":{\"k\":\"v\"},\"Context\":null}",
+            "spec_nil": false,
+            "action_id": "act-1",
+            "client_query": null,
+            "err": "parse url: parse \"https://a[b/\": invalid IP-literal",
+            "ok": false,
+            "open_url_goto": "",
+            "external_url": "",
+            "context": ""
+        },
+        {
+            "name": "external_bad_url_no_query",
+            "spec": "{\"Type\":\"external\",\"URL\":\"https://a[b/\",\"Query\":null,\"Context\":null}",
+            "spec_nil": false,
+            "action_id": "act-1",
+            "client_query": null,
+            "err": "",
+            "ok": true,
+            "open_url_goto": "",
+            "external_url": "https://a[b/",
+            "context": "null"
+        }
+    ]
+}

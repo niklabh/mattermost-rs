@@ -1,0 +1,381 @@
+{
+    "file_info_list_wire_keys": [
+        "order",
+        "file_infos",
+        "next_file_info_id",
+        "prev_file_info_id",
+        "first_inaccessible_file_time"
+    ],
+    "make": [
+        {
+            "name": "both_nil",
+            "out": {
+                "json": "{\"matches\":null}",
+                "list_nil": true,
+                "matches_nil": true
+            },
+            "panicked": false
+        },
+        {
+            "name": "nil_list_with_matches",
+            "out": {
+                "json": "{\"matches\":{\"f1\":[\"alpha\"]}}",
+                "list_nil": true,
+                "matches_nil": false
+            },
+            "panicked": false
+        },
+        {
+            "name": "new_list_nil_matches",
+            "out": {
+                "json": "{\"order\":[],\"file_infos\":{},\"next_file_info_id\":\"\",\"prev_file_info_id\":\"\",\"first_inaccessible_file_time\":0,\"matches\":null}",
+                "list": {
+                    "infos_nil": false,
+                    "json": "{\"order\":[],\"file_infos\":{},\"next_file_info_id\":\"\",\"prev_file_info_id\":\"\",\"first_inaccessible_file_time\":0}",
+                    "order_nil": false
+                },
+                "list_nil": false,
+                "matches_nil": true
+            },
+            "panicked": false
+        },
+        {
+            "name": "zero_list_nil_matches",
+            "out": {
+                "json": "{\"order\":null,\"file_infos\":null,\"next_file_info_id\":\"\",\"prev_file_info_id\":\"\",\"first_inaccessible_file_time\":0,\"matches\":null}",
+                "list": {
+                    "infos_nil": true,
+                    "json": "{\"order\":null,\"file_infos\":null,\"next_file_info_id\":\"\",\"prev_file_info_id\":\"\",\"first_inaccessible_file_time\":0}",
+                    "order_nil": true
+                },
+                "list_nil": false,
+                "matches_nil": true
+            },
+            "panicked": false
+        },
+        {
+            "name": "new_list_empty_matches",
+            "out": {
+                "json": "{\"order\":[],\"file_infos\":{},\"next_file_info_id\":\"\",\"prev_file_info_id\":\"\",\"first_inaccessible_file_time\":0,\"matches\":{}}",
+                "list": {
+                    "infos_nil": false,
+                    "json": "{\"order\":[],\"file_infos\":{},\"next_file_info_id\":\"\",\"prev_file_info_id\":\"\",\"first_inaccessible_file_time\":0}",
+                    "order_nil": false
+                },
+                "list_nil": false,
+                "matches_nil": false
+            },
+            "panicked": false
+        },
+        {
+            "name": "decoded_list",
+            "out": {
+                "json": "{\"order\":[\"f1\"],\"file_infos\":{\"f1\":{\"id\":\"f1\",\"user_id\":\"u1\",\"channel_id\":\"c1\",\"create_at\":100,\"update_at\":100,\"delete_at\":0,\"name\":\"one.txt\",\"extension\":\"txt\",\"size\":11,\"mime_type\":\"text/plain\",\"mini_preview\":null,\"remote_id\":null,\"archived\":false}},\"next_file_info_id\":\"\",\"prev_file_info_id\":\"\",\"first_inaccessible_file_time\":0,\"matches\":{\"f1\":[\"one\"]}}",
+                "list": {
+                    "infos_nil": false,
+                    "json": "{\"order\":[\"f1\"],\"file_infos\":{\"f1\":{\"id\":\"f1\",\"user_id\":\"u1\",\"channel_id\":\"c1\",\"create_at\":100,\"update_at\":100,\"delete_at\":0,\"name\":\"one.txt\",\"extension\":\"txt\",\"size\":11,\"mime_type\":\"text/plain\",\"mini_preview\":null,\"remote_id\":null,\"archived\":false}},\"next_file_info_id\":\"\",\"prev_file_info_id\":\"\",\"first_inaccessible_file_time\":0}",
+                    "order_nil": false
+                },
+                "list_nil": false,
+                "matches_nil": false
+            },
+            "panicked": false
+        },
+        {
+            "name": "nil_slice_value",
+            "out": {
+                "json": "{\"order\":[],\"file_infos\":{},\"next_file_info_id\":\"\",\"prev_file_info_id\":\"\",\"first_inaccessible_file_time\":0,\"matches\":{\"f1\":null}}",
+                "list": {
+                    "infos_nil": false,
+                    "json": "{\"order\":[],\"file_infos\":{},\"next_file_info_id\":\"\",\"prev_file_info_id\":\"\",\"first_inaccessible_file_time\":0}",
+                    "order_nil": false
+                },
+                "list_nil": false,
+                "matches_nil": false
+            },
+            "panicked": false
+        },
+        {
+            "name": "zero_value",
+            "out": {
+                "json": "{\"matches\":null}",
+                "list_nil": true,
+                "matches_nil": true
+            },
+            "panicked": false
+        }
+    ],
+    "matches_wire": [
+        {
+            "name": "nil",
+            "nil": true,
+            "out": "null",
+            "panicked": false
+        },
+        {
+            "name": "empty",
+            "nil": false,
+            "out": "{}",
+            "panicked": false
+        },
+        {
+            "name": "one",
+            "nil": false,
+            "out": "{\"f1\":[\"alpha\"]}",
+            "panicked": false
+        },
+        {
+            "name": "nil_value",
+            "nil": false,
+            "out": "{\"f1\":null}",
+            "panicked": false
+        },
+        {
+            "name": "empty_value",
+            "nil": false,
+            "out": "{\"f1\":[]}",
+            "panicked": false
+        },
+        {
+            "name": "unsorted",
+            "nil": false,
+            "out": "{\"a\":[\"2\"],\"m\":[],\"z\":[\"1\"]}",
+            "panicked": false
+        },
+        {
+            "name": "empty_key",
+            "nil": false,
+            "out": "{\"\":[\"x\"]}",
+            "panicked": false
+        },
+        {
+            "name": "escaped",
+            "nil": false,
+            "out": "{\"\\u003ca\\u003e\\u0026\":[\"\\u003cb\\u003e\",\"\\u2028\"]}",
+            "panicked": false
+        },
+        {
+            "name": "duplicate_values",
+            "nil": false,
+            "out": "{\"f1\":[\"x\",\"x\"]}",
+            "panicked": false
+        }
+    ],
+    "wire": [
+        {
+            "in": "{}",
+            "name": "zero",
+            "out": {
+                "json": "{\"matches\":null}",
+                "list_nil": true,
+                "matches_nil": true
+            },
+            "panicked": false
+        },
+        {
+            "in": "{\"matches\":{\"f1\":[\"alpha\",\"beta\"]}}",
+            "name": "matches_only",
+            "out": {
+                "json": "{\"matches\":{\"f1\":[\"alpha\",\"beta\"]}}",
+                "list_nil": true,
+                "matches_nil": false
+            },
+            "panicked": false
+        },
+        {
+            "in": "{\"matches\":null}",
+            "name": "matches_null",
+            "out": {
+                "json": "{\"matches\":null}",
+                "list_nil": true,
+                "matches_nil": true
+            },
+            "panicked": false
+        },
+        {
+            "in": "{\"matches\":{}}",
+            "name": "matches_empty",
+            "out": {
+                "json": "{\"matches\":{}}",
+                "list_nil": true,
+                "matches_nil": false
+            },
+            "panicked": false
+        },
+        {
+            "in": "{\"matches\":{\"f1\":null,\"f2\":[\"x\"]}}",
+            "name": "matches_nil_slice",
+            "out": {
+                "json": "{\"matches\":{\"f1\":null,\"f2\":[\"x\"]}}",
+                "list_nil": true,
+                "matches_nil": false
+            },
+            "panicked": false
+        },
+        {
+            "in": "{\"matches\":{\"f1\":[]}}",
+            "name": "matches_empty_slice",
+            "out": {
+                "json": "{\"matches\":{\"f1\":[]}}",
+                "list_nil": true,
+                "matches_nil": false
+            },
+            "panicked": false
+        },
+        {
+            "in": "{\"matches\":{\"z\":[\"1\"],\"a\":[\"2\"],\"m\":[]}}",
+            "name": "matches_unsorted_keys",
+            "out": {
+                "json": "{\"matches\":{\"a\":[\"2\"],\"m\":[],\"z\":[\"1\"]}}",
+                "list_nil": true,
+                "matches_nil": false
+            },
+            "panicked": false
+        },
+        {
+            "in": "{\"order\":null}",
+            "name": "list_null_only",
+            "out": {
+                "json": "{\"order\":null,\"file_infos\":null,\"next_file_info_id\":\"\",\"prev_file_info_id\":\"\",\"first_inaccessible_file_time\":0,\"matches\":null}",
+                "list": {
+                    "infos_nil": true,
+                    "json": "{\"order\":null,\"file_infos\":null,\"next_file_info_id\":\"\",\"prev_file_info_id\":\"\",\"first_inaccessible_file_time\":0}",
+                    "order_nil": true
+                },
+                "list_nil": false,
+                "matches_nil": true
+            },
+            "panicked": false
+        },
+        {
+            "in": "{\"next_file_info_id\":\"n1\"}",
+            "name": "list_scalar_only",
+            "out": {
+                "json": "{\"order\":null,\"file_infos\":null,\"next_file_info_id\":\"n1\",\"prev_file_info_id\":\"\",\"first_inaccessible_file_time\":0,\"matches\":null}",
+                "list": {
+                    "infos_nil": true,
+                    "json": "{\"order\":null,\"file_infos\":null,\"next_file_info_id\":\"n1\",\"prev_file_info_id\":\"\",\"first_inaccessible_file_time\":0}",
+                    "order_nil": true
+                },
+                "list_nil": false,
+                "matches_nil": true
+            },
+            "panicked": false
+        },
+        {
+            "in": "{\"first_inaccessible_file_time\":0}",
+            "name": "list_zero_scalar_only",
+            "out": {
+                "json": "{\"order\":null,\"file_infos\":null,\"next_file_info_id\":\"\",\"prev_file_info_id\":\"\",\"first_inaccessible_file_time\":0,\"matches\":null}",
+                "list": {
+                    "infos_nil": true,
+                    "json": "{\"order\":null,\"file_infos\":null,\"next_file_info_id\":\"\",\"prev_file_info_id\":\"\",\"first_inaccessible_file_time\":0}",
+                    "order_nil": true
+                },
+                "list_nil": false,
+                "matches_nil": true
+            },
+            "panicked": false
+        },
+        {
+            "in": "{\"nope\":1}",
+            "name": "unknown_key_only",
+            "out": {
+                "json": "{\"matches\":null}",
+                "list_nil": true,
+                "matches_nil": true
+            },
+            "panicked": false
+        },
+        {
+            "in": "{\"ORDER\":[]}",
+            "name": "uppercase_key_only",
+            "out": {
+                "json": "{\"order\":[],\"file_infos\":null,\"next_file_info_id\":\"\",\"prev_file_info_id\":\"\",\"first_inaccessible_file_time\":0,\"matches\":null}",
+                "list": {
+                    "infos_nil": true,
+                    "json": "{\"order\":[],\"file_infos\":null,\"next_file_info_id\":\"\",\"prev_file_info_id\":\"\",\"first_inaccessible_file_time\":0}",
+                    "order_nil": false
+                },
+                "list_nil": false,
+                "matches_nil": true
+            },
+            "panicked": false
+        },
+        {
+            "in": "{\"order\":[\"f1\"],\"file_infos\":{\"f1\":{\"id\":\"f1\",\"user_id\":\"u1\",\"channel_id\":\"c1\",\"create_at\":100,\"update_at\":100,\"name\":\"one.txt\",\"extension\":\"txt\",\"size\":11,\"mime_type\":\"text/plain\"}}}",
+            "name": "list_without_matches",
+            "out": {
+                "json": "{\"order\":[\"f1\"],\"file_infos\":{\"f1\":{\"id\":\"f1\",\"user_id\":\"u1\",\"channel_id\":\"c1\",\"create_at\":100,\"update_at\":100,\"delete_at\":0,\"name\":\"one.txt\",\"extension\":\"txt\",\"size\":11,\"mime_type\":\"text/plain\",\"mini_preview\":null,\"remote_id\":null,\"archived\":false}},\"next_file_info_id\":\"\",\"prev_file_info_id\":\"\",\"first_inaccessible_file_time\":0,\"matches\":null}",
+                "list": {
+                    "infos_nil": false,
+                    "json": "{\"order\":[\"f1\"],\"file_infos\":{\"f1\":{\"id\":\"f1\",\"user_id\":\"u1\",\"channel_id\":\"c1\",\"create_at\":100,\"update_at\":100,\"delete_at\":0,\"name\":\"one.txt\",\"extension\":\"txt\",\"size\":11,\"mime_type\":\"text/plain\",\"mini_preview\":null,\"remote_id\":null,\"archived\":false}},\"next_file_info_id\":\"\",\"prev_file_info_id\":\"\",\"first_inaccessible_file_time\":0}",
+                    "order_nil": false
+                },
+                "list_nil": false,
+                "matches_nil": true
+            },
+            "panicked": false
+        },
+        {
+            "in": "{\"order\":[\"f2\",\"f1\"],\"file_infos\":{\"f1\":{\"id\":\"f1\",\"user_id\":\"u1\",\"channel_id\":\"c1\",\"create_at\":100,\"update_at\":100,\"name\":\"one.txt\",\"extension\":\"txt\",\"size\":11,\"mime_type\":\"text/plain\"},\"f2\":{\"id\":\"f2\",\"user_id\":\"u2\",\"channel_id\":\"c1\",\"create_at\":200,\"update_at\":300,\"name\":\"two.png\",\"extension\":\"png\",\"size\":22,\"mime_type\":\"image/png\"}},\"next_file_info_id\":\"n1\",\"prev_file_info_id\":\"v1\",\"first_inaccessible_file_time\":1700000000000,\"matches\":{\"f1\":[\"one\"],\"f2\":[\"two\",\"three\"]}}",
+            "name": "full",
+            "out": {
+                "json": "{\"order\":[\"f2\",\"f1\"],\"file_infos\":{\"f1\":{\"id\":\"f1\",\"user_id\":\"u1\",\"channel_id\":\"c1\",\"create_at\":100,\"update_at\":100,\"delete_at\":0,\"name\":\"one.txt\",\"extension\":\"txt\",\"size\":11,\"mime_type\":\"text/plain\",\"mini_preview\":null,\"remote_id\":null,\"archived\":false},\"f2\":{\"id\":\"f2\",\"user_id\":\"u2\",\"channel_id\":\"c1\",\"create_at\":200,\"update_at\":300,\"delete_at\":0,\"name\":\"two.png\",\"extension\":\"png\",\"size\":22,\"mime_type\":\"image/png\",\"mini_preview\":null,\"remote_id\":null,\"archived\":false}},\"next_file_info_id\":\"n1\",\"prev_file_info_id\":\"v1\",\"first_inaccessible_file_time\":1700000000000,\"matches\":{\"f1\":[\"one\"],\"f2\":[\"two\",\"three\"]}}",
+                "list": {
+                    "infos_nil": false,
+                    "json": "{\"order\":[\"f2\",\"f1\"],\"file_infos\":{\"f1\":{\"id\":\"f1\",\"user_id\":\"u1\",\"channel_id\":\"c1\",\"create_at\":100,\"update_at\":100,\"delete_at\":0,\"name\":\"one.txt\",\"extension\":\"txt\",\"size\":11,\"mime_type\":\"text/plain\",\"mini_preview\":null,\"remote_id\":null,\"archived\":false},\"f2\":{\"id\":\"f2\",\"user_id\":\"u2\",\"channel_id\":\"c1\",\"create_at\":200,\"update_at\":300,\"delete_at\":0,\"name\":\"two.png\",\"extension\":\"png\",\"size\":22,\"mime_type\":\"image/png\",\"mini_preview\":null,\"remote_id\":null,\"archived\":false}},\"next_file_info_id\":\"n1\",\"prev_file_info_id\":\"v1\",\"first_inaccessible_file_time\":1700000000000}",
+                    "order_nil": false
+                },
+                "list_nil": false,
+                "matches_nil": false
+            },
+            "panicked": false
+        },
+        {
+            "in": "{\"order\":[\"f1\",\"missing\"],\"file_infos\":{\"f1\":{\"id\":\"f1\",\"user_id\":\"u1\",\"channel_id\":\"c1\",\"create_at\":100,\"update_at\":100,\"name\":\"one.txt\",\"extension\":\"txt\",\"size\":11,\"mime_type\":\"text/plain\"}},\"matches\":{}}",
+            "name": "order_without_info",
+            "out": {
+                "json": "{\"order\":[\"f1\",\"missing\"],\"file_infos\":{\"f1\":{\"id\":\"f1\",\"user_id\":\"u1\",\"channel_id\":\"c1\",\"create_at\":100,\"update_at\":100,\"delete_at\":0,\"name\":\"one.txt\",\"extension\":\"txt\",\"size\":11,\"mime_type\":\"text/plain\",\"mini_preview\":null,\"remote_id\":null,\"archived\":false}},\"next_file_info_id\":\"\",\"prev_file_info_id\":\"\",\"first_inaccessible_file_time\":0,\"matches\":{}}",
+                "list": {
+                    "infos_nil": false,
+                    "json": "{\"order\":[\"f1\",\"missing\"],\"file_infos\":{\"f1\":{\"id\":\"f1\",\"user_id\":\"u1\",\"channel_id\":\"c1\",\"create_at\":100,\"update_at\":100,\"delete_at\":0,\"name\":\"one.txt\",\"extension\":\"txt\",\"size\":11,\"mime_type\":\"text/plain\",\"mini_preview\":null,\"remote_id\":null,\"archived\":false}},\"next_file_info_id\":\"\",\"prev_file_info_id\":\"\",\"first_inaccessible_file_time\":0}",
+                    "order_nil": false
+                },
+                "list_nil": false,
+                "matches_nil": false
+            },
+            "panicked": false
+        },
+        {
+            "in": "{\"order\":[],\"file_infos\":{},\"matches\":{}}",
+            "name": "empty_collections",
+            "out": {
+                "json": "{\"order\":[],\"file_infos\":{},\"next_file_info_id\":\"\",\"prev_file_info_id\":\"\",\"first_inaccessible_file_time\":0,\"matches\":{}}",
+                "list": {
+                    "infos_nil": false,
+                    "json": "{\"order\":[],\"file_infos\":{},\"next_file_info_id\":\"\",\"prev_file_info_id\":\"\",\"first_inaccessible_file_time\":0}",
+                    "order_nil": false
+                },
+                "list_nil": false,
+                "matches_nil": false
+            },
+            "panicked": false
+        },
+        {
+            "in": "{\"order\":[\"f1\"],\"file_infos\":{\"f1\":null},\"matches\":{\"f1\":[\"x\"]}}",
+            "name": "nil_info_in_map",
+            "out": {
+                "json": "{\"order\":[\"f1\"],\"file_infos\":{\"f1\":null},\"next_file_info_id\":\"\",\"prev_file_info_id\":\"\",\"first_inaccessible_file_time\":0,\"matches\":{\"f1\":[\"x\"]}}",
+                "list": {
+                    "infos_nil": false,
+                    "json": "{\"order\":[\"f1\"],\"file_infos\":{\"f1\":null},\"next_file_info_id\":\"\",\"prev_file_info_id\":\"\",\"first_inaccessible_file_time\":0}",
+                    "order_nil": false
+                },
+                "list_nil": false,
+                "matches_nil": false
+            },
+            "panicked": false
+        }
+    ]
+}

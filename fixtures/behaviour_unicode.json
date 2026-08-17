@@ -1,0 +1,3587 @@
+{
+    "codepoints": [
+        {
+            "contains_cjk": false,
+            "cp": 0,
+            "han": false,
+            "hangul": false,
+            "hex": "U+0000",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 65,
+            "han": false,
+            "hangul": false,
+            "hex": "U+0041",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 122,
+            "han": false,
+            "hangul": false,
+            "hex": "U+007A",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 255,
+            "han": false,
+            "hangul": false,
+            "hex": "U+00FF",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 2309,
+            "han": false,
+            "hangul": false,
+            "hex": "U+0905",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 3585,
+            "han": false,
+            "hangul": false,
+            "hex": "U+0E01",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 4351,
+            "han": false,
+            "hangul": false,
+            "hex": "U+10FF",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 4352,
+            "han": false,
+            "hangul": true,
+            "hex": "U+1100",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 4353,
+            "han": false,
+            "hangul": true,
+            "hex": "U+1101",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 4606,
+            "han": false,
+            "hangul": true,
+            "hex": "U+11FE",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 4607,
+            "han": false,
+            "hangul": true,
+            "hex": "U+11FF",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 4608,
+            "han": false,
+            "hangul": false,
+            "hex": "U+1200",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 11903,
+            "han": false,
+            "hangul": false,
+            "hex": "U+2E7F",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 11904,
+            "han": true,
+            "hangul": false,
+            "hex": "U+2E80",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 11905,
+            "han": true,
+            "hangul": false,
+            "hex": "U+2E81",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 11928,
+            "han": true,
+            "hangul": false,
+            "hex": "U+2E98",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 11929,
+            "han": true,
+            "hangul": false,
+            "hex": "U+2E99",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 11930,
+            "han": false,
+            "hangul": false,
+            "hex": "U+2E9A",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 11931,
+            "han": true,
+            "hangul": false,
+            "hex": "U+2E9B",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 11932,
+            "han": true,
+            "hangul": false,
+            "hex": "U+2E9C",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 12018,
+            "han": true,
+            "hangul": false,
+            "hex": "U+2EF2",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 12019,
+            "han": true,
+            "hangul": false,
+            "hex": "U+2EF3",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 12020,
+            "han": false,
+            "hangul": false,
+            "hex": "U+2EF4",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 12031,
+            "han": false,
+            "hangul": false,
+            "hex": "U+2EFF",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 12032,
+            "han": true,
+            "hangul": false,
+            "hex": "U+2F00",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 12033,
+            "han": true,
+            "hangul": false,
+            "hex": "U+2F01",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 12244,
+            "han": true,
+            "hangul": false,
+            "hex": "U+2FD4",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 12245,
+            "han": true,
+            "hangul": false,
+            "hex": "U+2FD5",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 12246,
+            "han": false,
+            "hangul": false,
+            "hex": "U+2FD6",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 12288,
+            "han": false,
+            "hangul": false,
+            "hex": "U+3000",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 12289,
+            "han": false,
+            "hangul": false,
+            "hex": "U+3001",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 12290,
+            "han": false,
+            "hangul": false,
+            "hex": "U+3002",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 12292,
+            "han": false,
+            "hangul": false,
+            "hex": "U+3004",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 12293,
+            "han": true,
+            "hangul": false,
+            "hex": "U+3005",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 12294,
+            "han": false,
+            "hangul": false,
+            "hex": "U+3006",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 12295,
+            "han": true,
+            "hangul": false,
+            "hex": "U+3007",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 12296,
+            "han": false,
+            "hangul": false,
+            "hex": "U+3008",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 12300,
+            "han": false,
+            "hangul": false,
+            "hex": "U+300C",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 12301,
+            "han": false,
+            "hangul": false,
+            "hex": "U+300D",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 12320,
+            "han": false,
+            "hangul": false,
+            "hex": "U+3020",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 12321,
+            "han": true,
+            "hangul": false,
+            "hex": "U+3021",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 12322,
+            "han": true,
+            "hangul": false,
+            "hex": "U+3022",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 12328,
+            "han": true,
+            "hangul": false,
+            "hex": "U+3028",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 12329,
+            "han": true,
+            "hangul": false,
+            "hex": "U+3029",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 12330,
+            "han": false,
+            "hangul": false,
+            "hex": "U+302A",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 12333,
+            "han": false,
+            "hangul": false,
+            "hex": "U+302D",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 12334,
+            "han": false,
+            "hangul": true,
+            "hex": "U+302E",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 12335,
+            "han": false,
+            "hangul": true,
+            "hex": "U+302F",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 12336,
+            "han": false,
+            "hangul": false,
+            "hex": "U+3030",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 12343,
+            "han": false,
+            "hangul": false,
+            "hex": "U+3037",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 12344,
+            "han": true,
+            "hangul": false,
+            "hex": "U+3038",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 12345,
+            "han": true,
+            "hangul": false,
+            "hex": "U+3039",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 12346,
+            "han": true,
+            "hangul": false,
+            "hex": "U+303A",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 12347,
+            "han": true,
+            "hangul": false,
+            "hex": "U+303B",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 12348,
+            "han": false,
+            "hangul": false,
+            "hex": "U+303C",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 12352,
+            "han": false,
+            "hangul": false,
+            "hex": "U+3040",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 12353,
+            "han": false,
+            "hangul": false,
+            "hex": "U+3041",
+            "hiragana": true,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 12354,
+            "han": false,
+            "hangul": false,
+            "hex": "U+3042",
+            "hiragana": true,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 12437,
+            "han": false,
+            "hangul": false,
+            "hex": "U+3095",
+            "hiragana": true,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 12438,
+            "han": false,
+            "hangul": false,
+            "hex": "U+3096",
+            "hiragana": true,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 12439,
+            "han": false,
+            "hangul": false,
+            "hex": "U+3097",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 12441,
+            "han": false,
+            "hangul": false,
+            "hex": "U+3099",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 12442,
+            "han": false,
+            "hangul": false,
+            "hex": "U+309A",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 12443,
+            "han": false,
+            "hangul": false,
+            "hex": "U+309B",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 12444,
+            "han": false,
+            "hangul": false,
+            "hex": "U+309C",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 12445,
+            "han": false,
+            "hangul": false,
+            "hex": "U+309D",
+            "hiragana": true,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 12446,
+            "han": false,
+            "hangul": false,
+            "hex": "U+309E",
+            "hiragana": true,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 12447,
+            "han": false,
+            "hangul": false,
+            "hex": "U+309F",
+            "hiragana": true,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 12448,
+            "han": false,
+            "hangul": false,
+            "hex": "U+30A0",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 12449,
+            "han": false,
+            "hangul": false,
+            "hex": "U+30A1",
+            "hiragana": false,
+            "katakana": true,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 12450,
+            "han": false,
+            "hangul": false,
+            "hex": "U+30A2",
+            "hiragana": false,
+            "katakana": true,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 12537,
+            "han": false,
+            "hangul": false,
+            "hex": "U+30F9",
+            "hiragana": false,
+            "katakana": true,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 12538,
+            "han": false,
+            "hangul": false,
+            "hex": "U+30FA",
+            "hiragana": false,
+            "katakana": true,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 12539,
+            "han": false,
+            "hangul": false,
+            "hex": "U+30FB",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 12540,
+            "han": false,
+            "hangul": false,
+            "hex": "U+30FC",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 12541,
+            "han": false,
+            "hangul": false,
+            "hex": "U+30FD",
+            "hiragana": false,
+            "katakana": true,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 12542,
+            "han": false,
+            "hangul": false,
+            "hex": "U+30FE",
+            "hiragana": false,
+            "katakana": true,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 12543,
+            "han": false,
+            "hangul": false,
+            "hex": "U+30FF",
+            "hiragana": false,
+            "katakana": true,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 12544,
+            "han": false,
+            "hangul": false,
+            "hex": "U+3100",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 12592,
+            "han": false,
+            "hangul": false,
+            "hex": "U+3130",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 12593,
+            "han": false,
+            "hangul": true,
+            "hex": "U+3131",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 12594,
+            "han": false,
+            "hangul": true,
+            "hex": "U+3132",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 12685,
+            "han": false,
+            "hangul": true,
+            "hex": "U+318D",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 12686,
+            "han": false,
+            "hangul": true,
+            "hex": "U+318E",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 12687,
+            "han": false,
+            "hangul": false,
+            "hex": "U+318F",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 12783,
+            "han": false,
+            "hangul": false,
+            "hex": "U+31EF",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 12784,
+            "han": false,
+            "hangul": false,
+            "hex": "U+31F0",
+            "hiragana": false,
+            "katakana": true,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 12785,
+            "han": false,
+            "hangul": false,
+            "hex": "U+31F1",
+            "hiragana": false,
+            "katakana": true,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 12798,
+            "han": false,
+            "hangul": false,
+            "hex": "U+31FE",
+            "hiragana": false,
+            "katakana": true,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 12799,
+            "han": false,
+            "hangul": false,
+            "hex": "U+31FF",
+            "hiragana": false,
+            "katakana": true,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 12800,
+            "han": false,
+            "hangul": true,
+            "hex": "U+3200",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 12801,
+            "han": false,
+            "hangul": true,
+            "hex": "U+3201",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 12829,
+            "han": false,
+            "hangul": true,
+            "hex": "U+321D",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 12830,
+            "han": false,
+            "hangul": true,
+            "hex": "U+321E",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 12831,
+            "han": false,
+            "hangul": false,
+            "hex": "U+321F",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 12895,
+            "han": false,
+            "hangul": false,
+            "hex": "U+325F",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 12896,
+            "han": false,
+            "hangul": true,
+            "hex": "U+3260",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 12897,
+            "han": false,
+            "hangul": true,
+            "hex": "U+3261",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 12925,
+            "han": false,
+            "hangul": true,
+            "hex": "U+327D",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 12926,
+            "han": false,
+            "hangul": true,
+            "hex": "U+327E",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 12927,
+            "han": false,
+            "hangul": false,
+            "hex": "U+327F",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 13007,
+            "han": false,
+            "hangul": false,
+            "hex": "U+32CF",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 13008,
+            "han": false,
+            "hangul": false,
+            "hex": "U+32D0",
+            "hiragana": false,
+            "katakana": true,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 13009,
+            "han": false,
+            "hangul": false,
+            "hex": "U+32D1",
+            "hiragana": false,
+            "katakana": true,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 13053,
+            "han": false,
+            "hangul": false,
+            "hex": "U+32FD",
+            "hiragana": false,
+            "katakana": true,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 13054,
+            "han": false,
+            "hangul": false,
+            "hex": "U+32FE",
+            "hiragana": false,
+            "katakana": true,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 13055,
+            "han": false,
+            "hangul": false,
+            "hex": "U+32FF",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 13056,
+            "han": false,
+            "hangul": false,
+            "hex": "U+3300",
+            "hiragana": false,
+            "katakana": true,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 13057,
+            "han": false,
+            "hangul": false,
+            "hex": "U+3301",
+            "hiragana": false,
+            "katakana": true,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 13142,
+            "han": false,
+            "hangul": false,
+            "hex": "U+3356",
+            "hiragana": false,
+            "katakana": true,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 13143,
+            "han": false,
+            "hangul": false,
+            "hex": "U+3357",
+            "hiragana": false,
+            "katakana": true,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 13144,
+            "han": false,
+            "hangul": false,
+            "hex": "U+3358",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 13311,
+            "han": false,
+            "hangul": false,
+            "hex": "U+33FF",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 13312,
+            "han": true,
+            "hangul": false,
+            "hex": "U+3400",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 13313,
+            "han": true,
+            "hangul": false,
+            "hex": "U+3401",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 19902,
+            "han": true,
+            "hangul": false,
+            "hex": "U+4DBE",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 19903,
+            "han": true,
+            "hangul": false,
+            "hex": "U+4DBF",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 19904,
+            "han": false,
+            "hangul": false,
+            "hex": "U+4DC0",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 19967,
+            "han": false,
+            "hangul": false,
+            "hex": "U+4DFF",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 19968,
+            "han": true,
+            "hangul": false,
+            "hex": "U+4E00",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 19969,
+            "han": true,
+            "hangul": false,
+            "hex": "U+4E01",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 40958,
+            "han": true,
+            "hangul": false,
+            "hex": "U+9FFE",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 40959,
+            "han": true,
+            "hangul": false,
+            "hex": "U+9FFF",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 40960,
+            "han": false,
+            "hangul": false,
+            "hex": "U+A000",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 43359,
+            "han": false,
+            "hangul": false,
+            "hex": "U+A95F",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 43360,
+            "han": false,
+            "hangul": true,
+            "hex": "U+A960",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 43361,
+            "han": false,
+            "hangul": true,
+            "hex": "U+A961",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 43387,
+            "han": false,
+            "hangul": true,
+            "hex": "U+A97B",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 43388,
+            "han": false,
+            "hangul": true,
+            "hex": "U+A97C",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 43389,
+            "han": false,
+            "hangul": false,
+            "hex": "U+A97D",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 44031,
+            "han": false,
+            "hangul": false,
+            "hex": "U+ABFF",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 44032,
+            "han": false,
+            "hangul": true,
+            "hex": "U+AC00",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 44033,
+            "han": false,
+            "hangul": true,
+            "hex": "U+AC01",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 55202,
+            "han": false,
+            "hangul": true,
+            "hex": "U+D7A2",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 55203,
+            "han": false,
+            "hangul": true,
+            "hex": "U+D7A3",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 55204,
+            "han": false,
+            "hangul": false,
+            "hex": "U+D7A4",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 55215,
+            "han": false,
+            "hangul": false,
+            "hex": "U+D7AF",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 55216,
+            "han": false,
+            "hangul": true,
+            "hex": "U+D7B0",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 55217,
+            "han": false,
+            "hangul": true,
+            "hex": "U+D7B1",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 55237,
+            "han": false,
+            "hangul": true,
+            "hex": "U+D7C5",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 55238,
+            "han": false,
+            "hangul": true,
+            "hex": "U+D7C6",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 55239,
+            "han": false,
+            "hangul": false,
+            "hex": "U+D7C7",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 55242,
+            "han": false,
+            "hangul": false,
+            "hex": "U+D7CA",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 55243,
+            "han": false,
+            "hangul": true,
+            "hex": "U+D7CB",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 55244,
+            "han": false,
+            "hangul": true,
+            "hex": "U+D7CC",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 55290,
+            "han": false,
+            "hangul": true,
+            "hex": "U+D7FA",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 55291,
+            "han": false,
+            "hangul": true,
+            "hex": "U+D7FB",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 55292,
+            "han": false,
+            "hangul": false,
+            "hex": "U+D7FC",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 63743,
+            "han": false,
+            "hangul": false,
+            "hex": "U+F8FF",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 63744,
+            "han": true,
+            "hangul": false,
+            "hex": "U+F900",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 63745,
+            "han": true,
+            "hangul": false,
+            "hex": "U+F901",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 64108,
+            "han": true,
+            "hangul": false,
+            "hex": "U+FA6C",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 64109,
+            "han": true,
+            "hangul": false,
+            "hex": "U+FA6D",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 64110,
+            "han": false,
+            "hangul": false,
+            "hex": "U+FA6E",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 64111,
+            "han": false,
+            "hangul": false,
+            "hex": "U+FA6F",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 64112,
+            "han": true,
+            "hangul": false,
+            "hex": "U+FA70",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 64113,
+            "han": true,
+            "hangul": false,
+            "hex": "U+FA71",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 64216,
+            "han": true,
+            "hangul": false,
+            "hex": "U+FAD8",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 64217,
+            "han": true,
+            "hangul": false,
+            "hex": "U+FAD9",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 64218,
+            "han": false,
+            "hangul": false,
+            "hex": "U+FADA",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 64255,
+            "han": false,
+            "hangul": false,
+            "hex": "U+FAFF",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 65313,
+            "han": false,
+            "hangul": false,
+            "hex": "U+FF21",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 65345,
+            "han": false,
+            "hangul": false,
+            "hex": "U+FF41",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 65381,
+            "han": false,
+            "hangul": false,
+            "hex": "U+FF65",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 65382,
+            "han": false,
+            "hangul": false,
+            "hex": "U+FF66",
+            "hiragana": false,
+            "katakana": true,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 65383,
+            "han": false,
+            "hangul": false,
+            "hex": "U+FF67",
+            "hiragana": false,
+            "katakana": true,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 65390,
+            "han": false,
+            "hangul": false,
+            "hex": "U+FF6E",
+            "hiragana": false,
+            "katakana": true,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 65391,
+            "han": false,
+            "hangul": false,
+            "hex": "U+FF6F",
+            "hiragana": false,
+            "katakana": true,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 65392,
+            "han": false,
+            "hangul": false,
+            "hex": "U+FF70",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 65393,
+            "han": false,
+            "hangul": false,
+            "hex": "U+FF71",
+            "hiragana": false,
+            "katakana": true,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 65394,
+            "han": false,
+            "hangul": false,
+            "hex": "U+FF72",
+            "hiragana": false,
+            "katakana": true,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 65436,
+            "han": false,
+            "hangul": false,
+            "hex": "U+FF9C",
+            "hiragana": false,
+            "katakana": true,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 65437,
+            "han": false,
+            "hangul": false,
+            "hex": "U+FF9D",
+            "hiragana": false,
+            "katakana": true,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 65438,
+            "han": false,
+            "hangul": false,
+            "hex": "U+FF9E",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 65439,
+            "han": false,
+            "hangul": false,
+            "hex": "U+FF9F",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 65440,
+            "han": false,
+            "hangul": true,
+            "hex": "U+FFA0",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 65441,
+            "han": false,
+            "hangul": true,
+            "hex": "U+FFA1",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 65469,
+            "han": false,
+            "hangul": true,
+            "hex": "U+FFBD",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 65470,
+            "han": false,
+            "hangul": true,
+            "hex": "U+FFBE",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 65471,
+            "han": false,
+            "hangul": false,
+            "hex": "U+FFBF",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 65473,
+            "han": false,
+            "hangul": false,
+            "hex": "U+FFC1",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 65474,
+            "han": false,
+            "hangul": true,
+            "hex": "U+FFC2",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 65475,
+            "han": false,
+            "hangul": true,
+            "hex": "U+FFC3",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 65478,
+            "han": false,
+            "hangul": true,
+            "hex": "U+FFC6",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 65479,
+            "han": false,
+            "hangul": true,
+            "hex": "U+FFC7",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 65480,
+            "han": false,
+            "hangul": false,
+            "hex": "U+FFC8",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 65481,
+            "han": false,
+            "hangul": false,
+            "hex": "U+FFC9",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 65482,
+            "han": false,
+            "hangul": true,
+            "hex": "U+FFCA",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 65483,
+            "han": false,
+            "hangul": true,
+            "hex": "U+FFCB",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 65486,
+            "han": false,
+            "hangul": true,
+            "hex": "U+FFCE",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 65487,
+            "han": false,
+            "hangul": true,
+            "hex": "U+FFCF",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 65488,
+            "han": false,
+            "hangul": false,
+            "hex": "U+FFD0",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 65489,
+            "han": false,
+            "hangul": false,
+            "hex": "U+FFD1",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 65490,
+            "han": false,
+            "hangul": true,
+            "hex": "U+FFD2",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 65491,
+            "han": false,
+            "hangul": true,
+            "hex": "U+FFD3",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 65494,
+            "han": false,
+            "hangul": true,
+            "hex": "U+FFD6",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 65495,
+            "han": false,
+            "hangul": true,
+            "hex": "U+FFD7",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 65496,
+            "han": false,
+            "hangul": false,
+            "hex": "U+FFD8",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 65497,
+            "han": false,
+            "hangul": false,
+            "hex": "U+FFD9",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 65498,
+            "han": false,
+            "hangul": true,
+            "hex": "U+FFDA",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 65499,
+            "han": false,
+            "hangul": true,
+            "hex": "U+FFDB",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 65500,
+            "han": false,
+            "hangul": true,
+            "hex": "U+FFDC",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 65501,
+            "han": false,
+            "hangul": false,
+            "hex": "U+FFDD",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 94177,
+            "han": false,
+            "hangul": false,
+            "hex": "U+16FE1",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 94178,
+            "han": true,
+            "hangul": false,
+            "hex": "U+16FE2",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 94179,
+            "han": true,
+            "hangul": false,
+            "hex": "U+16FE3",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 94180,
+            "han": false,
+            "hangul": false,
+            "hex": "U+16FE4",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 94191,
+            "han": false,
+            "hangul": false,
+            "hex": "U+16FEF",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 94192,
+            "han": true,
+            "hangul": false,
+            "hex": "U+16FF0",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 94193,
+            "han": true,
+            "hangul": false,
+            "hex": "U+16FF1",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 94194,
+            "han": false,
+            "hangul": false,
+            "hex": "U+16FF2",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 110575,
+            "han": false,
+            "hangul": false,
+            "hex": "U+1AFEF",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 110576,
+            "han": false,
+            "hangul": false,
+            "hex": "U+1AFF0",
+            "hiragana": false,
+            "katakana": true,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 110577,
+            "han": false,
+            "hangul": false,
+            "hex": "U+1AFF1",
+            "hiragana": false,
+            "katakana": true,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 110578,
+            "han": false,
+            "hangul": false,
+            "hex": "U+1AFF2",
+            "hiragana": false,
+            "katakana": true,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 110579,
+            "han": false,
+            "hangul": false,
+            "hex": "U+1AFF3",
+            "hiragana": false,
+            "katakana": true,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 110580,
+            "han": false,
+            "hangul": false,
+            "hex": "U+1AFF4",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 110581,
+            "han": false,
+            "hangul": false,
+            "hex": "U+1AFF5",
+            "hiragana": false,
+            "katakana": true,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 110582,
+            "han": false,
+            "hangul": false,
+            "hex": "U+1AFF6",
+            "hiragana": false,
+            "katakana": true,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 110586,
+            "han": false,
+            "hangul": false,
+            "hex": "U+1AFFA",
+            "hiragana": false,
+            "katakana": true,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 110587,
+            "han": false,
+            "hangul": false,
+            "hex": "U+1AFFB",
+            "hiragana": false,
+            "katakana": true,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 110588,
+            "han": false,
+            "hangul": false,
+            "hex": "U+1AFFC",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 110589,
+            "han": false,
+            "hangul": false,
+            "hex": "U+1AFFD",
+            "hiragana": false,
+            "katakana": true,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 110590,
+            "han": false,
+            "hangul": false,
+            "hex": "U+1AFFE",
+            "hiragana": false,
+            "katakana": true,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 110591,
+            "han": false,
+            "hangul": false,
+            "hex": "U+1AFFF",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 110592,
+            "han": false,
+            "hangul": false,
+            "hex": "U+1B000",
+            "hiragana": false,
+            "katakana": true,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 110593,
+            "han": false,
+            "hangul": false,
+            "hex": "U+1B001",
+            "hiragana": true,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 110594,
+            "han": false,
+            "hangul": false,
+            "hex": "U+1B002",
+            "hiragana": true,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 110878,
+            "han": false,
+            "hangul": false,
+            "hex": "U+1B11E",
+            "hiragana": true,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 110879,
+            "han": false,
+            "hangul": false,
+            "hex": "U+1B11F",
+            "hiragana": true,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 110880,
+            "han": false,
+            "hangul": false,
+            "hex": "U+1B120",
+            "hiragana": false,
+            "katakana": true,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 110881,
+            "han": false,
+            "hangul": false,
+            "hex": "U+1B121",
+            "hiragana": false,
+            "katakana": true,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 110882,
+            "han": false,
+            "hangul": false,
+            "hex": "U+1B122",
+            "hiragana": false,
+            "katakana": true,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 110883,
+            "han": false,
+            "hangul": false,
+            "hex": "U+1B123",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 110897,
+            "han": false,
+            "hangul": false,
+            "hex": "U+1B131",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 110898,
+            "han": false,
+            "hangul": false,
+            "hex": "U+1B132",
+            "hiragana": true,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 110899,
+            "han": false,
+            "hangul": false,
+            "hex": "U+1B133",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 110927,
+            "han": false,
+            "hangul": false,
+            "hex": "U+1B14F",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 110928,
+            "han": false,
+            "hangul": false,
+            "hex": "U+1B150",
+            "hiragana": true,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 110929,
+            "han": false,
+            "hangul": false,
+            "hex": "U+1B151",
+            "hiragana": true,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 110930,
+            "han": false,
+            "hangul": false,
+            "hex": "U+1B152",
+            "hiragana": true,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 110931,
+            "han": false,
+            "hangul": false,
+            "hex": "U+1B153",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 110932,
+            "han": false,
+            "hangul": false,
+            "hex": "U+1B154",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 110933,
+            "han": false,
+            "hangul": false,
+            "hex": "U+1B155",
+            "hiragana": false,
+            "katakana": true,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 110934,
+            "han": false,
+            "hangul": false,
+            "hex": "U+1B156",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 110947,
+            "han": false,
+            "hangul": false,
+            "hex": "U+1B163",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 110948,
+            "han": false,
+            "hangul": false,
+            "hex": "U+1B164",
+            "hiragana": false,
+            "katakana": true,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 110949,
+            "han": false,
+            "hangul": false,
+            "hex": "U+1B165",
+            "hiragana": false,
+            "katakana": true,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 110950,
+            "han": false,
+            "hangul": false,
+            "hex": "U+1B166",
+            "hiragana": false,
+            "katakana": true,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 110951,
+            "han": false,
+            "hangul": false,
+            "hex": "U+1B167",
+            "hiragana": false,
+            "katakana": true,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 110952,
+            "han": false,
+            "hangul": false,
+            "hex": "U+1B168",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 127462,
+            "han": false,
+            "hangul": false,
+            "hex": "U+1F1E6",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 127487,
+            "han": false,
+            "hangul": false,
+            "hex": "U+1F1FF",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 127488,
+            "han": false,
+            "hangul": false,
+            "hex": "U+1F200",
+            "hiragana": true,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 127489,
+            "han": false,
+            "hangul": false,
+            "hex": "U+1F201",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 128512,
+            "han": false,
+            "hangul": false,
+            "hex": "U+1F600",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 131071,
+            "han": false,
+            "hangul": false,
+            "hex": "U+1FFFF",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 131072,
+            "han": true,
+            "hangul": false,
+            "hex": "U+20000",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 131073,
+            "han": true,
+            "hangul": false,
+            "hex": "U+20001",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 173790,
+            "han": true,
+            "hangul": false,
+            "hex": "U+2A6DE",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 173791,
+            "han": true,
+            "hangul": false,
+            "hex": "U+2A6DF",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 173792,
+            "han": false,
+            "hangul": false,
+            "hex": "U+2A6E0",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 173823,
+            "han": false,
+            "hangul": false,
+            "hex": "U+2A6FF",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 173824,
+            "han": true,
+            "hangul": false,
+            "hex": "U+2A700",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 173825,
+            "han": true,
+            "hangul": false,
+            "hex": "U+2A701",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 177976,
+            "han": true,
+            "hangul": false,
+            "hex": "U+2B738",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 177977,
+            "han": true,
+            "hangul": false,
+            "hex": "U+2B739",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 177978,
+            "han": false,
+            "hangul": false,
+            "hex": "U+2B73A",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 177983,
+            "han": false,
+            "hangul": false,
+            "hex": "U+2B73F",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 177984,
+            "han": true,
+            "hangul": false,
+            "hex": "U+2B740",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 177985,
+            "han": true,
+            "hangul": false,
+            "hex": "U+2B741",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 178204,
+            "han": true,
+            "hangul": false,
+            "hex": "U+2B81C",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 178205,
+            "han": true,
+            "hangul": false,
+            "hex": "U+2B81D",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 178206,
+            "han": false,
+            "hangul": false,
+            "hex": "U+2B81E",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 178207,
+            "han": false,
+            "hangul": false,
+            "hex": "U+2B81F",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 178208,
+            "han": true,
+            "hangul": false,
+            "hex": "U+2B820",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 178209,
+            "han": true,
+            "hangul": false,
+            "hex": "U+2B821",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 183968,
+            "han": true,
+            "hangul": false,
+            "hex": "U+2CEA0",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 183969,
+            "han": true,
+            "hangul": false,
+            "hex": "U+2CEA1",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 183970,
+            "han": false,
+            "hangul": false,
+            "hex": "U+2CEA2",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 183983,
+            "han": false,
+            "hangul": false,
+            "hex": "U+2CEAF",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 183984,
+            "han": true,
+            "hangul": false,
+            "hex": "U+2CEB0",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 183985,
+            "han": true,
+            "hangul": false,
+            "hex": "U+2CEB1",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 191455,
+            "han": true,
+            "hangul": false,
+            "hex": "U+2EBDF",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 191456,
+            "han": true,
+            "hangul": false,
+            "hex": "U+2EBE0",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 191457,
+            "han": false,
+            "hangul": false,
+            "hex": "U+2EBE1",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 191471,
+            "han": false,
+            "hangul": false,
+            "hex": "U+2EBEF",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 194559,
+            "han": false,
+            "hangul": false,
+            "hex": "U+2F7FF",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 194560,
+            "han": true,
+            "hangul": false,
+            "hex": "U+2F800",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 194561,
+            "han": true,
+            "hangul": false,
+            "hex": "U+2F801",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 195100,
+            "han": true,
+            "hangul": false,
+            "hex": "U+2FA1C",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 195101,
+            "han": true,
+            "hangul": false,
+            "hex": "U+2FA1D",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 195102,
+            "han": false,
+            "hangul": false,
+            "hex": "U+2FA1E",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 196607,
+            "han": false,
+            "hangul": false,
+            "hex": "U+2FFFF",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 196608,
+            "han": true,
+            "hangul": false,
+            "hex": "U+30000",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 196609,
+            "han": true,
+            "hangul": false,
+            "hex": "U+30001",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 201545,
+            "han": true,
+            "hangul": false,
+            "hex": "U+31349",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 201546,
+            "han": true,
+            "hangul": false,
+            "hex": "U+3134A",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 201547,
+            "han": false,
+            "hangul": false,
+            "hex": "U+3134B",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 201551,
+            "han": false,
+            "hangul": false,
+            "hex": "U+3134F",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 201552,
+            "han": true,
+            "hangul": false,
+            "hex": "U+31350",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 201553,
+            "han": true,
+            "hangul": false,
+            "hex": "U+31351",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 205742,
+            "han": true,
+            "hangul": false,
+            "hex": "U+323AE",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": true,
+            "cp": 205743,
+            "han": true,
+            "hangul": false,
+            "hex": "U+323AF",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 205744,
+            "han": false,
+            "hangul": false,
+            "hex": "U+323B0",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        },
+        {
+            "contains_cjk": false,
+            "cp": 1114111,
+            "han": false,
+            "hangul": false,
+            "hex": "U+10FFFF",
+            "hiragana": false,
+            "katakana": false,
+            "panicked": false
+        }
+    ],
+    "strings": [
+        {
+            "bytes": 0,
+            "in": "",
+            "name": "empty",
+            "out": false,
+            "panicked": false,
+            "runes": 0
+        },
+        {
+            "bytes": 11,
+            "in": "hello world",
+            "name": "ascii",
+            "out": false,
+            "panicked": false,
+            "runes": 11
+        },
+        {
+            "bytes": 10,
+            "in": "0123456789",
+            "name": "ascii_digits",
+            "out": false,
+            "panicked": false,
+            "runes": 10
+        },
+        {
+            "bytes": 6,
+            "in": "你好",
+            "name": "han_only",
+            "out": true,
+            "panicked": false,
+            "runes": 2
+        },
+        {
+            "bytes": 12,
+            "in": "ひらがな",
+            "name": "hiragana_only",
+            "out": true,
+            "panicked": false,
+            "runes": 4
+        },
+        {
+            "bytes": 12,
+            "in": "カタカナ",
+            "name": "katakana_only",
+            "out": true,
+            "panicked": false,
+            "runes": 4
+        },
+        {
+            "bytes": 9,
+            "in": "한국어",
+            "name": "hangul_only",
+            "out": true,
+            "panicked": false,
+            "runes": 3
+        },
+        {
+            "bytes": 6,
+            "in": "가",
+            "name": "hangul_jamo_only",
+            "out": true,
+            "panicked": false,
+            "runes": 2
+        },
+        {
+            "bytes": 3,
+            "in": "ㄱ",
+            "name": "hangul_compat_jamo",
+            "out": true,
+            "panicked": false,
+            "runes": 1
+        },
+        {
+            "bytes": 15,
+            "in": "。、「」〜",
+            "name": "cjk_punctuation_only",
+            "out": false,
+            "panicked": false,
+            "runes": 5
+        },
+        {
+            "bytes": 3,
+            "in": "　",
+            "name": "ideographic_space_only",
+            "out": false,
+            "panicked": false,
+            "runes": 1
+        },
+        {
+            "bytes": 3,
+            "in": "々",
+            "name": "iteration_mark_only",
+            "out": true,
+            "panicked": false,
+            "runes": 1
+        },
+        {
+            "bytes": 6,
+            "in": "・ー",
+            "name": "katakana_middle_dot_only",
+            "out": false,
+            "panicked": false,
+            "runes": 2
+        },
+        {
+            "bytes": 9,
+            "in": "ＡＢＣ",
+            "name": "fullwidth_latin_only",
+            "out": false,
+            "panicked": false,
+            "runes": 3
+        },
+        {
+            "bytes": 21,
+            "in": "日 followed by ascii",
+            "name": "leading_cjk",
+            "out": true,
+            "panicked": false,
+            "runes": 19
+        },
+        {
+            "bytes": 21,
+            "in": "ascii followed by 日",
+            "name": "trailing_cjk",
+            "out": true,
+            "panicked": false,
+            "runes": 19
+        },
+        {
+            "bytes": 5,
+            "in": "a日b",
+            "name": "cjk_in_the_middle",
+            "out": true,
+            "panicked": false,
+            "runes": 3
+        },
+        {
+            "bytes": 6,
+            "in": "。你",
+            "name": "punctuation_then_han",
+            "out": true,
+            "panicked": false,
+            "runes": 2
+        },
+        {
+            "bytes": 8,
+            "in": "🙂🎌",
+            "name": "emoji_only",
+            "out": false,
+            "panicked": false,
+            "runes": 2
+        },
+        {
+            "bytes": 18,
+            "in": "สวัสดี",
+            "name": "thai_only",
+            "out": false,
+            "panicked": false,
+            "runes": 6
+        },
+        {
+            "bytes": 12,
+            "in": "привет",
+            "name": "cyrillic_only",
+            "out": false,
+            "panicked": false,
+            "runes": 6
+        },
+        {
+            "bytes": 4,
+            "in": "𠀀",
+            "name": "extension_b",
+            "out": true,
+            "panicked": false,
+            "runes": 1
+        },
+        {
+            "bytes": 4,
+            "in": "𰀀",
+            "name": "extension_g",
+            "out": true,
+            "panicked": false,
+            "runes": 1
+        },
+        {
+            "bytes": 8,
+            "in": "𛀀𛀁",
+            "name": "kana_supplement",
+            "out": true,
+            "panicked": false,
+            "runes": 2
+        },
+        {
+            "bytes": 26,
+            "in": "Meeting at 3pm 会議室 A",
+            "name": "mixed_sentence",
+            "out": true,
+            "panicked": false,
+            "runes": 20
+        },
+        {
+            "bytes": 4,
+            "in": "a\n\tb",
+            "name": "newlines_and_tabs",
+            "out": false,
+            "panicked": false,
+            "runes": 4
+        }
+    ],
+    "tables": [
+        {
+            "codepoint_count": 98408,
+            "max_stride": 2,
+            "name": "Han",
+            "r16_count": 10,
+            "r32_count": 10,
+            "range_count": 20,
+            "ranges": [
+                {
+                    "lo": 11904,
+                    "hi": 11929,
+                    "stride": 1
+                },
+                {
+                    "lo": 11931,
+                    "hi": 12019,
+                    "stride": 1
+                },
+                {
+                    "lo": 12032,
+                    "hi": 12245,
+                    "stride": 1
+                },
+                {
+                    "lo": 12293,
+                    "hi": 12295,
+                    "stride": 2
+                },
+                {
+                    "lo": 12321,
+                    "hi": 12329,
+                    "stride": 1
+                },
+                {
+                    "lo": 12344,
+                    "hi": 12347,
+                    "stride": 1
+                },
+                {
+                    "lo": 13312,
+                    "hi": 19903,
+                    "stride": 1
+                },
+                {
+                    "lo": 19968,
+                    "hi": 40959,
+                    "stride": 1
+                },
+                {
+                    "lo": 63744,
+                    "hi": 64109,
+                    "stride": 1
+                },
+                {
+                    "lo": 64112,
+                    "hi": 64217,
+                    "stride": 1
+                },
+                {
+                    "lo": 94178,
+                    "hi": 94179,
+                    "stride": 1
+                },
+                {
+                    "lo": 94192,
+                    "hi": 94193,
+                    "stride": 1
+                },
+                {
+                    "lo": 131072,
+                    "hi": 173791,
+                    "stride": 1
+                },
+                {
+                    "lo": 173824,
+                    "hi": 177977,
+                    "stride": 1
+                },
+                {
+                    "lo": 177984,
+                    "hi": 178205,
+                    "stride": 1
+                },
+                {
+                    "lo": 178208,
+                    "hi": 183969,
+                    "stride": 1
+                },
+                {
+                    "lo": 183984,
+                    "hi": 191456,
+                    "stride": 1
+                },
+                {
+                    "lo": 194560,
+                    "hi": 195101,
+                    "stride": 1
+                },
+                {
+                    "lo": 196608,
+                    "hi": 201546,
+                    "stride": 1
+                },
+                {
+                    "lo": 201552,
+                    "hi": 205743,
+                    "stride": 1
+                }
+            ]
+        },
+        {
+            "codepoint_count": 381,
+            "max_stride": 30,
+            "name": "Hiragana",
+            "r16_count": 2,
+            "r32_count": 4,
+            "range_count": 6,
+            "ranges": [
+                {
+                    "lo": 12353,
+                    "hi": 12438,
+                    "stride": 1
+                },
+                {
+                    "lo": 12445,
+                    "hi": 12447,
+                    "stride": 1
+                },
+                {
+                    "lo": 110593,
+                    "hi": 110879,
+                    "stride": 1
+                },
+                {
+                    "lo": 110898,
+                    "hi": 110928,
+                    "stride": 30
+                },
+                {
+                    "lo": 110929,
+                    "hi": 110930,
+                    "stride": 1
+                },
+                {
+                    "lo": 127488,
+                    "hi": 127488,
+                    "stride": 1
+                }
+            ]
+        },
+        {
+            "codepoint_count": 321,
+            "max_stride": 288,
+            "name": "Katakana",
+            "r16_count": 7,
+            "r32_count": 7,
+            "range_count": 14,
+            "ranges": [
+                {
+                    "lo": 12449,
+                    "hi": 12538,
+                    "stride": 1
+                },
+                {
+                    "lo": 12541,
+                    "hi": 12543,
+                    "stride": 1
+                },
+                {
+                    "lo": 12784,
+                    "hi": 12799,
+                    "stride": 1
+                },
+                {
+                    "lo": 13008,
+                    "hi": 13054,
+                    "stride": 1
+                },
+                {
+                    "lo": 13056,
+                    "hi": 13143,
+                    "stride": 1
+                },
+                {
+                    "lo": 65382,
+                    "hi": 65391,
+                    "stride": 1
+                },
+                {
+                    "lo": 65393,
+                    "hi": 65437,
+                    "stride": 1
+                },
+                {
+                    "lo": 110576,
+                    "hi": 110579,
+                    "stride": 1
+                },
+                {
+                    "lo": 110581,
+                    "hi": 110587,
+                    "stride": 1
+                },
+                {
+                    "lo": 110589,
+                    "hi": 110590,
+                    "stride": 1
+                },
+                {
+                    "lo": 110592,
+                    "hi": 110880,
+                    "stride": 288
+                },
+                {
+                    "lo": 110881,
+                    "hi": 110882,
+                    "stride": 1
+                },
+                {
+                    "lo": 110933,
+                    "hi": 110948,
+                    "stride": 15
+                },
+                {
+                    "lo": 110949,
+                    "hi": 110951,
+                    "stride": 1
+                }
+            ]
+        },
+        {
+            "codepoint_count": 11739,
+            "max_stride": 1,
+            "name": "Hangul",
+            "r16_count": 14,
+            "r32_count": 0,
+            "range_count": 14,
+            "ranges": [
+                {
+                    "lo": 4352,
+                    "hi": 4607,
+                    "stride": 1
+                },
+                {
+                    "lo": 12334,
+                    "hi": 12335,
+                    "stride": 1
+                },
+                {
+                    "lo": 12593,
+                    "hi": 12686,
+                    "stride": 1
+                },
+                {
+                    "lo": 12800,
+                    "hi": 12830,
+                    "stride": 1
+                },
+                {
+                    "lo": 12896,
+                    "hi": 12926,
+                    "stride": 1
+                },
+                {
+                    "lo": 43360,
+                    "hi": 43388,
+                    "stride": 1
+                },
+                {
+                    "lo": 44032,
+                    "hi": 55203,
+                    "stride": 1
+                },
+                {
+                    "lo": 55216,
+                    "hi": 55238,
+                    "stride": 1
+                },
+                {
+                    "lo": 55243,
+                    "hi": 55291,
+                    "stride": 1
+                },
+                {
+                    "lo": 65440,
+                    "hi": 65470,
+                    "stride": 1
+                },
+                {
+                    "lo": 65474,
+                    "hi": 65479,
+                    "stride": 1
+                },
+                {
+                    "lo": 65482,
+                    "hi": 65487,
+                    "stride": 1
+                },
+                {
+                    "lo": 65490,
+                    "hi": 65495,
+                    "stride": 1
+                },
+                {
+                    "lo": 65498,
+                    "hi": 65500,
+                    "stride": 1
+                }
+            ]
+        }
+    ],
+    "unicode_version": "15.0.0"
+}

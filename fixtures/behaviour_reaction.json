@@ -1,0 +1,635 @@
+{
+    "get_remote_id": {
+        "empty": "",
+        "nil": "",
+        "set": "cluster-a"
+    },
+    "is_valid": [
+        {
+            "name": "valid",
+            "reaction": {
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "post_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "emoji_name": "custom_emoji",
+                "create_at": 1700000000000,
+                "update_at": 1700000000000,
+                "delete_at": 0,
+                "remote_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "channel_id": "g1ku9ozj3bhub3hs89bqu1m3gy"
+            },
+            "error_id": "",
+            "detailed": ""
+        },
+        {
+            "name": "user_id_empty",
+            "reaction": {
+                "user_id": "",
+                "post_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "emoji_name": "custom_emoji",
+                "create_at": 1700000000000,
+                "update_at": 1700000000000,
+                "delete_at": 0,
+                "remote_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "channel_id": "g1ku9ozj3bhub3hs89bqu1m3gy"
+            },
+            "error_id": "model.reaction.is_valid.user_id.app_error",
+            "detailed": "user_id="
+        },
+        {
+            "name": "user_id_short",
+            "reaction": {
+                "user_id": "aaaaaaaaaaaaaaaaaaaaaaaaa",
+                "post_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "emoji_name": "custom_emoji",
+                "create_at": 1700000000000,
+                "update_at": 1700000000000,
+                "delete_at": 0,
+                "remote_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "channel_id": "g1ku9ozj3bhub3hs89bqu1m3gy"
+            },
+            "error_id": "model.reaction.is_valid.user_id.app_error",
+            "detailed": "user_id=aaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "name": "post_id_empty",
+            "reaction": {
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "post_id": "",
+                "emoji_name": "custom_emoji",
+                "create_at": 1700000000000,
+                "update_at": 1700000000000,
+                "delete_at": 0,
+                "remote_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "channel_id": "g1ku9ozj3bhub3hs89bqu1m3gy"
+            },
+            "error_id": "model.reaction.is_valid.post_id.app_error",
+            "detailed": "post_id="
+        },
+        {
+            "name": "post_id_long",
+            "reaction": {
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "post_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "emoji_name": "custom_emoji",
+                "create_at": 1700000000000,
+                "update_at": 1700000000000,
+                "delete_at": 0,
+                "remote_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "channel_id": "g1ku9ozj3bhub3hs89bqu1m3gy"
+            },
+            "error_id": "model.reaction.is_valid.post_id.app_error",
+            "detailed": "post_id=aaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "name": "emoji_name_empty",
+            "reaction": {
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "post_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "emoji_name": "",
+                "create_at": 1700000000000,
+                "update_at": 1700000000000,
+                "delete_at": 0,
+                "remote_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "channel_id": "g1ku9ozj3bhub3hs89bqu1m3gy"
+            },
+            "error_id": "model.reaction.is_valid.emoji_name.app_error",
+            "detailed": "emoji_name="
+        },
+        {
+            "name": "emoji_name_64",
+            "reaction": {
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "post_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "emoji_name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "create_at": 1700000000000,
+                "update_at": 1700000000000,
+                "delete_at": 0,
+                "remote_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "channel_id": "g1ku9ozj3bhub3hs89bqu1m3gy"
+            },
+            "error_id": "",
+            "detailed": ""
+        },
+        {
+            "name": "emoji_name_65",
+            "reaction": {
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "post_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "emoji_name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "create_at": 1700000000000,
+                "update_at": 1700000000000,
+                "delete_at": 0,
+                "remote_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "channel_id": "g1ku9ozj3bhub3hs89bqu1m3gy"
+            },
+            "error_id": "model.reaction.is_valid.emoji_name.app_error",
+            "detailed": "emoji_name=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "name": "emoji_name_multibyte_32_runes",
+            "reaction": {
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "post_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "emoji_name": "éééééééééééééééééééééééééééééééé",
+                "create_at": 1700000000000,
+                "update_at": 1700000000000,
+                "delete_at": 0,
+                "remote_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "channel_id": "g1ku9ozj3bhub3hs89bqu1m3gy"
+            },
+            "error_id": "model.reaction.is_valid.emoji_name.app_error",
+            "detailed": "emoji_name=éééééééééééééééééééééééééééééééé"
+        },
+        {
+            "name": "emoji_name_multibyte_33_runes",
+            "reaction": {
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "post_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "emoji_name": "ééééééééééééééééééééééééééééééééé",
+                "create_at": 1700000000000,
+                "update_at": 1700000000000,
+                "delete_at": 0,
+                "remote_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "channel_id": "g1ku9ozj3bhub3hs89bqu1m3gy"
+            },
+            "error_id": "model.reaction.is_valid.emoji_name.app_error",
+            "detailed": "emoji_name=ééééééééééééééééééééééééééééééééé"
+        },
+        {
+            "name": "emoji_name_space",
+            "reaction": {
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "post_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "emoji_name": "has space",
+                "create_at": 1700000000000,
+                "update_at": 1700000000000,
+                "delete_at": 0,
+                "remote_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "channel_id": "g1ku9ozj3bhub3hs89bqu1m3gy"
+            },
+            "error_id": "model.reaction.is_valid.emoji_name.app_error",
+            "detailed": "emoji_name=has space"
+        },
+        {
+            "name": "emoji_name_dot",
+            "reaction": {
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "post_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "emoji_name": "has.dot",
+                "create_at": 1700000000000,
+                "update_at": 1700000000000,
+                "delete_at": 0,
+                "remote_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "channel_id": "g1ku9ozj3bhub3hs89bqu1m3gy"
+            },
+            "error_id": "model.reaction.is_valid.emoji_name.app_error",
+            "detailed": "emoji_name=has.dot"
+        },
+        {
+            "name": "emoji_name_plus",
+            "reaction": {
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "post_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "emoji_name": "+1",
+                "create_at": 1700000000000,
+                "update_at": 1700000000000,
+                "delete_at": 0,
+                "remote_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "channel_id": "g1ku9ozj3bhub3hs89bqu1m3gy"
+            },
+            "error_id": "",
+            "detailed": ""
+        },
+        {
+            "name": "emoji_name_hyphen",
+            "reaction": {
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "post_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "emoji_name": "-1",
+                "create_at": 1700000000000,
+                "update_at": 1700000000000,
+                "delete_at": 0,
+                "remote_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "channel_id": "g1ku9ozj3bhub3hs89bqu1m3gy"
+            },
+            "error_id": "",
+            "detailed": ""
+        },
+        {
+            "name": "emoji_name_upper",
+            "reaction": {
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "post_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "emoji_name": "GRINNING",
+                "create_at": 1700000000000,
+                "update_at": 1700000000000,
+                "delete_at": 0,
+                "remote_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "channel_id": "g1ku9ozj3bhub3hs89bqu1m3gy"
+            },
+            "error_id": "",
+            "detailed": ""
+        },
+        {
+            "name": "emoji_name_system",
+            "reaction": {
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "post_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "emoji_name": "grinning",
+                "create_at": 1700000000000,
+                "update_at": 1700000000000,
+                "delete_at": 0,
+                "remote_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "channel_id": "g1ku9ozj3bhub3hs89bqu1m3gy"
+            },
+            "error_id": "",
+            "detailed": ""
+        },
+        {
+            "name": "create_at_zero",
+            "reaction": {
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "post_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "emoji_name": "custom_emoji",
+                "create_at": 0,
+                "update_at": 1700000000000,
+                "delete_at": 0,
+                "remote_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "channel_id": "g1ku9ozj3bhub3hs89bqu1m3gy"
+            },
+            "error_id": "model.reaction.is_valid.create_at.app_error",
+            "detailed": ""
+        },
+        {
+            "name": "update_at_zero",
+            "reaction": {
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "post_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "emoji_name": "custom_emoji",
+                "create_at": 1700000000000,
+                "update_at": 0,
+                "delete_at": 0,
+                "remote_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "channel_id": "g1ku9ozj3bhub3hs89bqu1m3gy"
+            },
+            "error_id": "model.reaction.is_valid.update_at.app_error",
+            "detailed": ""
+        },
+        {
+            "name": "delete_at_set",
+            "reaction": {
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "post_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "emoji_name": "custom_emoji",
+                "create_at": 1700000000000,
+                "update_at": 1700000000000,
+                "delete_at": 1700000000000,
+                "remote_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "channel_id": "g1ku9ozj3bhub3hs89bqu1m3gy"
+            },
+            "error_id": "",
+            "detailed": ""
+        },
+        {
+            "name": "channel_id_empty",
+            "reaction": {
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "post_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "emoji_name": "custom_emoji",
+                "create_at": 1700000000000,
+                "update_at": 1700000000000,
+                "delete_at": 0,
+                "remote_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "channel_id": ""
+            },
+            "error_id": "",
+            "detailed": ""
+        },
+        {
+            "name": "channel_id_nonsense",
+            "reaction": {
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "post_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "emoji_name": "custom_emoji",
+                "create_at": 1700000000000,
+                "update_at": 1700000000000,
+                "delete_at": 0,
+                "remote_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "channel_id": "nope"
+            },
+            "error_id": "",
+            "detailed": ""
+        },
+        {
+            "name": "remote_id_nil",
+            "reaction": {
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "post_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "emoji_name": "custom_emoji",
+                "create_at": 1700000000000,
+                "update_at": 1700000000000,
+                "delete_at": 0,
+                "remote_id": null,
+                "channel_id": "g1ku9ozj3bhub3hs89bqu1m3gy"
+            },
+            "error_id": "",
+            "detailed": ""
+        }
+    ],
+    "pre_save": [
+        {
+            "name": "pre_save/zero_create_at_nil_remote",
+            "in_create_at": 0,
+            "in_update_at": 0,
+            "in_delete_at": 0,
+            "in_remote_nil": true,
+            "create_at_preserved": false,
+            "create_at_changed": true,
+            "update_at_changed": true,
+            "out_delete_at": 0,
+            "out_remote_nil": false,
+            "out_remote": ""
+        },
+        {
+            "name": "pre_save/zero_create_at_set_remote",
+            "in_create_at": 0,
+            "in_update_at": 0,
+            "in_delete_at": 0,
+            "in_remote_nil": false,
+            "create_at_preserved": false,
+            "create_at_changed": true,
+            "update_at_changed": true,
+            "out_delete_at": 0,
+            "out_remote_nil": false,
+            "out_remote": "cluster-a"
+        },
+        {
+            "name": "pre_save/existing_create_at",
+            "in_create_at": 1700000000000,
+            "in_update_at": 1700000000000,
+            "in_delete_at": 0,
+            "in_remote_nil": true,
+            "create_at_preserved": true,
+            "create_at_changed": false,
+            "update_at_changed": true,
+            "out_delete_at": 0,
+            "out_remote_nil": false,
+            "out_remote": ""
+        },
+        {
+            "name": "pre_save/deleted_reaction",
+            "in_create_at": 1700000000000,
+            "in_update_at": 1700000000000,
+            "in_delete_at": 1700000000001,
+            "in_remote_nil": true,
+            "create_at_preserved": true,
+            "create_at_changed": false,
+            "update_at_changed": true,
+            "out_delete_at": 0,
+            "out_remote_nil": false,
+            "out_remote": ""
+        },
+        {
+            "name": "pre_save/existing_remote",
+            "in_create_at": 1700000000000,
+            "in_update_at": 0,
+            "in_delete_at": 0,
+            "in_remote_nil": false,
+            "create_at_preserved": true,
+            "create_at_changed": false,
+            "update_at_changed": true,
+            "out_delete_at": 0,
+            "out_remote_nil": false,
+            "out_remote": "cluster-a"
+        }
+    ],
+    "pre_update": [
+        {
+            "name": "pre_update/zero_create_at_nil_remote",
+            "in_create_at": 0,
+            "in_update_at": 0,
+            "in_delete_at": 0,
+            "in_remote_nil": true,
+            "create_at_preserved": false,
+            "create_at_changed": false,
+            "update_at_changed": true,
+            "out_delete_at": 0,
+            "out_remote_nil": false,
+            "out_remote": ""
+        },
+        {
+            "name": "pre_update/zero_create_at_set_remote",
+            "in_create_at": 0,
+            "in_update_at": 0,
+            "in_delete_at": 0,
+            "in_remote_nil": false,
+            "create_at_preserved": false,
+            "create_at_changed": false,
+            "update_at_changed": true,
+            "out_delete_at": 0,
+            "out_remote_nil": false,
+            "out_remote": "cluster-a"
+        },
+        {
+            "name": "pre_update/existing_create_at",
+            "in_create_at": 1700000000000,
+            "in_update_at": 1700000000000,
+            "in_delete_at": 0,
+            "in_remote_nil": true,
+            "create_at_preserved": true,
+            "create_at_changed": false,
+            "update_at_changed": true,
+            "out_delete_at": 0,
+            "out_remote_nil": false,
+            "out_remote": ""
+        },
+        {
+            "name": "pre_update/deleted_reaction",
+            "in_create_at": 1700000000000,
+            "in_update_at": 1700000000000,
+            "in_delete_at": 1700000000001,
+            "in_remote_nil": true,
+            "create_at_preserved": true,
+            "create_at_changed": false,
+            "update_at_changed": true,
+            "out_delete_at": 1700000000001,
+            "out_remote_nil": false,
+            "out_remote": ""
+        },
+        {
+            "name": "pre_update/existing_remote",
+            "in_create_at": 1700000000000,
+            "in_update_at": 0,
+            "in_delete_at": 0,
+            "in_remote_nil": false,
+            "create_at_preserved": true,
+            "create_at_changed": false,
+            "update_at_changed": true,
+            "out_delete_at": 0,
+            "out_remote_nil": false,
+            "out_remote": "cluster-a"
+        }
+    ],
+    "regex_equivalence": [
+        {
+            "in": "",
+            "local": false,
+            "shared": false
+        },
+        {
+            "in": "a",
+            "local": true,
+            "shared": true
+        },
+        {
+            "in": "A",
+            "local": true,
+            "shared": true
+        },
+        {
+            "in": "1",
+            "local": true,
+            "shared": true
+        },
+        {
+            "in": "+1",
+            "local": true,
+            "shared": true
+        },
+        {
+            "in": "-1",
+            "local": true,
+            "shared": true
+        },
+        {
+            "in": "_",
+            "local": true,
+            "shared": true
+        },
+        {
+            "in": "-",
+            "local": true,
+            "shared": true
+        },
+        {
+            "in": "+",
+            "local": true,
+            "shared": true
+        },
+        {
+            "in": "custom_emoji",
+            "local": true,
+            "shared": true
+        },
+        {
+            "in": "custom-emoji",
+            "local": true,
+            "shared": true
+        },
+        {
+            "in": "custom+emoji",
+            "local": true,
+            "shared": true
+        },
+        {
+            "in": "CustomEmoji123",
+            "local": true,
+            "shared": true
+        },
+        {
+            "in": "has space",
+            "local": false,
+            "shared": false
+        },
+        {
+            "in": "has.dot",
+            "local": false,
+            "shared": false
+        },
+        {
+            "in": "has:colon",
+            "local": false,
+            "shared": false
+        },
+        {
+            "in": "has/slash",
+            "local": false,
+            "shared": false
+        },
+        {
+            "in": "has\\backslash",
+            "local": false,
+            "shared": false
+        },
+        {
+            "in": "héllo",
+            "local": false,
+            "shared": false
+        },
+        {
+            "in": "😀",
+            "local": false,
+            "shared": false
+        },
+        {
+            "in": "☃",
+            "local": false,
+            "shared": false
+        },
+        {
+            "in": "a\nb",
+            "local": false,
+            "shared": false
+        },
+        {
+            "in": "a\tb",
+            "local": false,
+            "shared": false
+        },
+        {
+            "in": " a",
+            "local": false,
+            "shared": false
+        },
+        {
+            "in": "a ",
+            "local": false,
+            "shared": false
+        },
+        {
+            "in": "a-z",
+            "local": true,
+            "shared": true
+        },
+        {
+            "in": ",",
+            "local": false,
+            "shared": false
+        },
+        {
+            "in": ".",
+            "local": false,
+            "shared": false
+        },
+        {
+            "in": "*",
+            "local": false,
+            "shared": false
+        },
+        {
+            "in": "]",
+            "local": false,
+            "shared": false
+        },
+        {
+            "in": "^",
+            "local": false,
+            "shared": false
+        },
+        {
+            "in": "$",
+            "local": false,
+            "shared": false
+        }
+    ]
+}

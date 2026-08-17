@@ -1,0 +1,2202 @@
+{
+    "constants": {
+        "ScheduledPostErrorCodeChannelArchived": "channel_archived",
+        "ScheduledPostErrorCodeChannelNotFound": "channel_not_found",
+        "ScheduledPostErrorCodeNoChannelPermission": "no_channel_permission",
+        "ScheduledPostErrorCodeRestrictedDM": "restricted_dm",
+        "ScheduledPostErrorCodeUserDeleted": "user_deleted",
+        "ScheduledPostErrorCodeUserDoesNotExist": "user_missing",
+        "ScheduledPostErrorInvalidPost": "invalid_post",
+        "ScheduledPostErrorNoChannelMember": "no_channel_member",
+        "ScheduledPostErrorThreadDeleted": "thread_deleted",
+        "ScheduledPostErrorUnableToSend": "unable_to_send",
+        "ScheduledPostErrorUnknownError": "unknown",
+        "ScheduledPostRepeatTypeNone": "",
+        "ScheduledPostRepeatTypeWeekly": "weekly",
+        "scheduledPostMaxTimeGap": -5000
+    },
+    "get_priority": [
+        {
+            "in": "{\"id\":\"i\"}",
+            "name": "metadata_nil",
+            "nil": true
+        },
+        {
+            "in": "{\"id\":\"i\",\"metadata\":{\"emojis\":[{\"name\":\"a\"}]}}",
+            "name": "metadata_without_priority",
+            "nil": true
+        },
+        {
+            "in": "{\"id\":\"i\",\"metadata\":{\"priority\":{\"priority\":\"urgent\",\"requested_ack\":true}}}",
+            "name": "metadata_with_priority",
+            "nil": false,
+            "out": "{\"priority\":\"urgent\",\"requested_ack\":true,\"persistent_notifications\":null}"
+        },
+        {
+            "in": "{\"id\":\"i\",\"priority\":{\"priority\":\"urgent\"}}",
+            "name": "draft_priority_only",
+            "nil": true
+        }
+    ],
+    "is_valid": [
+        {
+            "name": "valid",
+            "post": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 0,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "hello",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ],
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "scheduled_at": 0,
+                "processed_at": 0,
+                "error_code": "",
+                "repeat_type": "",
+                "repeat_timezone": ""
+            },
+            "scheduled_at_offset": 3600000,
+            "max_message_size": 4000,
+            "where": "",
+            "error_id": "",
+            "detailed": "",
+            "status": 0,
+            "base_where": "",
+            "base_error_id": "",
+            "base_detailed": ""
+        },
+        {
+            "name": "draft_message_too_long",
+            "post": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 0,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "abcd",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ],
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "scheduled_at": 0,
+                "processed_at": 0,
+                "error_code": "",
+                "repeat_type": "",
+                "repeat_timezone": ""
+            },
+            "scheduled_at_offset": 3600000,
+            "max_message_size": 3,
+            "where": "Drafts.IsValid",
+            "error_id": "model.draft.is_valid.message_length.app_error",
+            "detailed": "channelid=qr6kf7ztp7yifxt4wm5xn51bke",
+            "status": 400,
+            "base_where": "",
+            "base_error_id": "",
+            "base_detailed": ""
+        },
+        {
+            "name": "draft_create_at_zero",
+            "post": {
+                "create_at": 0,
+                "update_at": 1700000001000,
+                "delete_at": 0,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "hello",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ],
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "scheduled_at": 0,
+                "processed_at": 0,
+                "error_code": "",
+                "repeat_type": "",
+                "repeat_timezone": ""
+            },
+            "scheduled_at_offset": 3600000,
+            "max_message_size": 4000,
+            "where": "Drafts.IsValid",
+            "error_id": "model.draft.is_valid.create_at.app_error",
+            "detailed": "channelid=qr6kf7ztp7yifxt4wm5xn51bke",
+            "status": 400,
+            "base_where": "Drafts.IsValid",
+            "base_error_id": "model.draft.is_valid.create_at.app_error",
+            "base_detailed": "channelid=qr6kf7ztp7yifxt4wm5xn51bke"
+        },
+        {
+            "name": "draft_update_at_zero",
+            "post": {
+                "create_at": 1700000000000,
+                "update_at": 0,
+                "delete_at": 0,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "hello",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ],
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "scheduled_at": 0,
+                "processed_at": 0,
+                "error_code": "",
+                "repeat_type": "",
+                "repeat_timezone": ""
+            },
+            "scheduled_at_offset": 3600000,
+            "max_message_size": 4000,
+            "where": "Drafts.IsValid",
+            "error_id": "model.draft.is_valid.update_at.app_error",
+            "detailed": "channelid=qr6kf7ztp7yifxt4wm5xn51bke",
+            "status": 400,
+            "base_where": "Drafts.IsValid",
+            "base_error_id": "model.draft.is_valid.update_at.app_error",
+            "base_detailed": "channelid=qr6kf7ztp7yifxt4wm5xn51bke"
+        },
+        {
+            "name": "draft_user_id_bad",
+            "post": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 0,
+                "user_id": "nope",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "hello",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ],
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "scheduled_at": 0,
+                "processed_at": 0,
+                "error_code": "",
+                "repeat_type": "",
+                "repeat_timezone": ""
+            },
+            "scheduled_at_offset": 3600000,
+            "max_message_size": 4000,
+            "where": "Drafts.IsValid",
+            "error_id": "model.draft.is_valid.user_id.app_error",
+            "detailed": "",
+            "status": 400,
+            "base_where": "Drafts.IsValid",
+            "base_error_id": "model.draft.is_valid.user_id.app_error",
+            "base_detailed": ""
+        },
+        {
+            "name": "draft_channel_id_bad",
+            "post": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 0,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "nope",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "hello",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ],
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "scheduled_at": 0,
+                "processed_at": 0,
+                "error_code": "",
+                "repeat_type": "",
+                "repeat_timezone": ""
+            },
+            "scheduled_at_offset": 3600000,
+            "max_message_size": 4000,
+            "where": "Drafts.IsValid",
+            "error_id": "model.draft.is_valid.channel_id.app_error",
+            "detailed": "",
+            "status": 400,
+            "base_where": "Drafts.IsValid",
+            "base_error_id": "model.draft.is_valid.channel_id.app_error",
+            "base_detailed": ""
+        },
+        {
+            "name": "draft_root_id_bad",
+            "post": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 0,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "nope",
+                "message": "hello",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ],
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "scheduled_at": 0,
+                "processed_at": 0,
+                "error_code": "",
+                "repeat_type": "",
+                "repeat_timezone": ""
+            },
+            "scheduled_at_offset": 3600000,
+            "max_message_size": 4000,
+            "where": "Drafts.IsValid",
+            "error_id": "model.draft.is_valid.root_id.app_error",
+            "detailed": "",
+            "status": 400,
+            "base_where": "Drafts.IsValid",
+            "base_error_id": "model.draft.is_valid.root_id.app_error",
+            "base_detailed": ""
+        },
+        {
+            "name": "id_empty",
+            "post": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 0,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "hello",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ],
+                "id": "",
+                "scheduled_at": 0,
+                "processed_at": 0,
+                "error_code": "",
+                "repeat_type": "",
+                "repeat_timezone": ""
+            },
+            "scheduled_at_offset": 3600000,
+            "max_message_size": 4000,
+            "where": "ScheduledPost.IsValid",
+            "error_id": "model.scheduled_post.is_valid.id.app_error",
+            "detailed": "id=",
+            "status": 400,
+            "base_where": "ScheduledPost.IsValid",
+            "base_error_id": "model.scheduled_post.is_valid.id.app_error",
+            "base_detailed": "id="
+        },
+        {
+            "name": "id_nonsense",
+            "post": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 0,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "hello",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ],
+                "id": "nope",
+                "scheduled_at": 0,
+                "processed_at": 0,
+                "error_code": "",
+                "repeat_type": "",
+                "repeat_timezone": ""
+            },
+            "scheduled_at_offset": 3600000,
+            "max_message_size": 4000,
+            "where": "",
+            "error_id": "",
+            "detailed": "",
+            "status": 0,
+            "base_where": "",
+            "base_error_id": "",
+            "base_detailed": ""
+        },
+        {
+            "name": "empty_message_and_files",
+            "post": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 0,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "scheduled_at": 0,
+                "processed_at": 0,
+                "error_code": "",
+                "repeat_type": "",
+                "repeat_timezone": ""
+            },
+            "scheduled_at_offset": 3600000,
+            "max_message_size": 4000,
+            "where": "ScheduledPost.IsValid",
+            "error_id": "model.scheduled_post.is_valid.empty_post.app_error",
+            "detailed": "id=6bdz674pgq767e4jx75w4pf57a",
+            "status": 400,
+            "base_where": "ScheduledPost.IsValid",
+            "base_error_id": "model.scheduled_post.is_valid.empty_post.app_error",
+            "base_detailed": "id=6bdz674pgq767e4jx75w4pf57a"
+        },
+        {
+            "name": "empty_message_with_files",
+            "post": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 0,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ],
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "scheduled_at": 0,
+                "processed_at": 0,
+                "error_code": "",
+                "repeat_type": "",
+                "repeat_timezone": ""
+            },
+            "scheduled_at_offset": 3600000,
+            "max_message_size": 4000,
+            "where": "",
+            "error_id": "",
+            "detailed": "",
+            "status": 0,
+            "base_where": "",
+            "base_error_id": "",
+            "base_detailed": ""
+        },
+        {
+            "name": "empty_files_with_message",
+            "post": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 0,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "hello",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "scheduled_at": 0,
+                "processed_at": 0,
+                "error_code": "",
+                "repeat_type": "",
+                "repeat_timezone": ""
+            },
+            "scheduled_at_offset": 3600000,
+            "max_message_size": 4000,
+            "where": "",
+            "error_id": "",
+            "detailed": "",
+            "status": 0,
+            "base_where": "",
+            "base_error_id": "",
+            "base_detailed": ""
+        },
+        {
+            "name": "empty_message_empty_file_slice",
+            "post": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 0,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "scheduled_at": 0,
+                "processed_at": 0,
+                "error_code": "",
+                "repeat_type": "",
+                "repeat_timezone": ""
+            },
+            "scheduled_at_offset": 3600000,
+            "max_message_size": 4000,
+            "where": "ScheduledPost.IsValid",
+            "error_id": "model.scheduled_post.is_valid.empty_post.app_error",
+            "detailed": "id=6bdz674pgq767e4jx75w4pf57a",
+            "status": 400,
+            "base_where": "ScheduledPost.IsValid",
+            "base_error_id": "model.scheduled_post.is_valid.empty_post.app_error",
+            "base_detailed": "id=6bdz674pgq767e4jx75w4pf57a"
+        },
+        {
+            "name": "whitespace_message",
+            "post": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 0,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": " ",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ],
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "scheduled_at": 0,
+                "processed_at": 0,
+                "error_code": "",
+                "repeat_type": "",
+                "repeat_timezone": ""
+            },
+            "scheduled_at_offset": 3600000,
+            "max_message_size": 4000,
+            "where": "",
+            "error_id": "",
+            "detailed": "",
+            "status": 0,
+            "base_where": "",
+            "base_error_id": "",
+            "base_detailed": ""
+        },
+        {
+            "name": "scheduled_far_future",
+            "post": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 0,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "hello",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ],
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "scheduled_at": 0,
+                "processed_at": 0,
+                "error_code": "",
+                "repeat_type": "",
+                "repeat_timezone": ""
+            },
+            "scheduled_at_offset": 86400000,
+            "max_message_size": 4000,
+            "where": "",
+            "error_id": "",
+            "detailed": "",
+            "status": 0,
+            "base_where": "",
+            "base_error_id": "",
+            "base_detailed": ""
+        },
+        {
+            "name": "scheduled_just_past_within_grace",
+            "post": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 0,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "hello",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ],
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "scheduled_at": 0,
+                "processed_at": 0,
+                "error_code": "",
+                "repeat_type": "",
+                "repeat_timezone": ""
+            },
+            "scheduled_at_offset": -1000,
+            "max_message_size": 4000,
+            "where": "",
+            "error_id": "",
+            "detailed": "",
+            "status": 0,
+            "base_where": "",
+            "base_error_id": "",
+            "base_detailed": ""
+        },
+        {
+            "name": "scheduled_past_beyond_grace",
+            "post": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 0,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "hello",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ],
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "scheduled_at": 0,
+                "processed_at": 0,
+                "error_code": "",
+                "repeat_type": "",
+                "repeat_timezone": ""
+            },
+            "scheduled_at_offset": -60000,
+            "max_message_size": 4000,
+            "where": "ScheduledPost.IsValid",
+            "error_id": "model.scheduled_post.is_valid.scheduled_at.app_error",
+            "detailed": "id=6bdz674pgq767e4jx75w4pf57a",
+            "status": 400,
+            "base_where": "ScheduledPost.IsValid",
+            "base_error_id": "model.scheduled_post.is_valid.scheduled_at.app_error",
+            "base_detailed": "id=6bdz674pgq767e4jx75w4pf57a"
+        },
+        {
+            "name": "scheduled_long_past",
+            "post": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 0,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "hello",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ],
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "scheduled_at": 0,
+                "processed_at": 0,
+                "error_code": "",
+                "repeat_type": "",
+                "repeat_timezone": ""
+            },
+            "scheduled_at_offset": -86400000,
+            "max_message_size": 4000,
+            "where": "ScheduledPost.IsValid",
+            "error_id": "model.scheduled_post.is_valid.scheduled_at.app_error",
+            "detailed": "id=6bdz674pgq767e4jx75w4pf57a",
+            "status": 400,
+            "base_where": "ScheduledPost.IsValid",
+            "base_error_id": "model.scheduled_post.is_valid.scheduled_at.app_error",
+            "base_detailed": "id=6bdz674pgq767e4jx75w4pf57a"
+        },
+        {
+            "name": "processed_at_zero",
+            "post": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 0,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "hello",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ],
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "scheduled_at": 0,
+                "processed_at": 0,
+                "error_code": "",
+                "repeat_type": "",
+                "repeat_timezone": ""
+            },
+            "scheduled_at_offset": 3600000,
+            "max_message_size": 4000,
+            "where": "",
+            "error_id": "",
+            "detailed": "",
+            "status": 0,
+            "base_where": "",
+            "base_error_id": "",
+            "base_detailed": ""
+        },
+        {
+            "name": "processed_at_negative",
+            "post": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 0,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "hello",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ],
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "scheduled_at": 0,
+                "processed_at": -1,
+                "error_code": "",
+                "repeat_type": "",
+                "repeat_timezone": ""
+            },
+            "scheduled_at_offset": 3600000,
+            "max_message_size": 4000,
+            "where": "ScheduledPost.IsValid",
+            "error_id": "model.scheduled_post.is_valid.processed_at.app_error",
+            "detailed": "id=6bdz674pgq767e4jx75w4pf57a",
+            "status": 400,
+            "base_where": "ScheduledPost.IsValid",
+            "base_error_id": "model.scheduled_post.is_valid.processed_at.app_error",
+            "base_detailed": "id=6bdz674pgq767e4jx75w4pf57a"
+        },
+        {
+            "name": "repeat_none",
+            "post": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 0,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "hello",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ],
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "scheduled_at": 0,
+                "processed_at": 0,
+                "error_code": "",
+                "repeat_type": "",
+                "repeat_timezone": ""
+            },
+            "scheduled_at_offset": 3600000,
+            "max_message_size": 4000,
+            "where": "",
+            "error_id": "",
+            "detailed": "",
+            "status": 0,
+            "base_where": "",
+            "base_error_id": "",
+            "base_detailed": ""
+        },
+        {
+            "name": "repeat_weekly",
+            "post": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 0,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "hello",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "scheduled_at": 0,
+                "processed_at": 0,
+                "error_code": "",
+                "repeat_type": "weekly",
+                "repeat_timezone": "UTC"
+            },
+            "scheduled_at_offset": 3600000,
+            "max_message_size": 4000,
+            "where": "",
+            "error_id": "",
+            "detailed": "",
+            "status": 0,
+            "base_where": "",
+            "base_error_id": "",
+            "base_detailed": ""
+        },
+        {
+            "name": "repeat_daily_rejected",
+            "post": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 0,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "hello",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ],
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "scheduled_at": 0,
+                "processed_at": 0,
+                "error_code": "",
+                "repeat_type": "daily",
+                "repeat_timezone": ""
+            },
+            "scheduled_at_offset": 3600000,
+            "max_message_size": 4000,
+            "where": "ScheduledPost.IsValid",
+            "error_id": "model.scheduled_post.is_valid.repeat_type.app_error",
+            "detailed": "id=6bdz674pgq767e4jx75w4pf57a, repeat_type=daily",
+            "status": 400,
+            "base_where": "ScheduledPost.IsValid",
+            "base_error_id": "model.scheduled_post.is_valid.repeat_type.app_error",
+            "base_detailed": "id=6bdz674pgq767e4jx75w4pf57a, repeat_type=daily"
+        },
+        {
+            "name": "repeat_wrong_case",
+            "post": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 0,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "hello",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ],
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "scheduled_at": 0,
+                "processed_at": 0,
+                "error_code": "",
+                "repeat_type": "Weekly",
+                "repeat_timezone": ""
+            },
+            "scheduled_at_offset": 3600000,
+            "max_message_size": 4000,
+            "where": "ScheduledPost.IsValid",
+            "error_id": "model.scheduled_post.is_valid.repeat_type.app_error",
+            "detailed": "id=6bdz674pgq767e4jx75w4pf57a, repeat_type=Weekly",
+            "status": 400,
+            "base_where": "ScheduledPost.IsValid",
+            "base_error_id": "model.scheduled_post.is_valid.repeat_type.app_error",
+            "base_detailed": "id=6bdz674pgq767e4jx75w4pf57a, repeat_type=Weekly"
+        },
+        {
+            "name": "repeat_weekly_with_files",
+            "post": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 0,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "hello",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ],
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "scheduled_at": 0,
+                "processed_at": 0,
+                "error_code": "",
+                "repeat_type": "weekly",
+                "repeat_timezone": "UTC"
+            },
+            "scheduled_at_offset": 3600000,
+            "max_message_size": 4000,
+            "where": "ScheduledPost.IsValid",
+            "error_id": "model.scheduled_post.is_valid.repeat_files.app_error",
+            "detailed": "id=6bdz674pgq767e4jx75w4pf57a",
+            "status": 400,
+            "base_where": "ScheduledPost.IsValid",
+            "base_error_id": "model.scheduled_post.is_valid.repeat_files.app_error",
+            "base_detailed": "id=6bdz674pgq767e4jx75w4pf57a"
+        },
+        {
+            "name": "repeat_weekly_empty_file_slice",
+            "post": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 0,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "hello",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "scheduled_at": 0,
+                "processed_at": 0,
+                "error_code": "",
+                "repeat_type": "weekly",
+                "repeat_timezone": "UTC"
+            },
+            "scheduled_at_offset": 3600000,
+            "max_message_size": 4000,
+            "where": "",
+            "error_id": "",
+            "detailed": "",
+            "status": 0,
+            "base_where": "",
+            "base_error_id": "",
+            "base_detailed": ""
+        },
+        {
+            "name": "repeat_weekly_no_timezone",
+            "post": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 0,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "hello",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "scheduled_at": 0,
+                "processed_at": 0,
+                "error_code": "",
+                "repeat_type": "weekly",
+                "repeat_timezone": ""
+            },
+            "scheduled_at_offset": 3600000,
+            "max_message_size": 4000,
+            "where": "ScheduledPost.IsValid",
+            "error_id": "model.scheduled_post.is_valid.repeat_timezone.app_error",
+            "detailed": "id=6bdz674pgq767e4jx75w4pf57a",
+            "status": 400,
+            "base_where": "ScheduledPost.IsValid",
+            "base_error_id": "model.scheduled_post.is_valid.repeat_timezone.app_error",
+            "base_detailed": "id=6bdz674pgq767e4jx75w4pf57a"
+        },
+        {
+            "name": "repeat_weekly_local_rejected",
+            "post": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 0,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "hello",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "scheduled_at": 0,
+                "processed_at": 0,
+                "error_code": "",
+                "repeat_type": "weekly",
+                "repeat_timezone": "Local"
+            },
+            "scheduled_at_offset": 3600000,
+            "max_message_size": 4000,
+            "where": "ScheduledPost.IsValid",
+            "error_id": "model.scheduled_post.is_valid.repeat_timezone_invalid.app_error",
+            "detailed": "id=6bdz674pgq767e4jx75w4pf57a, repeat_timezone=Local",
+            "status": 400,
+            "base_where": "ScheduledPost.IsValid",
+            "base_error_id": "model.scheduled_post.is_valid.repeat_timezone_invalid.app_error",
+            "base_detailed": "id=6bdz674pgq767e4jx75w4pf57a, repeat_timezone=Local"
+        },
+        {
+            "name": "repeat_weekly_bad_timezone",
+            "post": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 0,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "hello",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "scheduled_at": 0,
+                "processed_at": 0,
+                "error_code": "",
+                "repeat_type": "weekly",
+                "repeat_timezone": "Nowhere/Nothing"
+            },
+            "scheduled_at_offset": 3600000,
+            "max_message_size": 4000,
+            "where": "ScheduledPost.IsValid",
+            "error_id": "model.scheduled_post.is_valid.repeat_timezone_invalid.app_error",
+            "detailed": "id=6bdz674pgq767e4jx75w4pf57a, repeat_timezone=Nowhere/Nothing, unknown time zone Nowhere/Nothing",
+            "status": 400,
+            "base_where": "ScheduledPost.IsValid",
+            "base_error_id": "model.scheduled_post.is_valid.repeat_timezone_invalid.app_error",
+            "base_detailed": "id=6bdz674pgq767e4jx75w4pf57a, repeat_timezone=Nowhere/Nothing, unknown time zone Nowhere/Nothing"
+        },
+        {
+            "name": "repeat_weekly_iana_timezone",
+            "post": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 0,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "hello",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "scheduled_at": 0,
+                "processed_at": 0,
+                "error_code": "",
+                "repeat_type": "weekly",
+                "repeat_timezone": "America/New_York"
+            },
+            "scheduled_at_offset": 3600000,
+            "max_message_size": 4000,
+            "where": "",
+            "error_id": "",
+            "detailed": "",
+            "status": 0,
+            "base_where": "",
+            "base_error_id": "",
+            "base_detailed": ""
+        },
+        {
+            "name": "timezone_ignored_when_not_repeating",
+            "post": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 0,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "hello",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ],
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "scheduled_at": 0,
+                "processed_at": 0,
+                "error_code": "",
+                "repeat_type": "",
+                "repeat_timezone": "Nowhere/Nothing"
+            },
+            "scheduled_at_offset": 3600000,
+            "max_message_size": 4000,
+            "where": "",
+            "error_id": "",
+            "detailed": "",
+            "status": 0,
+            "base_where": "",
+            "base_error_id": "",
+            "base_detailed": ""
+        }
+    ],
+    "pre_save": [
+        {
+            "name": "all_zero",
+            "in": {},
+            "id_was_minted": true,
+            "id_out": "",
+            "processed_at_out": 0,
+            "error_code_out": "",
+            "delete_at_out": 0,
+            "create_at_was_kept": false,
+            "create_at_value": 0,
+            "update_at_moved": true,
+            "update_at_equals_create_at": true,
+            "props_nil_out": false,
+            "props_out": {},
+            "file_ids_nil_out": false,
+            "file_ids_out": []
+        },
+        {
+            "name": "id_set",
+            "in": {
+                "id": "already",
+                "create_at": 1700000000000
+            },
+            "id_was_minted": false,
+            "id_out": "already",
+            "processed_at_out": 0,
+            "error_code_out": "",
+            "delete_at_out": 0,
+            "create_at_was_kept": true,
+            "create_at_value": 1700000000000,
+            "update_at_moved": true,
+            "update_at_equals_create_at": false,
+            "props_nil_out": false,
+            "props_out": {},
+            "file_ids_nil_out": false,
+            "file_ids_out": []
+        },
+        {
+            "name": "processed_and_error_set",
+            "in": {
+                "id": "i",
+                "create_at": 1,
+                "processed_at": 99,
+                "error_code": "unknown"
+            },
+            "id_was_minted": false,
+            "id_out": "i",
+            "processed_at_out": 0,
+            "error_code_out": "",
+            "delete_at_out": 0,
+            "create_at_was_kept": true,
+            "create_at_value": 1,
+            "update_at_moved": true,
+            "update_at_equals_create_at": false,
+            "props_nil_out": false,
+            "props_out": {},
+            "file_ids_nil_out": false,
+            "file_ids_out": []
+        },
+        {
+            "name": "delete_at_set",
+            "in": {
+                "id": "i",
+                "create_at": 1,
+                "delete_at": 1700000005000
+            },
+            "id_was_minted": false,
+            "id_out": "i",
+            "processed_at_out": 0,
+            "error_code_out": "",
+            "delete_at_out": 0,
+            "create_at_was_kept": true,
+            "create_at_value": 1,
+            "update_at_moved": true,
+            "update_at_equals_create_at": false,
+            "props_nil_out": false,
+            "props_out": {},
+            "file_ids_nil_out": false,
+            "file_ids_out": []
+        },
+        {
+            "name": "props_null",
+            "in": {
+                "id": "i",
+                "create_at": 1,
+                "props": null
+            },
+            "id_was_minted": false,
+            "id_out": "i",
+            "processed_at_out": 0,
+            "error_code_out": "",
+            "delete_at_out": 0,
+            "create_at_was_kept": true,
+            "create_at_value": 1,
+            "update_at_moved": true,
+            "update_at_equals_create_at": false,
+            "props_nil_out": false,
+            "props_out": {},
+            "file_ids_nil_out": false,
+            "file_ids_out": []
+        },
+        {
+            "name": "props_set",
+            "in": {
+                "id": "i",
+                "create_at": 1,
+                "props": {
+                    "b": 2,
+                    "a": 1
+                }
+            },
+            "id_was_minted": false,
+            "id_out": "i",
+            "processed_at_out": 0,
+            "error_code_out": "",
+            "delete_at_out": 0,
+            "create_at_was_kept": true,
+            "create_at_value": 1,
+            "update_at_moved": true,
+            "update_at_equals_create_at": false,
+            "props_nil_out": false,
+            "props_out": {
+                "a": 1,
+                "b": 2
+            },
+            "file_ids_nil_out": false,
+            "file_ids_out": []
+        },
+        {
+            "name": "file_ids_dupes",
+            "in": {
+                "id": "i",
+                "create_at": 1,
+                "file_ids": [
+                    "b",
+                    "a",
+                    "b"
+                ]
+            },
+            "id_was_minted": false,
+            "id_out": "i",
+            "processed_at_out": 0,
+            "error_code_out": "",
+            "delete_at_out": 0,
+            "create_at_was_kept": true,
+            "create_at_value": 1,
+            "update_at_moved": true,
+            "update_at_equals_create_at": false,
+            "props_nil_out": false,
+            "props_out": {},
+            "file_ids_nil_out": false,
+            "file_ids_out": [
+                "a",
+                "b"
+            ]
+        },
+        {
+            "name": "file_ids_null",
+            "in": {
+                "id": "i",
+                "create_at": 1,
+                "file_ids": null
+            },
+            "id_was_minted": false,
+            "id_out": "i",
+            "processed_at_out": 0,
+            "error_code_out": "",
+            "delete_at_out": 0,
+            "create_at_was_kept": true,
+            "create_at_value": 1,
+            "update_at_moved": true,
+            "update_at_equals_create_at": false,
+            "props_nil_out": false,
+            "props_out": {},
+            "file_ids_nil_out": false,
+            "file_ids_out": []
+        },
+        {
+            "name": "create_at_zero_id_set",
+            "in": {
+                "id": "i"
+            },
+            "id_was_minted": false,
+            "id_out": "i",
+            "processed_at_out": 0,
+            "error_code_out": "",
+            "delete_at_out": 0,
+            "create_at_was_kept": false,
+            "create_at_value": 0,
+            "update_at_moved": true,
+            "update_at_equals_create_at": true,
+            "props_nil_out": false,
+            "props_out": {},
+            "file_ids_nil_out": false,
+            "file_ids_out": []
+        }
+    ],
+    "pre_update": [
+        {
+            "name": "all_zero",
+            "in": {},
+            "id_was_minted": false,
+            "id_out": "",
+            "processed_at_out": 0,
+            "error_code_out": "",
+            "delete_at_out": 0,
+            "create_at_was_kept": true,
+            "create_at_value": 0,
+            "update_at_moved": true,
+            "update_at_equals_create_at": false,
+            "props_nil_out": false,
+            "props_out": {},
+            "file_ids_nil_out": false,
+            "file_ids_out": []
+        },
+        {
+            "name": "id_set",
+            "in": {
+                "id": "already",
+                "create_at": 1700000000000
+            },
+            "id_was_minted": false,
+            "id_out": "already",
+            "processed_at_out": 0,
+            "error_code_out": "",
+            "delete_at_out": 0,
+            "create_at_was_kept": true,
+            "create_at_value": 1700000000000,
+            "update_at_moved": true,
+            "update_at_equals_create_at": false,
+            "props_nil_out": false,
+            "props_out": {},
+            "file_ids_nil_out": false,
+            "file_ids_out": []
+        },
+        {
+            "name": "processed_and_error_set",
+            "in": {
+                "id": "i",
+                "create_at": 1,
+                "processed_at": 99,
+                "error_code": "unknown"
+            },
+            "id_was_minted": false,
+            "id_out": "i",
+            "processed_at_out": 99,
+            "error_code_out": "unknown",
+            "delete_at_out": 0,
+            "create_at_was_kept": true,
+            "create_at_value": 1,
+            "update_at_moved": true,
+            "update_at_equals_create_at": false,
+            "props_nil_out": false,
+            "props_out": {},
+            "file_ids_nil_out": false,
+            "file_ids_out": []
+        },
+        {
+            "name": "delete_at_set",
+            "in": {
+                "id": "i",
+                "create_at": 1,
+                "delete_at": 1700000005000
+            },
+            "id_was_minted": false,
+            "id_out": "i",
+            "processed_at_out": 0,
+            "error_code_out": "",
+            "delete_at_out": 1700000005000,
+            "create_at_was_kept": true,
+            "create_at_value": 1,
+            "update_at_moved": true,
+            "update_at_equals_create_at": false,
+            "props_nil_out": false,
+            "props_out": {},
+            "file_ids_nil_out": false,
+            "file_ids_out": []
+        },
+        {
+            "name": "props_null",
+            "in": {
+                "id": "i",
+                "create_at": 1,
+                "props": null
+            },
+            "id_was_minted": false,
+            "id_out": "i",
+            "processed_at_out": 0,
+            "error_code_out": "",
+            "delete_at_out": 0,
+            "create_at_was_kept": true,
+            "create_at_value": 1,
+            "update_at_moved": true,
+            "update_at_equals_create_at": false,
+            "props_nil_out": false,
+            "props_out": {},
+            "file_ids_nil_out": false,
+            "file_ids_out": []
+        },
+        {
+            "name": "props_set",
+            "in": {
+                "id": "i",
+                "create_at": 1,
+                "props": {
+                    "b": 2,
+                    "a": 1
+                }
+            },
+            "id_was_minted": false,
+            "id_out": "i",
+            "processed_at_out": 0,
+            "error_code_out": "",
+            "delete_at_out": 0,
+            "create_at_was_kept": true,
+            "create_at_value": 1,
+            "update_at_moved": true,
+            "update_at_equals_create_at": false,
+            "props_nil_out": false,
+            "props_out": {
+                "a": 1,
+                "b": 2
+            },
+            "file_ids_nil_out": false,
+            "file_ids_out": []
+        },
+        {
+            "name": "file_ids_dupes",
+            "in": {
+                "id": "i",
+                "create_at": 1,
+                "file_ids": [
+                    "b",
+                    "a",
+                    "b"
+                ]
+            },
+            "id_was_minted": false,
+            "id_out": "i",
+            "processed_at_out": 0,
+            "error_code_out": "",
+            "delete_at_out": 0,
+            "create_at_was_kept": true,
+            "create_at_value": 1,
+            "update_at_moved": true,
+            "update_at_equals_create_at": false,
+            "props_nil_out": false,
+            "props_out": {},
+            "file_ids_nil_out": false,
+            "file_ids_out": [
+                "a",
+                "b"
+            ]
+        },
+        {
+            "name": "file_ids_null",
+            "in": {
+                "id": "i",
+                "create_at": 1,
+                "file_ids": null
+            },
+            "id_was_minted": false,
+            "id_out": "i",
+            "processed_at_out": 0,
+            "error_code_out": "",
+            "delete_at_out": 0,
+            "create_at_was_kept": true,
+            "create_at_value": 1,
+            "update_at_moved": true,
+            "update_at_equals_create_at": false,
+            "props_nil_out": false,
+            "props_out": {},
+            "file_ids_nil_out": false,
+            "file_ids_out": []
+        },
+        {
+            "name": "create_at_zero_id_set",
+            "in": {
+                "id": "i"
+            },
+            "id_was_minted": false,
+            "id_out": "i",
+            "processed_at_out": 0,
+            "error_code_out": "",
+            "delete_at_out": 0,
+            "create_at_was_kept": true,
+            "create_at_value": 0,
+            "update_at_moved": true,
+            "update_at_equals_create_at": false,
+            "props_nil_out": false,
+            "props_out": {},
+            "file_ids_nil_out": false,
+            "file_ids_out": []
+        }
+    ],
+    "restore_non_updatable_fields": [
+        {
+            "name": "all_differ",
+            "original": "{\"id\":\"old\",\"create_at\":1,\"update_at\":11,\"user_id\":\"ou\",\"channel_id\":\"oc\",\"root_id\":\"or\",\"type\":\"ot\",\"message\":\"old message\",\"scheduled_at\":9}",
+            "out": "{\"create_at\":1,\"update_at\":22,\"delete_at\":0,\"user_id\":\"ou\",\"channel_id\":\"oc\",\"root_id\":\"or\",\"message\":\"new message\",\"type\":\"ot\",\"props\":null,\"id\":\"old\",\"scheduled_at\":5,\"processed_at\":0,\"error_code\":\"\",\"repeat_type\":\"\",\"repeat_timezone\":\"\"}",
+            "target": "{\"id\":\"new\",\"create_at\":2,\"update_at\":22,\"user_id\":\"nu\",\"channel_id\":\"nc\",\"root_id\":\"nr\",\"type\":\"nt\",\"message\":\"new message\",\"scheduled_at\":5}"
+        },
+        {
+            "name": "original_is_zero",
+            "original": "{}",
+            "out": "{\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"user_id\":\"\",\"channel_id\":\"\",\"root_id\":\"\",\"message\":\"\",\"type\":\"\",\"props\":null,\"id\":\"\",\"scheduled_at\":0,\"processed_at\":0,\"error_code\":\"\",\"repeat_type\":\"\",\"repeat_timezone\":\"\"}",
+            "target": "{\"id\":\"new\",\"create_at\":2,\"user_id\":\"nu\",\"channel_id\":\"nc\",\"root_id\":\"nr\",\"type\":\"nt\"}"
+        },
+        {
+            "name": "identical",
+            "original": "{\"id\":\"x\",\"user_id\":\"u\"}",
+            "out": "{\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"user_id\":\"u\",\"channel_id\":\"\",\"root_id\":\"\",\"message\":\"\",\"type\":\"\",\"props\":null,\"id\":\"x\",\"scheduled_at\":0,\"processed_at\":0,\"error_code\":\"\",\"repeat_type\":\"\",\"repeat_timezone\":\"\"}",
+            "target": "{\"id\":\"x\",\"user_id\":\"u\"}"
+        }
+    ],
+    "sanitize_input": [
+        {
+            "in": "{\"id\":\"i\",\"create_at\":1700000000000,\"update_at\":5}",
+            "metadata_nil": true,
+            "name": "create_at_set",
+            "out": "{\"create_at\":0,\"update_at\":5,\"delete_at\":0,\"user_id\":\"\",\"channel_id\":\"\",\"root_id\":\"\",\"message\":\"\",\"type\":\"\",\"props\":null,\"id\":\"i\",\"scheduled_at\":0,\"processed_at\":0,\"error_code\":\"\",\"repeat_type\":\"\",\"repeat_timezone\":\"\"}"
+        },
+        {
+            "in": "{\"id\":\"i\",\"create_at\":1}",
+            "metadata_nil": true,
+            "name": "metadata_nil",
+            "out": "{\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"user_id\":\"\",\"channel_id\":\"\",\"root_id\":\"\",\"message\":\"\",\"type\":\"\",\"props\":null,\"id\":\"i\",\"scheduled_at\":0,\"processed_at\":0,\"error_code\":\"\",\"repeat_type\":\"\",\"repeat_timezone\":\"\"}"
+        },
+        {
+            "embeds_nil": true,
+            "in": "{\"id\":\"i\",\"create_at\":1,\"metadata\":{\"embeds\":[{\"type\":\"link\"}],\"emojis\":[{\"name\":\"smile\"}]}}",
+            "metadata_nil": false,
+            "name": "metadata_with_embeds",
+            "out": "{\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"user_id\":\"\",\"channel_id\":\"\",\"root_id\":\"\",\"message\":\"\",\"type\":\"\",\"props\":null,\"metadata\":{\"emojis\":[{\"id\":\"\",\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"creator_id\":\"\",\"name\":\"smile\"}]},\"id\":\"i\",\"scheduled_at\":0,\"processed_at\":0,\"error_code\":\"\",\"repeat_type\":\"\",\"repeat_timezone\":\"\"}"
+        },
+        {
+            "embeds_nil": true,
+            "in": "{\"id\":\"i\",\"create_at\":1,\"metadata\":{\"emojis\":[{\"name\":\"a\"}]}}",
+            "metadata_nil": false,
+            "name": "metadata_without_embeds",
+            "out": "{\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"user_id\":\"\",\"channel_id\":\"\",\"root_id\":\"\",\"message\":\"\",\"type\":\"\",\"props\":null,\"metadata\":{\"emojis\":[{\"id\":\"\",\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"creator_id\":\"\",\"name\":\"a\"}]},\"id\":\"i\",\"scheduled_at\":0,\"processed_at\":0,\"error_code\":\"\",\"repeat_type\":\"\",\"repeat_timezone\":\"\"}"
+        }
+    ],
+    "timezones": [
+        {
+            "err": null,
+            "loc": "UTC",
+            "name": "",
+            "ok": true,
+            "panicked": false
+        },
+        {
+            "err": null,
+            "loc": "UTC",
+            "name": "UTC",
+            "ok": true,
+            "panicked": false
+        },
+        {
+            "err": null,
+            "loc": "Asia/Kolkata",
+            "name": "Local",
+            "ok": true,
+            "panicked": false
+        },
+        {
+            "err": null,
+            "loc": "GMT",
+            "name": "GMT",
+            "ok": true,
+            "panicked": false
+        },
+        {
+            "err": null,
+            "loc": "EST",
+            "name": "EST",
+            "ok": true,
+            "panicked": false
+        },
+        {
+            "err": null,
+            "loc": "MST",
+            "name": "MST",
+            "ok": true,
+            "panicked": false
+        },
+        {
+            "err": null,
+            "loc": "HST",
+            "name": "HST",
+            "ok": true,
+            "panicked": false
+        },
+        {
+            "err": null,
+            "loc": "EST5EDT",
+            "name": "EST5EDT",
+            "ok": true,
+            "panicked": false
+        },
+        {
+            "err": null,
+            "loc": "America/New_York",
+            "name": "America/New_York",
+            "ok": true,
+            "panicked": false
+        },
+        {
+            "err": null,
+            "loc": "america/new_york",
+            "name": "america/new_york",
+            "ok": true,
+            "panicked": false
+        },
+        {
+            "err": null,
+            "loc": "AMERICA/NEW_YORK",
+            "name": "AMERICA/NEW_YORK",
+            "ok": true,
+            "panicked": false
+        },
+        {
+            "err": null,
+            "loc": "Europe/London",
+            "name": "Europe/London",
+            "ok": true,
+            "panicked": false
+        },
+        {
+            "err": null,
+            "loc": "Europe/Berlin",
+            "name": "Europe/Berlin",
+            "ok": true,
+            "panicked": false
+        },
+        {
+            "err": null,
+            "loc": "Asia/Kolkata",
+            "name": "Asia/Kolkata",
+            "ok": true,
+            "panicked": false
+        },
+        {
+            "err": null,
+            "loc": "Asia/Calcutta",
+            "name": "Asia/Calcutta",
+            "ok": true,
+            "panicked": false
+        },
+        {
+            "err": null,
+            "loc": "Australia/Sydney",
+            "name": "Australia/Sydney",
+            "ok": true,
+            "panicked": false
+        },
+        {
+            "err": null,
+            "loc": "Pacific/Auckland",
+            "name": "Pacific/Auckland",
+            "ok": true,
+            "panicked": false
+        },
+        {
+            "err": null,
+            "loc": "Africa/Cairo",
+            "name": "Africa/Cairo",
+            "ok": true,
+            "panicked": false
+        },
+        {
+            "err": null,
+            "loc": "US/Pacific",
+            "name": "US/Pacific",
+            "ok": true,
+            "panicked": false
+        },
+        {
+            "err": null,
+            "loc": "US/Eastern",
+            "name": "US/Eastern",
+            "ok": true,
+            "panicked": false
+        },
+        {
+            "err": null,
+            "loc": "Canada/Eastern",
+            "name": "Canada/Eastern",
+            "ok": true,
+            "panicked": false
+        },
+        {
+            "err": null,
+            "loc": "Etc/UTC",
+            "name": "Etc/UTC",
+            "ok": true,
+            "panicked": false
+        },
+        {
+            "err": null,
+            "loc": "Etc/GMT",
+            "name": "Etc/GMT",
+            "ok": true,
+            "panicked": false
+        },
+        {
+            "err": null,
+            "loc": "Etc/GMT+5",
+            "name": "Etc/GMT+5",
+            "ok": true,
+            "panicked": false
+        },
+        {
+            "err": null,
+            "loc": "Etc/GMT-5",
+            "name": "Etc/GMT-5",
+            "ok": true,
+            "panicked": false
+        },
+        {
+            "err": null,
+            "loc": "Zulu",
+            "name": "Zulu",
+            "ok": true,
+            "panicked": false
+        },
+        {
+            "err": null,
+            "loc": "Universal",
+            "name": "Universal",
+            "ok": true,
+            "panicked": false
+        },
+        {
+            "err": null,
+            "loc": "Greenwich",
+            "name": "Greenwich",
+            "ok": true,
+            "panicked": false
+        },
+        {
+            "err": null,
+            "loc": "CET",
+            "name": "CET",
+            "ok": true,
+            "panicked": false
+        },
+        {
+            "err": null,
+            "loc": "MET",
+            "name": "MET",
+            "ok": true,
+            "panicked": false
+        },
+        {
+            "err": null,
+            "loc": "WET",
+            "name": "WET",
+            "ok": true,
+            "panicked": false
+        },
+        {
+            "err": null,
+            "loc": "EET",
+            "name": "EET",
+            "ok": true,
+            "panicked": false
+        },
+        {
+            "err": null,
+            "loc": "PST8PDT",
+            "name": "PST8PDT",
+            "ok": true,
+            "panicked": false
+        },
+        {
+            "err": null,
+            "loc": "America/Argentina/Buenos_Aires",
+            "name": "America/Argentina/Buenos_Aires",
+            "ok": true,
+            "panicked": false
+        },
+        {
+            "err": null,
+            "loc": "Antarctica/Troll",
+            "name": "Antarctica/Troll",
+            "ok": true,
+            "panicked": false
+        },
+        {
+            "err": "unknown time zone US/Pacific-New",
+            "name": "US/Pacific-New",
+            "ok": false,
+            "panicked": false
+        },
+        {
+            "err": null,
+            "loc": "Asia/Rangoon",
+            "name": "Asia/Rangoon",
+            "ok": true,
+            "panicked": false
+        },
+        {
+            "err": null,
+            "loc": "Europe/Kiev",
+            "name": "Europe/Kiev",
+            "ok": true,
+            "panicked": false
+        },
+        {
+            "err": null,
+            "loc": "Europe/Kyiv",
+            "name": "Europe/Kyiv",
+            "ok": true,
+            "panicked": false
+        },
+        {
+            "err": null,
+            "loc": "Pacific/Enderbury",
+            "name": "Pacific/Enderbury",
+            "ok": true,
+            "panicked": false
+        },
+        {
+            "err": "unknown time zone Nowhere/Nothing",
+            "name": "Nowhere/Nothing",
+            "ok": false,
+            "panicked": false
+        },
+        {
+            "err": "unknown time zone America/Nonexistent",
+            "name": "America/Nonexistent",
+            "ok": false,
+            "panicked": false
+        },
+        {
+            "err": "unknown time zone UTC+2",
+            "name": "UTC+2",
+            "ok": false,
+            "panicked": false
+        },
+        {
+            "err": "unknown time zone +05:30",
+            "name": "+05:30",
+            "ok": false,
+            "panicked": false
+        },
+        {
+            "err": null,
+            "loc": "utc",
+            "name": "utc",
+            "ok": true,
+            "panicked": false
+        },
+        {
+            "err": "time: invalid location name",
+            "name": "../etc/passwd",
+            "ok": false,
+            "panicked": false
+        },
+        {
+            "err": "not a directory",
+            "name": "America/New_York/",
+            "ok": false,
+            "panicked": false
+        },
+        {
+            "err": "time: invalid location name",
+            "name": "/UTC",
+            "ok": false,
+            "panicked": false
+        },
+        {
+            "err": null,
+            "loc": "America//New_York",
+            "name": "America//New_York",
+            "ok": true,
+            "panicked": false
+        },
+        {
+            "err": "unknown time zone  UTC",
+            "name": " UTC",
+            "ok": false,
+            "panicked": false
+        }
+    ],
+    "to_post": [
+        {
+            "name": "minimal",
+            "in": {
+                "id": "i",
+                "user_id": "u",
+                "channel_id": "c",
+                "message": "m"
+            },
+            "post": "{\"id\":\"\",\"create_at\":0,\"update_at\":0,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u\",\"channel_id\":\"c\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"m\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null}",
+            "err": ""
+        },
+        {
+            "name": "every_carried_field",
+            "in": {
+                "id": "i",
+                "create_at": 1,
+                "update_at": 2,
+                "delete_at": 3,
+                "user_id": "u",
+                "channel_id": "c",
+                "root_id": "r",
+                "message": "m",
+                "type": "custom_x",
+                "file_ids": [
+                    "f1",
+                    "f2"
+                ],
+                "metadata": {
+                    "emojis": [
+                        {
+                            "name": "smile"
+                        }
+                    ]
+                },
+                "scheduled_at": 9,
+                "processed_at": 8,
+                "error_code": "unknown"
+            },
+            "post": "{\"id\":\"\",\"create_at\":0,\"update_at\":0,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u\",\"channel_id\":\"c\",\"root_id\":\"r\",\"original_id\":\"\",\"message\":\"m\",\"type\":\"custom_x\",\"props\":null,\"hashtags\":\"\",\"file_ids\":[\"f1\",\"f2\"],\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null,\"metadata\":{\"emojis\":[{\"id\":\"\",\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"creator_id\":\"\",\"name\":\"smile\"}]}}",
+            "err": ""
+        },
+        {
+            "name": "props_are_copied",
+            "in": {
+                "user_id": "u",
+                "props": {
+                    "b": 2,
+                    "a": "x"
+                }
+            },
+            "post": "{\"id\":\"\",\"create_at\":0,\"update_at\":0,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u\",\"channel_id\":\"\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"\",\"type\":\"\",\"props\":{\"a\":\"x\",\"b\":2},\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null}",
+            "err": ""
+        },
+        {
+            "name": "props_null",
+            "in": {
+                "user_id": "u",
+                "props": null
+            },
+            "post": "{\"id\":\"\",\"create_at\":0,\"update_at\":0,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u\",\"channel_id\":\"\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null}",
+            "err": ""
+        },
+        {
+            "name": "props_empty",
+            "in": {
+                "user_id": "u",
+                "props": {}
+            },
+            "post": "{\"id\":\"\",\"create_at\":0,\"update_at\":0,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u\",\"channel_id\":\"\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null}",
+            "err": ""
+        },
+        {
+            "name": "priority_complete",
+            "in": {
+                "user_id": "u",
+                "priority": {
+                    "priority": "urgent",
+                    "requested_ack": true,
+                    "persistent_notifications": false
+                }
+            },
+            "post": "{\"id\":\"\",\"create_at\":0,\"update_at\":0,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u\",\"channel_id\":\"\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null,\"metadata\":{\"priority\":{\"priority\":\"urgent\",\"requested_ack\":true,\"persistent_notifications\":false}}}",
+            "err": ""
+        },
+        {
+            "name": "priority_complete_with_metadata",
+            "in": {
+                "user_id": "u",
+                "metadata": {
+                    "emojis": [
+                        {
+                            "name": "a"
+                        }
+                    ]
+                },
+                "priority": {
+                    "priority": "important",
+                    "requested_ack": false,
+                    "persistent_notifications": true
+                }
+            },
+            "post": "{\"id\":\"\",\"create_at\":0,\"update_at\":0,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u\",\"channel_id\":\"\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null,\"metadata\":{\"emojis\":[{\"id\":\"\",\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"creator_id\":\"\",\"name\":\"a\"}],\"priority\":{\"priority\":\"important\",\"requested_ack\":false,\"persistent_notifications\":true}}}",
+            "err": ""
+        },
+        {
+            "name": "priority_empty_map",
+            "in": {
+                "user_id": "u",
+                "priority": {}
+            },
+            "post": "{\"id\":\"\",\"create_at\":0,\"update_at\":0,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u\",\"channel_id\":\"\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null}",
+            "err": ""
+        },
+        {
+            "name": "priority_null",
+            "in": {
+                "user_id": "u",
+                "priority": null
+            },
+            "post": "{\"id\":\"\",\"create_at\":0,\"update_at\":0,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u\",\"channel_id\":\"\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null}",
+            "err": ""
+        },
+        {
+            "name": "priority_missing_requested_ack",
+            "in": {
+                "user_id": "u",
+                "priority": {
+                    "priority": "urgent"
+                }
+            },
+            "post": "",
+            "err": "ScheduledPost.ToPost: requested_ack is not a bool. ScheduledPost.Priority: map[priority:urgent]"
+        },
+        {
+            "name": "priority_missing_persistent",
+            "in": {
+                "user_id": "u",
+                "priority": {
+                    "priority": "urgent",
+                    "requested_ack": true
+                }
+            },
+            "post": "",
+            "err": "ScheduledPost.ToPost: persistent_notifications is not a bool. ScheduledPost.Priority: map[priority:urgent requested_ack:true]"
+        },
+        {
+            "name": "priority_wrong_type",
+            "in": {
+                "user_id": "u",
+                "priority": {
+                    "priority": 1,
+                    "requested_ack": true,
+                    "persistent_notifications": true
+                }
+            },
+            "post": "",
+            "err": "ScheduledPost.ToPost: priority is not a string. ScheduledPost.Priority: map[persistent_notifications:true priority:1 requested_ack:true]"
+        },
+        {
+            "name": "priority_ack_is_a_string",
+            "in": {
+                "user_id": "u",
+                "priority": {
+                    "priority": "urgent",
+                    "requested_ack": "true",
+                    "persistent_notifications": true
+                }
+            },
+            "post": "",
+            "err": "ScheduledPost.ToPost: requested_ack is not a bool. ScheduledPost.Priority: map[persistent_notifications:true priority:urgent requested_ack:true]"
+        },
+        {
+            "name": "priority_extra_key",
+            "in": {
+                "user_id": "u",
+                "priority": {
+                    "priority": "urgent",
+                    "requested_ack": true,
+                    "persistent_notifications": true,
+                    "extra": 1
+                }
+            },
+            "post": "{\"id\":\"\",\"create_at\":0,\"update_at\":0,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u\",\"channel_id\":\"\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null,\"metadata\":{\"priority\":{\"priority\":\"urgent\",\"requested_ack\":true,\"persistent_notifications\":true}}}",
+            "err": ""
+        },
+        {
+            "name": "priority_empty_string",
+            "in": {
+                "user_id": "u",
+                "priority": {
+                    "priority": "",
+                    "requested_ack": false,
+                    "persistent_notifications": false
+                }
+            },
+            "post": "{\"id\":\"\",\"create_at\":0,\"update_at\":0,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u\",\"channel_id\":\"\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null,\"metadata\":{\"priority\":{\"priority\":\"\",\"requested_ack\":false,\"persistent_notifications\":false}}}",
+            "err": ""
+        }
+    ],
+    "wire": [
+        {
+            "err": null,
+            "file_ids_nil": true,
+            "in": "{}",
+            "metadata_nil": true,
+            "name": "empty_object",
+            "out": "{\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"user_id\":\"\",\"channel_id\":\"\",\"root_id\":\"\",\"message\":\"\",\"type\":\"\",\"props\":null,\"id\":\"\",\"scheduled_at\":0,\"processed_at\":0,\"error_code\":\"\",\"repeat_type\":\"\",\"repeat_timezone\":\"\"}",
+            "panicked": false,
+            "priority_nil": true,
+            "props_nil": true
+        },
+        {
+            "err": null,
+            "file_ids_nil": false,
+            "in": "{\"create_at\":1700000000000,\"update_at\":1700000001000,\"delete_at\":1700000002000,\"user_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"channel_id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"root_id\":\"g1ku9ozj3bhub3hs89bqu1m3gy\",\"message\":\"hello\",\"type\":\"custom_x\",\"props\":{\"a\":\"b\"},\"file_ids\":[\"f1\"],\"metadata\":{\"emojis\":[{\"name\":\"smile\"}]},\"priority\":{\"priority\":\"urgent\"},\"id\":\"6bdz674pgq767e4jx75w4pf57a\",\"scheduled_at\":1700000003000,\"processed_at\":1700000004000,\"error_code\":\"unknown\",\"repeat_type\":\"weekly\",\"repeat_timezone\":\"UTC\"}",
+            "metadata_nil": false,
+            "name": "all_fields",
+            "out": "{\"create_at\":1700000000000,\"update_at\":1700000001000,\"delete_at\":1700000002000,\"user_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"channel_id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"root_id\":\"g1ku9ozj3bhub3hs89bqu1m3gy\",\"message\":\"hello\",\"type\":\"custom_x\",\"props\":{\"a\":\"b\"},\"file_ids\":[\"f1\"],\"metadata\":{\"emojis\":[{\"id\":\"\",\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"creator_id\":\"\",\"name\":\"smile\"}]},\"priority\":{\"priority\":\"urgent\"},\"id\":\"6bdz674pgq767e4jx75w4pf57a\",\"scheduled_at\":1700000003000,\"processed_at\":1700000004000,\"error_code\":\"unknown\",\"repeat_type\":\"weekly\",\"repeat_timezone\":\"UTC\"}",
+            "panicked": false,
+            "priority_nil": false,
+            "props_nil": false
+        },
+        {
+            "err": null,
+            "file_ids_nil": true,
+            "in": "{\"props\":null,\"id\":\"x\"}",
+            "metadata_nil": true,
+            "name": "props_null",
+            "out": "{\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"user_id\":\"\",\"channel_id\":\"\",\"root_id\":\"\",\"message\":\"\",\"type\":\"\",\"props\":null,\"id\":\"x\",\"scheduled_at\":0,\"processed_at\":0,\"error_code\":\"\",\"repeat_type\":\"\",\"repeat_timezone\":\"\"}",
+            "panicked": false,
+            "priority_nil": true,
+            "props_nil": true
+        },
+        {
+            "err": null,
+            "file_ids_nil": true,
+            "in": "{\"props\":{},\"id\":\"x\"}",
+            "metadata_nil": true,
+            "name": "props_empty",
+            "out": "{\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"user_id\":\"\",\"channel_id\":\"\",\"root_id\":\"\",\"message\":\"\",\"type\":\"\",\"props\":{},\"id\":\"x\",\"scheduled_at\":0,\"processed_at\":0,\"error_code\":\"\",\"repeat_type\":\"\",\"repeat_timezone\":\"\"}",
+            "panicked": false,
+            "priority_nil": true,
+            "props_nil": false
+        },
+        {
+            "err": null,
+            "file_ids_nil": false,
+            "in": "{\"file_ids\":[],\"id\":\"x\"}",
+            "metadata_nil": true,
+            "name": "file_ids_empty",
+            "out": "{\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"user_id\":\"\",\"channel_id\":\"\",\"root_id\":\"\",\"message\":\"\",\"type\":\"\",\"props\":null,\"id\":\"x\",\"scheduled_at\":0,\"processed_at\":0,\"error_code\":\"\",\"repeat_type\":\"\",\"repeat_timezone\":\"\"}",
+            "panicked": false,
+            "priority_nil": true,
+            "props_nil": true
+        },
+        {
+            "err": null,
+            "file_ids_nil": true,
+            "in": "{\"metadata\":{},\"id\":\"x\"}",
+            "metadata_nil": false,
+            "name": "metadata_empty",
+            "out": "{\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"user_id\":\"\",\"channel_id\":\"\",\"root_id\":\"\",\"message\":\"\",\"type\":\"\",\"props\":null,\"metadata\":{},\"id\":\"x\",\"scheduled_at\":0,\"processed_at\":0,\"error_code\":\"\",\"repeat_type\":\"\",\"repeat_timezone\":\"\"}",
+            "panicked": false,
+            "priority_nil": true,
+            "props_nil": true
+        },
+        {
+            "err": null,
+            "file_ids_nil": true,
+            "in": "{\"priority\":{},\"id\":\"x\"}",
+            "metadata_nil": true,
+            "name": "priority_empty",
+            "out": "{\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"user_id\":\"\",\"channel_id\":\"\",\"root_id\":\"\",\"message\":\"\",\"type\":\"\",\"props\":null,\"id\":\"x\",\"scheduled_at\":0,\"processed_at\":0,\"error_code\":\"\",\"repeat_type\":\"\",\"repeat_timezone\":\"\"}",
+            "panicked": false,
+            "priority_nil": false,
+            "props_nil": true
+        },
+        {
+            "err": null,
+            "file_ids_nil": true,
+            "in": "{\"id\":\"i\",\"scheduled_at\":1,\"processed_at\":2,\"error_code\":\"e\",\"repeat_type\":\"weekly\",\"repeat_timezone\":\"UTC\"}",
+            "metadata_nil": true,
+            "name": "own_fields_only",
+            "out": "{\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"user_id\":\"\",\"channel_id\":\"\",\"root_id\":\"\",\"message\":\"\",\"type\":\"\",\"props\":null,\"id\":\"i\",\"scheduled_at\":1,\"processed_at\":2,\"error_code\":\"e\",\"repeat_type\":\"weekly\",\"repeat_timezone\":\"UTC\"}",
+            "panicked": false,
+            "priority_nil": true,
+            "props_nil": true
+        },
+        {
+            "err": null,
+            "file_ids_nil": true,
+            "in": "{\"message\":\"m\",\"user_id\":\"u\"}",
+            "metadata_nil": true,
+            "name": "draft_fields_only",
+            "out": "{\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"user_id\":\"u\",\"channel_id\":\"\",\"root_id\":\"\",\"message\":\"m\",\"type\":\"\",\"props\":null,\"id\":\"\",\"scheduled_at\":0,\"processed_at\":0,\"error_code\":\"\",\"repeat_type\":\"\",\"repeat_timezone\":\"\"}",
+            "panicked": false,
+            "priority_nil": true,
+            "props_nil": true
+        },
+        {
+            "err": null,
+            "file_ids_nil": true,
+            "in": "{\"nope\":1,\"id\":\"x\"}",
+            "metadata_nil": true,
+            "name": "unknown_key",
+            "out": "{\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"user_id\":\"\",\"channel_id\":\"\",\"root_id\":\"\",\"message\":\"\",\"type\":\"\",\"props\":null,\"id\":\"x\",\"scheduled_at\":0,\"processed_at\":0,\"error_code\":\"\",\"repeat_type\":\"\",\"repeat_timezone\":\"\"}",
+            "panicked": false,
+            "priority_nil": true,
+            "props_nil": true
+        },
+        {
+            "err": null,
+            "file_ids_nil": true,
+            "in": "{\"message\":\"a\u003cb\u003ec\u0026d\",\"repeat_timezone\":\"a\u0026b\"}",
+            "metadata_nil": true,
+            "name": "escapes",
+            "out": "{\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"user_id\":\"\",\"channel_id\":\"\",\"root_id\":\"\",\"message\":\"a\\u003cb\\u003ec\\u0026d\",\"type\":\"\",\"props\":null,\"id\":\"\",\"scheduled_at\":0,\"processed_at\":0,\"error_code\":\"\",\"repeat_type\":\"\",\"repeat_timezone\":\"a\\u0026b\"}",
+            "panicked": false,
+            "priority_nil": true,
+            "props_nil": true
+        },
+        {
+            "err": null,
+            "file_ids_nil": true,
+            "in": "{\"id\":null,\"scheduled_at\":null,\"message\":null}",
+            "metadata_nil": true,
+            "name": "null_scalars",
+            "out": "{\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"user_id\":\"\",\"channel_id\":\"\",\"root_id\":\"\",\"message\":\"\",\"type\":\"\",\"props\":null,\"id\":\"\",\"scheduled_at\":0,\"processed_at\":0,\"error_code\":\"\",\"repeat_type\":\"\",\"repeat_timezone\":\"\"}",
+            "panicked": false,
+            "priority_nil": true,
+            "props_nil": true
+        },
+        {
+            "err": null,
+            "file_ids_nil": true,
+            "in": "",
+            "metadata_nil": true,
+            "name": "zero_value",
+            "out": "{\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"user_id\":\"\",\"channel_id\":\"\",\"root_id\":\"\",\"message\":\"\",\"type\":\"\",\"props\":null,\"id\":\"\",\"scheduled_at\":0,\"processed_at\":0,\"error_code\":\"\",\"repeat_type\":\"\",\"repeat_timezone\":\"\"}",
+            "panicked": false,
+            "priority_nil": true,
+            "props_nil": true
+        }
+    ]
+}

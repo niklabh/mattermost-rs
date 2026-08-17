@@ -1,0 +1,593 @@
+{
+    "human_strings": [
+        {
+            "name": "no_props",
+            "post": "{\"message\":\"m\"}",
+            "omitting": [
+                "m"
+            ],
+            "full": [
+                "m"
+            ]
+        },
+        {
+            "name": "mm_blocks_null",
+            "post": "{\"props\":{\"mm_blocks\":null}}",
+            "omitting": null,
+            "full": null
+        },
+        {
+            "name": "mm_blocks_object",
+            "post": "{\"props\":{\"mm_blocks\":{\"type\":\"text\",\"text\":\"x\"}}}",
+            "omitting": null,
+            "full": null
+        },
+        {
+            "name": "mm_blocks_string",
+            "post": "{\"props\":{\"mm_blocks\":\"x\"}}",
+            "omitting": null,
+            "full": null
+        },
+        {
+            "name": "mm_blocks_empty",
+            "post": "{\"props\":{\"mm_blocks\":[]}}",
+            "omitting": null,
+            "full": null
+        },
+        {
+            "name": "mm_blocks_element_not_a_map",
+            "post": "{\"props\":{\"mm_blocks\":[\"x\",1,null,[]]}}",
+            "omitting": null,
+            "full": null
+        },
+        {
+            "name": "mm_text",
+            "post": "{\"props\":{\"mm_blocks\":[{\"type\":\"text\",\"text\":\"hello\"}]}}",
+            "omitting": null,
+            "full": [
+                "hello"
+            ]
+        },
+        {
+            "name": "mm_text_blank",
+            "post": "{\"props\":{\"mm_blocks\":[{\"type\":\"text\",\"text\":\"   \"}]}}",
+            "omitting": null,
+            "full": null
+        },
+        {
+            "name": "mm_text_padded",
+            "post": "{\"props\":{\"mm_blocks\":[{\"type\":\"text\",\"text\":\"  hello  \"}]}}",
+            "omitting": null,
+            "full": [
+                "  hello  "
+            ]
+        },
+        {
+            "name": "mm_text_not_a_string",
+            "post": "{\"props\":{\"mm_blocks\":[{\"type\":\"text\",\"text\":42}]}}",
+            "omitting": null,
+            "full": null
+        },
+        {
+            "name": "mm_text_missing",
+            "post": "{\"props\":{\"mm_blocks\":[{\"type\":\"text\"}]}}",
+            "omitting": null,
+            "full": null
+        },
+        {
+            "name": "mm_type_missing",
+            "post": "{\"props\":{\"mm_blocks\":[{\"text\":\"hello\"}]}}",
+            "omitting": null,
+            "full": null
+        },
+        {
+            "name": "mm_type_unknown",
+            "post": "{\"props\":{\"mm_blocks\":[{\"type\":\"nope\",\"text\":\"hello\"}]}}",
+            "omitting": null,
+            "full": null
+        },
+        {
+            "name": "mm_type_not_a_string",
+            "post": "{\"props\":{\"mm_blocks\":[{\"type\":7,\"text\":\"hello\"}]}}",
+            "omitting": null,
+            "full": null
+        },
+        {
+            "name": "mm_container",
+            "post": "{\"props\":{\"mm_blocks\":[{\"type\":\"container\",\"content\":[{\"type\":\"text\",\"text\":\"in\"}]}]}}",
+            "omitting": null,
+            "full": [
+                "in"
+            ]
+        },
+        {
+            "name": "mm_container_content_missing",
+            "post": "{\"props\":{\"mm_blocks\":[{\"type\":\"container\"}]}}",
+            "omitting": null,
+            "full": null
+        },
+        {
+            "name": "mm_container_content_object",
+            "post": "{\"props\":{\"mm_blocks\":[{\"type\":\"container\",\"content\":{\"type\":\"text\",\"text\":\"in\"}}]}}",
+            "omitting": null,
+            "full": null
+        },
+        {
+            "name": "mm_container_nested",
+            "post": "{\"props\":{\"mm_blocks\":[{\"type\":\"container\",\"content\":[{\"type\":\"container\",\"content\":[{\"type\":\"text\",\"text\":\"deep\"}]}]}]}}",
+            "omitting": null,
+            "full": [
+                "deep"
+            ]
+        },
+        {
+            "name": "mm_collapsible_order",
+            "post": "{\"props\":{\"mm_blocks\":[{\"type\":\"collapsible\",\"header\":[{\"type\":\"text\",\"text\":\"h\"}],\"content\":[{\"type\":\"text\",\"text\":\"c\"}]}]}}",
+            "omitting": null,
+            "full": [
+                "h",
+                "c"
+            ]
+        },
+        {
+            "name": "mm_collapsible_header_only",
+            "post": "{\"props\":{\"mm_blocks\":[{\"type\":\"collapsible\",\"header\":[{\"type\":\"text\",\"text\":\"h\"}]}]}}",
+            "omitting": null,
+            "full": [
+                "h"
+            ]
+        },
+        {
+            "name": "mm_column_set",
+            "post": "{\"props\":{\"mm_blocks\":[{\"type\":\"column_set\",\"columns\":[{\"items\":[{\"type\":\"text\",\"text\":\"c1\"}]},{\"items\":[{\"type\":\"text\",\"text\":\"c2\"}]}]}]}}",
+            "omitting": null,
+            "full": [
+                "c1",
+                "c2"
+            ]
+        },
+        {
+            "name": "mm_column_set_no_type_needed",
+            "post": "{\"props\":{\"mm_blocks\":[{\"type\":\"column_set\",\"columns\":[{\"type\":\"column\",\"items\":[{\"type\":\"text\",\"text\":\"c1\"}]}]}]}}",
+            "omitting": null,
+            "full": [
+                "c1"
+            ]
+        },
+        {
+            "name": "mm_column_set_items_missing",
+            "post": "{\"props\":{\"mm_blocks\":[{\"type\":\"column_set\",\"columns\":[{}]}]}}",
+            "omitting": null,
+            "full": null
+        },
+        {
+            "name": "mm_column_set_column_not_a_map",
+            "post": "{\"props\":{\"mm_blocks\":[{\"type\":\"column_set\",\"columns\":[\"x\"]}]}}",
+            "omitting": null,
+            "full": null
+        },
+        {
+            "name": "mm_column_set_columns_object",
+            "post": "{\"props\":{\"mm_blocks\":[{\"type\":\"column_set\",\"columns\":{}}]}}",
+            "omitting": null,
+            "full": null
+        },
+        {
+            "name": "mm_two_blocks_order",
+            "post": "{\"props\":{\"mm_blocks\":[{\"type\":\"text\",\"text\":\"a\"},{\"type\":\"text\",\"text\":\"b\"}]}}",
+            "omitting": null,
+            "full": [
+                "a",
+                "b"
+            ]
+        },
+        {
+            "name": "kit_markdown",
+            "post": "{\"props\":{\"blocks\":[{\"type\":\"markdown\",\"text\":\"md\"}]}}",
+            "omitting": null,
+            "full": [
+                "md"
+            ]
+        },
+        {
+            "name": "kit_markdown_text_is_a_map",
+            "post": "{\"props\":{\"blocks\":[{\"type\":\"markdown\",\"text\":{\"text\":\"md\"}}]}}",
+            "omitting": null,
+            "full": null
+        },
+        {
+            "name": "kit_section_text",
+            "post": "{\"props\":{\"blocks\":[{\"type\":\"section\",\"text\":{\"type\":\"mrkdwn\",\"text\":\"sec\"}}]}}",
+            "omitting": null,
+            "full": [
+                "sec"
+            ]
+        },
+        {
+            "name": "kit_section_text_is_a_string",
+            "post": "{\"props\":{\"blocks\":[{\"type\":\"section\",\"text\":\"sec\"}]}}",
+            "omitting": null,
+            "full": null
+        },
+        {
+            "name": "kit_section_text_inner_missing",
+            "post": "{\"props\":{\"blocks\":[{\"type\":\"section\",\"text\":{\"type\":\"mrkdwn\"}}]}}",
+            "omitting": null,
+            "full": null
+        },
+        {
+            "name": "kit_section_fields",
+            "post": "{\"props\":{\"blocks\":[{\"type\":\"section\",\"fields\":[{\"type\":\"mrkdwn\",\"text\":\"f1\"},{\"type\":\"mrkdwn\",\"text\":\"f2\"}]}]}}",
+            "omitting": null,
+            "full": [
+                "f1",
+                "f2"
+            ]
+        },
+        {
+            "name": "kit_section_text_and_fields_order",
+            "post": "{\"props\":{\"blocks\":[{\"type\":\"section\",\"text\":{\"text\":\"sec\"},\"fields\":[{\"text\":\"f1\"}]}]}}",
+            "omitting": null,
+            "full": [
+                "sec",
+                "f1"
+            ]
+        },
+        {
+            "name": "kit_section_field_not_a_map",
+            "post": "{\"props\":{\"blocks\":[{\"type\":\"section\",\"fields\":[\"f1\"]}]}}",
+            "omitting": null,
+            "full": null
+        },
+        {
+            "name": "kit_section_field_text_not_a_string",
+            "post": "{\"props\":{\"blocks\":[{\"type\":\"section\",\"fields\":[{\"text\":7}]}]}}",
+            "omitting": null,
+            "full": null
+        },
+        {
+            "name": "kit_header",
+            "post": "{\"props\":{\"blocks\":[{\"type\":\"header\",\"text\":{\"type\":\"plain_text\",\"text\":\"head\"}}]}}",
+            "omitting": null,
+            "full": [
+                "head"
+            ]
+        },
+        {
+            "name": "kit_actions_ignored",
+            "post": "{\"props\":{\"blocks\":[{\"type\":\"actions\",\"elements\":[{\"type\":\"button\",\"text\":{\"text\":\"press\"},\"action_id\":\"a\"}]}]}}",
+            "omitting": null,
+            "full": null
+        },
+        {
+            "name": "kit_image_block_alt_ignored",
+            "post": "{\"props\":{\"blocks\":[{\"type\":\"image\",\"image_url\":\"https://x/i.png\",\"alt_text\":\"alt\"}]}}",
+            "omitting": null,
+            "full": null
+        },
+        {
+            "name": "kit_unknown_type",
+            "post": "{\"props\":{\"blocks\":[{\"type\":\"nope\",\"text\":\"x\"}]}}",
+            "omitting": null,
+            "full": null
+        },
+        {
+            "name": "card_text_block",
+            "post": "{\"props\":{\"cards\":[{\"type\":\"AdaptiveCard\",\"body\":[{\"type\":\"TextBlock\",\"text\":\"t\"}]}]}}",
+            "omitting": null,
+            "full": [
+                "t"
+            ]
+        },
+        {
+            "name": "card_body_missing",
+            "post": "{\"props\":{\"cards\":[{\"type\":\"AdaptiveCard\"}]}}",
+            "omitting": null,
+            "full": null
+        },
+        {
+            "name": "card_body_object",
+            "post": "{\"props\":{\"cards\":[{\"body\":{\"type\":\"TextBlock\",\"text\":\"t\"}}]}}",
+            "omitting": null,
+            "full": null
+        },
+        {
+            "name": "card_container",
+            "post": "{\"props\":{\"cards\":[{\"body\":[{\"type\":\"Container\",\"items\":[{\"type\":\"TextBlock\",\"text\":\"in\"}]}]}]}}",
+            "omitting": null,
+            "full": [
+                "in"
+            ]
+        },
+        {
+            "name": "card_container_nested",
+            "post": "{\"props\":{\"cards\":[{\"body\":[{\"type\":\"Container\",\"items\":[{\"type\":\"Container\",\"items\":[{\"type\":\"TextBlock\",\"text\":\"deep\"}]}]}]}]}}",
+            "omitting": null,
+            "full": [
+                "deep"
+            ]
+        },
+        {
+            "name": "card_column_set",
+            "post": "{\"props\":{\"cards\":[{\"body\":[{\"type\":\"ColumnSet\",\"columns\":[{\"items\":[{\"type\":\"TextBlock\",\"text\":\"c1\"}]},{\"items\":[{\"type\":\"TextBlock\",\"text\":\"c2\"}]}]}]}]}}",
+            "omitting": null,
+            "full": [
+                "c1",
+                "c2"
+            ]
+        },
+        {
+            "name": "card_column_set_items_missing",
+            "post": "{\"props\":{\"cards\":[{\"body\":[{\"type\":\"ColumnSet\",\"columns\":[{}]}]}]}}",
+            "omitting": null,
+            "full": null
+        },
+        {
+            "name": "card_action_set_ignored",
+            "post": "{\"props\":{\"cards\":[{\"body\":[{\"type\":\"ActionSet\",\"actions\":[{\"type\":\"Action.Submit\",\"id\":\"a\",\"title\":\"press\"}]}]}]}}",
+            "omitting": null,
+            "full": null
+        },
+        {
+            "name": "card_top_level_actions_ignored",
+            "post": "{\"props\":{\"cards\":[{\"body\":[{\"type\":\"TextBlock\",\"text\":\"t\"}],\"actions\":[{\"type\":\"Action.Submit\",\"id\":\"a\",\"title\":\"press\"}]}]}}",
+            "omitting": null,
+            "full": [
+                "t"
+            ]
+        },
+        {
+            "name": "card_unknown_item_type",
+            "post": "{\"props\":{\"cards\":[{\"body\":[{\"type\":\"Nope\",\"text\":\"t\"}]}]}}",
+            "omitting": null,
+            "full": null
+        },
+        {
+            "name": "all_three_dialects",
+            "post": "{\"message\":\"msg\",\"props\":{\"cards\":[{\"body\":[{\"type\":\"TextBlock\",\"text\":\"card\"}]}],\"blocks\":[{\"type\":\"markdown\",\"text\":\"kit\"}],\"mm_blocks\":[{\"type\":\"text\",\"text\":\"mm\"}]}}",
+            "omitting": [
+                "msg"
+            ],
+            "full": [
+                "msg",
+                "mm",
+                "kit",
+                "card"
+            ]
+        },
+        {
+            "name": "attachments_come_before_blocks",
+            "post": "{\"message\":\"msg\",\"props\":{\"attachments\":[{\"title\":\"att\"}],\"mm_blocks\":[{\"type\":\"text\",\"text\":\"mm\"}]}}",
+            "omitting": [
+                "msg",
+                "att"
+            ],
+            "full": [
+                "msg",
+                "att",
+                "mm"
+            ]
+        }
+    ],
+    "image_urls": [
+        {
+            "name": "no_props",
+            "post": "{\"message\":\"m\"}",
+            "enabled": null,
+            "disabled": null
+        },
+        {
+            "name": "empty_props",
+            "post": "{\"props\":{}}",
+            "enabled": null,
+            "disabled": null
+        },
+        {
+            "name": "mm_image",
+            "post": "{\"props\":{\"mm_blocks\":[{\"type\":\"image\",\"url\":\"https://x/a.png\"}]}}",
+            "enabled": [
+                "https://x/a.png"
+            ],
+            "disabled": null
+        },
+        {
+            "name": "mm_image_url_missing",
+            "post": "{\"props\":{\"mm_blocks\":[{\"type\":\"image\"}]}}",
+            "enabled": null,
+            "disabled": null
+        },
+        {
+            "name": "mm_image_url_not_a_string",
+            "post": "{\"props\":{\"mm_blocks\":[{\"type\":\"image\",\"url\":7}]}}",
+            "enabled": null,
+            "disabled": null
+        },
+        {
+            "name": "mm_image_url_empty",
+            "post": "{\"props\":{\"mm_blocks\":[{\"type\":\"image\",\"url\":\"\"}]}}",
+            "enabled": [
+                ""
+            ],
+            "disabled": null
+        },
+        {
+            "name": "mm_image_relative",
+            "post": "{\"props\":{\"mm_blocks\":[{\"type\":\"image\",\"url\":\"/plugins/x/img\"}]}}",
+            "enabled": [
+                "/plugins/x/img"
+            ],
+            "disabled": null
+        },
+        {
+            "name": "mm_container",
+            "post": "{\"props\":{\"mm_blocks\":[{\"type\":\"container\",\"content\":[{\"type\":\"image\",\"url\":\"https://x/a.png\"}]}]}}",
+            "enabled": [
+                "https://x/a.png"
+            ],
+            "disabled": null
+        },
+        {
+            "name": "mm_collapsible_order",
+            "post": "{\"props\":{\"mm_blocks\":[{\"type\":\"collapsible\",\"header\":[{\"type\":\"image\",\"url\":\"https://x/h.png\"}],\"content\":[{\"type\":\"image\",\"url\":\"https://x/c.png\"}]}]}}",
+            "enabled": [
+                "https://x/h.png",
+                "https://x/c.png"
+            ],
+            "disabled": null
+        },
+        {
+            "name": "mm_column_set_flat_items",
+            "post": "{\"props\":{\"mm_blocks\":[{\"type\":\"column_set\",\"columns\":[{\"items\":[{\"type\":\"image\",\"url\":\"https://x/a.png\"}]}]}]}}",
+            "enabled": null,
+            "disabled": null
+        },
+        {
+            "name": "mm_column_set_nested_items",
+            "post": "{\"props\":{\"mm_blocks\":[{\"type\":\"column_set\",\"columns\":[{\"items\":[[{\"type\":\"image\",\"url\":\"https://x/a.png\"}]]}]}]}}",
+            "enabled": [
+                "https://x/a.png"
+            ],
+            "disabled": null
+        },
+        {
+            "name": "mm_text_block_ignored",
+            "post": "{\"props\":{\"mm_blocks\":[{\"type\":\"text\",\"text\":\"![a](https://x/md.png)\"}]}}",
+            "enabled": null,
+            "disabled": null
+        },
+        {
+            "name": "mm_two_images_order",
+            "post": "{\"props\":{\"mm_blocks\":[{\"type\":\"image\",\"url\":\"https://x/1.png\"},{\"type\":\"image\",\"url\":\"https://x/2.png\"}]}}",
+            "enabled": [
+                "https://x/1.png",
+                "https://x/2.png"
+            ],
+            "disabled": null
+        },
+        {
+            "name": "kit_image_block",
+            "post": "{\"props\":{\"blocks\":[{\"type\":\"image\",\"image_url\":\"https://x/k.png\"}]}}",
+            "enabled": [
+                "https://x/k.png"
+            ],
+            "disabled": null
+        },
+        {
+            "name": "kit_image_block_url_key",
+            "post": "{\"props\":{\"blocks\":[{\"type\":\"image\",\"url\":\"https://x/k.png\"}]}}",
+            "enabled": null,
+            "disabled": null
+        },
+        {
+            "name": "kit_section_accessory_image",
+            "post": "{\"props\":{\"blocks\":[{\"type\":\"section\",\"text\":{\"text\":\"t\"},\"accessory\":{\"type\":\"image\",\"image_url\":\"https://x/acc.png\"}}]}}",
+            "enabled": [
+                "https://x/acc.png"
+            ],
+            "disabled": null
+        },
+        {
+            "name": "kit_section_accessory_not_an_image",
+            "post": "{\"props\":{\"blocks\":[{\"type\":\"section\",\"accessory\":{\"type\":\"button\",\"image_url\":\"https://x/acc.png\"}},{\"type\":\"image\",\"image_url\":\"https://x/after.png\"}]}}",
+            "enabled": [
+                "https://x/after.png"
+            ],
+            "disabled": null
+        },
+        {
+            "name": "kit_section_without_accessory",
+            "post": "{\"props\":{\"blocks\":[{\"type\":\"section\",\"text\":{\"text\":\"t\"}},{\"type\":\"image\",\"image_url\":\"https://x/after.png\"}]}}",
+            "enabled": [
+                "https://x/after.png"
+            ],
+            "disabled": null
+        },
+        {
+            "name": "card_image",
+            "post": "{\"props\":{\"cards\":[{\"body\":[{\"type\":\"Image\",\"url\":\"https://x/c.png\"}]}]}}",
+            "enabled": [
+                "https://x/c.png"
+            ],
+            "disabled": null
+        },
+        {
+            "name": "card_image_url_key_wrong",
+            "post": "{\"props\":{\"cards\":[{\"body\":[{\"type\":\"Image\",\"image_url\":\"https://x/c.png\"}]}]}}",
+            "enabled": null,
+            "disabled": null
+        },
+        {
+            "name": "card_container",
+            "post": "{\"props\":{\"cards\":[{\"body\":[{\"type\":\"Container\",\"items\":[{\"type\":\"Image\",\"url\":\"https://x/c.png\"}]}]}]}}",
+            "enabled": [
+                "https://x/c.png"
+            ],
+            "disabled": null
+        },
+        {
+            "name": "card_column_set",
+            "post": "{\"props\":{\"cards\":[{\"body\":[{\"type\":\"ColumnSet\",\"columns\":[{\"items\":[{\"type\":\"Image\",\"url\":\"https://x/c1.png\"}]}]}]}]}}",
+            "enabled": [
+                "https://x/c1.png"
+            ],
+            "disabled": null
+        },
+        {
+            "name": "attachment_all_four",
+            "post": "{\"props\":{\"attachments\":[{\"image_url\":\"https://x/i.png\",\"thumb_url\":\"https://x/t.png\",\"author_icon\":\"https://x/a.png\",\"footer_icon\":\"https://x/f.png\"}]}}",
+            "enabled": [
+                "https://x/i.png",
+                "https://x/t.png",
+                "https://x/a.png",
+                "https://x/f.png"
+            ],
+            "disabled": [
+                "https://x/i.png",
+                "https://x/t.png",
+                "https://x/a.png",
+                "https://x/f.png"
+            ]
+        },
+        {
+            "name": "attachment_empty_strings_skipped",
+            "post": "{\"props\":{\"attachments\":[{\"image_url\":\"\",\"thumb_url\":\"https://x/t.png\"}]}}",
+            "enabled": [
+                "https://x/t.png"
+            ],
+            "disabled": [
+                "https://x/t.png"
+            ]
+        },
+        {
+            "name": "attachment_malformed_dropped",
+            "post": "{\"props\":{\"attachments\":[{\"image_url\":123}]}}",
+            "enabled": null,
+            "disabled": null
+        },
+        {
+            "name": "attachment_two",
+            "post": "{\"props\":{\"attachments\":[{\"image_url\":\"https://x/1.png\"},{\"image_url\":\"https://x/2.png\"}]}}",
+            "enabled": [
+                "https://x/1.png",
+                "https://x/2.png"
+            ],
+            "disabled": [
+                "https://x/1.png",
+                "https://x/2.png"
+            ]
+        },
+        {
+            "name": "blocks_then_attachments",
+            "post": "{\"props\":{\"attachments\":[{\"image_url\":\"https://x/att.png\"}],\"mm_blocks\":[{\"type\":\"image\",\"url\":\"https://x/mm.png\"}],\"blocks\":[{\"type\":\"image\",\"image_url\":\"https://x/kit.png\"}],\"cards\":[{\"body\":[{\"type\":\"Image\",\"url\":\"https://x/card.png\"}]}]}}",
+            "enabled": [
+                "https://x/mm.png",
+                "https://x/kit.png",
+                "https://x/card.png",
+                "https://x/att.png"
+            ],
+            "disabled": [
+                "https://x/att.png"
+            ]
+        }
+    ]
+}

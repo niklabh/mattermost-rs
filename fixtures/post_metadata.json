@@ -1,0 +1,93 @@
+{
+    "embeds": [
+        {
+            "type": "type-2ee72a",
+            "url": "https://example.com/url/63a143",
+            "data": "data-48d790"
+        }
+    ],
+    "emojis": [
+        {
+            "id": "iipa9htdogdpx613t93n8yrg4h",
+            "create_at": 1700437086000,
+            "update_at": 1700140687000,
+            "delete_at": 1706888397000,
+            "creator_id": "p7uzfa1djctojxdfqmtrg1tdyo",
+            "name": "name-2b4b2c"
+        }
+    ],
+    "files": [
+        {
+            "id": "jzonyn8szenmfgs6ryrxpqerse",
+            "user_id": "t9nwutmctquipzgdj8ns3ni8ka",
+            "post_id": "hqjasth1i7nuwcr1tpd3fm1f8e",
+            "channel_id": "itydu63pytrcnz4n88714bkear",
+            "create_at": 1700384510000,
+            "update_at": 1705992239000,
+            "delete_at": 1704963949000,
+            "name": "name-040cab",
+            "extension": "extension-2754ec",
+            "size": 39,
+            "mime_type": "mimetype-69e139",
+            "width": 74,
+            "height": 1,
+            "has_preview_image": true,
+            "mini_preview": "Ynl0ZXMtbWluaXByZXZpZXc=",
+            "remote_id": "8hmw1ahg8na83dyijftacp7oxo",
+            "archived": true
+        }
+    ],
+    "redacted_file_count": 26,
+    "images": {
+        "key0-7e0e93": {
+            "width": 80,
+            "height": 51,
+            "format": "format-73d34d",
+            "frame_count": 34
+        }
+    },
+    "reactions": [
+        {
+            "user_id": "dwxznrccwgn4r4o7qrea3erfwe",
+            "post_id": "z155pdrw3cmgn573s4gjjuyscr",
+            "emoji_name": "emojiname-d1898d",
+            "create_at": 1700301497000,
+            "update_at": 1706502884000,
+            "delete_at": 1702295494000,
+            "remote_id": "sbx6atmw3w6xga5b7tnzjuth6c",
+            "channel_id": "wsgjqoagbdgezhwk17bocb6ctc"
+        }
+    ],
+    "priority": {
+        "priority": "priority-c4d459",
+        "requested_ack": true,
+        "persistent_notifications": true,
+        "PostId": "b55shjrrhwq4moxapa1ej3o7ww",
+        "ChannelId": "q9d5gu4oaqfqitgfsp8ibowk7e"
+    },
+    "acknowledgements": [
+        {
+            "user_id": "otaooioyo61brp5ubbmybnfrne",
+            "post_id": "fria5owbu7s4n7tjtzbed8upwr",
+            "acknowledged_at": 1705171808000,
+            "channel_id": "gms9ekbigatyz3xq6owdkp3nbc",
+            "remote_id": "3zj9gc4xg86wrgs16c3w6c87ee"
+        }
+    ],
+    "translations": {
+        "key0-d19050": {
+            "text": "text-f86d90",
+            "object": {
+                "key": "value"
+            },
+            "type": "type-855caa",
+            "state": "state-2a12f0",
+            "source_lang": "sourcelang-20b2ed"
+        }
+    },
+    "expire_at": 1707178702000,
+    "recipients": [
+        "recipients-b85540",
+        "recipients-71abda"
+    ]
+}

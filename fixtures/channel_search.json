@@ -1,0 +1,23 @@
+{
+    "term": "term-79ef3a",
+    "exclude_default_channels": true,
+    "not_associated_to_group": "notassociatedtogroup-250e53",
+    "team_ids": [
+        "teamids-df4bd9",
+        "teamids-e73b80"
+    ],
+    "group_constrained": true,
+    "exclude_group_constrained": true,
+    "exclude_policy_constrained": true,
+    "public": true,
+    "private": true,
+    "include_deleted": true,
+    "include_search_by_id": true,
+    "exclude_remote": true,
+    "deleted": true,
+    "page": 90,
+    "per_page": 43,
+    "access_control_policy_enforced": true,
+    "exclude_access_control_policy_enforced": true,
+    "parent_access_control_policy_id": "pi961ga3k5sdmqu77rpt1ixcgw"
+}

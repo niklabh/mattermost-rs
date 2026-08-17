@@ -1,0 +1,13 @@
+{
+    "name": "name-01f74f",
+    "roles": {
+        "guests": {
+            "value": true,
+            "enabled": true
+        },
+        "members": {
+            "value": true,
+            "enabled": true
+        }
+    }
+}

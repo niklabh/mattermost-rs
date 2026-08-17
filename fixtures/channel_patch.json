@@ -1,0 +1,16 @@
+{
+    "display_name": "displayname-4f3fe6",
+    "name": "name-134140",
+    "header": "header-d9723a",
+    "purpose": "purpose-314f99",
+    "group_constrained": true,
+    "banner_info": {
+        "enabled": true,
+        "text": "text-b9eb0c",
+        "background_color": "backgroundcolor-49e365"
+    },
+    "autotranslation": true,
+    "managed_category_name": "managedcategoryname-455432",
+    "default_category_name": "defaultcategoryname-f56667",
+    "discoverable": true
+}

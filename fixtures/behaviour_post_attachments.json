@@ -1,0 +1,889 @@
+{
+    "all_strings": [
+        {
+            "name": "empty_post",
+            "post": "{}",
+            "omitting": null,
+            "full": null,
+            "differs": false
+        },
+        {
+            "name": "message_plain",
+            "post": "{\"message\":\"hello\"}",
+            "omitting": [
+                "hello"
+            ],
+            "full": [
+                "hello"
+            ],
+            "differs": false
+        },
+        {
+            "name": "message_padded_kept_verbatim",
+            "post": "{\"message\":\"  hello  \"}",
+            "omitting": [
+                "  hello  "
+            ],
+            "full": [
+                "  hello  "
+            ],
+            "differs": false
+        },
+        {
+            "name": "message_empty",
+            "post": "{\"message\":\"\"}",
+            "omitting": null,
+            "full": null,
+            "differs": false
+        },
+        {
+            "name": "message_spaces",
+            "post": "{\"message\":\"   \"}",
+            "omitting": null,
+            "full": null,
+            "differs": false
+        },
+        {
+            "name": "message_tab_newline",
+            "post": "{\"message\":\"\\t\\n\\r\\u000b\\f\"}",
+            "omitting": null,
+            "full": null,
+            "differs": false
+        },
+        {
+            "name": "message_nbsp",
+            "post": "{\"message\":\"\\u00a0\"}",
+            "omitting": null,
+            "full": null,
+            "differs": false
+        },
+        {
+            "name": "message_ideographic_space",
+            "post": "{\"message\":\"\\u3000\"}",
+            "omitting": null,
+            "full": null,
+            "differs": false
+        },
+        {
+            "name": "message_zero_width_space",
+            "post": "{\"message\":\"\\u200b\"}",
+            "omitting": [
+                "​"
+            ],
+            "full": [
+                "​"
+            ],
+            "differs": false
+        },
+        {
+            "name": "message_ogham_space_mark",
+            "post": "{\"message\":\"\\u1680\"}",
+            "omitting": null,
+            "full": null,
+            "differs": false
+        },
+        {
+            "name": "message_mongolian_vowel_separator",
+            "post": "{\"message\":\"\\u180e\"}",
+            "omitting": [
+                "᠎"
+            ],
+            "full": [
+                "᠎"
+            ],
+            "differs": false
+        },
+        {
+            "name": "message_next_line",
+            "post": "{\"message\":\"\\u0085\"}",
+            "omitting": null,
+            "full": null,
+            "differs": false
+        },
+        {
+            "name": "message_markdown_preserved",
+            "post": "{\"message\":\"# head\\n\\n- a\\n- b\\n\"}",
+            "omitting": [
+                "# head\n\n- a\n- b\n"
+            ],
+            "full": [
+                "# head\n\n- a\n- b\n"
+            ],
+            "differs": false
+        },
+        {
+            "name": "attachment_order",
+            "post": "{\"message\":\"m\",\"props\":{\"attachments\":[{\"author_name\":\"an\",\"title\":\"ti\",\"text\":\"tx\",\"pretext\":\"pre\",\"footer\":\"fo\"}]}}",
+            "omitting": [
+                "m",
+                "an",
+                "ti",
+                "tx",
+                "pre",
+                "fo"
+            ],
+            "full": [
+                "m",
+                "an",
+                "ti",
+                "tx",
+                "pre",
+                "fo"
+            ],
+            "differs": false
+        },
+        {
+            "name": "attachment_blank_parts_dropped",
+            "post": "{\"props\":{\"attachments\":[{\"author_name\":\"  \",\"title\":\"\",\"text\":\"tx\",\"pretext\":\"\\t\",\"footer\":\"fo\"}]}}",
+            "omitting": [
+                "tx",
+                "fo"
+            ],
+            "full": [
+                "tx",
+                "fo"
+            ],
+            "differs": false
+        },
+        {
+            "name": "attachment_parts_kept_verbatim",
+            "post": "{\"props\":{\"attachments\":[{\"title\":\"  padded  \"}]}}",
+            "omitting": [
+                "  padded  "
+            ],
+            "full": [
+                "  padded  "
+            ],
+            "differs": false
+        },
+        {
+            "name": "two_attachments",
+            "post": "{\"props\":{\"attachments\":[{\"title\":\"a\"},{\"title\":\"b\"}]}}",
+            "omitting": [
+                "a",
+                "b"
+            ],
+            "full": [
+                "a",
+                "b"
+            ],
+            "differs": false
+        },
+        {
+            "name": "malformed_attachment_skipped",
+            "post": "{\"props\":{\"attachments\":[{\"title\":\"a\"},{\"title\":123}]}}",
+            "omitting": [
+                "a"
+            ],
+            "full": [
+                "a"
+            ],
+            "differs": false
+        },
+        {
+            "name": "null_attachment_contributes_nothing",
+            "post": "{\"props\":{\"attachments\":[null]}}",
+            "omitting": null,
+            "full": null,
+            "differs": false
+        },
+        {
+            "name": "field_string_value",
+            "post": "{\"props\":{\"attachments\":[{\"fields\":[{\"title\":\"ft\",\"value\":\"fv\"}]}]}}",
+            "omitting": [
+                "ft",
+                "fv"
+            ],
+            "full": [
+                "ft",
+                "fv"
+            ],
+            "differs": false
+        },
+        {
+            "name": "field_string_value_padded",
+            "post": "{\"props\":{\"attachments\":[{\"fields\":[{\"title\":\"ft\",\"value\":\"  fv  \"}]}]}}",
+            "omitting": [
+                "ft",
+                "  fv  "
+            ],
+            "full": [
+                "ft",
+                "  fv  "
+            ],
+            "differs": false
+        },
+        {
+            "name": "field_string_value_blank",
+            "post": "{\"props\":{\"attachments\":[{\"fields\":[{\"title\":\"ft\",\"value\":\"   \"}]}]}}",
+            "omitting": [
+                "ft"
+            ],
+            "full": [
+                "ft"
+            ],
+            "differs": false
+        },
+        {
+            "name": "field_value_absent",
+            "post": "{\"props\":{\"attachments\":[{\"fields\":[{\"title\":\"ft\"}]}]}}",
+            "omitting": [
+                "ft"
+            ],
+            "full": [
+                "ft"
+            ],
+            "differs": false
+        },
+        {
+            "name": "field_value_explicit_null",
+            "post": "{\"props\":{\"attachments\":[{\"fields\":[{\"title\":\"ft\",\"value\":null}]}]}}",
+            "omitting": [
+                "ft"
+            ],
+            "full": [
+                "ft"
+            ],
+            "differs": false
+        },
+        {
+            "name": "field_value_number",
+            "post": "{\"props\":{\"attachments\":[{\"fields\":[{\"title\":\"ft\",\"value\":42}]}]}}",
+            "omitting": [
+                "ft",
+                "42"
+            ],
+            "full": [
+                "ft",
+                "42"
+            ],
+            "differs": false
+        },
+        {
+            "name": "field_value_zero",
+            "post": "{\"props\":{\"attachments\":[{\"fields\":[{\"title\":\"ft\",\"value\":0}]}]}}",
+            "omitting": [
+                "ft",
+                "0"
+            ],
+            "full": [
+                "ft",
+                "0"
+            ],
+            "differs": false
+        },
+        {
+            "name": "field_value_float",
+            "post": "{\"props\":{\"attachments\":[{\"fields\":[{\"title\":\"ft\",\"value\":1.5}]}]}}",
+            "omitting": [
+                "ft",
+                "1.5"
+            ],
+            "full": [
+                "ft",
+                "1.5"
+            ],
+            "differs": false
+        },
+        {
+            "name": "field_value_big_float",
+            "post": "{\"props\":{\"attachments\":[{\"fields\":[{\"title\":\"ft\",\"value\":123456789}]}]}}",
+            "omitting": [
+                "ft",
+                "1.23456789e+08"
+            ],
+            "full": [
+                "ft",
+                "1.23456789e+08"
+            ],
+            "differs": false
+        },
+        {
+            "name": "field_value_exponent",
+            "post": "{\"props\":{\"attachments\":[{\"fields\":[{\"title\":\"ft\",\"value\":1e6}]}]}}",
+            "omitting": [
+                "ft",
+                "1e+06"
+            ],
+            "full": [
+                "ft",
+                "1e+06"
+            ],
+            "differs": false
+        },
+        {
+            "name": "field_value_true",
+            "post": "{\"props\":{\"attachments\":[{\"fields\":[{\"title\":\"ft\",\"value\":true}]}]}}",
+            "omitting": [
+                "ft",
+                "true"
+            ],
+            "full": [
+                "ft",
+                "true"
+            ],
+            "differs": false
+        },
+        {
+            "name": "field_value_false",
+            "post": "{\"props\":{\"attachments\":[{\"fields\":[{\"title\":\"ft\",\"value\":false}]}]}}",
+            "omitting": [
+                "ft",
+                "false"
+            ],
+            "full": [
+                "ft",
+                "false"
+            ],
+            "differs": false
+        },
+        {
+            "name": "field_value_object",
+            "post": "{\"props\":{\"attachments\":[{\"fields\":[{\"title\":\"ft\",\"value\":{\"b\":2,\"a\":1}}]}]}}",
+            "omitting": [
+                "ft",
+                "map[a:1 b:2]"
+            ],
+            "full": [
+                "ft",
+                "map[a:1 b:2]"
+            ],
+            "differs": false
+        },
+        {
+            "name": "field_value_array",
+            "post": "{\"props\":{\"attachments\":[{\"fields\":[{\"title\":\"ft\",\"value\":[\"a\",1,null]}]}]}}",
+            "omitting": [
+                "ft",
+                "[a 1 \u003cnil\u003e]"
+            ],
+            "full": [
+                "ft",
+                "[a 1 \u003cnil\u003e]"
+            ],
+            "differs": false
+        },
+        {
+            "name": "field_value_empty_object",
+            "post": "{\"props\":{\"attachments\":[{\"fields\":[{\"title\":\"ft\",\"value\":{}}]}]}}",
+            "omitting": [
+                "ft",
+                "map[]"
+            ],
+            "full": [
+                "ft",
+                "map[]"
+            ],
+            "differs": false
+        },
+        {
+            "name": "field_value_empty_array",
+            "post": "{\"props\":{\"attachments\":[{\"fields\":[{\"title\":\"ft\",\"value\":[]}]}]}}",
+            "omitting": [
+                "ft",
+                "[]"
+            ],
+            "full": [
+                "ft",
+                "[]"
+            ],
+            "differs": false
+        },
+        {
+            "name": "field_value_empty_string",
+            "post": "{\"props\":{\"attachments\":[{\"fields\":[{\"title\":\"ft\",\"value\":\"\"}]}]}}",
+            "omitting": [
+                "ft"
+            ],
+            "full": [
+                "ft"
+            ],
+            "differs": false
+        },
+        {
+            "name": "field_blank_title_kept_value",
+            "post": "{\"props\":{\"attachments\":[{\"fields\":[{\"title\":\"  \",\"value\":\"v\"}]}]}}",
+            "omitting": [
+                "v"
+            ],
+            "full": [
+                "v"
+            ],
+            "differs": false
+        },
+        {
+            "name": "field_null_filtered",
+            "post": "{\"props\":{\"attachments\":[{\"fields\":[null,{\"title\":\"ft\",\"value\":\"fv\"}]}]}}",
+            "omitting": [
+                "ft",
+                "fv"
+            ],
+            "full": [
+                "ft",
+                "fv"
+            ],
+            "differs": false
+        },
+        {
+            "name": "two_fields",
+            "post": "{\"props\":{\"attachments\":[{\"fields\":[{\"title\":\"a\",\"value\":\"b\"},{\"title\":\"c\",\"value\":2}]}]}}",
+            "omitting": [
+                "a",
+                "b",
+                "c",
+                "2"
+            ],
+            "full": [
+                "a",
+                "b",
+                "c",
+                "2"
+            ],
+            "differs": false
+        },
+        {
+            "name": "mm_blocks_present",
+            "post": "{\"message\":\"m\",\"props\":{\"mm_blocks\":[{\"type\":\"text\",\"text\":\"block text\"}]}}",
+            "omitting": [
+                "m"
+            ],
+            "full": [
+                "m",
+                "block text"
+            ],
+            "differs": true
+        },
+        {
+            "name": "block_kit_present",
+            "post": "{\"message\":\"m\",\"props\":{\"blocks\":[{\"type\":\"section\",\"text\":{\"type\":\"mrkdwn\",\"text\":\"kit text\"}}]}}",
+            "omitting": [
+                "m"
+            ],
+            "full": [
+                "m",
+                "kit text"
+            ],
+            "differs": true
+        },
+        {
+            "name": "adaptive_cards_present",
+            "post": "{\"message\":\"m\",\"props\":{\"cards\":[{\"type\":\"AdaptiveCard\",\"body\":[{\"type\":\"TextBlock\",\"text\":\"card text\"}]}]}}",
+            "omitting": [
+                "m"
+            ],
+            "full": [
+                "m",
+                "card text"
+            ],
+            "differs": true
+        },
+        {
+            "name": "mm_blocks_empty_array",
+            "post": "{\"message\":\"m\",\"props\":{\"mm_blocks\":[]}}",
+            "omitting": [
+                "m"
+            ],
+            "full": [
+                "m"
+            ],
+            "differs": false
+        },
+        {
+            "name": "mm_blocks_not_an_array",
+            "post": "{\"message\":\"m\",\"props\":{\"mm_blocks\":\"nope\"}}",
+            "omitting": [
+                "m"
+            ],
+            "full": [
+                "m"
+            ],
+            "differs": false
+        },
+        {
+            "name": "attachments_and_mm_blocks",
+            "post": "{\"message\":\"m\",\"props\":{\"attachments\":[{\"title\":\"a\"}],\"mm_blocks\":[{\"type\":\"text\",\"text\":\"block text\"}]}}",
+            "omitting": [
+                "m",
+                "a"
+            ],
+            "full": [
+                "m",
+                "a",
+                "block text"
+            ],
+            "differs": true
+        }
+    ],
+    "attachments": [
+        {
+            "name": "props_absent",
+            "post": "{\"message\":\"hi\"}",
+            "count": 0,
+            "attachments": "null"
+        },
+        {
+            "name": "props_empty",
+            "post": "{\"props\":{}}",
+            "count": 0,
+            "attachments": "null"
+        },
+        {
+            "name": "attachments_null",
+            "post": "{\"props\":{\"attachments\":null}}",
+            "count": 0,
+            "attachments": "null"
+        },
+        {
+            "name": "attachments_empty_array",
+            "post": "{\"props\":{\"attachments\":[]}}",
+            "count": 0,
+            "attachments": "null"
+        },
+        {
+            "name": "attachments_object",
+            "post": "{\"props\":{\"attachments\":{\"id\":1}}}",
+            "count": 0,
+            "attachments": "null"
+        },
+        {
+            "name": "attachments_string",
+            "post": "{\"props\":{\"attachments\":\"nope\"}}",
+            "count": 0,
+            "attachments": "null"
+        },
+        {
+            "name": "attachments_number",
+            "post": "{\"props\":{\"attachments\":7}}",
+            "count": 0,
+            "attachments": "null"
+        },
+        {
+            "name": "attachments_bool",
+            "post": "{\"props\":{\"attachments\":true}}",
+            "count": 0,
+            "attachments": "null"
+        },
+        {
+            "name": "element_null",
+            "post": "{\"props\":{\"attachments\":[null]}}",
+            "count": 1,
+            "attachments": "[{\"id\":0,\"fallback\":\"\",\"color\":\"\",\"pretext\":\"\",\"author_name\":\"\",\"author_link\":\"\",\"author_icon\":\"\",\"title\":\"\",\"title_link\":\"\",\"text\":\"\",\"fields\":null,\"image_url\":\"\",\"thumb_url\":\"\",\"footer\":\"\",\"footer_icon\":\"\",\"ts\":null}]"
+        },
+        {
+            "name": "element_empty_object",
+            "post": "{\"props\":{\"attachments\":[{}]}}",
+            "count": 1,
+            "attachments": "[{\"id\":0,\"fallback\":\"\",\"color\":\"\",\"pretext\":\"\",\"author_name\":\"\",\"author_link\":\"\",\"author_icon\":\"\",\"title\":\"\",\"title_link\":\"\",\"text\":\"\",\"fields\":null,\"image_url\":\"\",\"thumb_url\":\"\",\"footer\":\"\",\"footer_icon\":\"\",\"ts\":null}]"
+        },
+        {
+            "name": "element_string",
+            "post": "{\"props\":{\"attachments\":[\"nope\"]}}",
+            "count": 0,
+            "attachments": "null"
+        },
+        {
+            "name": "element_number",
+            "post": "{\"props\":{\"attachments\":[7]}}",
+            "count": 0,
+            "attachments": "null"
+        },
+        {
+            "name": "element_bool",
+            "post": "{\"props\":{\"attachments\":[false]}}",
+            "count": 0,
+            "attachments": "null"
+        },
+        {
+            "name": "element_array",
+            "post": "{\"props\":{\"attachments\":[[]]}}",
+            "count": 0,
+            "attachments": "null"
+        },
+        {
+            "name": "one_full",
+            "post": "{\"props\":{\"attachments\":[{\"id\":3,\"fallback\":\"f\",\"color\":\"#a1b2c3\",\"pretext\":\"p\",\"author_name\":\"an\",\"author_link\":\"https://a.example.com\",\"author_icon\":\"https://i.example.com\",\"title\":\"t\",\"title_link\":\"https://t.example.com\",\"text\":\"x\",\"image_url\":\"https://im.example.com\",\"thumb_url\":\"https://th.example.com\",\"footer\":\"foot\",\"footer_icon\":\"https://fi.example.com\",\"ts\":\"1700000000\"}]}}",
+            "count": 1,
+            "attachments": "[{\"id\":3,\"fallback\":\"f\",\"color\":\"#a1b2c3\",\"pretext\":\"p\",\"author_name\":\"an\",\"author_link\":\"https://a.example.com\",\"author_icon\":\"https://i.example.com\",\"title\":\"t\",\"title_link\":\"https://t.example.com\",\"text\":\"x\",\"fields\":null,\"image_url\":\"https://im.example.com\",\"thumb_url\":\"https://th.example.com\",\"footer\":\"foot\",\"footer_icon\":\"https://fi.example.com\",\"ts\":\"1700000000\"}]"
+        },
+        {
+            "name": "unknown_keys_ignored",
+            "post": "{\"props\":{\"attachments\":[{\"title\":\"t\",\"nope\":1,\"deeper\":{\"a\":[1]}}]}}",
+            "count": 1,
+            "attachments": "[{\"id\":0,\"fallback\":\"\",\"color\":\"\",\"pretext\":\"\",\"author_name\":\"\",\"author_link\":\"\",\"author_icon\":\"\",\"title\":\"t\",\"title_link\":\"\",\"text\":\"\",\"fields\":null,\"image_url\":\"\",\"thumb_url\":\"\",\"footer\":\"\",\"footer_icon\":\"\",\"ts\":null}]"
+        },
+        {
+            "name": "case_insensitive_keys",
+            "post": "{\"props\":{\"attachments\":[{\"Title\":\"t\",\"TEXT\":\"x\"}]}}",
+            "count": 1,
+            "attachments": "[{\"id\":0,\"fallback\":\"\",\"color\":\"\",\"pretext\":\"\",\"author_name\":\"\",\"author_link\":\"\",\"author_icon\":\"\",\"title\":\"t\",\"title_link\":\"\",\"text\":\"x\",\"fields\":null,\"image_url\":\"\",\"thumb_url\":\"\",\"footer\":\"\",\"footer_icon\":\"\",\"ts\":null}]"
+        },
+        {
+            "name": "duplicate_keys_last_wins",
+            "post": "{\"props\":{\"attachments\":[{\"title\":\"a\",\"title\":\"b\"}]}}",
+            "count": 1,
+            "attachments": "[{\"id\":0,\"fallback\":\"\",\"color\":\"\",\"pretext\":\"\",\"author_name\":\"\",\"author_link\":\"\",\"author_icon\":\"\",\"title\":\"b\",\"title_link\":\"\",\"text\":\"\",\"fields\":null,\"image_url\":\"\",\"thumb_url\":\"\",\"footer\":\"\",\"footer_icon\":\"\",\"ts\":null}]"
+        },
+        {
+            "name": "bad_field_type_string",
+            "post": "{\"props\":{\"attachments\":[{\"title\":123}]}}",
+            "count": 0,
+            "attachments": "null"
+        },
+        {
+            "name": "bad_field_type_id_float",
+            "post": "{\"props\":{\"attachments\":[{\"id\":1.5}]}}",
+            "count": 0,
+            "attachments": "null"
+        },
+        {
+            "name": "id_integral_float",
+            "post": "{\"props\":{\"attachments\":[{\"id\":3}]}}",
+            "count": 1,
+            "attachments": "[{\"id\":3,\"fallback\":\"\",\"color\":\"\",\"pretext\":\"\",\"author_name\":\"\",\"author_link\":\"\",\"author_icon\":\"\",\"title\":\"\",\"title_link\":\"\",\"text\":\"\",\"fields\":null,\"image_url\":\"\",\"thumb_url\":\"\",\"footer\":\"\",\"footer_icon\":\"\",\"ts\":null}]"
+        },
+        {
+            "name": "fields_not_array",
+            "post": "{\"props\":{\"attachments\":[{\"fields\":{}}]}}",
+            "count": 0,
+            "attachments": "null"
+        },
+        {
+            "name": "bad_element_between_good",
+            "post": "{\"props\":{\"attachments\":[{\"title\":\"a\"},{\"title\":123},{\"title\":\"b\"}]}}",
+            "count": 2,
+            "attachments": "[{\"id\":0,\"fallback\":\"\",\"color\":\"\",\"pretext\":\"\",\"author_name\":\"\",\"author_link\":\"\",\"author_icon\":\"\",\"title\":\"a\",\"title_link\":\"\",\"text\":\"\",\"fields\":null,\"image_url\":\"\",\"thumb_url\":\"\",\"footer\":\"\",\"footer_icon\":\"\",\"ts\":null},{\"id\":0,\"fallback\":\"\",\"color\":\"\",\"pretext\":\"\",\"author_name\":\"\",\"author_link\":\"\",\"author_icon\":\"\",\"title\":\"b\",\"title_link\":\"\",\"text\":\"\",\"fields\":null,\"image_url\":\"\",\"thumb_url\":\"\",\"footer\":\"\",\"footer_icon\":\"\",\"ts\":null}]"
+        },
+        {
+            "name": "ts_number",
+            "post": "{\"props\":{\"attachments\":[{\"ts\":123}]}}",
+            "count": 1,
+            "attachments": "[{\"id\":0,\"fallback\":\"\",\"color\":\"\",\"pretext\":\"\",\"author_name\":\"\",\"author_link\":\"\",\"author_icon\":\"\",\"title\":\"\",\"title_link\":\"\",\"text\":\"\",\"fields\":null,\"image_url\":\"\",\"thumb_url\":\"\",\"footer\":\"\",\"footer_icon\":\"\",\"ts\":123}]"
+        },
+        {
+            "name": "ts_null",
+            "post": "{\"props\":{\"attachments\":[{\"ts\":null}]}}",
+            "count": 1,
+            "attachments": "[{\"id\":0,\"fallback\":\"\",\"color\":\"\",\"pretext\":\"\",\"author_name\":\"\",\"author_link\":\"\",\"author_icon\":\"\",\"title\":\"\",\"title_link\":\"\",\"text\":\"\",\"fields\":null,\"image_url\":\"\",\"thumb_url\":\"\",\"footer\":\"\",\"footer_icon\":\"\",\"ts\":null}]"
+        },
+        {
+            "name": "field_short_quoted_true",
+            "post": "{\"props\":{\"attachments\":[{\"fields\":[{\"title\":\"t\",\"short\":\"true\"}]}]}}",
+            "count": 1,
+            "attachments": "[{\"id\":0,\"fallback\":\"\",\"color\":\"\",\"pretext\":\"\",\"author_name\":\"\",\"author_link\":\"\",\"author_icon\":\"\",\"title\":\"\",\"title_link\":\"\",\"text\":\"\",\"fields\":[{\"title\":\"t\",\"value\":null,\"short\":true}],\"image_url\":\"\",\"thumb_url\":\"\",\"footer\":\"\",\"footer_icon\":\"\",\"ts\":null}]"
+        },
+        {
+            "name": "field_short_bad",
+            "post": "{\"props\":{\"attachments\":[{\"fields\":[{\"title\":\"t\",\"short\":\"yes\"}]}]}}",
+            "count": 0,
+            "attachments": "null"
+        },
+        {
+            "name": "actions_one_null",
+            "post": "{\"props\":{\"attachments\":[{\"actions\":[null]}]}}",
+            "count": 1,
+            "attachments": "[{\"id\":0,\"fallback\":\"\",\"color\":\"\",\"pretext\":\"\",\"author_name\":\"\",\"author_link\":\"\",\"author_icon\":\"\",\"title\":\"\",\"title_link\":\"\",\"text\":\"\",\"fields\":null,\"image_url\":\"\",\"thumb_url\":\"\",\"footer\":\"\",\"footer_icon\":\"\",\"ts\":null}]"
+        },
+        {
+            "name": "actions_null_then_real",
+            "post": "{\"props\":{\"attachments\":[{\"actions\":[null,{\"id\":\"a1\",\"name\":\"n\"}]}]}}",
+            "count": 1,
+            "attachments": "[{\"id\":0,\"fallback\":\"\",\"color\":\"\",\"pretext\":\"\",\"author_name\":\"\",\"author_link\":\"\",\"author_icon\":\"\",\"title\":\"\",\"title_link\":\"\",\"text\":\"\",\"fields\":null,\"image_url\":\"\",\"thumb_url\":\"\",\"footer\":\"\",\"footer_icon\":\"\",\"ts\":null,\"actions\":[{\"id\":\"a1\",\"name\":\"n\"}]}]"
+        },
+        {
+            "name": "actions_real_then_null",
+            "post": "{\"props\":{\"attachments\":[{\"actions\":[{\"id\":\"a1\",\"name\":\"n\"},null]}]}}",
+            "count": 1,
+            "attachments": "[{\"id\":0,\"fallback\":\"\",\"color\":\"\",\"pretext\":\"\",\"author_name\":\"\",\"author_link\":\"\",\"author_icon\":\"\",\"title\":\"\",\"title_link\":\"\",\"text\":\"\",\"fields\":null,\"image_url\":\"\",\"thumb_url\":\"\",\"footer\":\"\",\"footer_icon\":\"\",\"ts\":null,\"actions\":[{\"id\":\"a1\",\"name\":\"n\"}]}]"
+        },
+        {
+            "name": "actions_empty",
+            "post": "{\"props\":{\"attachments\":[{\"actions\":[]}]}}",
+            "count": 1,
+            "attachments": "[{\"id\":0,\"fallback\":\"\",\"color\":\"\",\"pretext\":\"\",\"author_name\":\"\",\"author_link\":\"\",\"author_icon\":\"\",\"title\":\"\",\"title_link\":\"\",\"text\":\"\",\"fields\":null,\"image_url\":\"\",\"thumb_url\":\"\",\"footer\":\"\",\"footer_icon\":\"\",\"ts\":null}]"
+        },
+        {
+            "name": "fields_one_null",
+            "post": "{\"props\":{\"attachments\":[{\"fields\":[null]}]}}",
+            "count": 1,
+            "attachments": "[{\"id\":0,\"fallback\":\"\",\"color\":\"\",\"pretext\":\"\",\"author_name\":\"\",\"author_link\":\"\",\"author_icon\":\"\",\"title\":\"\",\"title_link\":\"\",\"text\":\"\",\"fields\":[],\"image_url\":\"\",\"thumb_url\":\"\",\"footer\":\"\",\"footer_icon\":\"\",\"ts\":null}]"
+        },
+        {
+            "name": "fields_null_then_real",
+            "post": "{\"props\":{\"attachments\":[{\"fields\":[null,{\"title\":\"t\",\"value\":\"v\"}]}]}}",
+            "count": 1,
+            "attachments": "[{\"id\":0,\"fallback\":\"\",\"color\":\"\",\"pretext\":\"\",\"author_name\":\"\",\"author_link\":\"\",\"author_icon\":\"\",\"title\":\"\",\"title_link\":\"\",\"text\":\"\",\"fields\":[{\"title\":\"t\",\"value\":\"v\",\"short\":false}],\"image_url\":\"\",\"thumb_url\":\"\",\"footer\":\"\",\"footer_icon\":\"\",\"ts\":null}]"
+        },
+        {
+            "name": "fields_empty",
+            "post": "{\"props\":{\"attachments\":[{\"fields\":[]}]}}",
+            "count": 1,
+            "attachments": "[{\"id\":0,\"fallback\":\"\",\"color\":\"\",\"pretext\":\"\",\"author_name\":\"\",\"author_link\":\"\",\"author_icon\":\"\",\"title\":\"\",\"title_link\":\"\",\"text\":\"\",\"fields\":[],\"image_url\":\"\",\"thumb_url\":\"\",\"footer\":\"\",\"footer_icon\":\"\",\"ts\":null}]"
+        },
+        {
+            "name": "fields_null",
+            "post": "{\"props\":{\"attachments\":[{\"fields\":null}]}}",
+            "count": 1,
+            "attachments": "[{\"id\":0,\"fallback\":\"\",\"color\":\"\",\"pretext\":\"\",\"author_name\":\"\",\"author_link\":\"\",\"author_icon\":\"\",\"title\":\"\",\"title_link\":\"\",\"text\":\"\",\"fields\":null,\"image_url\":\"\",\"thumb_url\":\"\",\"footer\":\"\",\"footer_icon\":\"\",\"ts\":null}]"
+        },
+        {
+            "name": "action_option_null",
+            "post": "{\"props\":{\"attachments\":[{\"actions\":[{\"id\":\"a1\",\"name\":\"n\",\"options\":[null]}]}]}}",
+            "count": 1,
+            "attachments": "[{\"id\":0,\"fallback\":\"\",\"color\":\"\",\"pretext\":\"\",\"author_name\":\"\",\"author_link\":\"\",\"author_icon\":\"\",\"title\":\"\",\"title_link\":\"\",\"text\":\"\",\"fields\":null,\"image_url\":\"\",\"thumb_url\":\"\",\"footer\":\"\",\"footer_icon\":\"\",\"ts\":null,\"actions\":[{\"id\":\"a1\",\"name\":\"n\",\"options\":[null]}]}]"
+        },
+        {
+            "name": "action_option_null_then_real",
+            "post": "{\"props\":{\"attachments\":[{\"actions\":[{\"id\":\"a1\",\"name\":\"n\",\"options\":[null,{\"text\":\"t\",\"value\":\"v\"}]}]}]}}",
+            "count": 1,
+            "attachments": "[{\"id\":0,\"fallback\":\"\",\"color\":\"\",\"pretext\":\"\",\"author_name\":\"\",\"author_link\":\"\",\"author_icon\":\"\",\"title\":\"\",\"title_link\":\"\",\"text\":\"\",\"fields\":null,\"image_url\":\"\",\"thumb_url\":\"\",\"footer\":\"\",\"footer_icon\":\"\",\"ts\":null,\"actions\":[{\"id\":\"a1\",\"name\":\"n\",\"options\":[null,{\"text\":\"t\",\"value\":\"v\"}]}]}]"
+        },
+        {
+            "name": "two_attachments",
+            "post": "{\"props\":{\"attachments\":[{\"title\":\"a\"},{\"title\":\"b\"}]}}",
+            "count": 2,
+            "attachments": "[{\"id\":0,\"fallback\":\"\",\"color\":\"\",\"pretext\":\"\",\"author_name\":\"\",\"author_link\":\"\",\"author_icon\":\"\",\"title\":\"a\",\"title_link\":\"\",\"text\":\"\",\"fields\":null,\"image_url\":\"\",\"thumb_url\":\"\",\"footer\":\"\",\"footer_icon\":\"\",\"ts\":null},{\"id\":0,\"fallback\":\"\",\"color\":\"\",\"pretext\":\"\",\"author_name\":\"\",\"author_link\":\"\",\"author_icon\":\"\",\"title\":\"b\",\"title_link\":\"\",\"text\":\"\",\"fields\":null,\"image_url\":\"\",\"thumb_url\":\"\",\"footer\":\"\",\"footer_icon\":\"\",\"ts\":null}]"
+        }
+    ],
+    "attachments_equal": [
+        {
+            "name": "both_absent",
+            "a": "{}",
+            "b": "{}",
+            "equal": true,
+            "panicked": false
+        },
+        {
+            "name": "absent_against_empty",
+            "a": "{}",
+            "b": "{\"props\":{\"attachments\":[]}}",
+            "equal": true,
+            "panicked": false
+        },
+        {
+            "name": "one_against_none",
+            "a": "{\"props\":{\"attachments\":[{\"title\":\"a\"}]}}",
+            "b": "{}",
+            "equal": false,
+            "panicked": false
+        },
+        {
+            "name": "different_lengths",
+            "a": "{\"props\":{\"attachments\":[{\"title\":\"a\"}]}}",
+            "b": "{\"props\":{\"attachments\":[{\"title\":\"a\"},{\"title\":\"b\"}]}}",
+            "equal": false,
+            "panicked": false
+        },
+        {
+            "name": "same_title",
+            "a": "{\"props\":{\"attachments\":[{\"title\":\"a\"}]}}",
+            "b": "{\"props\":{\"attachments\":[{\"title\":\"a\"}]}}",
+            "equal": true,
+            "panicked": false
+        },
+        {
+            "name": "different_title",
+            "a": "{\"props\":{\"attachments\":[{\"title\":\"a\"}]}}",
+            "b": "{\"props\":{\"attachments\":[{\"title\":\"b\"}]}}",
+            "equal": false,
+            "panicked": false
+        },
+        {
+            "name": "different_order",
+            "a": "{\"props\":{\"attachments\":[{\"title\":\"a\"},{\"title\":\"b\"}]}}",
+            "b": "{\"props\":{\"attachments\":[{\"title\":\"b\"},{\"title\":\"a\"}]}}",
+            "equal": false,
+            "panicked": false
+        },
+        {
+            "name": "ts_int_against_float",
+            "a": "{\"props\":{\"attachments\":[{\"ts\":1}]}}",
+            "b": "{\"props\":{\"attachments\":[{\"ts\":1.0}]}}",
+            "equal": true,
+            "panicked": false
+        },
+        {
+            "name": "ts_exponent",
+            "a": "{\"props\":{\"attachments\":[{\"ts\":100}]}}",
+            "b": "{\"props\":{\"attachments\":[{\"ts\":1e2}]}}",
+            "equal": true,
+            "panicked": false
+        },
+        {
+            "name": "ts_string_against_number",
+            "a": "{\"props\":{\"attachments\":[{\"ts\":\"1\"}]}}",
+            "b": "{\"props\":{\"attachments\":[{\"ts\":1}]}}",
+            "equal": false,
+            "panicked": false
+        },
+        {
+            "name": "field_without_value",
+            "a": "{\"props\":{\"attachments\":[{\"fields\":[{\"title\":\"t\"}]}]}}",
+            "b": "{\"props\":{\"attachments\":[{\"fields\":[{\"title\":\"t\"}]}]}}",
+            "equal": false,
+            "panicked": true
+        },
+        {
+            "name": "field_value_explicit_null",
+            "a": "{\"props\":{\"attachments\":[{\"fields\":[{\"title\":\"t\",\"value\":null}]}]}}",
+            "b": "{\"props\":{\"attachments\":[{\"fields\":[{\"title\":\"t\",\"value\":\"v\"}]}]}}",
+            "equal": false,
+            "panicked": true
+        },
+        {
+            "name": "field_values_equal",
+            "a": "{\"props\":{\"attachments\":[{\"fields\":[{\"title\":\"t\",\"value\":\"v\"}]}]}}",
+            "b": "{\"props\":{\"attachments\":[{\"fields\":[{\"title\":\"t\",\"value\":\"v\"}]}]}}",
+            "equal": true,
+            "panicked": false
+        },
+        {
+            "name": "field_values_differ",
+            "a": "{\"props\":{\"attachments\":[{\"fields\":[{\"title\":\"t\",\"value\":\"v\"}]}]}}",
+            "b": "{\"props\":{\"attachments\":[{\"fields\":[{\"title\":\"t\",\"value\":\"w\"}]}]}}",
+            "equal": false,
+            "panicked": false
+        },
+        {
+            "name": "field_value_number_equal",
+            "a": "{\"props\":{\"attachments\":[{\"fields\":[{\"title\":\"t\",\"value\":2}]}]}}",
+            "b": "{\"props\":{\"attachments\":[{\"fields\":[{\"title\":\"t\",\"value\":2.0}]}]}}",
+            "equal": true,
+            "panicked": false
+        },
+        {
+            "name": "actions_differ_by_style",
+            "a": "{\"props\":{\"attachments\":[{\"actions\":[{\"id\":\"a\",\"name\":\"n\",\"style\":\"primary\"}]}]}}",
+            "b": "{\"props\":{\"attachments\":[{\"actions\":[{\"id\":\"a\",\"name\":\"n\",\"style\":\"danger\"}]}]}}",
+            "equal": true,
+            "panicked": false
+        },
+        {
+            "name": "actions_differ_by_name",
+            "a": "{\"props\":{\"attachments\":[{\"actions\":[{\"id\":\"a\",\"name\":\"n\"}]}]}}",
+            "b": "{\"props\":{\"attachments\":[{\"actions\":[{\"id\":\"a\",\"name\":\"m\"}]}]}}",
+            "equal": false,
+            "panicked": false
+        },
+        {
+            "name": "nil_action_filtered_before_compare",
+            "a": "{\"props\":{\"attachments\":[{\"actions\":[null,{\"id\":\"a\",\"name\":\"n\"}]}]}}",
+            "b": "{\"props\":{\"attachments\":[{\"actions\":[{\"id\":\"a\",\"name\":\"n\"}]}]}}",
+            "equal": true,
+            "panicked": false
+        },
+        {
+            "name": "nil_element_against_empty_object",
+            "a": "{\"props\":{\"attachments\":[null]}}",
+            "b": "{\"props\":{\"attachments\":[{}]}}",
+            "equal": true,
+            "panicked": false
+        },
+        {
+            "name": "malformed_against_absent",
+            "a": "{\"props\":{\"attachments\":[{\"title\":123}]}}",
+            "b": "{}",
+            "equal": true,
+            "panicked": false
+        }
+    ]
+}

@@ -4,7 +4,7 @@
     "update_at": 1705492114000,
     "delete_at": 1703204580000,
     "team_id": "qr6kf7ztp7yifxt4wm5xn51bke",
-    "type": "O",
+    "type": "P",
     "display_name": "Town Square",
     "name": "town-square",
     "header": "header-d074ea",
@@ -27,7 +27,7 @@
     "banner_info": {
         "enabled": true,
         "text": "text-3b293d",
-        "background_color": "backgroundcolor-81328f"
+        "background_color": "#1153ab"
     },
     "policy_enforced": true,
     "policy_actions": {

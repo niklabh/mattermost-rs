@@ -1,0 +1,1287 @@
+{
+    "encode_json": [
+        {
+            "in": "{}",
+            "name": "zero",
+            "panicked": true
+        },
+        {
+            "in": "{\"matches\":{\"p1\":[\"alpha\",\"beta\"]}}",
+            "name": "matches_only",
+            "panicked": true
+        },
+        {
+            "in": "{\"matches\":null}",
+            "name": "matches_null",
+            "panicked": true
+        },
+        {
+            "in": "{\"matches\":{}}",
+            "name": "matches_empty",
+            "panicked": true
+        },
+        {
+            "in": "{\"matches\":{\"p1\":null,\"p2\":[\"x\"]}}",
+            "name": "matches_nil_slice",
+            "panicked": true
+        },
+        {
+            "in": "{\"matches\":{\"p1\":[]}}",
+            "name": "matches_empty_slice",
+            "panicked": true
+        },
+        {
+            "in": "{\"matches\":{\"z\":[\"1\"],\"a\":[\"2\"],\"m\":[]}}",
+            "name": "matches_unsorted_keys",
+            "panicked": true
+        },
+        {
+            "err": false,
+            "in": "{\"order\":null}",
+            "name": "list_null_only",
+            "out": "{\"order\":null,\"posts\":{},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0,\"matches\":null}\n",
+            "panicked": false,
+            "receiver_after": {
+                "json": "{\"order\":null,\"posts\":{},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0,\"matches\":null}",
+                "list": {
+                    "burn": "null",
+                    "burn_nil": true,
+                    "json": "{\"order\":null,\"posts\":{},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0}",
+                    "order_nil": true,
+                    "posts_nil": false
+                },
+                "list_nil": false,
+                "matches_nil": true
+            }
+        },
+        {
+            "err": false,
+            "in": "{\"next_post_id\":\"n1\"}",
+            "name": "list_scalar_only",
+            "out": "{\"order\":null,\"posts\":{},\"next_post_id\":\"n1\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0,\"matches\":null}\n",
+            "panicked": false,
+            "receiver_after": {
+                "json": "{\"order\":null,\"posts\":{},\"next_post_id\":\"n1\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0,\"matches\":null}",
+                "list": {
+                    "burn": "null",
+                    "burn_nil": true,
+                    "json": "{\"order\":null,\"posts\":{},\"next_post_id\":\"n1\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0}",
+                    "order_nil": true,
+                    "posts_nil": false
+                },
+                "list_nil": false,
+                "matches_nil": true
+            }
+        },
+        {
+            "err": false,
+            "in": "{\"has_next\":false}",
+            "name": "has_next_false",
+            "out": "{\"order\":null,\"posts\":{},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"has_next\":false,\"first_inaccessible_post_time\":0,\"matches\":null}\n",
+            "panicked": false,
+            "receiver_after": {
+                "json": "{\"order\":null,\"posts\":{},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"has_next\":false,\"first_inaccessible_post_time\":0,\"matches\":null}",
+                "list": {
+                    "burn": "null",
+                    "burn_nil": true,
+                    "json": "{\"order\":null,\"posts\":{},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"has_next\":false,\"first_inaccessible_post_time\":0}",
+                    "order_nil": true,
+                    "posts_nil": false
+                },
+                "list_nil": false,
+                "matches_nil": true
+            }
+        },
+        {
+            "in": "{\"nope\":1}",
+            "name": "unknown_key_only",
+            "panicked": true
+        },
+        {
+            "in": "{\"burn_on_read_posts\":{}}",
+            "name": "burn_key_only",
+            "panicked": true
+        },
+        {
+            "err": false,
+            "in": "{\"ORDER\":[]}",
+            "name": "uppercase_key_only",
+            "out": "{\"order\":[],\"posts\":{},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0,\"matches\":null}\n",
+            "panicked": false,
+            "receiver_after": {
+                "json": "{\"order\":[],\"posts\":{},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0,\"matches\":null}",
+                "list": {
+                    "burn": "null",
+                    "burn_nil": true,
+                    "json": "{\"order\":[],\"posts\":{},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0}",
+                    "order_nil": false,
+                    "posts_nil": false
+                },
+                "list_nil": false,
+                "matches_nil": true
+            }
+        },
+        {
+            "err": false,
+            "in": "{\"order\":[\"p1\"],\"posts\":{\"p1\":{\"id\":\"p1\",\"create_at\":100,\"update_at\":100,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"message\":\"one\"}}}",
+            "name": "list_without_matches",
+            "out": "{\"order\":[\"p1\"],\"posts\":{\"p1\":{\"id\":\"p1\",\"create_at\":100,\"update_at\":100,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"one\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null}},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0,\"matches\":null}\n",
+            "panicked": false,
+            "receiver_after": {
+                "json": "{\"order\":[\"p1\"],\"posts\":{\"p1\":{\"id\":\"p1\",\"create_at\":100,\"update_at\":100,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"one\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null}},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0,\"matches\":null}",
+                "list": {
+                    "burn": "null",
+                    "burn_nil": true,
+                    "json": "{\"order\":[\"p1\"],\"posts\":{\"p1\":{\"id\":\"p1\",\"create_at\":100,\"update_at\":100,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"one\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null}},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0}",
+                    "order_nil": false,
+                    "posts_nil": false
+                },
+                "list_nil": false,
+                "matches_nil": true
+            }
+        },
+        {
+            "err": false,
+            "in": "{\"order\":[\"p2\",\"p1\"],\"posts\":{\"p1\":{\"id\":\"p1\",\"create_at\":100,\"update_at\":100,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"message\":\"one\"},\"p2\":{\"id\":\"p2\",\"create_at\":200,\"update_at\":300,\"user_id\":\"u2\",\"channel_id\":\"c1\",\"message\":\"two\"}},\"next_post_id\":\"n1\",\"prev_post_id\":\"v1\",\"has_next\":true,\"first_inaccessible_post_time\":1700000000000,\"matches\":{\"p1\":[\"one\"],\"p2\":[\"two\",\"three\"]}}",
+            "name": "full",
+            "out": "{\"order\":[\"p2\",\"p1\"],\"posts\":{\"p1\":{\"id\":\"p1\",\"create_at\":100,\"update_at\":100,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"one\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null},\"p2\":{\"id\":\"p2\",\"create_at\":200,\"update_at\":300,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u2\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"two\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null}},\"next_post_id\":\"n1\",\"prev_post_id\":\"v1\",\"has_next\":true,\"first_inaccessible_post_time\":1700000000000,\"matches\":{\"p1\":[\"one\"],\"p2\":[\"two\",\"three\"]}}\n",
+            "panicked": false,
+            "receiver_after": {
+                "json": "{\"order\":[\"p2\",\"p1\"],\"posts\":{\"p1\":{\"id\":\"p1\",\"create_at\":100,\"update_at\":100,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"one\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null},\"p2\":{\"id\":\"p2\",\"create_at\":200,\"update_at\":300,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u2\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"two\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null}},\"next_post_id\":\"n1\",\"prev_post_id\":\"v1\",\"has_next\":true,\"first_inaccessible_post_time\":1700000000000,\"matches\":{\"p1\":[\"one\"],\"p2\":[\"two\",\"three\"]}}",
+                "list": {
+                    "burn": "null",
+                    "burn_nil": true,
+                    "json": "{\"order\":[\"p2\",\"p1\"],\"posts\":{\"p1\":{\"id\":\"p1\",\"create_at\":100,\"update_at\":100,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"one\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null},\"p2\":{\"id\":\"p2\",\"create_at\":200,\"update_at\":300,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u2\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"two\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null}},\"next_post_id\":\"n1\",\"prev_post_id\":\"v1\",\"has_next\":true,\"first_inaccessible_post_time\":1700000000000}",
+                    "order_nil": false,
+                    "posts_nil": false
+                },
+                "list_nil": false,
+                "matches_nil": false
+            }
+        },
+        {
+            "err": false,
+            "in": "{\"order\":[\"pa\"],\"posts\":{\"pa\":{\"id\":\"pa\",\"create_at\":10,\"update_at\":10,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"props\":{\"attachments\":[{\"id\":1,\"actions\":[{\"id\":\"a1\",\"name\":\"Click\",\"integration\":{\"url\":\"https://example.com/hook\",\"context\":{\"k\":\"v\"}}}]}]}}},\"matches\":{\"pa\":[\"Click\"]}}",
+            "name": "with_attachments",
+            "out": "{\"order\":[\"pa\"],\"posts\":{\"pa\":{\"id\":\"pa\",\"create_at\":10,\"update_at\":10,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"\",\"type\":\"\",\"props\":{\"attachments\":[{\"id\":1,\"fallback\":\"\",\"color\":\"\",\"pretext\":\"\",\"author_name\":\"\",\"author_link\":\"\",\"author_icon\":\"\",\"title\":\"\",\"title_link\":\"\",\"text\":\"\",\"fields\":null,\"image_url\":\"\",\"thumb_url\":\"\",\"footer\":\"\",\"footer_icon\":\"\",\"ts\":null,\"actions\":[{\"id\":\"a1\",\"name\":\"Click\"}]}]},\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null}},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0,\"matches\":{\"pa\":[\"Click\"]}}\n",
+            "panicked": false,
+            "receiver_after": {
+                "json": "{\"order\":[\"pa\"],\"posts\":{\"pa\":{\"id\":\"pa\",\"create_at\":10,\"update_at\":10,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"\",\"type\":\"\",\"props\":{\"attachments\":[{\"id\":1,\"fallback\":\"\",\"color\":\"\",\"pretext\":\"\",\"author_name\":\"\",\"author_link\":\"\",\"author_icon\":\"\",\"title\":\"\",\"title_link\":\"\",\"text\":\"\",\"fields\":null,\"image_url\":\"\",\"thumb_url\":\"\",\"footer\":\"\",\"footer_icon\":\"\",\"ts\":null,\"actions\":[{\"id\":\"a1\",\"name\":\"Click\"}]}]},\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null}},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0,\"matches\":{\"pa\":[\"Click\"]}}",
+                "list": {
+                    "burn": "null",
+                    "burn_nil": true,
+                    "json": "{\"order\":[\"pa\"],\"posts\":{\"pa\":{\"id\":\"pa\",\"create_at\":10,\"update_at\":10,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"\",\"type\":\"\",\"props\":{\"attachments\":[{\"id\":1,\"fallback\":\"\",\"color\":\"\",\"pretext\":\"\",\"author_name\":\"\",\"author_link\":\"\",\"author_icon\":\"\",\"title\":\"\",\"title_link\":\"\",\"text\":\"\",\"fields\":null,\"image_url\":\"\",\"thumb_url\":\"\",\"footer\":\"\",\"footer_icon\":\"\",\"ts\":null,\"actions\":[{\"id\":\"a1\",\"name\":\"Click\"}]}]},\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null}},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0}",
+                    "order_nil": false,
+                    "posts_nil": false
+                },
+                "list_nil": false,
+                "matches_nil": false
+            }
+        },
+        {
+            "err": false,
+            "in": "{\"order\":[\"pm\"],\"posts\":{\"pm\":{\"id\":\"pm\",\"create_at\":7,\"update_at\":7,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"message\":\"meta\",\"metadata\":{\"emojis\":[{\"id\":\"e1\",\"name\":\"smile\"}],\"priority\":{\"priority\":\"urgent\"}}}},\"matches\":{\"pm\":[\"meta\"]}}",
+            "name": "with_metadata",
+            "out": "{\"order\":[\"pm\"],\"posts\":{\"pm\":{\"id\":\"pm\",\"create_at\":7,\"update_at\":7,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"meta\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null,\"metadata\":{\"emojis\":[{\"id\":\"e1\",\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"creator_id\":\"\",\"name\":\"smile\"}],\"priority\":{\"priority\":\"urgent\",\"requested_ack\":null,\"persistent_notifications\":null}}}},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0,\"matches\":{\"pm\":[\"meta\"]}}\n",
+            "panicked": false,
+            "receiver_after": {
+                "json": "{\"order\":[\"pm\"],\"posts\":{\"pm\":{\"id\":\"pm\",\"create_at\":7,\"update_at\":7,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"meta\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null,\"metadata\":{\"emojis\":[{\"id\":\"e1\",\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"creator_id\":\"\",\"name\":\"smile\"}],\"priority\":{\"priority\":\"urgent\",\"requested_ack\":null,\"persistent_notifications\":null}}}},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0,\"matches\":{\"pm\":[\"meta\"]}}",
+                "list": {
+                    "burn": "null",
+                    "burn_nil": true,
+                    "json": "{\"order\":[\"pm\"],\"posts\":{\"pm\":{\"id\":\"pm\",\"create_at\":7,\"update_at\":7,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"meta\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null,\"metadata\":{\"emojis\":[{\"id\":\"e1\",\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"creator_id\":\"\",\"name\":\"smile\"}],\"priority\":{\"priority\":\"urgent\",\"requested_ack\":null,\"persistent_notifications\":null}}}},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0}",
+                    "order_nil": false,
+                    "posts_nil": false
+                },
+                "list_nil": false,
+                "matches_nil": false
+            }
+        },
+        {
+            "err": false,
+            "in": "{\"order\":[\"p1\",\"missing\"],\"posts\":{\"p1\":{\"id\":\"p1\",\"create_at\":100,\"update_at\":100,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"message\":\"one\"}},\"matches\":{}}",
+            "name": "order_without_post",
+            "out": "{\"order\":[\"p1\",\"missing\"],\"posts\":{\"p1\":{\"id\":\"p1\",\"create_at\":100,\"update_at\":100,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"one\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null}},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0,\"matches\":{}}\n",
+            "panicked": false,
+            "receiver_after": {
+                "json": "{\"order\":[\"p1\",\"missing\"],\"posts\":{\"p1\":{\"id\":\"p1\",\"create_at\":100,\"update_at\":100,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"one\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null}},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0,\"matches\":{}}",
+                "list": {
+                    "burn": "null",
+                    "burn_nil": true,
+                    "json": "{\"order\":[\"p1\",\"missing\"],\"posts\":{\"p1\":{\"id\":\"p1\",\"create_at\":100,\"update_at\":100,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"one\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null}},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0}",
+                    "order_nil": false,
+                    "posts_nil": false
+                },
+                "list_nil": false,
+                "matches_nil": false
+            }
+        },
+        {
+            "err": false,
+            "in": "{\"order\":[],\"posts\":{},\"matches\":{}}",
+            "name": "empty_collections",
+            "out": "{\"order\":[],\"posts\":{},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0,\"matches\":{}}\n",
+            "panicked": false,
+            "receiver_after": {
+                "json": "{\"order\":[],\"posts\":{},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0,\"matches\":{}}",
+                "list": {
+                    "burn": "null",
+                    "burn_nil": true,
+                    "json": "{\"order\":[],\"posts\":{},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0}",
+                    "order_nil": false,
+                    "posts_nil": false
+                },
+                "list_nil": false,
+                "matches_nil": false
+            }
+        }
+    ],
+    "for_plugin": [
+        {
+            "in": "{}",
+            "name": "zero",
+            "panicked": true
+        },
+        {
+            "in": "{\"matches\":{\"p1\":[\"alpha\",\"beta\"]}}",
+            "name": "matches_only",
+            "panicked": true
+        },
+        {
+            "in": "{\"matches\":null}",
+            "name": "matches_null",
+            "panicked": true
+        },
+        {
+            "in": "{\"matches\":{}}",
+            "name": "matches_empty",
+            "panicked": true
+        },
+        {
+            "in": "{\"matches\":{\"p1\":null,\"p2\":[\"x\"]}}",
+            "name": "matches_nil_slice",
+            "panicked": true
+        },
+        {
+            "in": "{\"matches\":{\"p1\":[]}}",
+            "name": "matches_empty_slice",
+            "panicked": true
+        },
+        {
+            "in": "{\"matches\":{\"z\":[\"1\"],\"a\":[\"2\"],\"m\":[]}}",
+            "name": "matches_unsorted_keys",
+            "panicked": true
+        },
+        {
+            "in": "{\"order\":null}",
+            "matches_aliased": null,
+            "name": "list_null_only",
+            "original_after": {
+                "json": "{\"order\":null,\"posts\":null,\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0,\"matches\":null}",
+                "list": {
+                    "burn": "null",
+                    "burn_nil": true,
+                    "json": "{\"order\":null,\"posts\":null,\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0}",
+                    "order_nil": true,
+                    "posts_nil": true
+                },
+                "list_nil": false,
+                "matches_nil": true
+            },
+            "out": {
+                "json": "{\"order\":[],\"posts\":{},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0,\"matches\":null}",
+                "list": {
+                    "burn": "{}",
+                    "burn_nil": false,
+                    "json": "{\"order\":[],\"posts\":{},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0}",
+                    "order_nil": false,
+                    "posts_nil": false
+                },
+                "list_nil": false,
+                "matches_nil": true
+            },
+            "panicked": false
+        },
+        {
+            "in": "{\"next_post_id\":\"n1\"}",
+            "matches_aliased": null,
+            "name": "list_scalar_only",
+            "original_after": {
+                "json": "{\"order\":null,\"posts\":null,\"next_post_id\":\"n1\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0,\"matches\":null}",
+                "list": {
+                    "burn": "null",
+                    "burn_nil": true,
+                    "json": "{\"order\":null,\"posts\":null,\"next_post_id\":\"n1\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0}",
+                    "order_nil": true,
+                    "posts_nil": true
+                },
+                "list_nil": false,
+                "matches_nil": true
+            },
+            "out": {
+                "json": "{\"order\":[],\"posts\":{},\"next_post_id\":\"n1\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0,\"matches\":null}",
+                "list": {
+                    "burn": "{}",
+                    "burn_nil": false,
+                    "json": "{\"order\":[],\"posts\":{},\"next_post_id\":\"n1\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0}",
+                    "order_nil": false,
+                    "posts_nil": false
+                },
+                "list_nil": false,
+                "matches_nil": true
+            },
+            "panicked": false
+        },
+        {
+            "in": "{\"has_next\":false}",
+            "matches_aliased": null,
+            "name": "has_next_false",
+            "original_after": {
+                "json": "{\"order\":null,\"posts\":null,\"next_post_id\":\"\",\"prev_post_id\":\"\",\"has_next\":false,\"first_inaccessible_post_time\":0,\"matches\":null}",
+                "list": {
+                    "burn": "null",
+                    "burn_nil": true,
+                    "json": "{\"order\":null,\"posts\":null,\"next_post_id\":\"\",\"prev_post_id\":\"\",\"has_next\":false,\"first_inaccessible_post_time\":0}",
+                    "order_nil": true,
+                    "posts_nil": true
+                },
+                "list_nil": false,
+                "matches_nil": true
+            },
+            "out": {
+                "json": "{\"order\":[],\"posts\":{},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"has_next\":false,\"first_inaccessible_post_time\":0,\"matches\":null}",
+                "list": {
+                    "burn": "{}",
+                    "burn_nil": false,
+                    "json": "{\"order\":[],\"posts\":{},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"has_next\":false,\"first_inaccessible_post_time\":0}",
+                    "order_nil": false,
+                    "posts_nil": false
+                },
+                "list_nil": false,
+                "matches_nil": true
+            },
+            "panicked": false
+        },
+        {
+            "in": "{\"nope\":1}",
+            "name": "unknown_key_only",
+            "panicked": true
+        },
+        {
+            "in": "{\"burn_on_read_posts\":{}}",
+            "name": "burn_key_only",
+            "panicked": true
+        },
+        {
+            "in": "{\"ORDER\":[]}",
+            "matches_aliased": null,
+            "name": "uppercase_key_only",
+            "original_after": {
+                "json": "{\"order\":[],\"posts\":null,\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0,\"matches\":null}",
+                "list": {
+                    "burn": "null",
+                    "burn_nil": true,
+                    "json": "{\"order\":[],\"posts\":null,\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0}",
+                    "order_nil": false,
+                    "posts_nil": true
+                },
+                "list_nil": false,
+                "matches_nil": true
+            },
+            "out": {
+                "json": "{\"order\":[],\"posts\":{},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0,\"matches\":null}",
+                "list": {
+                    "burn": "{}",
+                    "burn_nil": false,
+                    "json": "{\"order\":[],\"posts\":{},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0}",
+                    "order_nil": false,
+                    "posts_nil": false
+                },
+                "list_nil": false,
+                "matches_nil": true
+            },
+            "panicked": false
+        },
+        {
+            "in": "{\"order\":[\"p1\"],\"posts\":{\"p1\":{\"id\":\"p1\",\"create_at\":100,\"update_at\":100,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"message\":\"one\"}}}",
+            "matches_aliased": null,
+            "name": "list_without_matches",
+            "original_after": {
+                "json": "{\"order\":[\"p1\"],\"posts\":{\"p1\":{\"id\":\"p1\",\"create_at\":100,\"update_at\":100,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"one\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null}},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0,\"matches\":null}",
+                "list": {
+                    "burn": "null",
+                    "burn_nil": true,
+                    "json": "{\"order\":[\"p1\"],\"posts\":{\"p1\":{\"id\":\"p1\",\"create_at\":100,\"update_at\":100,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"one\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null}},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0}",
+                    "order_nil": false,
+                    "posts_nil": false
+                },
+                "list_nil": false,
+                "matches_nil": true
+            },
+            "out": {
+                "json": "{\"order\":[\"p1\"],\"posts\":{\"p1\":{\"id\":\"p1\",\"create_at\":100,\"update_at\":100,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"one\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null}},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0,\"matches\":null}",
+                "list": {
+                    "burn": "{}",
+                    "burn_nil": false,
+                    "json": "{\"order\":[\"p1\"],\"posts\":{\"p1\":{\"id\":\"p1\",\"create_at\":100,\"update_at\":100,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"one\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null}},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0}",
+                    "order_nil": false,
+                    "posts_nil": false
+                },
+                "list_nil": false,
+                "matches_nil": true
+            },
+            "panicked": false
+        },
+        {
+            "in": "{\"order\":[\"p2\",\"p1\"],\"posts\":{\"p1\":{\"id\":\"p1\",\"create_at\":100,\"update_at\":100,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"message\":\"one\"},\"p2\":{\"id\":\"p2\",\"create_at\":200,\"update_at\":300,\"user_id\":\"u2\",\"channel_id\":\"c1\",\"message\":\"two\"}},\"next_post_id\":\"n1\",\"prev_post_id\":\"v1\",\"has_next\":true,\"first_inaccessible_post_time\":1700000000000,\"matches\":{\"p1\":[\"one\"],\"p2\":[\"two\",\"three\"]}}",
+            "matches_aliased": true,
+            "name": "full",
+            "original_after": {
+                "json": "{\"order\":[\"p2\",\"p1\"],\"posts\":{\"p1\":{\"id\":\"p1\",\"create_at\":100,\"update_at\":100,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"one\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null},\"p2\":{\"id\":\"p2\",\"create_at\":200,\"update_at\":300,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u2\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"two\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null}},\"next_post_id\":\"n1\",\"prev_post_id\":\"v1\",\"has_next\":true,\"first_inaccessible_post_time\":1700000000000,\"matches\":{\"p1\":[\"one\"],\"p2\":[\"two\",\"three\"]}}",
+                "list": {
+                    "burn": "null",
+                    "burn_nil": true,
+                    "json": "{\"order\":[\"p2\",\"p1\"],\"posts\":{\"p1\":{\"id\":\"p1\",\"create_at\":100,\"update_at\":100,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"one\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null},\"p2\":{\"id\":\"p2\",\"create_at\":200,\"update_at\":300,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u2\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"two\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null}},\"next_post_id\":\"n1\",\"prev_post_id\":\"v1\",\"has_next\":true,\"first_inaccessible_post_time\":1700000000000}",
+                    "order_nil": false,
+                    "posts_nil": false
+                },
+                "list_nil": false,
+                "matches_nil": false
+            },
+            "out": {
+                "json": "{\"order\":[\"p2\",\"p1\"],\"posts\":{\"p1\":{\"id\":\"p1\",\"create_at\":100,\"update_at\":100,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"one\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null},\"p2\":{\"id\":\"p2\",\"create_at\":200,\"update_at\":300,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u2\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"two\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null}},\"next_post_id\":\"n1\",\"prev_post_id\":\"v1\",\"has_next\":true,\"first_inaccessible_post_time\":1700000000000,\"matches\":{\"p1\":[\"one\"],\"p2\":[\"two\",\"three\"]}}",
+                "list": {
+                    "burn": "{}",
+                    "burn_nil": false,
+                    "json": "{\"order\":[\"p2\",\"p1\"],\"posts\":{\"p1\":{\"id\":\"p1\",\"create_at\":100,\"update_at\":100,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"one\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null},\"p2\":{\"id\":\"p2\",\"create_at\":200,\"update_at\":300,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u2\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"two\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null}},\"next_post_id\":\"n1\",\"prev_post_id\":\"v1\",\"has_next\":true,\"first_inaccessible_post_time\":1700000000000}",
+                    "order_nil": false,
+                    "posts_nil": false
+                },
+                "list_nil": false,
+                "matches_nil": false
+            },
+            "panicked": false
+        },
+        {
+            "in": "{\"order\":[\"pa\"],\"posts\":{\"pa\":{\"id\":\"pa\",\"create_at\":10,\"update_at\":10,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"props\":{\"attachments\":[{\"id\":1,\"actions\":[{\"id\":\"a1\",\"name\":\"Click\",\"integration\":{\"url\":\"https://example.com/hook\",\"context\":{\"k\":\"v\"}}}]}]}}},\"matches\":{\"pa\":[\"Click\"]}}",
+            "matches_aliased": true,
+            "name": "with_attachments",
+            "original_after": {
+                "json": "{\"order\":[\"pa\"],\"posts\":{\"pa\":{\"id\":\"pa\",\"create_at\":10,\"update_at\":10,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"\",\"type\":\"\",\"props\":{\"attachments\":[{\"actions\":[{\"id\":\"a1\",\"integration\":{\"context\":{\"k\":\"v\"},\"url\":\"https://example.com/hook\"},\"name\":\"Click\"}],\"id\":1}]},\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null}},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0,\"matches\":{\"pa\":[\"Click\"]}}",
+                "list": {
+                    "burn": "null",
+                    "burn_nil": true,
+                    "json": "{\"order\":[\"pa\"],\"posts\":{\"pa\":{\"id\":\"pa\",\"create_at\":10,\"update_at\":10,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"\",\"type\":\"\",\"props\":{\"attachments\":[{\"actions\":[{\"id\":\"a1\",\"integration\":{\"context\":{\"k\":\"v\"},\"url\":\"https://example.com/hook\"},\"name\":\"Click\"}],\"id\":1}]},\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null}},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0}",
+                    "order_nil": false,
+                    "posts_nil": false
+                },
+                "list_nil": false,
+                "matches_nil": false
+            },
+            "out": {
+                "json": "{\"order\":[\"pa\"],\"posts\":{\"pa\":{\"id\":\"pa\",\"create_at\":10,\"update_at\":10,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"\",\"type\":\"\",\"props\":{\"attachments\":[{\"actions\":[{\"id\":\"a1\",\"integration\":{\"context\":{\"k\":\"v\"},\"url\":\"https://example.com/hook\"},\"name\":\"Click\"}],\"id\":1}]},\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null}},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0,\"matches\":{\"pa\":[\"Click\"]}}",
+                "list": {
+                    "burn": "{}",
+                    "burn_nil": false,
+                    "json": "{\"order\":[\"pa\"],\"posts\":{\"pa\":{\"id\":\"pa\",\"create_at\":10,\"update_at\":10,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"\",\"type\":\"\",\"props\":{\"attachments\":[{\"actions\":[{\"id\":\"a1\",\"integration\":{\"context\":{\"k\":\"v\"},\"url\":\"https://example.com/hook\"},\"name\":\"Click\"}],\"id\":1}]},\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null}},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0}",
+                    "order_nil": false,
+                    "posts_nil": false
+                },
+                "list_nil": false,
+                "matches_nil": false
+            },
+            "panicked": false
+        },
+        {
+            "in": "{\"order\":[\"pm\"],\"posts\":{\"pm\":{\"id\":\"pm\",\"create_at\":7,\"update_at\":7,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"message\":\"meta\",\"metadata\":{\"emojis\":[{\"id\":\"e1\",\"name\":\"smile\"}],\"priority\":{\"priority\":\"urgent\"}}}},\"matches\":{\"pm\":[\"meta\"]}}",
+            "matches_aliased": true,
+            "name": "with_metadata",
+            "original_after": {
+                "json": "{\"order\":[\"pm\"],\"posts\":{\"pm\":{\"id\":\"pm\",\"create_at\":7,\"update_at\":7,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"meta\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null,\"metadata\":{\"emojis\":[{\"id\":\"e1\",\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"creator_id\":\"\",\"name\":\"smile\"}],\"priority\":{\"priority\":\"urgent\",\"requested_ack\":null,\"persistent_notifications\":null}}}},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0,\"matches\":{\"pm\":[\"meta\"]}}",
+                "list": {
+                    "burn": "null",
+                    "burn_nil": true,
+                    "json": "{\"order\":[\"pm\"],\"posts\":{\"pm\":{\"id\":\"pm\",\"create_at\":7,\"update_at\":7,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"meta\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null,\"metadata\":{\"emojis\":[{\"id\":\"e1\",\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"creator_id\":\"\",\"name\":\"smile\"}],\"priority\":{\"priority\":\"urgent\",\"requested_ack\":null,\"persistent_notifications\":null}}}},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0}",
+                    "order_nil": false,
+                    "posts_nil": false
+                },
+                "list_nil": false,
+                "matches_nil": false
+            },
+            "out": {
+                "json": "{\"order\":[\"pm\"],\"posts\":{\"pm\":{\"id\":\"pm\",\"create_at\":7,\"update_at\":7,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"meta\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null}},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0,\"matches\":{\"pm\":[\"meta\"]}}",
+                "list": {
+                    "burn": "{}",
+                    "burn_nil": false,
+                    "json": "{\"order\":[\"pm\"],\"posts\":{\"pm\":{\"id\":\"pm\",\"create_at\":7,\"update_at\":7,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"meta\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null}},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0}",
+                    "order_nil": false,
+                    "posts_nil": false
+                },
+                "list_nil": false,
+                "matches_nil": false
+            },
+            "panicked": false
+        },
+        {
+            "in": "{\"order\":[\"p1\",\"missing\"],\"posts\":{\"p1\":{\"id\":\"p1\",\"create_at\":100,\"update_at\":100,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"message\":\"one\"}},\"matches\":{}}",
+            "matches_aliased": true,
+            "name": "order_without_post",
+            "original_after": {
+                "json": "{\"order\":[\"p1\",\"missing\"],\"posts\":{\"p1\":{\"id\":\"p1\",\"create_at\":100,\"update_at\":100,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"one\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null}},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0,\"matches\":{}}",
+                "list": {
+                    "burn": "null",
+                    "burn_nil": true,
+                    "json": "{\"order\":[\"p1\",\"missing\"],\"posts\":{\"p1\":{\"id\":\"p1\",\"create_at\":100,\"update_at\":100,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"one\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null}},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0}",
+                    "order_nil": false,
+                    "posts_nil": false
+                },
+                "list_nil": false,
+                "matches_nil": false
+            },
+            "out": {
+                "json": "{\"order\":[\"p1\",\"missing\"],\"posts\":{\"p1\":{\"id\":\"p1\",\"create_at\":100,\"update_at\":100,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"one\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null}},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0,\"matches\":{}}",
+                "list": {
+                    "burn": "{}",
+                    "burn_nil": false,
+                    "json": "{\"order\":[\"p1\",\"missing\"],\"posts\":{\"p1\":{\"id\":\"p1\",\"create_at\":100,\"update_at\":100,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"one\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null}},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0}",
+                    "order_nil": false,
+                    "posts_nil": false
+                },
+                "list_nil": false,
+                "matches_nil": false
+            },
+            "panicked": false
+        },
+        {
+            "in": "{\"order\":[],\"posts\":{},\"matches\":{}}",
+            "matches_aliased": true,
+            "name": "empty_collections",
+            "original_after": {
+                "json": "{\"order\":[],\"posts\":{},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0,\"matches\":{}}",
+                "list": {
+                    "burn": "null",
+                    "burn_nil": true,
+                    "json": "{\"order\":[],\"posts\":{},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0}",
+                    "order_nil": false,
+                    "posts_nil": false
+                },
+                "list_nil": false,
+                "matches_nil": false
+            },
+            "out": {
+                "json": "{\"order\":[],\"posts\":{},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0,\"matches\":{}}",
+                "list": {
+                    "burn": "{}",
+                    "burn_nil": false,
+                    "json": "{\"order\":[],\"posts\":{},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0}",
+                    "order_nil": false,
+                    "posts_nil": false
+                },
+                "list_nil": false,
+                "matches_nil": false
+            },
+            "panicked": false
+        }
+    ],
+    "make": [
+        {
+            "name": "both_nil",
+            "out": {
+                "json": "{\"matches\":null}",
+                "list_nil": true,
+                "matches_nil": true
+            },
+            "panicked": false
+        },
+        {
+            "name": "nil_list_with_matches",
+            "out": {
+                "json": "{\"matches\":{\"p1\":[\"alpha\"]}}",
+                "list_nil": true,
+                "matches_nil": false
+            },
+            "panicked": false
+        },
+        {
+            "name": "new_list_nil_matches",
+            "out": {
+                "json": "{\"order\":[],\"posts\":{},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0,\"matches\":null}",
+                "list": {
+                    "burn": "{}",
+                    "burn_nil": false,
+                    "json": "{\"order\":[],\"posts\":{},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0}",
+                    "order_nil": false,
+                    "posts_nil": false
+                },
+                "list_nil": false,
+                "matches_nil": true
+            },
+            "panicked": false
+        },
+        {
+            "name": "zero_list_nil_matches",
+            "out": {
+                "json": "{\"order\":null,\"posts\":null,\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0,\"matches\":null}",
+                "list": {
+                    "burn": "null",
+                    "burn_nil": true,
+                    "json": "{\"order\":null,\"posts\":null,\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0}",
+                    "order_nil": true,
+                    "posts_nil": true
+                },
+                "list_nil": false,
+                "matches_nil": true
+            },
+            "panicked": false
+        },
+        {
+            "name": "new_list_empty_matches",
+            "out": {
+                "json": "{\"order\":[],\"posts\":{},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0,\"matches\":{}}",
+                "list": {
+                    "burn": "{}",
+                    "burn_nil": false,
+                    "json": "{\"order\":[],\"posts\":{},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0}",
+                    "order_nil": false,
+                    "posts_nil": false
+                },
+                "list_nil": false,
+                "matches_nil": false
+            },
+            "panicked": false
+        },
+        {
+            "name": "decoded_list",
+            "out": {
+                "json": "{\"order\":[\"p1\"],\"posts\":{\"p1\":{\"id\":\"p1\",\"create_at\":100,\"update_at\":100,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"one\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null}},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0,\"matches\":{\"p1\":[\"one\"]}}",
+                "list": {
+                    "burn": "null",
+                    "burn_nil": true,
+                    "json": "{\"order\":[\"p1\"],\"posts\":{\"p1\":{\"id\":\"p1\",\"create_at\":100,\"update_at\":100,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"one\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null}},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0}",
+                    "order_nil": false,
+                    "posts_nil": false
+                },
+                "list_nil": false,
+                "matches_nil": false
+            },
+            "panicked": false
+        },
+        {
+            "name": "zero_value",
+            "out": {
+                "json": "{\"matches\":null}",
+                "list_nil": true,
+                "matches_nil": true
+            },
+            "panicked": false
+        }
+    ],
+    "matches_wire": [
+        {
+            "err": null,
+            "in": "null",
+            "len": 0,
+            "name": "null",
+            "nil": true,
+            "out": "null",
+            "panicked": false
+        },
+        {
+            "err": null,
+            "in": "{}",
+            "len": 0,
+            "name": "empty",
+            "nil": false,
+            "out": "{}",
+            "panicked": false
+        },
+        {
+            "err": null,
+            "in": "{\"p1\":[\"a\"]}",
+            "len": 1,
+            "name": "one",
+            "nil": false,
+            "out": "{\"p1\":[\"a\"]}",
+            "panicked": false
+        },
+        {
+            "err": null,
+            "in": "{\"p1\":null}",
+            "len": 1,
+            "name": "nil_value",
+            "nil": false,
+            "out": "{\"p1\":null}",
+            "panicked": false
+        },
+        {
+            "err": null,
+            "in": "{\"p1\":[]}",
+            "len": 1,
+            "name": "empty_value",
+            "nil": false,
+            "out": "{\"p1\":[]}",
+            "panicked": false
+        },
+        {
+            "err": null,
+            "in": "{\"z\":[\"1\"],\"A\":[\"2\"],\"a\":[\"3\"],\"m\":null}",
+            "len": 4,
+            "name": "unsorted",
+            "nil": false,
+            "out": "{\"A\":[\"2\"],\"a\":[\"3\"],\"m\":null,\"z\":[\"1\"]}",
+            "panicked": false
+        },
+        {
+            "err": null,
+            "in": "{\"\":[\"a\"]}",
+            "len": 1,
+            "name": "empty_key",
+            "nil": false,
+            "out": "{\"\":[\"a\"]}",
+            "panicked": false
+        },
+        {
+            "err": null,
+            "in": "{\"p1\":[\"a\"],\"p1\":[\"b\"]}",
+            "len": 1,
+            "name": "duplicate_key",
+            "nil": false,
+            "out": "{\"p1\":[\"b\"]}",
+            "panicked": false
+        },
+        {
+            "err": null,
+            "in": "{\"a\u003cb\u003ec\u0026d\":[\"x\u003cy\u003ez\"]}",
+            "len": 1,
+            "name": "escapes",
+            "nil": false,
+            "out": "{\"a\\u003cb\\u003ec\\u0026d\":[\"x\\u003cy\\u003ez\"]}",
+            "panicked": false
+        },
+        {
+            "err": null,
+            "in": "{\"é\":[\"1\"],\"e\":[\"2\"],\"éx\":[\"3\"]}",
+            "len": 3,
+            "name": "unicode_keys",
+            "nil": false,
+            "out": "{\"e\":[\"2\"],\"é\":[\"1\"],\"éx\":[\"3\"]}",
+            "panicked": false
+        },
+        {
+            "err": null,
+            "in": "{\"p1\":[\"a\",\"b\",\"c\",\"\"]}",
+            "len": 1,
+            "name": "many_values",
+            "nil": false,
+            "out": "{\"p1\":[\"a\",\"b\",\"c\",\"\"]}",
+            "panicked": false
+        }
+    ],
+    "post_list_wire_keys": [
+        "order",
+        "posts",
+        "next_post_id",
+        "prev_post_id",
+        "has_next",
+        "first_inaccessible_post_time"
+    ],
+    "to_json": [
+        {
+            "in": "{}",
+            "name": "zero",
+            "panicked": true
+        },
+        {
+            "in": "{\"matches\":{\"p1\":[\"alpha\",\"beta\"]}}",
+            "name": "matches_only",
+            "panicked": true
+        },
+        {
+            "in": "{\"matches\":null}",
+            "name": "matches_null",
+            "panicked": true
+        },
+        {
+            "in": "{\"matches\":{}}",
+            "name": "matches_empty",
+            "panicked": true
+        },
+        {
+            "in": "{\"matches\":{\"p1\":null,\"p2\":[\"x\"]}}",
+            "name": "matches_nil_slice",
+            "panicked": true
+        },
+        {
+            "in": "{\"matches\":{\"p1\":[]}}",
+            "name": "matches_empty_slice",
+            "panicked": true
+        },
+        {
+            "in": "{\"matches\":{\"z\":[\"1\"],\"a\":[\"2\"],\"m\":[]}}",
+            "name": "matches_unsorted_keys",
+            "panicked": true
+        },
+        {
+            "err": false,
+            "in": "{\"order\":null}",
+            "name": "list_null_only",
+            "out": "{\"order\":null,\"posts\":{},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0,\"matches\":null}",
+            "panicked": false,
+            "receiver_after": {
+                "json": "{\"order\":null,\"posts\":{},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0,\"matches\":null}",
+                "list": {
+                    "burn": "null",
+                    "burn_nil": true,
+                    "json": "{\"order\":null,\"posts\":{},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0}",
+                    "order_nil": true,
+                    "posts_nil": false
+                },
+                "list_nil": false,
+                "matches_nil": true
+            }
+        },
+        {
+            "err": false,
+            "in": "{\"next_post_id\":\"n1\"}",
+            "name": "list_scalar_only",
+            "out": "{\"order\":null,\"posts\":{},\"next_post_id\":\"n1\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0,\"matches\":null}",
+            "panicked": false,
+            "receiver_after": {
+                "json": "{\"order\":null,\"posts\":{},\"next_post_id\":\"n1\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0,\"matches\":null}",
+                "list": {
+                    "burn": "null",
+                    "burn_nil": true,
+                    "json": "{\"order\":null,\"posts\":{},\"next_post_id\":\"n1\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0}",
+                    "order_nil": true,
+                    "posts_nil": false
+                },
+                "list_nil": false,
+                "matches_nil": true
+            }
+        },
+        {
+            "err": false,
+            "in": "{\"has_next\":false}",
+            "name": "has_next_false",
+            "out": "{\"order\":null,\"posts\":{},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"has_next\":false,\"first_inaccessible_post_time\":0,\"matches\":null}",
+            "panicked": false,
+            "receiver_after": {
+                "json": "{\"order\":null,\"posts\":{},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"has_next\":false,\"first_inaccessible_post_time\":0,\"matches\":null}",
+                "list": {
+                    "burn": "null",
+                    "burn_nil": true,
+                    "json": "{\"order\":null,\"posts\":{},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"has_next\":false,\"first_inaccessible_post_time\":0}",
+                    "order_nil": true,
+                    "posts_nil": false
+                },
+                "list_nil": false,
+                "matches_nil": true
+            }
+        },
+        {
+            "in": "{\"nope\":1}",
+            "name": "unknown_key_only",
+            "panicked": true
+        },
+        {
+            "in": "{\"burn_on_read_posts\":{}}",
+            "name": "burn_key_only",
+            "panicked": true
+        },
+        {
+            "err": false,
+            "in": "{\"ORDER\":[]}",
+            "name": "uppercase_key_only",
+            "out": "{\"order\":[],\"posts\":{},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0,\"matches\":null}",
+            "panicked": false,
+            "receiver_after": {
+                "json": "{\"order\":[],\"posts\":{},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0,\"matches\":null}",
+                "list": {
+                    "burn": "null",
+                    "burn_nil": true,
+                    "json": "{\"order\":[],\"posts\":{},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0}",
+                    "order_nil": false,
+                    "posts_nil": false
+                },
+                "list_nil": false,
+                "matches_nil": true
+            }
+        },
+        {
+            "err": false,
+            "in": "{\"order\":[\"p1\"],\"posts\":{\"p1\":{\"id\":\"p1\",\"create_at\":100,\"update_at\":100,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"message\":\"one\"}}}",
+            "name": "list_without_matches",
+            "out": "{\"order\":[\"p1\"],\"posts\":{\"p1\":{\"id\":\"p1\",\"create_at\":100,\"update_at\":100,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"one\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null}},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0,\"matches\":null}",
+            "panicked": false,
+            "receiver_after": {
+                "json": "{\"order\":[\"p1\"],\"posts\":{\"p1\":{\"id\":\"p1\",\"create_at\":100,\"update_at\":100,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"one\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null}},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0,\"matches\":null}",
+                "list": {
+                    "burn": "null",
+                    "burn_nil": true,
+                    "json": "{\"order\":[\"p1\"],\"posts\":{\"p1\":{\"id\":\"p1\",\"create_at\":100,\"update_at\":100,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"one\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null}},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0}",
+                    "order_nil": false,
+                    "posts_nil": false
+                },
+                "list_nil": false,
+                "matches_nil": true
+            }
+        },
+        {
+            "err": false,
+            "in": "{\"order\":[\"p2\",\"p1\"],\"posts\":{\"p1\":{\"id\":\"p1\",\"create_at\":100,\"update_at\":100,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"message\":\"one\"},\"p2\":{\"id\":\"p2\",\"create_at\":200,\"update_at\":300,\"user_id\":\"u2\",\"channel_id\":\"c1\",\"message\":\"two\"}},\"next_post_id\":\"n1\",\"prev_post_id\":\"v1\",\"has_next\":true,\"first_inaccessible_post_time\":1700000000000,\"matches\":{\"p1\":[\"one\"],\"p2\":[\"two\",\"three\"]}}",
+            "name": "full",
+            "out": "{\"order\":[\"p2\",\"p1\"],\"posts\":{\"p1\":{\"id\":\"p1\",\"create_at\":100,\"update_at\":100,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"one\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null},\"p2\":{\"id\":\"p2\",\"create_at\":200,\"update_at\":300,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u2\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"two\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null}},\"next_post_id\":\"n1\",\"prev_post_id\":\"v1\",\"has_next\":true,\"first_inaccessible_post_time\":1700000000000,\"matches\":{\"p1\":[\"one\"],\"p2\":[\"two\",\"three\"]}}",
+            "panicked": false,
+            "receiver_after": {
+                "json": "{\"order\":[\"p2\",\"p1\"],\"posts\":{\"p1\":{\"id\":\"p1\",\"create_at\":100,\"update_at\":100,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"one\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null},\"p2\":{\"id\":\"p2\",\"create_at\":200,\"update_at\":300,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u2\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"two\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null}},\"next_post_id\":\"n1\",\"prev_post_id\":\"v1\",\"has_next\":true,\"first_inaccessible_post_time\":1700000000000,\"matches\":{\"p1\":[\"one\"],\"p2\":[\"two\",\"three\"]}}",
+                "list": {
+                    "burn": "null",
+                    "burn_nil": true,
+                    "json": "{\"order\":[\"p2\",\"p1\"],\"posts\":{\"p1\":{\"id\":\"p1\",\"create_at\":100,\"update_at\":100,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"one\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null},\"p2\":{\"id\":\"p2\",\"create_at\":200,\"update_at\":300,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u2\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"two\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null}},\"next_post_id\":\"n1\",\"prev_post_id\":\"v1\",\"has_next\":true,\"first_inaccessible_post_time\":1700000000000}",
+                    "order_nil": false,
+                    "posts_nil": false
+                },
+                "list_nil": false,
+                "matches_nil": false
+            }
+        },
+        {
+            "err": false,
+            "in": "{\"order\":[\"pa\"],\"posts\":{\"pa\":{\"id\":\"pa\",\"create_at\":10,\"update_at\":10,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"props\":{\"attachments\":[{\"id\":1,\"actions\":[{\"id\":\"a1\",\"name\":\"Click\",\"integration\":{\"url\":\"https://example.com/hook\",\"context\":{\"k\":\"v\"}}}]}]}}},\"matches\":{\"pa\":[\"Click\"]}}",
+            "name": "with_attachments",
+            "out": "{\"order\":[\"pa\"],\"posts\":{\"pa\":{\"id\":\"pa\",\"create_at\":10,\"update_at\":10,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"\",\"type\":\"\",\"props\":{\"attachments\":[{\"id\":1,\"fallback\":\"\",\"color\":\"\",\"pretext\":\"\",\"author_name\":\"\",\"author_link\":\"\",\"author_icon\":\"\",\"title\":\"\",\"title_link\":\"\",\"text\":\"\",\"fields\":null,\"image_url\":\"\",\"thumb_url\":\"\",\"footer\":\"\",\"footer_icon\":\"\",\"ts\":null,\"actions\":[{\"id\":\"a1\",\"name\":\"Click\"}]}]},\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null}},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0,\"matches\":{\"pa\":[\"Click\"]}}",
+            "panicked": false,
+            "receiver_after": {
+                "json": "{\"order\":[\"pa\"],\"posts\":{\"pa\":{\"id\":\"pa\",\"create_at\":10,\"update_at\":10,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"\",\"type\":\"\",\"props\":{\"attachments\":[{\"id\":1,\"fallback\":\"\",\"color\":\"\",\"pretext\":\"\",\"author_name\":\"\",\"author_link\":\"\",\"author_icon\":\"\",\"title\":\"\",\"title_link\":\"\",\"text\":\"\",\"fields\":null,\"image_url\":\"\",\"thumb_url\":\"\",\"footer\":\"\",\"footer_icon\":\"\",\"ts\":null,\"actions\":[{\"id\":\"a1\",\"name\":\"Click\"}]}]},\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null}},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0,\"matches\":{\"pa\":[\"Click\"]}}",
+                "list": {
+                    "burn": "null",
+                    "burn_nil": true,
+                    "json": "{\"order\":[\"pa\"],\"posts\":{\"pa\":{\"id\":\"pa\",\"create_at\":10,\"update_at\":10,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"\",\"type\":\"\",\"props\":{\"attachments\":[{\"id\":1,\"fallback\":\"\",\"color\":\"\",\"pretext\":\"\",\"author_name\":\"\",\"author_link\":\"\",\"author_icon\":\"\",\"title\":\"\",\"title_link\":\"\",\"text\":\"\",\"fields\":null,\"image_url\":\"\",\"thumb_url\":\"\",\"footer\":\"\",\"footer_icon\":\"\",\"ts\":null,\"actions\":[{\"id\":\"a1\",\"name\":\"Click\"}]}]},\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null}},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0}",
+                    "order_nil": false,
+                    "posts_nil": false
+                },
+                "list_nil": false,
+                "matches_nil": false
+            }
+        },
+        {
+            "err": false,
+            "in": "{\"order\":[\"pm\"],\"posts\":{\"pm\":{\"id\":\"pm\",\"create_at\":7,\"update_at\":7,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"message\":\"meta\",\"metadata\":{\"emojis\":[{\"id\":\"e1\",\"name\":\"smile\"}],\"priority\":{\"priority\":\"urgent\"}}}},\"matches\":{\"pm\":[\"meta\"]}}",
+            "name": "with_metadata",
+            "out": "{\"order\":[\"pm\"],\"posts\":{\"pm\":{\"id\":\"pm\",\"create_at\":7,\"update_at\":7,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"meta\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null,\"metadata\":{\"emojis\":[{\"id\":\"e1\",\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"creator_id\":\"\",\"name\":\"smile\"}],\"priority\":{\"priority\":\"urgent\",\"requested_ack\":null,\"persistent_notifications\":null}}}},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0,\"matches\":{\"pm\":[\"meta\"]}}",
+            "panicked": false,
+            "receiver_after": {
+                "json": "{\"order\":[\"pm\"],\"posts\":{\"pm\":{\"id\":\"pm\",\"create_at\":7,\"update_at\":7,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"meta\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null,\"metadata\":{\"emojis\":[{\"id\":\"e1\",\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"creator_id\":\"\",\"name\":\"smile\"}],\"priority\":{\"priority\":\"urgent\",\"requested_ack\":null,\"persistent_notifications\":null}}}},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0,\"matches\":{\"pm\":[\"meta\"]}}",
+                "list": {
+                    "burn": "null",
+                    "burn_nil": true,
+                    "json": "{\"order\":[\"pm\"],\"posts\":{\"pm\":{\"id\":\"pm\",\"create_at\":7,\"update_at\":7,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"meta\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null,\"metadata\":{\"emojis\":[{\"id\":\"e1\",\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"creator_id\":\"\",\"name\":\"smile\"}],\"priority\":{\"priority\":\"urgent\",\"requested_ack\":null,\"persistent_notifications\":null}}}},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0}",
+                    "order_nil": false,
+                    "posts_nil": false
+                },
+                "list_nil": false,
+                "matches_nil": false
+            }
+        },
+        {
+            "err": false,
+            "in": "{\"order\":[\"p1\",\"missing\"],\"posts\":{\"p1\":{\"id\":\"p1\",\"create_at\":100,\"update_at\":100,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"message\":\"one\"}},\"matches\":{}}",
+            "name": "order_without_post",
+            "out": "{\"order\":[\"p1\",\"missing\"],\"posts\":{\"p1\":{\"id\":\"p1\",\"create_at\":100,\"update_at\":100,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"one\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null}},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0,\"matches\":{}}",
+            "panicked": false,
+            "receiver_after": {
+                "json": "{\"order\":[\"p1\",\"missing\"],\"posts\":{\"p1\":{\"id\":\"p1\",\"create_at\":100,\"update_at\":100,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"one\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null}},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0,\"matches\":{}}",
+                "list": {
+                    "burn": "null",
+                    "burn_nil": true,
+                    "json": "{\"order\":[\"p1\",\"missing\"],\"posts\":{\"p1\":{\"id\":\"p1\",\"create_at\":100,\"update_at\":100,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"one\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null}},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0}",
+                    "order_nil": false,
+                    "posts_nil": false
+                },
+                "list_nil": false,
+                "matches_nil": false
+            }
+        },
+        {
+            "err": false,
+            "in": "{\"order\":[],\"posts\":{},\"matches\":{}}",
+            "name": "empty_collections",
+            "out": "{\"order\":[],\"posts\":{},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0,\"matches\":{}}",
+            "panicked": false,
+            "receiver_after": {
+                "json": "{\"order\":[],\"posts\":{},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0,\"matches\":{}}",
+                "list": {
+                    "burn": "null",
+                    "burn_nil": true,
+                    "json": "{\"order\":[],\"posts\":{},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0}",
+                    "order_nil": false,
+                    "posts_nil": false
+                },
+                "list_nil": false,
+                "matches_nil": false
+            }
+        }
+    ],
+    "wire": [
+        {
+            "in": "{}",
+            "name": "zero",
+            "out": {
+                "json": "{\"matches\":null}",
+                "list_nil": true,
+                "matches_nil": true
+            },
+            "panicked": false
+        },
+        {
+            "in": "{\"matches\":{\"p1\":[\"alpha\",\"beta\"]}}",
+            "name": "matches_only",
+            "out": {
+                "json": "{\"matches\":{\"p1\":[\"alpha\",\"beta\"]}}",
+                "list_nil": true,
+                "matches_nil": false
+            },
+            "panicked": false
+        },
+        {
+            "in": "{\"matches\":null}",
+            "name": "matches_null",
+            "out": {
+                "json": "{\"matches\":null}",
+                "list_nil": true,
+                "matches_nil": true
+            },
+            "panicked": false
+        },
+        {
+            "in": "{\"matches\":{}}",
+            "name": "matches_empty",
+            "out": {
+                "json": "{\"matches\":{}}",
+                "list_nil": true,
+                "matches_nil": false
+            },
+            "panicked": false
+        },
+        {
+            "in": "{\"matches\":{\"p1\":null,\"p2\":[\"x\"]}}",
+            "name": "matches_nil_slice",
+            "out": {
+                "json": "{\"matches\":{\"p1\":null,\"p2\":[\"x\"]}}",
+                "list_nil": true,
+                "matches_nil": false
+            },
+            "panicked": false
+        },
+        {
+            "in": "{\"matches\":{\"p1\":[]}}",
+            "name": "matches_empty_slice",
+            "out": {
+                "json": "{\"matches\":{\"p1\":[]}}",
+                "list_nil": true,
+                "matches_nil": false
+            },
+            "panicked": false
+        },
+        {
+            "in": "{\"matches\":{\"z\":[\"1\"],\"a\":[\"2\"],\"m\":[]}}",
+            "name": "matches_unsorted_keys",
+            "out": {
+                "json": "{\"matches\":{\"a\":[\"2\"],\"m\":[],\"z\":[\"1\"]}}",
+                "list_nil": true,
+                "matches_nil": false
+            },
+            "panicked": false
+        },
+        {
+            "in": "{\"order\":null}",
+            "name": "list_null_only",
+            "out": {
+                "json": "{\"order\":null,\"posts\":null,\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0,\"matches\":null}",
+                "list": {
+                    "burn": "null",
+                    "burn_nil": true,
+                    "json": "{\"order\":null,\"posts\":null,\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0}",
+                    "order_nil": true,
+                    "posts_nil": true
+                },
+                "list_nil": false,
+                "matches_nil": true
+            },
+            "panicked": false
+        },
+        {
+            "in": "{\"next_post_id\":\"n1\"}",
+            "name": "list_scalar_only",
+            "out": {
+                "json": "{\"order\":null,\"posts\":null,\"next_post_id\":\"n1\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0,\"matches\":null}",
+                "list": {
+                    "burn": "null",
+                    "burn_nil": true,
+                    "json": "{\"order\":null,\"posts\":null,\"next_post_id\":\"n1\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0}",
+                    "order_nil": true,
+                    "posts_nil": true
+                },
+                "list_nil": false,
+                "matches_nil": true
+            },
+            "panicked": false
+        },
+        {
+            "in": "{\"has_next\":false}",
+            "name": "has_next_false",
+            "out": {
+                "json": "{\"order\":null,\"posts\":null,\"next_post_id\":\"\",\"prev_post_id\":\"\",\"has_next\":false,\"first_inaccessible_post_time\":0,\"matches\":null}",
+                "list": {
+                    "burn": "null",
+                    "burn_nil": true,
+                    "json": "{\"order\":null,\"posts\":null,\"next_post_id\":\"\",\"prev_post_id\":\"\",\"has_next\":false,\"first_inaccessible_post_time\":0}",
+                    "order_nil": true,
+                    "posts_nil": true
+                },
+                "list_nil": false,
+                "matches_nil": true
+            },
+            "panicked": false
+        },
+        {
+            "in": "{\"nope\":1}",
+            "name": "unknown_key_only",
+            "out": {
+                "json": "{\"matches\":null}",
+                "list_nil": true,
+                "matches_nil": true
+            },
+            "panicked": false
+        },
+        {
+            "in": "{\"burn_on_read_posts\":{}}",
+            "name": "burn_key_only",
+            "out": {
+                "json": "{\"matches\":null}",
+                "list_nil": true,
+                "matches_nil": true
+            },
+            "panicked": false
+        },
+        {
+            "in": "{\"ORDER\":[]}",
+            "name": "uppercase_key_only",
+            "out": {
+                "json": "{\"order\":[],\"posts\":null,\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0,\"matches\":null}",
+                "list": {
+                    "burn": "null",
+                    "burn_nil": true,
+                    "json": "{\"order\":[],\"posts\":null,\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0}",
+                    "order_nil": false,
+                    "posts_nil": true
+                },
+                "list_nil": false,
+                "matches_nil": true
+            },
+            "panicked": false
+        },
+        {
+            "in": "{\"order\":[\"p1\"],\"posts\":{\"p1\":{\"id\":\"p1\",\"create_at\":100,\"update_at\":100,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"message\":\"one\"}}}",
+            "name": "list_without_matches",
+            "out": {
+                "json": "{\"order\":[\"p1\"],\"posts\":{\"p1\":{\"id\":\"p1\",\"create_at\":100,\"update_at\":100,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"one\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null}},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0,\"matches\":null}",
+                "list": {
+                    "burn": "null",
+                    "burn_nil": true,
+                    "json": "{\"order\":[\"p1\"],\"posts\":{\"p1\":{\"id\":\"p1\",\"create_at\":100,\"update_at\":100,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"one\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null}},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0}",
+                    "order_nil": false,
+                    "posts_nil": false
+                },
+                "list_nil": false,
+                "matches_nil": true
+            },
+            "panicked": false
+        },
+        {
+            "in": "{\"order\":[\"p2\",\"p1\"],\"posts\":{\"p1\":{\"id\":\"p1\",\"create_at\":100,\"update_at\":100,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"message\":\"one\"},\"p2\":{\"id\":\"p2\",\"create_at\":200,\"update_at\":300,\"user_id\":\"u2\",\"channel_id\":\"c1\",\"message\":\"two\"}},\"next_post_id\":\"n1\",\"prev_post_id\":\"v1\",\"has_next\":true,\"first_inaccessible_post_time\":1700000000000,\"matches\":{\"p1\":[\"one\"],\"p2\":[\"two\",\"three\"]}}",
+            "name": "full",
+            "out": {
+                "json": "{\"order\":[\"p2\",\"p1\"],\"posts\":{\"p1\":{\"id\":\"p1\",\"create_at\":100,\"update_at\":100,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"one\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null},\"p2\":{\"id\":\"p2\",\"create_at\":200,\"update_at\":300,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u2\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"two\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null}},\"next_post_id\":\"n1\",\"prev_post_id\":\"v1\",\"has_next\":true,\"first_inaccessible_post_time\":1700000000000,\"matches\":{\"p1\":[\"one\"],\"p2\":[\"two\",\"three\"]}}",
+                "list": {
+                    "burn": "null",
+                    "burn_nil": true,
+                    "json": "{\"order\":[\"p2\",\"p1\"],\"posts\":{\"p1\":{\"id\":\"p1\",\"create_at\":100,\"update_at\":100,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"one\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null},\"p2\":{\"id\":\"p2\",\"create_at\":200,\"update_at\":300,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u2\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"two\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null}},\"next_post_id\":\"n1\",\"prev_post_id\":\"v1\",\"has_next\":true,\"first_inaccessible_post_time\":1700000000000}",
+                    "order_nil": false,
+                    "posts_nil": false
+                },
+                "list_nil": false,
+                "matches_nil": false
+            },
+            "panicked": false
+        },
+        {
+            "in": "{\"order\":[\"pa\"],\"posts\":{\"pa\":{\"id\":\"pa\",\"create_at\":10,\"update_at\":10,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"props\":{\"attachments\":[{\"id\":1,\"actions\":[{\"id\":\"a1\",\"name\":\"Click\",\"integration\":{\"url\":\"https://example.com/hook\",\"context\":{\"k\":\"v\"}}}]}]}}},\"matches\":{\"pa\":[\"Click\"]}}",
+            "name": "with_attachments",
+            "out": {
+                "json": "{\"order\":[\"pa\"],\"posts\":{\"pa\":{\"id\":\"pa\",\"create_at\":10,\"update_at\":10,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"\",\"type\":\"\",\"props\":{\"attachments\":[{\"actions\":[{\"id\":\"a1\",\"integration\":{\"context\":{\"k\":\"v\"},\"url\":\"https://example.com/hook\"},\"name\":\"Click\"}],\"id\":1}]},\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null}},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0,\"matches\":{\"pa\":[\"Click\"]}}",
+                "list": {
+                    "burn": "null",
+                    "burn_nil": true,
+                    "json": "{\"order\":[\"pa\"],\"posts\":{\"pa\":{\"id\":\"pa\",\"create_at\":10,\"update_at\":10,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"\",\"type\":\"\",\"props\":{\"attachments\":[{\"actions\":[{\"id\":\"a1\",\"integration\":{\"context\":{\"k\":\"v\"},\"url\":\"https://example.com/hook\"},\"name\":\"Click\"}],\"id\":1}]},\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null}},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0}",
+                    "order_nil": false,
+                    "posts_nil": false
+                },
+                "list_nil": false,
+                "matches_nil": false
+            },
+            "panicked": false
+        },
+        {
+            "in": "{\"order\":[\"pm\"],\"posts\":{\"pm\":{\"id\":\"pm\",\"create_at\":7,\"update_at\":7,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"message\":\"meta\",\"metadata\":{\"emojis\":[{\"id\":\"e1\",\"name\":\"smile\"}],\"priority\":{\"priority\":\"urgent\"}}}},\"matches\":{\"pm\":[\"meta\"]}}",
+            "name": "with_metadata",
+            "out": {
+                "json": "{\"order\":[\"pm\"],\"posts\":{\"pm\":{\"id\":\"pm\",\"create_at\":7,\"update_at\":7,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"meta\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null,\"metadata\":{\"emojis\":[{\"id\":\"e1\",\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"creator_id\":\"\",\"name\":\"smile\"}],\"priority\":{\"priority\":\"urgent\",\"requested_ack\":null,\"persistent_notifications\":null}}}},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0,\"matches\":{\"pm\":[\"meta\"]}}",
+                "list": {
+                    "burn": "null",
+                    "burn_nil": true,
+                    "json": "{\"order\":[\"pm\"],\"posts\":{\"pm\":{\"id\":\"pm\",\"create_at\":7,\"update_at\":7,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"meta\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null,\"metadata\":{\"emojis\":[{\"id\":\"e1\",\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"creator_id\":\"\",\"name\":\"smile\"}],\"priority\":{\"priority\":\"urgent\",\"requested_ack\":null,\"persistent_notifications\":null}}}},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0}",
+                    "order_nil": false,
+                    "posts_nil": false
+                },
+                "list_nil": false,
+                "matches_nil": false
+            },
+            "panicked": false
+        },
+        {
+            "in": "{\"order\":[\"p1\",\"missing\"],\"posts\":{\"p1\":{\"id\":\"p1\",\"create_at\":100,\"update_at\":100,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"message\":\"one\"}},\"matches\":{}}",
+            "name": "order_without_post",
+            "out": {
+                "json": "{\"order\":[\"p1\",\"missing\"],\"posts\":{\"p1\":{\"id\":\"p1\",\"create_at\":100,\"update_at\":100,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"one\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null}},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0,\"matches\":{}}",
+                "list": {
+                    "burn": "null",
+                    "burn_nil": true,
+                    "json": "{\"order\":[\"p1\",\"missing\"],\"posts\":{\"p1\":{\"id\":\"p1\",\"create_at\":100,\"update_at\":100,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"u1\",\"channel_id\":\"c1\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"one\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null}},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0}",
+                    "order_nil": false,
+                    "posts_nil": false
+                },
+                "list_nil": false,
+                "matches_nil": false
+            },
+            "panicked": false
+        },
+        {
+            "in": "{\"order\":[],\"posts\":{},\"matches\":{}}",
+            "name": "empty_collections",
+            "out": {
+                "json": "{\"order\":[],\"posts\":{},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0,\"matches\":{}}",
+                "list": {
+                    "burn": "null",
+                    "burn_nil": true,
+                    "json": "{\"order\":[],\"posts\":{},\"next_post_id\":\"\",\"prev_post_id\":\"\",\"first_inaccessible_post_time\":0}",
+                    "order_nil": false,
+                    "posts_nil": false
+                },
+                "list_nil": false,
+                "matches_nil": false
+            },
+            "panicked": false
+        }
+    ]
+}

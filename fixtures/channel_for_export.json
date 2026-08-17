@@ -1,0 +1,43 @@
+{
+    "id": "8dgnh7wrugbzz46pf35ejgwdxc",
+    "create_at": 1701075943000,
+    "update_at": 1706028522000,
+    "delete_at": 1700883756000,
+    "team_id": "pfq6beewumufbp15hnotjgxgky",
+    "type": "type-b132ba",
+    "display_name": "displayname-25cdd5",
+    "name": "name-3fdf35",
+    "header": "header-b3da65",
+    "purpose": "purpose-4f179a",
+    "last_post_at": 1700477913000,
+    "total_msg_count": 1,
+    "extra_update_at": 1701808272000,
+    "creator_id": "9t6bx4pcc78g3m56n9w4a4nqpo",
+    "scheme_id": "4qsc5b7jafo3eefm3sd4uodb1o",
+    "props": {
+        "key0-9a7918": "val0-9ad9c9",
+        "key1-997765": "val1-99d816"
+    },
+    "group_constrained": true,
+    "autotranslation": true,
+    "shared": true,
+    "total_msg_count_root": 65,
+    "policy_id": "w4aax3aj6kd8yspuo9uouhhgqy",
+    "last_root_post_at": 1702719333000,
+    "banner_info": {
+        "enabled": true,
+        "text": "text-bf3a6e",
+        "background_color": "backgroundcolor-18696f"
+    },
+    "policy_enforced": true,
+    "policy_actions": {
+        "key0-0f0470": true,
+        "key1-100623": true
+    },
+    "policy_is_active": true,
+    "default_category_name": "defaultcategoryname-fd867b",
+    "managed_category_name": "managedcategoryname-bd2ed7",
+    "discoverable": true,
+    "TeamName": "teamname-071918",
+    "SchemeName": "schemename-0ee296"
+}

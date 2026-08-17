@@ -1,0 +1,3703 @@
+{
+    "add": [
+        {
+            "name": "empty_list",
+            "list": [],
+            "arg": {
+                "emoji": "a",
+                "text": "one",
+                "duration": "date_and_time",
+                "expires_at": "2026-08-14T12:00:00Z"
+            },
+            "out": [
+                {
+                    "emoji": "a",
+                    "text": "one",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                }
+            ],
+            "found": false
+        },
+        {
+            "name": "present_exact",
+            "list": [
+                {
+                    "emoji": "a",
+                    "text": "one",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "b",
+                    "text": "two",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "c",
+                    "text": "three",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "d",
+                    "text": "four",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "e",
+                    "text": "five",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                }
+            ],
+            "arg": {
+                "emoji": "c",
+                "text": "three",
+                "duration": "date_and_time",
+                "expires_at": "2026-08-14T12:00:00Z"
+            },
+            "out": [
+                {
+                    "emoji": "c",
+                    "text": "three",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "a",
+                    "text": "one",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "b",
+                    "text": "two",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "d",
+                    "text": "four",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "e",
+                    "text": "five",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                }
+            ],
+            "found": false
+        },
+        {
+            "name": "same_text_other_emoji",
+            "list": [
+                {
+                    "emoji": "a",
+                    "text": "one",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "b",
+                    "text": "two",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "c",
+                    "text": "three",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "d",
+                    "text": "four",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "e",
+                    "text": "five",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                }
+            ],
+            "arg": {
+                "emoji": "z",
+                "text": "three",
+                "duration": "date_and_time",
+                "expires_at": "2026-08-14T12:00:00Z"
+            },
+            "out": [
+                {
+                    "emoji": "z",
+                    "text": "three",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "a",
+                    "text": "one",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "b",
+                    "text": "two",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "d",
+                    "text": "four",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "e",
+                    "text": "five",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                }
+            ],
+            "found": false
+        },
+        {
+            "name": "same_emoji_other_text",
+            "list": [
+                {
+                    "emoji": "a",
+                    "text": "one",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "b",
+                    "text": "two",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "c",
+                    "text": "three",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "d",
+                    "text": "four",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "e",
+                    "text": "five",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                }
+            ],
+            "arg": {
+                "emoji": "c",
+                "text": "zzz",
+                "duration": "date_and_time",
+                "expires_at": "2026-08-14T12:00:00Z"
+            },
+            "out": [
+                {
+                    "emoji": "c",
+                    "text": "zzz",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "a",
+                    "text": "one",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "b",
+                    "text": "two",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "c",
+                    "text": "three",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "d",
+                    "text": "four",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                }
+            ],
+            "found": false
+        },
+        {
+            "name": "absent",
+            "list": [
+                {
+                    "emoji": "a",
+                    "text": "one",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "b",
+                    "text": "two",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "c",
+                    "text": "three",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "d",
+                    "text": "four",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "e",
+                    "text": "five",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                }
+            ],
+            "arg": {
+                "emoji": "z",
+                "text": "zzz",
+                "duration": "date_and_time",
+                "expires_at": "2026-08-14T12:00:00Z"
+            },
+            "out": [
+                {
+                    "emoji": "z",
+                    "text": "zzz",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "a",
+                    "text": "one",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "b",
+                    "text": "two",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "c",
+                    "text": "three",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "d",
+                    "text": "four",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                }
+            ],
+            "found": false
+        },
+        {
+            "name": "arg_fully_empty",
+            "list": [
+                {
+                    "emoji": "a",
+                    "text": "one",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "b",
+                    "text": "two",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "c",
+                    "text": "three",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "d",
+                    "text": "four",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "e",
+                    "text": "five",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                }
+            ],
+            "arg": {
+                "emoji": "",
+                "text": "",
+                "duration": "",
+                "expires_at": "0001-01-01T00:00:00Z"
+            },
+            "out": [
+                {
+                    "emoji": "",
+                    "text": "",
+                    "duration": "",
+                    "expires_at": "0001-01-01T00:00:00Z"
+                },
+                {
+                    "emoji": "a",
+                    "text": "one",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "b",
+                    "text": "two",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "c",
+                    "text": "three",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "d",
+                    "text": "four",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                }
+            ],
+            "found": false
+        },
+        {
+            "name": "arg_empty_emoji_and_text",
+            "list": [
+                {
+                    "emoji": "a",
+                    "text": "one",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "b",
+                    "text": "two",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "c",
+                    "text": "three",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "d",
+                    "text": "four",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "e",
+                    "text": "five",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                }
+            ],
+            "arg": {
+                "emoji": "",
+                "text": "",
+                "duration": "date_and_time",
+                "expires_at": "2026-08-14T12:00:00Z"
+            },
+            "out": [
+                {
+                    "emoji": "",
+                    "text": "",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "a",
+                    "text": "one",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "b",
+                    "text": "two",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "c",
+                    "text": "three",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "d",
+                    "text": "four",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                }
+            ],
+            "found": false
+        },
+        {
+            "name": "arg_empty_text_only",
+            "list": [
+                {
+                    "emoji": "a",
+                    "text": "one",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "b",
+                    "text": "two",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "c",
+                    "text": "three",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "d",
+                    "text": "four",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "e",
+                    "text": "five",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                }
+            ],
+            "arg": {
+                "emoji": "a",
+                "text": "",
+                "duration": "date_and_time",
+                "expires_at": "2026-08-14T12:00:00Z"
+            },
+            "out": [
+                {
+                    "emoji": "a",
+                    "text": "",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "a",
+                    "text": "one",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "b",
+                    "text": "two",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "c",
+                    "text": "three",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "d",
+                    "text": "four",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                }
+            ],
+            "found": false
+        },
+        {
+            "name": "arg_empty_emoji_only",
+            "list": [
+                {
+                    "emoji": "a",
+                    "text": "one",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "b",
+                    "text": "two",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "c",
+                    "text": "three",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "d",
+                    "text": "four",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "e",
+                    "text": "five",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                }
+            ],
+            "arg": {
+                "emoji": "",
+                "text": "one",
+                "duration": "date_and_time",
+                "expires_at": "2026-08-14T12:00:00Z"
+            },
+            "out": [
+                {
+                    "emoji": "",
+                    "text": "one",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "b",
+                    "text": "two",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "c",
+                    "text": "three",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "d",
+                    "text": "four",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "e",
+                    "text": "five",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                }
+            ],
+            "found": false
+        },
+        {
+            "name": "list_at_cap",
+            "list": [
+                {
+                    "emoji": "a",
+                    "text": "one",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "b",
+                    "text": "two",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "c",
+                    "text": "three",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "d",
+                    "text": "four",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "e",
+                    "text": "five",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                }
+            ],
+            "arg": {
+                "emoji": "f",
+                "text": "six",
+                "duration": "date_and_time",
+                "expires_at": "2026-08-14T12:00:00Z"
+            },
+            "out": [
+                {
+                    "emoji": "f",
+                    "text": "six",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "a",
+                    "text": "one",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "b",
+                    "text": "two",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "c",
+                    "text": "three",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "d",
+                    "text": "four",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                }
+            ],
+            "found": false
+        },
+        {
+            "name": "list_over_cap",
+            "list": [
+                {
+                    "emoji": "a",
+                    "text": "one",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "b",
+                    "text": "two",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "c",
+                    "text": "three",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "d",
+                    "text": "four",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "e",
+                    "text": "five",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "f",
+                    "text": "six",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                }
+            ],
+            "arg": {
+                "emoji": "g",
+                "text": "seven",
+                "duration": "date_and_time",
+                "expires_at": "2026-08-14T12:00:00Z"
+            },
+            "out": [
+                {
+                    "emoji": "g",
+                    "text": "seven",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "a",
+                    "text": "one",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "b",
+                    "text": "two",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "c",
+                    "text": "three",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "d",
+                    "text": "four",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                }
+            ],
+            "found": false
+        },
+        {
+            "name": "duplicate_texts_in_list",
+            "list": [
+                {
+                    "emoji": "a",
+                    "text": "dup",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "b",
+                    "text": "dup",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "c",
+                    "text": "keep",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                }
+            ],
+            "arg": {
+                "emoji": "z",
+                "text": "dup",
+                "duration": "date_and_time",
+                "expires_at": "2026-08-14T12:00:00Z"
+            },
+            "out": [
+                {
+                    "emoji": "z",
+                    "text": "dup",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "c",
+                    "text": "keep",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                }
+            ],
+            "found": false
+        },
+        {
+            "name": "single",
+            "list": [
+                {
+                    "emoji": "a",
+                    "text": "one",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                }
+            ],
+            "arg": {
+                "emoji": "a",
+                "text": "one",
+                "duration": "date_and_time",
+                "expires_at": "2026-08-14T12:00:00Z"
+            },
+            "out": [
+                {
+                    "emoji": "a",
+                    "text": "one",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                }
+            ],
+            "found": false
+        },
+        {
+            "name": "differs_only_in_expiry",
+            "list": [
+                {
+                    "emoji": "a",
+                    "text": "one",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T13:00:00Z"
+                }
+            ],
+            "arg": {
+                "emoji": "a",
+                "text": "one",
+                "duration": "date_and_time",
+                "expires_at": "2026-08-14T12:00:00Z"
+            },
+            "out": [
+                {
+                    "emoji": "a",
+                    "text": "one",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                }
+            ],
+            "found": false
+        }
+    ],
+    "clear_custom_status": {
+        "key_exists": true,
+        "value": ""
+    },
+    "contains": [
+        {
+            "name": "empty_list",
+            "list": [],
+            "arg": {
+                "emoji": "a",
+                "text": "one",
+                "duration": "date_and_time",
+                "expires_at": "2026-08-14T12:00:00Z"
+            },
+            "out": null,
+            "found": false
+        },
+        {
+            "name": "present_exact",
+            "list": [
+                {
+                    "emoji": "a",
+                    "text": "one",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "b",
+                    "text": "two",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "c",
+                    "text": "three",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "d",
+                    "text": "four",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "e",
+                    "text": "five",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                }
+            ],
+            "arg": {
+                "emoji": "c",
+                "text": "three",
+                "duration": "date_and_time",
+                "expires_at": "2026-08-14T12:00:00Z"
+            },
+            "out": null,
+            "found": true
+        },
+        {
+            "name": "same_text_other_emoji",
+            "list": [
+                {
+                    "emoji": "a",
+                    "text": "one",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "b",
+                    "text": "two",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "c",
+                    "text": "three",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "d",
+                    "text": "four",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "e",
+                    "text": "five",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                }
+            ],
+            "arg": {
+                "emoji": "z",
+                "text": "three",
+                "duration": "date_and_time",
+                "expires_at": "2026-08-14T12:00:00Z"
+            },
+            "out": null,
+            "found": false
+        },
+        {
+            "name": "same_emoji_other_text",
+            "list": [
+                {
+                    "emoji": "a",
+                    "text": "one",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "b",
+                    "text": "two",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "c",
+                    "text": "three",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "d",
+                    "text": "four",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "e",
+                    "text": "five",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                }
+            ],
+            "arg": {
+                "emoji": "c",
+                "text": "zzz",
+                "duration": "date_and_time",
+                "expires_at": "2026-08-14T12:00:00Z"
+            },
+            "out": null,
+            "found": false
+        },
+        {
+            "name": "absent",
+            "list": [
+                {
+                    "emoji": "a",
+                    "text": "one",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "b",
+                    "text": "two",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "c",
+                    "text": "three",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "d",
+                    "text": "four",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "e",
+                    "text": "five",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                }
+            ],
+            "arg": {
+                "emoji": "z",
+                "text": "zzz",
+                "duration": "date_and_time",
+                "expires_at": "2026-08-14T12:00:00Z"
+            },
+            "out": null,
+            "found": false
+        },
+        {
+            "name": "arg_fully_empty",
+            "list": [
+                {
+                    "emoji": "a",
+                    "text": "one",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "b",
+                    "text": "two",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "c",
+                    "text": "three",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "d",
+                    "text": "four",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "e",
+                    "text": "five",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                }
+            ],
+            "arg": {
+                "emoji": "",
+                "text": "",
+                "duration": "",
+                "expires_at": "0001-01-01T00:00:00Z"
+            },
+            "out": null,
+            "found": false
+        },
+        {
+            "name": "arg_empty_emoji_and_text",
+            "list": [
+                {
+                    "emoji": "a",
+                    "text": "one",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "b",
+                    "text": "two",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "c",
+                    "text": "three",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "d",
+                    "text": "four",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "e",
+                    "text": "five",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                }
+            ],
+            "arg": {
+                "emoji": "",
+                "text": "",
+                "duration": "date_and_time",
+                "expires_at": "2026-08-14T12:00:00Z"
+            },
+            "out": null,
+            "found": false
+        },
+        {
+            "name": "arg_empty_text_only",
+            "list": [
+                {
+                    "emoji": "a",
+                    "text": "one",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "b",
+                    "text": "two",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "c",
+                    "text": "three",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "d",
+                    "text": "four",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "e",
+                    "text": "five",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                }
+            ],
+            "arg": {
+                "emoji": "a",
+                "text": "",
+                "duration": "date_and_time",
+                "expires_at": "2026-08-14T12:00:00Z"
+            },
+            "out": null,
+            "found": false
+        },
+        {
+            "name": "arg_empty_emoji_only",
+            "list": [
+                {
+                    "emoji": "a",
+                    "text": "one",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "b",
+                    "text": "two",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "c",
+                    "text": "three",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "d",
+                    "text": "four",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "e",
+                    "text": "five",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                }
+            ],
+            "arg": {
+                "emoji": "",
+                "text": "one",
+                "duration": "date_and_time",
+                "expires_at": "2026-08-14T12:00:00Z"
+            },
+            "out": null,
+            "found": false
+        },
+        {
+            "name": "list_at_cap",
+            "list": [
+                {
+                    "emoji": "a",
+                    "text": "one",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "b",
+                    "text": "two",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "c",
+                    "text": "three",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "d",
+                    "text": "four",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "e",
+                    "text": "five",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                }
+            ],
+            "arg": {
+                "emoji": "f",
+                "text": "six",
+                "duration": "date_and_time",
+                "expires_at": "2026-08-14T12:00:00Z"
+            },
+            "out": null,
+            "found": false
+        },
+        {
+            "name": "list_over_cap",
+            "list": [
+                {
+                    "emoji": "a",
+                    "text": "one",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "b",
+                    "text": "two",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "c",
+                    "text": "three",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "d",
+                    "text": "four",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "e",
+                    "text": "five",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "f",
+                    "text": "six",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                }
+            ],
+            "arg": {
+                "emoji": "g",
+                "text": "seven",
+                "duration": "date_and_time",
+                "expires_at": "2026-08-14T12:00:00Z"
+            },
+            "out": null,
+            "found": false
+        },
+        {
+            "name": "duplicate_texts_in_list",
+            "list": [
+                {
+                    "emoji": "a",
+                    "text": "dup",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "b",
+                    "text": "dup",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "c",
+                    "text": "keep",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                }
+            ],
+            "arg": {
+                "emoji": "z",
+                "text": "dup",
+                "duration": "date_and_time",
+                "expires_at": "2026-08-14T12:00:00Z"
+            },
+            "out": null,
+            "found": false
+        },
+        {
+            "name": "single",
+            "list": [
+                {
+                    "emoji": "a",
+                    "text": "one",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                }
+            ],
+            "arg": {
+                "emoji": "a",
+                "text": "one",
+                "duration": "date_and_time",
+                "expires_at": "2026-08-14T12:00:00Z"
+            },
+            "out": null,
+            "found": true
+        },
+        {
+            "name": "differs_only_in_expiry",
+            "list": [
+                {
+                    "emoji": "a",
+                    "text": "one",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T13:00:00Z"
+                }
+            ],
+            "arg": {
+                "emoji": "a",
+                "text": "one",
+                "duration": "date_and_time",
+                "expires_at": "2026-08-14T12:00:00Z"
+            },
+            "out": null,
+            "found": false
+        }
+    ],
+    "duration_and_expiry": [
+        {
+            "duration": "",
+            "expires_at_zero": true,
+            "expires_at_offset_hours": 0,
+            "out": true
+        },
+        {
+            "duration": "",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": -8760,
+            "out": false
+        },
+        {
+            "duration": "",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": -24,
+            "out": false
+        },
+        {
+            "duration": "",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": -1,
+            "out": false
+        },
+        {
+            "duration": "",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": 1,
+            "out": true
+        },
+        {
+            "duration": "",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": 24,
+            "out": true
+        },
+        {
+            "duration": "",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": 8760,
+            "out": true
+        },
+        {
+            "duration": "date_and_time",
+            "expires_at_zero": true,
+            "expires_at_offset_hours": 0,
+            "out": false
+        },
+        {
+            "duration": "date_and_time",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": -8760,
+            "out": false
+        },
+        {
+            "duration": "date_and_time",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": -24,
+            "out": false
+        },
+        {
+            "duration": "date_and_time",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": -1,
+            "out": false
+        },
+        {
+            "duration": "date_and_time",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": 1,
+            "out": true
+        },
+        {
+            "duration": "date_and_time",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": 24,
+            "out": true
+        },
+        {
+            "duration": "date_and_time",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": 8760,
+            "out": true
+        },
+        {
+            "duration": "one_hour",
+            "expires_at_zero": true,
+            "expires_at_offset_hours": 0,
+            "out": false
+        },
+        {
+            "duration": "one_hour",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": -8760,
+            "out": false
+        },
+        {
+            "duration": "one_hour",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": -24,
+            "out": false
+        },
+        {
+            "duration": "one_hour",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": -1,
+            "out": false
+        },
+        {
+            "duration": "one_hour",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": 1,
+            "out": true
+        },
+        {
+            "duration": "one_hour",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": 24,
+            "out": true
+        },
+        {
+            "duration": "one_hour",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": 8760,
+            "out": true
+        },
+        {
+            "duration": "thirty_minutes",
+            "expires_at_zero": true,
+            "expires_at_offset_hours": 0,
+            "out": false
+        },
+        {
+            "duration": "thirty_minutes",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": -8760,
+            "out": false
+        },
+        {
+            "duration": "thirty_minutes",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": -24,
+            "out": false
+        },
+        {
+            "duration": "thirty_minutes",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": -1,
+            "out": false
+        },
+        {
+            "duration": "thirty_minutes",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": 1,
+            "out": true
+        },
+        {
+            "duration": "thirty_minutes",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": 24,
+            "out": true
+        },
+        {
+            "duration": "thirty_minutes",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": 8760,
+            "out": true
+        },
+        {
+            "duration": "four_hours",
+            "expires_at_zero": true,
+            "expires_at_offset_hours": 0,
+            "out": false
+        },
+        {
+            "duration": "four_hours",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": -8760,
+            "out": false
+        },
+        {
+            "duration": "four_hours",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": -24,
+            "out": false
+        },
+        {
+            "duration": "four_hours",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": -1,
+            "out": false
+        },
+        {
+            "duration": "four_hours",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": 1,
+            "out": true
+        },
+        {
+            "duration": "four_hours",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": 24,
+            "out": true
+        },
+        {
+            "duration": "four_hours",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": 8760,
+            "out": true
+        },
+        {
+            "duration": "today",
+            "expires_at_zero": true,
+            "expires_at_offset_hours": 0,
+            "out": false
+        },
+        {
+            "duration": "today",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": -8760,
+            "out": false
+        },
+        {
+            "duration": "today",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": -24,
+            "out": false
+        },
+        {
+            "duration": "today",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": -1,
+            "out": false
+        },
+        {
+            "duration": "today",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": 1,
+            "out": true
+        },
+        {
+            "duration": "today",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": 24,
+            "out": true
+        },
+        {
+            "duration": "today",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": 8760,
+            "out": true
+        },
+        {
+            "duration": "this_week",
+            "expires_at_zero": true,
+            "expires_at_offset_hours": 0,
+            "out": false
+        },
+        {
+            "duration": "this_week",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": -8760,
+            "out": false
+        },
+        {
+            "duration": "this_week",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": -24,
+            "out": false
+        },
+        {
+            "duration": "this_week",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": -1,
+            "out": false
+        },
+        {
+            "duration": "this_week",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": 1,
+            "out": true
+        },
+        {
+            "duration": "this_week",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": 24,
+            "out": true
+        },
+        {
+            "duration": "this_week",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": 8760,
+            "out": true
+        },
+        {
+            "duration": "bogus",
+            "expires_at_zero": true,
+            "expires_at_offset_hours": 0,
+            "out": false
+        },
+        {
+            "duration": "bogus",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": -8760,
+            "out": false
+        },
+        {
+            "duration": "bogus",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": -24,
+            "out": false
+        },
+        {
+            "duration": "bogus",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": -1,
+            "out": false
+        },
+        {
+            "duration": "bogus",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": 1,
+            "out": false
+        },
+        {
+            "duration": "bogus",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": 24,
+            "out": false
+        },
+        {
+            "duration": "bogus",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": 8760,
+            "out": false
+        },
+        {
+            "duration": "DATE_AND_TIME",
+            "expires_at_zero": true,
+            "expires_at_offset_hours": 0,
+            "out": false
+        },
+        {
+            "duration": "DATE_AND_TIME",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": -8760,
+            "out": false
+        },
+        {
+            "duration": "DATE_AND_TIME",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": -24,
+            "out": false
+        },
+        {
+            "duration": "DATE_AND_TIME",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": -1,
+            "out": false
+        },
+        {
+            "duration": "DATE_AND_TIME",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": 1,
+            "out": false
+        },
+        {
+            "duration": "DATE_AND_TIME",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": 24,
+            "out": false
+        },
+        {
+            "duration": "DATE_AND_TIME",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": 8760,
+            "out": false
+        }
+    ],
+    "pre_save_duration": [
+        {
+            "duration": "",
+            "expires_at_zero": true,
+            "expires_at_offset_hours": 0,
+            "out": ""
+        },
+        {
+            "duration": "",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": -8760,
+            "out": ""
+        },
+        {
+            "duration": "",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": -24,
+            "out": ""
+        },
+        {
+            "duration": "",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": -1,
+            "out": ""
+        },
+        {
+            "duration": "",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": 1,
+            "out": "date_and_time"
+        },
+        {
+            "duration": "",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": 24,
+            "out": "date_and_time"
+        },
+        {
+            "duration": "",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": 8760,
+            "out": "date_and_time"
+        },
+        {
+            "duration": "date_and_time",
+            "expires_at_zero": true,
+            "expires_at_offset_hours": 0,
+            "out": "date_and_time"
+        },
+        {
+            "duration": "date_and_time",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": -8760,
+            "out": "date_and_time"
+        },
+        {
+            "duration": "date_and_time",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": -24,
+            "out": "date_and_time"
+        },
+        {
+            "duration": "date_and_time",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": -1,
+            "out": "date_and_time"
+        },
+        {
+            "duration": "date_and_time",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": 1,
+            "out": "date_and_time"
+        },
+        {
+            "duration": "date_and_time",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": 24,
+            "out": "date_and_time"
+        },
+        {
+            "duration": "date_and_time",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": 8760,
+            "out": "date_and_time"
+        },
+        {
+            "duration": "one_hour",
+            "expires_at_zero": true,
+            "expires_at_offset_hours": 0,
+            "out": "one_hour"
+        },
+        {
+            "duration": "one_hour",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": -8760,
+            "out": "one_hour"
+        },
+        {
+            "duration": "one_hour",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": -24,
+            "out": "one_hour"
+        },
+        {
+            "duration": "one_hour",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": -1,
+            "out": "one_hour"
+        },
+        {
+            "duration": "one_hour",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": 1,
+            "out": "one_hour"
+        },
+        {
+            "duration": "one_hour",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": 24,
+            "out": "one_hour"
+        },
+        {
+            "duration": "one_hour",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": 8760,
+            "out": "one_hour"
+        },
+        {
+            "duration": "thirty_minutes",
+            "expires_at_zero": true,
+            "expires_at_offset_hours": 0,
+            "out": "thirty_minutes"
+        },
+        {
+            "duration": "thirty_minutes",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": -8760,
+            "out": "thirty_minutes"
+        },
+        {
+            "duration": "thirty_minutes",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": -24,
+            "out": "thirty_minutes"
+        },
+        {
+            "duration": "thirty_minutes",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": -1,
+            "out": "thirty_minutes"
+        },
+        {
+            "duration": "thirty_minutes",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": 1,
+            "out": "thirty_minutes"
+        },
+        {
+            "duration": "thirty_minutes",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": 24,
+            "out": "thirty_minutes"
+        },
+        {
+            "duration": "thirty_minutes",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": 8760,
+            "out": "thirty_minutes"
+        },
+        {
+            "duration": "four_hours",
+            "expires_at_zero": true,
+            "expires_at_offset_hours": 0,
+            "out": "four_hours"
+        },
+        {
+            "duration": "four_hours",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": -8760,
+            "out": "four_hours"
+        },
+        {
+            "duration": "four_hours",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": -24,
+            "out": "four_hours"
+        },
+        {
+            "duration": "four_hours",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": -1,
+            "out": "four_hours"
+        },
+        {
+            "duration": "four_hours",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": 1,
+            "out": "four_hours"
+        },
+        {
+            "duration": "four_hours",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": 24,
+            "out": "four_hours"
+        },
+        {
+            "duration": "four_hours",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": 8760,
+            "out": "four_hours"
+        },
+        {
+            "duration": "today",
+            "expires_at_zero": true,
+            "expires_at_offset_hours": 0,
+            "out": "today"
+        },
+        {
+            "duration": "today",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": -8760,
+            "out": "today"
+        },
+        {
+            "duration": "today",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": -24,
+            "out": "today"
+        },
+        {
+            "duration": "today",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": -1,
+            "out": "today"
+        },
+        {
+            "duration": "today",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": 1,
+            "out": "today"
+        },
+        {
+            "duration": "today",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": 24,
+            "out": "today"
+        },
+        {
+            "duration": "today",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": 8760,
+            "out": "today"
+        },
+        {
+            "duration": "this_week",
+            "expires_at_zero": true,
+            "expires_at_offset_hours": 0,
+            "out": "this_week"
+        },
+        {
+            "duration": "this_week",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": -8760,
+            "out": "this_week"
+        },
+        {
+            "duration": "this_week",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": -24,
+            "out": "this_week"
+        },
+        {
+            "duration": "this_week",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": -1,
+            "out": "this_week"
+        },
+        {
+            "duration": "this_week",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": 1,
+            "out": "this_week"
+        },
+        {
+            "duration": "this_week",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": 24,
+            "out": "this_week"
+        },
+        {
+            "duration": "this_week",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": 8760,
+            "out": "this_week"
+        },
+        {
+            "duration": "bogus",
+            "expires_at_zero": true,
+            "expires_at_offset_hours": 0,
+            "out": "bogus"
+        },
+        {
+            "duration": "bogus",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": -8760,
+            "out": "bogus"
+        },
+        {
+            "duration": "bogus",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": -24,
+            "out": "bogus"
+        },
+        {
+            "duration": "bogus",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": -1,
+            "out": "bogus"
+        },
+        {
+            "duration": "bogus",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": 1,
+            "out": "bogus"
+        },
+        {
+            "duration": "bogus",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": 24,
+            "out": "bogus"
+        },
+        {
+            "duration": "bogus",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": 8760,
+            "out": "bogus"
+        },
+        {
+            "duration": "DATE_AND_TIME",
+            "expires_at_zero": true,
+            "expires_at_offset_hours": 0,
+            "out": "DATE_AND_TIME"
+        },
+        {
+            "duration": "DATE_AND_TIME",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": -8760,
+            "out": "DATE_AND_TIME"
+        },
+        {
+            "duration": "DATE_AND_TIME",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": -24,
+            "out": "DATE_AND_TIME"
+        },
+        {
+            "duration": "DATE_AND_TIME",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": -1,
+            "out": "DATE_AND_TIME"
+        },
+        {
+            "duration": "DATE_AND_TIME",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": 1,
+            "out": "DATE_AND_TIME"
+        },
+        {
+            "duration": "DATE_AND_TIME",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": 24,
+            "out": "DATE_AND_TIME"
+        },
+        {
+            "duration": "DATE_AND_TIME",
+            "expires_at_zero": false,
+            "expires_at_offset_hours": 8760,
+            "out": "DATE_AND_TIME"
+        }
+    ],
+    "pre_save_text": [
+        {
+            "in": "",
+            "out": ""
+        },
+        {
+            "in": "hello",
+            "out": "hello"
+        },
+        {
+            "in": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "out": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "in": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "out": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "in": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "out": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "in": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "out": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "in": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+            "out": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé"
+        },
+        {
+            "in": "ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+            "out": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé"
+        },
+        {
+            "in": "☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃",
+            "out": "☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃☃"
+        },
+        {
+            "in": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+            "out": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
+        },
+        {
+            "in": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+            "out": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀"
+        },
+        {
+            "in": "ááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááááá",
+            "out": "áááááááááááááááááááááááááááááááááááááááááááááááááá"
+        },
+        {
+            "in": "﻿leading bomxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+            "out": "﻿leading bomxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        }
+    ],
+    "remove": [
+        {
+            "name": "empty_list",
+            "list": [],
+            "arg": {
+                "emoji": "a",
+                "text": "one",
+                "duration": "date_and_time",
+                "expires_at": "2026-08-14T12:00:00Z"
+            },
+            "out": [],
+            "found": false
+        },
+        {
+            "name": "present_exact",
+            "list": [
+                {
+                    "emoji": "a",
+                    "text": "one",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "b",
+                    "text": "two",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "c",
+                    "text": "three",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "d",
+                    "text": "four",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "e",
+                    "text": "five",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                }
+            ],
+            "arg": {
+                "emoji": "c",
+                "text": "three",
+                "duration": "date_and_time",
+                "expires_at": "2026-08-14T12:00:00Z"
+            },
+            "out": [
+                {
+                    "emoji": "a",
+                    "text": "one",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "b",
+                    "text": "two",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "d",
+                    "text": "four",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "e",
+                    "text": "five",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                }
+            ],
+            "found": false
+        },
+        {
+            "name": "same_text_other_emoji",
+            "list": [
+                {
+                    "emoji": "a",
+                    "text": "one",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "b",
+                    "text": "two",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "c",
+                    "text": "three",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "d",
+                    "text": "four",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "e",
+                    "text": "five",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                }
+            ],
+            "arg": {
+                "emoji": "z",
+                "text": "three",
+                "duration": "date_and_time",
+                "expires_at": "2026-08-14T12:00:00Z"
+            },
+            "out": [
+                {
+                    "emoji": "a",
+                    "text": "one",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "b",
+                    "text": "two",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "c",
+                    "text": "three",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "d",
+                    "text": "four",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "e",
+                    "text": "five",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                }
+            ],
+            "found": false
+        },
+        {
+            "name": "same_emoji_other_text",
+            "list": [
+                {
+                    "emoji": "a",
+                    "text": "one",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "b",
+                    "text": "two",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "c",
+                    "text": "three",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "d",
+                    "text": "four",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "e",
+                    "text": "five",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                }
+            ],
+            "arg": {
+                "emoji": "c",
+                "text": "zzz",
+                "duration": "date_and_time",
+                "expires_at": "2026-08-14T12:00:00Z"
+            },
+            "out": [
+                {
+                    "emoji": "a",
+                    "text": "one",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "b",
+                    "text": "two",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "c",
+                    "text": "three",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "d",
+                    "text": "four",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "e",
+                    "text": "five",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                }
+            ],
+            "found": false
+        },
+        {
+            "name": "absent",
+            "list": [
+                {
+                    "emoji": "a",
+                    "text": "one",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "b",
+                    "text": "two",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "c",
+                    "text": "three",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "d",
+                    "text": "four",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "e",
+                    "text": "five",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                }
+            ],
+            "arg": {
+                "emoji": "z",
+                "text": "zzz",
+                "duration": "date_and_time",
+                "expires_at": "2026-08-14T12:00:00Z"
+            },
+            "out": [
+                {
+                    "emoji": "a",
+                    "text": "one",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "b",
+                    "text": "two",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "c",
+                    "text": "three",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "d",
+                    "text": "four",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "e",
+                    "text": "five",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                }
+            ],
+            "found": false
+        },
+        {
+            "name": "arg_fully_empty",
+            "list": [
+                {
+                    "emoji": "a",
+                    "text": "one",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "b",
+                    "text": "two",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "c",
+                    "text": "three",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "d",
+                    "text": "four",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "e",
+                    "text": "five",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                }
+            ],
+            "arg": {
+                "emoji": "",
+                "text": "",
+                "duration": "",
+                "expires_at": "0001-01-01T00:00:00Z"
+            },
+            "out": [
+                {
+                    "emoji": "a",
+                    "text": "one",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "b",
+                    "text": "two",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "c",
+                    "text": "three",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "d",
+                    "text": "four",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "e",
+                    "text": "five",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                }
+            ],
+            "found": false
+        },
+        {
+            "name": "arg_empty_emoji_and_text",
+            "list": [
+                {
+                    "emoji": "a",
+                    "text": "one",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "b",
+                    "text": "two",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "c",
+                    "text": "three",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "d",
+                    "text": "four",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "e",
+                    "text": "five",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                }
+            ],
+            "arg": {
+                "emoji": "",
+                "text": "",
+                "duration": "date_and_time",
+                "expires_at": "2026-08-14T12:00:00Z"
+            },
+            "out": [
+                {
+                    "emoji": "a",
+                    "text": "one",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "b",
+                    "text": "two",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "c",
+                    "text": "three",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "d",
+                    "text": "four",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "e",
+                    "text": "five",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                }
+            ],
+            "found": false
+        },
+        {
+            "name": "arg_empty_text_only",
+            "list": [
+                {
+                    "emoji": "a",
+                    "text": "one",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "b",
+                    "text": "two",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "c",
+                    "text": "three",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "d",
+                    "text": "four",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "e",
+                    "text": "five",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                }
+            ],
+            "arg": {
+                "emoji": "a",
+                "text": "",
+                "duration": "date_and_time",
+                "expires_at": "2026-08-14T12:00:00Z"
+            },
+            "out": [
+                {
+                    "emoji": "a",
+                    "text": "one",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "b",
+                    "text": "two",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "c",
+                    "text": "three",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "d",
+                    "text": "four",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "e",
+                    "text": "five",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                }
+            ],
+            "found": false
+        },
+        {
+            "name": "arg_empty_emoji_only",
+            "list": [
+                {
+                    "emoji": "a",
+                    "text": "one",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "b",
+                    "text": "two",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "c",
+                    "text": "three",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "d",
+                    "text": "four",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "e",
+                    "text": "five",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                }
+            ],
+            "arg": {
+                "emoji": "",
+                "text": "one",
+                "duration": "date_and_time",
+                "expires_at": "2026-08-14T12:00:00Z"
+            },
+            "out": [
+                {
+                    "emoji": "a",
+                    "text": "one",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "b",
+                    "text": "two",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "c",
+                    "text": "three",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "d",
+                    "text": "four",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "e",
+                    "text": "five",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                }
+            ],
+            "found": false
+        },
+        {
+            "name": "list_at_cap",
+            "list": [
+                {
+                    "emoji": "a",
+                    "text": "one",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "b",
+                    "text": "two",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "c",
+                    "text": "three",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "d",
+                    "text": "four",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "e",
+                    "text": "five",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                }
+            ],
+            "arg": {
+                "emoji": "f",
+                "text": "six",
+                "duration": "date_and_time",
+                "expires_at": "2026-08-14T12:00:00Z"
+            },
+            "out": [
+                {
+                    "emoji": "a",
+                    "text": "one",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "b",
+                    "text": "two",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "c",
+                    "text": "three",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "d",
+                    "text": "four",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "e",
+                    "text": "five",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                }
+            ],
+            "found": false
+        },
+        {
+            "name": "list_over_cap",
+            "list": [
+                {
+                    "emoji": "a",
+                    "text": "one",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "b",
+                    "text": "two",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "c",
+                    "text": "three",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "d",
+                    "text": "four",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "e",
+                    "text": "five",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "f",
+                    "text": "six",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                }
+            ],
+            "arg": {
+                "emoji": "g",
+                "text": "seven",
+                "duration": "date_and_time",
+                "expires_at": "2026-08-14T12:00:00Z"
+            },
+            "out": [
+                {
+                    "emoji": "a",
+                    "text": "one",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "b",
+                    "text": "two",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "c",
+                    "text": "three",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "d",
+                    "text": "four",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "e",
+                    "text": "five",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "f",
+                    "text": "six",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                }
+            ],
+            "found": false
+        },
+        {
+            "name": "duplicate_texts_in_list",
+            "list": [
+                {
+                    "emoji": "a",
+                    "text": "dup",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "b",
+                    "text": "dup",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "c",
+                    "text": "keep",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                }
+            ],
+            "arg": {
+                "emoji": "z",
+                "text": "dup",
+                "duration": "date_and_time",
+                "expires_at": "2026-08-14T12:00:00Z"
+            },
+            "out": [
+                {
+                    "emoji": "a",
+                    "text": "dup",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "b",
+                    "text": "dup",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                },
+                {
+                    "emoji": "c",
+                    "text": "keep",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                }
+            ],
+            "found": false
+        },
+        {
+            "name": "single",
+            "list": [
+                {
+                    "emoji": "a",
+                    "text": "one",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T12:00:00Z"
+                }
+            ],
+            "arg": {
+                "emoji": "a",
+                "text": "one",
+                "duration": "date_and_time",
+                "expires_at": "2026-08-14T12:00:00Z"
+            },
+            "out": [],
+            "found": false
+        },
+        {
+            "name": "differs_only_in_expiry",
+            "list": [
+                {
+                    "emoji": "a",
+                    "text": "one",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T13:00:00Z"
+                }
+            ],
+            "arg": {
+                "emoji": "a",
+                "text": "one",
+                "duration": "date_and_time",
+                "expires_at": "2026-08-14T12:00:00Z"
+            },
+            "out": [
+                {
+                    "emoji": "a",
+                    "text": "one",
+                    "duration": "date_and_time",
+                    "expires_at": "2026-08-14T13:00:00Z"
+                }
+            ],
+            "found": false
+        }
+    ],
+    "rune_to_hex": {
+        "0": "0000",
+        "1": "0001",
+        "1114111": "10ffff",
+        "128512": "1f600",
+        "15": "000f",
+        "16": "0010",
+        "255": "00ff",
+        "256": "0100",
+        "4095": "0fff",
+        "4096": "1000",
+        "48": "0030",
+        "65279": "feff",
+        "65535": "ffff",
+        "65536": "10000",
+        "769": "0301",
+        "90": "005a",
+        "97": "0061",
+        "9731": "2603"
+    },
+    "set_custom_status": {
+        "complete": "{\"emoji\":\"a\",\"text\":\"b\",\"duration\":\"date_and_time\",\"expires_at\":\"2026-08-14T12:00:00Z\"}",
+        "html": "{\"emoji\":\"\\u003cb\\u003e\",\"text\":\"a\\u0026b\",\"duration\":\"date_and_time\",\"expires_at\":\"2026-08-14T12:00:00Z\"}",
+        "nil": "null",
+        "zero": "{\"emoji\":\"\",\"text\":\"\",\"duration\":\"\",\"expires_at\":\"0001-01-01T00:00:00Z\"}"
+    },
+    "time_marshal": [
+        {
+            "name": "zero",
+            "unix_seconds": -62135596800,
+            "nanos": 0,
+            "offset_seconds": 0,
+            "is_zero": true,
+            "json": "\"0001-01-01T00:00:00Z\"",
+            "err": ""
+        },
+        {
+            "name": "epoch",
+            "unix_seconds": 0,
+            "nanos": 0,
+            "offset_seconds": 0,
+            "is_zero": false,
+            "json": "\"1970-01-01T00:00:00Z\"",
+            "err": ""
+        },
+        {
+            "name": "whole_second",
+            "unix_seconds": 1786708800,
+            "nanos": 0,
+            "offset_seconds": 0,
+            "is_zero": false,
+            "json": "\"2026-08-14T12:00:00Z\"",
+            "err": ""
+        },
+        {
+            "name": "half_second",
+            "unix_seconds": 1786708800,
+            "nanos": 500000000,
+            "offset_seconds": 0,
+            "is_zero": false,
+            "json": "\"2026-08-14T12:00:00.5Z\"",
+            "err": ""
+        },
+        {
+            "name": "millis_120",
+            "unix_seconds": 1786708800,
+            "nanos": 120000000,
+            "offset_seconds": 0,
+            "is_zero": false,
+            "json": "\"2026-08-14T12:00:00.12Z\"",
+            "err": ""
+        },
+        {
+            "name": "millis_100",
+            "unix_seconds": 1786708800,
+            "nanos": 100000000,
+            "offset_seconds": 0,
+            "is_zero": false,
+            "json": "\"2026-08-14T12:00:00.1Z\"",
+            "err": ""
+        },
+        {
+            "name": "millis_123",
+            "unix_seconds": 1786708800,
+            "nanos": 123000000,
+            "offset_seconds": 0,
+            "is_zero": false,
+            "json": "\"2026-08-14T12:00:00.123Z\"",
+            "err": ""
+        },
+        {
+            "name": "micros_123456",
+            "unix_seconds": 1786708800,
+            "nanos": 123456000,
+            "offset_seconds": 0,
+            "is_zero": false,
+            "json": "\"2026-08-14T12:00:00.123456Z\"",
+            "err": ""
+        },
+        {
+            "name": "nanos_123456789",
+            "unix_seconds": 1786708800,
+            "nanos": 123456789,
+            "offset_seconds": 0,
+            "is_zero": false,
+            "json": "\"2026-08-14T12:00:00.123456789Z\"",
+            "err": ""
+        },
+        {
+            "name": "one_nano",
+            "unix_seconds": 1786708800,
+            "nanos": 1,
+            "offset_seconds": 0,
+            "is_zero": false,
+            "json": "\"2026-08-14T12:00:00.000000001Z\"",
+            "err": ""
+        },
+        {
+            "name": "ten_millis",
+            "unix_seconds": 1786708800,
+            "nanos": 10000000,
+            "offset_seconds": 0,
+            "is_zero": false,
+            "json": "\"2026-08-14T12:00:00.01Z\"",
+            "err": ""
+        },
+        {
+            "name": "nanos_trailing_zero",
+            "unix_seconds": 1786708800,
+            "nanos": 123456780,
+            "offset_seconds": 0,
+            "is_zero": false,
+            "json": "\"2026-08-14T12:00:00.12345678Z\"",
+            "err": ""
+        },
+        {
+            "name": "positive_offset",
+            "unix_seconds": 1786689000,
+            "nanos": 0,
+            "offset_seconds": 19800,
+            "is_zero": false,
+            "json": "\"2026-08-14T12:00:00+05:30\"",
+            "err": ""
+        },
+        {
+            "name": "negative_offset",
+            "unix_seconds": 1786737600,
+            "nanos": 0,
+            "offset_seconds": -28800,
+            "is_zero": false,
+            "json": "\"2026-08-14T12:00:00-08:00\"",
+            "err": ""
+        },
+        {
+            "name": "offset_with_nanos",
+            "unix_seconds": 1786689000,
+            "nanos": 250000000,
+            "offset_seconds": 19800,
+            "is_zero": false,
+            "json": "\"2026-08-14T12:00:00.25+05:30\"",
+            "err": ""
+        },
+        {
+            "name": "pre_epoch",
+            "unix_seconds": -14182940,
+            "nanos": 0,
+            "offset_seconds": 0,
+            "is_zero": false,
+            "json": "\"1969-07-20T20:17:40Z\"",
+            "err": ""
+        },
+        {
+            "name": "year_9999",
+            "unix_seconds": 253402300799,
+            "nanos": 999999999,
+            "offset_seconds": 0,
+            "is_zero": false,
+            "json": "\"9999-12-31T23:59:59.999999999Z\"",
+            "err": ""
+        },
+        {
+            "name": "year_10000",
+            "unix_seconds": 253402300800,
+            "nanos": 0,
+            "offset_seconds": 0,
+            "is_zero": false,
+            "json": "",
+            "err": "json: error calling MarshalJSON for type time.Time: Time.MarshalJSON: year outside of range [0,9999]"
+        },
+        {
+            "name": "year_negative",
+            "unix_seconds": -62198755200,
+            "nanos": 0,
+            "offset_seconds": 0,
+            "is_zero": false,
+            "json": "",
+            "err": "json: error calling MarshalJSON for type time.Time: Time.MarshalJSON: year outside of range [0,9999]"
+        }
+    ],
+    "time_unmarshal": [
+        {
+            "in": "\"2026-08-14T12:00:00Z\"",
+            "ok": true,
+            "out": "\"2026-08-14T12:00:00Z\""
+        },
+        {
+            "in": "\"2026-08-14T12:00:00.5Z\"",
+            "ok": true,
+            "out": "\"2026-08-14T12:00:00.5Z\""
+        },
+        {
+            "in": "\"2026-08-14T12:00:00.500Z\"",
+            "ok": true,
+            "out": "\"2026-08-14T12:00:00.5Z\""
+        },
+        {
+            "in": "\"2026-08-14T12:00:00.123456789Z\"",
+            "ok": true,
+            "out": "\"2026-08-14T12:00:00.123456789Z\""
+        },
+        {
+            "in": "\"2026-08-14T12:00:00.1234567891Z\"",
+            "ok": true,
+            "out": "\"2026-08-14T12:00:00.123456789Z\""
+        },
+        {
+            "in": "\"2026-08-14T12:00:00+05:30\"",
+            "ok": true,
+            "out": "\"2026-08-14T12:00:00+05:30\""
+        },
+        {
+            "in": "\"2026-08-14T12:00:00-08:00\"",
+            "ok": true,
+            "out": "\"2026-08-14T12:00:00-08:00\""
+        },
+        {
+            "in": "\"2026-08-14T12:00:00+00:00\"",
+            "ok": true,
+            "out": "\"2026-08-14T12:00:00Z\""
+        },
+        {
+            "in": "\"2026-08-14T12:00:00-00:00\"",
+            "ok": true,
+            "out": "\"2026-08-14T12:00:00Z\""
+        },
+        {
+            "in": "\"0001-01-01T00:00:00Z\"",
+            "ok": true,
+            "out": "\"0001-01-01T00:00:00Z\""
+        },
+        {
+            "in": "\"1969-07-20T20:17:40Z\"",
+            "ok": true,
+            "out": "\"1969-07-20T20:17:40Z\""
+        },
+        {
+            "in": "\"2026-08-14t12:00:00z\"",
+            "ok": false,
+            "out": ""
+        },
+        {
+            "in": "\"2026-08-14T12:00:00z\"",
+            "ok": false,
+            "out": ""
+        },
+        {
+            "in": "\"2026-08-14T12:00:00\"",
+            "ok": false,
+            "out": ""
+        },
+        {
+            "in": "\"2026-08-14 12:00:00Z\"",
+            "ok": false,
+            "out": ""
+        },
+        {
+            "in": "\"2026-08-14\"",
+            "ok": false,
+            "out": ""
+        },
+        {
+            "in": "\"12:00:00Z\"",
+            "ok": false,
+            "out": ""
+        },
+        {
+            "in": "\"2026-08-14T12:00:00.Z\"",
+            "ok": false,
+            "out": ""
+        },
+        {
+            "in": "\"2026-8-14T12:00:00Z\"",
+            "ok": false,
+            "out": ""
+        },
+        {
+            "in": "\"2026-08-14T12:00:00+0530\"",
+            "ok": false,
+            "out": ""
+        },
+        {
+            "in": "\"2026-08-14T12:00:00Z07:00\"",
+            "ok": false,
+            "out": ""
+        },
+        {
+            "in": "\"2026-13-14T12:00:00Z\"",
+            "ok": false,
+            "out": ""
+        },
+        {
+            "in": "\"2026-02-30T12:00:00Z\"",
+            "ok": false,
+            "out": ""
+        },
+        {
+            "in": "\"2026-08-14T25:00:00Z\"",
+            "ok": false,
+            "out": ""
+        },
+        {
+            "in": "\"2024-02-29T12:00:00Z\"",
+            "ok": true,
+            "out": "\"2024-02-29T12:00:00Z\""
+        },
+        {
+            "in": "\"2023-02-29T12:00:00Z\"",
+            "ok": false,
+            "out": ""
+        },
+        {
+            "in": "\"2026-08-14T23:59:60Z\"",
+            "ok": false,
+            "out": ""
+        },
+        {
+            "in": "\"2026-08-14T12:00:00.000000000Z\"",
+            "ok": true,
+            "out": "\"2026-08-14T12:00:00Z\""
+        },
+        {
+            "in": "\"2026-08-14T12:00:00+23:59\"",
+            "ok": true,
+            "out": "\"2026-08-14T12:00:00+23:59\""
+        },
+        {
+            "in": "\"2026-08-14T12:00:00+99:99\"",
+            "ok": false,
+            "out": ""
+        },
+        {
+            "in": "\"2026-08-14T12:00:00-99:99\"",
+            "ok": false,
+            "out": ""
+        },
+        {
+            "in": "\"-026-08-14T12:00:00Z\"",
+            "ok": false,
+            "out": ""
+        },
+        {
+            "in": "\"+026-08-14T12:00:00Z\"",
+            "ok": false,
+            "out": ""
+        },
+        {
+            "in": "\"\"",
+            "ok": false,
+            "out": ""
+        },
+        {
+            "in": "\"   \"",
+            "ok": false,
+            "out": ""
+        },
+        {
+            "in": "null",
+            "ok": true,
+            "out": "\"2001-02-03T04:05:06.7Z\""
+        },
+        {
+            "in": "0",
+            "ok": false,
+            "out": ""
+        },
+        {
+            "in": "1700000000000",
+            "ok": false,
+            "out": ""
+        },
+        {
+            "in": "true",
+            "ok": false,
+            "out": ""
+        },
+        {
+            "in": "{}",
+            "ok": false,
+            "out": ""
+        },
+        {
+            "in": "[]",
+            "ok": false,
+            "out": ""
+        }
+    ],
+    "time_unmarshal_sentinel": "\"2001-02-03T04:05:06.7Z\"",
+    "user_custom_status": [
+        {
+            "name": "absent",
+            "prop": "",
+            "prop_present": false,
+            "get": null,
+            "validate": true
+        },
+        {
+            "name": "empty_string",
+            "prop": "",
+            "prop_present": true,
+            "get": null,
+            "validate": true
+        },
+        {
+            "name": "null_literal",
+            "prop": "null",
+            "prop_present": true,
+            "get": null,
+            "validate": false
+        },
+        {
+            "name": "empty_object",
+            "prop": "{}",
+            "prop_present": true,
+            "get": {
+                "emoji": "",
+                "text": "",
+                "duration": "",
+                "expires_at": "0001-01-01T00:00:00Z"
+            },
+            "validate": true
+        },
+        {
+            "name": "complete",
+            "prop": "{\"emoji\":\"a\",\"text\":\"b\",\"duration\":\"date_and_time\",\"expires_at\":\"2026-08-14T12:00:00Z\"}",
+            "prop_present": true,
+            "get": {
+                "emoji": "a",
+                "text": "b",
+                "duration": "date_and_time",
+                "expires_at": "2026-08-14T12:00:00Z"
+            },
+            "validate": true
+        },
+        {
+            "name": "offset_preserved",
+            "prop": "{\"emoji\":\"a\",\"text\":\"b\",\"duration\":\"date_and_time\",\"expires_at\":\"2026-08-14T12:00:00+05:30\"}",
+            "prop_present": true,
+            "get": {
+                "emoji": "a",
+                "text": "b",
+                "duration": "date_and_time",
+                "expires_at": "2026-08-14T12:00:00+05:30"
+            },
+            "validate": true
+        },
+        {
+            "name": "partial_keys",
+            "prop": "{\"emoji\":\"a\"}",
+            "prop_present": true,
+            "get": {
+                "emoji": "a",
+                "text": "",
+                "duration": "",
+                "expires_at": "0001-01-01T00:00:00Z"
+            },
+            "validate": true
+        },
+        {
+            "name": "unknown_key",
+            "prop": "{\"emoji\":\"a\",\"nope\":1}",
+            "prop_present": true,
+            "get": {
+                "emoji": "a",
+                "text": "",
+                "duration": "",
+                "expires_at": "0001-01-01T00:00:00Z"
+            },
+            "validate": true
+        },
+        {
+            "name": "expires_at_null",
+            "prop": "{\"emoji\":\"a\",\"expires_at\":null}",
+            "prop_present": true,
+            "get": {
+                "emoji": "a",
+                "text": "",
+                "duration": "",
+                "expires_at": "0001-01-01T00:00:00Z"
+            },
+            "validate": true
+        },
+        {
+            "name": "type_error_first",
+            "prop": "{\"emoji\":123,\"text\":\"kept\"}",
+            "prop_present": true,
+            "get": {
+                "emoji": "",
+                "text": "kept",
+                "duration": "",
+                "expires_at": "0001-01-01T00:00:00Z"
+            },
+            "validate": true
+        },
+        {
+            "name": "type_error_last",
+            "prop": "{\"emoji\":\"kept\",\"text\":123}",
+            "prop_present": true,
+            "get": {
+                "emoji": "kept",
+                "text": "",
+                "duration": "",
+                "expires_at": "0001-01-01T00:00:00Z"
+            },
+            "validate": true
+        },
+        {
+            "name": "bad_expires_at_middle",
+            "prop": "{\"emoji\":\"kept\",\"expires_at\":\"garbage\",\"text\":\"dropped?\"}",
+            "prop_present": true,
+            "get": {
+                "emoji": "kept",
+                "text": "",
+                "duration": "",
+                "expires_at": "0001-01-01T00:00:00Z"
+            },
+            "validate": true
+        },
+        {
+            "name": "bad_expires_at_last",
+            "prop": "{\"emoji\":\"kept\",\"text\":\"kept\",\"expires_at\":\"garbage\"}",
+            "prop_present": true,
+            "get": {
+                "emoji": "kept",
+                "text": "kept",
+                "duration": "",
+                "expires_at": "0001-01-01T00:00:00Z"
+            },
+            "validate": true
+        },
+        {
+            "name": "truncated",
+            "prop": "{\"emoji\":\"a\"",
+            "prop_present": true,
+            "get": null,
+            "validate": false
+        },
+        {
+            "name": "garbage",
+            "prop": "garbage",
+            "prop_present": true,
+            "get": null,
+            "validate": false
+        },
+        {
+            "name": "trailing_data",
+            "prop": "{\"emoji\":\"a\"}{\"emoji\":\"b\"}",
+            "prop_present": true,
+            "get": null,
+            "validate": false
+        },
+        {
+            "name": "leading_whitespace",
+            "prop": "   {\"emoji\":\"a\"}   ",
+            "prop_present": true,
+            "get": {
+                "emoji": "a",
+                "text": "",
+                "duration": "",
+                "expires_at": "0001-01-01T00:00:00Z"
+            },
+            "validate": true
+        },
+        {
+            "name": "json_string",
+            "prop": "\"a string\"",
+            "prop_present": true,
+            "get": {
+                "emoji": "",
+                "text": "",
+                "duration": "",
+                "expires_at": "0001-01-01T00:00:00Z"
+            },
+            "validate": true
+        },
+        {
+            "name": "json_array",
+            "prop": "[]",
+            "prop_present": true,
+            "get": {
+                "emoji": "",
+                "text": "",
+                "duration": "",
+                "expires_at": "0001-01-01T00:00:00Z"
+            },
+            "validate": true
+        },
+        {
+            "name": "json_number",
+            "prop": "0",
+            "prop_present": true,
+            "get": {
+                "emoji": "",
+                "text": "",
+                "duration": "",
+                "expires_at": "0001-01-01T00:00:00Z"
+            },
+            "validate": true
+        },
+        {
+            "name": "json_true",
+            "prop": "true",
+            "prop_present": true,
+            "get": {
+                "emoji": "",
+                "text": "",
+                "duration": "",
+                "expires_at": "0001-01-01T00:00:00Z"
+            },
+            "validate": true
+        }
+    ],
+    "valid_durations": {
+        "": true,
+        "DATE_AND_TIME": false,
+        "date and time": false,
+        "date_and_time": true,
+        "forever": false,
+        "four_hours": true,
+        "one_hour": true,
+        "one_minute": false,
+        "thirty_minutes": true,
+        "this_month": false,
+        "this_week": true,
+        "today": true,
+        "tomorrow": false
+    }
+}

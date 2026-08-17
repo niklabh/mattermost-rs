@@ -1,0 +1,627 @@
+{
+    "float_decode": [
+        {
+            "err": null,
+            "in": "{\"name\":\"n\",\"value\":1}",
+            "json_after": "{\"name\":\"n\",\"value\":1}",
+            "name": "integer",
+            "name_after": "n",
+            "ok": true,
+            "panicked": false,
+            "raw": "1",
+            "value_bits": 4607182418800017408
+        },
+        {
+            "err": null,
+            "in": "{\"name\":\"n\",\"value\":1.0}",
+            "json_after": "{\"name\":\"n\",\"value\":1}",
+            "name": "integer_with_point",
+            "name_after": "n",
+            "ok": true,
+            "panicked": false,
+            "raw": "1.0",
+            "value_bits": 4607182418800017408
+        },
+        {
+            "err": null,
+            "in": "{\"name\":\"n\",\"value\":1.5}",
+            "json_after": "{\"name\":\"n\",\"value\":1.5}",
+            "name": "fractional",
+            "name_after": "n",
+            "ok": true,
+            "panicked": false,
+            "raw": "1.5",
+            "value_bits": 4609434218613702656
+        },
+        {
+            "err": null,
+            "in": "{\"name\":\"n\",\"value\":1e9}",
+            "json_after": "{\"name\":\"n\",\"value\":1000000000}",
+            "name": "exponent",
+            "name_after": "n",
+            "ok": true,
+            "panicked": false,
+            "raw": "1e9",
+            "value_bits": 4741671816366391296
+        },
+        {
+            "err": null,
+            "in": "{\"name\":\"n\",\"value\":1e-9}",
+            "json_after": "{\"name\":\"n\",\"value\":1e-9}",
+            "name": "negative_exponent",
+            "name_after": "n",
+            "ok": true,
+            "panicked": false,
+            "raw": "1e-9",
+            "value_bits": 4472406533629990549
+        },
+        {
+            "err": null,
+            "in": "{\"name\":\"n\",\"value\":1E9}",
+            "json_after": "{\"name\":\"n\",\"value\":1000000000}",
+            "name": "capital_exponent",
+            "name_after": "n",
+            "ok": true,
+            "panicked": false,
+            "raw": "1E9",
+            "value_bits": 4741671816366391296
+        },
+        {
+            "err": null,
+            "in": "{\"name\":\"n\",\"value\":1e+9}",
+            "json_after": "{\"name\":\"n\",\"value\":1000000000}",
+            "name": "explicit_plus_exponent",
+            "name_after": "n",
+            "ok": true,
+            "panicked": false,
+            "raw": "1e+9",
+            "value_bits": 4741671816366391296
+        },
+        {
+            "err": null,
+            "in": "{\"name\":\"n\",\"value\":-2.75}",
+            "json_after": "{\"name\":\"n\",\"value\":-2.75}",
+            "name": "negative",
+            "name_after": "n",
+            "ok": true,
+            "panicked": false,
+            "raw": "-2.75",
+            "value_bits": 13836746905142427648
+        },
+        {
+            "err": null,
+            "in": "{\"name\":\"n\",\"value\":-0}",
+            "json_after": "{\"name\":\"n\",\"value\":-0}",
+            "name": "negative_zero",
+            "name_after": "n",
+            "ok": true,
+            "panicked": false,
+            "raw": "-0",
+            "value_bits": 9223372036854775808
+        },
+        {
+            "err": null,
+            "in": "{\"name\":\"n\",\"value\":9007199254740993}",
+            "json_after": "{\"name\":\"n\",\"value\":9007199254740992}",
+            "name": "beyond_precision",
+            "name_after": "n",
+            "ok": true,
+            "panicked": false,
+            "raw": "9007199254740993",
+            "value_bits": 4845873199050653696
+        },
+        {
+            "err": "json: cannot unmarshal number 1e400 into Go struct field AnalyticsRow.value of type float64",
+            "in": "{\"name\":\"n\",\"value\":1e400}",
+            "json_after": "{\"name\":\"n\",\"value\":0}",
+            "name": "overflow",
+            "name_after": "n",
+            "ok": false,
+            "panicked": false,
+            "raw": "1e400",
+            "value_bits": 0
+        },
+        {
+            "err": null,
+            "in": "{\"name\":\"n\",\"value\":1e-400}",
+            "json_after": "{\"name\":\"n\",\"value\":0}",
+            "name": "underflow",
+            "name_after": "n",
+            "ok": true,
+            "panicked": false,
+            "raw": "1e-400",
+            "value_bits": 0
+        },
+        {
+            "err": null,
+            "in": "{\"name\":\"n\",\"value\":1.7976931348623157e308}",
+            "json_after": "{\"name\":\"n\",\"value\":1.7976931348623157e+308}",
+            "name": "max_float64_literal",
+            "name_after": "n",
+            "ok": true,
+            "panicked": false,
+            "raw": "1.7976931348623157e308",
+            "value_bits": 9218868437227405311
+        },
+        {
+            "err": "json: cannot unmarshal string into Go struct field AnalyticsRow.value of type float64",
+            "in": "{\"name\":\"n\",\"value\":\"1.5\"}",
+            "json_after": "{\"name\":\"n\",\"value\":0}",
+            "name": "quoted",
+            "name_after": "n",
+            "ok": false,
+            "panicked": false,
+            "raw": "\"1.5\"",
+            "value_bits": 0
+        },
+        {
+            "err": null,
+            "in": "{\"name\":\"n\",\"value\":null}",
+            "json_after": "{\"name\":\"n\",\"value\":0}",
+            "name": "null",
+            "name_after": "n",
+            "ok": true,
+            "panicked": false,
+            "raw": "null",
+            "value_bits": 0
+        },
+        {
+            "err": "json: cannot unmarshal bool into Go struct field AnalyticsRow.value of type float64",
+            "in": "{\"name\":\"n\",\"value\":true}",
+            "json_after": "{\"name\":\"n\",\"value\":0}",
+            "name": "bool",
+            "name_after": "n",
+            "ok": false,
+            "panicked": false,
+            "raw": "true",
+            "value_bits": 0
+        },
+        {
+            "err": "invalid character 'N' looking for beginning of value",
+            "in": "{\"name\":\"n\",\"value\":NaN}",
+            "json_after": "{\"name\":\"\",\"value\":0}",
+            "name": "nan_literal",
+            "name_after": "",
+            "ok": false,
+            "panicked": false,
+            "raw": "NaN",
+            "value_bits": 0
+        },
+        {
+            "err": "invalid character 'I' looking for beginning of value",
+            "in": "{\"name\":\"n\",\"value\":Infinity}",
+            "json_after": "{\"name\":\"\",\"value\":0}",
+            "name": "infinity_literal",
+            "name_after": "",
+            "ok": false,
+            "panicked": false,
+            "raw": "Infinity",
+            "value_bits": 0
+        },
+        {
+            "err": "invalid character '+' looking for beginning of value",
+            "in": "{\"name\":\"n\",\"value\":+1}",
+            "json_after": "{\"name\":\"\",\"value\":0}",
+            "name": "leading_plus",
+            "name_after": "",
+            "ok": false,
+            "panicked": false,
+            "raw": "+1",
+            "value_bits": 0
+        },
+        {
+            "err": "invalid character 'x' after object key:value pair",
+            "in": "{\"name\":\"n\",\"value\":0x10}",
+            "json_after": "{\"name\":\"\",\"value\":0}",
+            "name": "hex",
+            "name_after": "",
+            "ok": false,
+            "panicked": false,
+            "raw": "0x10",
+            "value_bits": 0
+        }
+    ],
+    "float_wire": [
+        {
+            "bits": 0,
+            "fmt_v": "0",
+            "in_row": "{\"name\":\"zero\",\"value\":0}",
+            "json": "0",
+            "name": "zero",
+            "panicked": false,
+            "strconv_f": "0"
+        },
+        {
+            "bits": 9223372036854775808,
+            "fmt_v": "-0",
+            "in_row": "{\"name\":\"negative_zero\",\"value\":-0}",
+            "json": "-0",
+            "name": "negative_zero",
+            "panicked": false,
+            "strconv_f": "-0"
+        },
+        {
+            "bits": 4607182418800017408,
+            "fmt_v": "1",
+            "in_row": "{\"name\":\"one\",\"value\":1}",
+            "json": "1",
+            "name": "one",
+            "panicked": false,
+            "strconv_f": "1"
+        },
+        {
+            "bits": 13830554455654793216,
+            "fmt_v": "-1",
+            "in_row": "{\"name\":\"negative_one\",\"value\":-1}",
+            "json": "-1",
+            "name": "negative_one",
+            "panicked": false,
+            "strconv_f": "-1"
+        },
+        {
+            "bits": 4698053236609777664,
+            "fmt_v": "1.234567e+06",
+            "in_row": "{\"name\":\"integral_large\",\"value\":1234567}",
+            "json": "1234567",
+            "name": "integral_large",
+            "panicked": false,
+            "strconv_f": "1234567"
+        },
+        {
+            "bits": 4631107791820423168,
+            "fmt_v": "42",
+            "in_row": "{\"name\":\"count_like\",\"value\":42}",
+            "json": "42",
+            "name": "count_like",
+            "panicked": false,
+            "strconv_f": "42"
+        },
+        {
+            "bits": 4602678819172646912,
+            "fmt_v": "0.5",
+            "in_row": "{\"name\":\"half\",\"value\":0.5}",
+            "json": "0.5",
+            "name": "half",
+            "panicked": false,
+            "strconv_f": "0.5"
+        },
+        {
+            "bits": 4591870180066957722,
+            "fmt_v": "0.1",
+            "in_row": "{\"name\":\"tenth\",\"value\":0.1}",
+            "json": "0.1",
+            "name": "tenth",
+            "panicked": false,
+            "strconv_f": "0.1"
+        },
+        {
+            "bits": 4599676419421066581,
+            "fmt_v": "0.3333333333333333",
+            "in_row": "{\"name\":\"third\",\"value\":0.3333333333333333}",
+            "json": "0.3333333333333333",
+            "name": "third",
+            "panicked": false,
+            "strconv_f": "0.3333333333333333"
+        },
+        {
+            "bits": 13836746905142427648,
+            "fmt_v": "-2.75",
+            "in_row": "{\"name\":\"negative_fraction\",\"value\":-2.75}",
+            "json": "-2.75",
+            "name": "negative_fraction",
+            "panicked": false,
+            "strconv_f": "-2.75"
+        },
+        {
+            "bits": 4517329197830473120,
+            "fmt_v": "1.000001e-06",
+            "in_row": "{\"name\":\"just_above_lower_threshold\",\"value\":0.000001000001}",
+            "json": "0.000001000001",
+            "name": "just_above_lower_threshold",
+            "panicked": false,
+            "strconv_f": "0.000001000001"
+        },
+        {
+            "bits": 4517329193108106637,
+            "fmt_v": "1e-06",
+            "in_row": "{\"name\":\"at_lower_threshold\",\"value\":0.000001}",
+            "json": "0.000001",
+            "name": "at_lower_threshold",
+            "panicked": false,
+            "strconv_f": "0.000001"
+        },
+        {
+            "bits": 4517329188385740154,
+            "fmt_v": "9.99999e-07",
+            "in_row": "{\"name\":\"just_below_lower_threshold\",\"value\":9.99999e-7}",
+            "json": "9.99999e-7",
+            "name": "just_below_lower_threshold",
+            "panicked": false,
+            "strconv_f": "0.000000999999"
+        },
+        {
+            "bits": 4502148214488346440,
+            "fmt_v": "1e-07",
+            "in_row": "{\"name\":\"one_e_minus_7\",\"value\":1e-7}",
+            "json": "1e-7",
+            "name": "one_e_minus_7",
+            "panicked": false,
+            "strconv_f": "0.0000001"
+        },
+        {
+            "bits": 4472406533629990549,
+            "fmt_v": "1e-09",
+            "in_row": "{\"name\":\"one_e_minus_9\",\"value\":1e-9}",
+            "json": "1e-9",
+            "name": "one_e_minus_9",
+            "panicked": false,
+            "strconv_f": "0.000000001"
+        },
+        {
+            "bits": 4457293557087583675,
+            "fmt_v": "1e-10",
+            "in_row": "{\"name\":\"one_e_minus_10\",\"value\":1e-10}",
+            "json": "1e-10",
+            "name": "one_e_minus_10",
+            "panicked": false,
+            "strconv_f": "0.0000000001"
+        },
+        {
+            "bits": 4503599627370496,
+            "fmt_v": "2.2250738585072014e-308",
+            "in_row": "{\"name\":\"smallest_normal\",\"value\":2.2250738585072014e-308}",
+            "json": "2.2250738585072014e-308",
+            "name": "smallest_normal",
+            "panicked": false,
+            "strconv_f": "0.000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000022250738585072014"
+        },
+        {
+            "bits": 1,
+            "fmt_v": "5e-324",
+            "in_row": "{\"name\":\"smallest_subnormal\",\"value\":5e-324}",
+            "json": "5e-324",
+            "name": "smallest_subnormal",
+            "panicked": false,
+            "strconv_f": "0.000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000005"
+        },
+        {
+            "bits": 4921056587992461135,
+            "fmt_v": "9.999999999999999e+20",
+            "in_row": "{\"name\":\"just_below_upper_threshold\",\"value\":999999999999999900000}",
+            "json": "999999999999999900000",
+            "name": "just_below_upper_threshold",
+            "panicked": false,
+            "strconv_f": "999999999999999900000"
+        },
+        {
+            "bits": 4921056587992461136,
+            "fmt_v": "1e+21",
+            "in_row": "{\"name\":\"at_upper_threshold\",\"value\":1e+21}",
+            "json": "1e+21",
+            "name": "at_upper_threshold",
+            "panicked": false,
+            "strconv_f": "1000000000000000000000"
+        },
+        {
+            "bits": 4921056587992461137,
+            "fmt_v": "1.0000000000000001e+21",
+            "in_row": "{\"name\":\"just_above_upper_threshold\",\"value\":1.0000000000000001e+21}",
+            "json": "1.0000000000000001e+21",
+            "name": "just_above_upper_threshold",
+            "panicked": false,
+            "strconv_f": "1000000000000000100000"
+        },
+        {
+            "bits": 4936209963552724370,
+            "fmt_v": "1e+22",
+            "in_row": "{\"name\":\"one_e_22\",\"value\":1e+22}",
+            "json": "1e+22",
+            "name": "one_e_22",
+            "panicked": false,
+            "strconv_f": "10000000000000000000000"
+        },
+        {
+            "bits": 9218868437227405311,
+            "fmt_v": "1.7976931348623157e+308",
+            "in_row": "{\"name\":\"max_float64\",\"value\":1.7976931348623157e+308}",
+            "json": "1.7976931348623157e+308",
+            "name": "max_float64",
+            "panicked": false,
+            "strconv_f": "179769313486231570000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+        },
+        {
+            "bits": 4845873199050653696,
+            "fmt_v": "9.007199254740992e+15",
+            "in_row": "{\"name\":\"two_pow_53\",\"value\":9007199254740992}",
+            "json": "9007199254740992",
+            "name": "two_pow_53",
+            "panicked": false,
+            "strconv_f": "9007199254740992"
+        },
+        {
+            "bits": 4845873199050653697,
+            "fmt_v": "9.007199254740994e+15",
+            "in_row": "{\"name\":\"two_pow_53_plus_two\",\"value\":9007199254740994}",
+            "json": "9007199254740994",
+            "name": "two_pow_53_plus_two",
+            "panicked": false,
+            "strconv_f": "9007199254740994"
+        },
+        {
+            "bits": 4845873199050653695,
+            "fmt_v": "9.007199254740991e+15",
+            "in_row": "{\"name\":\"max_safe_integer\",\"value\":9007199254740991}",
+            "json": "9007199254740991",
+            "name": "max_safe_integer",
+            "panicked": false,
+            "strconv_f": "9007199254740991"
+        },
+        {
+            "bits": 4614256656552045848,
+            "fmt_v": "3.141592653589793",
+            "in_row": "{\"name\":\"pi\",\"value\":3.141592653589793}",
+            "json": "3.141592653589793",
+            "name": "pi",
+            "panicked": false,
+            "strconv_f": "3.141592653589793"
+        },
+        {
+            "bits": 4608238818662570491,
+            "fmt_v": "1.2345678901234567",
+            "in_row": "{\"name\":\"many_digits\",\"value\":1.2345678901234567}",
+            "json": "1.2345678901234567",
+            "name": "many_digits",
+            "panicked": false,
+            "strconv_f": "1.2345678901234567"
+        },
+        {
+            "bits": 4599075939470750516,
+            "fmt_v": "0.30000000000000004",
+            "in_row": "{\"name\":\"trailing_nines\",\"value\":0.30000000000000004}",
+            "json": "0.30000000000000004",
+            "name": "trailing_nines",
+            "panicked": false,
+            "strconv_f": "0.30000000000000004"
+        }
+    ],
+    "row_wire": [
+        {
+            "json": "{\"name\":\"\",\"value\":0}",
+            "name": "zero",
+            "panicked": false,
+            "value_bits": 0
+        },
+        {
+            "json": "{\"name\":\"total_posts\",\"value\":1234}",
+            "name": "typical",
+            "panicked": false,
+            "value_bits": 4653142004841054208
+        },
+        {
+            "json": "{\"name\":\"avg_per_day\",\"value\":12.5}",
+            "name": "fractional",
+            "panicked": false,
+            "value_bits": 4623226492472524800
+        },
+        {
+            "json": "{\"name\":\"delta\",\"value\":-3}",
+            "name": "negative",
+            "panicked": false,
+            "value_bits": 13837309855095848960
+        },
+        {
+            "json": "{\"name\":\"\",\"value\":1}",
+            "name": "empty_name",
+            "panicked": false,
+            "value_bits": 4607182418800017408
+        },
+        {
+            "json": "{\"name\":\"\\u003ca\\u003e\\u0026b\",\"value\":1}",
+            "name": "escaped_name",
+            "panicked": false,
+            "value_bits": 4607182418800017408
+        },
+        {
+            "json": "{\"name\":\"tiny\",\"value\":1e-9}",
+            "name": "exponent_value",
+            "panicked": false,
+            "value_bits": 4472406533629990549
+        }
+    ],
+    "rows_wire": [
+        {
+            "element_nil": [],
+            "json": "null",
+            "len": 0,
+            "name": "nil",
+            "nil": true,
+            "panicked": false
+        },
+        {
+            "element_nil": [],
+            "json": "[]",
+            "len": 0,
+            "name": "empty",
+            "nil": false,
+            "panicked": false
+        },
+        {
+            "element_nil": [
+                false
+            ],
+            "json": "[{\"name\":\"a\",\"value\":1}]",
+            "len": 1,
+            "name": "one",
+            "nil": false,
+            "panicked": false
+        },
+        {
+            "element_nil": [
+                false,
+                false,
+                false
+            ],
+            "json": "[{\"name\":\"a\",\"value\":1},{\"name\":\"b\",\"value\":2.5},{\"name\":\"c\",\"value\":-3}]",
+            "len": 3,
+            "name": "several",
+            "nil": false,
+            "panicked": false
+        },
+        {
+            "element_nil": [
+                false,
+                true
+            ],
+            "json": "[{\"name\":\"a\",\"value\":1},null]",
+            "len": 2,
+            "name": "nil_element",
+            "nil": false,
+            "panicked": false
+        },
+        {
+            "element_nil": [
+                true
+            ],
+            "json": "[null]",
+            "len": 1,
+            "name": "only_a_nil_element",
+            "nil": false,
+            "panicked": false
+        }
+    ],
+    "unsupported": [
+        {
+            "bits": 9221120237041090561,
+            "err": "json: unsupported value: NaN",
+            "fmt_v": "NaN",
+            "name": "nan",
+            "ok": false,
+            "output": "",
+            "panicked": false,
+            "row_err": "json: unsupported value: NaN",
+            "slice_err": "json: unsupported value: NaN"
+        },
+        {
+            "bits": 9218868437227405312,
+            "err": "json: unsupported value: +Inf",
+            "fmt_v": "+Inf",
+            "name": "positive_infinity",
+            "ok": false,
+            "output": "",
+            "panicked": false,
+            "row_err": "json: unsupported value: +Inf",
+            "slice_err": "json: unsupported value: +Inf"
+        },
+        {
+            "bits": 18442240474082181120,
+            "err": "json: unsupported value: -Inf",
+            "fmt_v": "-Inf",
+            "name": "negative_infinity",
+            "ok": false,
+            "output": "",
+            "panicked": false,
+            "row_err": "json: unsupported value: -Inf",
+            "slice_err": "json: unsupported value: -Inf"
+        }
+    ]
+}

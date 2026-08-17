@@ -1,0 +1,623 @@
+{
+    "bool_decode": [
+        {
+            "channel_id_after": "c1",
+            "err": null,
+            "in": "{\"channel_id\":\"c1\",\"collapsed_threads_supported\":true}",
+            "name": "true",
+            "ok": true,
+            "panicked": false,
+            "raw": "true",
+            "value": true
+        },
+        {
+            "channel_id_after": "c1",
+            "err": null,
+            "in": "{\"channel_id\":\"c1\",\"collapsed_threads_supported\":false}",
+            "name": "false",
+            "ok": true,
+            "panicked": false,
+            "raw": "false",
+            "value": false
+        },
+        {
+            "channel_id_after": "c1",
+            "err": null,
+            "in": "{\"channel_id\":\"c1\",\"collapsed_threads_supported\":null}",
+            "name": "null",
+            "ok": true,
+            "panicked": false,
+            "raw": "null",
+            "value": false
+        },
+        {
+            "channel_id_after": "c1",
+            "err": "json: cannot unmarshal string into Go struct field ChannelView.collapsed_threads_supported of type bool",
+            "in": "{\"channel_id\":\"c1\",\"collapsed_threads_supported\":\"true\"}",
+            "name": "quoted_true",
+            "ok": false,
+            "panicked": false,
+            "raw": "\"true\"",
+            "value": false
+        },
+        {
+            "channel_id_after": "c1",
+            "err": "json: cannot unmarshal number into Go struct field ChannelView.collapsed_threads_supported of type bool",
+            "in": "{\"channel_id\":\"c1\",\"collapsed_threads_supported\":1}",
+            "name": "one",
+            "ok": false,
+            "panicked": false,
+            "raw": "1",
+            "value": false
+        },
+        {
+            "channel_id_after": "c1",
+            "err": "json: cannot unmarshal number into Go struct field ChannelView.collapsed_threads_supported of type bool",
+            "in": "{\"channel_id\":\"c1\",\"collapsed_threads_supported\":0}",
+            "name": "zero",
+            "ok": false,
+            "panicked": false,
+            "raw": "0",
+            "value": false
+        },
+        {
+            "channel_id_after": "c1",
+            "err": "json: cannot unmarshal string into Go struct field ChannelView.collapsed_threads_supported of type bool",
+            "in": "{\"channel_id\":\"c1\",\"collapsed_threads_supported\":\"\"}",
+            "name": "empty_string",
+            "ok": false,
+            "panicked": false,
+            "raw": "\"\"",
+            "value": false
+        }
+    ],
+    "map_marshal_wire": [
+        {
+            "in_struct": "{\"status\":\"OK\",\"last_viewed_at_times\":null}",
+            "map_json": "null",
+            "name": "nil",
+            "nil": true,
+            "panicked": false
+        },
+        {
+            "in_struct": "{\"status\":\"OK\",\"last_viewed_at_times\":{}}",
+            "map_json": "{}",
+            "name": "empty",
+            "nil": false,
+            "panicked": false
+        },
+        {
+            "in_struct": "{\"status\":\"OK\",\"last_viewed_at_times\":{\"a\":1}}",
+            "map_json": "{\"a\":1}",
+            "name": "one",
+            "nil": false,
+            "panicked": false
+        },
+        {
+            "in_struct": "{\"status\":\"OK\",\"last_viewed_at_times\":{\"a\":1,\"b\":2,\"c\":3}}",
+            "map_json": "{\"a\":1,\"b\":2,\"c\":3}",
+            "name": "sorted_input",
+            "nil": false,
+            "panicked": false
+        },
+        {
+            "in_struct": "{\"status\":\"OK\",\"last_viewed_at_times\":{\"a\":1,\"b\":2,\"c\":3}}",
+            "map_json": "{\"a\":1,\"b\":2,\"c\":3}",
+            "name": "unsorted_input",
+            "nil": false,
+            "panicked": false
+        },
+        {
+            "in_struct": "{\"status\":\"OK\",\"last_viewed_at_times\":{\"A\":1,\"B\":4,\"a\":3,\"b\":2}}",
+            "map_json": "{\"A\":1,\"B\":4,\"a\":3,\"b\":2}",
+            "name": "mixed_case",
+            "nil": false,
+            "panicked": false
+        },
+        {
+            "in_struct": "{\"status\":\"OK\",\"last_viewed_at_times\":{\"\":1,\"a\":2}}",
+            "map_json": "{\"\":1,\"a\":2}",
+            "name": "empty_key",
+            "nil": false,
+            "panicked": false
+        },
+        {
+            "in_struct": "{\"status\":\"OK\",\"last_viewed_at_times\":{\"\\u0026b\":2,\"\\u003ca\\u003e\":1,\"c\\u2028\":3}}",
+            "map_json": "{\"\\u0026b\":2,\"\\u003ca\\u003e\":1,\"c\\u2028\":3}",
+            "name": "escaped_keys",
+            "nil": false,
+            "panicked": false
+        },
+        {
+            "in_struct": "{\"status\":\"OK\",\"last_viewed_at_times\":{\"z\":2,\"é\":1,\"日\":3}}",
+            "map_json": "{\"z\":2,\"é\":1,\"日\":3}",
+            "name": "non_ascii_keys",
+            "nil": false,
+            "panicked": false
+        },
+        {
+            "in_struct": "{\"status\":\"OK\",\"last_viewed_at_times\":{\"hi\":9223372036854775807,\"lo\":-9223372036854775808}}",
+            "map_json": "{\"hi\":9223372036854775807,\"lo\":-9223372036854775808}",
+            "name": "bounds",
+            "nil": false,
+            "panicked": false
+        }
+    ],
+    "map_value_decode": [
+        {
+            "err": null,
+            "in": "{\"status\":\"OK\",\"last_viewed_at_times\":{\"keep\":7,\"probe\":1700000000000}}",
+            "json_after": "{\"status\":\"OK\",\"last_viewed_at_times\":{\"keep\":7,\"probe\":1700000000000}}",
+            "keep_value": 7,
+            "map_len": 2,
+            "map_nil": false,
+            "name": "integer",
+            "ok": true,
+            "panicked": false,
+            "probe_present": true,
+            "probe_value": 1700000000000,
+            "raw": "1700000000000"
+        },
+        {
+            "err": null,
+            "in": "{\"status\":\"OK\",\"last_viewed_at_times\":{\"keep\":7,\"probe\":0}}",
+            "json_after": "{\"status\":\"OK\",\"last_viewed_at_times\":{\"keep\":7,\"probe\":0}}",
+            "keep_value": 7,
+            "map_len": 2,
+            "map_nil": false,
+            "name": "zero",
+            "ok": true,
+            "panicked": false,
+            "probe_present": true,
+            "probe_value": 0,
+            "raw": "0"
+        },
+        {
+            "err": null,
+            "in": "{\"status\":\"OK\",\"last_viewed_at_times\":{\"keep\":7,\"probe\":-1}}",
+            "json_after": "{\"status\":\"OK\",\"last_viewed_at_times\":{\"keep\":7,\"probe\":-1}}",
+            "keep_value": 7,
+            "map_len": 2,
+            "map_nil": false,
+            "name": "negative",
+            "ok": true,
+            "panicked": false,
+            "probe_present": true,
+            "probe_value": -1,
+            "raw": "-1"
+        },
+        {
+            "err": null,
+            "in": "{\"status\":\"OK\",\"last_viewed_at_times\":{\"keep\":7,\"probe\":9223372036854775807}}",
+            "json_after": "{\"status\":\"OK\",\"last_viewed_at_times\":{\"keep\":7,\"probe\":9223372036854775807}}",
+            "keep_value": 7,
+            "map_len": 2,
+            "map_nil": false,
+            "name": "max_int64",
+            "ok": true,
+            "panicked": false,
+            "probe_present": true,
+            "probe_value": 9223372036854775807,
+            "raw": "9223372036854775807"
+        },
+        {
+            "err": null,
+            "in": "{\"status\":\"OK\",\"last_viewed_at_times\":{\"keep\":7,\"probe\":-9223372036854775808}}",
+            "json_after": "{\"status\":\"OK\",\"last_viewed_at_times\":{\"keep\":7,\"probe\":-9223372036854775808}}",
+            "keep_value": 7,
+            "map_len": 2,
+            "map_nil": false,
+            "name": "min_int64",
+            "ok": true,
+            "panicked": false,
+            "probe_present": true,
+            "probe_value": -9223372036854775808,
+            "raw": "-9223372036854775808"
+        },
+        {
+            "err": "json: cannot unmarshal number 9223372036854775808 into Go struct field ChannelViewResponse.last_viewed_at_times of type int64",
+            "in": "{\"status\":\"OK\",\"last_viewed_at_times\":{\"keep\":7,\"probe\":9223372036854775808}}",
+            "json_after": "{\"status\":\"OK\",\"last_viewed_at_times\":{\"keep\":7,\"probe\":0}}",
+            "keep_value": 7,
+            "map_len": 2,
+            "map_nil": false,
+            "name": "max_int64_plus_one",
+            "ok": false,
+            "panicked": false,
+            "probe_present": true,
+            "probe_value": 0,
+            "raw": "9223372036854775808"
+        },
+        {
+            "err": "json: cannot unmarshal number 1.0 into Go struct field ChannelViewResponse.last_viewed_at_times of type int64",
+            "in": "{\"status\":\"OK\",\"last_viewed_at_times\":{\"keep\":7,\"probe\":1.0}}",
+            "json_after": "{\"status\":\"OK\",\"last_viewed_at_times\":{\"keep\":7,\"probe\":0}}",
+            "keep_value": 7,
+            "map_len": 2,
+            "map_nil": false,
+            "name": "fractional_but_whole",
+            "ok": false,
+            "panicked": false,
+            "probe_present": true,
+            "probe_value": 0,
+            "raw": "1.0"
+        },
+        {
+            "err": "json: cannot unmarshal number 1.5 into Go struct field ChannelViewResponse.last_viewed_at_times of type int64",
+            "in": "{\"status\":\"OK\",\"last_viewed_at_times\":{\"keep\":7,\"probe\":1.5}}",
+            "json_after": "{\"status\":\"OK\",\"last_viewed_at_times\":{\"keep\":7,\"probe\":0}}",
+            "keep_value": 7,
+            "map_len": 2,
+            "map_nil": false,
+            "name": "fractional",
+            "ok": false,
+            "panicked": false,
+            "probe_present": true,
+            "probe_value": 0,
+            "raw": "1.5"
+        },
+        {
+            "err": "json: cannot unmarshal number 1e9 into Go struct field ChannelViewResponse.last_viewed_at_times of type int64",
+            "in": "{\"status\":\"OK\",\"last_viewed_at_times\":{\"keep\":7,\"probe\":1e9}}",
+            "json_after": "{\"status\":\"OK\",\"last_viewed_at_times\":{\"keep\":7,\"probe\":0}}",
+            "keep_value": 7,
+            "map_len": 2,
+            "map_nil": false,
+            "name": "exponent",
+            "ok": false,
+            "panicked": false,
+            "probe_present": true,
+            "probe_value": 0,
+            "raw": "1e9"
+        },
+        {
+            "err": "json: cannot unmarshal string into Go struct field ChannelViewResponse.last_viewed_at_times of type int64",
+            "in": "{\"status\":\"OK\",\"last_viewed_at_times\":{\"keep\":7,\"probe\":\"1700000000000\"}}",
+            "json_after": "{\"status\":\"OK\",\"last_viewed_at_times\":{\"keep\":7,\"probe\":0}}",
+            "keep_value": 7,
+            "map_len": 2,
+            "map_nil": false,
+            "name": "quoted_number",
+            "ok": false,
+            "panicked": false,
+            "probe_present": true,
+            "probe_value": 0,
+            "raw": "\"1700000000000\""
+        },
+        {
+            "err": null,
+            "in": "{\"status\":\"OK\",\"last_viewed_at_times\":{\"keep\":7,\"probe\":null}}",
+            "json_after": "{\"status\":\"OK\",\"last_viewed_at_times\":{\"keep\":7,\"probe\":0}}",
+            "keep_value": 7,
+            "map_len": 2,
+            "map_nil": false,
+            "name": "null",
+            "ok": true,
+            "panicked": false,
+            "probe_present": true,
+            "probe_value": 0,
+            "raw": "null"
+        },
+        {
+            "err": "json: cannot unmarshal bool into Go struct field ChannelViewResponse.last_viewed_at_times of type int64",
+            "in": "{\"status\":\"OK\",\"last_viewed_at_times\":{\"keep\":7,\"probe\":true}}",
+            "json_after": "{\"status\":\"OK\",\"last_viewed_at_times\":{\"keep\":7,\"probe\":0}}",
+            "keep_value": 7,
+            "map_len": 2,
+            "map_nil": false,
+            "name": "bool",
+            "ok": false,
+            "panicked": false,
+            "probe_present": true,
+            "probe_value": 0,
+            "raw": "true"
+        },
+        {
+            "err": "json: cannot unmarshal object into Go struct field ChannelViewResponse.last_viewed_at_times of type int64",
+            "in": "{\"status\":\"OK\",\"last_viewed_at_times\":{\"keep\":7,\"probe\":{}}}",
+            "json_after": "{\"status\":\"OK\",\"last_viewed_at_times\":{\"keep\":7,\"probe\":0}}",
+            "keep_value": 7,
+            "map_len": 2,
+            "map_nil": false,
+            "name": "object",
+            "ok": false,
+            "panicked": false,
+            "probe_present": true,
+            "probe_value": 0,
+            "raw": "{}"
+        },
+        {
+            "err": "json: cannot unmarshal array into Go struct field ChannelViewResponse.last_viewed_at_times of type int64",
+            "in": "{\"status\":\"OK\",\"last_viewed_at_times\":{\"keep\":7,\"probe\":[]}}",
+            "json_after": "{\"status\":\"OK\",\"last_viewed_at_times\":{\"keep\":7,\"probe\":0}}",
+            "keep_value": 7,
+            "map_len": 2,
+            "map_nil": false,
+            "name": "array",
+            "ok": false,
+            "panicked": false,
+            "probe_present": true,
+            "probe_value": 0,
+            "raw": "[]"
+        }
+    ],
+    "response_wire": [
+        {
+            "err": null,
+            "in": "{}",
+            "json": "{\"status\":\"\",\"last_viewed_at_times\":null}",
+            "map_len": 0,
+            "map_nil": true,
+            "name": "zero",
+            "ok": true,
+            "panicked": false,
+            "status": ""
+        },
+        {
+            "err": null,
+            "in": "{\"status\":\"OK\"}",
+            "json": "{\"status\":\"OK\",\"last_viewed_at_times\":null}",
+            "map_len": 0,
+            "map_nil": true,
+            "name": "status_only",
+            "ok": true,
+            "panicked": false,
+            "status": "OK"
+        },
+        {
+            "err": null,
+            "in": "{\"status\":\"OK\",\"last_viewed_at_times\":null}",
+            "json": "{\"status\":\"OK\",\"last_viewed_at_times\":null}",
+            "map_len": 0,
+            "map_nil": true,
+            "name": "map_null",
+            "ok": true,
+            "panicked": false,
+            "status": "OK"
+        },
+        {
+            "err": null,
+            "in": "{\"status\":\"OK\",\"last_viewed_at_times\":{}}",
+            "json": "{\"status\":\"OK\",\"last_viewed_at_times\":{}}",
+            "map_len": 0,
+            "map_nil": false,
+            "name": "map_empty",
+            "ok": true,
+            "panicked": false,
+            "status": "OK"
+        },
+        {
+            "err": null,
+            "in": "{\"status\":\"OK\",\"last_viewed_at_times\":{\"qr6kf7ztp7yifxt4wm5xn51bke\":1700000000000}}",
+            "json": "{\"status\":\"OK\",\"last_viewed_at_times\":{\"qr6kf7ztp7yifxt4wm5xn51bke\":1700000000000}}",
+            "map_len": 1,
+            "map_nil": false,
+            "name": "one_entry",
+            "ok": true,
+            "panicked": false,
+            "status": "OK"
+        },
+        {
+            "err": null,
+            "in": "{\"status\":\"OK\",\"last_viewed_at_times\":{\"z\":3,\"a\":1,\"m\":2}}",
+            "json": "{\"status\":\"OK\",\"last_viewed_at_times\":{\"a\":1,\"m\":2,\"z\":3}}",
+            "map_len": 3,
+            "map_nil": false,
+            "name": "unsorted_keys",
+            "ok": true,
+            "panicked": false,
+            "status": "OK"
+        },
+        {
+            "err": null,
+            "in": "{\"last_viewed_at_times\":{\"a\":0}}",
+            "json": "{\"status\":\"\",\"last_viewed_at_times\":{\"a\":0}}",
+            "map_len": 1,
+            "map_nil": false,
+            "name": "zero_value",
+            "ok": true,
+            "panicked": false,
+            "status": ""
+        },
+        {
+            "err": null,
+            "in": "{\"last_viewed_at_times\":{\"a\":-1}}",
+            "json": "{\"status\":\"\",\"last_viewed_at_times\":{\"a\":-1}}",
+            "map_len": 1,
+            "map_nil": false,
+            "name": "negative_value",
+            "ok": true,
+            "panicked": false,
+            "status": ""
+        },
+        {
+            "err": null,
+            "in": "{\"last_viewed_at_times\":{\"lo\":-9223372036854775808,\"hi\":9223372036854775807}}",
+            "json": "{\"status\":\"\",\"last_viewed_at_times\":{\"hi\":9223372036854775807,\"lo\":-9223372036854775808}}",
+            "map_len": 2,
+            "map_nil": false,
+            "name": "int64_bounds",
+            "ok": true,
+            "panicked": false,
+            "status": ""
+        },
+        {
+            "err": null,
+            "in": "{\"last_viewed_at_times\":{\"\":1}}",
+            "json": "{\"status\":\"\",\"last_viewed_at_times\":{\"\":1}}",
+            "map_len": 1,
+            "map_nil": false,
+            "name": "empty_key",
+            "ok": true,
+            "panicked": false,
+            "status": ""
+        },
+        {
+            "err": null,
+            "in": "{\"last_viewed_at_times\":{\"\u003ca\u003e\u0026\":1}}",
+            "json": "{\"status\":\"\",\"last_viewed_at_times\":{\"\\u003ca\\u003e\\u0026\":1}}",
+            "map_len": 1,
+            "map_nil": false,
+            "name": "escaped_key",
+            "ok": true,
+            "panicked": false,
+            "status": ""
+        },
+        {
+            "err": null,
+            "in": "{\"last_viewed_at_times\":{\"a\":1,\"a\":2}}",
+            "json": "{\"status\":\"\",\"last_viewed_at_times\":{\"a\":2}}",
+            "map_len": 1,
+            "map_nil": false,
+            "name": "duplicate_key",
+            "ok": true,
+            "panicked": false,
+            "status": ""
+        },
+        {
+            "err": null,
+            "in": "{\"status\":\"first\",\"status\":\"second\"}",
+            "json": "{\"status\":\"second\",\"last_viewed_at_times\":null}",
+            "map_len": 0,
+            "map_nil": true,
+            "name": "duplicate_status",
+            "ok": true,
+            "panicked": false,
+            "status": "second"
+        },
+        {
+            "err": null,
+            "in": "{\"status\":null}",
+            "json": "{\"status\":\"\",\"last_viewed_at_times\":null}",
+            "map_len": 0,
+            "map_nil": true,
+            "name": "explicit_null_status",
+            "ok": true,
+            "panicked": false,
+            "status": ""
+        },
+        {
+            "err": null,
+            "in": "{\"nope\":1}",
+            "json": "{\"status\":\"\",\"last_viewed_at_times\":null}",
+            "map_len": 0,
+            "map_nil": true,
+            "name": "unknown_key",
+            "ok": true,
+            "panicked": false,
+            "status": ""
+        }
+    ],
+    "view_wire": [
+        {
+            "channel_id": "",
+            "collapsed_threads_supported": false,
+            "err": null,
+            "in": "{}",
+            "json": "{\"channel_id\":\"\",\"prev_channel_id\":\"\",\"collapsed_threads_supported\":false}",
+            "name": "zero",
+            "ok": true,
+            "panicked": false,
+            "prev_channel_id": ""
+        },
+        {
+            "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+            "collapsed_threads_supported": true,
+            "err": null,
+            "in": "{\"channel_id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"prev_channel_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"collapsed_threads_supported\":true}",
+            "json": "{\"channel_id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"prev_channel_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"collapsed_threads_supported\":true}",
+            "name": "full",
+            "ok": true,
+            "panicked": false,
+            "prev_channel_id": "6bdz674pgq767e4jx75w4pf57a"
+        },
+        {
+            "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+            "collapsed_threads_supported": false,
+            "err": null,
+            "in": "{\"channel_id\":\"qr6kf7ztp7yifxt4wm5xn51bke\"}",
+            "json": "{\"channel_id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"prev_channel_id\":\"\",\"collapsed_threads_supported\":false}",
+            "name": "channel_only",
+            "ok": true,
+            "panicked": false,
+            "prev_channel_id": ""
+        },
+        {
+            "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+            "collapsed_threads_supported": false,
+            "err": null,
+            "in": "{\"channel_id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"prev_channel_id\":\"\"}",
+            "json": "{\"channel_id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"prev_channel_id\":\"\",\"collapsed_threads_supported\":false}",
+            "name": "empty_prev",
+            "ok": true,
+            "panicked": false,
+            "prev_channel_id": ""
+        },
+        {
+            "channel_id": "",
+            "collapsed_threads_supported": false,
+            "err": null,
+            "in": "{\"collapsed_threads_supported\":false}",
+            "json": "{\"channel_id\":\"\",\"prev_channel_id\":\"\",\"collapsed_threads_supported\":false}",
+            "name": "crt_false",
+            "ok": true,
+            "panicked": false,
+            "prev_channel_id": ""
+        },
+        {
+            "channel_id": "",
+            "collapsed_threads_supported": false,
+            "err": null,
+            "in": "{\"channel_id\":null,\"prev_channel_id\":null,\"collapsed_threads_supported\":null}",
+            "json": "{\"channel_id\":\"\",\"prev_channel_id\":\"\",\"collapsed_threads_supported\":false}",
+            "name": "explicit_nulls",
+            "ok": true,
+            "panicked": false,
+            "prev_channel_id": ""
+        },
+        {
+            "channel_id": "",
+            "collapsed_threads_supported": false,
+            "err": null,
+            "in": "{\"nope\":1}",
+            "json": "{\"channel_id\":\"\",\"prev_channel_id\":\"\",\"collapsed_threads_supported\":false}",
+            "name": "unknown_key",
+            "ok": true,
+            "panicked": false,
+            "prev_channel_id": ""
+        },
+        {
+            "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+            "collapsed_threads_supported": false,
+            "err": null,
+            "in": "{\"CHANNEL_ID\":\"qr6kf7ztp7yifxt4wm5xn51bke\"}",
+            "json": "{\"channel_id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"prev_channel_id\":\"\",\"collapsed_threads_supported\":false}",
+            "name": "uppercase_key",
+            "ok": true,
+            "panicked": false,
+            "prev_channel_id": ""
+        },
+        {
+            "channel_id": "nope",
+            "collapsed_threads_supported": false,
+            "err": null,
+            "in": "{\"channel_id\":\"nope\"}",
+            "json": "{\"channel_id\":\"nope\",\"prev_channel_id\":\"\",\"collapsed_threads_supported\":false}",
+            "name": "not_an_id",
+            "ok": true,
+            "panicked": false,
+            "prev_channel_id": ""
+        },
+        {
+            "channel_id": "\u003ca\u003e\u0026b",
+            "collapsed_threads_supported": false,
+            "err": null,
+            "in": "{\"channel_id\":\"\u003ca\u003e\u0026b\"}",
+            "json": "{\"channel_id\":\"\\u003ca\\u003e\\u0026b\",\"prev_channel_id\":\"\",\"collapsed_threads_supported\":false}",
+            "name": "escaped",
+            "ok": true,
+            "panicked": false,
+            "prev_channel_id": ""
+        }
+    ]
+}

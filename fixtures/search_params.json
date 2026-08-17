@@ -1,0 +1,40 @@
+{
+    "terms": "terms-a8fdbb",
+    "excluded_terms": "excludedterms-163bc1",
+    "ishashtag": true,
+    "in_channels": [
+        "inchannels-5df241",
+        "inchannels-1748db"
+    ],
+    "excluded_channels": [
+        "excludedchannels-d55423",
+        "excludedchannels-d38331"
+    ],
+    "from_users": [
+        "fromusers-99e10c",
+        "fromusers-d87cda"
+    ],
+    "excluded_users": [
+        "excludedusers-ecc1f8",
+        "excludedusers-f2fe9e"
+    ],
+    "after_date": "afterdate-e394bf",
+    "excluded_after_date": "excludedafterdate-33998f",
+    "before_date": "beforedate-0a966a",
+    "excluded_before_date": "excludedbeforedate-803d92",
+    "extensions": [
+        "extensions-26a268",
+        "extensions-268477"
+    ],
+    "excluded_extensions": [
+        "excludedextensions-6cbe8c",
+        "excludedextensions-74ae33"
+    ],
+    "on_date": "ondate-5c6ac2",
+    "excluded_date": "excludeddate-e28716",
+    "or_terms": true,
+    "include_deleted_channels": true,
+    "timezone_offset": 16,
+    "search_without_user_id": true,
+    "modifier": "modifier-f202b1"
+}

@@ -1,0 +1,1385 @@
+{
+    "constants": {
+        "bookmark_file_owner": "bookmark",
+        "download_type_file": "file",
+        "download_type_preview": "preview",
+        "download_type_public": "public",
+        "download_type_thumbnail": "thumbnail",
+        "max_filename_length": 256,
+        "sort_by_created": "CreateAt",
+        "sort_by_size": "Size"
+    },
+    "get_etag_for_file_infos": [
+        {
+            "name": "nil",
+            "infos": [],
+            "out": "11.11.0"
+        },
+        {
+            "name": "empty",
+            "infos": [],
+            "out": "11.11.0"
+        },
+        {
+            "name": "single",
+            "infos": [
+                {
+                    "id": "6bdz674pgq767e4jx75w4pf57a",
+                    "user_id": "",
+                    "post_id": "6bdz674pgq767e4jx75w4pf57a",
+                    "channel_id": "",
+                    "create_at": 0,
+                    "update_at": 1700000000000,
+                    "delete_at": 0,
+                    "name": "",
+                    "extension": "",
+                    "size": 0,
+                    "mime_type": "",
+                    "mini_preview": null,
+                    "remote_id": null,
+                    "archived": false
+                }
+            ],
+            "out": "11.11.0.6bdz674pgq767e4jx75w4pf57a.1700000000000"
+        },
+        {
+            "name": "max_from_later_element",
+            "infos": [
+                {
+                    "id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                    "user_id": "",
+                    "post_id": "6bdz674pgq767e4jx75w4pf57a",
+                    "channel_id": "",
+                    "create_at": 0,
+                    "update_at": 100,
+                    "delete_at": 0,
+                    "name": "",
+                    "extension": "",
+                    "size": 0,
+                    "mime_type": "",
+                    "mini_preview": null,
+                    "remote_id": null,
+                    "archived": false
+                },
+                {
+                    "id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                    "user_id": "",
+                    "post_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                    "channel_id": "",
+                    "create_at": 0,
+                    "update_at": 900,
+                    "delete_at": 0,
+                    "name": "",
+                    "extension": "",
+                    "size": 0,
+                    "mime_type": "",
+                    "mini_preview": null,
+                    "remote_id": null,
+                    "archived": false
+                },
+                {
+                    "id": "6bdz674pgq767e4jx75w4pf57a",
+                    "user_id": "",
+                    "post_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                    "channel_id": "",
+                    "create_at": 0,
+                    "update_at": 500,
+                    "delete_at": 0,
+                    "name": "",
+                    "extension": "",
+                    "size": 0,
+                    "mime_type": "",
+                    "mini_preview": null,
+                    "remote_id": null,
+                    "archived": false
+                }
+            ],
+            "out": "11.11.0.6bdz674pgq767e4jx75w4pf57a.900"
+        },
+        {
+            "name": "max_from_first_element",
+            "infos": [
+                {
+                    "id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                    "user_id": "",
+                    "post_id": "6bdz674pgq767e4jx75w4pf57a",
+                    "channel_id": "",
+                    "create_at": 0,
+                    "update_at": 900,
+                    "delete_at": 0,
+                    "name": "",
+                    "extension": "",
+                    "size": 0,
+                    "mime_type": "",
+                    "mini_preview": null,
+                    "remote_id": null,
+                    "archived": false
+                },
+                {
+                    "id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                    "user_id": "",
+                    "post_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                    "channel_id": "",
+                    "create_at": 0,
+                    "update_at": 100,
+                    "delete_at": 0,
+                    "name": "",
+                    "extension": "",
+                    "size": 0,
+                    "mime_type": "",
+                    "mini_preview": null,
+                    "remote_id": null,
+                    "archived": false
+                }
+            ],
+            "out": "11.11.0.6bdz674pgq767e4jx75w4pf57a.900"
+        },
+        {
+            "name": "all_zero_update_at",
+            "infos": [
+                {
+                    "id": "6bdz674pgq767e4jx75w4pf57a",
+                    "user_id": "",
+                    "post_id": "6bdz674pgq767e4jx75w4pf57a",
+                    "channel_id": "",
+                    "create_at": 0,
+                    "update_at": 0,
+                    "delete_at": 0,
+                    "name": "",
+                    "extension": "",
+                    "size": 0,
+                    "mime_type": "",
+                    "mini_preview": null,
+                    "remote_id": null,
+                    "archived": false
+                },
+                {
+                    "id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                    "user_id": "",
+                    "post_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                    "channel_id": "",
+                    "create_at": 0,
+                    "update_at": 0,
+                    "delete_at": 0,
+                    "name": "",
+                    "extension": "",
+                    "size": 0,
+                    "mime_type": "",
+                    "mini_preview": null,
+                    "remote_id": null,
+                    "archived": false
+                }
+            ],
+            "out": "11.11.0.6bdz674pgq767e4jx75w4pf57a.0"
+        },
+        {
+            "name": "negative_update_at",
+            "infos": [
+                {
+                    "id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                    "user_id": "",
+                    "post_id": "6bdz674pgq767e4jx75w4pf57a",
+                    "channel_id": "",
+                    "create_at": 0,
+                    "update_at": -5,
+                    "delete_at": 0,
+                    "name": "",
+                    "extension": "",
+                    "size": 0,
+                    "mime_type": "",
+                    "mini_preview": null,
+                    "remote_id": null,
+                    "archived": false
+                },
+                {
+                    "id": "6bdz674pgq767e4jx75w4pf57a",
+                    "user_id": "",
+                    "post_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                    "channel_id": "",
+                    "create_at": 0,
+                    "update_at": -1,
+                    "delete_at": 0,
+                    "name": "",
+                    "extension": "",
+                    "size": 0,
+                    "mime_type": "",
+                    "mini_preview": null,
+                    "remote_id": null,
+                    "archived": false
+                }
+            ],
+            "out": "11.11.0.6bdz674pgq767e4jx75w4pf57a.0"
+        },
+        {
+            "name": "empty_post_id",
+            "infos": [
+                {
+                    "id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                    "user_id": "",
+                    "channel_id": "",
+                    "create_at": 0,
+                    "update_at": 700,
+                    "delete_at": 0,
+                    "name": "",
+                    "extension": "",
+                    "size": 0,
+                    "mime_type": "",
+                    "mini_preview": null,
+                    "remote_id": null,
+                    "archived": false
+                }
+            ],
+            "out": "11.11.0..700"
+        }
+    ],
+    "is_image": [
+        {
+            "mime_type": "",
+            "is_image": false,
+            "is_svg": false
+        },
+        {
+            "mime_type": "image/png",
+            "is_image": true,
+            "is_svg": false
+        },
+        {
+            "mime_type": "image/jpeg",
+            "is_image": true,
+            "is_svg": false
+        },
+        {
+            "mime_type": "image/svg+xml",
+            "is_image": true,
+            "is_svg": true
+        },
+        {
+            "mime_type": "IMAGE/PNG",
+            "is_image": false,
+            "is_svg": false
+        },
+        {
+            "mime_type": "text/plain",
+            "is_image": false,
+            "is_svg": false
+        },
+        {
+            "mime_type": "application/pdf",
+            "is_image": false,
+            "is_svg": false
+        },
+        {
+            "mime_type": "image",
+            "is_image": true,
+            "is_svg": false
+        },
+        {
+            "mime_type": "images/png",
+            "is_image": true,
+            "is_svg": false
+        },
+        {
+            "mime_type": "imagex",
+            "is_image": true,
+            "is_svg": false
+        },
+        {
+            "mime_type": "x-image/png",
+            "is_image": false,
+            "is_svg": false
+        },
+        {
+            "mime_type": "image/svg+xml; charset=utf-8",
+            "is_image": true,
+            "is_svg": false
+        },
+        {
+            "mime_type": " image/png",
+            "is_image": false,
+            "is_svg": false
+        }
+    ],
+    "is_valid": [
+        {
+            "name": "valid",
+            "file_info": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "user_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "post_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "channel_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "create_at": 1700000000000,
+                "update_at": 1700000000000,
+                "delete_at": 0,
+                "name": "file.txt",
+                "extension": "txt",
+                "size": 1024,
+                "mime_type": "text/plain",
+                "mini_preview": null,
+                "remote_id": "cluster-a",
+                "archived": false
+            },
+            "path": "20231114/teams/x/channels/y/users/z/file.txt",
+            "error_id": "",
+            "detailed": ""
+        },
+        {
+            "name": "id_empty",
+            "file_info": {
+                "id": "",
+                "user_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "post_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "channel_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "create_at": 1700000000000,
+                "update_at": 1700000000000,
+                "delete_at": 0,
+                "name": "file.txt",
+                "extension": "txt",
+                "size": 1024,
+                "mime_type": "text/plain",
+                "mini_preview": null,
+                "remote_id": "cluster-a",
+                "archived": false
+            },
+            "path": "20231114/teams/x/channels/y/users/z/file.txt",
+            "error_id": "model.file_info.is_valid.id.app_error",
+            "detailed": ""
+        },
+        {
+            "name": "id_short",
+            "file_info": {
+                "id": "aaaaaaaaaaaaaaaaaaaaaaaaa",
+                "user_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "post_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "channel_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "create_at": 1700000000000,
+                "update_at": 1700000000000,
+                "delete_at": 0,
+                "name": "file.txt",
+                "extension": "txt",
+                "size": 1024,
+                "mime_type": "text/plain",
+                "mini_preview": null,
+                "remote_id": "cluster-a",
+                "archived": false
+            },
+            "path": "20231114/teams/x/channels/y/users/z/file.txt",
+            "error_id": "model.file_info.is_valid.id.app_error",
+            "detailed": ""
+        },
+        {
+            "name": "creator_id_empty",
+            "file_info": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "user_id": "",
+                "post_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "channel_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "create_at": 1700000000000,
+                "update_at": 1700000000000,
+                "delete_at": 0,
+                "name": "file.txt",
+                "extension": "txt",
+                "size": 1024,
+                "mime_type": "text/plain",
+                "mini_preview": null,
+                "remote_id": "cluster-a",
+                "archived": false
+            },
+            "path": "20231114/teams/x/channels/y/users/z/file.txt",
+            "error_id": "model.file_info.is_valid.user_id.app_error",
+            "detailed": "id=6bdz674pgq767e4jx75w4pf57a"
+        },
+        {
+            "name": "creator_id_nouser",
+            "file_info": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "user_id": "nouser",
+                "post_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "channel_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "create_at": 1700000000000,
+                "update_at": 1700000000000,
+                "delete_at": 0,
+                "name": "file.txt",
+                "extension": "txt",
+                "size": 1024,
+                "mime_type": "text/plain",
+                "mini_preview": null,
+                "remote_id": "cluster-a",
+                "archived": false
+            },
+            "path": "20231114/teams/x/channels/y/users/z/file.txt",
+            "error_id": "",
+            "detailed": ""
+        },
+        {
+            "name": "creator_id_bookmark",
+            "file_info": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "user_id": "bookmark",
+                "post_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "channel_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "create_at": 1700000000000,
+                "update_at": 1700000000000,
+                "delete_at": 0,
+                "name": "file.txt",
+                "extension": "txt",
+                "size": 1024,
+                "mime_type": "text/plain",
+                "mini_preview": null,
+                "remote_id": "cluster-a",
+                "archived": false
+            },
+            "path": "20231114/teams/x/channels/y/users/z/file.txt",
+            "error_id": "",
+            "detailed": ""
+        },
+        {
+            "name": "creator_id_nonsense",
+            "file_info": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "user_id": "nope",
+                "post_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "channel_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "create_at": 1700000000000,
+                "update_at": 1700000000000,
+                "delete_at": 0,
+                "name": "file.txt",
+                "extension": "txt",
+                "size": 1024,
+                "mime_type": "text/plain",
+                "mini_preview": null,
+                "remote_id": "cluster-a",
+                "archived": false
+            },
+            "path": "20231114/teams/x/channels/y/users/z/file.txt",
+            "error_id": "model.file_info.is_valid.user_id.app_error",
+            "detailed": "id=6bdz674pgq767e4jx75w4pf57a"
+        },
+        {
+            "name": "creator_id_NoUser_wrong_case",
+            "file_info": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "user_id": "NoUser",
+                "post_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "channel_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "create_at": 1700000000000,
+                "update_at": 1700000000000,
+                "delete_at": 0,
+                "name": "file.txt",
+                "extension": "txt",
+                "size": 1024,
+                "mime_type": "text/plain",
+                "mini_preview": null,
+                "remote_id": "cluster-a",
+                "archived": false
+            },
+            "path": "20231114/teams/x/channels/y/users/z/file.txt",
+            "error_id": "model.file_info.is_valid.user_id.app_error",
+            "detailed": "id=6bdz674pgq767e4jx75w4pf57a"
+        },
+        {
+            "name": "post_id_empty",
+            "file_info": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "user_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "channel_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "create_at": 1700000000000,
+                "update_at": 1700000000000,
+                "delete_at": 0,
+                "name": "file.txt",
+                "extension": "txt",
+                "size": 1024,
+                "mime_type": "text/plain",
+                "mini_preview": null,
+                "remote_id": "cluster-a",
+                "archived": false
+            },
+            "path": "20231114/teams/x/channels/y/users/z/file.txt",
+            "error_id": "",
+            "detailed": ""
+        },
+        {
+            "name": "post_id_nonsense",
+            "file_info": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "user_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "post_id": "nope",
+                "channel_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "create_at": 1700000000000,
+                "update_at": 1700000000000,
+                "delete_at": 0,
+                "name": "file.txt",
+                "extension": "txt",
+                "size": 1024,
+                "mime_type": "text/plain",
+                "mini_preview": null,
+                "remote_id": "cluster-a",
+                "archived": false
+            },
+            "path": "20231114/teams/x/channels/y/users/z/file.txt",
+            "error_id": "model.file_info.is_valid.post_id.app_error",
+            "detailed": "id=6bdz674pgq767e4jx75w4pf57a"
+        },
+        {
+            "name": "create_at_zero",
+            "file_info": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "user_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "post_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "channel_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "create_at": 0,
+                "update_at": 1700000000000,
+                "delete_at": 0,
+                "name": "file.txt",
+                "extension": "txt",
+                "size": 1024,
+                "mime_type": "text/plain",
+                "mini_preview": null,
+                "remote_id": "cluster-a",
+                "archived": false
+            },
+            "path": "20231114/teams/x/channels/y/users/z/file.txt",
+            "error_id": "model.file_info.is_valid.create_at.app_error",
+            "detailed": "id=6bdz674pgq767e4jx75w4pf57a"
+        },
+        {
+            "name": "update_at_zero",
+            "file_info": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "user_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "post_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "channel_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "create_at": 1700000000000,
+                "update_at": 0,
+                "delete_at": 0,
+                "name": "file.txt",
+                "extension": "txt",
+                "size": 1024,
+                "mime_type": "text/plain",
+                "mini_preview": null,
+                "remote_id": "cluster-a",
+                "archived": false
+            },
+            "path": "20231114/teams/x/channels/y/users/z/file.txt",
+            "error_id": "model.file_info.is_valid.update_at.app_error",
+            "detailed": "id=6bdz674pgq767e4jx75w4pf57a"
+        },
+        {
+            "name": "path_empty",
+            "file_info": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "user_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "post_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "channel_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "create_at": 1700000000000,
+                "update_at": 1700000000000,
+                "delete_at": 0,
+                "name": "file.txt",
+                "extension": "txt",
+                "size": 1024,
+                "mime_type": "text/plain",
+                "mini_preview": null,
+                "remote_id": "cluster-a",
+                "archived": false
+            },
+            "path": "",
+            "error_id": "model.file_info.is_valid.path.app_error",
+            "detailed": "id=6bdz674pgq767e4jx75w4pf57a"
+        },
+        {
+            "name": "name_empty",
+            "file_info": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "user_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "post_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "channel_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "create_at": 1700000000000,
+                "update_at": 1700000000000,
+                "delete_at": 0,
+                "name": "",
+                "extension": "txt",
+                "size": 1024,
+                "mime_type": "text/plain",
+                "mini_preview": null,
+                "remote_id": "cluster-a",
+                "archived": false
+            },
+            "path": "20231114/teams/x/channels/y/users/z/file.txt",
+            "error_id": "",
+            "detailed": ""
+        },
+        {
+            "name": "name_dot",
+            "file_info": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "user_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "post_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "channel_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "create_at": 1700000000000,
+                "update_at": 1700000000000,
+                "delete_at": 0,
+                "name": ".",
+                "extension": "txt",
+                "size": 1024,
+                "mime_type": "text/plain",
+                "mini_preview": null,
+                "remote_id": "cluster-a",
+                "archived": false
+            },
+            "path": "20231114/teams/x/channels/y/users/z/file.txt",
+            "error_id": "model.file_info.is_valid.name.app_error",
+            "detailed": "id=6bdz674pgq767e4jx75w4pf57a"
+        },
+        {
+            "name": "name_dotdot",
+            "file_info": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "user_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "post_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "channel_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "create_at": 1700000000000,
+                "update_at": 1700000000000,
+                "delete_at": 0,
+                "name": "..",
+                "extension": "txt",
+                "size": 1024,
+                "mime_type": "text/plain",
+                "mini_preview": null,
+                "remote_id": "cluster-a",
+                "archived": false
+            },
+            "path": "20231114/teams/x/channels/y/users/z/file.txt",
+            "error_id": "model.file_info.is_valid.name.app_error",
+            "detailed": "id=6bdz674pgq767e4jx75w4pf57a"
+        },
+        {
+            "name": "name_slash",
+            "file_info": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "user_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "post_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "channel_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "create_at": 1700000000000,
+                "update_at": 1700000000000,
+                "delete_at": 0,
+                "name": "a/b.txt",
+                "extension": "txt",
+                "size": 1024,
+                "mime_type": "text/plain",
+                "mini_preview": null,
+                "remote_id": "cluster-a",
+                "archived": false
+            },
+            "path": "20231114/teams/x/channels/y/users/z/file.txt",
+            "error_id": "model.file_info.is_valid.name.app_error",
+            "detailed": "id=6bdz674pgq767e4jx75w4pf57a"
+        },
+        {
+            "name": "name_backslash",
+            "file_info": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "user_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "post_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "channel_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "create_at": 1700000000000,
+                "update_at": 1700000000000,
+                "delete_at": 0,
+                "name": "a\\b.txt",
+                "extension": "txt",
+                "size": 1024,
+                "mime_type": "text/plain",
+                "mini_preview": null,
+                "remote_id": "cluster-a",
+                "archived": false
+            },
+            "path": "20231114/teams/x/channels/y/users/z/file.txt",
+            "error_id": "model.file_info.is_valid.name.app_error",
+            "detailed": "id=6bdz674pgq767e4jx75w4pf57a"
+        },
+        {
+            "name": "name_control_char",
+            "file_info": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "user_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "post_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "channel_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "create_at": 1700000000000,
+                "update_at": 1700000000000,
+                "delete_at": 0,
+                "name": "a\u0001b.txt",
+                "extension": "txt",
+                "size": 1024,
+                "mime_type": "text/plain",
+                "mini_preview": null,
+                "remote_id": "cluster-a",
+                "archived": false
+            },
+            "path": "20231114/teams/x/channels/y/users/z/file.txt",
+            "error_id": "model.file_info.is_valid.name.app_error",
+            "detailed": "id=6bdz674pgq767e4jx75w4pf57a"
+        },
+        {
+            "name": "name_256",
+            "file_info": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "user_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "post_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "channel_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "create_at": 1700000000000,
+                "update_at": 1700000000000,
+                "delete_at": 0,
+                "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "extension": "txt",
+                "size": 1024,
+                "mime_type": "text/plain",
+                "mini_preview": null,
+                "remote_id": "cluster-a",
+                "archived": false
+            },
+            "path": "20231114/teams/x/channels/y/users/z/file.txt",
+            "error_id": "",
+            "detailed": ""
+        },
+        {
+            "name": "name_257",
+            "file_info": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "user_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "post_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "channel_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "create_at": 1700000000000,
+                "update_at": 1700000000000,
+                "delete_at": 0,
+                "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "extension": "txt",
+                "size": 1024,
+                "mime_type": "text/plain",
+                "mini_preview": null,
+                "remote_id": "cluster-a",
+                "archived": false
+            },
+            "path": "20231114/teams/x/channels/y/users/z/file.txt",
+            "error_id": "model.file_info.is_valid.name.app_error",
+            "detailed": "id=6bdz674pgq767e4jx75w4pf57a"
+        },
+        {
+            "name": "name_256_runes_multibyte",
+            "file_info": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "user_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "post_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "channel_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "create_at": 1700000000000,
+                "update_at": 1700000000000,
+                "delete_at": 0,
+                "name": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+                "extension": "txt",
+                "size": 1024,
+                "mime_type": "text/plain",
+                "mini_preview": null,
+                "remote_id": "cluster-a",
+                "archived": false
+            },
+            "path": "20231114/teams/x/channels/y/users/z/file.txt",
+            "error_id": "",
+            "detailed": ""
+        },
+        {
+            "name": "name_257_runes_multibyte",
+            "file_info": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "user_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "post_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "channel_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "create_at": 1700000000000,
+                "update_at": 1700000000000,
+                "delete_at": 0,
+                "name": "ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+                "extension": "txt",
+                "size": 1024,
+                "mime_type": "text/plain",
+                "mini_preview": null,
+                "remote_id": "cluster-a",
+                "archived": false
+            },
+            "path": "20231114/teams/x/channels/y/users/z/file.txt",
+            "error_id": "model.file_info.is_valid.name.app_error",
+            "detailed": "id=6bdz674pgq767e4jx75w4pf57a"
+        },
+        {
+            "name": "channel_id_empty",
+            "file_info": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "user_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "post_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "channel_id": "",
+                "create_at": 1700000000000,
+                "update_at": 1700000000000,
+                "delete_at": 0,
+                "name": "file.txt",
+                "extension": "txt",
+                "size": 1024,
+                "mime_type": "text/plain",
+                "mini_preview": null,
+                "remote_id": "cluster-a",
+                "archived": false
+            },
+            "path": "20231114/teams/x/channels/y/users/z/file.txt",
+            "error_id": "",
+            "detailed": ""
+        },
+        {
+            "name": "delete_at_set",
+            "file_info": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "user_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "post_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "channel_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "create_at": 1700000000000,
+                "update_at": 1700000000000,
+                "delete_at": 1700000000000,
+                "name": "file.txt",
+                "extension": "txt",
+                "size": 1024,
+                "mime_type": "text/plain",
+                "mini_preview": null,
+                "remote_id": "cluster-a",
+                "archived": false
+            },
+            "path": "20231114/teams/x/channels/y/users/z/file.txt",
+            "error_id": "",
+            "detailed": ""
+        }
+    ],
+    "is_valid_filename": {
+        "": false,
+        "\u0000null": false,
+        "  leading.txt": true,
+        ".": false,
+        "..": false,
+        "...": true,
+        "../file.txt": false,
+        "./file.txt": false,
+        ".hidden": true,
+        "/": false,
+        "//": false,
+        "/a": false,
+        "\\": false,
+        "\\\\server\\share\\f.txt": false,
+        "a\u0001b": false,
+        "a\tb": false,
+        "a\nb": false,
+        "a\u001fb": false,
+        "a.b.c": true,
+        "a/": false,
+        "a/b": false,
+        "a/b/c.txt": false,
+        "a/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb": false,
+        "a\\b": false,
+        "a\\b\\c.txt": false,
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": true,
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": true,
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": false,
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa": false,
+        "ab": false,
+        "dir/../file.txt": false,
+        "é.txt": true,
+        "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé.txt": false,
+        "file.txt": true,
+        "no-extension": true,
+        "trailing.txt  ": true,
+        "unicode-é.txt": true,
+        "with space.txt": true,
+        "": false,
+        "é.txt": true,
+        "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé": true,
+        "ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé": false,
+        "日本語.txt": true,
+        "😀.png": true
+    },
+    "make_content_inaccessible": {
+        "archived": true,
+        "content": "",
+        "has_preview_image": false,
+        "json": "{\"id\":\"6bdz674pgq767e4jx75w4pf57a\",\"user_id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"channel_id\":\"\",\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"name\":\"file.txt\",\"extension\":\"\",\"size\":1024,\"mime_type\":\"\",\"mini_preview\":null,\"remote_id\":null,\"archived\":true}",
+        "mini_preview_nil": true,
+        "name": "file.txt",
+        "path": "",
+        "preview_path": "",
+        "size": 1024,
+        "thumbnail_path": ""
+    },
+    "new_info": [
+        {
+            "in": "",
+            "name": "",
+            "extension": "",
+            "mime_type": ""
+        },
+        {
+            "in": "file.txt",
+            "name": "file.txt",
+            "extension": "txt",
+            "mime_type": "text/plain; charset=utf-8"
+        },
+        {
+            "in": "file.PNG",
+            "name": "file.PNG",
+            "extension": "png",
+            "mime_type": "image/png"
+        },
+        {
+            "in": "file.png",
+            "name": "file.png",
+            "extension": "png",
+            "mime_type": "image/png"
+        },
+        {
+            "in": "photo.jpeg",
+            "name": "photo.jpeg",
+            "extension": "jpeg",
+            "mime_type": "image/jpeg"
+        },
+        {
+            "in": "a.tar.gz",
+            "name": "a.tar.gz",
+            "extension": "gz",
+            "mime_type": "application/gzip"
+        },
+        {
+            "in": "noextension",
+            "name": "noextension",
+            "extension": "",
+            "mime_type": ""
+        },
+        {
+            "in": ".hidden",
+            "name": ".hidden",
+            "extension": "hidden",
+            "mime_type": ""
+        },
+        {
+            "in": "file.",
+            "name": "file.",
+            "extension": "",
+            "mime_type": ""
+        },
+        {
+            "in": "file.unknownext",
+            "name": "file.unknownext",
+            "extension": "unknownext",
+            "mime_type": ""
+        },
+        {
+            "in": "dir/file.png",
+            "name": "dir/file.png",
+            "extension": "png",
+            "mime_type": "image/png"
+        },
+        {
+            "in": "file.SVG",
+            "name": "file.SVG",
+            "extension": "svg",
+            "mime_type": "image/svg+xml"
+        },
+        {
+            "in": "doc.pdf",
+            "name": "doc.pdf",
+            "extension": "pdf",
+            "mime_type": "application/pdf"
+        },
+        {
+            "in": "page.html",
+            "name": "page.html",
+            "extension": "html",
+            "mime_type": "text/html; charset=utf-8"
+        },
+        {
+            "in": "data.json",
+            "name": "data.json",
+            "extension": "json",
+            "mime_type": "application/json"
+        },
+        {
+            "in": "script.js",
+            "name": "script.js",
+            "extension": "js",
+            "mime_type": "text/javascript; charset=utf-8"
+        },
+        {
+            "in": "style.css",
+            "name": "style.css",
+            "extension": "css",
+            "mime_type": "text/css; charset=utf-8"
+        },
+        {
+            "in": "image.webp",
+            "name": "image.webp",
+            "extension": "webp",
+            "mime_type": "image/webp"
+        },
+        {
+            "in": "image.gif",
+            "name": "image.gif",
+            "extension": "gif",
+            "mime_type": "image/gif"
+        },
+        {
+            "in": "movie.mp4",
+            "name": "movie.mp4",
+            "extension": "mp4",
+            "mime_type": "video/mp4"
+        }
+    ],
+    "pre_save": [
+        {
+            "name": "all_zero",
+            "in_id": "",
+            "in_create_at": 0,
+            "in_update_at": 0,
+            "in_remote_nil": true,
+            "id_preserved": false,
+            "id_generated": true,
+            "create_at_preserved": false,
+            "out_update_at": 0,
+            "update_at_raised": true,
+            "out_remote_nil": false
+        },
+        {
+            "name": "id_kept",
+            "in_id": "6bdz674pgq767e4jx75w4pf57a",
+            "in_create_at": 1700000000000,
+            "in_update_at": 1700000000000,
+            "in_remote_nil": true,
+            "id_preserved": true,
+            "id_generated": false,
+            "create_at_preserved": true,
+            "out_update_at": 1700000000000,
+            "update_at_raised": false,
+            "out_remote_nil": false
+        },
+        {
+            "name": "update_at_behind_create_at",
+            "in_id": "6bdz674pgq767e4jx75w4pf57a",
+            "in_create_at": 1700000000000,
+            "in_update_at": 1600000000000,
+            "in_remote_nil": true,
+            "id_preserved": true,
+            "id_generated": false,
+            "create_at_preserved": true,
+            "out_update_at": 1700000000000,
+            "update_at_raised": true,
+            "out_remote_nil": false
+        },
+        {
+            "name": "update_at_ahead_of_create_at",
+            "in_id": "6bdz674pgq767e4jx75w4pf57a",
+            "in_create_at": 1700000000000,
+            "in_update_at": 1800000000000,
+            "in_remote_nil": true,
+            "id_preserved": true,
+            "id_generated": false,
+            "create_at_preserved": true,
+            "out_update_at": 1800000000000,
+            "update_at_raised": false,
+            "out_remote_nil": false
+        },
+        {
+            "name": "update_at_zero_create_at_set",
+            "in_id": "6bdz674pgq767e4jx75w4pf57a",
+            "in_create_at": 1700000000000,
+            "in_update_at": 0,
+            "in_remote_nil": true,
+            "id_preserved": true,
+            "id_generated": false,
+            "create_at_preserved": true,
+            "out_update_at": 1700000000000,
+            "update_at_raised": true,
+            "out_remote_nil": false
+        },
+        {
+            "name": "remote_set",
+            "in_id": "6bdz674pgq767e4jx75w4pf57a",
+            "in_create_at": 1700000000000,
+            "in_update_at": 1700000000000,
+            "in_remote_nil": false,
+            "id_preserved": true,
+            "id_generated": false,
+            "create_at_preserved": true,
+            "out_update_at": 1700000000000,
+            "update_at_raised": false,
+            "out_remote_nil": false
+        }
+    ],
+    "sanitize_filename": [
+        {
+            "in": "",
+            "out": "",
+            "out_valid": false
+        },
+        {
+            "in": ".",
+            "out": "",
+            "out_valid": false
+        },
+        {
+            "in": "..",
+            "out": "",
+            "out_valid": false
+        },
+        {
+            "in": "...",
+            "out": "...",
+            "out_valid": true
+        },
+        {
+            "in": "file.txt",
+            "out": "file.txt",
+            "out_valid": true
+        },
+        {
+            "in": "no-extension",
+            "out": "no-extension",
+            "out_valid": true
+        },
+        {
+            "in": ".hidden",
+            "out": ".hidden",
+            "out_valid": true
+        },
+        {
+            "in": "a.b.c",
+            "out": "a.b.c",
+            "out_valid": true
+        },
+        {
+            "in": "/",
+            "out": "",
+            "out_valid": false
+        },
+        {
+            "in": "//",
+            "out": "",
+            "out_valid": false
+        },
+        {
+            "in": "/a",
+            "out": "a",
+            "out_valid": true
+        },
+        {
+            "in": "a/",
+            "out": "a",
+            "out_valid": true
+        },
+        {
+            "in": "a/b",
+            "out": "b",
+            "out_valid": true
+        },
+        {
+            "in": "a/b/c.txt",
+            "out": "c.txt",
+            "out_valid": true
+        },
+        {
+            "in": "\\",
+            "out": "",
+            "out_valid": false
+        },
+        {
+            "in": "a\\b",
+            "out": "b",
+            "out_valid": true
+        },
+        {
+            "in": "a\\b\\c.txt",
+            "out": "c.txt",
+            "out_valid": true
+        },
+        {
+            "in": "\\\\server\\share\\f.txt",
+            "out": "f.txt",
+            "out_valid": true
+        },
+        {
+            "in": "with space.txt",
+            "out": "with space.txt",
+            "out_valid": true
+        },
+        {
+            "in": "  leading.txt",
+            "out": "  leading.txt",
+            "out_valid": true
+        },
+        {
+            "in": "trailing.txt  ",
+            "out": "trailing.txt  ",
+            "out_valid": true
+        },
+        {
+            "in": "\u0000null",
+            "out": "null",
+            "out_valid": true
+        },
+        {
+            "in": "a\u0001b",
+            "out": "ab",
+            "out_valid": true
+        },
+        {
+            "in": "a\u001fb",
+            "out": "ab",
+            "out_valid": true
+        },
+        {
+            "in": "ab",
+            "out": "ab",
+            "out_valid": true
+        },
+        {
+            "in": "",
+            "out": "",
+            "out_valid": false
+        },
+        {
+            "in": "a\tb",
+            "out": "ab",
+            "out_valid": true
+        },
+        {
+            "in": "a\nb",
+            "out": "ab",
+            "out_valid": true
+        },
+        {
+            "in": "unicode-é.txt",
+            "out": "unicode-é.txt",
+            "out_valid": true
+        },
+        {
+            "in": "日本語.txt",
+            "out": "日本語.txt",
+            "out_valid": true
+        },
+        {
+            "in": "😀.png",
+            "out": "😀.png",
+            "out_valid": true
+        },
+        {
+            "in": "é.txt",
+            "out": "é.txt",
+            "out_valid": true
+        },
+        {
+            "in": "é.txt",
+            "out": "é.txt",
+            "out_valid": true
+        },
+        {
+            "in": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "out": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "out_valid": true
+        },
+        {
+            "in": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "out": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "out_valid": true
+        },
+        {
+            "in": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "out": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "out_valid": true
+        },
+        {
+            "in": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "out": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "out_valid": true
+        },
+        {
+            "in": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+            "out": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+            "out_valid": true
+        },
+        {
+            "in": "ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+            "out": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+            "out_valid": true
+        },
+        {
+            "in": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé.txt",
+            "out": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé.txt",
+            "out_valid": true
+        },
+        {
+            "in": "a/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "out": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "out_valid": true
+        },
+        {
+            "in": "./file.txt",
+            "out": "file.txt",
+            "out_valid": true
+        },
+        {
+            "in": "../file.txt",
+            "out": "file.txt",
+            "out_valid": true
+        },
+        {
+            "in": "dir/../file.txt",
+            "out": "file.txt",
+            "out_valid": true
+        }
+    ],
+    "wire": [
+        {
+            "name": "zero",
+            "json": "{\"id\":\"\",\"user_id\":\"\",\"channel_id\":\"\",\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"name\":\"\",\"extension\":\"\",\"size\":0,\"mime_type\":\"\",\"mini_preview\":null,\"remote_id\":null,\"archived\":false}"
+        },
+        {
+            "name": "mini_preview_nil_pointer",
+            "json": "{\"id\":\"\",\"user_id\":\"\",\"channel_id\":\"\",\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"name\":\"\",\"extension\":\"\",\"size\":0,\"mime_type\":\"\",\"mini_preview\":null,\"remote_id\":null,\"archived\":false}"
+        },
+        {
+            "name": "mini_preview_pointer_to_nil_slice",
+            "json": "{\"id\":\"\",\"user_id\":\"\",\"channel_id\":\"\",\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"name\":\"\",\"extension\":\"\",\"size\":0,\"mime_type\":\"\",\"mini_preview\":null,\"remote_id\":null,\"archived\":false}"
+        },
+        {
+            "name": "mini_preview_pointer_to_empty_slice",
+            "json": "{\"id\":\"\",\"user_id\":\"\",\"channel_id\":\"\",\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"name\":\"\",\"extension\":\"\",\"size\":0,\"mime_type\":\"\",\"mini_preview\":\"\",\"remote_id\":null,\"archived\":false}"
+        },
+        {
+            "name": "mini_preview_pointer_to_data",
+            "json": "{\"id\":\"\",\"user_id\":\"\",\"channel_id\":\"\",\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"name\":\"\",\"extension\":\"\",\"size\":0,\"mime_type\":\"\",\"mini_preview\":\"AQID\",\"remote_id\":null,\"archived\":false}"
+        },
+        {
+            "name": "remote_id_nil",
+            "json": "{\"id\":\"\",\"user_id\":\"\",\"channel_id\":\"\",\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"name\":\"\",\"extension\":\"\",\"size\":0,\"mime_type\":\"\",\"mini_preview\":null,\"remote_id\":null,\"archived\":false}"
+        },
+        {
+            "name": "remote_id_empty",
+            "json": "{\"id\":\"\",\"user_id\":\"\",\"channel_id\":\"\",\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"name\":\"\",\"extension\":\"\",\"size\":0,\"mime_type\":\"\",\"mini_preview\":null,\"remote_id\":\"\",\"archived\":false}"
+        },
+        {
+            "name": "remote_id_set",
+            "json": "{\"id\":\"\",\"user_id\":\"\",\"channel_id\":\"\",\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"name\":\"\",\"extension\":\"\",\"size\":0,\"mime_type\":\"\",\"mini_preview\":null,\"remote_id\":\"cluster-a\",\"archived\":false}"
+        },
+        {
+            "name": "omitempty_all_zero",
+            "json": "{\"id\":\"\",\"user_id\":\"\",\"channel_id\":\"\",\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"name\":\"\",\"extension\":\"\",\"size\":0,\"mime_type\":\"\",\"mini_preview\":null,\"remote_id\":null,\"archived\":false}"
+        },
+        {
+            "name": "omitempty_all_set",
+            "json": "{\"id\":\"\",\"user_id\":\"\",\"post_id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"channel_id\":\"\",\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"name\":\"\",\"extension\":\"\",\"size\":0,\"mime_type\":\"\",\"width\":640,\"height\":480,\"has_preview_image\":true,\"mini_preview\":null,\"remote_id\":null,\"archived\":false}"
+        },
+        {
+            "name": "hidden_fields_populated",
+            "json": "{\"id\":\"\",\"user_id\":\"\",\"channel_id\":\"\",\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"name\":\"\",\"extension\":\"\",\"size\":0,\"mime_type\":\"\",\"mini_preview\":null,\"remote_id\":null,\"archived\":false}"
+        },
+        {
+            "name": "archived",
+            "json": "{\"id\":\"\",\"user_id\":\"\",\"channel_id\":\"\",\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"name\":\"\",\"extension\":\"\",\"size\":0,\"mime_type\":\"\",\"mini_preview\":null,\"remote_id\":null,\"archived\":true}"
+        }
+    ]
+}

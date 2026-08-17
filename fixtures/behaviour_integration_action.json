@@ -1,0 +1,1996 @@
+{
+    "constants": {
+        "format_apps_binding": "apps_binding",
+        "format_attachment": "attachment",
+        "format_block": "block",
+        "format_card": "card",
+        "format_mm_block": "mm_block",
+        "max_action_query_entries": 50,
+        "max_action_query_key_length": 128,
+        "max_action_query_value_length": 2048,
+        "max_mm_blocks_action_key_len": 64,
+        "max_mm_blocks_actions_per_post": 50,
+        "mm_blocks_action_cookie_kind": "mm_blocks_actions",
+        "post_action_data_source_chans": "channels",
+        "post_action_data_source_users": "users",
+        "post_action_retain_prop_keys": [
+            "from_webhook",
+            "from_bot",
+            "from_plugin",
+            "override_username",
+            "override_icon_url"
+        ],
+        "post_action_type_button": "button",
+        "post_action_type_select": "select"
+    },
+    "multierror_format": [
+        {
+            "count": 1,
+            "error": "1 error occurred:\n\t* first\n\n",
+            "inputs": [
+                "first"
+            ],
+            "name": "one"
+        },
+        {
+            "count": 2,
+            "error": "2 errors occurred:\n\t* first\n\t* second\n\n",
+            "inputs": [
+                "first",
+                "second"
+            ],
+            "name": "two"
+        },
+        {
+            "count": 3,
+            "error": "3 errors occurred:\n\t* a\n\t* b\n\t* c\n\n",
+            "inputs": [
+                "a",
+                "b",
+                "c"
+            ],
+            "name": "three"
+        },
+        {
+            "count": 1,
+            "error": "1 error occurred:\n\t* \n\n",
+            "inputs": [
+                ""
+            ],
+            "name": "empty_message"
+        },
+        {
+            "count": 1,
+            "error": "1 error occurred:\n\t* first\nsecond\n\n",
+            "inputs": [
+                "first\nsecond"
+            ],
+            "name": "with_newline"
+        },
+        {
+            "count": 2,
+            "error": "2 errors occurred:\n\t* option at index 0 is invalid: text is required\n\t* option at index 0 is invalid: value is required\n\n",
+            "messages": [
+                "option at index 0 is invalid: text is required",
+                "option at index 0 is invalid: value is required"
+            ],
+            "name": "prefixed"
+        }
+    ],
+    "normalize_format": {
+        "": "attachment",
+        "\tcard\n": "card",
+        "  ": "attachment",
+        " mm_block ": "mm_block",
+        "BLOCK ": "block",
+        "MM_BLOCK": "mm_block",
+        "Mm_Block": "mm_block",
+        "apps_binding": "apps_binding",
+        "attachment": "attachment",
+        "attachments": "attachment",
+        "block": "block",
+        "card": "card",
+        "mm block": "attachment",
+        "mm_block": "mm_block",
+        "mm_blocks": "attachment",
+        "unknown": "attachment"
+    },
+    "post_action_equals": [
+        {
+            "name": "identical",
+            "a": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "type": "select",
+                "name": "Pick",
+                "tooltip": "tip",
+                "style": "primary",
+                "options": [
+                    {
+                        "text": "a",
+                        "value": "1"
+                    }
+                ],
+                "default_option": "a",
+                "integration": {
+                    "url": "https://example.com/hook",
+                    "context": {
+                        "k": "v"
+                    }
+                },
+                "cookie": "cookie"
+            },
+            "b": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "type": "select",
+                "name": "Pick",
+                "tooltip": "tip",
+                "style": "primary",
+                "options": [
+                    {
+                        "text": "a",
+                        "value": "1"
+                    }
+                ],
+                "default_option": "a",
+                "integration": {
+                    "url": "https://example.com/hook",
+                    "context": {
+                        "k": "v"
+                    }
+                },
+                "cookie": "cookie"
+            },
+            "equals": true
+        },
+        {
+            "name": "tooltip_differs_still_equal",
+            "a": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "type": "select",
+                "name": "Pick",
+                "tooltip": "tip",
+                "style": "primary",
+                "options": [
+                    {
+                        "text": "a",
+                        "value": "1"
+                    }
+                ],
+                "default_option": "a",
+                "integration": {
+                    "url": "https://example.com/hook",
+                    "context": {
+                        "k": "v"
+                    }
+                },
+                "cookie": "cookie"
+            },
+            "b": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "type": "select",
+                "name": "Pick",
+                "tooltip": "other",
+                "style": "primary",
+                "options": [
+                    {
+                        "text": "a",
+                        "value": "1"
+                    }
+                ],
+                "default_option": "a",
+                "integration": {
+                    "url": "https://example.com/hook",
+                    "context": {
+                        "k": "v"
+                    }
+                },
+                "cookie": "cookie"
+            },
+            "equals": true
+        },
+        {
+            "name": "disabled_differs_still_equal",
+            "a": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "type": "select",
+                "name": "Pick",
+                "tooltip": "tip",
+                "style": "primary",
+                "options": [
+                    {
+                        "text": "a",
+                        "value": "1"
+                    }
+                ],
+                "default_option": "a",
+                "integration": {
+                    "url": "https://example.com/hook",
+                    "context": {
+                        "k": "v"
+                    }
+                },
+                "cookie": "cookie"
+            },
+            "b": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "type": "select",
+                "name": "Pick",
+                "tooltip": "tip",
+                "disabled": true,
+                "style": "primary",
+                "options": [
+                    {
+                        "text": "a",
+                        "value": "1"
+                    }
+                ],
+                "default_option": "a",
+                "integration": {
+                    "url": "https://example.com/hook",
+                    "context": {
+                        "k": "v"
+                    }
+                },
+                "cookie": "cookie"
+            },
+            "equals": true
+        },
+        {
+            "name": "style_differs_still_equal",
+            "a": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "type": "select",
+                "name": "Pick",
+                "tooltip": "tip",
+                "style": "primary",
+                "options": [
+                    {
+                        "text": "a",
+                        "value": "1"
+                    }
+                ],
+                "default_option": "a",
+                "integration": {
+                    "url": "https://example.com/hook",
+                    "context": {
+                        "k": "v"
+                    }
+                },
+                "cookie": "cookie"
+            },
+            "b": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "type": "select",
+                "name": "Pick",
+                "tooltip": "tip",
+                "style": "danger",
+                "options": [
+                    {
+                        "text": "a",
+                        "value": "1"
+                    }
+                ],
+                "default_option": "a",
+                "integration": {
+                    "url": "https://example.com/hook",
+                    "context": {
+                        "k": "v"
+                    }
+                },
+                "cookie": "cookie"
+            },
+            "equals": true
+        },
+        {
+            "name": "id_differs",
+            "a": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "type": "select",
+                "name": "Pick",
+                "tooltip": "tip",
+                "style": "primary",
+                "options": [
+                    {
+                        "text": "a",
+                        "value": "1"
+                    }
+                ],
+                "default_option": "a",
+                "integration": {
+                    "url": "https://example.com/hook",
+                    "context": {
+                        "k": "v"
+                    }
+                },
+                "cookie": "cookie"
+            },
+            "b": {
+                "id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "type": "select",
+                "name": "Pick",
+                "tooltip": "tip",
+                "style": "primary",
+                "options": [
+                    {
+                        "text": "a",
+                        "value": "1"
+                    }
+                ],
+                "default_option": "a",
+                "integration": {
+                    "url": "https://example.com/hook",
+                    "context": {
+                        "k": "v"
+                    }
+                },
+                "cookie": "cookie"
+            },
+            "equals": false
+        },
+        {
+            "name": "type_differs",
+            "a": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "type": "select",
+                "name": "Pick",
+                "tooltip": "tip",
+                "style": "primary",
+                "options": [
+                    {
+                        "text": "a",
+                        "value": "1"
+                    }
+                ],
+                "default_option": "a",
+                "integration": {
+                    "url": "https://example.com/hook",
+                    "context": {
+                        "k": "v"
+                    }
+                },
+                "cookie": "cookie"
+            },
+            "b": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "type": "button",
+                "name": "Pick",
+                "tooltip": "tip",
+                "style": "primary",
+                "options": [
+                    {
+                        "text": "a",
+                        "value": "1"
+                    }
+                ],
+                "default_option": "a",
+                "integration": {
+                    "url": "https://example.com/hook",
+                    "context": {
+                        "k": "v"
+                    }
+                },
+                "cookie": "cookie"
+            },
+            "equals": false
+        },
+        {
+            "name": "name_differs",
+            "a": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "type": "select",
+                "name": "Pick",
+                "tooltip": "tip",
+                "style": "primary",
+                "options": [
+                    {
+                        "text": "a",
+                        "value": "1"
+                    }
+                ],
+                "default_option": "a",
+                "integration": {
+                    "url": "https://example.com/hook",
+                    "context": {
+                        "k": "v"
+                    }
+                },
+                "cookie": "cookie"
+            },
+            "b": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "type": "select",
+                "name": "Other",
+                "tooltip": "tip",
+                "style": "primary",
+                "options": [
+                    {
+                        "text": "a",
+                        "value": "1"
+                    }
+                ],
+                "default_option": "a",
+                "integration": {
+                    "url": "https://example.com/hook",
+                    "context": {
+                        "k": "v"
+                    }
+                },
+                "cookie": "cookie"
+            },
+            "equals": false
+        },
+        {
+            "name": "data_source_differs",
+            "a": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "type": "select",
+                "name": "Pick",
+                "tooltip": "tip",
+                "style": "primary",
+                "options": [
+                    {
+                        "text": "a",
+                        "value": "1"
+                    }
+                ],
+                "default_option": "a",
+                "integration": {
+                    "url": "https://example.com/hook",
+                    "context": {
+                        "k": "v"
+                    }
+                },
+                "cookie": "cookie"
+            },
+            "b": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "type": "select",
+                "name": "Pick",
+                "tooltip": "tip",
+                "style": "primary",
+                "data_source": "users",
+                "options": [
+                    {
+                        "text": "a",
+                        "value": "1"
+                    }
+                ],
+                "default_option": "a",
+                "integration": {
+                    "url": "https://example.com/hook",
+                    "context": {
+                        "k": "v"
+                    }
+                },
+                "cookie": "cookie"
+            },
+            "equals": false
+        },
+        {
+            "name": "default_option_differs",
+            "a": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "type": "select",
+                "name": "Pick",
+                "tooltip": "tip",
+                "style": "primary",
+                "options": [
+                    {
+                        "text": "a",
+                        "value": "1"
+                    }
+                ],
+                "default_option": "a",
+                "integration": {
+                    "url": "https://example.com/hook",
+                    "context": {
+                        "k": "v"
+                    }
+                },
+                "cookie": "cookie"
+            },
+            "b": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "type": "select",
+                "name": "Pick",
+                "tooltip": "tip",
+                "style": "primary",
+                "options": [
+                    {
+                        "text": "a",
+                        "value": "1"
+                    }
+                ],
+                "default_option": "z",
+                "integration": {
+                    "url": "https://example.com/hook",
+                    "context": {
+                        "k": "v"
+                    }
+                },
+                "cookie": "cookie"
+            },
+            "equals": false
+        },
+        {
+            "name": "cookie_differs",
+            "a": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "type": "select",
+                "name": "Pick",
+                "tooltip": "tip",
+                "style": "primary",
+                "options": [
+                    {
+                        "text": "a",
+                        "value": "1"
+                    }
+                ],
+                "default_option": "a",
+                "integration": {
+                    "url": "https://example.com/hook",
+                    "context": {
+                        "k": "v"
+                    }
+                },
+                "cookie": "cookie"
+            },
+            "b": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "type": "select",
+                "name": "Pick",
+                "tooltip": "tip",
+                "style": "primary",
+                "options": [
+                    {
+                        "text": "a",
+                        "value": "1"
+                    }
+                ],
+                "default_option": "a",
+                "integration": {
+                    "url": "https://example.com/hook",
+                    "context": {
+                        "k": "v"
+                    }
+                },
+                "cookie": "other"
+            },
+            "equals": false
+        },
+        {
+            "name": "option_text_differs",
+            "a": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "type": "select",
+                "name": "Pick",
+                "tooltip": "tip",
+                "style": "primary",
+                "options": [
+                    {
+                        "text": "a",
+                        "value": "1"
+                    }
+                ],
+                "default_option": "a",
+                "integration": {
+                    "url": "https://example.com/hook",
+                    "context": {
+                        "k": "v"
+                    }
+                },
+                "cookie": "cookie"
+            },
+            "b": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "type": "select",
+                "name": "Pick",
+                "tooltip": "tip",
+                "style": "primary",
+                "options": [
+                    {
+                        "text": "z",
+                        "value": "1"
+                    }
+                ],
+                "default_option": "a",
+                "integration": {
+                    "url": "https://example.com/hook",
+                    "context": {
+                        "k": "v"
+                    }
+                },
+                "cookie": "cookie"
+            },
+            "equals": false
+        },
+        {
+            "name": "option_value_differs",
+            "a": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "type": "select",
+                "name": "Pick",
+                "tooltip": "tip",
+                "style": "primary",
+                "options": [
+                    {
+                        "text": "a",
+                        "value": "1"
+                    }
+                ],
+                "default_option": "a",
+                "integration": {
+                    "url": "https://example.com/hook",
+                    "context": {
+                        "k": "v"
+                    }
+                },
+                "cookie": "cookie"
+            },
+            "b": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "type": "select",
+                "name": "Pick",
+                "tooltip": "tip",
+                "style": "primary",
+                "options": [
+                    {
+                        "text": "a",
+                        "value": "9"
+                    }
+                ],
+                "default_option": "a",
+                "integration": {
+                    "url": "https://example.com/hook",
+                    "context": {
+                        "k": "v"
+                    }
+                },
+                "cookie": "cookie"
+            },
+            "equals": false
+        },
+        {
+            "name": "option_count_differs",
+            "a": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "type": "select",
+                "name": "Pick",
+                "tooltip": "tip",
+                "style": "primary",
+                "options": [
+                    {
+                        "text": "a",
+                        "value": "1"
+                    }
+                ],
+                "default_option": "a",
+                "integration": {
+                    "url": "https://example.com/hook",
+                    "context": {
+                        "k": "v"
+                    }
+                },
+                "cookie": "cookie"
+            },
+            "b": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "type": "select",
+                "name": "Pick",
+                "tooltip": "tip",
+                "style": "primary",
+                "options": [
+                    {
+                        "text": "a",
+                        "value": "1"
+                    },
+                    {
+                        "text": "b",
+                        "value": "2"
+                    }
+                ],
+                "default_option": "a",
+                "integration": {
+                    "url": "https://example.com/hook",
+                    "context": {
+                        "k": "v"
+                    }
+                },
+                "cookie": "cookie"
+            },
+            "equals": false
+        },
+        {
+            "name": "options_emptied",
+            "a": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "type": "select",
+                "name": "Pick",
+                "tooltip": "tip",
+                "style": "primary",
+                "options": [
+                    {
+                        "text": "a",
+                        "value": "1"
+                    }
+                ],
+                "default_option": "a",
+                "integration": {
+                    "url": "https://example.com/hook",
+                    "context": {
+                        "k": "v"
+                    }
+                },
+                "cookie": "cookie"
+            },
+            "b": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "type": "select",
+                "name": "Pick",
+                "tooltip": "tip",
+                "style": "primary",
+                "default_option": "a",
+                "integration": {
+                    "url": "https://example.com/hook",
+                    "context": {
+                        "k": "v"
+                    }
+                },
+                "cookie": "cookie"
+            },
+            "equals": false
+        },
+        {
+            "name": "integration_url_differs",
+            "a": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "type": "select",
+                "name": "Pick",
+                "tooltip": "tip",
+                "style": "primary",
+                "options": [
+                    {
+                        "text": "a",
+                        "value": "1"
+                    }
+                ],
+                "default_option": "a",
+                "integration": {
+                    "url": "https://example.com/hook",
+                    "context": {
+                        "k": "v"
+                    }
+                },
+                "cookie": "cookie"
+            },
+            "b": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "type": "select",
+                "name": "Pick",
+                "tooltip": "tip",
+                "style": "primary",
+                "options": [
+                    {
+                        "text": "a",
+                        "value": "1"
+                    }
+                ],
+                "default_option": "a",
+                "integration": {
+                    "url": "https://other.com",
+                    "context": {
+                        "k": "v"
+                    }
+                },
+                "cookie": "cookie"
+            },
+            "equals": false
+        },
+        {
+            "name": "integration_nil_on_b",
+            "a": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "type": "select",
+                "name": "Pick",
+                "tooltip": "tip",
+                "style": "primary",
+                "options": [
+                    {
+                        "text": "a",
+                        "value": "1"
+                    }
+                ],
+                "default_option": "a",
+                "integration": {
+                    "url": "https://example.com/hook",
+                    "context": {
+                        "k": "v"
+                    }
+                },
+                "cookie": "cookie"
+            },
+            "b": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "type": "select",
+                "name": "Pick",
+                "tooltip": "tip",
+                "style": "primary",
+                "options": [
+                    {
+                        "text": "a",
+                        "value": "1"
+                    }
+                ],
+                "default_option": "a",
+                "cookie": "cookie"
+            },
+            "equals": false
+        },
+        {
+            "name": "context_value_differs",
+            "a": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "type": "select",
+                "name": "Pick",
+                "tooltip": "tip",
+                "style": "primary",
+                "options": [
+                    {
+                        "text": "a",
+                        "value": "1"
+                    }
+                ],
+                "default_option": "a",
+                "integration": {
+                    "url": "https://example.com/hook",
+                    "context": {
+                        "k": "v"
+                    }
+                },
+                "cookie": "cookie"
+            },
+            "b": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "type": "select",
+                "name": "Pick",
+                "tooltip": "tip",
+                "style": "primary",
+                "options": [
+                    {
+                        "text": "a",
+                        "value": "1"
+                    }
+                ],
+                "default_option": "a",
+                "integration": {
+                    "url": "https://example.com/hook",
+                    "context": {
+                        "k": "other"
+                    }
+                },
+                "cookie": "cookie"
+            },
+            "equals": false
+        },
+        {
+            "name": "context_key_differs",
+            "a": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "type": "select",
+                "name": "Pick",
+                "tooltip": "tip",
+                "style": "primary",
+                "options": [
+                    {
+                        "text": "a",
+                        "value": "1"
+                    }
+                ],
+                "default_option": "a",
+                "integration": {
+                    "url": "https://example.com/hook",
+                    "context": {
+                        "k": "v"
+                    }
+                },
+                "cookie": "cookie"
+            },
+            "b": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "type": "select",
+                "name": "Pick",
+                "tooltip": "tip",
+                "style": "primary",
+                "options": [
+                    {
+                        "text": "a",
+                        "value": "1"
+                    }
+                ],
+                "default_option": "a",
+                "integration": {
+                    "url": "https://example.com/hook",
+                    "context": {
+                        "other": "v"
+                    }
+                },
+                "cookie": "cookie"
+            },
+            "equals": false
+        },
+        {
+            "name": "context_count_differs",
+            "a": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "type": "select",
+                "name": "Pick",
+                "tooltip": "tip",
+                "style": "primary",
+                "options": [
+                    {
+                        "text": "a",
+                        "value": "1"
+                    }
+                ],
+                "default_option": "a",
+                "integration": {
+                    "url": "https://example.com/hook",
+                    "context": {
+                        "k": "v"
+                    }
+                },
+                "cookie": "cookie"
+            },
+            "b": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "type": "select",
+                "name": "Pick",
+                "tooltip": "tip",
+                "style": "primary",
+                "options": [
+                    {
+                        "text": "a",
+                        "value": "1"
+                    }
+                ],
+                "default_option": "a",
+                "integration": {
+                    "url": "https://example.com/hook",
+                    "context": {
+                        "j": "w",
+                        "k": "v"
+                    }
+                },
+                "cookie": "cookie"
+            },
+            "equals": false
+        },
+        {
+            "name": "context_nested_equal",
+            "a": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "type": "select",
+                "name": "Pick",
+                "tooltip": "tip",
+                "style": "primary",
+                "options": [
+                    {
+                        "text": "a",
+                        "value": "1"
+                    }
+                ],
+                "default_option": "a",
+                "integration": {
+                    "url": "https://example.com/hook",
+                    "context": {
+                        "k": "v"
+                    }
+                },
+                "cookie": "cookie"
+            },
+            "b": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "type": "select",
+                "name": "Pick",
+                "tooltip": "tip",
+                "style": "primary",
+                "options": [
+                    {
+                        "text": "a",
+                        "value": "1"
+                    }
+                ],
+                "default_option": "a",
+                "integration": {
+                    "url": "https://example.com/hook",
+                    "context": {
+                        "k": "v"
+                    }
+                },
+                "cookie": "cookie"
+            },
+            "equals": true
+        },
+        {
+            "name": "both_integrations_nil",
+            "a": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "type": "select",
+                "name": "Pick",
+                "tooltip": "tip",
+                "style": "primary",
+                "options": [
+                    {
+                        "text": "a",
+                        "value": "1"
+                    }
+                ],
+                "default_option": "a",
+                "cookie": "cookie"
+            },
+            "b": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "type": "select",
+                "name": "Pick",
+                "tooltip": "tip",
+                "style": "primary",
+                "options": [
+                    {
+                        "text": "a",
+                        "value": "1"
+                    }
+                ],
+                "default_option": "a",
+                "cookie": "cookie"
+            },
+            "equals": true
+        },
+        {
+            "name": "nested_context_deep_equal",
+            "a": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "type": "select",
+                "name": "Pick",
+                "tooltip": "tip",
+                "style": "primary",
+                "options": [
+                    {
+                        "text": "a",
+                        "value": "1"
+                    }
+                ],
+                "default_option": "a",
+                "integration": {
+                    "url": "u",
+                    "context": {
+                        "k": {
+                            "deep": [
+                                "x",
+                                1
+                            ]
+                        }
+                    }
+                },
+                "cookie": "cookie"
+            },
+            "b": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "type": "select",
+                "name": "Pick",
+                "tooltip": "tip",
+                "style": "primary",
+                "options": [
+                    {
+                        "text": "a",
+                        "value": "1"
+                    }
+                ],
+                "default_option": "a",
+                "integration": {
+                    "url": "u",
+                    "context": {
+                        "k": {
+                            "deep": [
+                                "x",
+                                1
+                            ]
+                        }
+                    }
+                },
+                "cookie": "cookie"
+            },
+            "equals": true
+        }
+    ],
+    "post_action_equals_panics": {
+        "nil_option_on_both": true,
+        "nil_option_on_input": true,
+        "nil_option_on_receiver": true,
+        "no_options": false
+    },
+    "post_action_is_valid": [
+        {
+            "name": "zero",
+            "action": {},
+            "messages": [
+                "action must have a name",
+                "invalid action type: must be 'button' or 'select'",
+                "action must have integration settings"
+            ],
+            "error": "3 errors occurred:\n\t* action must have a name\n\t* invalid action type: must be 'button' or 'select'\n\t* action must have integration settings\n\n"
+        },
+        {
+            "name": "valid_button",
+            "action": {
+                "type": "button",
+                "name": "Go",
+                "integration": {
+                    "url": "https://example.com/hook"
+                }
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "valid_select_options",
+            "action": {
+                "type": "select",
+                "name": "Pick",
+                "options": [
+                    {
+                        "text": "a",
+                        "value": "1"
+                    }
+                ],
+                "integration": {
+                    "url": "https://example.com/hook"
+                }
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "valid_select_data_source",
+            "action": {
+                "type": "select",
+                "name": "Pick",
+                "data_source": "users",
+                "integration": {
+                    "url": "https://example.com/hook"
+                }
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "no_name",
+            "action": {
+                "type": "button",
+                "integration": {
+                    "url": "https://x.com"
+                }
+            },
+            "messages": [
+                "action must have a name"
+            ],
+            "error": "1 error occurred:\n\t* action must have a name\n\n"
+        },
+        {
+            "name": "style_default",
+            "action": {
+                "type": "button",
+                "name": "n",
+                "style": "default",
+                "integration": {
+                    "url": "https://x.com"
+                }
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "style_danger",
+            "action": {
+                "type": "button",
+                "name": "n",
+                "style": "danger",
+                "integration": {
+                    "url": "https://x.com"
+                }
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "style_hex6",
+            "action": {
+                "type": "button",
+                "name": "n",
+                "style": "#a1b2c3",
+                "integration": {
+                    "url": "https://x.com"
+                }
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "style_hex3",
+            "action": {
+                "type": "button",
+                "name": "n",
+                "style": "#abc",
+                "integration": {
+                    "url": "https://x.com"
+                }
+            },
+            "messages": [
+                "invalid style '#abc' - must be one of [default, primary, success, good, warning, danger] or a hex color"
+            ],
+            "error": "1 error occurred:\n\t* invalid style '#abc' - must be one of [default, primary, success, good, warning, danger] or a hex color\n\n"
+        },
+        {
+            "name": "style_hex_no_hash",
+            "action": {
+                "type": "button",
+                "name": "n",
+                "style": "a1b2c3",
+                "integration": {
+                    "url": "https://x.com"
+                }
+            },
+            "messages": [
+                "invalid style 'a1b2c3' - must be one of [default, primary, success, good, warning, danger] or a hex color"
+            ],
+            "error": "1 error occurred:\n\t* invalid style 'a1b2c3' - must be one of [default, primary, success, good, warning, danger] or a hex color\n\n"
+        },
+        {
+            "name": "style_hex_uppercase",
+            "action": {
+                "type": "button",
+                "name": "n",
+                "style": "#A1B2C3",
+                "integration": {
+                    "url": "https://x.com"
+                }
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "style_unknown_word",
+            "action": {
+                "type": "button",
+                "name": "n",
+                "style": "Danger",
+                "integration": {
+                    "url": "https://x.com"
+                }
+            },
+            "messages": [
+                "invalid style 'Danger' - must be one of [default, primary, success, good, warning, danger] or a hex color"
+            ],
+            "error": "1 error occurred:\n\t* invalid style 'Danger' - must be one of [default, primary, success, good, warning, danger] or a hex color\n\n"
+        },
+        {
+            "name": "type_empty",
+            "action": {
+                "name": "n",
+                "integration": {
+                    "url": "https://x.com"
+                }
+            },
+            "messages": [
+                "invalid action type: must be 'button' or 'select'"
+            ],
+            "error": "1 error occurred:\n\t* invalid action type: must be 'button' or 'select'\n\n"
+        },
+        {
+            "name": "type_unknown",
+            "action": {
+                "type": "radio",
+                "name": "n",
+                "integration": {
+                    "url": "https://x.com"
+                }
+            },
+            "messages": [
+                "invalid action type: must be 'button' or 'select'"
+            ],
+            "error": "1 error occurred:\n\t* invalid action type: must be 'button' or 'select'\n\n"
+        },
+        {
+            "name": "type_button_uppercase",
+            "action": {
+                "type": "Button",
+                "name": "n",
+                "integration": {
+                    "url": "https://x.com"
+                }
+            },
+            "messages": [
+                "invalid action type: must be 'button' or 'select'"
+            ],
+            "error": "1 error occurred:\n\t* invalid action type: must be 'button' or 'select'\n\n"
+        },
+        {
+            "name": "button_with_options",
+            "action": {
+                "type": "button",
+                "name": "n",
+                "options": [
+                    {
+                        "text": "a",
+                        "value": "1"
+                    }
+                ],
+                "integration": {
+                    "url": "https://x.com"
+                }
+            },
+            "messages": [
+                "button action must not have options"
+            ],
+            "error": "1 error occurred:\n\t* button action must not have options\n\n"
+        },
+        {
+            "name": "button_with_data_source",
+            "action": {
+                "type": "button",
+                "name": "n",
+                "data_source": "users",
+                "integration": {
+                    "url": "https://x.com"
+                }
+            },
+            "messages": [
+                "button action must not have a data source"
+            ],
+            "error": "1 error occurred:\n\t* button action must not have a data source\n\n"
+        },
+        {
+            "name": "button_with_both",
+            "action": {
+                "type": "button",
+                "name": "n",
+                "data_source": "users",
+                "options": [
+                    {
+                        "text": "a",
+                        "value": "1"
+                    }
+                ],
+                "integration": {
+                    "url": "https://x.com"
+                }
+            },
+            "messages": [
+                "button action must not have options",
+                "button action must not have a data source"
+            ],
+            "error": "2 errors occurred:\n\t* button action must not have options\n\t* button action must not have a data source\n\n"
+        },
+        {
+            "name": "select_no_options_no_source",
+            "action": {
+                "type": "select",
+                "name": "n",
+                "integration": {
+                    "url": "https://x.com"
+                }
+            },
+            "messages": [
+                "select action must have either DataSource or Options set"
+            ],
+            "error": "1 error occurred:\n\t* select action must have either DataSource or Options set\n\n"
+        },
+        {
+            "name": "select_bad_data_source",
+            "action": {
+                "type": "select",
+                "name": "n",
+                "data_source": "teams",
+                "integration": {
+                    "url": "https://x.com"
+                }
+            },
+            "messages": [
+                "invalid data_source 'teams' for select action"
+            ],
+            "error": "1 error occurred:\n\t* invalid data_source 'teams' for select action\n\n"
+        },
+        {
+            "name": "select_source_and_options",
+            "action": {
+                "type": "select",
+                "name": "n",
+                "data_source": "channels",
+                "options": [
+                    {
+                        "text": "a",
+                        "value": "1"
+                    }
+                ],
+                "integration": {
+                    "url": "https://x.com"
+                }
+            },
+            "messages": [
+                "select action cannot have both DataSource and Options set"
+            ],
+            "error": "1 error occurred:\n\t* select action cannot have both DataSource and Options set\n\n"
+        },
+        {
+            "name": "select_bad_source_and_options",
+            "action": {
+                "type": "select",
+                "name": "n",
+                "data_source": "teams",
+                "options": [
+                    {
+                        "text": "a",
+                        "value": "1"
+                    }
+                ],
+                "integration": {
+                    "url": "https://x.com"
+                }
+            },
+            "messages": [
+                "invalid data_source 'teams' for select action",
+                "select action cannot have both DataSource and Options set"
+            ],
+            "error": "2 errors occurred:\n\t* invalid data_source 'teams' for select action\n\t* select action cannot have both DataSource and Options set\n\n"
+        },
+        {
+            "name": "select_empty_options_slice",
+            "action": {
+                "type": "select",
+                "name": "n",
+                "integration": {
+                    "url": "https://x.com"
+                }
+            },
+            "messages": [
+                "select action must have either DataSource or Options set"
+            ],
+            "error": "1 error occurred:\n\t* select action must have either DataSource or Options set\n\n"
+        },
+        {
+            "name": "select_option_missing_text",
+            "action": {
+                "type": "select",
+                "name": "n",
+                "options": [
+                    {
+                        "text": "",
+                        "value": "1"
+                    }
+                ],
+                "integration": {
+                    "url": "https://x.com"
+                }
+            },
+            "messages": [
+                "option at index 0 is invalid: text is required"
+            ],
+            "error": "1 error occurred:\n\t* option at index 0 is invalid: text is required\n\n"
+        },
+        {
+            "name": "select_option_missing_both",
+            "action": {
+                "type": "select",
+                "name": "n",
+                "options": [
+                    {
+                        "text": "",
+                        "value": ""
+                    }
+                ],
+                "integration": {
+                    "url": "https://x.com"
+                }
+            },
+            "messages": [
+                "option at index 0 is invalid: text is required",
+                "option at index 0 is invalid: value is required"
+            ],
+            "error": "2 errors occurred:\n\t* option at index 0 is invalid: text is required\n\t* option at index 0 is invalid: value is required\n\n"
+        },
+        {
+            "name": "select_second_option_bad",
+            "action": {
+                "type": "select",
+                "name": "n",
+                "options": [
+                    {
+                        "text": "a",
+                        "value": "1"
+                    },
+                    {
+                        "text": "",
+                        "value": ""
+                    }
+                ],
+                "integration": {
+                    "url": "https://x.com"
+                }
+            },
+            "messages": [
+                "option at index 1 is invalid: text is required",
+                "option at index 1 is invalid: value is required"
+            ],
+            "error": "2 errors occurred:\n\t* option at index 1 is invalid: text is required\n\t* option at index 1 is invalid: value is required\n\n"
+        },
+        {
+            "name": "select_nil_option",
+            "action": {
+                "type": "select",
+                "name": "n",
+                "options": [
+                    null
+                ],
+                "integration": {
+                    "url": "https://x.com"
+                }
+            },
+            "messages": [
+                "select action contains nil option"
+            ],
+            "error": "1 error occurred:\n\t* select action contains nil option\n\n"
+        },
+        {
+            "name": "select_nil_then_bad_option",
+            "action": {
+                "type": "select",
+                "name": "n",
+                "options": [
+                    null,
+                    {
+                        "text": "",
+                        "value": ""
+                    }
+                ],
+                "integration": {
+                    "url": "https://x.com"
+                }
+            },
+            "messages": [
+                "select action contains nil option",
+                "option at index 1 is invalid: text is required",
+                "option at index 1 is invalid: value is required"
+            ],
+            "error": "3 errors occurred:\n\t* select action contains nil option\n\t* option at index 1 is invalid: text is required\n\t* option at index 1 is invalid: value is required\n\n"
+        },
+        {
+            "name": "integration_nil",
+            "action": {
+                "type": "button",
+                "name": "n"
+            },
+            "messages": [
+                "action must have integration settings"
+            ],
+            "error": "1 error occurred:\n\t* action must have integration settings\n\n"
+        },
+        {
+            "name": "integration_empty_url",
+            "action": {
+                "type": "button",
+                "name": "n",
+                "integration": {}
+            },
+            "messages": [
+                "action must have an integration URL",
+                "action must have an valid integration URL"
+            ],
+            "error": "2 errors occurred:\n\t* action must have an integration URL\n\t* action must have an valid integration URL\n\n"
+        },
+        {
+            "name": "integration_plugin_absolute",
+            "action": {
+                "type": "button",
+                "name": "n",
+                "integration": {
+                    "url": "/plugins/x"
+                }
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "integration_plugin_relative",
+            "action": {
+                "type": "button",
+                "name": "n",
+                "integration": {
+                    "url": "plugins/x"
+                }
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "integration_plugin_dot_relative",
+            "action": {
+                "type": "button",
+                "name": "n",
+                "integration": {
+                    "url": "./plugins/x"
+                }
+            },
+            "messages": [
+                "action must have an valid integration URL"
+            ],
+            "error": "1 error occurred:\n\t* action must have an valid integration URL\n\n"
+        },
+        {
+            "name": "integration_plugin_prefix_only",
+            "action": {
+                "type": "button",
+                "name": "n",
+                "integration": {
+                    "url": "/plugins/"
+                }
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "integration_plugins_lookalike",
+            "action": {
+                "type": "button",
+                "name": "n",
+                "integration": {
+                    "url": "/pluginsx"
+                }
+            },
+            "messages": [
+                "action must have an valid integration URL"
+            ],
+            "error": "1 error occurred:\n\t* action must have an valid integration URL\n\n"
+        },
+        {
+            "name": "integration_http",
+            "action": {
+                "type": "button",
+                "name": "n",
+                "integration": {
+                    "url": "http://x.com"
+                }
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "integration_ftp",
+            "action": {
+                "type": "button",
+                "name": "n",
+                "integration": {
+                    "url": "ftp://x.com"
+                }
+            },
+            "messages": [
+                "action must have an valid integration URL"
+            ],
+            "error": "1 error occurred:\n\t* action must have an valid integration URL\n\n"
+        },
+        {
+            "name": "integration_relative_path",
+            "action": {
+                "type": "button",
+                "name": "n",
+                "integration": {
+                    "url": "/api/v4/x"
+                }
+            },
+            "messages": [
+                "action must have an valid integration URL"
+            ],
+            "error": "1 error occurred:\n\t* action must have an valid integration URL\n\n"
+        },
+        {
+            "name": "everything_wrong",
+            "action": {
+                "type": "nope",
+                "style": "nope"
+            },
+            "messages": [
+                "action must have a name",
+                "invalid style 'nope' - must be one of [default, primary, success, good, warning, danger] or a hex color",
+                "invalid action type: must be 'button' or 'select'",
+                "action must have integration settings"
+            ],
+            "error": "4 errors occurred:\n\t* action must have a name\n\t* invalid style 'nope' - must be one of [default, primary, success, good, warning, danger] or a hex color\n\t* invalid action type: must be 'button' or 'select'\n\t* action must have integration settings\n\n"
+        },
+        {
+            "name": "name_and_style_and_type",
+            "action": {
+                "type": "nope",
+                "style": "nope",
+                "integration": {
+                    "url": "https://x.com"
+                }
+            },
+            "messages": [
+                "action must have a name",
+                "invalid style 'nope' - must be one of [default, primary, success, good, warning, danger] or a hex color",
+                "invalid action type: must be 'button' or 'select'"
+            ],
+            "error": "3 errors occurred:\n\t* action must have a name\n\t* invalid style 'nope' - must be one of [default, primary, success, good, warning, danger] or a hex color\n\t* invalid action type: must be 'button' or 'select'\n\n"
+        }
+    ],
+    "post_action_options_valid": [
+        {
+            "error": "",
+            "messages": [],
+            "name": "both_set"
+        },
+        {
+            "error": "1 error occurred:\n\t* text is required\n\n",
+            "messages": [
+                "text is required"
+            ],
+            "name": "no_text"
+        },
+        {
+            "error": "1 error occurred:\n\t* value is required\n\n",
+            "messages": [
+                "value is required"
+            ],
+            "name": "no_value"
+        },
+        {
+            "error": "2 errors occurred:\n\t* text is required\n\t* value is required\n\n",
+            "messages": [
+                "text is required",
+                "value is required"
+            ],
+            "name": "neither"
+        },
+        {
+            "error": "",
+            "messages": [],
+            "name": "whitespace_text_counts_as_set"
+        }
+    ],
+    "preserve_state": [
+        {
+            "name": "nil_props",
+            "props": null,
+            "post_id": "6bdz674pgq767e4jx75w4pf57a",
+            "root_id": "",
+            "retain": {},
+            "remove": [
+                "from_webhook",
+                "from_bot",
+                "from_plugin",
+                "override_username",
+                "override_icon_url"
+            ],
+            "original_props": null,
+            "root_post_id": "6bdz674pgq767e4jx75w4pf57a",
+            "original_is_pinned": false,
+            "original_has_reactions": false
+        },
+        {
+            "name": "empty_props",
+            "props": {},
+            "post_id": "6bdz674pgq767e4jx75w4pf57a",
+            "root_id": "",
+            "retain": {},
+            "remove": [
+                "from_webhook",
+                "from_bot",
+                "from_plugin",
+                "override_username",
+                "override_icon_url"
+            ],
+            "original_props": {},
+            "root_post_id": "6bdz674pgq767e4jx75w4pf57a",
+            "original_is_pinned": false,
+            "original_has_reactions": false
+        },
+        {
+            "name": "all_five_present",
+            "props": {
+                "from_bot": "true",
+                "from_plugin": "true",
+                "from_webhook": "true",
+                "override_icon_url": "https://x.com/i.png",
+                "override_username": "bot"
+            },
+            "post_id": "6bdz674pgq767e4jx75w4pf57a",
+            "root_id": "",
+            "retain": {
+                "from_bot": "true",
+                "from_plugin": "true",
+                "from_webhook": "true",
+                "override_icon_url": "https://x.com/i.png",
+                "override_username": "bot"
+            },
+            "remove": [],
+            "original_props": {
+                "from_bot": "true",
+                "from_plugin": "true",
+                "from_webhook": "true",
+                "override_icon_url": "https://x.com/i.png",
+                "override_username": "bot"
+            },
+            "root_post_id": "6bdz674pgq767e4jx75w4pf57a",
+            "original_is_pinned": false,
+            "original_has_reactions": false
+        },
+        {
+            "name": "some_present",
+            "props": {
+                "from_webhook": "true",
+                "unrelated": "kept_in_original_only"
+            },
+            "post_id": "6bdz674pgq767e4jx75w4pf57a",
+            "root_id": "",
+            "retain": {
+                "from_webhook": "true"
+            },
+            "remove": [
+                "from_bot",
+                "from_plugin",
+                "override_username",
+                "override_icon_url"
+            ],
+            "original_props": {
+                "from_webhook": "true",
+                "unrelated": "kept_in_original_only"
+            },
+            "root_post_id": "6bdz674pgq767e4jx75w4pf57a",
+            "original_is_pinned": false,
+            "original_has_reactions": false
+        },
+        {
+            "name": "null_value_is_retained",
+            "props": {
+                "from_bot": null
+            },
+            "post_id": "6bdz674pgq767e4jx75w4pf57a",
+            "root_id": "",
+            "retain": {
+                "from_bot": null
+            },
+            "remove": [
+                "from_webhook",
+                "from_plugin",
+                "override_username",
+                "override_icon_url"
+            ],
+            "original_props": {
+                "from_bot": null
+            },
+            "root_post_id": "6bdz674pgq767e4jx75w4pf57a",
+            "original_is_pinned": false,
+            "original_has_reactions": false
+        },
+        {
+            "name": "root_id_wins",
+            "props": {},
+            "post_id": "6bdz674pgq767e4jx75w4pf57a",
+            "root_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+            "retain": {},
+            "remove": [
+                "from_webhook",
+                "from_bot",
+                "from_plugin",
+                "override_username",
+                "override_icon_url"
+            ],
+            "original_props": {},
+            "root_post_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+            "original_is_pinned": false,
+            "original_has_reactions": false
+        },
+        {
+            "name": "pinned_and_reactions",
+            "props": {},
+            "post_id": "6bdz674pgq767e4jx75w4pf57a",
+            "root_id": "",
+            "retain": {},
+            "remove": [
+                "from_webhook",
+                "from_bot",
+                "from_plugin",
+                "override_username",
+                "override_icon_url"
+            ],
+            "original_props": {},
+            "root_post_id": "6bdz674pgq767e4jx75w4pf57a",
+            "original_is_pinned": true,
+            "original_has_reactions": true
+        }
+    ],
+    "wire": [
+        {
+            "name": "post_action_zero",
+            "json": "{}"
+        },
+        {
+            "name": "post_action_disabled_false_is_omitted",
+            "json": "{\"name\":\"n\"}"
+        },
+        {
+            "name": "post_action_disabled_true",
+            "json": "{\"name\":\"n\",\"disabled\":true}"
+        },
+        {
+            "name": "post_action_empty_options_slice",
+            "json": "{}"
+        },
+        {
+            "name": "post_action_full",
+            "json": "{\"id\":\"6bdz674pgq767e4jx75w4pf57a\",\"type\":\"select\",\"name\":\"Pick\",\"tooltip\":\"tip\",\"disabled\":true,\"style\":\"#a1b2c3\",\"data_source\":\"users\",\"options\":[{\"text\":\"t\",\"value\":\"v\"}],\"default_option\":\"v\",\"integration\":{\"url\":\"https://example.com/h\",\"context\":{\"a\":\"1\",\"b\":2}},\"cookie\":\"ck\"}"
+        },
+        {
+            "name": "post_action_options_zero",
+            "json": "{\"text\":\"\",\"value\":\"\"}"
+        },
+        {
+            "name": "post_action_integration_zero",
+            "json": "{}"
+        },
+        {
+            "name": "post_action_integration_empty_context",
+            "json": "{\"url\":\"u\"}"
+        },
+        {
+            "name": "do_post_action_request_zero",
+            "json": "{}"
+        },
+        {
+            "name": "do_post_action_request_full",
+            "json": "{\"selected_option\":\"o\",\"cookie\":\"c\",\"query\":{\"k\":\"v\"},\"integration_format\":\"mm_block\"}"
+        },
+        {
+            "name": "post_action_cookie_zero",
+            "json": "{}"
+        },
+        {
+            "name": "post_action_cookie_full",
+            "json": "{\"type\":\"t\",\"post_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"root_post_id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"channel_id\":\"g1ku9ozj3bhub3hs89bqu1m3gy\",\"data_source\":\"users\",\"integration\":{\"url\":\"u\"},\"retain_props\":{\"a\":\"b\"},\"remove_props\":[\"c\"]}"
+        },
+        {
+            "name": "mm_blocks_cookie_zero",
+            "json": "{\"actions\":null}"
+        },
+        {
+            "name": "mm_blocks_cookie_full",
+            "json": "{\"kind\":\"mm_blocks_actions\",\"post_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"root_post_id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"channel_id\":\"g1ku9ozj3bhub3hs89bqu1m3gy\",\"retain_props\":{\"a\":\"b\"},\"remove_props\":[\"c\"],\"actions\":{\"k\":{\"x\":\"y\"}}}"
+        },
+        {
+            "name": "integration_request_zero",
+            "json": "{\"user_id\":\"\",\"user_name\":\"\",\"channel_id\":\"\",\"channel_name\":\"\",\"team_id\":\"\",\"team_domain\":\"\",\"post_id\":\"\",\"trigger_id\":\"\",\"type\":\"\",\"data_source\":\"\"}"
+        },
+        {
+            "name": "integration_request_full",
+            "json": "{\"user_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"user_name\":\"u\",\"channel_id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"channel_name\":\"c\",\"team_id\":\"g1ku9ozj3bhub3hs89bqu1m3gy\",\"team_domain\":\"t\",\"post_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"trigger_id\":\"tr\",\"type\":\"button\",\"data_source\":\"users\",\"context\":{\"a\":\"b\"}}"
+        },
+        {
+            "name": "integration_response_zero",
+            "json": "{\"update\":null,\"ephemeral_text\":\"\",\"skip_slack_parsing\":false}"
+        },
+        {
+            "name": "integration_response_full",
+            "json": "{\"update\":{\"id\":\"6bdz674pgq767e4jx75w4pf57a\",\"create_at\":0,\"update_at\":0,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"\",\"channel_id\":\"\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null},\"ephemeral_text\":\"e\",\"skip_slack_parsing\":true,\"goto_location\":\"g\"}"
+        },
+        {
+            "name": "api_response_zero",
+            "json": "{\"status\":\"\",\"trigger_id\":\"\"}"
+        },
+        {
+            "name": "api_response_full",
+            "json": "{\"status\":\"OK\",\"trigger_id\":\"tr\",\"goto_location\":\"g\"}"
+        },
+        {
+            "name": "execute_dialog_response_zero",
+            "json": "{\"trigger_id\":\"\"}"
+        }
+    ]
+}

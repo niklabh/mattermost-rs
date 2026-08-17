@@ -1,0 +1,178 @@
+{
+    "copy": [
+        {
+            "name": "fields_dropped_by_copy",
+            "in": "{\"embeds\":[{\"type\":\"link\",\"url\":\"https://example.com\"}],\"redacted_file_count\":7,\"images\":{\"u\":{\"width\":1,\"height\":2,\"format\":\"png\",\"frame_count\":0}},\"priority\":{\"priority\":\"urgent\",\"requested_ack\":null,\"persistent_notifications\":null,\"PostId\":\"6bdz674pgq767e4jx75w4pf57a\"},\"expire_at\":1700000000000,\"recipients\":[\"6bdz674pgq767e4jx75w4pf57a\",\"qr6kf7ztp7yifxt4wm5xn51bke\"]}",
+            "out": "{\"embeds\":[{\"type\":\"link\",\"url\":\"https://example.com\"}],\"redacted_file_count\":7,\"images\":{\"u\":{\"width\":1,\"height\":2,\"format\":\"png\",\"frame_count\":0}},\"priority\":{\"priority\":\"urgent\",\"requested_ack\":null,\"persistent_notifications\":null,\"PostId\":\"6bdz674pgq767e4jx75w4pf57a\"}}",
+            "shares_embed_pointer": true,
+            "shares_image_pointer": true,
+            "shares_priority_pointer": false,
+            "expire_at_survived": false,
+            "recipients_survived": false
+        },
+        {
+            "name": "nil_collections_become_empty",
+            "in": "{}",
+            "out": "{}",
+            "shares_embed_pointer": false,
+            "shares_image_pointer": false,
+            "shares_priority_pointer": true,
+            "expire_at_survived": true,
+            "recipients_survived": true
+        }
+    ],
+    "priority_wire": [
+        {
+            "name": "zero",
+            "json": "{\"priority\":null,\"requested_ack\":null,\"persistent_notifications\":null}",
+            "roundtrip": "{\"priority\":null,\"requested_ack\":null,\"persistent_notifications\":null}"
+        },
+        {
+            "name": "priority_set",
+            "json": "{\"priority\":\"urgent\",\"requested_ack\":null,\"persistent_notifications\":null}",
+            "roundtrip": "{\"priority\":\"urgent\",\"requested_ack\":null,\"persistent_notifications\":null}"
+        },
+        {
+            "name": "priority_empty_string",
+            "json": "{\"priority\":\"\",\"requested_ack\":null,\"persistent_notifications\":null}",
+            "roundtrip": "{\"priority\":\"\",\"requested_ack\":null,\"persistent_notifications\":null}"
+        },
+        {
+            "name": "requested_ack_true",
+            "json": "{\"priority\":null,\"requested_ack\":true,\"persistent_notifications\":null}",
+            "roundtrip": "{\"priority\":null,\"requested_ack\":true,\"persistent_notifications\":null}"
+        },
+        {
+            "name": "requested_ack_false",
+            "json": "{\"priority\":null,\"requested_ack\":false,\"persistent_notifications\":null}",
+            "roundtrip": "{\"priority\":null,\"requested_ack\":false,\"persistent_notifications\":null}"
+        },
+        {
+            "name": "persistent_notifications",
+            "json": "{\"priority\":null,\"requested_ack\":null,\"persistent_notifications\":true}",
+            "roundtrip": "{\"priority\":null,\"requested_ack\":null,\"persistent_notifications\":true}"
+        },
+        {
+            "name": "post_id_set",
+            "json": "{\"priority\":null,\"requested_ack\":null,\"persistent_notifications\":null,\"PostId\":\"6bdz674pgq767e4jx75w4pf57a\"}",
+            "roundtrip": "{\"priority\":null,\"requested_ack\":null,\"persistent_notifications\":null,\"PostId\":\"6bdz674pgq767e4jx75w4pf57a\"}"
+        },
+        {
+            "name": "channel_id_set",
+            "json": "{\"priority\":null,\"requested_ack\":null,\"persistent_notifications\":null,\"ChannelId\":\"qr6kf7ztp7yifxt4wm5xn51bke\"}",
+            "roundtrip": "{\"priority\":null,\"requested_ack\":null,\"persistent_notifications\":null,\"ChannelId\":\"qr6kf7ztp7yifxt4wm5xn51bke\"}"
+        },
+        {
+            "name": "complete",
+            "json": "{\"priority\":\"urgent\",\"requested_ack\":true,\"persistent_notifications\":false,\"PostId\":\"6bdz674pgq767e4jx75w4pf57a\",\"ChannelId\":\"qr6kf7ztp7yifxt4wm5xn51bke\"}",
+            "roundtrip": "{\"priority\":\"urgent\",\"requested_ack\":true,\"persistent_notifications\":false,\"PostId\":\"6bdz674pgq767e4jx75w4pf57a\",\"ChannelId\":\"qr6kf7ztp7yifxt4wm5xn51bke\"}"
+        }
+    ],
+    "wire": [
+        {
+            "name": "zero",
+            "json": "{}",
+            "roundtrip": "{}"
+        },
+        {
+            "name": "embeds_empty",
+            "json": "{}",
+            "roundtrip": "{}"
+        },
+        {
+            "name": "embeds_one",
+            "json": "{\"embeds\":[{\"type\":\"opengraph\",\"url\":\"https://example.com\"}]}",
+            "roundtrip": "{\"embeds\":[{\"type\":\"opengraph\",\"url\":\"https://example.com\"}]}"
+        },
+        {
+            "name": "emojis_empty",
+            "json": "{}",
+            "roundtrip": "{}"
+        },
+        {
+            "name": "files_empty",
+            "json": "{}",
+            "roundtrip": "{}"
+        },
+        {
+            "name": "reactions_empty",
+            "json": "{}",
+            "roundtrip": "{}"
+        },
+        {
+            "name": "acknowledgements_empty",
+            "json": "{}",
+            "roundtrip": "{}"
+        },
+        {
+            "name": "images_empty",
+            "json": "{}",
+            "roundtrip": "{}"
+        },
+        {
+            "name": "translations_empty",
+            "json": "{}",
+            "roundtrip": "{}"
+        },
+        {
+            "name": "recipients_empty",
+            "json": "{}",
+            "roundtrip": "{}"
+        },
+        {
+            "name": "embeds_nil_element",
+            "json": "{\"embeds\":[null]}",
+            "roundtrip": "{\"embeds\":[null]}"
+        },
+        {
+            "name": "images_one",
+            "json": "{\"images\":{\"https://example.com/a.png\":{\"width\":640,\"height\":480,\"format\":\"png\",\"frame_count\":0}}}",
+            "roundtrip": "{\"images\":{\"https://example.com/a.png\":{\"width\":640,\"height\":480,\"format\":\"png\",\"frame_count\":0}}}"
+        },
+        {
+            "name": "images_animated",
+            "json": "{\"images\":{\"https://example.com/a.gif\":{\"width\":1,\"height\":2,\"format\":\"gif\",\"frame_count\":12}}}",
+            "roundtrip": "{\"images\":{\"https://example.com/a.gif\":{\"width\":1,\"height\":2,\"format\":\"gif\",\"frame_count\":12}}}"
+        },
+        {
+            "name": "translation_text",
+            "json": "{\"translations\":{\"fr\":{\"text\":\"bonjour\",\"type\":\"string\",\"state\":\"done\",\"source_lang\":\"en\"}}}",
+            "roundtrip": "{\"translations\":{\"fr\":{\"text\":\"bonjour\",\"type\":\"string\",\"state\":\"done\",\"source_lang\":\"en\"}}}"
+        },
+        {
+            "name": "translation_object",
+            "json": "{\"translations\":{\"fr\":{\"object\":{\"a\":1},\"type\":\"object\",\"state\":\"done\"}}}",
+            "roundtrip": "{\"translations\":{\"fr\":{\"object\":{\"a\":1},\"type\":\"object\",\"state\":\"done\"}}}"
+        },
+        {
+            "name": "translation_zero",
+            "json": "{\"translations\":{\"fr\":{\"type\":\"\",\"state\":\"\"}}}",
+            "roundtrip": "{\"translations\":{\"fr\":{\"type\":\"\",\"state\":\"\"}}}"
+        },
+        {
+            "name": "translation_object_null",
+            "json": "{\"translations\":{\"fr\":{\"object\":null,\"type\":\"object\",\"state\":\"\"}}}",
+            "roundtrip": "{\"translations\":{\"fr\":{\"object\":null,\"type\":\"object\",\"state\":\"\"}}}"
+        },
+        {
+            "name": "redacted_file_count",
+            "json": "{\"redacted_file_count\":3}",
+            "roundtrip": "{\"redacted_file_count\":3}"
+        },
+        {
+            "name": "expire_at",
+            "json": "{\"expire_at\":1700000000000}",
+            "roundtrip": "{\"expire_at\":1700000000000}"
+        },
+        {
+            "name": "recipients",
+            "json": "{\"recipients\":[\"6bdz674pgq767e4jx75w4pf57a\",\"qr6kf7ztp7yifxt4wm5xn51bke\"]}",
+            "roundtrip": "{\"recipients\":[\"6bdz674pgq767e4jx75w4pf57a\",\"qr6kf7ztp7yifxt4wm5xn51bke\"]}"
+        },
+        {
+            "name": "priority",
+            "json": "{\"priority\":{\"priority\":\"urgent\",\"requested_ack\":true,\"persistent_notifications\":null}}",
+            "roundtrip": "{\"priority\":{\"priority\":\"urgent\",\"requested_ack\":true,\"persistent_notifications\":null}}"
+        }
+    ]
+}

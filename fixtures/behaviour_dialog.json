@@ -1,0 +1,3634 @@
+{
+    "constants": {
+        "default_time_interval_minutes": 60,
+        "dialog_element_bool_max_length": 150,
+        "dialog_element_display_name_max_length": 24,
+        "dialog_element_file_max_length": 300,
+        "dialog_element_help_text_max_length": 150,
+        "dialog_element_name_max_length": 300,
+        "dialog_element_select_max_length": 3000,
+        "dialog_element_text_max_length": 150,
+        "dialog_element_textarea_max_length": 3000,
+        "dialog_title_max_length": 24,
+        "iso_date_format": "2006-01-02",
+        "iso_date_time_format": "2006-01-02T15:04:05Z",
+        "iso_date_time_no_seconds_format": "2006-01-02T15:04",
+        "iso_date_time_no_timezone_format": "2006-01-02T15:04:05",
+        "iso_date_time_with_timezone_format": "2006-01-02T15:04:05-07:00",
+        "max_dialog_file_ids": 10,
+        "max_dialog_submission_id_shaped_token_scan": 256,
+        "submit_dialog_response_type_empty": "",
+        "submit_dialog_response_type_form": "form",
+        "submit_dialog_response_type_navigate": "navigate",
+        "submit_dialog_response_type_ok": "ok"
+    },
+    "date_formats": [
+        {
+            "as_date_default": [],
+            "as_datetime": [],
+            "as_min_date": [],
+            "input": ""
+        },
+        {
+            "as_date_default": [],
+            "as_datetime": [],
+            "as_min_date": [],
+            "input": "today"
+        },
+        {
+            "as_date_default": [],
+            "as_datetime": [],
+            "as_min_date": [],
+            "input": "tomorrow"
+        },
+        {
+            "as_date_default": [],
+            "as_datetime": [],
+            "as_min_date": [],
+            "input": "yesterday"
+        },
+        {
+            "as_date_default": [
+                "invalid date format: \"Today\", expected ISO format (YYYY-MM-DD), datetime format, or relative format"
+            ],
+            "as_datetime": [
+                "invalid datetime format: \"Today\", expected ISO format (YYYY-MM-DDTHH:MM:SSZ) or relative format"
+            ],
+            "as_min_date": [
+                "invalid date or datetime format: \"Today\", expected ISO date (YYYY-MM-DD), datetime (YYYY-MM-DDTHH:MM:SSZ), or relative format"
+            ],
+            "input": "Today"
+        },
+        {
+            "as_date_default": [
+                "invalid date format: \"TOMORROW\", expected ISO format (YYYY-MM-DD), datetime format, or relative format"
+            ],
+            "as_datetime": [
+                "invalid datetime format: \"TOMORROW\", expected ISO format (YYYY-MM-DDTHH:MM:SSZ) or relative format"
+            ],
+            "as_min_date": [
+                "invalid date or datetime format: \"TOMORROW\", expected ISO date (YYYY-MM-DD), datetime (YYYY-MM-DDTHH:MM:SSZ), or relative format"
+            ],
+            "input": "TOMORROW"
+        },
+        {
+            "as_date_default": [
+                "invalid date format: \" today\", expected ISO format (YYYY-MM-DD), datetime format, or relative format"
+            ],
+            "as_datetime": [
+                "invalid datetime format: \" today\", expected ISO format (YYYY-MM-DDTHH:MM:SSZ) or relative format"
+            ],
+            "as_min_date": [
+                "invalid date or datetime format: \" today\", expected ISO date (YYYY-MM-DD), datetime (YYYY-MM-DDTHH:MM:SSZ), or relative format"
+            ],
+            "input": " today"
+        },
+        {
+            "as_date_default": [],
+            "as_datetime": [],
+            "as_min_date": [],
+            "input": "+1d"
+        },
+        {
+            "as_date_default": [],
+            "as_datetime": [],
+            "as_min_date": [],
+            "input": "-1d"
+        },
+        {
+            "as_date_default": [],
+            "as_datetime": [],
+            "as_min_date": [],
+            "input": "+0d"
+        },
+        {
+            "as_date_default": [],
+            "as_datetime": [],
+            "as_min_date": [],
+            "input": "+12d"
+        },
+        {
+            "as_date_default": [],
+            "as_datetime": [],
+            "as_min_date": [],
+            "input": "+123d"
+        },
+        {
+            "as_date_default": [
+                "invalid date format: \"+1234d\", expected ISO format (YYYY-MM-DD), datetime format, or relative format"
+            ],
+            "as_datetime": [
+                "invalid datetime format: \"+1234d\", expected ISO format (YYYY-MM-DDTHH:MM:SSZ) or relative format"
+            ],
+            "as_min_date": [
+                "invalid date or datetime format: \"+1234d\", expected ISO date (YYYY-MM-DD), datetime (YYYY-MM-DDTHH:MM:SSZ), or relative format"
+            ],
+            "input": "+1234d"
+        },
+        {
+            "as_date_default": [],
+            "as_datetime": [],
+            "as_min_date": [],
+            "input": "+1w"
+        },
+        {
+            "as_date_default": [],
+            "as_datetime": [],
+            "as_min_date": [],
+            "input": "+1m"
+        },
+        {
+            "as_date_default": [],
+            "as_datetime": [],
+            "as_min_date": [],
+            "input": "+1H"
+        },
+        {
+            "as_date_default": [],
+            "as_datetime": [],
+            "as_min_date": [],
+            "input": "+1M"
+        },
+        {
+            "as_date_default": [],
+            "as_datetime": [],
+            "as_min_date": [],
+            "input": "+1S"
+        },
+        {
+            "as_date_default": [
+                "invalid date format: \"+1h\", expected ISO format (YYYY-MM-DD), datetime format, or relative format"
+            ],
+            "as_datetime": [
+                "invalid datetime format: \"+1h\", expected ISO format (YYYY-MM-DDTHH:MM:SSZ) or relative format"
+            ],
+            "as_min_date": [
+                "invalid date or datetime format: \"+1h\", expected ISO date (YYYY-MM-DD), datetime (YYYY-MM-DDTHH:MM:SSZ), or relative format"
+            ],
+            "input": "+1h"
+        },
+        {
+            "as_date_default": [
+                "invalid date format: \"+1s\", expected ISO format (YYYY-MM-DD), datetime format, or relative format"
+            ],
+            "as_datetime": [
+                "invalid datetime format: \"+1s\", expected ISO format (YYYY-MM-DDTHH:MM:SSZ) or relative format"
+            ],
+            "as_min_date": [
+                "invalid date or datetime format: \"+1s\", expected ISO date (YYYY-MM-DD), datetime (YYYY-MM-DDTHH:MM:SSZ), or relative format"
+            ],
+            "input": "+1s"
+        },
+        {
+            "as_date_default": [
+                "invalid date format: \"+1D\", expected ISO format (YYYY-MM-DD), datetime format, or relative format"
+            ],
+            "as_datetime": [
+                "invalid datetime format: \"+1D\", expected ISO format (YYYY-MM-DDTHH:MM:SSZ) or relative format"
+            ],
+            "as_min_date": [
+                "invalid date or datetime format: \"+1D\", expected ISO date (YYYY-MM-DD), datetime (YYYY-MM-DDTHH:MM:SSZ), or relative format"
+            ],
+            "input": "+1D"
+        },
+        {
+            "as_date_default": [
+                "invalid date format: \"+1W\", expected ISO format (YYYY-MM-DD), datetime format, or relative format"
+            ],
+            "as_datetime": [
+                "invalid datetime format: \"+1W\", expected ISO format (YYYY-MM-DDTHH:MM:SSZ) or relative format"
+            ],
+            "as_min_date": [
+                "invalid date or datetime format: \"+1W\", expected ISO date (YYYY-MM-DD), datetime (YYYY-MM-DDTHH:MM:SSZ), or relative format"
+            ],
+            "input": "+1W"
+        },
+        {
+            "as_date_default": [
+                "invalid date format: \"+1x\", expected ISO format (YYYY-MM-DD), datetime format, or relative format"
+            ],
+            "as_datetime": [
+                "invalid datetime format: \"+1x\", expected ISO format (YYYY-MM-DDTHH:MM:SSZ) or relative format"
+            ],
+            "as_min_date": [
+                "invalid date or datetime format: \"+1x\", expected ISO date (YYYY-MM-DD), datetime (YYYY-MM-DDTHH:MM:SSZ), or relative format"
+            ],
+            "input": "+1x"
+        },
+        {
+            "as_date_default": [
+                "invalid date format: \"+d\", expected ISO format (YYYY-MM-DD), datetime format, or relative format"
+            ],
+            "as_datetime": [
+                "invalid datetime format: \"+d\", expected ISO format (YYYY-MM-DDTHH:MM:SSZ) or relative format"
+            ],
+            "as_min_date": [
+                "invalid date or datetime format: \"+d\", expected ISO date (YYYY-MM-DD), datetime (YYYY-MM-DDTHH:MM:SSZ), or relative format"
+            ],
+            "input": "+d"
+        },
+        {
+            "as_date_default": [
+                "invalid date format: \"+1\", expected ISO format (YYYY-MM-DD), datetime format, or relative format"
+            ],
+            "as_datetime": [
+                "invalid datetime format: \"+1\", expected ISO format (YYYY-MM-DDTHH:MM:SSZ) or relative format"
+            ],
+            "as_min_date": [
+                "invalid date or datetime format: \"+1\", expected ISO date (YYYY-MM-DD), datetime (YYYY-MM-DDTHH:MM:SSZ), or relative format"
+            ],
+            "input": "+1"
+        },
+        {
+            "as_date_default": [
+                "invalid date format: \"1d\", expected ISO format (YYYY-MM-DD), datetime format, or relative format"
+            ],
+            "as_datetime": [
+                "invalid datetime format: \"1d\", expected ISO format (YYYY-MM-DDTHH:MM:SSZ) or relative format"
+            ],
+            "as_min_date": [
+                "invalid date or datetime format: \"1d\", expected ISO date (YYYY-MM-DD), datetime (YYYY-MM-DDTHH:MM:SSZ), or relative format"
+            ],
+            "input": "1d"
+        },
+        {
+            "as_date_default": [],
+            "as_datetime": [],
+            "as_min_date": [],
+            "input": "++5d"
+        },
+        {
+            "as_date_default": [],
+            "as_datetime": [],
+            "as_min_date": [],
+            "input": "+-5d"
+        },
+        {
+            "as_date_default": [
+                "invalid date format: \"+ 5d\", expected ISO format (YYYY-MM-DD), datetime format, or relative format"
+            ],
+            "as_datetime": [
+                "invalid datetime format: \"+ 5d\", expected ISO format (YYYY-MM-DDTHH:MM:SSZ) or relative format"
+            ],
+            "as_min_date": [
+                "invalid date or datetime format: \"+ 5d\", expected ISO date (YYYY-MM-DD), datetime (YYYY-MM-DDTHH:MM:SSZ), or relative format"
+            ],
+            "input": "+ 5d"
+        },
+        {
+            "as_date_default": [
+                "invalid date format: \"+5 d\", expected ISO format (YYYY-MM-DD), datetime format, or relative format"
+            ],
+            "as_datetime": [
+                "invalid datetime format: \"+5 d\", expected ISO format (YYYY-MM-DDTHH:MM:SSZ) or relative format"
+            ],
+            "as_min_date": [
+                "invalid date or datetime format: \"+5 d\", expected ISO date (YYYY-MM-DD), datetime (YYYY-MM-DDTHH:MM:SSZ), or relative format"
+            ],
+            "input": "+5 d"
+        },
+        {
+            "as_date_default": [],
+            "as_datetime": [],
+            "as_min_date": [],
+            "input": "-99S"
+        },
+        {
+            "as_date_default": [],
+            "as_datetime": [],
+            "as_min_date": [],
+            "input": "+999M"
+        },
+        {
+            "as_date_default": [
+                "invalid date format: \"+1000M\", expected ISO format (YYYY-MM-DD), datetime format, or relative format"
+            ],
+            "as_datetime": [
+                "invalid datetime format: \"+1000M\", expected ISO format (YYYY-MM-DDTHH:MM:SSZ) or relative format"
+            ],
+            "as_min_date": [
+                "invalid date or datetime format: \"+1000M\", expected ISO date (YYYY-MM-DD), datetime (YYYY-MM-DDTHH:MM:SSZ), or relative format"
+            ],
+            "input": "+1000M"
+        },
+        {
+            "as_date_default": [],
+            "as_datetime": [
+                "invalid datetime format: \"2023-01-02\", expected ISO format (YYYY-MM-DDTHH:MM:SSZ) or relative format"
+            ],
+            "as_min_date": [],
+            "input": "2023-01-02"
+        },
+        {
+            "as_date_default": [
+                "invalid date format: \"2023-1-2\", expected ISO format (YYYY-MM-DD), datetime format, or relative format"
+            ],
+            "as_datetime": [
+                "invalid datetime format: \"2023-1-2\", expected ISO format (YYYY-MM-DDTHH:MM:SSZ) or relative format"
+            ],
+            "as_min_date": [
+                "invalid date or datetime format: \"2023-1-2\", expected ISO date (YYYY-MM-DD), datetime (YYYY-MM-DDTHH:MM:SSZ), or relative format"
+            ],
+            "input": "2023-1-2"
+        },
+        {
+            "as_date_default": [
+                "invalid date format: \"23-01-02\", expected ISO format (YYYY-MM-DD), datetime format, or relative format"
+            ],
+            "as_datetime": [
+                "invalid datetime format: \"23-01-02\", expected ISO format (YYYY-MM-DDTHH:MM:SSZ) or relative format"
+            ],
+            "as_min_date": [
+                "invalid date or datetime format: \"23-01-02\", expected ISO date (YYYY-MM-DD), datetime (YYYY-MM-DDTHH:MM:SSZ), or relative format"
+            ],
+            "input": "23-01-02"
+        },
+        {
+            "as_date_default": [
+                "invalid date format: \"2023-01-2\", expected ISO format (YYYY-MM-DD), datetime format, or relative format"
+            ],
+            "as_datetime": [
+                "invalid datetime format: \"2023-01-2\", expected ISO format (YYYY-MM-DDTHH:MM:SSZ) or relative format"
+            ],
+            "as_min_date": [
+                "invalid date or datetime format: \"2023-01-2\", expected ISO date (YYYY-MM-DD), datetime (YYYY-MM-DDTHH:MM:SSZ), or relative format"
+            ],
+            "input": "2023-01-2"
+        },
+        {
+            "as_date_default": [
+                "invalid date format: \"2023-13-01\", expected ISO format (YYYY-MM-DD), datetime format, or relative format"
+            ],
+            "as_datetime": [
+                "invalid datetime format: \"2023-13-01\", expected ISO format (YYYY-MM-DDTHH:MM:SSZ) or relative format"
+            ],
+            "as_min_date": [
+                "invalid date or datetime format: \"2023-13-01\", expected ISO date (YYYY-MM-DD), datetime (YYYY-MM-DDTHH:MM:SSZ), or relative format"
+            ],
+            "input": "2023-13-01"
+        },
+        {
+            "as_date_default": [
+                "invalid date format: \"2023-02-29\", expected ISO format (YYYY-MM-DD), datetime format, or relative format"
+            ],
+            "as_datetime": [
+                "invalid datetime format: \"2023-02-29\", expected ISO format (YYYY-MM-DDTHH:MM:SSZ) or relative format"
+            ],
+            "as_min_date": [
+                "invalid date or datetime format: \"2023-02-29\", expected ISO date (YYYY-MM-DD), datetime (YYYY-MM-DDTHH:MM:SSZ), or relative format"
+            ],
+            "input": "2023-02-29"
+        },
+        {
+            "as_date_default": [],
+            "as_datetime": [
+                "invalid datetime format: \"2024-02-29\", expected ISO format (YYYY-MM-DDTHH:MM:SSZ) or relative format"
+            ],
+            "as_min_date": [],
+            "input": "2024-02-29"
+        },
+        {
+            "as_date_default": [
+                "invalid date format: \"2023-02-30\", expected ISO format (YYYY-MM-DD), datetime format, or relative format"
+            ],
+            "as_datetime": [
+                "invalid datetime format: \"2023-02-30\", expected ISO format (YYYY-MM-DDTHH:MM:SSZ) or relative format"
+            ],
+            "as_min_date": [
+                "invalid date or datetime format: \"2023-02-30\", expected ISO date (YYYY-MM-DD), datetime (YYYY-MM-DDTHH:MM:SSZ), or relative format"
+            ],
+            "input": "2023-02-30"
+        },
+        {
+            "as_date_default": [
+                "invalid date format: \"2023-00-10\", expected ISO format (YYYY-MM-DD), datetime format, or relative format"
+            ],
+            "as_datetime": [
+                "invalid datetime format: \"2023-00-10\", expected ISO format (YYYY-MM-DDTHH:MM:SSZ) or relative format"
+            ],
+            "as_min_date": [
+                "invalid date or datetime format: \"2023-00-10\", expected ISO date (YYYY-MM-DD), datetime (YYYY-MM-DDTHH:MM:SSZ), or relative format"
+            ],
+            "input": "2023-00-10"
+        },
+        {
+            "as_date_default": [
+                "invalid date format: \"2023-01-00\", expected ISO format (YYYY-MM-DD), datetime format, or relative format"
+            ],
+            "as_datetime": [
+                "invalid datetime format: \"2023-01-00\", expected ISO format (YYYY-MM-DDTHH:MM:SSZ) or relative format"
+            ],
+            "as_min_date": [
+                "invalid date or datetime format: \"2023-01-00\", expected ISO date (YYYY-MM-DD), datetime (YYYY-MM-DDTHH:MM:SSZ), or relative format"
+            ],
+            "input": "2023-01-00"
+        },
+        {
+            "as_date_default": [
+                "invalid date format: \"2023-01-32\", expected ISO format (YYYY-MM-DD), datetime format, or relative format"
+            ],
+            "as_datetime": [
+                "invalid datetime format: \"2023-01-32\", expected ISO format (YYYY-MM-DDTHH:MM:SSZ) or relative format"
+            ],
+            "as_min_date": [
+                "invalid date or datetime format: \"2023-01-32\", expected ISO date (YYYY-MM-DD), datetime (YYYY-MM-DDTHH:MM:SSZ), or relative format"
+            ],
+            "input": "2023-01-32"
+        },
+        {
+            "as_date_default": [],
+            "as_datetime": [
+                "invalid datetime format: \"0000-01-01\", expected ISO format (YYYY-MM-DDTHH:MM:SSZ) or relative format"
+            ],
+            "as_min_date": [],
+            "input": "0000-01-01"
+        },
+        {
+            "as_date_default": [],
+            "as_datetime": [
+                "invalid datetime format: \"9999-12-31\", expected ISO format (YYYY-MM-DDTHH:MM:SSZ) or relative format"
+            ],
+            "as_min_date": [],
+            "input": "9999-12-31"
+        },
+        {
+            "as_date_default": [
+                "invalid date format: \"10000-01-01\", expected ISO format (YYYY-MM-DD), datetime format, or relative format"
+            ],
+            "as_datetime": [
+                "invalid datetime format: \"10000-01-01\", expected ISO format (YYYY-MM-DDTHH:MM:SSZ) or relative format"
+            ],
+            "as_min_date": [
+                "invalid date or datetime format: \"10000-01-01\", expected ISO date (YYYY-MM-DD), datetime (YYYY-MM-DDTHH:MM:SSZ), or relative format"
+            ],
+            "input": "10000-01-01"
+        },
+        {
+            "as_date_default": [
+                "invalid date format: \"-001-01-01\", expected ISO format (YYYY-MM-DD), datetime format, or relative format"
+            ],
+            "as_datetime": [
+                "invalid datetime format: \"-001-01-01\", expected ISO format (YYYY-MM-DDTHH:MM:SSZ) or relative format"
+            ],
+            "as_min_date": [
+                "invalid date or datetime format: \"-001-01-01\", expected ISO date (YYYY-MM-DD), datetime (YYYY-MM-DDTHH:MM:SSZ), or relative format"
+            ],
+            "input": "-001-01-01"
+        },
+        {
+            "as_date_default": [
+                "invalid date format: \"2023-01-02 \", expected ISO format (YYYY-MM-DD), datetime format, or relative format"
+            ],
+            "as_datetime": [
+                "invalid datetime format: \"2023-01-02 \", expected ISO format (YYYY-MM-DDTHH:MM:SSZ) or relative format"
+            ],
+            "as_min_date": [
+                "invalid date or datetime format: \"2023-01-02 \", expected ISO date (YYYY-MM-DD), datetime (YYYY-MM-DDTHH:MM:SSZ), or relative format"
+            ],
+            "input": "2023-01-02 "
+        },
+        {
+            "as_date_default": [
+                "invalid date format: \" 2023-01-02\", expected ISO format (YYYY-MM-DD), datetime format, or relative format"
+            ],
+            "as_datetime": [
+                "invalid datetime format: \" 2023-01-02\", expected ISO format (YYYY-MM-DDTHH:MM:SSZ) or relative format"
+            ],
+            "as_min_date": [
+                "invalid date or datetime format: \" 2023-01-02\", expected ISO date (YYYY-MM-DD), datetime (YYYY-MM-DDTHH:MM:SSZ), or relative format"
+            ],
+            "input": " 2023-01-02"
+        },
+        {
+            "as_date_default": [
+                "invalid date format: \"2023-01-02x\", expected ISO format (YYYY-MM-DD), datetime format, or relative format"
+            ],
+            "as_datetime": [
+                "invalid datetime format: \"2023-01-02x\", expected ISO format (YYYY-MM-DDTHH:MM:SSZ) or relative format"
+            ],
+            "as_min_date": [
+                "invalid date or datetime format: \"2023-01-02x\", expected ISO date (YYYY-MM-DD), datetime (YYYY-MM-DDTHH:MM:SSZ), or relative format"
+            ],
+            "input": "2023-01-02x"
+        },
+        {
+            "as_date_default": [
+                "date field received datetime format \"2023-01-02T15:04:05Z\", only date portion \"2023-01-02\" will be used. Consider using date format instead"
+            ],
+            "as_datetime": [],
+            "as_min_date": [],
+            "input": "2023-01-02T15:04:05Z"
+        },
+        {
+            "as_date_default": [
+                "invalid date format: \"2023-01-02T15:04:05z\", expected ISO format (YYYY-MM-DD), datetime format, or relative format"
+            ],
+            "as_datetime": [
+                "invalid datetime format: \"2023-01-02T15:04:05z\", expected ISO format (YYYY-MM-DDTHH:MM:SSZ) or relative format"
+            ],
+            "as_min_date": [
+                "invalid date or datetime format: \"2023-01-02T15:04:05z\", expected ISO date (YYYY-MM-DD), datetime (YYYY-MM-DDTHH:MM:SSZ), or relative format"
+            ],
+            "input": "2023-01-02T15:04:05z"
+        },
+        {
+            "as_date_default": [
+                "invalid date format: \"2023-01-02t15:04:05Z\", expected ISO format (YYYY-MM-DD), datetime format, or relative format"
+            ],
+            "as_datetime": [
+                "invalid datetime format: \"2023-01-02t15:04:05Z\", expected ISO format (YYYY-MM-DDTHH:MM:SSZ) or relative format"
+            ],
+            "as_min_date": [
+                "invalid date or datetime format: \"2023-01-02t15:04:05Z\", expected ISO date (YYYY-MM-DD), datetime (YYYY-MM-DDTHH:MM:SSZ), or relative format"
+            ],
+            "input": "2023-01-02t15:04:05Z"
+        },
+        {
+            "as_date_default": [
+                "date field received datetime format \"2023-01-02T15:04:05\", only date portion \"2023-01-02\" will be used. Consider using date format instead"
+            ],
+            "as_datetime": [],
+            "as_min_date": [],
+            "input": "2023-01-02T15:04:05"
+        },
+        {
+            "as_date_default": [
+                "date field received datetime format \"2023-01-02T15:04\", only date portion \"2023-01-02\" will be used. Consider using date format instead"
+            ],
+            "as_datetime": [],
+            "as_min_date": [],
+            "input": "2023-01-02T15:04"
+        },
+        {
+            "as_date_default": [
+                "date field received datetime format \"2023-01-02T15:04:05+05:30\", only date portion \"2023-01-02\" will be used. Consider using date format instead"
+            ],
+            "as_datetime": [],
+            "as_min_date": [],
+            "input": "2023-01-02T15:04:05+05:30"
+        },
+        {
+            "as_date_default": [
+                "date field received datetime format \"2023-01-02T15:04:05-07:00\", only date portion \"2023-01-02\" will be used. Consider using date format instead"
+            ],
+            "as_datetime": [],
+            "as_min_date": [],
+            "input": "2023-01-02T15:04:05-07:00"
+        },
+        {
+            "as_date_default": [
+                "invalid date format: \"2023-01-02T15:04:05+0530\", expected ISO format (YYYY-MM-DD), datetime format, or relative format"
+            ],
+            "as_datetime": [
+                "invalid datetime format: \"2023-01-02T15:04:05+0530\", expected ISO format (YYYY-MM-DDTHH:MM:SSZ) or relative format"
+            ],
+            "as_min_date": [
+                "invalid date or datetime format: \"2023-01-02T15:04:05+0530\", expected ISO date (YYYY-MM-DD), datetime (YYYY-MM-DDTHH:MM:SSZ), or relative format"
+            ],
+            "input": "2023-01-02T15:04:05+0530"
+        },
+        {
+            "as_date_default": [
+                "invalid date format: \"2023-01-02T15:04:05Z+05:00\", expected ISO format (YYYY-MM-DD), datetime format, or relative format"
+            ],
+            "as_datetime": [
+                "invalid datetime format: \"2023-01-02T15:04:05Z+05:00\", expected ISO format (YYYY-MM-DDTHH:MM:SSZ) or relative format"
+            ],
+            "as_min_date": [
+                "invalid date or datetime format: \"2023-01-02T15:04:05Z+05:00\", expected ISO date (YYYY-MM-DD), datetime (YYYY-MM-DDTHH:MM:SSZ), or relative format"
+            ],
+            "input": "2023-01-02T15:04:05Z+05:00"
+        },
+        {
+            "as_date_default": [
+                "date field received datetime format \"2023-01-02T15:04:05.123Z\", only date portion \"2023-01-02\" will be used. Consider using date format instead"
+            ],
+            "as_datetime": [],
+            "as_min_date": [],
+            "input": "2023-01-02T15:04:05.123Z"
+        },
+        {
+            "as_date_default": [
+                "date field received datetime format \"2023-01-02T15:04:05.123456789Z\", only date portion \"2023-01-02\" will be used. Consider using date format instead"
+            ],
+            "as_datetime": [],
+            "as_min_date": [],
+            "input": "2023-01-02T15:04:05.123456789Z"
+        },
+        {
+            "as_date_default": [
+                "invalid date format: \"2023-01-02T15:04:05.Z\", expected ISO format (YYYY-MM-DD), datetime format, or relative format"
+            ],
+            "as_datetime": [
+                "invalid datetime format: \"2023-01-02T15:04:05.Z\", expected ISO format (YYYY-MM-DDTHH:MM:SSZ) or relative format"
+            ],
+            "as_min_date": [
+                "invalid date or datetime format: \"2023-01-02T15:04:05.Z\", expected ISO date (YYYY-MM-DD), datetime (YYYY-MM-DDTHH:MM:SSZ), or relative format"
+            ],
+            "input": "2023-01-02T15:04:05.Z"
+        },
+        {
+            "as_date_default": [
+                "date field received datetime format \"2023-01-02T15:04:05.123\", only date portion \"2023-01-02\" will be used. Consider using date format instead"
+            ],
+            "as_datetime": [],
+            "as_min_date": [],
+            "input": "2023-01-02T15:04:05.123"
+        },
+        {
+            "as_date_default": [
+                "invalid date format: \"2023-01-02T15:04.5\", expected ISO format (YYYY-MM-DD), datetime format, or relative format"
+            ],
+            "as_datetime": [
+                "invalid datetime format: \"2023-01-02T15:04.5\", expected ISO format (YYYY-MM-DDTHH:MM:SSZ) or relative format"
+            ],
+            "as_min_date": [
+                "invalid date or datetime format: \"2023-01-02T15:04.5\", expected ISO date (YYYY-MM-DD), datetime (YYYY-MM-DDTHH:MM:SSZ), or relative format"
+            ],
+            "input": "2023-01-02T15:04.5"
+        },
+        {
+            "as_date_default": [
+                "invalid date format: \"2023-01-02T24:00:00Z\", expected ISO format (YYYY-MM-DD), datetime format, or relative format"
+            ],
+            "as_datetime": [
+                "invalid datetime format: \"2023-01-02T24:00:00Z\", expected ISO format (YYYY-MM-DDTHH:MM:SSZ) or relative format"
+            ],
+            "as_min_date": [
+                "invalid date or datetime format: \"2023-01-02T24:00:00Z\", expected ISO date (YYYY-MM-DD), datetime (YYYY-MM-DDTHH:MM:SSZ), or relative format"
+            ],
+            "input": "2023-01-02T24:00:00Z"
+        },
+        {
+            "as_date_default": [
+                "invalid date format: \"2023-01-02T23:59:60Z\", expected ISO format (YYYY-MM-DD), datetime format, or relative format"
+            ],
+            "as_datetime": [
+                "invalid datetime format: \"2023-01-02T23:59:60Z\", expected ISO format (YYYY-MM-DDTHH:MM:SSZ) or relative format"
+            ],
+            "as_min_date": [
+                "invalid date or datetime format: \"2023-01-02T23:59:60Z\", expected ISO date (YYYY-MM-DD), datetime (YYYY-MM-DDTHH:MM:SSZ), or relative format"
+            ],
+            "input": "2023-01-02T23:59:60Z"
+        },
+        {
+            "as_date_default": [
+                "invalid date format: \"2023-01-02T15:60:00Z\", expected ISO format (YYYY-MM-DD), datetime format, or relative format"
+            ],
+            "as_datetime": [
+                "invalid datetime format: \"2023-01-02T15:60:00Z\", expected ISO format (YYYY-MM-DDTHH:MM:SSZ) or relative format"
+            ],
+            "as_min_date": [
+                "invalid date or datetime format: \"2023-01-02T15:60:00Z\", expected ISO date (YYYY-MM-DD), datetime (YYYY-MM-DDTHH:MM:SSZ), or relative format"
+            ],
+            "input": "2023-01-02T15:60:00Z"
+        },
+        {
+            "as_date_default": [
+                "date field received datetime format \"2023-01-02T5:04:05Z\", only date portion \"2023-01-02\" will be used. Consider using date format instead"
+            ],
+            "as_datetime": [],
+            "as_min_date": [],
+            "input": "2023-01-02T5:04:05Z"
+        },
+        {
+            "as_date_default": [
+                "date field received datetime format \"2023-01-02T15:04:05\", only date portion \"2023-01-02\" will be used. Consider using date format instead"
+            ],
+            "as_datetime": [],
+            "as_min_date": [],
+            "input": "2023-01-02T15:04:05"
+        },
+        {
+            "as_date_default": [
+                "invalid date format: \"nope\", expected ISO format (YYYY-MM-DD), datetime format, or relative format"
+            ],
+            "as_datetime": [
+                "invalid datetime format: \"nope\", expected ISO format (YYYY-MM-DDTHH:MM:SSZ) or relative format"
+            ],
+            "as_min_date": [
+                "invalid date or datetime format: \"nope\", expected ISO date (YYYY-MM-DD), datetime (YYYY-MM-DDTHH:MM:SSZ), or relative format"
+            ],
+            "input": "nope"
+        },
+        {
+            "as_date_default": [
+                "invalid date format: \"2023\", expected ISO format (YYYY-MM-DD), datetime format, or relative format"
+            ],
+            "as_datetime": [
+                "invalid datetime format: \"2023\", expected ISO format (YYYY-MM-DDTHH:MM:SSZ) or relative format"
+            ],
+            "as_min_date": [
+                "invalid date or datetime format: \"2023\", expected ISO date (YYYY-MM-DD), datetime (YYYY-MM-DDTHH:MM:SSZ), or relative format"
+            ],
+            "input": "2023"
+        },
+        {
+            "as_date_default": [
+                "invalid date format: \"2023-01\", expected ISO format (YYYY-MM-DD), datetime format, or relative format"
+            ],
+            "as_datetime": [
+                "invalid datetime format: \"2023-01\", expected ISO format (YYYY-MM-DDTHH:MM:SSZ) or relative format"
+            ],
+            "as_min_date": [
+                "invalid date or datetime format: \"2023-01\", expected ISO date (YYYY-MM-DD), datetime (YYYY-MM-DDTHH:MM:SSZ), or relative format"
+            ],
+            "input": "2023-01"
+        },
+        {
+            "as_date_default": [
+                "invalid date format: \"T15:04:05Z\", expected ISO format (YYYY-MM-DD), datetime format, or relative format"
+            ],
+            "as_datetime": [
+                "invalid datetime format: \"T15:04:05Z\", expected ISO format (YYYY-MM-DDTHH:MM:SSZ) or relative format"
+            ],
+            "as_min_date": [
+                "invalid date or datetime format: \"T15:04:05Z\", expected ISO date (YYYY-MM-DD), datetime (YYYY-MM-DDTHH:MM:SSZ), or relative format"
+            ],
+            "input": "T15:04:05Z"
+        },
+        {
+            "as_date_default": [
+                "invalid date format: \"null\", expected ISO format (YYYY-MM-DD), datetime format, or relative format"
+            ],
+            "as_datetime": [
+                "invalid datetime format: \"null\", expected ISO format (YYYY-MM-DDTHH:MM:SSZ) or relative format"
+            ],
+            "as_min_date": [
+                "invalid date or datetime format: \"null\", expected ISO date (YYYY-MM-DD), datetime (YYYY-MM-DDTHH:MM:SSZ), or relative format"
+            ],
+            "input": "null"
+        }
+    ],
+    "dialog_is_valid": [
+        {
+            "name": "zero",
+            "input": {
+                "callback_id": "",
+                "title": "",
+                "introduction_text": "",
+                "icon_url": "",
+                "elements": null,
+                "submit_label": "",
+                "notify_on_cancel": false,
+                "state": ""
+            },
+            "messages": [
+                "invalid dialog title \"\""
+            ],
+            "error": "1 error occurred:\n\t* invalid dialog title \"\"\n\n"
+        },
+        {
+            "name": "minimal_valid",
+            "input": {
+                "callback_id": "",
+                "title": "T",
+                "introduction_text": "",
+                "icon_url": "",
+                "elements": null,
+                "submit_label": "",
+                "notify_on_cancel": false,
+                "state": ""
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "title_at_limit",
+            "input": {
+                "callback_id": "",
+                "title": "xxxxxxxxxxxxxxxxxxxxxxxx",
+                "introduction_text": "",
+                "icon_url": "",
+                "elements": null,
+                "submit_label": "",
+                "notify_on_cancel": false,
+                "state": ""
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "title_over_limit",
+            "input": {
+                "callback_id": "",
+                "title": "xxxxxxxxxxxxxxxxxxxxxxxxx",
+                "introduction_text": "",
+                "icon_url": "",
+                "elements": null,
+                "submit_label": "",
+                "notify_on_cancel": false,
+                "state": ""
+            },
+            "messages": [
+                "invalid dialog title \"xxxxxxxxxxxxxxxxxxxxxxxxx\""
+            ],
+            "error": "1 error occurred:\n\t* invalid dialog title \"xxxxxxxxxxxxxxxxxxxxxxxxx\"\n\n"
+        },
+        {
+            "name": "title_multibyte",
+            "input": {
+                "callback_id": "",
+                "title": "ééééééééééééé",
+                "introduction_text": "",
+                "icon_url": "",
+                "elements": null,
+                "submit_label": "",
+                "notify_on_cancel": false,
+                "state": ""
+            },
+            "messages": [
+                "invalid dialog title \"ééééééééééééé\""
+            ],
+            "error": "1 error occurred:\n\t* invalid dialog title \"ééééééééééééé\"\n\n"
+        },
+        {
+            "name": "icon_url_valid",
+            "input": {
+                "callback_id": "",
+                "title": "T",
+                "introduction_text": "",
+                "icon_url": "https://example.com/i.png",
+                "elements": null,
+                "submit_label": "",
+                "notify_on_cancel": false,
+                "state": ""
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "icon_url_invalid",
+            "input": {
+                "callback_id": "",
+                "title": "T",
+                "introduction_text": "",
+                "icon_url": "not a url",
+                "elements": null,
+                "submit_label": "",
+                "notify_on_cancel": false,
+                "state": ""
+            },
+            "messages": [
+                "invalid icon url"
+            ],
+            "error": "1 error occurred:\n\t* invalid icon url\n\n"
+        },
+        {
+            "name": "icon_url_plugin_path",
+            "input": {
+                "callback_id": "",
+                "title": "T",
+                "introduction_text": "",
+                "icon_url": "/plugins/x/i.png",
+                "elements": null,
+                "submit_label": "",
+                "notify_on_cancel": false,
+                "state": ""
+            },
+            "messages": [
+                "invalid icon url"
+            ],
+            "error": "1 error occurred:\n\t* invalid icon url\n\n"
+        },
+        {
+            "name": "empty_elements_slice",
+            "input": {
+                "callback_id": "",
+                "title": "T",
+                "introduction_text": "",
+                "icon_url": "",
+                "elements": [],
+                "submit_label": "",
+                "notify_on_cancel": false,
+                "state": ""
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "one_valid_element",
+            "input": {
+                "callback_id": "",
+                "title": "T",
+                "introduction_text": "",
+                "icon_url": "",
+                "elements": [
+                    {
+                        "display_name": "Display",
+                        "name": "name",
+                        "type": "text",
+                        "subtype": "",
+                        "default": "",
+                        "placeholder": "",
+                        "help_text": "",
+                        "optional": false,
+                        "min_length": 0,
+                        "max_length": 0,
+                        "data_source": "",
+                        "options": null,
+                        "multiselect": false
+                    }
+                ],
+                "submit_label": "",
+                "notify_on_cancel": false,
+                "state": ""
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "one_invalid_element",
+            "input": {
+                "callback_id": "",
+                "title": "T",
+                "introduction_text": "",
+                "icon_url": "",
+                "elements": [
+                    {
+                        "display_name": "d",
+                        "name": "n",
+                        "type": "nope",
+                        "subtype": "",
+                        "default": "",
+                        "placeholder": "",
+                        "help_text": "",
+                        "optional": false,
+                        "min_length": 0,
+                        "max_length": 0,
+                        "data_source": "",
+                        "options": null,
+                        "multiselect": false
+                    }
+                ],
+                "submit_label": "",
+                "notify_on_cancel": false,
+                "state": ""
+            },
+            "messages": [
+                "\"n\" field is not valid: 1 error occurred:\n\t* invalid element type: \"nope\"\n\n"
+            ],
+            "error": "1 error occurred:\n\t* \"n\" field is not valid: 1 error occurred:\n\t* invalid element type: \"nope\"\n\n\n\n"
+        },
+        {
+            "name": "element_with_two_failures",
+            "input": {
+                "callback_id": "",
+                "title": "T",
+                "introduction_text": "",
+                "icon_url": "",
+                "elements": [
+                    {
+                        "display_name": "",
+                        "name": "",
+                        "type": "nope",
+                        "subtype": "",
+                        "default": "",
+                        "placeholder": "",
+                        "help_text": "",
+                        "optional": false,
+                        "min_length": 0,
+                        "max_length": 0,
+                        "data_source": "",
+                        "options": null,
+                        "multiselect": false
+                    }
+                ],
+                "submit_label": "",
+                "notify_on_cancel": false,
+                "state": ""
+            },
+            "messages": [
+                "\"\" field is not valid: 3 errors occurred:\n\t* DisplayName cannot be empty\n\t* Name cannot be empty\n\t* invalid element type: \"nope\"\n\n"
+            ],
+            "error": "1 error occurred:\n\t* \"\" field is not valid: 3 errors occurred:\n\t* DisplayName cannot be empty\n\t* Name cannot be empty\n\t* invalid element type: \"nope\"\n\n\n\n"
+        },
+        {
+            "name": "duplicate_names",
+            "input": {
+                "callback_id": "",
+                "title": "T",
+                "introduction_text": "",
+                "icon_url": "",
+                "elements": [
+                    {
+                        "display_name": "Display",
+                        "name": "name",
+                        "type": "text",
+                        "subtype": "",
+                        "default": "",
+                        "placeholder": "",
+                        "help_text": "",
+                        "optional": false,
+                        "min_length": 0,
+                        "max_length": 0,
+                        "data_source": "",
+                        "options": null,
+                        "multiselect": false
+                    },
+                    {
+                        "display_name": "Display",
+                        "name": "name",
+                        "type": "text",
+                        "subtype": "",
+                        "default": "",
+                        "placeholder": "",
+                        "help_text": "",
+                        "optional": false,
+                        "min_length": 0,
+                        "max_length": 0,
+                        "data_source": "",
+                        "options": null,
+                        "multiselect": false
+                    }
+                ],
+                "submit_label": "",
+                "notify_on_cancel": false,
+                "state": ""
+            },
+            "messages": [
+                "duplicate dialog element \"name\""
+            ],
+            "error": "1 error occurred:\n\t* duplicate dialog element \"name\"\n\n"
+        },
+        {
+            "name": "three_duplicates",
+            "input": {
+                "callback_id": "",
+                "title": "T",
+                "introduction_text": "",
+                "icon_url": "",
+                "elements": [
+                    {
+                        "display_name": "Display",
+                        "name": "name",
+                        "type": "text",
+                        "subtype": "",
+                        "default": "",
+                        "placeholder": "",
+                        "help_text": "",
+                        "optional": false,
+                        "min_length": 0,
+                        "max_length": 0,
+                        "data_source": "",
+                        "options": null,
+                        "multiselect": false
+                    },
+                    {
+                        "display_name": "Display",
+                        "name": "name",
+                        "type": "text",
+                        "subtype": "",
+                        "default": "",
+                        "placeholder": "",
+                        "help_text": "",
+                        "optional": false,
+                        "min_length": 0,
+                        "max_length": 0,
+                        "data_source": "",
+                        "options": null,
+                        "multiselect": false
+                    },
+                    {
+                        "display_name": "Display",
+                        "name": "name",
+                        "type": "text",
+                        "subtype": "",
+                        "default": "",
+                        "placeholder": "",
+                        "help_text": "",
+                        "optional": false,
+                        "min_length": 0,
+                        "max_length": 0,
+                        "data_source": "",
+                        "options": null,
+                        "multiselect": false
+                    }
+                ],
+                "submit_label": "",
+                "notify_on_cancel": false,
+                "state": ""
+            },
+            "messages": [
+                "duplicate dialog element \"name\"",
+                "duplicate dialog element \"name\""
+            ],
+            "error": "2 errors occurred:\n\t* duplicate dialog element \"name\"\n\t* duplicate dialog element \"name\"\n\n"
+        },
+        {
+            "name": "duplicate_empty_names",
+            "input": {
+                "callback_id": "",
+                "title": "T",
+                "introduction_text": "",
+                "icon_url": "",
+                "elements": [
+                    {
+                        "display_name": "d",
+                        "name": "",
+                        "type": "text",
+                        "subtype": "",
+                        "default": "",
+                        "placeholder": "",
+                        "help_text": "",
+                        "optional": false,
+                        "min_length": 0,
+                        "max_length": 0,
+                        "data_source": "",
+                        "options": null,
+                        "multiselect": false
+                    },
+                    {
+                        "display_name": "d",
+                        "name": "",
+                        "type": "text",
+                        "subtype": "",
+                        "default": "",
+                        "placeholder": "",
+                        "help_text": "",
+                        "optional": false,
+                        "min_length": 0,
+                        "max_length": 0,
+                        "data_source": "",
+                        "options": null,
+                        "multiselect": false
+                    }
+                ],
+                "submit_label": "",
+                "notify_on_cancel": false,
+                "state": ""
+            },
+            "messages": [
+                "\"\" field is not valid: 1 error occurred:\n\t* Name cannot be empty\n\n",
+                "duplicate dialog element \"\"",
+                "\"\" field is not valid: 1 error occurred:\n\t* Name cannot be empty\n\n"
+            ],
+            "error": "3 errors occurred:\n\t* \"\" field is not valid: 1 error occurred:\n\t* Name cannot be empty\n\n\n\t* duplicate dialog element \"\"\n\t* \"\" field is not valid: 1 error occurred:\n\t* Name cannot be empty\n\n\n\n"
+        },
+        {
+            "name": "everything_wrong",
+            "input": {
+                "callback_id": "",
+                "title": "xxxxxxxxxxxxxxxxxxxxxxxxx",
+                "introduction_text": "",
+                "icon_url": "nope",
+                "elements": [
+                    {
+                        "display_name": "",
+                        "name": "",
+                        "type": "bad",
+                        "subtype": "",
+                        "default": "",
+                        "placeholder": "",
+                        "help_text": "",
+                        "optional": false,
+                        "min_length": 0,
+                        "max_length": 0,
+                        "data_source": "",
+                        "options": null,
+                        "multiselect": false
+                    },
+                    {
+                        "display_name": "",
+                        "name": "",
+                        "type": "bad",
+                        "subtype": "",
+                        "default": "",
+                        "placeholder": "",
+                        "help_text": "",
+                        "optional": false,
+                        "min_length": 0,
+                        "max_length": 0,
+                        "data_source": "",
+                        "options": null,
+                        "multiselect": false
+                    }
+                ],
+                "submit_label": "",
+                "notify_on_cancel": false,
+                "state": ""
+            },
+            "messages": [
+                "invalid dialog title \"xxxxxxxxxxxxxxxxxxxxxxxxx\"",
+                "invalid icon url",
+                "\"\" field is not valid: 3 errors occurred:\n\t* DisplayName cannot be empty\n\t* Name cannot be empty\n\t* invalid element type: \"bad\"\n\n",
+                "duplicate dialog element \"\"",
+                "\"\" field is not valid: 3 errors occurred:\n\t* DisplayName cannot be empty\n\t* Name cannot be empty\n\t* invalid element type: \"bad\"\n\n"
+            ],
+            "error": "5 errors occurred:\n\t* invalid dialog title \"xxxxxxxxxxxxxxxxxxxxxxxxx\"\n\t* invalid icon url\n\t* \"\" field is not valid: 3 errors occurred:\n\t* DisplayName cannot be empty\n\t* Name cannot be empty\n\t* invalid element type: \"bad\"\n\n\n\t* duplicate dialog element \"\"\n\t* \"\" field is not valid: 3 errors occurred:\n\t* DisplayName cannot be empty\n\t* Name cannot be empty\n\t* invalid element type: \"bad\"\n\n\n\n"
+        }
+    ],
+    "effective_datetime_config": [
+        {
+            "config": {},
+            "element": {
+                "display_name": "",
+                "name": "",
+                "type": "",
+                "subtype": "",
+                "default": "",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "",
+                "options": null,
+                "multiselect": false
+            },
+            "name": "zero"
+        },
+        {
+            "config": {
+                "min_date": "2020-01-01",
+                "max_date": "2020-12-31",
+                "time_interval": 15
+            },
+            "element": {
+                "display_name": "",
+                "name": "",
+                "type": "",
+                "subtype": "",
+                "default": "",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "",
+                "options": null,
+                "multiselect": false,
+                "min_date": "2020-01-01",
+                "max_date": "2020-12-31",
+                "time_interval": 15
+            },
+            "name": "deprecated_only"
+        },
+        {
+            "config": {
+                "min_date": "2021-01-01",
+                "max_date": "2021-12-31",
+                "time_interval": 30
+            },
+            "element": {
+                "display_name": "",
+                "name": "",
+                "type": "",
+                "subtype": "",
+                "default": "",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "",
+                "options": null,
+                "multiselect": false,
+                "datetime_config": {
+                    "min_date": "2021-01-01",
+                    "max_date": "2021-12-31",
+                    "time_interval": 30
+                },
+                "min_date": "2020-01-01",
+                "max_date": "2020-12-31",
+                "time_interval": 15
+            },
+            "name": "config_wins"
+        },
+        {
+            "config": {
+                "min_date": "2020-01-01",
+                "max_date": "2020-12-31",
+                "time_interval": 15
+            },
+            "element": {
+                "display_name": "",
+                "name": "",
+                "type": "",
+                "subtype": "",
+                "default": "",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "",
+                "options": null,
+                "multiselect": false,
+                "datetime_config": {},
+                "min_date": "2020-01-01",
+                "max_date": "2020-12-31",
+                "time_interval": 15
+            },
+            "name": "config_empty_keeps_deprecated"
+        },
+        {
+            "config": {
+                "time_interval": 15
+            },
+            "element": {
+                "display_name": "",
+                "name": "",
+                "type": "",
+                "subtype": "",
+                "default": "",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "",
+                "options": null,
+                "multiselect": false,
+                "datetime_config": {},
+                "time_interval": 15
+            },
+            "name": "config_zero_interval_keeps_deprecated"
+        },
+        {
+            "config": {
+                "location_timezone": "Asia/Tokyo"
+            },
+            "element": {
+                "display_name": "",
+                "name": "",
+                "type": "",
+                "subtype": "",
+                "default": "",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "",
+                "options": null,
+                "multiselect": false,
+                "datetime_config": {
+                    "location_timezone": "Asia/Tokyo"
+                }
+            },
+            "name": "location_timezone"
+        },
+        {
+            "config": {
+                "manual_time_entry": true
+            },
+            "element": {
+                "display_name": "",
+                "name": "",
+                "type": "",
+                "subtype": "",
+                "default": "",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "",
+                "options": null,
+                "multiselect": false,
+                "datetime_config": {
+                    "manual_time_entry": true
+                }
+            },
+            "name": "manual_time_entry"
+        },
+        {
+            "config": {
+                "manual_time_entry": true
+            },
+            "element": {
+                "display_name": "",
+                "name": "",
+                "type": "",
+                "subtype": "",
+                "default": "",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "",
+                "options": null,
+                "multiselect": false,
+                "datetime_config": {
+                    "allow_manual_time_entry": true
+                }
+            },
+            "name": "allow_manual_time_entry_deprecated"
+        },
+        {
+            "config": {
+                "manual_time_entry": true
+            },
+            "element": {
+                "display_name": "",
+                "name": "",
+                "type": "",
+                "subtype": "",
+                "default": "",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "",
+                "options": null,
+                "multiselect": false,
+                "datetime_config": {
+                    "allow_manual_time_entry": true
+                }
+            },
+            "name": "manual_time_entry_ored"
+        }
+    ],
+    "element_is_valid": [
+        {
+            "name": "zero",
+            "input": {
+                "display_name": "",
+                "name": "",
+                "type": "",
+                "subtype": "",
+                "default": "",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "",
+                "options": null,
+                "multiselect": false
+            },
+            "messages": [
+                "DisplayName cannot be empty",
+                "Name cannot be empty",
+                "invalid element type: \"\""
+            ],
+            "error": "3 errors occurred:\n\t* DisplayName cannot be empty\n\t* Name cannot be empty\n\t* invalid element type: \"\"\n\n"
+        },
+        {
+            "name": "valid_text",
+            "input": {
+                "display_name": "Display",
+                "name": "name",
+                "type": "text",
+                "subtype": "",
+                "default": "",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "",
+                "options": null,
+                "multiselect": false
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "valid_text_subtype",
+            "input": {
+                "display_name": "Display",
+                "name": "name",
+                "type": "text",
+                "subtype": "email",
+                "default": "",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "",
+                "options": null,
+                "multiselect": false
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "missing_display_name",
+            "input": {
+                "display_name": "",
+                "name": "n",
+                "type": "text",
+                "subtype": "",
+                "default": "",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "",
+                "options": null,
+                "multiselect": false
+            },
+            "messages": [
+                "DisplayName cannot be empty"
+            ],
+            "error": "1 error occurred:\n\t* DisplayName cannot be empty\n\n"
+        },
+        {
+            "name": "missing_name",
+            "input": {
+                "display_name": "d",
+                "name": "",
+                "type": "text",
+                "subtype": "",
+                "default": "",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "",
+                "options": null,
+                "multiselect": false
+            },
+            "messages": [
+                "Name cannot be empty"
+            ],
+            "error": "1 error occurred:\n\t* Name cannot be empty\n\n"
+        },
+        {
+            "name": "display_name_at_limit",
+            "input": {
+                "display_name": "xxxxxxxxxxxxxxxxxxxxxxxx",
+                "name": "name",
+                "type": "text",
+                "subtype": "",
+                "default": "",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "",
+                "options": null,
+                "multiselect": false
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "display_name_over_limit",
+            "input": {
+                "display_name": "xxxxxxxxxxxxxxxxxxxxxxxxx",
+                "name": "name",
+                "type": "text",
+                "subtype": "",
+                "default": "",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "",
+                "options": null,
+                "multiselect": false
+            },
+            "messages": [
+                "DisplayName cannot be longer than 24 characters, got 25"
+            ],
+            "error": "1 error occurred:\n\t* DisplayName cannot be longer than 24 characters, got 25\n\n"
+        },
+        {
+            "name": "name_over_limit",
+            "input": {
+                "display_name": "Display",
+                "name": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                "type": "text",
+                "subtype": "",
+                "default": "",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "",
+                "options": null,
+                "multiselect": false
+            },
+            "messages": [
+                "Name cannot be longer than 300 characters, got 301"
+            ],
+            "error": "1 error occurred:\n\t* Name cannot be longer than 300 characters, got 301\n\n"
+        },
+        {
+            "name": "help_text_over_limit",
+            "input": {
+                "display_name": "Display",
+                "name": "name",
+                "type": "text",
+                "subtype": "",
+                "default": "",
+                "placeholder": "",
+                "help_text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "",
+                "options": null,
+                "multiselect": false
+            },
+            "messages": [
+                "HelpText cannot be longer than 150 characters, got 151"
+            ],
+            "error": "1 error occurred:\n\t* HelpText cannot be longer than 150 characters, got 151\n\n"
+        },
+        {
+            "name": "display_name_multibyte",
+            "input": {
+                "display_name": "ééééééééééééé",
+                "name": "name",
+                "type": "text",
+                "subtype": "",
+                "default": "",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "",
+                "options": null,
+                "multiselect": false
+            },
+            "messages": [
+                "DisplayName cannot be longer than 24 characters, got 26"
+            ],
+            "error": "1 error occurred:\n\t* DisplayName cannot be longer than 24 characters, got 26\n\n"
+        },
+        {
+            "name": "negative_min_length",
+            "input": {
+                "display_name": "Display",
+                "name": "name",
+                "type": "text",
+                "subtype": "",
+                "default": "",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": -1,
+                "max_length": 0,
+                "data_source": "",
+                "options": null,
+                "multiselect": false
+            },
+            "messages": [
+                "min length cannot be a negative number, got -1"
+            ],
+            "error": "1 error occurred:\n\t* min length cannot be a negative number, got -1\n\n"
+        },
+        {
+            "name": "min_greater_than_max",
+            "input": {
+                "display_name": "Display",
+                "name": "name",
+                "type": "text",
+                "subtype": "",
+                "default": "",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 5,
+                "max_length": 2,
+                "data_source": "",
+                "options": null,
+                "multiselect": false
+            },
+            "messages": [
+                "min length should be less then max length, got 5 \u003e 2"
+            ],
+            "error": "1 error occurred:\n\t* min length should be less then max length, got 5 \u003e 2\n\n"
+        },
+        {
+            "name": "min_equals_max",
+            "input": {
+                "display_name": "Display",
+                "name": "name",
+                "type": "text",
+                "subtype": "",
+                "default": "",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 2,
+                "max_length": 2,
+                "data_source": "",
+                "options": null,
+                "multiselect": false
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "min_length_without_max",
+            "input": {
+                "display_name": "Display",
+                "name": "name",
+                "type": "text",
+                "subtype": "",
+                "default": "",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 1,
+                "max_length": 0,
+                "data_source": "",
+                "options": null,
+                "multiselect": false
+            },
+            "messages": [
+                "min length should be less then max length, got 1 \u003e 0"
+            ],
+            "error": "1 error occurred:\n\t* min length should be less then max length, got 1 \u003e 0\n\n"
+        },
+        {
+            "name": "multiselect_on_text",
+            "input": {
+                "display_name": "Display",
+                "name": "name",
+                "type": "text",
+                "subtype": "",
+                "default": "",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "",
+                "options": null,
+                "multiselect": true
+            },
+            "messages": [
+                "multiselect can only be used with select elements, got type \"text\""
+            ],
+            "error": "1 error occurred:\n\t* multiselect can only be used with select elements, got type \"text\"\n\n"
+        },
+        {
+            "name": "allow_multiple_on_text",
+            "input": {
+                "display_name": "Display",
+                "name": "name",
+                "type": "text",
+                "subtype": "",
+                "default": "",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "",
+                "options": null,
+                "multiselect": false,
+                "allow_multiple": true
+            },
+            "messages": [
+                "allow_multiple can only be used with file elements, got type \"text\""
+            ],
+            "error": "1 error occurred:\n\t* allow_multiple can only be used with file elements, got type \"text\"\n\n"
+        },
+        {
+            "name": "text_default_over_limit",
+            "input": {
+                "display_name": "Display",
+                "name": "name",
+                "type": "text",
+                "subtype": "",
+                "default": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "",
+                "options": null,
+                "multiselect": false
+            },
+            "messages": [
+                "Default cannot be longer than 150 characters, got 151"
+            ],
+            "error": "1 error occurred:\n\t* Default cannot be longer than 150 characters, got 151\n\n"
+        },
+        {
+            "name": "text_placeholder_over_limit",
+            "input": {
+                "display_name": "Display",
+                "name": "name",
+                "type": "text",
+                "subtype": "",
+                "default": "",
+                "placeholder": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "",
+                "options": null,
+                "multiselect": false
+            },
+            "messages": [
+                "Placeholder cannot be longer than 150 characters, got 151"
+            ],
+            "error": "1 error occurred:\n\t* Placeholder cannot be longer than 150 characters, got 151\n\n"
+        },
+        {
+            "name": "text_bad_subtype",
+            "input": {
+                "display_name": "Display",
+                "name": "name",
+                "type": "text",
+                "subtype": "nope",
+                "default": "",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "",
+                "options": null,
+                "multiselect": false
+            },
+            "messages": [
+                "invalid subtype \"text\""
+            ],
+            "error": "1 error occurred:\n\t* invalid subtype \"text\"\n\n"
+        },
+        {
+            "name": "textarea_valid",
+            "input": {
+                "display_name": "Display",
+                "name": "name",
+                "type": "textarea",
+                "subtype": "",
+                "default": "",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "",
+                "options": null,
+                "multiselect": false
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "textarea_default_over_limit",
+            "input": {
+                "display_name": "Display",
+                "name": "name",
+                "type": "textarea",
+                "subtype": "",
+                "default": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "",
+                "options": null,
+                "multiselect": false
+            },
+            "messages": [
+                "Default cannot be longer than 3000 characters, got 3001"
+            ],
+            "error": "1 error occurred:\n\t* Default cannot be longer than 3000 characters, got 3001\n\n"
+        },
+        {
+            "name": "textarea_bad_subtype",
+            "input": {
+                "display_name": "Display",
+                "name": "name",
+                "type": "textarea",
+                "subtype": "nope",
+                "default": "",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "",
+                "options": null,
+                "multiselect": false
+            },
+            "messages": [
+                "invalid subtype \"textarea\""
+            ],
+            "error": "1 error occurred:\n\t* invalid subtype \"textarea\"\n\n"
+        },
+        {
+            "name": "select_with_options",
+            "input": {
+                "display_name": "Display",
+                "name": "name",
+                "type": "select",
+                "subtype": "",
+                "default": "1",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "",
+                "options": [
+                    {
+                        "text": "a",
+                        "value": "1"
+                    }
+                ],
+                "multiselect": false
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "select_default_not_in_options",
+            "input": {
+                "display_name": "Display",
+                "name": "name",
+                "type": "select",
+                "subtype": "",
+                "default": "2",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "",
+                "options": [
+                    {
+                        "text": "a",
+                        "value": "1"
+                    }
+                ],
+                "multiselect": false
+            },
+            "messages": [
+                "default value \"2\" doesn't exist in options "
+            ],
+            "error": "1 error occurred:\n\t* default value \"2\" doesn't exist in options \n\n"
+        },
+        {
+            "name": "select_empty_default_is_fine",
+            "input": {
+                "display_name": "Display",
+                "name": "name",
+                "type": "select",
+                "subtype": "",
+                "default": "",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "",
+                "options": [
+                    {
+                        "text": "a",
+                        "value": "1"
+                    }
+                ],
+                "multiselect": false
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "select_no_options_no_default",
+            "input": {
+                "display_name": "Display",
+                "name": "name",
+                "type": "select",
+                "subtype": "",
+                "default": "",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "",
+                "options": null,
+                "multiselect": false
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "select_nil_option_element",
+            "input": {
+                "display_name": "Display",
+                "name": "name",
+                "type": "select",
+                "subtype": "",
+                "default": "1",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "",
+                "options": [
+                    null,
+                    {
+                        "text": "a",
+                        "value": "1"
+                    }
+                ],
+                "multiselect": false
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "select_data_source_users",
+            "input": {
+                "display_name": "Display",
+                "name": "name",
+                "type": "select",
+                "subtype": "",
+                "default": "",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "users",
+                "options": null,
+                "multiselect": false
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "select_data_source_bad",
+            "input": {
+                "display_name": "Display",
+                "name": "name",
+                "type": "select",
+                "subtype": "",
+                "default": "",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "nope",
+                "options": null,
+                "multiselect": false
+            },
+            "messages": [
+                "invalid data source \"nope\", allowed are 'users', 'channels', or 'dynamic'"
+            ],
+            "error": "1 error occurred:\n\t* invalid data source \"nope\", allowed are 'users', 'channels', or 'dynamic'\n\n"
+        },
+        {
+            "name": "select_bad_data_source_skips_default_check",
+            "input": {
+                "display_name": "Display",
+                "name": "name",
+                "type": "select",
+                "subtype": "",
+                "default": "missing",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "nope",
+                "options": null,
+                "multiselect": false
+            },
+            "messages": [
+                "invalid data source \"nope\", allowed are 'users', 'channels', or 'dynamic'"
+            ],
+            "error": "1 error occurred:\n\t* invalid data source \"nope\", allowed are 'users', 'channels', or 'dynamic'\n\n"
+        },
+        {
+            "name": "select_dynamic_without_url",
+            "input": {
+                "display_name": "Display",
+                "name": "name",
+                "type": "select",
+                "subtype": "",
+                "default": "",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "dynamic",
+                "options": null,
+                "multiselect": false
+            },
+            "messages": [
+                "dynamic data_source requires data_source_url"
+            ],
+            "error": "1 error occurred:\n\t* dynamic data_source requires data_source_url\n\n"
+        },
+        {
+            "name": "select_dynamic_with_url",
+            "input": {
+                "display_name": "Display",
+                "name": "name",
+                "type": "select",
+                "subtype": "",
+                "default": "",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "dynamic",
+                "data_source_url": "https://example.com/lookup",
+                "options": null,
+                "multiselect": false
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "select_dynamic_plugin_url",
+            "input": {
+                "display_name": "Display",
+                "name": "name",
+                "type": "select",
+                "subtype": "",
+                "default": "",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "dynamic",
+                "data_source_url": "/plugins/x/lookup",
+                "options": null,
+                "multiselect": false
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "select_dynamic_bad_url",
+            "input": {
+                "display_name": "Display",
+                "name": "name",
+                "type": "select",
+                "subtype": "",
+                "default": "",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "dynamic",
+                "data_source_url": "not a url",
+                "options": null,
+                "multiselect": false
+            },
+            "messages": [
+                "invalid data_source_url for dynamic select"
+            ],
+            "error": "1 error occurred:\n\t* invalid data_source_url for dynamic select\n\n"
+        },
+        {
+            "name": "select_dynamic_with_options",
+            "input": {
+                "display_name": "Display",
+                "name": "name",
+                "type": "select",
+                "subtype": "",
+                "default": "",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "dynamic",
+                "data_source_url": "https://example.com/lookup",
+                "options": [
+                    {
+                        "text": "a",
+                        "value": "1"
+                    }
+                ],
+                "multiselect": false
+            },
+            "messages": [
+                "dynamic select element should not have static options"
+            ],
+            "error": "1 error occurred:\n\t* dynamic select element should not have static options\n\n"
+        },
+        {
+            "name": "select_dynamic_ignores_default",
+            "input": {
+                "display_name": "Display",
+                "name": "name",
+                "type": "select",
+                "subtype": "",
+                "default": "anything",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "dynamic",
+                "data_source_url": "https://example.com/lookup",
+                "options": null,
+                "multiselect": false
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "multiselect_all_present",
+            "input": {
+                "display_name": "Display",
+                "name": "name",
+                "type": "select",
+                "subtype": "",
+                "default": "1,2",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "",
+                "options": [
+                    {
+                        "text": "a",
+                        "value": "1"
+                    },
+                    {
+                        "text": "b",
+                        "value": "2"
+                    }
+                ],
+                "multiselect": true
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "multiselect_spaces_stripped",
+            "input": {
+                "display_name": "Display",
+                "name": "name",
+                "type": "select",
+                "subtype": "",
+                "default": " 1 , 2 ",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "",
+                "options": [
+                    {
+                        "text": "a",
+                        "value": "1"
+                    },
+                    {
+                        "text": "b",
+                        "value": "2"
+                    }
+                ],
+                "multiselect": true
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "multiselect_option_value_with_space",
+            "input": {
+                "display_name": "Display",
+                "name": "name",
+                "type": "select",
+                "subtype": "",
+                "default": "with space",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "",
+                "options": [
+                    {
+                        "text": "a",
+                        "value": "with space"
+                    }
+                ],
+                "multiselect": true
+            },
+            "messages": [
+                "multiselect default value \"with space\" contains values not in options"
+            ],
+            "error": "1 error occurred:\n\t* multiselect default value \"with space\" contains values not in options\n\n"
+        },
+        {
+            "name": "multiselect_missing_value",
+            "input": {
+                "display_name": "Display",
+                "name": "name",
+                "type": "select",
+                "subtype": "",
+                "default": "1,3",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "",
+                "options": [
+                    {
+                        "text": "a",
+                        "value": "1"
+                    }
+                ],
+                "multiselect": true
+            },
+            "messages": [
+                "multiselect default value \"1,3\" contains values not in options"
+            ],
+            "error": "1 error occurred:\n\t* multiselect default value \"1,3\" contains values not in options\n\n"
+        },
+        {
+            "name": "multiselect_trailing_comma",
+            "input": {
+                "display_name": "Display",
+                "name": "name",
+                "type": "select",
+                "subtype": "",
+                "default": "1,",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "",
+                "options": [
+                    {
+                        "text": "a",
+                        "value": "1"
+                    }
+                ],
+                "multiselect": true
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "select_default_over_limit",
+            "input": {
+                "display_name": "Display",
+                "name": "name",
+                "type": "select",
+                "subtype": "",
+                "default": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "",
+                "options": [
+                    {
+                        "text": "a",
+                        "value": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                    }
+                ],
+                "multiselect": false
+            },
+            "messages": [
+                "Default cannot be longer than 3000 characters, got 3001"
+            ],
+            "error": "1 error occurred:\n\t* Default cannot be longer than 3000 characters, got 3001\n\n"
+        },
+        {
+            "name": "bool_valid_true",
+            "input": {
+                "display_name": "Display",
+                "name": "name",
+                "type": "bool",
+                "subtype": "",
+                "default": "true",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "",
+                "options": null,
+                "multiselect": false
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "bool_valid_empty",
+            "input": {
+                "display_name": "Display",
+                "name": "name",
+                "type": "bool",
+                "subtype": "",
+                "default": "",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "",
+                "options": null,
+                "multiselect": false
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "bool_bad_default",
+            "input": {
+                "display_name": "Display",
+                "name": "name",
+                "type": "bool",
+                "subtype": "",
+                "default": "TRUE",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "",
+                "options": null,
+                "multiselect": false
+            },
+            "messages": [
+                "invalid default of bool"
+            ],
+            "error": "1 error occurred:\n\t* invalid default of bool\n\n"
+        },
+        {
+            "name": "bool_placeholder_over_limit",
+            "input": {
+                "display_name": "Display",
+                "name": "name",
+                "type": "bool",
+                "subtype": "",
+                "default": "",
+                "placeholder": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "",
+                "options": null,
+                "multiselect": false
+            },
+            "messages": [
+                "Placeholder cannot be longer than 150 characters, got 151"
+            ],
+            "error": "1 error occurred:\n\t* Placeholder cannot be longer than 150 characters, got 151\n\n"
+        },
+        {
+            "name": "bool_long_default_not_checked",
+            "input": {
+                "display_name": "Display",
+                "name": "name",
+                "type": "bool",
+                "subtype": "",
+                "default": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "",
+                "options": null,
+                "multiselect": false
+            },
+            "messages": [
+                "invalid default of bool"
+            ],
+            "error": "1 error occurred:\n\t* invalid default of bool\n\n"
+        },
+        {
+            "name": "radio_default_in_options",
+            "input": {
+                "display_name": "Display",
+                "name": "name",
+                "type": "radio",
+                "subtype": "",
+                "default": "1",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "",
+                "options": [
+                    {
+                        "text": "a",
+                        "value": "1"
+                    }
+                ],
+                "multiselect": false
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "radio_default_missing",
+            "input": {
+                "display_name": "Display",
+                "name": "name",
+                "type": "radio",
+                "subtype": "",
+                "default": "2",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "",
+                "options": [
+                    {
+                        "text": "a",
+                        "value": "1"
+                    }
+                ],
+                "multiselect": false
+            },
+            "messages": [
+                "default value \"2\" doesn't exist in options "
+            ],
+            "error": "1 error occurred:\n\t* default value \"2\" doesn't exist in options \n\n"
+        },
+        {
+            "name": "radio_long_placeholder_not_checked",
+            "input": {
+                "display_name": "Display",
+                "name": "name",
+                "type": "radio",
+                "subtype": "",
+                "default": "",
+                "placeholder": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "",
+                "options": null,
+                "multiselect": false
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "file_valid",
+            "input": {
+                "display_name": "Display",
+                "name": "name",
+                "type": "file",
+                "subtype": "",
+                "default": "",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "",
+                "options": null,
+                "multiselect": false
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "file_one_id",
+            "input": {
+                "display_name": "Display",
+                "name": "name",
+                "type": "file",
+                "subtype": "",
+                "default": "6bdz674pgq767e4jx75w4pf57a",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "",
+                "options": null,
+                "multiselect": false
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "file_two_ids_without_allow_multiple",
+            "input": {
+                "display_name": "Display",
+                "name": "name",
+                "type": "file",
+                "subtype": "",
+                "default": "6bdz674pgq767e4jx75w4pf57a,qr6kf7ztp7yifxt4wm5xn51bke",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "",
+                "options": null,
+                "multiselect": false
+            },
+            "messages": [
+                "default may not contain more than one file ID when allow_multiple is false"
+            ],
+            "error": "1 error occurred:\n\t* default may not contain more than one file ID when allow_multiple is false\n\n"
+        },
+        {
+            "name": "file_two_ids_with_allow_multiple",
+            "input": {
+                "display_name": "Display",
+                "name": "name",
+                "type": "file",
+                "subtype": "",
+                "default": "6bdz674pgq767e4jx75w4pf57a,qr6kf7ztp7yifxt4wm5xn51bke",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "",
+                "options": null,
+                "multiselect": false,
+                "allow_multiple": true
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "file_bad_id",
+            "input": {
+                "display_name": "Display",
+                "name": "name",
+                "type": "file",
+                "subtype": "",
+                "default": "nope",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "",
+                "options": null,
+                "multiselect": false
+            },
+            "messages": [
+                "default file ID \"nope\" is not a valid ID"
+            ],
+            "error": "1 error occurred:\n\t* default file ID \"nope\" is not a valid ID\n\n"
+        },
+        {
+            "name": "file_blank_segments_skipped",
+            "input": {
+                "display_name": "Display",
+                "name": "name",
+                "type": "file",
+                "subtype": "",
+                "default": " 6bdz674pgq767e4jx75w4pf57a , , ",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "",
+                "options": null,
+                "multiselect": false
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "file_with_options",
+            "input": {
+                "display_name": "Display",
+                "name": "name",
+                "type": "file",
+                "subtype": "",
+                "default": "",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "",
+                "options": [
+                    {
+                        "text": "a",
+                        "value": "1"
+                    }
+                ],
+                "multiselect": false
+            },
+            "messages": [
+                "file elements cannot have options"
+            ],
+            "error": "1 error occurred:\n\t* file elements cannot have options\n\n"
+        },
+        {
+            "name": "file_with_data_source",
+            "input": {
+                "display_name": "Display",
+                "name": "name",
+                "type": "file",
+                "subtype": "",
+                "default": "",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "users",
+                "options": null,
+                "multiselect": false
+            },
+            "messages": [
+                "file elements cannot have a data source"
+            ],
+            "error": "1 error occurred:\n\t* file elements cannot have a data source\n\n"
+        },
+        {
+            "name": "file_placeholder_over_limit",
+            "input": {
+                "display_name": "Display",
+                "name": "name",
+                "type": "file",
+                "subtype": "",
+                "default": "",
+                "placeholder": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "",
+                "options": null,
+                "multiselect": false
+            },
+            "messages": [
+                "Placeholder cannot be longer than 300 characters, got 301"
+            ],
+            "error": "1 error occurred:\n\t* Placeholder cannot be longer than 300 characters, got 301\n\n"
+        },
+        {
+            "name": "action_button_missing_config",
+            "input": {
+                "display_name": "Display",
+                "name": "name",
+                "type": "action_button",
+                "subtype": "",
+                "default": "",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "",
+                "options": null,
+                "multiselect": false
+            },
+            "messages": [
+                "action_button element requires action_button configuration"
+            ],
+            "error": "1 error occurred:\n\t* action_button element requires action_button configuration\n\n"
+        },
+        {
+            "name": "action_button_empty_url",
+            "input": {
+                "display_name": "Display",
+                "name": "name",
+                "type": "action_button",
+                "subtype": "",
+                "default": "",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "",
+                "options": null,
+                "multiselect": false,
+                "action_button": {
+                    "url": ""
+                }
+            },
+            "messages": [
+                "action_button requires a non-empty URL"
+            ],
+            "error": "1 error occurred:\n\t* action_button requires a non-empty URL\n\n"
+        },
+        {
+            "name": "action_button_bad_url",
+            "input": {
+                "display_name": "Display",
+                "name": "name",
+                "type": "action_button",
+                "subtype": "",
+                "default": "",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "",
+                "options": null,
+                "multiselect": false,
+                "action_button": {
+                    "url": "not a url"
+                }
+            },
+            "messages": [
+                "invalid action_button URL: invalid URL"
+            ],
+            "error": "1 error occurred:\n\t* invalid action_button URL: invalid URL\n\n"
+        },
+        {
+            "name": "action_button_valid",
+            "input": {
+                "display_name": "Display",
+                "name": "name",
+                "type": "action_button",
+                "subtype": "",
+                "default": "",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "",
+                "options": null,
+                "multiselect": false,
+                "action_button": {
+                    "url": "/plugins/x/do",
+                    "context": {
+                        "k": "v"
+                    }
+                }
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "unknown_type",
+            "input": {
+                "display_name": "Display",
+                "name": "name",
+                "type": "nope",
+                "subtype": "",
+                "default": "",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "",
+                "options": null,
+                "multiselect": false
+            },
+            "messages": [
+                "invalid element type: \"nope\""
+            ],
+            "error": "1 error occurred:\n\t* invalid element type: \"nope\"\n\n"
+        },
+        {
+            "name": "empty_type",
+            "input": {
+                "display_name": "Display",
+                "name": "name",
+                "type": "",
+                "subtype": "",
+                "default": "",
+                "placeholder": "",
+                "help_text": "",
+                "optional": false,
+                "min_length": 0,
+                "max_length": 0,
+                "data_source": "",
+                "options": null,
+                "multiselect": false
+            },
+            "messages": [
+                "invalid element type: \"\""
+            ],
+            "error": "1 error occurred:\n\t* invalid element type: \"\"\n\n"
+        }
+    ],
+    "lookup_url": [
+        {
+            "url": "",
+            "valid": false
+        },
+        {
+            "url": " ",
+            "valid": false
+        },
+        {
+            "url": "https://example.com",
+            "valid": true
+        },
+        {
+            "url": "http://example.com/x?q=1",
+            "valid": true
+        },
+        {
+            "url": "ftp://example.com",
+            "valid": false
+        },
+        {
+            "url": "example.com",
+            "valid": false
+        },
+        {
+            "url": "/api/v4/x",
+            "valid": false
+        },
+        {
+            "url": "/plugins/x",
+            "valid": true
+        },
+        {
+            "url": "/plugins/",
+            "valid": true
+        },
+        {
+            "url": "/plugins/x/y",
+            "valid": true
+        },
+        {
+            "url": "plugins/x",
+            "valid": false
+        },
+        {
+            "url": "./plugins/x",
+            "valid": false
+        },
+        {
+            "url": "/plugins/../etc",
+            "valid": false
+        },
+        {
+            "url": "/plugins/x/../y",
+            "valid": false
+        },
+        {
+            "url": "/plugins//x",
+            "valid": false
+        },
+        {
+            "url": "/plugins/x//y",
+            "valid": false
+        },
+        {
+            "url": "/plugins/x..y",
+            "valid": false
+        },
+        {
+            "url": "/plugins/x.y",
+            "valid": true
+        },
+        {
+            "url": "https://example.com/../x",
+            "valid": true
+        },
+        {
+            "url": "https://example.com//x",
+            "valid": true
+        },
+        {
+            "url": "https://example.com/plugins/x",
+            "valid": true
+        }
+    ],
+    "open_dialog_request_is_valid": [
+        {
+            "name": "zero",
+            "input": {
+                "trigger_id": "",
+                "url": "",
+                "dialog": {
+                    "callback_id": "",
+                    "title": "",
+                    "introduction_text": "",
+                    "icon_url": "",
+                    "elements": null,
+                    "submit_label": "",
+                    "notify_on_cancel": false,
+                    "state": ""
+                }
+            },
+            "messages": [
+                "empty URL",
+                "empty trigger id",
+                "invalid dialog title \"\""
+            ],
+            "error": "3 errors occurred:\n\t* empty URL\n\t* empty trigger id\n\t* invalid dialog title \"\"\n\n"
+        },
+        {
+            "name": "valid",
+            "input": {
+                "trigger_id": "trig",
+                "url": "https://example.com/d",
+                "dialog": {
+                    "callback_id": "",
+                    "title": "T",
+                    "introduction_text": "",
+                    "icon_url": "",
+                    "elements": null,
+                    "submit_label": "",
+                    "notify_on_cancel": false,
+                    "state": ""
+                }
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "missing_url",
+            "input": {
+                "trigger_id": "t",
+                "url": "",
+                "dialog": {
+                    "callback_id": "",
+                    "title": "T",
+                    "introduction_text": "",
+                    "icon_url": "",
+                    "elements": null,
+                    "submit_label": "",
+                    "notify_on_cancel": false,
+                    "state": ""
+                }
+            },
+            "messages": [
+                "empty URL"
+            ],
+            "error": "1 error occurred:\n\t* empty URL\n\n"
+        },
+        {
+            "name": "missing_trigger",
+            "input": {
+                "trigger_id": "",
+                "url": "u",
+                "dialog": {
+                    "callback_id": "",
+                    "title": "T",
+                    "introduction_text": "",
+                    "icon_url": "",
+                    "elements": null,
+                    "submit_label": "",
+                    "notify_on_cancel": false,
+                    "state": ""
+                }
+            },
+            "messages": [
+                "empty trigger id"
+            ],
+            "error": "1 error occurred:\n\t* empty trigger id\n\n"
+        },
+        {
+            "name": "nonsense_url_accepted",
+            "input": {
+                "trigger_id": "t",
+                "url": "not a url",
+                "dialog": {
+                    "callback_id": "",
+                    "title": "T",
+                    "introduction_text": "",
+                    "icon_url": "",
+                    "elements": null,
+                    "submit_label": "",
+                    "notify_on_cancel": false,
+                    "state": ""
+                }
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "invalid_dialog",
+            "input": {
+                "trigger_id": "t",
+                "url": "u",
+                "dialog": {
+                    "callback_id": "",
+                    "title": "",
+                    "introduction_text": "",
+                    "icon_url": "nope",
+                    "elements": null,
+                    "submit_label": "",
+                    "notify_on_cancel": false,
+                    "state": ""
+                }
+            },
+            "messages": [
+                "invalid dialog title \"\"",
+                "invalid icon url"
+            ],
+            "error": "2 errors occurred:\n\t* invalid dialog title \"\"\n\t* invalid icon url\n\n"
+        }
+    ],
+    "quote": [
+        {
+            "input": "",
+            "input_quoted": "\"\"",
+            "quoted": "\"\""
+        },
+        {
+            "input": "abc",
+            "input_quoted": "\"abc\"",
+            "quoted": "\"abc\""
+        },
+        {
+            "input": "a b",
+            "input_quoted": "\"a b\"",
+            "quoted": "\"a b\""
+        },
+        {
+            "input": "a\"b",
+            "input_quoted": "\"a\\\"b\"",
+            "quoted": "\"a\\\"b\""
+        },
+        {
+            "input": "a\\\\b",
+            "input_quoted": "\"a\\\\\\\\b\"",
+            "quoted": "\"a\\\\\\\\b\""
+        },
+        {
+            "input": "a'b",
+            "input_quoted": "\"a'b\"",
+            "quoted": "\"a'b\""
+        },
+        {
+            "input": "tab\there",
+            "input_quoted": "\"tab\\there\"",
+            "quoted": "\"tab\\there\""
+        },
+        {
+            "input": "nl\nhere",
+            "input_quoted": "\"nl\\nhere\"",
+            "quoted": "\"nl\\nhere\""
+        },
+        {
+            "input": "cr\rhere",
+            "input_quoted": "\"cr\\rhere\"",
+            "quoted": "\"cr\\rhere\""
+        },
+        {
+            "input": "\u0007",
+            "input_quoted": "\"\\a\"",
+            "quoted": "\"\\a\""
+        },
+        {
+            "input": "\b",
+            "input_quoted": "\"\\b\"",
+            "quoted": "\"\\b\""
+        },
+        {
+            "input": "\f",
+            "input_quoted": "\"\\f\"",
+            "quoted": "\"\\f\""
+        },
+        {
+            "input": "\u000b",
+            "input_quoted": "\"\\v\"",
+            "quoted": "\"\\v\""
+        },
+        {
+            "input": "\u0000",
+            "input_quoted": "\"\\x00\"",
+            "quoted": "\"\\x00\""
+        },
+        {
+            "input": "\u001b",
+            "input_quoted": "\"\\x1b\"",
+            "quoted": "\"\\x1b\""
+        },
+        {
+            "input": "",
+            "input_quoted": "\"\\x7f\"",
+            "quoted": "\"\\x7f\""
+        },
+        {
+            "input": "é",
+            "input_quoted": "\"é\"",
+            "quoted": "\"é\""
+        },
+        {
+            "input": "日本語",
+            "input_quoted": "\"日本語\"",
+            "quoted": "\"日本語\""
+        },
+        {
+            "input": "😀",
+            "input_quoted": "\"😀\"",
+            "quoted": "\"😀\""
+        },
+        {
+            "input": "nbsp here",
+            "input_quoted": "\"nbsp\\u00a0here\"",
+            "quoted": "\"nbsp\\u00a0here\""
+        },
+        {
+            "input": "ideographic　space",
+            "input_quoted": "\"ideographic\\u3000space\"",
+            "quoted": "\"ideographic\\u3000space\""
+        },
+        {
+            "input": "zwsp​here",
+            "input_quoted": "\"zwsp\\u200bhere\"",
+            "quoted": "\"zwsp\\u200bhere\""
+        },
+        {
+            "input": "nelhere",
+            "input_quoted": "\"nel\\u0085here\"",
+            "quoted": "\"nel\\u0085here\""
+        },
+        {
+            "input": "bom﻿here",
+            "input_quoted": "\"bom\\ufeffhere\"",
+            "quoted": "\"bom\\ufeffhere\""
+        },
+        {
+            "input": "combining é",
+            "input_quoted": "\"combining é\"",
+            "quoted": "\"combining é\""
+        },
+        {
+            "input": "flag 🇨🇦",
+            "input_quoted": "\"flag 🇨🇦\"",
+            "quoted": "\"flag 🇨🇦\""
+        },
+        {
+            "input": "\ufffd",
+            "input_quoted": "\"\\xff\"",
+            "quoted": "\"\\xff\""
+        },
+        {
+            "input": "\ufffd(",
+            "input_quoted": "\"\\xc3(\"",
+            "quoted": "\"\\xc3(\""
+        },
+        {
+            "input": "mixed \u0001 é \n end",
+            "input_quoted": "\"mixed \\x01 é \\n end\"",
+            "quoted": "\"mixed \\x01 é \\n end\""
+        }
+    ],
+    "submit_response_is_valid": [
+        {
+            "name": "zero",
+            "input": {},
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "error_short_circuits",
+            "input": {
+                "error": "boom",
+                "type": "garbage",
+                "form": {
+                    "callback_id": "",
+                    "title": "",
+                    "introduction_text": "",
+                    "icon_url": "",
+                    "elements": null,
+                    "submit_label": "",
+                    "notify_on_cancel": false,
+                    "state": ""
+                }
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "errors_map_short_circuits",
+            "input": {
+                "errors": {
+                    "f": "bad"
+                },
+                "type": "garbage"
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "empty_errors_map_does_not",
+            "input": {
+                "type": "garbage"
+            },
+            "messages": [
+                "invalid type \"garbage\", must be one of: empty, ok, form, navigate"
+            ],
+            "error": "invalid type \"garbage\", must be one of: empty, ok, form, navigate"
+        },
+        {
+            "name": "type_ok",
+            "input": {
+                "type": "ok"
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "type_navigate",
+            "input": {
+                "type": "navigate"
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "type_ok_with_form",
+            "input": {
+                "type": "ok",
+                "form": {
+                    "callback_id": "",
+                    "title": "T",
+                    "introduction_text": "",
+                    "icon_url": "",
+                    "elements": null,
+                    "submit_label": "",
+                    "notify_on_cancel": false,
+                    "state": ""
+                }
+            },
+            "messages": [
+                "form field must be nil for type \"ok\""
+            ],
+            "error": "form field must be nil for type \"ok\""
+        },
+        {
+            "name": "type_empty_with_form",
+            "input": {
+                "form": {
+                    "callback_id": "",
+                    "title": "T",
+                    "introduction_text": "",
+                    "icon_url": "",
+                    "elements": null,
+                    "submit_label": "",
+                    "notify_on_cancel": false,
+                    "state": ""
+                }
+            },
+            "messages": [
+                "form field must be nil for type \"\""
+            ],
+            "error": "form field must be nil for type \"\""
+        },
+        {
+            "name": "type_form_without_form",
+            "input": {
+                "type": "form"
+            },
+            "messages": [
+                "form field is required for form type"
+            ],
+            "error": "form field is required for form type"
+        },
+        {
+            "name": "type_form_with_valid_form",
+            "input": {
+                "type": "form",
+                "form": {
+                    "callback_id": "",
+                    "title": "T",
+                    "introduction_text": "",
+                    "icon_url": "",
+                    "elements": null,
+                    "submit_label": "",
+                    "notify_on_cancel": false,
+                    "state": ""
+                }
+            },
+            "messages": [],
+            "error": ""
+        },
+        {
+            "name": "type_form_with_invalid_form",
+            "input": {
+                "type": "form",
+                "form": {
+                    "callback_id": "",
+                    "title": "",
+                    "introduction_text": "",
+                    "icon_url": "",
+                    "elements": null,
+                    "submit_label": "",
+                    "notify_on_cancel": false,
+                    "state": ""
+                }
+            },
+            "messages": [
+                "invalid form: 1 error occurred:\n\t* invalid dialog title \"\"\n\n"
+            ],
+            "error": "invalid form: 1 error occurred:\n\t* invalid dialog title \"\"\n\n"
+        },
+        {
+            "name": "type_unknown",
+            "input": {
+                "type": "nope"
+            },
+            "messages": [
+                "invalid type \"nope\", must be one of: empty, ok, form, navigate"
+            ],
+            "error": "invalid type \"nope\", must be one of: empty, ok, form, navigate"
+        },
+        {
+            "name": "type_uppercase",
+            "input": {
+                "type": "OK"
+            },
+            "messages": [
+                "invalid type \"OK\", must be one of: empty, ok, form, navigate"
+            ],
+            "error": "invalid type \"OK\", must be one of: empty, ok, form, navigate"
+        }
+    ],
+    "time_interval": [
+        {
+            "interval": 0,
+            "messages": []
+        },
+        {
+            "interval": 1,
+            "messages": []
+        },
+        {
+            "interval": -1,
+            "messages": [
+                "time_interval must be between 1 and 1440 minutes, got -1"
+            ]
+        },
+        {
+            "interval": 2,
+            "messages": []
+        },
+        {
+            "interval": 3,
+            "messages": []
+        },
+        {
+            "interval": 7,
+            "messages": [
+                "time_interval must be a divisor of 1440 (24 hours * 60 minutes) to create valid time intervals, got 7"
+            ]
+        },
+        {
+            "interval": 15,
+            "messages": []
+        },
+        {
+            "interval": 60,
+            "messages": []
+        },
+        {
+            "interval": 90,
+            "messages": []
+        },
+        {
+            "interval": 120,
+            "messages": []
+        },
+        {
+            "interval": 480,
+            "messages": []
+        },
+        {
+            "interval": 720,
+            "messages": []
+        },
+        {
+            "interval": 1440,
+            "messages": []
+        },
+        {
+            "interval": 1441,
+            "messages": [
+                "time_interval must be between 1 and 1440 minutes, got 1441"
+            ]
+        },
+        {
+            "interval": 10000,
+            "messages": [
+                "time_interval must be between 1 and 1440 minutes, got 10000"
+            ]
+        }
+    ],
+    "wire": [
+        {
+            "name": "dialog_zero",
+            "json": "{\"callback_id\":\"\",\"title\":\"\",\"introduction_text\":\"\",\"icon_url\":\"\",\"elements\":null,\"submit_label\":\"\",\"notify_on_cancel\":false,\"state\":\"\"}"
+        },
+        {
+            "name": "dialog_empty_elements",
+            "json": "{\"callback_id\":\"\",\"title\":\"\",\"introduction_text\":\"\",\"icon_url\":\"\",\"elements\":[],\"submit_label\":\"\",\"notify_on_cancel\":false,\"state\":\"\"}"
+        },
+        {
+            "name": "dialog_full",
+            "json": "{\"callback_id\":\"cb\",\"title\":\"T\",\"introduction_text\":\"intro\",\"icon_url\":\"https://example.com/i.png\",\"elements\":[{\"display_name\":\"d\",\"name\":\"n\",\"type\":\"text\",\"subtype\":\"\",\"default\":\"\",\"placeholder\":\"\",\"help_text\":\"\",\"optional\":false,\"min_length\":0,\"max_length\":0,\"data_source\":\"\",\"options\":null,\"multiselect\":false}],\"submit_label\":\"Go\",\"notify_on_cancel\":true,\"state\":\"st\",\"source_url\":\"https://example.com/s\"}"
+        },
+        {
+            "name": "element_zero",
+            "json": "{\"display_name\":\"\",\"name\":\"\",\"type\":\"\",\"subtype\":\"\",\"default\":\"\",\"placeholder\":\"\",\"help_text\":\"\",\"optional\":false,\"min_length\":0,\"max_length\":0,\"data_source\":\"\",\"options\":null,\"multiselect\":false}"
+        },
+        {
+            "name": "element_full",
+            "json": "{\"display_name\":\"d\",\"name\":\"n\",\"type\":\"select\",\"subtype\":\"s\",\"default\":\"1\",\"placeholder\":\"p\",\"help_text\":\"h\",\"optional\":true,\"min_length\":1,\"max_length\":9,\"data_source\":\"dynamic\",\"data_source_url\":\"https://example.com/l\",\"options\":[{\"text\":\"t\",\"value\":\"1\"}],\"multiselect\":true,\"allow_multiple\":true,\"refresh\":true,\"datetime_config\":{\"min_date\":\"2020-01-01\",\"max_date\":\"2020-12-31\",\"time_interval\":30,\"location_timezone\":\"Asia/Tokyo\",\"manual_time_entry\":true,\"allow_manual_time_entry\":true},\"min_date\":\"2019-01-01\",\"max_date\":\"2019-12-31\",\"time_interval\":15,\"action_button\":{\"url\":\"/plugins/x/do\",\"context\":{\"k\":\"v\"}}}"
+        },
+        {
+            "name": "element_empty_options_slice",
+            "json": "{\"display_name\":\"\",\"name\":\"\",\"type\":\"\",\"subtype\":\"\",\"default\":\"\",\"placeholder\":\"\",\"help_text\":\"\",\"optional\":false,\"min_length\":0,\"max_length\":0,\"data_source\":\"\",\"options\":[],\"multiselect\":false}"
+        },
+        {
+            "name": "datetime_config_zero",
+            "json": "{}"
+        },
+        {
+            "name": "datetime_config_full",
+            "json": "{\"min_date\":\"2020-01-01\",\"max_date\":\"2020-12-31\",\"time_interval\":30,\"location_timezone\":\"Asia/Tokyo\",\"manual_time_entry\":true,\"allow_manual_time_entry\":true}"
+        },
+        {
+            "name": "action_button_zero",
+            "json": "{\"url\":\"\"}"
+        },
+        {
+            "name": "action_button_empty_context",
+            "json": "{\"url\":\"u\"}"
+        },
+        {
+            "name": "action_button_full",
+            "json": "{\"url\":\"u\",\"context\":{\"a\":\"1\",\"b\":\"2\"}}"
+        },
+        {
+            "name": "open_dialog_request_zero",
+            "json": "{\"trigger_id\":\"\",\"url\":\"\",\"dialog\":{\"callback_id\":\"\",\"title\":\"\",\"introduction_text\":\"\",\"icon_url\":\"\",\"elements\":null,\"submit_label\":\"\",\"notify_on_cancel\":false,\"state\":\"\"}}"
+        },
+        {
+            "name": "open_dialog_request_full",
+            "json": "{\"trigger_id\":\"tr\",\"url\":\"https://example.com/d\",\"dialog\":{\"callback_id\":\"\",\"title\":\"T\",\"introduction_text\":\"\",\"icon_url\":\"\",\"elements\":null,\"submit_label\":\"\",\"notify_on_cancel\":false,\"state\":\"\"}}"
+        },
+        {
+            "name": "submit_request_zero",
+            "json": "{\"type\":\"\",\"callback_id\":\"\",\"state\":\"\",\"user_id\":\"\",\"channel_id\":\"\",\"team_id\":\"\",\"submission\":null,\"cancelled\":false}"
+        },
+        {
+            "name": "submit_request_full",
+            "json": "{\"type\":\"dialog_submission\",\"url\":\"https://example.com/s\",\"callback_id\":\"cb\",\"state\":\"st\",\"user_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"channel_id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"team_id\":\"g1ku9ozj3bhub3hs89bqu1m3gy\",\"submission\":{\"a\":\"1\",\"b\":2},\"cancelled\":true,\"file_ids\":[\"6bdz674pgq767e4jx75w4pf57a\"]}"
+        },
+        {
+            "name": "submit_request_empty_file_ids",
+            "json": "{\"type\":\"\",\"callback_id\":\"\",\"state\":\"\",\"user_id\":\"\",\"channel_id\":\"\",\"team_id\":\"\",\"submission\":null,\"cancelled\":false}"
+        },
+        {
+            "name": "submit_response_zero",
+            "json": "{}"
+        },
+        {
+            "name": "submit_response_full",
+            "json": "{\"error\":\"e\",\"errors\":{\"f\":\"bad\"},\"type\":\"form\",\"form\":{\"callback_id\":\"\",\"title\":\"T\",\"introduction_text\":\"\",\"icon_url\":\"\",\"elements\":null,\"submit_label\":\"\",\"notify_on_cancel\":false,\"state\":\"\"}}"
+        },
+        {
+            "name": "submit_response_empty_errors_map",
+            "json": "{}"
+        },
+        {
+            "name": "execute_dialog_action_request_zero",
+            "json": "{\"url\":\"\",\"channel_id\":\"\",\"team_id\":\"\"}"
+        },
+        {
+            "name": "execute_dialog_action_request_full",
+            "json": "{\"url\":\"u\",\"context\":{\"k\":\"v\"},\"channel_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"team_id\":\"qr6kf7ztp7yifxt4wm5xn51bke\"}"
+        },
+        {
+            "name": "dialog_select_option_zero",
+            "json": "{\"text\":\"\",\"value\":\"\"}"
+        },
+        {
+            "name": "dialog_select_option_full",
+            "json": "{\"text\":\"t\",\"value\":\"v\"}"
+        },
+        {
+            "name": "lookup_dialog_response_zero",
+            "json": "{\"items\":null}"
+        },
+        {
+            "name": "lookup_dialog_response_empty",
+            "json": "{\"items\":[]}"
+        },
+        {
+            "name": "lookup_dialog_response_full",
+            "json": "{\"items\":[{\"text\":\"t\",\"value\":\"v\"}]}"
+        }
+    ]
+}

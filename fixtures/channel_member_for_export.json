@@ -1,0 +1,23 @@
+{
+    "channel_id": "fqu5z5qbh4cts6ffzxshd3c3dc",
+    "user_id": "ip88ri96fzu3t6ncqjm9hm88uy",
+    "roles": "roles-2fe811",
+    "last_viewed_at": 1706012163000,
+    "msg_count": 79,
+    "mention_count": 80,
+    "mention_count_root": 48,
+    "urgent_mention_count": 27,
+    "msg_count_root": 27,
+    "notify_props": {
+        "key0-b46df1": "val0-9315c4",
+        "key1-b56fa4": "val1-941777"
+    },
+    "last_update_at": 1702767978000,
+    "scheme_guest": true,
+    "scheme_user": true,
+    "scheme_admin": true,
+    "explicit_roles": "explicitroles-22355b",
+    "autotranslation_disabled": true,
+    "ChannelName": "channelname-1e23a6",
+    "Username": "username-84664b"
+}

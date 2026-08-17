@@ -1,0 +1,66 @@
+{
+    "id": "z7nqnkx13meukdndhrw9f1qtgw",
+    "create_at": 1706748460000,
+    "update_at": 1702871429000,
+    "delete_at": 1702257107000,
+    "team_id": "53ugiz8uen4dirmepmqxgopw8e",
+    "type": "type-65fc7c",
+    "display_name": "displayname-755614",
+    "name": "name-dcc42e",
+    "header": "header-a01b74",
+    "purpose": "purpose-36f40c",
+    "last_post_at": 1700921474000,
+    "total_msg_count": 2,
+    "extra_update_at": 1700573769000,
+    "creator_id": "1za6r8wi5zznxazxhexjmz8qrh",
+    "scheme_id": "xygcg3pfnt84skaqap14kfkxic",
+    "props": {
+        "key0-d6aad5": "val0-77fb1e",
+        "key1-d7ac88": "val1-78fcd1"
+    },
+    "group_constrained": true,
+    "autotranslation": true,
+    "shared": true,
+    "total_msg_count_root": 98,
+    "policy_id": "jiwiun9w8dqk3gu8mgf9ep6hio",
+    "last_root_post_at": 1704772770000,
+    "banner_info": {
+        "enabled": true,
+        "text": "text-1e2d6e",
+        "background_color": "backgroundcolor-0cfa2b"
+    },
+    "policy_enforced": true,
+    "policy_actions": {
+        "key0-a7cb32": true,
+        "key1-a6c97f": true
+    },
+    "policy_is_active": true,
+    "default_category_name": "defaultcategoryname-b210b7",
+    "managed_category_name": "managedcategoryname-560b76",
+    "discoverable": true,
+    "Members": [
+        {
+            "channel_id": "9ih77pz3ydx1k1ua545xu966rw",
+            "user_id": "yiekk7w5emo9hw1qwi5jsoxb9a",
+            "roles": "roles-935373",
+            "last_viewed_at": 1700217021000,
+            "msg_count": 9,
+            "mention_count": 2,
+            "mention_count_root": 30,
+            "urgent_mention_count": 85,
+            "msg_count_root": 25,
+            "notify_props": {
+                "key0-80d140": "val0-e4a1b2",
+                "key1-81d2f3": "val1-e5a365"
+            },
+            "last_update_at": 1701932268000,
+            "scheme_guest": true,
+            "scheme_user": true,
+            "scheme_admin": true,
+            "explicit_roles": "explicitroles-4f8f8b",
+            "autotranslation_disabled": true,
+            "ChannelName": "channelname-51c090",
+            "Username": "username-4f8bac"
+        }
+    ]
+}
