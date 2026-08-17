@@ -34,6 +34,18 @@ tokio = { version = "1", features = ["full"] }
 # HTTP
 axum = "0.8"
 
+# The Strangler Fig proxy's forward leg. rustls rather than native-tls so the build has no
+# OpenSSL dependency, matching the sqlx feature choice. No default features: the cookie store,
+# redirect following and gzip layers would all change what the proxy forwards, and the proxy must
+# hand the Go server's answer back unaltered.
+reqwest = { version = "0.12", default-features = false, features = [
+    "rustls-tls",
+    "stream",
+] }
+# Body plumbing for the proxy: axum's `Body` and reqwest's are different types.
+http-body-util = "0.1"
+tower = "0.5"
+
 # Database — Postgres only.
 sqlx = { version = "0.8", default-features = false, features = [
     "runtime-tokio-rustls",

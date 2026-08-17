@@ -9,10 +9,15 @@ correctness and idiomatic Rust conflict on the wire format, the wire format wins
 
 ---
 
-## Status: early. This is not a running server yet.
+## Status: early, but it runs.
 
-Phase 1 of 5 — the model crate. The later crates are ported in dependency order; see
-[Layout](#layout) for what each one is and which phase it belongs to.
+Phase 1 of 5 — the model crate — with one **vertical slice** through phases 2-4 landed to prove
+the architecture end to end. `GET /api/v4/users/me` is served from Rust, authenticated against a
+session row the Go server wrote, and returns bytes identical to Go's. Every other route is
+forwarded to the Go server and comes back unaltered.
+
+The later crates are ported in dependency order; see [Layout](#layout) for what each one is and
+which phase it belongs to.
 
 **[`MIGRATION.md`](MIGRATION.md) is the authoritative ledger** — per-file status, test counts,
 and the non-obvious semantics each translation turned up. Progress is tracked there and only
@@ -84,6 +89,41 @@ git -C reference/mattermost checkout FETCH_HEAD
 
 cargo test -p mm-model
 ```
+
+### Running the two servers
+
+The Strangler Fig needs a Go server to forward to and a Postgres both servers share. Both are in
+`docker-compose.yml`; the Rust server runs on the host so it can be rebuilt without a container
+cycle.
+
+```sh
+docker compose up -d          # postgres :5432, the Go server :8065
+export DATABASE_URL=postgres://mmuser:mmuser_password@localhost:5432/mattermost
+cargo run -p mm-api           # :8066 — serves what is migrated, forwards the rest
+```
+
+The Go server owns the schema and runs the migrations. **Never point a migration tool at this
+database from the Rust side** — the two would race, and Go's migrations are the reference.
+
+Every response carries `x-mmrs-served-by: rust` or `: go`, so you can see the cutover:
+
+```sh
+curl -si localhost:8066/api/v4/system/ping | grep -i served-by     # -> go
+```
+
+The cross-server parity test is the oracle for anything migrated. It needs the stack up and a
+user to log in as, and it is skipped unless explicitly enabled, so `cargo test` stays green on a
+machine with no Docker:
+
+```sh
+MM_PARITY_STACK=1 cargo test -p mm-api --test parity_users_me
+```
+
+`.sqlx/` is committed, so `SQLX_OFFLINE=true cargo check --workspace` builds the compile-time
+checked queries with no database at all. Re-run `cargo sqlx prepare --workspace` after changing
+one.
+
+### Regenerating fixtures
 
 The committed fixtures are enough to run the test suite, so the clone is only needed to
 **regenerate** them or to translate another file:

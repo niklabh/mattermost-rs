@@ -1,7 +1,53 @@
 # Migration Ledger
 
 Go source pinned at: mattermost@9dfbaeca99f4096388fd1c048a9e6d1d0a86743e (2026-08-13)
-Current phase: 1 — Core Types
+Current phase: 1 — Core Types (with a phase 2-4 vertical slice landed, see below)
+
+## The vertical slice — the architecture is proven end to end (2026-08-17)
+
+**A client cannot tell which server answered.** `GET /api/v4/users/me` is served by Rust,
+authenticated against a session row the **Go** server wrote, and its response is byte-identical
+to Go's — 721 bytes, same fields, same key order, same trailing newline. Everything else is
+forwarded to Go and comes back unaltered.
+
+This was done ahead of finishing phase 1 deliberately. 40k lines of model code had never served a
+byte, and `MIGRATION_STRATEGY.md:69` predicted exactly that risk ("months of unverifiable work").
+Three assumptions had never been tested even once; all three now hold:
+
+| Assumption | Verdict |
+|---|---|
+| sqlx can read the schema the Go server migrates | Yes — and the compile-time checker caught a v11-only `NOT NULL` on `Sessions.VoipDeviceId` at build time |
+| A Go-minted token authenticates against the shared `Sessions` table | Yes — cookie, `Bearer` and `?access_token=` all work |
+| A real client accepts our serialisation | Yes — byte-identical, after one 1-byte fix ([D-086]) |
+
+**Run it** — `docker compose up -d`, then `cargo run -p mm-api`. The Rust server listens on
+:8066 and forwards to the Go server on :8065; both share one Postgres. See the README.
+
+**The finding that matters most is [D-087].** Go answers `/users/me` from an in-memory user cache
+that a login does not invalidate, so it serves a `update_at` **6.3 seconds stale and not
+converging** while we return the row's actual value. We are the correct one, which is the
+uncomfortable part: the divergence cannot be closed by matching Go. One database does not mean
+one cache, and this applies to every cached read the migration touches. Decide it before
+migrating any route that *writes* an entity Go caches.
+
+Two beliefs held before this session were wrong and are now measured:
+
+1. **`User::Sanitize(map[string]bool{})` strips nothing extra.** Go guards its whole flag block
+   behind `if len(options) != 0` (user.go:702), so the *empty* map — which is exactly what
+   `/users/me` passes — keeps email, full name and auth service. The intuitive reading ("no
+   options means no permissions means strip everything") is exactly inverted, and acting on it
+   would have blanked the email of every user viewing their own profile. `mm-model`'s port had
+   this right already; a comment and a test written from the intuition did not.
+2. **A session **id** must not authenticate.** `SessionStore.Get` matches `Token = $1 OR Id = $1`,
+   so the row comes back either way, and only `session.Token != token` (session.go:95) rejects
+   it. Dropping that line silently turns session ids — which appear in admin APIs and logs — into
+   bearer credentials. Verified against both servers: 401 from each.
+
+**Phase 2 is licence-unblocked as of 2026-08-17.** [D-031] is closed: the repository now carries a
+split licence — AGPL-3.0-only at the root, Apache-2.0 on `mm-model` alone. The first `mm-store`
+commit no longer trips anything. The **only** new standing rule is directional: an AGPL crate may
+depend on `mm-model`, and `mm-model` may never depend on an AGPL crate or read
+`server/channels/`. That was already the layering rule; it is now also a licensing one.
 
 **Phase 2 is licence-unblocked as of 2026-08-17.** [D-031] is closed: the repository now carries a
 split licence — AGPL-3.0-only at the root, Apache-2.0 on `mm-model` alone. The first `mm-store`
@@ -185,6 +231,14 @@ whenever a session skips, approximates, or discovers-but-does-not-close somethin
 | — (shared) | `mm-model/src/utils.rs::go_time::date_in_zone`, `::add_date_days` | DONE | 280 cases | Go's `time.Date` **normalisation** and `AddDate`. Go's doc declines to specify it ("the choice of time zone… is not guaranteed"), so the implementation is what is ported — reduced to two offset lookups, which the corpus proves exact. chrono's `LocalResult` is **not** substitutable and its obvious mapping is wrong in both arms; see the notes. |
 | — (tooling) | `reference/dump/behaviour_scheduled_post_recurrence.go` → `fixtures/behaviour_scheduled_post_recurrence.json` | DONE | 8 diff tests | 280 `time.Date` probes and 295 `ComputeNextScheduledAt` cases, both **generated** rather than listed: the 16 DST transitions of ten zones are discovered by scanning the host's tzdata and bisecting, then every probe is placed relative to a discovered boundary. The transitions are written out as their own section so the Rust side asserts `chrono-tz` agrees with them *before* trusting an answer. Corrected one conclusion the Go source had produced — see note 2. |
 | model/post_search_results.go | `mm-model/src/post_search_results.rs` | PARTIAL | 15 pass | Whole file except `Auditable` ([D-028]). `PostSearchResults`, `PostSearchMatches`, `MakePostSearchResults`, `ToJSON`, `EncodeJSON`, `ForPlugin`. Wire format asserted **byte-for-byte** over 18 of the 19 corpus documents. Carries a hand-written `Deserialize`: Go allocates the embedded `*PostList` from **which keys are present** and serde's `flatten` on an `Option` cannot express that. Two divergences ([D-054] three panics, [D-055] the shared `Matches` map) plus one instance of [D-040]. |
+| store/sqlstore/session_store.go (`Get`) | `mm-store/src/session_store.rs` | PARTIAL | 2 pass | **First `mm-store` content.** The Strangler Fig's load-bearing query: `Token = $1 OR Id = $1 LIMIT 1`, one bind parameter against two columns. Compile-time checked by sqlx against the real schema, which is how the v11-only `NOT NULL` on `VoipDeviceId` was found rather than assumed. Deferred: the `TeamMembers` second query ([D-077]) and the other 19 interface methods. Two divergences ([D-078] NULL defaulting, [D-079] token redaction). |
+| store/sqlstore/user_store.go (`Get`) | `mm-store/src/user_store.rs` | PARTIAL | 1 pass | The `Users` LEFT JOIN `Bots` query, all 31 columns in Go's order. The join is not decoration: `is_bot` is `b.UserId IS NOT NULL`, so dropping it would make every bot a non-bot. Go's two `COALESCE`s are reproduced in SQL rather than defaulted Rust-side, so the database answers the same question for both servers. Deferred: the other ~100 interface methods. |
+| app/session.go (`GetSession`) | `mm-app/src/session.rs` | PARTIAL | 3 pass | **First `mm-app` content.** Reproduces the `session.Token != token` check that stops a session **id** authenticating — the single most consequential line in the slice. Deferred: the session cache, the user-access-token path, and the idle timeout ([D-088]). |
+| app/user.go (`GetUser`) | `mm-app/src/user.rs` | PARTIAL | 2 pass | Store-error mapping only: a miss is 404 `app.user.missing_account.error`, anything else is 500. Collapsing the two would report an outage as a missing account. |
+| app/authentication.go (`ParseAuthTokenFromRequest`) | `mm-api/src/auth.rs` | PARTIAL | 10 pass | Four of six token locations. **The cookie is checked before the `Authorization` header** — reversing that would authenticate some requests as a different user than Go does. Go's 50-byte truncation of the *returned* value is reproduced; the char-boundary guard is unreachable, and a test proves it (a non-ASCII header value fails `to_str` first). Deferred: the cloud and remote-cluster headers ([D-081]). |
+| api4/user.go (`getUser`, `me` only) | `mm-api/src/users.rs` | PARTIAL | 4 pass | **The first route served from Rust.** Etag, `If-None-Match` → 304, `Sanitize` for self, and the `Encode` newline ([D-086]). Body asserted byte-identical against the running Go server. Deferred: the permission check ([D-082], read it before adding `/users/{id}`), terms of service ([D-083]), `UpdateLastActivityAtIfNeeded` ([D-084]), real privacy settings ([D-085]). |
+| — (proxy) | `mm-api/src/proxy.rs` | DONE | 3 pass | The Strangler Fig fallback. Strips hop-by-hop headers, preserves repeated ones (`Set-Cookie` above all), forwards bodies, and marks every response `x-mmrs-served-by: go` so a migrated route and a proxied one are distinguishable during cutover. Verified with a `POST` carrying a body: 201 through the proxy. |
+| — (tooling) | `docker-compose.yml`, `crates/mm-api/tests/parity_users_me.rs` | DONE | 4 diff tests | The dev stack and the cross-server oracle. The test logs in **once per process** — a login mutates `UpdateAt`, and per-test logins made parallel tests move the field underneath each other. Gated on `MM_PARITY_STACK=1` so `cargo test` stays green without Docker. |
 | — (licensing) | `LICENSE`, `crates/mm-model/LICENSE`, `NOTICE`, `README.md`, `Cargo.toml` | DONE | — | **[D-031] closed — phase 2 is unblocked.** Split licence, option (b), mirroring upstream: root is verbatim AGPL-3.0-only and `mm-model` **overrides** back to Apache-2.0, because it derives solely from `server/public/`. The rule this creates: AGPL crates may depend on `mm-model`, never the reverse — `mm-model` taking a type from `mm-store` would now breach the licence, not just the layering. The four AGPL crates carry the label while still holding zero AGPL-derived lines, deliberately. |
 | — (shared) | `mm-model/src/post_list.rs::PostList::WIRE_KEYS` | DONE | 1 diff test | The six JSON keys the embed contributes. Read off the Go struct tags by the oracle rather than transcribed, so a field added upstream fails a test instead of silently changing which documents allocate the embed. |
 | — (tooling) | `reference/dump/behaviour_post_search_results.go` → `fixtures/behaviour_post_search_results.json` | DONE | 8 diff tests | 19 documents through the wire format, `ToJSON`, `EncodeJSON` and `ForPlugin`, each recording the receiver **after** the call — which is what caught `ToJSON`'s side effect. Plus 7 constructor cases, an 11-case `PostSearchMatches` corpus and the promoted key set. Every case is `recover`-probed; 27 of Go's 76 answers are a crash. |

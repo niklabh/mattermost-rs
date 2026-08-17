@@ -2643,3 +2643,247 @@ break cache invalidation with nothing failing.
 `the_etag_matches_go` pins both properties against Go's own answers, including the ascending and
 unsorted cases, and asserts the etag does **not** track the maximum — so if upstream ever changes
 the function to scan, the test fails rather than silently agreeing.
+
+---
+
+## D-077 · `Session.TeamMembers` is not populated
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-08-17 (phase 2, `session_store.go`)
+**Blocks** anything that reads `Session.TeamMembers` — team-scoped permission checks above all.
+
+Go's `SqlSessionStore.Get` (session_store.go:111) does two queries, not one: after loading the
+session it calls `Team().GetTeamsForUser(...)` and keeps the members whose `DeleteAt == 0`.
+
+Ours does the first query only and leaves `team_members` at `None`. The second needs the
+scheme-roles join, which is a store method in its own right and would have doubled the slice.
+
+**Why it is safe for the vertical slice and not in general.** The slice uses the session to
+authenticate — `user_id` and expiry — and `/users/me` never reads team membership. The first
+team-scoped route ported will read it, and an empty list is indistinguishable from "member of no
+teams", so the failure is a **silent** permission denial rather than an error.
+
+**To pay off** port `TeamStore.GetTeamsForUser` with its scheme-roles join, then fill the field
+and drop the `None`.
+
+---
+
+## D-078 · Nullable session columns default here and would fail a scan in Go
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-17 (phase 2, `session_store.go`)
+
+`Sessions` declares `NOT NULL` on `Id` and `VoipDeviceId` only. Go scans the rest into
+non-pointer struct fields, so an actual `NULL` in, say, `Roles` is a scan error and the request
+fails. We take the `Option` sqlx infers and `unwrap_or_default()`, so the same row yields an
+empty string and the request succeeds.
+
+**Accepted** because the divergence is strictly more permissive and cannot invent a wrong
+non-empty value: `NULL` becomes `""`, which is what the column means in practice. Mattermost's
+own writes never produce these NULLs, so the divergence is only reachable via a row some other
+tool wrote. Reproducing Go's failure would mean rejecting a request over a column the handler
+does not read.
+
+Revisit if a column is ever added where `NULL` and `""` mean different things.
+
+---
+
+## D-079 · The session token is redacted from errors, where Go interpolates it
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-17 (phase 2, `session_store.go`)
+
+Two places where Go puts a live credential into a string that reaches logs:
+
+- `store.NewErrNotFound("Session", fmt.Sprintf("sessionIdOrToken=%s", ...))` (session_store.go:107)
+- `model.NewAppError(..., map[string]any{"Token": token, ...})` (app/session.go:96, :115)
+
+Both are reproduced with the token replaced by `<redacted>` / omitted. The error **id**, status
+code and detail string are unchanged, so nothing a client sees differs — `AppError.params` is
+`json:"-"` and never serialised.
+
+**Accepted deliberately, and it is the one place this port is intentionally not bug-compatible.**
+The miss path runs on every request with a bad token, which is exactly the path most likely to be
+high-volume in a log aggregator. A test in `session_store.rs` asserts the token does not appear.
+
+---
+
+## D-080 · The etag's version component tracks the pinned SHA, not the peer server
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-17 (phase 2, `/users/me`)
+
+`User.Etag` prefixes `model.CurrentVersion`. Ours is the pinned tree's `11.11.0`; the development
+container runs the `latest` image, `11.10.0`. So the two servers issue different etags for a
+byte-identical user, measured:
+
+```
+go   11.10.0.y9i4er48tt8bukijy7i3u5y9ar.1786973424207..0.true.true.0
+rust 11.11.0.y9i4er48tt8bukijy7i3u5y9ar.1786973424207..0.true.true.0
+```
+
+**Accepted** because it is an environment mismatch, not a port bug: a Go server built from the
+pinned SHA agrees. The consequence during a mixed deployment is a cache miss — a client holding
+Go's etag revalidates against us and gets a 200 instead of a 304 — never a wrong body.
+
+The parity test strips the version (**three** dot-separated components, not one) and compares the
+rest, and separately asserts our prefix is `CURRENT_VERSION` so the exemption cannot widen.
+
+---
+
+## D-081 · Two token locations are not parsed
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-08-17 (phase 2, `authentication.go`)
+
+`ParseAuthTokenFromRequest` reads six locations. Four are ported — cookie, `Bearer`, `token`,
+`?access_token=`. Two are not: `X-Cloud-Token` (`TokenLocationCloudHeader`) and the
+remote-cluster token header.
+
+Neither is reachable by a normal client, and both authenticate a *different kind* of principal
+than a session — mishandling them is worse than not handling them. A request carrying only one
+of these gets 401 here and would be served by Go.
+
+**To pay off** port them with the principal types they imply, not as extra token strings.
+
+---
+
+## D-082 · `/users/me` skips the permission check because its target is always self
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-17 (phase 2, `api4/user.go`)
+**Blocks** — read this before adding `GET /users/{user_id}`.
+
+Go's `getUser` calls `UserCanSeeOtherUser(session.UserId, params.UserId)` before anything else.
+The migrated route resolves `me` only, so the target is the session's own user and the check is
+`true` by construction.
+
+**Accepted for this route and dangerous to generalise.** `getUser` is one handler serving both
+`/users/me` and `/users/{id}`; wiring the second path to this function without adding the check
+would let any authenticated user read any other user's profile. The handler's doc comment says
+so at the call site, which is where someone adding the route will be looking.
+
+---
+
+## D-083 · The terms-of-service fields are always zero
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-08-17 (phase 2, `api4/user.go`)
+
+`getUser` fetches `GetUserTermsOfService(user.Id)` when the viewer is the user or an admin and
+copies `TermsOfServiceId` / `TermsOfServiceCreateAt` onto the response (user.go:329-337). The
+`UserTermsOfService` store is not ported, so both stay zero.
+
+Invisible on a server with no ToS policy configured — which is why the parity test passes — and
+wrong on one that has: the webapp uses these fields to decide whether to show the acceptance
+gate, so a user who has accepted would be asked again. They also feed `User.Etag`, so the etag
+is wrong too.
+
+**To pay off** port `UserTermsOfServiceStore.GetByUser` and the 404-is-not-an-error branch.
+
+---
+
+## D-084 · `UpdateLastActivityAtIfNeeded` is not called on the read path
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-08-17 (phase 2, `api4/user.go`)
+
+Go's `getUser` ends with `UpdateLastActivityAtIfNeeded(session)` — a **write** on a GET, which is
+how session idle timeouts stay accurate. Ours does not.
+
+Consequence while both servers run: a user whose traffic is served by the migrated route stops
+refreshing `Sessions.LastActivityAt`, so a Go server enforcing `SessionIdleTimeoutInMinutes` may
+revoke a session belonging to an active user. Goes together with [D-088]'s idle-timeout check —
+one writes the value, the other reads it, and porting either alone is worse than neither.
+
+**To pay off** port it with the session cache, since Go's "if needed" is a cache-backed
+throttle rather than an unconditional write.
+
+---
+
+## D-085 · Privacy settings are hardcoded to Go's defaults
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-08-17 (phase 2, `mm-api`)
+**Depends on** config being ported (`model/config.go`, out of scope for hand-translation).
+
+`getUser` reads `PrivacySettings.ShowFullName` and `ShowEmailAddress` and passes both to
+`User.Etag`. `AppState` carries `true`/`true` — Go's defaults — as named constants.
+
+An admin who turns either off gets a wrong etag from us and the correct one from Go. The
+response **body** is unaffected on this route, because the self case calls `Sanitize` with an
+empty map and that strips nothing (see the note in `users.rs`); a route serving *other* users
+would have a wrong body too.
+
+**To pay off** load config. The fields are two booleans, so this is a config-plumbing task rather
+than a translation one.
+
+---
+
+## D-086 · `json.NewEncoder.Encode` appends a newline and `json.Marshal` does not
+
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-08-17 (phase 2, `/users/me`)
+**Closed** 2026-08-17, same session.
+
+The first cross-server byte comparison differed by exactly one byte in 721: Go's body ended
+`...false}\n` and ours ended `...false}`. Go's api4 handlers write with
+`json.NewEncoder(w).Encode(v)` (user.go:353), which appends `\n`; `json.Marshal` does not.
+
+Everything else matched on the first attempt — every field, every value and the **key order**,
+which serde reproduces from the struct's field order.
+
+**Closed** by pushing `b'\n'` in the handler. Recorded rather than just fixed because it is a
+property of the *call site*, not the type: every handler ported from an `Encode` call owes the
+newline, and every one ported from a `Marshal` call must not add it. `post.rs::encode_json`
+already had this right for the same reason — this is the second instance, so it is a pattern.
+
+---
+
+## D-087 · The Go server serves `/users/me` from a stale user cache
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-08-17 (phase 2, cross-server parity)
+**Blocks** nothing yet; **affects every cached read the migration touches.**
+
+Measured, and the most consequential thing this slice turned up.
+
+A login bumps `Users.UpdateAt`. The Go server answers `/users/me` from an in-memory user cache
+that the login does not invalidate, so it keeps serving the pre-login row. We read through to the
+database and return the current one. At the same instant:
+
+```
+psql   updateat = 1786974497630
+go     update_at = 1786974491337     <- 6.3 s stale
+rust   update_at = 1786974497630     <- the row
+```
+
+It does not converge: fifteen seconds of polling did not change it.
+
+**We are the correct one.** That is the uncomfortable part — the divergence cannot be fixed by
+making our answer match Go's, because Go's answer does not match its own database.
+
+**Why it matters beyond this field.** The Strangler Fig assumes two servers over one database.
+It does *not* automatically give them one cache. Every read Go caches is a read where the two
+servers can disagree, and every write we make is a write Go's cache will not hear about. Go
+invalidates its caches through the cluster message bus; we publish nothing to it.
+
+**Options, none chosen yet**
+- **(a) Join the cluster bus** and publish invalidations. Correct and the largest.
+- **(b) Read-through only, never cache** on the Rust side, and accept that Go serves stale data
+  for keys we write. Cheapest; leaves the divergence in place in one direction.
+- **(c) Migrate a cached entity's reads and writes together**, so no entity is half-owned.
+  Constrains route ordering rather than requiring new machinery.
+
+**To pay off** decide before migrating any route that *writes* an entity Go caches. The current
+slice is read-only, which is why it is safe today.
+
+**In the meantime** the parity test normalises `update_at` out of the byte comparison, asserts
+everything else matches exactly, and then checks our value against the row — so the exemption
+proves us right rather than hiding a difference.
+
+---
+
+## D-088 · The session idle timeout is not enforced
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-08-17 (phase 2, `app/session.go`)
+
+`GetSession` revokes a session when `ServiceSettings.SessionIdleTimeoutInMinutes > 0` and the
+session is not OAuth, not a mobile app, not a user access token, and
+`ExtendSessionLengthWithActivity` is off (session.go:118-137). Ours checks expiry only.
+
+So a session idle past the configured timeout authenticates against the migrated route and is
+revoked by Go. Needs config ([D-085]) and the revoke path; pairs with [D-084], which is the
+write that keeps `LastActivityAt` accurate in the first place.
+
+**To pay off** with config, and with [D-084] in the same change — porting the check without the
+write would revoke sessions that are in fact active.

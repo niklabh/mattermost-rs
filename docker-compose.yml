@@ -1,0 +1,68 @@
+# Development stack for the Strangler Fig migration.
+#
+# Two processes, ONE database. That shared database is the whole mechanism: the Rust server
+# authenticates against the same `Sessions` rows the Go server writes, so a client holding a
+# token minted by Go is authenticated by Rust without a second login.
+#
+#   postgres    :5432   the shared database — schema created and migrated by the Go server
+#   mattermost  :8065   the Go server; the proxy's forward target for unmigrated routes
+#
+# The Rust server (`mm-api`) runs on the host, not here, so it can be rebuilt without a
+# container cycle. It listens on :8066 and forwards anything it does not serve to :8065.
+#
+#   docker compose up -d
+#   cargo run -p mm-api
+#
+# The Go server owns the schema. Never point a migration tool at this database from the Rust
+# side — the two servers would race, and the Go server's migrations are the reference.
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: mmrs-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: mmuser
+      POSTGRES_PASSWORD: mmuser_password
+      POSTGRES_DB: mattermost
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      # `pg_isready` alone reports ready during the init script's first boot, while the
+      # database is still being created. Naming the database and user closes that window.
+      test: ["CMD-SHELL", "pg_isready -U mmuser -d mattermost"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  mattermost:
+    # No arm64 manifest is published, so the platform is forced and the container runs under
+    # emulation on Apple silicon. It is slow to boot and fine for a forward target.
+    image: mattermost/mattermost-team-edition:latest
+    platform: linux/amd64
+    container_name: mmrs-mattermost
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8065:8065"
+    environment:
+      MM_SQLSETTINGS_DRIVERNAME: postgres
+      MM_SQLSETTINGS_DATASOURCE: "postgres://mmuser:mmuser_password@postgres:5432/mattermost?sslmode=disable&connect_timeout=10"
+      MM_SERVICESETTINGS_SITEURL: "http://localhost:8065"
+      # Lets the slice create its first user through the API without an invite.
+      MM_TEAMSETTINGS_ENABLEOPENSERVER: "true"
+      # The proxy is the only thing in front of this server in development; local-mode
+      # sockets and rate limiting would both confuse the picture.
+      MM_SERVICESETTINGS_ENABLELOCALMODE: "false"
+    volumes:
+      - mattermost-data:/mattermost/data
+      - mattermost-config:/mattermost/config
+
+volumes:
+  postgres-data:
+  mattermost-data:
+  mattermost-config:

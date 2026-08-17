@@ -8,14 +8,24 @@ repository.workspace = true
 
 [dependencies]
 mm-app.workspace = true
+mm-model.workspace = true
+mm-store.workspace = true
 
 axum.workspace = true
 tokio.workspace = true
+reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+# main.rs only — CLAUDE.md permits anyhow there and nowhere else.
+anyhow.workspace = true
 
 [dev-dependencies]
-anyhow.workspace = true
+# The parity test reads the users row directly, to prove our value is the row's and not merely
+# different from Go's cached one.
+sqlx.workspace = true
+# `json` is a test-only need: the proxy must forward bodies untouched, so the crate itself never
+# asks reqwest to serialise anything.
+reqwest = { workspace = true, features = ["json"] }
