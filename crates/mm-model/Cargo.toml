@@ -3,7 +3,11 @@ name = "mm-model"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-license.workspace = true
+# DELIBERATELY NOT `license.workspace = true`. The workspace default is AGPL-3.0-only; this crate
+# is the Apache-2.0 half of the split, because every line of it derives from `server/public/`,
+# which upstream licenses under Apache-2.0. See ./LICENSE, the root NOTICE, and D-031.
+# Remove this override the moment this crate takes anything from `server/channels/`.
+license = "Apache-2.0"
 repository.workspace = true
 
 [dependencies]

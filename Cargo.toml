@@ -12,10 +12,13 @@ members = [
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
-# Everything translated so far derives from Go's `server/public/`, which upstream licenses under
-# Apache-2.0 (see NOTICE). This MUST become AGPL-3.0-only before any code derived from
-# `server/channels/` — i.e. all of phase 2 onward — is committed. Tracked as D-031.
-license = "Apache-2.0"
+# The licence is SPLIT, mirroring upstream's own split (see NOTICE and D-031):
+#   - this default, AGPL-3.0-only, covers mm-store / mm-app / mm-api / mm-ws, which derive from
+#     `server/channels/` — the AGPL v3.0 half of the Mattermost tree;
+#   - `crates/mm-model` OVERRIDES it back to Apache-2.0, because it derives solely from
+#     `server/public/`, which upstream licenses under Apache-2.0.
+# A crate that starts consuming `server/channels/` source must drop its override, not add one.
+license = "AGPL-3.0-only"
 repository = "https://github.com/niklabh/mattermost-rs"
 
 [workspace.dependencies]
