@@ -2068,3 +2068,188 @@ mod custom_status_go_parity {
         assert_eq!(user.get_custom_status(), Some(cs));
     }
 }
+
+// --- locale validation ---------------------------------------------------------------------------
+
+/// Port of `IsValidLocale` (user.go:1105). Closes [D-001].
+///
+/// # The registry is the rule
+///
+/// Go delegates to `golang.org/x/text/language.Parse`, which validates against the **IANA subtag
+/// registry** rather than against BCP 47 syntax. `xx` is syntactically perfect and rejected,
+/// because it is not a registered language; `qaa`, `mul` and `zxx` look like nonsense and are
+/// accepted, because they are. There is nothing to reason about, so nothing here is reasoned.
+///
+/// # How the tables were built
+///
+/// `UserLocaleMaxLength` is 5, so the reachable input space is every string of at most five bytes
+/// — 81,376,658 of them over the characters a tag can contain. The generator asks Go about every
+/// one, decomposes the 234,421 it accepts into the component tables in [`crate::locale_generated`],
+/// and then **re-derives all 81 million answers from those tables**, failing if a single one
+/// disagrees.
+///
+/// That step earned its cost immediately: the first rule missed the registry's **grandfathered**
+/// tags — `i-ami`, `i-hak`, `i-lux` and five others — and the verification named all sixteen
+/// rather than letting them ship. They are now an exception list the generator derives from its
+/// own residual, not one anybody typed out.
+///
+/// # Empty is valid
+///
+/// Go tests `locale != ""` before anything else, so an unset locale passes. That is not an
+/// oversight to tidy: a user with no locale is normal.
+pub fn is_valid_locale(locale: &str) -> bool {
+    use crate::locale_generated::{EXCEPTIONS, LANGUAGES_2, LANGUAGES_3, REGIONS_2};
+
+    if locale.is_empty() {
+        return true;
+    }
+
+    // `len(locale)` in Go is bytes, and the check runs before `Parse`, so a six-byte tag is
+    // rejected without ever consulting the registry.
+    if locale.len() > USER_LOCALE_MAX_LENGTH {
+        return false;
+    }
+
+    // The tables are lower-case; `language.Parse` is case-insensitive.
+    let lower = crate::utils::go_to_lower(locale);
+    let s = lower.as_str();
+    let bytes = s.as_bytes();
+
+    let in_table = |table: &[&str], needle: &str| table.binary_search(&needle).is_ok();
+
+    if in_table(EXCEPTIONS, s) {
+        return true;
+    }
+    if s == "root" {
+        return true;
+    }
+
+    let is_letter = |c: u8| c.is_ascii_lowercase();
+    let is_sep = |c: u8| c == b'-' || c == b'_';
+
+    // Private use: `x` then one or more separator-delimited alphanumeric subtags.
+    if bytes.len() >= 3 && bytes[0] == b'x' && is_sep(bytes[1]) {
+        let rest = &bytes[2..];
+        if rest.is_empty() || is_sep(rest[0]) || is_sep(rest[rest.len() - 1]) {
+            return false;
+        }
+        let mut previous_was_sep = false;
+        for &c in rest {
+            if is_sep(c) {
+                if previous_was_sep {
+                    return false;
+                }
+                previous_was_sep = true;
+            } else if !c.is_ascii_alphanumeric() {
+                return false;
+            } else {
+                previous_was_sep = false;
+            }
+        }
+        return true;
+    }
+
+    match bytes.len() {
+        2 if bytes.iter().all(|&c| is_letter(c)) => in_table(LANGUAGES_2, s),
+        3 if bytes.iter().all(|&c| is_letter(c)) => in_table(LANGUAGES_3, s),
+        5 if is_letter(bytes[0])
+            && is_letter(bytes[1])
+            && is_sep(bytes[2])
+            && is_letter(bytes[3])
+            && is_letter(bytes[4]) =>
+        {
+            in_table(LANGUAGES_2, &s[..2]) && in_table(REGIONS_2, &s[3..])
+        }
+        _ => false,
+    }
+}
+
+/// Parity tests for [`is_valid_locale`], driven by `fixtures/behaviour_locale.json`.
+#[cfg(test)]
+mod locale_go_parity {
+    use super::*;
+
+    fn oracle() -> serde_json::Value {
+        serde_json::from_str(include_str!("../../../fixtures/behaviour_locale.json")).unwrap()
+    }
+
+    #[test]
+    fn max_length_matches_go() {
+        assert_eq!(
+            oracle()["max_length"].as_u64().unwrap() as usize,
+            USER_LOCALE_MAX_LENGTH
+        );
+    }
+
+    /// The hand-picked probes, including every example from [D-001]'s table.
+    #[test]
+    fn probes_match_go() {
+        for case in oracle()["probes"].as_array().unwrap() {
+            let input = case["input"].as_str().unwrap();
+            assert_eq!(
+                is_valid_locale(input),
+                case["valid"].as_bool().unwrap(),
+                "is_valid_locale({input:?})"
+            );
+        }
+    }
+
+    /// A spread through the accepted set — every 2,000th entry of the enumeration — so membership
+    /// is checked against real registry data rather than only the memorable cases.
+    #[test]
+    fn a_sample_of_the_accepted_set_is_accepted() {
+        let oracle = oracle();
+        let sample = oracle["accepted_sample"].as_array().unwrap();
+        assert!(sample.len() > 100, "the sample should span the set");
+        for value in sample {
+            let input = value.as_str().unwrap();
+            assert!(
+                is_valid_locale(input),
+                "{input:?} is in Go's accepted set and must pass here"
+            );
+        }
+        assert_eq!(oracle["accepted_total"].as_u64().unwrap(), 234_421);
+    }
+
+    /// The grandfathered tags, which no structural rule covers and which the first version of
+    /// this port got wrong.
+    #[test]
+    fn the_grandfathered_tags_are_accepted() {
+        let oracle = oracle();
+        let exceptions = oracle["exceptions"].as_array().unwrap();
+        assert_eq!(exceptions.len(), 16, "eight tags, two separator spellings");
+        for value in exceptions {
+            let input = value.as_str().unwrap();
+            assert!(is_valid_locale(input), "grandfathered {input:?}");
+        }
+        // ...and the one that looks just like them and is not registered.
+        assert!(!is_valid_locale("i-en"));
+    }
+
+    /// The distinction that makes a table necessary: syntax is not enough.
+    #[test]
+    fn syntax_is_not_the_rule() {
+        // Well-formed and unregistered.
+        for rejected in ["xx", "xxx", "zh-Ha", "en-1", "a-b"] {
+            assert!(
+                !is_valid_locale(rejected),
+                "{rejected:?} should be rejected"
+            );
+        }
+        // Odd-looking and registered.
+        for accepted in ["qaa", "mul", "zxx", "und", "root"] {
+            assert!(is_valid_locale(accepted), "{accepted:?} should be accepted");
+        }
+    }
+
+    /// Empty passes, and the length check is on bytes and runs before the registry lookup.
+    #[test]
+    fn empty_passes_and_six_bytes_fails() {
+        assert!(is_valid_locale(""));
+        assert!(is_valid_locale("en-US"));
+        assert!(
+            !is_valid_locale("en-USA"),
+            "six bytes, rejected before Parse"
+        );
+    }
+}

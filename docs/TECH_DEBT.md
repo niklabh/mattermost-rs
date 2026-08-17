@@ -43,7 +43,8 @@ these blocks anything, and forwarding costs nothing because unmigrated is alread
 
 ## D-001 · `IsValidLocale` needs the IANA subtag registry
 
-**Status** OPEN · **Severity** blocking · **Raised** 2026-08-13 (phase 1, after `user.go`)
+**Status** CLOSED · **Severity** blocking · **Raised** 2026-08-13 (phase 1, after `user.go`)
+**Closed** 2026-08-17 — the table is generated and verified; see below.
 **Blocks** `User::is_valid`, and any later `IsValid` that validates a locale.
 
 `IsValidLocale` (user.go:1105) delegates to `golang.org/x/text/language.Parse`, which validates
@@ -69,8 +70,31 @@ plus `root`. Generating the exact accepted set is mechanical, not a guess.
 - **(c) Leave unported** — current state.
 
 **Decision** Deferred 2026-08-13 by the project owner: log and revisit. Chose (c) for now.
-**To pay off** enumerate in `reference/dump/`, emit `crates/mm-model/src/locale_generated.rs`,
-then wire `User::is_valid`.
+Revisited 2026-08-17 in the batch resolution above and settled on **(a)**; done the same day.
+
+**Paid off.** `reference/dump/locale_gen.go` emits
+`crates/mm-model/src/locale_generated.rs`, and `is_valid_locale` is ported.
+
+**The enumeration is exhaustive, not sampled.** `UserLocaleMaxLength` is 5, so the reachable input
+space is every string of at most five bytes; over the characters a tag can contain that is
+**81,376,658** strings, and `language.Parse` answers all of them in about eight seconds. 234,421
+are accepted.
+
+**The emitted tables are not that set.** 234,421 strings is too many to ship as a list, so they are
+decomposed into components — 190 two-letter languages, 8,794 three-letter, 327 regions — plus a
+structural rule for `ll<sep>RR`, `root` and private-use `x-…`. The generator then **re-derives all
+81 million answers from the tables** and fails the build if one disagrees. The enumeration is the
+proof, not the payload.
+
+**That step caught a real error immediately.** The first rule missed the registry's
+**grandfathered** tags — `i-ami`, `i-bnn`, `i-hak`, `i-lux`, `i-pwn`, `i-tao`, `i-tay`, `i-tsu`,
+each in both separator spellings — and the verification named all sixteen rather than letting them
+ship. They are now a 16-entry exception table the generator derives from its **own residual**:
+whatever its rule fails to cover becomes the list, so nobody has to know in advance which tags are
+irregular. Note `i-en`, which looks identical in shape, is **not** registered and is correctly
+rejected — which is exactly why guessing the pattern would not have worked.
+
+**Cost:** the generator run grows by about 18 seconds, and `locale_generated.rs` is 1,198 lines.
 
 ---
 
@@ -87,7 +111,17 @@ then wire `User::is_valid`.
 passwords**. Any caller mistaking it for Go's `PreSave` would store plaintext. Rename to
 `pre_save` only when the hasher lands.
 
-**To pay off** close D-001 and D-004, define the hasher trait, port the timezone defaults.
+**Half-unblocked 2026-08-17.** [D-001] is closed and [D-004] was already, so `IsValid`'s three
+dependencies — `IsValidEmail`, `IsValidLocale`, `ValidateCustomStatus` — are all ported and
+`User::is_valid` is now writable. It is 81 lines and 18 error branches, so it wants its own oracle
+and its own session.
+
+`PreSave` is **not** unblocked: it additionally needs a `UserPasswordHasher` and
+`timezones.DefaultUserTimezone()`. Until it lands, `pre_save_partial` keeps its name and the
+warning that goes with it — a caller mistaking it for Go's `PreSave` stores plaintext.
+
+**To pay off** port `User::is_valid` (ready now), then define the hasher trait and the timezone
+defaults for `PreSave`.
 
 ---
 
