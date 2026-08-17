@@ -78,11 +78,48 @@ depend on `mm-model`, and `mm-model` may never depend on an AGPL crate or read
 `channel_count.go` **does not exist** — checked 2026-08-17. The earlier note guessed at the name;
 do not look for it again.
 
-Next file: `server/public/model/cluster_info.go` (13 lines) with `plugins_response.go` (13) as
-possible companions — **read both before deciding**, and split them if they share nothing. The
-pattern this session and the last two have settled into is that a pair is only worth folding when
-one oracle genuinely covers both (`audit`/`audits`, `emoji_search`/`user_access_token_search`);
-two unrelated 13-line structs are two sessions' worth of ledger entries in one, not a saving.
+## Next: close [D-077] — `TeamStore::GetTeamsForUser` (team_store.go:1181)
+
+**Superseded 2026-08-17.** This line previously read "next file: `cluster_info.go` (13 lines)",
+which was written before the vertical slice landed. Two things changed it.
+
+**It is the only incomplete thing in committed code.** `SessionStore::get` returns less than Go
+does *today*: Go's `Get` runs a second query — `Team().GetTeamsForUser(...)`, filtered to
+`DeleteAt == 0` (session_store.go:111) — and we leave `team_members` at `None`. Everything else
+shipped in the slice is either complete or explicitly scoped; this one is a gap in a function we
+already call on every authenticated request.
+
+**It gates the cheapest next route.** `Session.team_members` carries **no `omitempty`**, so the
+key is always present: we would emit `"team_members": null` where Go emits a populated array.
+That is a guaranteed parity failure on `GET /api/v4/users/me/sessions` (api4/user.go:2570) —
+which is otherwise the ideal next route, being *self-scoped* and therefore needing no permission
+system at all.
+
+Contrast the obvious alternative, `GET /api/v4/users/{user_id}`: it needs `UserCanSeeOtherUser`
+([D-082]), which drags in the whole roles-and-permissions surface — `role.go` is 1,311 lines and
+`permission.go` (2,789) is out of scope for hand-translation. That is a much larger step and
+should not be the one taken first.
+
+**What the work is.** `GetTeamsForUser` is three lines on top of
+`getTeamMembersWithSchemeSelectQuery`, and *that* is the content: the scheme-roles join is how
+Mattermost computes a member's effective roles from the team and channel schemes. Getting it
+wrong is a **silent permission bug** rather than a visible error, so it wants a behavioural
+oracle, not a reading. `teammembers` is already in the dev stack's schema and the `TeamMember`
+model type is ported.
+
+After that, `GET /api/v4/users/me/sessions` is a small route on top of `SessionStore::GetSessions`
+(session_store.go:126) — and it will exercise `Session::sanitize`, which matters because sessions
+carry tokens.
+
+### If porting model files instead
+
+The sub-20-line set is nearly exhausted (22 files left under 20 lines, 141 in scope overall) and
+its yield has been falling. The old guidance still applies when picking one: prefer a small file
+**with a method** — the last four tech-debt entries came from a method (`Audits::Etag`), a tag
+convention (`limits.go`), a pointer rule (`channel_search.go`) and a float (`analytics_row.go`),
+not from a wire format alone. `cluster_info.go` (13) and `plugins_response.go` (13) remain
+candidates; read both before folding them together, since a pair is only worth one session when
+one oracle genuinely covers both.
 
 **No file in the remaining sub-20-line set has produced a new tech-debt entry from its wire format
 alone** — the last four came from a method (`Audits::Etag`), a tag convention (`limits.go`), a
