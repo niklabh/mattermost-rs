@@ -1,0 +1,497 @@
+{
+    "auditable": {
+        "bot": "{\"create_at\":1600000000000,\"delete_at\":0,\"description\":\"a bot that does things\",\"display_name\":\"Bot Display Name\",\"last_icon_update\":1700000000000,\"owner_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaa\",\"update_at\":1650000000000,\"user_id\":\"y9i4er48tt8bukijy7i3u5y9ar\",\"username\":\"botusername\"}",
+        "patch": "{\"description\":\"x\",\"display_name\":\"d\",\"username\":\"u\"}",
+        "patch_all_nil": "{\"description\":null,\"display_name\":null,\"username\":null}",
+        "patch_wire": [
+            {
+                "json": "{\"username\":null,\"display_name\":null,\"description\":null}",
+                "name": "all_nil"
+            },
+            {
+                "json": "{\"username\":\"u\",\"display_name\":\"d\",\"description\":\"desc\"}",
+                "name": "all_set"
+            },
+            {
+                "json": "{\"username\":\"\",\"display_name\":\"\",\"description\":\"\"}",
+                "name": "empty_strings"
+            },
+            {
+                "json": "{\"username\":\"u\",\"display_name\":null,\"description\":null}",
+                "name": "only_username"
+            }
+        ],
+        "trace": "{\"user_id\":\"y9i4er48tt8bukijy7i3u5y9ar\"}"
+    },
+    "bot_from_user": [
+        {
+            "create_at": 0,
+            "delete_at": 0,
+            "description": "",
+            "display_name": "someuser",
+            "name": "typical",
+            "owner_id": "y9i4er48tt8bukijy7i3u5y9ar",
+            "update_at": 0,
+            "user_id": "y9i4er48tt8bukijy7i3u5y9ar",
+            "username": "someuser"
+        },
+        {
+            "create_at": 0,
+            "delete_at": 0,
+            "description": "",
+            "display_name": "uname",
+            "name": "with_full_name",
+            "owner_id": "aaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "update_at": 0,
+            "user_id": "aaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "username": "uname"
+        },
+        {
+            "create_at": 0,
+            "delete_at": 0,
+            "description": "",
+            "display_name": "",
+            "name": "empty",
+            "owner_id": "",
+            "update_at": 0,
+            "user_id": "",
+            "username": ""
+        }
+    ],
+    "constants": {
+        "BotCreatorIdMaxRunes": 190,
+        "BotDescriptionMaxRunes": 1024,
+        "BotDisplayNameMaxRunes": 64,
+        "BotSystemBotUsername": "system-bot",
+        "BotWarnMetricBotUsername": "mattermost-advisor",
+        "KeyValuePluginIdMaxRunes": 190,
+        "SystemUserRoleId": "system_user",
+        "UserFirstNameMaxRunes": 64
+    },
+    "etag": [
+        {
+            "etag": "11.11.0.y9i4er48tt8bukijy7i3u5y9ar.1650000000000",
+            "name": "typical"
+        },
+        {
+            "etag": "11.11.0..0",
+            "name": "zero"
+        },
+        {
+            "etag": "11.11.0.y9i4er48tt8bukijy7i3u5y9ar.0",
+            "name": "zero_update_at"
+        }
+    ],
+    "is_bot_dm": [
+        {
+            "name": "direct_prefix",
+            "result": true
+        },
+        {
+            "name": "direct_suffix",
+            "result": true
+        },
+        {
+            "name": "direct_not_involved",
+            "result": false
+        },
+        {
+            "name": "open_channel",
+            "result": false
+        },
+        {
+            "name": "group_channel",
+            "result": false
+        },
+        {
+            "name": "no_separator",
+            "result": false
+        },
+        {
+            "name": "id_in_middle",
+            "result": false
+        },
+        {
+            "name": "empty_name",
+            "result": false
+        }
+    ],
+    "is_valid": [
+        {
+            "name": "valid",
+            "result": {
+                "ok": true
+            }
+        },
+        {
+            "name": "empty_user_id",
+            "result": {
+                "id": "model.bot.is_valid.user_id.app_error",
+                "ok": false,
+                "status": 400,
+                "where": "Bot.IsValid"
+            }
+        },
+        {
+            "name": "short_user_id",
+            "result": {
+                "id": "model.bot.is_valid.user_id.app_error",
+                "ok": false,
+                "status": 400,
+                "where": "Bot.IsValid"
+            }
+        },
+        {
+            "name": "zero_create_at",
+            "result": {
+                "id": "model.bot.is_valid.create_at.app_error",
+                "ok": false,
+                "status": 400,
+                "where": "Bot.IsValid"
+            }
+        },
+        {
+            "name": "zero_update_at",
+            "result": {
+                "id": "model.bot.is_valid.update_at.app_error",
+                "ok": false,
+                "status": 400,
+                "where": "Bot.IsValid"
+            }
+        },
+        {
+            "name": "bad_username_via_is_valid",
+            "result": {
+                "id": "model.bot.is_valid.username.app_error",
+                "ok": false,
+                "status": 400,
+                "where": "Bot.IsValid"
+            }
+        },
+        {
+            "name": "zero_create_at_and_bad_username",
+            "result": {
+                "id": "model.bot.is_valid.create_at.app_error",
+                "ok": false,
+                "status": 400,
+                "where": "Bot.IsValid"
+            }
+        }
+    ],
+    "is_valid_create": [
+        {
+            "name": "valid",
+            "result": {
+                "ok": true
+            }
+        },
+        {
+            "name": "empty_user_id_is_fine_on_create",
+            "result": {
+                "ok": true
+            }
+        },
+        {
+            "name": "zero_timestamps_are_fine_on_create",
+            "result": {
+                "ok": true
+            }
+        },
+        {
+            "name": "empty_username",
+            "result": {
+                "id": "model.bot.is_valid.username.app_error",
+                "ok": false,
+                "status": 400,
+                "where": "Bot.IsValid"
+            }
+        },
+        {
+            "name": "bad_username",
+            "result": {
+                "id": "model.bot.is_valid.username.app_error",
+                "ok": false,
+                "status": 400,
+                "where": "Bot.IsValid"
+            }
+        },
+        {
+            "name": "display_name_too_long",
+            "result": {
+                "id": "model.bot.is_valid.user_id.app_error",
+                "ok": false,
+                "status": 400,
+                "where": "Bot.IsValid"
+            }
+        },
+        {
+            "name": "display_name_at_limit",
+            "result": {
+                "ok": true
+            }
+        },
+        {
+            "name": "description_too_long",
+            "result": {
+                "id": "model.bot.is_valid.description.app_error",
+                "ok": false,
+                "status": 400,
+                "where": "Bot.IsValid"
+            }
+        },
+        {
+            "name": "description_at_limit",
+            "result": {
+                "ok": true
+            }
+        },
+        {
+            "name": "empty_owner_id",
+            "result": {
+                "id": "model.bot.is_valid.creator_id.app_error",
+                "ok": false,
+                "status": 400,
+                "where": "Bot.IsValid"
+            }
+        },
+        {
+            "name": "owner_id_too_long",
+            "result": {
+                "id": "model.bot.is_valid.creator_id.app_error",
+                "ok": false,
+                "status": 400,
+                "where": "Bot.IsValid"
+            }
+        },
+        {
+            "name": "owner_id_at_limit",
+            "result": {
+                "ok": true
+            }
+        },
+        {
+            "name": "display_name_at_limit_multibyte",
+            "result": {
+                "ok": true
+            }
+        }
+    ],
+    "keys": [
+        "user_id",
+        "username",
+        "display_name",
+        "description",
+        "owner_id",
+        "last_icon_update",
+        "create_at",
+        "update_at",
+        "delete_at"
+    ],
+    "list_etag": [
+        {
+            "etag": "11.11.0.0.0.0.0",
+            "len": 0,
+            "name": "empty"
+        },
+        {
+            "etag": "11.11.0.y9i4er48tt8bukijy7i3u5y9ar.100.0.1",
+            "len": 1,
+            "name": "one"
+        },
+        {
+            "etag": "11.11.0.bbbbbbbbbbbbbbbbbbbbbbbbbb.200.0.2",
+            "len": 2,
+            "name": "ascending"
+        },
+        {
+            "etag": "11.11.0.bbbbbbbbbbbbbbbbbbbbbbbbbb.200.0.2",
+            "len": 2,
+            "name": "descending"
+        },
+        {
+            "etag": "11.11.0.aaaaaaaaaaaaaaaaaaaaaaaaaa.200.0.2",
+            "len": 2,
+            "name": "tie"
+        },
+        {
+            "etag": "11.11.0.0.0.0.2",
+            "len": 2,
+            "name": "all_zero_update_at"
+        }
+    ],
+    "not_found_error": {
+        "id": "store.sql_bot.get.missing.app_error",
+        "status": 404,
+        "where": "SomeWhere"
+    },
+    "patch": [
+        {
+            "name": "nil_patch",
+            "panics": true
+        },
+        {
+            "json": "{\"user_id\":\"y9i4er48tt8bukijy7i3u5y9ar\",\"username\":\"botusername\",\"display_name\":\"Bot Display Name\",\"description\":\"a bot that does things\",\"owner_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaa\",\"last_icon_update\":1700000000000,\"create_at\":1600000000000,\"update_at\":1650000000000,\"delete_at\":0}",
+            "name": "empty_patch",
+            "panics": false
+        },
+        {
+            "json": "{\"user_id\":\"y9i4er48tt8bukijy7i3u5y9ar\",\"username\":\"newname\",\"display_name\":\"Bot Display Name\",\"description\":\"a bot that does things\",\"owner_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaa\",\"last_icon_update\":1700000000000,\"create_at\":1600000000000,\"update_at\":1650000000000,\"delete_at\":0}",
+            "name": "username_only",
+            "panics": false
+        },
+        {
+            "json": "{\"user_id\":\"y9i4er48tt8bukijy7i3u5y9ar\",\"username\":\"botusername\",\"display_name\":\"New Display\",\"description\":\"a bot that does things\",\"owner_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaa\",\"last_icon_update\":1700000000000,\"create_at\":1600000000000,\"update_at\":1650000000000,\"delete_at\":0}",
+            "name": "display_name_only",
+            "panics": false
+        },
+        {
+            "json": "{\"user_id\":\"y9i4er48tt8bukijy7i3u5y9ar\",\"username\":\"botusername\",\"display_name\":\"Bot Display Name\",\"description\":\"new description\",\"owner_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaa\",\"last_icon_update\":1700000000000,\"create_at\":1600000000000,\"update_at\":1650000000000,\"delete_at\":0}",
+            "name": "description_only",
+            "panics": false
+        },
+        {
+            "json": "{\"user_id\":\"y9i4er48tt8bukijy7i3u5y9ar\",\"username\":\"n\",\"display_name\":\"d\",\"description\":\"x\",\"owner_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaa\",\"last_icon_update\":1700000000000,\"create_at\":1600000000000,\"update_at\":1650000000000,\"delete_at\":0}",
+            "name": "all_three",
+            "panics": false
+        },
+        {
+            "json": "{\"user_id\":\"y9i4er48tt8bukijy7i3u5y9ar\",\"username\":\"botusername\",\"display_name\":\"Bot Display Name\",\"description\":\"a bot that does things\",\"owner_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaa\",\"last_icon_update\":1700000000000,\"create_at\":1600000000000,\"update_at\":1650000000000,\"delete_at\":0}",
+            "name": "same_username",
+            "panics": false
+        },
+        {
+            "json": "{\"user_id\":\"y9i4er48tt8bukijy7i3u5y9ar\",\"username\":\"botusername\",\"description\":\"a bot that does things\",\"owner_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaa\",\"last_icon_update\":1700000000000,\"create_at\":1600000000000,\"update_at\":1650000000000,\"delete_at\":0}",
+            "name": "clear_display_name",
+            "panics": false
+        }
+    ],
+    "patch_keys": [
+        "username",
+        "display_name",
+        "description"
+    ],
+    "pre_save": [
+        {
+            "create_at_equals_update_at": true,
+            "create_at_nonzero": true,
+            "delete_at_before": 12345,
+            "delete_at_cleared": true,
+            "description_unchanged": true,
+            "display_name_unchanged": true,
+            "name": "pre_save",
+            "owner_id_unchanged": true,
+            "user_id_unchanged": true,
+            "username_before": "  MixedCase  ",
+            "username_normalized": "  mixedcase  "
+        },
+        {
+            "create_at_unchanged": true,
+            "delete_at_unchanged": true,
+            "name": "pre_update",
+            "update_at_changed": true,
+            "update_at_nonzero": true,
+            "username_unchanged": true
+        }
+    ],
+    "user_from_bot": [
+        {
+            "auth_service": "",
+            "create_at": 0,
+            "email": "botusername@localhost",
+            "first_name": "Bot Display Name",
+            "id": "y9i4er48tt8bukijy7i3u5y9ar",
+            "last_name": "",
+            "name": "typical",
+            "nickname": "",
+            "position": "",
+            "roles": "system_user",
+            "username": "botusername"
+        },
+        {
+            "auth_service": "",
+            "create_at": 0,
+            "email": "@localhost",
+            "first_name": "Bot Display Name",
+            "id": "y9i4er48tt8bukijy7i3u5y9ar",
+            "last_name": "",
+            "name": "empty_username",
+            "nickname": "",
+            "position": "",
+            "roles": "system_user",
+            "username": ""
+        },
+        {
+            "auth_service": "",
+            "create_at": 0,
+            "email": "mixedcase@localhost",
+            "first_name": "Bot Display Name",
+            "id": "y9i4er48tt8bukijy7i3u5y9ar",
+            "last_name": "",
+            "name": "mixed_case_username",
+            "nickname": "",
+            "position": "",
+            "roles": "system_user",
+            "username": "MixedCase"
+        }
+    ],
+    "wire": [
+        {
+            "json": "{\"user_id\":\"\",\"username\":\"\",\"owner_id\":\"\",\"create_at\":0,\"update_at\":0,\"delete_at\":0}",
+            "name": "zero"
+        },
+        {
+            "json": "{\"user_id\":\"y9i4er48tt8bukijy7i3u5y9ar\",\"username\":\"botusername\",\"display_name\":\"Bot Display Name\",\"description\":\"a bot that does things\",\"owner_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaa\",\"last_icon_update\":1700000000000,\"create_at\":1600000000000,\"update_at\":1650000000000,\"delete_at\":0}",
+            "name": "full"
+        },
+        {
+            "json": "{\"user_id\":\"y9i4er48tt8bukijy7i3u5y9ar\",\"username\":\"botusername\",\"display_name\":\"Bot Display Name\",\"description\":\"a bot that does things\",\"owner_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaa\",\"last_icon_update\":1700000000000,\"create_at\":1600000000000,\"update_at\":1650000000000,\"delete_at\":1700000000001}",
+            "name": "deleted"
+        },
+        {
+            "json": "{\"user_id\":\"y9i4er48tt8bukijy7i3u5y9ar\",\"username\":\"botusername\",\"description\":\"a bot that does things\",\"owner_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaa\",\"last_icon_update\":1700000000000,\"create_at\":1600000000000,\"update_at\":1650000000000,\"delete_at\":0}",
+            "name": "no_display_name"
+        },
+        {
+            "json": "{\"user_id\":\"y9i4er48tt8bukijy7i3u5y9ar\",\"username\":\"botusername\",\"display_name\":\"Bot Display Name\",\"owner_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaa\",\"last_icon_update\":1700000000000,\"create_at\":1600000000000,\"update_at\":1650000000000,\"delete_at\":0}",
+            "name": "no_description"
+        },
+        {
+            "json": "{\"user_id\":\"y9i4er48tt8bukijy7i3u5y9ar\",\"username\":\"botusername\",\"display_name\":\"Bot Display Name\",\"description\":\"a bot that does things\",\"owner_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaa\",\"create_at\":1600000000000,\"update_at\":1650000000000,\"delete_at\":0}",
+            "name": "no_icon"
+        }
+    ],
+    "would_patch": [
+        {
+            "name": "nil_patch",
+            "would": false
+        },
+        {
+            "name": "empty_patch",
+            "would": false
+        },
+        {
+            "name": "username_only",
+            "would": true
+        },
+        {
+            "name": "display_name_only",
+            "would": true
+        },
+        {
+            "name": "description_only",
+            "would": true
+        },
+        {
+            "name": "all_three",
+            "would": true
+        },
+        {
+            "name": "same_username",
+            "would": false
+        },
+        {
+            "name": "clear_display_name",
+            "would": true
+        }
+    ]
+}

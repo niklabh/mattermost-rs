@@ -118,6 +118,8 @@ var registry = map[string]any{
 	"status":                        &model.Status{},
 	"preference":                    &model.Preference{},
 	"custom_status":                 &model.CustomStatus{},
+	"bot":                           &model.Bot{},
+	"bot_patch":                     &model.BotPatch{},
 }
 
 // overrides pins specific fields to semantically valid values, keyed by the
@@ -504,6 +506,12 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_channel_search.json"))
+
+	if err := writeBotBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: bot behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_bot.json"))
 
 	if err := writeLimitsBehaviourFixture(*out); err != nil {
 		fmt.Fprintf(os.Stderr, "FAIL: limits behaviour fixture: %v\n", err)

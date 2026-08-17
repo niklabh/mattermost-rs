@@ -3182,3 +3182,54 @@ forwarded.
 
 **Until then**, the honest options are: forward anything permission-gated (correct, and free), or
 keep porting `mm-model` files, of which 141 remain. Neither is blocked.
+
+---
+
+## D-095 · `Bot::patch` cannot reproduce Go's nil-patch panic
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-17 (phase 1, `bot.go`)
+
+`(*Bot).Patch` takes `*BotPatch` and dereferences each field without a nil check (bot.go:143), so
+`bot.Patch(nil)` panics. The oracle probes it and records `panics: true`.
+
+Ours takes `&BotPatch`, which makes the state unrepresentable — there is no value to pass that
+would panic. `WouldPatch` is the opposite case and *is* faithful: Go guards nil there explicitly
+and answers `false`, so the port takes `Option<&BotPatch>` and reproduces that.
+
+**Accepted** because the difference is a consequence of the type system rather than a choice: the
+only way to reproduce the panic would be to take an `Option` and then `unwrap` it, which
+`CLAUDE.md` forbids in library code and which would be worse code for an unreachable state. The
+asymmetry between the two methods is Go's, and it is preserved in the signatures.
+
+Same shape as the panics accepted in [D-052] and [D-058].
+
+---
+
+## D-096 · Two upstream bugs in `bot.go` are reproduced deliberately
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-17 (phase 1, `bot.go`)
+
+Both confirmed against Go by `fixtures/behaviour_bot.json`, not read out of the source.
+
+**`IsValidCreate` reports the wrong error id for a long display name.** The branch checking
+`DisplayName` against `BotDisplayNameMaxRunes` returns `model.bot.is_valid.user_id.app_error`
+(bot.go:93) — a copy-paste of the line above it. There is no
+`model.bot.is_valid.display_name.app_error` anywhere in the tree. Measured:
+
+```
+display_name_too_long  -> model.bot.is_valid.user_id.app_error
+description_too_long   -> model.bot.is_valid.description.app_error
+```
+
+Reachable from any bot-creation form, and a client branching on the id would get a different
+answer from the two servers if we "fixed" it. The parity test asserts the wrong id explicitly, so
+removing the bug from the port fails loudly rather than silently diverging.
+
+**`BotList.Etag`'s third component is always zero.** `var delta int64` is declared, never
+assigned, and passed to `Etag` (bot.go:200), so every bot-list etag carries a literal `0` there.
+It reads as a leftover from a version that computed something. Kept, with the variable and its
+name, so a future reader who deletes the "unused" binding fails a test.
+
+Related: `id` starts as the **string** `"0"` rather than empty, so an empty list etags as
+`11.11.0.0.0.0.0` and a list whose every `UpdateAt` is zero keeps `"0"` as its id — the same trap
+`Audits::etag` carries ([D-076]).
