@@ -2832,8 +2832,8 @@ already had this right for the same reason — this is the second instance, so i
 
 ## D-087 · The Go server serves `/users/me` from a stale user cache
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-08-17 (phase 2, cross-server parity)
-**Blocks** nothing yet; **affects every cached read the migration touches.**
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-17 (phase 2, cross-server parity)
+**Decided** 2026-08-17 — see **Decision** below. **Constrains every write route from here on.**
 
 Measured, and the most consequential thing this slice turned up.
 
@@ -2857,15 +2857,71 @@ It does *not* automatically give them one cache. Every read Go caches is a read 
 servers can disagree, and every write we make is a write Go's cache will not hear about. Go
 invalidates its caches through the cluster message bus; we publish nothing to it.
 
-**Options, none chosen yet**
+**Options as first written**
 - **(a) Join the cluster bus** and publish invalidations. Correct and the largest.
 - **(b) Read-through only, never cache** on the Rust side, and accept that Go serves stale data
   for keys we write. Cheapest; leaves the divergence in place in one direction.
 - **(c) Migrate a cached entity's reads and writes together**, so no entity is half-owned.
   Constrains route ordering rather than requiring new machinery.
 
-**To pay off** decide before migrating any route that *writes* an entity Go caches. The current
-slice is read-only, which is why it is safe today.
+---
+
+### Decision (2026-08-17): **(b), extended — read in Rust, write through Go**
+
+Two of the three options turned out to be unavailable, and the third turned out to be
+insufficient as written. All three findings are measured.
+
+**(a) is licensed away.** Invalidation is published through `ps.clusterIFace`
+(`app/platform/web_hub.go:238`), an `einterfaces.ClusterInterface`. `einterfaces/` is the
+enterprise interface surface and the only implementations live in `enterprise/`, which
+`MIGRATION.md` already lists as permanently out of scope. Implementing it would mean
+reimplementing a licensed component and speaking an internal, unstable message format.
+
+**The elegant alternative is licensed away too, and this is the part worth recording.** Setting
+`CacheSettings.CacheType = redis` moves the cache out of process, keys it `{cacheName}:{key}`
+(`cache/redis.go:83`), and — because the client uses rueidis client-side tracking with a
+five-minute TTL — deleting a key would invalidate the Go server's local copy as well. Better
+still, *invalidating* needs only the key name, never the value encoding, so it would have
+sidestepped the msgpack codecs entirely. It does not work:
+
+```
+{"msg":"Successfully connected to cache backend","backend":"redis","result":"PONG"}
+Error: failed to initialize platform: Redis cannot be used in an instance without a
+license or a license without clustering
+```
+
+The server connects to Redis, confirms `PONG`, and *then* refuses to boot. So on Team Edition —
+the baseline this port targets — the Go cache is in-process LRU and **there is no invalidation
+channel a second process can reach at all**. Do not spend another session looking for one.
+
+**(c) was insufficient.** Migrating an entity's *routes* does not give us the entity: the Go
+server reads users internally for its own permission checks and webhook paths, straight from its
+own cache, regardless of which server owns the HTTP route. Route-level ownership is not
+read-level ownership.
+
+**What was chosen.** Three standing rules:
+
+1. **The Rust side never caches.** Every read goes through to Postgres. This removes one
+   direction of the problem completely and costs nothing at migration-era traffic — and it is
+   why we were the *correct* server in the measurement above, not merely a different one.
+2. **A route that writes an entity the Go server caches stays proxied to Go**, so Go performs the
+   write and runs its own invalidation exactly as it does today. This is free: unmigrated is
+   already the default, and the proxy is the fallback, so "not migrating it" requires no code.
+3. **Read routes migrate freely.** We are always at least as fresh as Go, never staler.
+
+The uncomfortable consequence, stated plainly: **writes are the last thing to migrate, not the
+next thing.** Reads can move at whatever pace the porting sustains; a write cannot move until the
+Go server no longer reads that entity — which in practice means until it is being retired.
+
+**Revisit only** for a deployment with an Enterprise licence including clustering, where Redis
+cache mode is permitted and rule 2 can be relaxed to "write directly, then `DEL` the key".
+
+**Bonus finding — this closes an open question.** The cache values are msgpack, encoded by the
+generated `user_serial_gen.go` (1,343 lines) and `session_serial_gen.go` (937). Since we never
+populate Go's cache under this decision, those 2,280 lines are confirmed **out of scope** rather
+than merely deprioritised. Under the Redis option we would have needed only key names, and under
+the chosen option we do not touch the cache at all — so there is no path on which they are
+required.
 
 **In the meantime** the parity test normalises `update_at` out of the byte comparison, asserts
 everything else matches exactly, and then checks our value against the row — so the exemption

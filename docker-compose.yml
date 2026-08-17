@@ -37,6 +37,19 @@ services:
       timeout: 5s
       retries: 20
 
+  # There is deliberately NO redis service here, and adding one will not work — measured
+  # 2026-08-17, do not try it again. Setting `MM_CACHESETTINGS_CACHETYPE=redis` makes the Go
+  # server connect to Redis successfully and then refuse to start:
+  #
+  #   failed to initialize platform: Redis cannot be used in an instance without a license
+  #   or a license without clustering
+  #
+  # Out-of-process caching is enterprise-licensed, as is the cluster message bus. On Team
+  # Edition the Go server's cache is in-process LRU with no invalidation channel a second
+  # server can reach. That is the constraint behind D-087's decision: Rust reads through and
+  # never caches, and any route that WRITES an entity Go caches stays proxied to Go so Go
+  # invalidates its own cache.
+
   mattermost:
     # No arm64 manifest is published, so the platform is forced and the container runs under
     # emulation on Apple silicon. It is slow to boot and fine for a forward target.

@@ -23,12 +23,32 @@ Three assumptions had never been tested even once; all three now hold:
 **Run it** — `docker compose up -d`, then `cargo run -p mm-api`. The Rust server listens on
 :8066 and forwards to the Go server on :8065; both share one Postgres. See the README.
 
-**The finding that matters most is [D-087].** Go answers `/users/me` from an in-memory user cache
-that a login does not invalidate, so it serves a `update_at` **6.3 seconds stale and not
-converging** while we return the row's actual value. We are the correct one, which is the
-uncomfortable part: the divergence cannot be closed by matching Go. One database does not mean
-one cache, and this applies to every cached read the migration touches. Decide it before
-migrating any route that *writes* an entity Go caches.
+**The finding that matters most is [D-087], and it is now decided.** Go answers `/users/me` from
+an in-memory user cache that a login does not invalidate, so it serves an `update_at` **6.3
+seconds stale and not converging** while we return the row's actual value. We are the correct
+one, which is the uncomfortable part: the divergence cannot be closed by matching Go.
+
+**Decision — read in Rust, write through Go.** Three rules, and the second is the one that
+changes the plan:
+
+1. The Rust side **never caches**; every read goes through to Postgres.
+2. A route that **writes** an entity Go caches **stays proxied to Go**, so Go runs its own
+   invalidation. Free to adopt — unmigrated is the default and the proxy is the fallback.
+3. Read routes migrate freely; we are never staler than Go.
+
+Both alternatives are licensed away, measured rather than assumed. The cluster bus is
+`einterfaces.ClusterInterface`, implemented only in the out-of-scope `enterprise/` tree. Redis
+cache mode — which would have been elegant, since invalidation needs only a key name and never
+the value encoding — makes the server connect to Redis, log `PONG`, and then refuse to boot:
+*"Redis cannot be used in an instance without a license or a license without clustering."* On
+Team Edition there is **no invalidation channel a second process can reach**; do not go looking
+for one again.
+
+**So writes are the last thing to migrate, not the next thing.** Reads move at whatever pace the
+porting sustains; a write cannot move until the Go server no longer reads that entity.
+
+This also settles the `*_serial_gen.go` question: those 2,280 generated lines are the **msgpack
+codecs for Go's cache**, and since we never populate that cache, they are confirmed out of scope.
 
 Two beliefs held before this session were wrong and are now measured:
 
