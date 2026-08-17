@@ -100,7 +100,8 @@ rejected — which is exactly why guessing the pattern would not have worked.
 
 ## D-002 · `User::is_valid` and `User::pre_save` are not ported
 
-**Status** OPEN · **Severity** blocking · **Raised** 2026-08-13 (phase 1, `user.go`)
+**Status** CLOSED · **Severity** blocking · **Raised** 2026-08-13 (phase 1, `user.go`)
+**Closed** 2026-08-17 — `IsValid` landed; `PreSave` split out into [D-108].
 **Depends on** [D-001], [D-004], [D-005]
 
 `IsValid` (user.go:383) needs `IsValidEmail` (now done), `IsValidLocale` ([D-001]) and
@@ -120,8 +121,15 @@ and its own session.
 `timezones.DefaultUserTimezone()`. Until it lands, `pre_save_partial` keeps its name and the
 warning that goes with it — a caller mistaking it for Go's `PreSave` stores plaintext.
 
-**To pay off** port `User::is_valid` (ready now), then define the hasher trait and the timezone
-defaults for `PreSave`.
+**Paid off, in half.** `User::is_valid` landed 2026-08-17 — 18 branches, all measured, including
+three a reading gets wrong: a **remote user may hold an invalid email** (only the format check is
+skipped, not emptiness or length); the timezone cap counts **runes of Go's marshalled JSON**, so a
+`<` costs six; and `Props` gates the custom-status check by **nil-ness**, so an empty-but-present
+map still validates.
+
+`PreSave` is **not** done and is now [D-108], because its remaining dependencies — a bcrypt hasher
+and the timezone defaults — have nothing to do with `IsValid`'s and deserve their own entry rather
+than keeping a closed one open.
 
 ---
 
@@ -3725,3 +3733,59 @@ waiting on.
 
 Status moves to **ACCEPTED** for the `message` field specifically; the two fixed thirds stay
 closed.
+
+---
+
+## D-107 · `User.IsValid`'s `auth_data` branch formats a pointer, so Go's own detail is unstable
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-17 (phase 1, `user.go`)
+
+```go
+if u.AuthData != nil && len(*u.AuthData) > UserAuthDataMaxLength {
+    return InvalidUserError("auth_data", u.Id, u.AuthData)   // u.AuthData is *string
+}
+```
+
+`InvalidUserError` renders its value with `%v`, and `%v` on a `*string` prints the **address**.
+The two neighbouring auth-data branches dereference first — `*u.AuthData` — so this is the only
+one that does it, which reads like an oversight rather than a choice.
+
+Measured, twice in one process:
+
+```
+value_is_an_address: true
+stable_across_calls: false
+```
+
+So Go's own `detailed_error` for this branch is **not reproducible even by Go**. There is nothing
+to match.
+
+**Our detail is `auth_data=<pointer>`.** The alternative — emitting the dereferenced value, which
+is what the sibling branches do — was rejected on privacy grounds: `AuthData` is an SSO identifier,
+`detailed_error` reaches logs, and Go's accident happens to keep it out of them. A marker preserves
+that property and signals the difference.
+
+The parity test asserts Go's recorded detail still contains `0x`, so if upstream ever dereferences
+the pointer this entry stops being a divergence and the test says so.
+
+---
+
+## D-108 · `User::pre_save` is still unported, and `pre_save_partial` is still a loaded gun
+
+**Status** OPEN · **Severity** blocking · **Raised** 2026-08-17 (phase 1, `user.go`)
+**Split from** [D-002], whose `IsValid` half is now closed.
+
+`User::is_valid` landed 2026-08-17 once [D-001] closed. `PreSave` did not, and its two remaining
+dependencies are unrelated to anything ported so far:
+
+- **A password hasher.** Go uses `golang.org/x/crypto/bcrypt`. Both servers read the same
+  `Users.Password` column, so the cost factor and hash format are load-bearing — this is a
+  cross-server compatibility problem like [D-046], not a free choice.
+- **`timezones.DefaultUserTimezone()`**, which reads a timezone list Mattermost ships.
+
+Until then `pre_save_partial` keeps its name **and the reason for it**: a caller mistaking it for
+Go's `PreSave` stores a plaintext password. It is the one genuinely dangerous thing in the crate,
+and the name is the only guard.
+
+**To pay off** decide the bcrypt crate and pin it against Go's output for a known password and
+cost, then port the timezone defaults, then rename.

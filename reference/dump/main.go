@@ -548,6 +548,11 @@ func main() {
 	}
 	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_channel_search.json"))
 
+	if err := writeUserIsValidBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: user is_valid behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+
 	if err := writeLocaleGenerated(*out, *rustOut); err != nil {
 		fmt.Fprintf(os.Stderr, "FAIL: locale table: %v\n", err)
 		os.Exit(1)

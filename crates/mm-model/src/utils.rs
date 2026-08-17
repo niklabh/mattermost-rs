@@ -909,6 +909,29 @@ pub fn etag(parts: &[&dyn std::fmt::Display]) -> String {
 // ---------------------------------------------------------------------------
 // Go's encoding/json, for the cases where its *output* is load-bearing
 // ---------------------------------------------------------------------------
+/// Go's `fmt.Sprintf("%v", someStringMap)`.
+///
+/// Renders as `map[key:value key2:value2]` — the literal prefix `map[`, space-separated pairs,
+/// a colon between key and value, no quotes and no commas. An empty or nil map is `map[]`.
+///
+/// Since Go 1.12 map formatting **sorts by key**, so this is deterministic; before that it was
+/// not. `User::is_valid` interpolates a timezone map into an error detail this way, which is the
+/// only reason it exists — and nothing about `%v` announces the shape, so it is measured against
+/// Go rather than guessed.
+pub fn go_format_string_map(map: &StringMap) -> String {
+    let mut out = String::from("map[");
+    // `StringMap` is a `BTreeMap`, so iteration is already in Go's sorted order.
+    for (index, (key, value)) in map.iter().enumerate() {
+        if index > 0 {
+            out.push(' ');
+        }
+        out.push_str(key);
+        out.push(':');
+        out.push_str(value);
+    }
+    out.push(']');
+    out
+}
 
 /// The `map[string]string` case of `model.ToJSON` (utils.go:611), which is
 /// `json.Marshal` with the error discarded.

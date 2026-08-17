@@ -863,6 +863,209 @@ impl User {
 
     // -- sanitization -------------------------------------------------------
 
+    /// Port of `(*User).IsValid` (user.go:383). Closes the `IsValid` half of [D-002].
+    ///
+    /// Eighteen branches, checked in order — a user broken two ways reports the **first** failure,
+    /// which the corpus drives explicitly.
+    ///
+    /// # The caps mix bytes and runes
+    ///
+    /// `Email`, `AuthData` and `Roles` are capped in **bytes** (`len`); `Nickname`, `Position`,
+    /// `FirstName`, `LastName` and the marshalled timezone in **runes**. The constant names carry
+    /// the distinction — `MaxLength` against `MaxRunes` — but `Email` and `Roles` read like they
+    /// should count characters and do not. Measured at both boundaries with multi-byte input.
+    ///
+    /// # A remote user may hold an invalid email
+    ///
+    /// ```text
+    /// len(u.Email) > max || u.Email == "" || (!IsValidEmail(u.Email) && !u.IsRemote())
+    /// ```
+    ///
+    /// Emptiness and length apply to everyone; only the **format** check is skipped when the user
+    /// is remote. So a synced user can carry something that is not an email at all, and hoisting
+    /// `IsValidEmail` out of that conjunction would reject rows Go accepts. Driven both ways.
+    ///
+    /// # The timezone cap measures Go's JSON
+    ///
+    /// It marshals the map and counts the **runes of the result**, so braces, quotes, colons and
+    /// commas all count — and Go escapes HTML, so a `<` costs six runes rather than one. Hence
+    /// [`crate::utils::go_json_marshal_string_map`] rather than any convenient stringification.
+    ///
+    /// # `Props` gates the custom-status check
+    ///
+    /// A **nil** `Props` skips it entirely; an empty-but-present map does not. Three states, and
+    /// the middle one is easy to lose in an `Option` that gets `unwrap_or_default`ed.
+    pub fn is_valid(&self) -> utils::AppResult {
+        if !crate::utils::is_valid_id(&self.id) {
+            return Err(Box::new(invalid_user_error("id", "", &self.id)));
+        }
+
+        if self.create_at == 0 {
+            return Err(Box::new(invalid_user_error(
+                "create_at",
+                &self.id,
+                &self.create_at.to_string(),
+            )));
+        }
+
+        if self.update_at == 0 {
+            return Err(Box::new(invalid_user_error(
+                "update_at",
+                &self.id,
+                &self.update_at.to_string(),
+            )));
+        }
+
+        // A remote user's username may contain what a local one's may not.
+        let username_ok = if self.is_remote() {
+            is_valid_username_allow_remote(&self.username)
+        } else {
+            is_valid_username(&self.username)
+        };
+        if !username_ok {
+            return Err(Box::new(invalid_user_error(
+                "username",
+                &self.id,
+                &self.username,
+            )));
+        }
+
+        // Bytes, not runes — and the format check is the only part remote users skip.
+        if self.email.len() > USER_EMAIL_MAX_LENGTH
+            || self.email.is_empty()
+            || (!crate::utils::is_valid_email(&self.email) && !self.is_remote())
+        {
+            return Err(Box::new(invalid_user_error("email", &self.id, &self.email)));
+        }
+
+        if self.nickname.chars().count() > USER_NICKNAME_MAX_RUNES {
+            return Err(Box::new(invalid_user_error(
+                "nickname",
+                &self.id,
+                &self.nickname,
+            )));
+        }
+
+        if self.position.chars().count() > USER_POSITION_MAX_RUNES {
+            return Err(Box::new(invalid_user_error(
+                "position",
+                &self.id,
+                &self.position,
+            )));
+        }
+
+        if self.first_name.chars().count() > USER_FIRST_NAME_MAX_RUNES {
+            return Err(Box::new(invalid_user_error(
+                "first_name",
+                &self.id,
+                &self.first_name,
+            )));
+        }
+
+        if self.last_name.chars().count() > USER_LAST_NAME_MAX_RUNES {
+            return Err(Box::new(invalid_user_error(
+                "last_name",
+                &self.id,
+                &self.last_name,
+            )));
+        }
+
+        if let Some(auth_data) = &self.auth_data
+            && auth_data.len() > USER_AUTH_DATA_MAX_LENGTH
+        {
+            // Go passes the **pointer** here, not the string, so its detail contains a memory
+            // address that changes between calls. Unreproducible by construction, and emitting
+            // the value instead would put an SSO identifier in the logs that Go keeps out of
+            // them. A marker, and [D-107].
+            return Err(Box::new(invalid_user_error(
+                "auth_data",
+                &self.id,
+                "<pointer>",
+            )));
+        }
+
+        if let Some(auth_data) = &self.auth_data
+            && !auth_data.is_empty()
+            && self.auth_service.is_empty()
+        {
+            return Err(Box::new(invalid_user_error(
+                "auth_data_type",
+                &self.id,
+                &format!("{auth_data} {}", self.auth_service),
+            )));
+        }
+
+        if !self.password.is_empty()
+            && let Some(auth_data) = &self.auth_data
+            && !auth_data.is_empty()
+        {
+            return Err(Box::new(invalid_user_error(
+                "auth_data_pwd",
+                &self.id,
+                auth_data,
+            )));
+        }
+
+        if !is_valid_locale(&self.locale) {
+            return Err(Box::new(invalid_user_error(
+                "locale",
+                &self.id,
+                &self.locale,
+            )));
+        }
+
+        // `len(u.Timezone) > 0` is the map's entry count, so a present-but-empty map skips this.
+        if let Some(timezone) = &self.timezone
+            && !timezone.is_empty()
+        {
+            let marshalled = crate::utils::go_json_marshal_string_map(Some(timezone));
+            if marshalled.chars().count() > USER_TIMEZONE_MAX_RUNES {
+                return Err(Box::new(invalid_user_error(
+                    "timezone_limit",
+                    &self.id,
+                    &crate::utils::go_format_string_map(timezone),
+                )));
+            }
+        }
+
+        // Bytes. And this branch builds its error directly rather than through
+        // `InvalidUserError`, so the id shape and the params differ from every branch above.
+        if self.roles.len() > USER_ROLES_MAX_LENGTH {
+            let mut params = std::collections::HashMap::new();
+            params.insert(
+                "Limit".to_owned(),
+                serde_json::Value::from(USER_ROLES_MAX_LENGTH),
+            );
+            return Err(Box::new(utils::AppError::new(
+                "User.IsValid",
+                "model.user.is_valid.roles_limit.app_error",
+                Some(params),
+                format!("user_id={} roles_limit={}", self.id, self.roles),
+                400,
+            )));
+        }
+
+        // A nil `Props` skips the check; an empty one does not.
+        if let Some(props) = &self.props
+            && !self.validate_custom_status()
+        {
+            let mut params = std::collections::HashMap::new();
+            params.insert(
+                "Props".to_owned(),
+                serde_json::to_value(props).unwrap_or(serde_json::Value::Null),
+            );
+            return Err(Box::new(utils::AppError::new(
+                "User.IsValid",
+                "model.user.is_valid.invalidProperty.app_error",
+                Some(params),
+                format!("user_id={}", self.id),
+                400,
+            )));
+        }
+
+        Ok(())
+    }
+
     /// Port of `(*User).Sanitize` (user.go:696).
     ///
     /// `options` is Go's `map[string]bool`; an **empty** map means "strip nothing extra",
@@ -2251,5 +2454,328 @@ mod locale_go_parity {
             !is_valid_locale("en-USA"),
             "six bytes, rejected before Parse"
         );
+    }
+}
+
+/// Parity tests for [`User::is_valid`], driven by `fixtures/behaviour_user_is_valid.json`.
+#[cfg(test)]
+mod is_valid_go_parity {
+    use super::*;
+
+    fn oracle() -> serde_json::Value {
+        serde_json::from_str(include_str!(
+            "../../../fixtures/behaviour_user_is_valid.json"
+        ))
+        .unwrap()
+    }
+
+    fn runes(n: usize, c: char) -> String {
+        std::iter::repeat_n(c, n).collect()
+    }
+
+    fn valid_user() -> User {
+        User {
+            id: "y9i4er48tt8bukijy7i3u5y9ar".to_owned(),
+            create_at: 1_600_000_000_000,
+            update_at: 1_650_000_000_000,
+            username: "someuser".to_owned(),
+            email: "someone@example.com".to_owned(),
+            nickname: "nick".to_owned(),
+            position: "position".to_owned(),
+            first_name: "First".to_owned(),
+            last_name: "Last".to_owned(),
+            locale: "en".to_owned(),
+            roles: "system_user".to_owned(),
+            ..Default::default()
+        }
+    }
+
+    fn user_for(name: &str) -> User {
+        let mut u = valid_user();
+        match name {
+            "valid" => {}
+            "bad_id" => u.id = "nope".to_owned(),
+            "empty_id" => u.id = String::new(),
+            "zero_create_at" => u.create_at = 0,
+            "zero_update_at" => u.update_at = 0,
+            "bad_username" => u.username = "Has Spaces".to_owned(),
+            "empty_username" => u.username = String::new(),
+            "empty_email" => u.email = String::new(),
+            "bad_email" => u.email = "not an email".to_owned(),
+            "email_at_cap" => {
+                u.email = format!(
+                    "{}@example.com",
+                    runes(USER_EMAIL_MAX_LENGTH - "@example.com".len(), 'a')
+                )
+            }
+            "email_over_cap" => {
+                u.email = format!(
+                    "{}@example.com",
+                    runes(USER_EMAIL_MAX_LENGTH - "@example.com".len() + 1, 'a')
+                )
+            }
+            "email_multibyte_over_cap_in_bytes" => {
+                u.email = format!("{}@example.com", runes(USER_EMAIL_MAX_LENGTH / 2, 'é'))
+            }
+            "nickname_at_cap" => u.nickname = runes(USER_NICKNAME_MAX_RUNES, 'a'),
+            "nickname_over_cap" => u.nickname = runes(USER_NICKNAME_MAX_RUNES + 1, 'a'),
+            "nickname_multibyte_at_cap" => u.nickname = runes(USER_NICKNAME_MAX_RUNES, 'é'),
+            "position_over_cap" => u.position = runes(USER_POSITION_MAX_RUNES + 1, 'a'),
+            "first_name_over_cap" => u.first_name = runes(USER_FIRST_NAME_MAX_RUNES + 1, 'a'),
+            "last_name_over_cap" => u.last_name = runes(USER_LAST_NAME_MAX_RUNES + 1, 'a'),
+            "auth_data_over_cap" => {
+                u.auth_data = Some(runes(USER_AUTH_DATA_MAX_LENGTH + 1, 'a'));
+                u.auth_service = "gitlab".to_owned();
+            }
+            "auth_data_without_service" => {
+                u.auth_data = Some("some-auth-data".to_owned());
+                u.auth_service = String::new();
+            }
+            "auth_data_with_password" => {
+                u.auth_data = Some("some-auth-data".to_owned());
+                u.auth_service = "gitlab".to_owned();
+                u.password = "hashed".to_owned();
+            }
+            "auth_data_empty_pointer" => u.auth_data = Some(String::new()),
+            "auth_data_valid" => {
+                u.auth_data = Some("some-auth-data".to_owned());
+                u.auth_service = "gitlab".to_owned();
+            }
+            "password_without_auth_data" => u.password = "hashed".to_owned(),
+            "bad_locale" => u.locale = "xx".to_owned(),
+            "empty_locale_is_valid" => u.locale = String::new(),
+            "locale_over_length" => u.locale = "en-USA".to_owned(),
+            "roles_at_cap" => u.roles = runes(USER_ROLES_MAX_LENGTH, 'a'),
+            "roles_over_cap" => u.roles = runes(USER_ROLES_MAX_LENGTH + 1, 'a'),
+            "nil_props_skips_custom_status" => u.props = None,
+            "empty_props_is_not_nil" => u.props = Some(utils::StringMap::new()),
+            "props_with_bad_custom_status" => {
+                let mut props = utils::StringMap::new();
+                props.insert(
+                    crate::custom_status::USER_PROPS_KEY_CUSTOM_STATUS.to_owned(),
+                    "not json".to_owned(),
+                );
+                u.props = Some(props);
+            }
+            "timezone_over_cap" => {
+                let mut tz = utils::StringMap::new();
+                tz.insert(
+                    "automaticTimezone".to_owned(),
+                    runes(USER_TIMEZONE_MAX_RUNES, 'a'),
+                );
+                tz.insert("manualTimezone".to_owned(), "b".to_owned());
+                tz.insert("useAutomaticTimezone".to_owned(), "true".to_owned());
+                u.timezone = Some(tz);
+            }
+            "timezone_small_is_valid" => {
+                let mut tz = utils::StringMap::new();
+                tz.insert("b".to_owned(), "2".to_owned());
+                tz.insert("a".to_owned(), "1".to_owned());
+                u.timezone = Some(tz);
+            }
+            "bad_id_and_bad_email" => {
+                u.id = "nope".to_owned();
+                u.email = String::new();
+            }
+            "zero_create_at_and_bad_username" => {
+                u.create_at = 0;
+                u.username = "Has Spaces".to_owned();
+            }
+            other => panic!("unmapped corpus case: {other}"),
+        }
+        u
+    }
+
+    #[test]
+    fn constants_match_go() {
+        let c = &oracle()["constants"];
+        assert_eq!(c["UserEmailMaxLength"], USER_EMAIL_MAX_LENGTH);
+        assert_eq!(c["UserNicknameMaxRunes"], USER_NICKNAME_MAX_RUNES);
+        assert_eq!(c["UserPositionMaxRunes"], USER_POSITION_MAX_RUNES);
+        assert_eq!(c["UserFirstNameMaxRunes"], USER_FIRST_NAME_MAX_RUNES);
+        assert_eq!(c["UserLastNameMaxRunes"], USER_LAST_NAME_MAX_RUNES);
+        assert_eq!(c["UserAuthDataMaxLength"], USER_AUTH_DATA_MAX_LENGTH);
+        assert_eq!(c["UserTimezoneMaxRunes"], USER_TIMEZONE_MAX_RUNES);
+        assert_eq!(c["UserRolesMaxLength"], USER_ROLES_MAX_LENGTH);
+        assert_eq!(c["UserLocaleMaxLength"], USER_LOCALE_MAX_LENGTH);
+    }
+
+    #[test]
+    fn is_valid_matches_go() {
+        for case in oracle()["cases"].as_array().unwrap() {
+            let name = case["name"].as_str().unwrap();
+            let got = user_for(name).is_valid();
+
+            if case["ok"].as_bool().unwrap() {
+                assert!(got.is_ok(), "{name}: expected ok, got {got:?}");
+                continue;
+            }
+
+            let err = got.expect_err(&format!("{name}: expected an error"));
+            assert_eq!(err.id, case["id"].as_str().unwrap(), "{name}: id");
+            assert_eq!(err.where_, case["where"].as_str().unwrap(), "{name}: where");
+            assert_eq!(
+                err.status_code,
+                case["status"].as_i64().unwrap() as i32,
+                "{name}: status"
+            );
+
+            // The `auth_data` length branch interpolates a POINTER in Go, so its detail holds a
+            // memory address that changes between calls. Ours holds a marker. See D-107.
+            if name == "auth_data_over_cap" {
+                assert!(
+                    case["detailed_error"].as_str().unwrap().contains("0x"),
+                    "Go's detail should still be an address; if not, D-107 can be closed"
+                );
+                assert_eq!(
+                    err.detailed_error,
+                    format!("user_id={} auth_data=<pointer>", valid_user().id)
+                );
+                continue;
+            }
+
+            assert_eq!(
+                err.detailed_error,
+                case["detailed_error"].as_str().unwrap(),
+                "{name}: detailed_error"
+            );
+        }
+    }
+
+    /// The exemption that a tidy refactor would remove.
+    #[test]
+    fn a_remote_user_may_hold_an_invalid_email() {
+        for case in oracle()["remote_email"].as_array().unwrap() {
+            let name = case["name"].as_str().unwrap();
+            let mut u = valid_user();
+            u.email = match name {
+                "local_valid_email" | "remote_valid_email" => "someone@example.com".to_owned(),
+                "local_invalid_email" | "remote_invalid_email" => "not an email".to_owned(),
+                "remote_empty_email" => String::new(),
+                "remote_over_cap_email" => runes(USER_EMAIL_MAX_LENGTH + 1, 'a'),
+                other => panic!("unmapped: {other}"),
+            };
+            if name.starts_with("remote") {
+                u.remote_id = Some("aaaaaaaaaaaaaaaaaaaaaaaaaa".to_owned());
+            }
+
+            assert_eq!(
+                u.is_remote(),
+                case["is_remote"].as_bool().unwrap(),
+                "{name}: is_remote"
+            );
+            assert_eq!(
+                u.is_valid().is_ok(),
+                case["ok"].as_bool().unwrap(),
+                "{name}: validity"
+            );
+        }
+
+        // Stated directly: only the FORMAT check is skipped.
+        let mut remote = valid_user();
+        remote.remote_id = Some("aaaaaaaaaaaaaaaaaaaaaaaaaa".to_owned());
+        remote.email = "not an email".to_owned();
+        assert!(remote.is_valid().is_ok(), "format is skipped for remote");
+        remote.email = String::new();
+        assert!(remote.is_valid().is_err(), "emptiness is not skipped");
+    }
+
+    /// The timezone cap counts runes of Go's **marshalled** JSON, escaping included.
+    #[test]
+    fn the_timezone_cap_measures_gos_json() {
+        for case in oracle()["timezone_json"].as_array().unwrap() {
+            let name = case["name"].as_str().unwrap();
+            let mut tz = utils::StringMap::new();
+            match name {
+                "nil" | "empty" => {}
+                "typical" => {
+                    tz.insert(
+                        "automaticTimezone".to_owned(),
+                        "America/New_York".to_owned(),
+                    );
+                    tz.insert("manualTimezone".to_owned(), String::new());
+                    tz.insert("useAutomaticTimezone".to_owned(), "true".to_owned());
+                }
+                "html_escapable" => {
+                    tz.insert("a".to_owned(), "<".to_owned());
+                }
+                other => panic!("unmapped: {other}"),
+            }
+
+            if name == "nil" {
+                // Go marshals a nil map to `null`; we never reach the branch for `None`.
+                continue;
+            }
+
+            let marshalled = utils::go_json_marshal_string_map(Some(&tz));
+            assert_eq!(
+                marshalled,
+                case["json"].as_str().unwrap(),
+                "{name}: marshalled json"
+            );
+            assert_eq!(
+                marshalled.chars().count(),
+                case["rune_count"].as_u64().unwrap() as usize,
+                "{name}: rune count"
+            );
+        }
+
+        // The escaping is the point: `<` costs six runes, so it eats the budget six times faster.
+        let mut escapable = utils::StringMap::new();
+        escapable.insert("a".to_owned(), "<".to_owned());
+        assert!(utils::go_json_marshal_string_map(Some(&escapable)).contains("\\u003c"));
+    }
+
+    /// Go's `%v` on a map, which the timezone branch interpolates into its detail.
+    #[test]
+    fn map_formatting_matches_go() {
+        for case in oracle()["map_format"].as_array().unwrap() {
+            let name = case["name"].as_str().unwrap();
+            let mut map = utils::StringMap::new();
+            match name {
+                "nil" | "empty" => {}
+                "one" => {
+                    map.insert("a".to_owned(), "1".to_owned());
+                }
+                "sorted" => {
+                    map.insert("z".to_owned(), "26".to_owned());
+                    map.insert("a".to_owned(), "1".to_owned());
+                    map.insert("m".to_owned(), "13".to_owned());
+                }
+                "empty_value" => {
+                    map.insert("a".to_owned(), String::new());
+                }
+                "space_in_value" => {
+                    map.insert("a".to_owned(), "one two".to_owned());
+                }
+                other => panic!("unmapped: {other}"),
+            }
+            assert_eq!(
+                utils::go_format_string_map(&map),
+                case["rendered"].as_str().unwrap(),
+                "map format for {name}"
+            );
+        }
+    }
+
+    /// A nil `Props` skips the custom-status check; an empty-but-present map does not.
+    #[test]
+    fn props_gates_the_custom_status_check() {
+        let mut none = valid_user();
+        none.props = None;
+        assert!(none.is_valid().is_ok());
+
+        let mut empty = valid_user();
+        empty.props = Some(utils::StringMap::new());
+        assert!(empty.is_valid().is_ok(), "an empty map still validates");
+
+        let mut bad = valid_user();
+        let mut props = utils::StringMap::new();
+        props.insert(
+            crate::custom_status::USER_PROPS_KEY_CUSTOM_STATUS.to_owned(),
+            "not json".to_owned(),
+        );
+        bad.props = Some(props);
+        assert!(bad.is_valid().is_err());
     }
 }

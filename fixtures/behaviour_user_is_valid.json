@@ -1,0 +1,352 @@
+{
+    "auth_data_ptr": {
+        "detail_prefix": "user_id=y9i4er48tt8bukijy7i3u5y9ar",
+        "id": "model.user.is_valid.auth_data.app_error",
+        "stable_across_calls": false,
+        "value_is_an_address": true
+    },
+    "cases": [
+        {
+            "name": "valid",
+            "ok": true
+        },
+        {
+            "detailed_error": " id=nope",
+            "id": "model.user.is_valid.id.app_error",
+            "name": "bad_id",
+            "ok": false,
+            "status": 400,
+            "where": "User.IsValid"
+        },
+        {
+            "detailed_error": " id=",
+            "id": "model.user.is_valid.id.app_error",
+            "name": "empty_id",
+            "ok": false,
+            "status": 400,
+            "where": "User.IsValid"
+        },
+        {
+            "detailed_error": "user_id=y9i4er48tt8bukijy7i3u5y9ar create_at=0",
+            "id": "model.user.is_valid.create_at.app_error",
+            "name": "zero_create_at",
+            "ok": false,
+            "status": 400,
+            "where": "User.IsValid"
+        },
+        {
+            "detailed_error": "user_id=y9i4er48tt8bukijy7i3u5y9ar update_at=0",
+            "id": "model.user.is_valid.update_at.app_error",
+            "name": "zero_update_at",
+            "ok": false,
+            "status": 400,
+            "where": "User.IsValid"
+        },
+        {
+            "detailed_error": "user_id=y9i4er48tt8bukijy7i3u5y9ar username=Has Spaces",
+            "id": "model.user.is_valid.username.app_error",
+            "name": "bad_username",
+            "ok": false,
+            "status": 400,
+            "where": "User.IsValid"
+        },
+        {
+            "detailed_error": "user_id=y9i4er48tt8bukijy7i3u5y9ar username=",
+            "id": "model.user.is_valid.username.app_error",
+            "name": "empty_username",
+            "ok": false,
+            "status": 400,
+            "where": "User.IsValid"
+        },
+        {
+            "detailed_error": "user_id=y9i4er48tt8bukijy7i3u5y9ar email=",
+            "id": "model.user.is_valid.email.app_error",
+            "name": "empty_email",
+            "ok": false,
+            "status": 400,
+            "where": "User.IsValid"
+        },
+        {
+            "detailed_error": "user_id=y9i4er48tt8bukijy7i3u5y9ar email=not an email",
+            "id": "model.user.is_valid.email.app_error",
+            "name": "bad_email",
+            "ok": false,
+            "status": 400,
+            "where": "User.IsValid"
+        },
+        {
+            "name": "email_at_cap",
+            "ok": true
+        },
+        {
+            "detailed_error": "user_id=y9i4er48tt8bukijy7i3u5y9ar email=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@example.com",
+            "id": "model.user.is_valid.email.app_error",
+            "name": "email_over_cap",
+            "ok": false,
+            "status": 400,
+            "where": "User.IsValid"
+        },
+        {
+            "detailed_error": "user_id=y9i4er48tt8bukijy7i3u5y9ar email=éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé@example.com",
+            "id": "model.user.is_valid.email.app_error",
+            "name": "email_multibyte_over_cap_in_bytes",
+            "ok": false,
+            "status": 400,
+            "where": "User.IsValid"
+        },
+        {
+            "name": "nickname_at_cap",
+            "ok": true
+        },
+        {
+            "detailed_error": "user_id=y9i4er48tt8bukijy7i3u5y9ar nickname=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "id": "model.user.is_valid.nickname.app_error",
+            "name": "nickname_over_cap",
+            "ok": false,
+            "status": 400,
+            "where": "User.IsValid"
+        },
+        {
+            "name": "nickname_multibyte_at_cap",
+            "ok": true
+        },
+        {
+            "detailed_error": "user_id=y9i4er48tt8bukijy7i3u5y9ar position=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "id": "model.user.is_valid.position.app_error",
+            "name": "position_over_cap",
+            "ok": false,
+            "status": 400,
+            "where": "User.IsValid"
+        },
+        {
+            "detailed_error": "user_id=y9i4er48tt8bukijy7i3u5y9ar first_name=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "id": "model.user.is_valid.first_name.app_error",
+            "name": "first_name_over_cap",
+            "ok": false,
+            "status": 400,
+            "where": "User.IsValid"
+        },
+        {
+            "detailed_error": "user_id=y9i4er48tt8bukijy7i3u5y9ar last_name=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "id": "model.user.is_valid.last_name.app_error",
+            "name": "last_name_over_cap",
+            "ok": false,
+            "status": 400,
+            "where": "User.IsValid"
+        },
+        {
+            "detailed_error": "user_id=y9i4er48tt8bukijy7i3u5y9ar auth_data=0x452662b10900",
+            "id": "model.user.is_valid.auth_data.app_error",
+            "name": "auth_data_over_cap",
+            "ok": false,
+            "status": 400,
+            "where": "User.IsValid"
+        },
+        {
+            "detailed_error": "user_id=y9i4er48tt8bukijy7i3u5y9ar auth_data_type=some-auth-data ",
+            "id": "model.user.is_valid.auth_data_type.app_error",
+            "name": "auth_data_without_service",
+            "ok": false,
+            "status": 400,
+            "where": "User.IsValid"
+        },
+        {
+            "detailed_error": "user_id=y9i4er48tt8bukijy7i3u5y9ar auth_data_pwd=some-auth-data",
+            "id": "model.user.is_valid.auth_data_pwd.app_error",
+            "name": "auth_data_with_password",
+            "ok": false,
+            "status": 400,
+            "where": "User.IsValid"
+        },
+        {
+            "name": "auth_data_empty_pointer",
+            "ok": true
+        },
+        {
+            "name": "auth_data_valid",
+            "ok": true
+        },
+        {
+            "name": "password_without_auth_data",
+            "ok": true
+        },
+        {
+            "detailed_error": "user_id=y9i4er48tt8bukijy7i3u5y9ar locale=xx",
+            "id": "model.user.is_valid.locale.app_error",
+            "name": "bad_locale",
+            "ok": false,
+            "status": 400,
+            "where": "User.IsValid"
+        },
+        {
+            "name": "empty_locale_is_valid",
+            "ok": true
+        },
+        {
+            "detailed_error": "user_id=y9i4er48tt8bukijy7i3u5y9ar locale=en-USA",
+            "id": "model.user.is_valid.locale.app_error",
+            "name": "locale_over_length",
+            "ok": false,
+            "status": 400,
+            "where": "User.IsValid"
+        },
+        {
+            "name": "roles_at_cap",
+            "ok": true
+        },
+        {
+            "detailed_error": "user_id=y9i4er48tt8bukijy7i3u5y9ar roles_limit=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "id": "model.user.is_valid.roles_limit.app_error",
+            "name": "roles_over_cap",
+            "ok": false,
+            "status": 400,
+            "where": "User.IsValid"
+        },
+        {
+            "name": "nil_props_skips_custom_status",
+            "ok": true
+        },
+        {
+            "name": "empty_props_is_not_nil",
+            "ok": true
+        },
+        {
+            "detailed_error": "user_id=y9i4er48tt8bukijy7i3u5y9ar",
+            "id": "model.user.is_valid.invalidProperty.app_error",
+            "name": "props_with_bad_custom_status",
+            "ok": false,
+            "status": 400,
+            "where": "User.IsValid"
+        },
+        {
+            "detailed_error": "user_id=y9i4er48tt8bukijy7i3u5y9ar timezone_limit=map[automaticTimezone:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa manualTimezone:b useAutomaticTimezone:true]",
+            "id": "model.user.is_valid.timezone_limit.app_error",
+            "name": "timezone_over_cap",
+            "ok": false,
+            "status": 400,
+            "where": "User.IsValid"
+        },
+        {
+            "name": "timezone_small_is_valid",
+            "ok": true
+        },
+        {
+            "detailed_error": " id=nope",
+            "id": "model.user.is_valid.id.app_error",
+            "name": "bad_id_and_bad_email",
+            "ok": false,
+            "status": 400,
+            "where": "User.IsValid"
+        },
+        {
+            "detailed_error": "user_id=y9i4er48tt8bukijy7i3u5y9ar create_at=0",
+            "id": "model.user.is_valid.create_at.app_error",
+            "name": "zero_create_at_and_bad_username",
+            "ok": false,
+            "status": 400,
+            "where": "User.IsValid"
+        }
+    ],
+    "constants": {
+        "UserAuthDataMaxLength": 128,
+        "UserEmailMaxLength": 128,
+        "UserFirstNameMaxRunes": 64,
+        "UserLastNameMaxRunes": 64,
+        "UserLocaleMaxLength": 5,
+        "UserNicknameMaxRunes": 64,
+        "UserPositionMaxRunes": 128,
+        "UserRolesMaxLength": 256,
+        "UserTimezoneMaxRunes": 256
+    },
+    "map_format": [
+        {
+            "name": "nil",
+            "rendered": "map[]"
+        },
+        {
+            "name": "empty",
+            "rendered": "map[]"
+        },
+        {
+            "name": "one",
+            "rendered": "map[a:1]"
+        },
+        {
+            "name": "sorted",
+            "rendered": "map[a:1 m:13 z:26]"
+        },
+        {
+            "name": "empty_value",
+            "rendered": "map[a:]"
+        },
+        {
+            "name": "space_in_value",
+            "rendered": "map[a:one two]"
+        }
+    ],
+    "remote_email": [
+        {
+            "is_remote": false,
+            "name": "local_valid_email",
+            "ok": true
+        },
+        {
+            "id": "model.user.is_valid.email.app_error",
+            "is_remote": false,
+            "name": "local_invalid_email",
+            "ok": false
+        },
+        {
+            "is_remote": true,
+            "name": "remote_valid_email",
+            "ok": true
+        },
+        {
+            "is_remote": true,
+            "name": "remote_invalid_email",
+            "ok": true
+        },
+        {
+            "id": "model.user.is_valid.email.app_error",
+            "is_remote": true,
+            "name": "remote_empty_email",
+            "ok": false
+        },
+        {
+            "id": "model.user.is_valid.email.app_error",
+            "is_remote": true,
+            "name": "remote_over_cap_email",
+            "ok": false
+        }
+    ],
+    "timezone_json": [
+        {
+            "byte_count": 4,
+            "is_valid_id": "",
+            "json": "null",
+            "name": "nil",
+            "rune_count": 4
+        },
+        {
+            "byte_count": 2,
+            "is_valid_id": "",
+            "json": "{}",
+            "name": "empty",
+            "rune_count": 2
+        },
+        {
+            "byte_count": 90,
+            "is_valid_id": "",
+            "json": "{\"automaticTimezone\":\"America/New_York\",\"manualTimezone\":\"\",\"useAutomaticTimezone\":\"true\"}",
+            "name": "typical",
+            "rune_count": 90
+        },
+        {
+            "byte_count": 14,
+            "is_valid_id": "",
+            "json": "{\"a\":\"\\u003c\"}",
+            "name": "html_escapable",
+            "rune_count": 14
+        }
+    ]
+}
