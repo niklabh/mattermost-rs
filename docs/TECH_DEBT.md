@@ -3055,7 +3055,8 @@ observable rather than merely present.
 
 ## D-091 · Sidebar categories are not updated when preferences change
 
-**Status** OPEN · **Severity** incomplete · **Raised** 2026-08-17 (phase 2, `app/preference.go`)
+**Status** CLOSED · **Severity** incomplete · **Raised** 2026-08-17 (phase 2, `app/preference.go`)
+**Closed** 2026-08-17, same session — by forwarding rather than by porting.
 
 `UpdatePreferences` calls `Store().Channel().UpdateSidebarChannelsByPreferences(preferences)`
 (preference.go:62) — Go keeps sidebar categories in step with the `direct_channel_show` and
@@ -3069,9 +3070,15 @@ reload does not fix it.
 
 Narrow but sharp: only those two preference categories are affected, and only through our route.
 
-**To pay off** port `ChannelStore::UpdateSidebarChannelsByPreferences`. Until then, consider
-adding `direct_channel_show` / `group_channel_show` to the forwarded set alongside
-`flagged_post`, which would close it without porting anything.
+**Closed** by taking exactly that option: `direct_channel_show` and `group_channel_show` joined
+`flagged_post` in `FORWARDED_CATEGORIES`, so a batch touching either goes to the Go server, which
+runs the sidebar sync itself. Nothing was ported and the inconsistency is gone.
+
+Worth noting the shape of the fix, because it generalises: **forwarding is a correctness tool, not
+only a stopgap.** A handler that cannot do part of its job correctly can decline that part rather
+than approximate it, and the client sees no difference. Porting
+`ChannelStore::UpdateSidebarChannelsByPreferences` later would let these categories be served
+here, but nothing is broken until then.
 
 ---
 
@@ -3129,3 +3136,49 @@ since `/users/{id}` alone carries GET, PUT, POST and DELETE across different han
 `MethodRouter::fallback(forward_to_go)` so unmigrated methods are proxied rather than rejected.
 Registering a route directly is now the thing to avoid, and
 `an_unmigrated_method_on_a_migrated_path_still_reaches_go` fails if it happens.
+
+---
+
+## D-094 · The permission system now gates almost every remaining route
+
+**Status** OPEN · **Severity** blocking · **Raised** 2026-08-17 (phase 2, after four routes)
+**Blocks** most of api4.
+
+The self-scoped routes are nearly exhausted, and what is left runs into one wall. Measured across
+`channels/api4/`:
+
+| | |
+|---|---|
+| handlers (`func x(c *Context, ...)`) | 687 |
+| `SessionHasPermission*` call sites | **674** |
+| files containing at least one | 59 |
+
+The four migrated routes are the exception rather than a sample: each is `me`-scoped, and Go's
+checks short-circuit for self — `SessionHasPermissionToUser` returns true when
+`session.UserId == userID` (authorization.go:258), `UserCanSeeOtherUser` when
+`userID == otherUserId` (user.go:2711). That is why they were portable, and it does not extend.
+
+**Two shapes of blocker, and the difference matters.**
+
+*Escapable* — the check guards something that cannot act on this route.
+`GET /users/me/teams/members` gates `SanitizeRoleData` behind
+`SessionHasPermissionToTeam(..., PermissionManageTeamRoles)`, but that sanitiser is a no-op when
+`o.UserId == currentUserId` (team_member.go:147) and the route returns the caller's own
+memberships. The guard cannot change the output, so the route is portable and the sanitiser is
+simply called unconditionally. Migrated on that basis, and verified byte-identical against Go.
+
+*Not escapable* — the check decides what is in the response. `GET /users/me/teams` gates
+`SanitizeTeam`, which strips `email` and `invite_id` unless the caller holds `PermissionManageTeam`
+and `PermissionInviteUser` respectively (app/team.go:2303). There is no self-shortcut: a user can
+be in a team without either permission. Serving it without the check would **leak an invite id**,
+which is enough to join the team. Not migrated; forwarding, with a test asserting it stays
+forwarded.
+
+**So the next substantial step is the permission system itself, not another route.** What it needs:
+- `model/permission.go` (2,789 lines) — already out of scope for hand-translation; **generate** it.
+- `model/role.go` (1,311 lines) — the role definitions and their permission sets.
+- The scheme-roles resolution already ported in `mm-store/src/team_store.rs` is the same shape one
+  layer down, so the groundwork is not zero.
+
+**Until then**, the honest options are: forward anything permission-gated (correct, and free), or
+keep porting `mm-model` files, of which 141 remain. Neither is blocked.

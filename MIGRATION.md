@@ -78,24 +78,32 @@ depend on `mm-model`, and `mm-model` may never depend on an AGPL crate or read
 `channel_count.go` **does not exist** — checked 2026-08-17. The earlier note guessed at the name;
 do not look for it again.
 
-## Next: `GET /api/v4/users/me/teams`
+## Next: the permission system, or more model files
 
-The first write **landed** — `PUT /api/v4/users/me/preferences`. What it taught is in the rows
-below; the short version is that writes are not the hard part, but *partial* migration is.
+Four routes are migrated and the easy seam has run out. `GET /users/me/teams/members` landed —
+see the rows below — but its sibling `GET /users/me/teams` did **not**, and the reason is now the
+shape of the whole roadmap. Measured across `channels/api4/`: **687 handlers, 674
+`SessionHasPermission*` call sites, 59 files.** The four routes migrated so far are the exception,
+not a sample — each is `me`-scoped, and Go's checks short-circuit for self.
 
-`/users/me/teams` is now the cheapest remaining route: `TeamStore::GetTeamsForUser` is already
-ported, so it needs `TeamStore::Get` for the teams themselves, and `Team` is already a wire type.
-It also pairs naturally with closing [D-091] — the sidebar sync that the preferences write skips.
+[D-094] records the two shapes of blocker, and the distinction is the useful part:
 
-**Not** `GET /api/v4/users/{user_id}`: still blocked behind `UserCanSeeOtherUser` ([D-082]),
-which drags in `role.go` (1,311 lines) and `permission.go` (2,789, out of scope).
+- **Escapable** — the check guards something that cannot act here. `/users/me/teams/members`
+  gates `SanitizeRoleData`, which is a no-op for one's own membership. Portable; migrated.
+- **Not escapable** — the check decides the response. `/users/me/teams` gates `SanitizeTeam`,
+  which strips `email` and `invite_id` per permission, with no self-shortcut. Serving it without
+  the check leaks an invite id, which is enough to join the team. Forwarded, with a test that
+  keeps it forwarded.
 
-**Not** `PUT /api/v4/users/me/patch` either, and this is worth recording because it was the
-obvious-looking candidate and is not viable: `SqlUserStore.Update` (user_store.go:258) calls
-`user.IsValid()`, which is exactly what [D-002] leaves unported and [D-001] blocks. It also needs
-`DoubleCheckPassword` for an email change (a password hasher), `CheckProviderAttributes`,
-`CheckLockedProfileFields` and four config settings. A partial port would be a **write that skips
-validation**, which is the dangerous direction.
+So the next substantial step is **the permission system** — generate `model/permission.go`
+(2,789 lines, already out of scope for hand-translation), port `model/role.go` (1,311), and reuse
+the scheme-roles resolution already written in `mm-store/src/team_store.rs`, which is the same
+shape one layer down.
+
+The alternative is to **keep porting `mm-model`** — 141 files remain and nothing there is blocked.
+Forwarding anything permission-gated stays correct and free in the meantime; [D-091] was closed
+that way rather than by porting, which is worth remembering: **forwarding is a correctness tool,
+not only a stopgap.**
 
 ### If porting model files instead
 
@@ -279,6 +287,8 @@ whenever a session skips, approximates, or discovers-but-does-not-close somethin
 | api4/user.go (`getSessions`, `me` only) | `mm-api/src/sessions.rs` | PARTIAL | 4 pass | **The second route served from Rust, and the first list response.** Body asserted byte-identical against the running Go server — 22,209 bytes, first try. Two things carry the session: `Sanitize` clears the token on every element (this endpoint's whole body is otherwise a set of live credentials), and Go writes it with `json.Marshal`, **not** `NewEncoder().Encode()`, so there is **no trailing newline** — the opposite of `/users/me`. Same wire type, same server, different call site ([D-086]). Deferred: the permission check, same reasoning as [D-082]. |
 | app/session.go (`GetSessions`) | `mm-app/src/session.rs` | PARTIAL | 3 pass | Blunt by design: *any* store failure is `app.session.get_sessions.app_error` with a 500. Go has no not-found branch here, because a user with no sessions is an empty list rather than a miss. |
 | — (tooling) | `crates/mm-api/tests/common/mod.rs` | DONE | — | Shared parity-test plumbing. Compiled into each test binary separately, so the login `OnceCell` is per-binary. Replaced three hand-rolled copies of the login helper. |
+| app/team.go (`GetTeamMembersForUser`) | `mm-app/src/team.rs` | PARTIAL | — | A thin wrapper over the already-ported `TeamStore::GetTeamsForUser`; any store failure is `app.team.get_members.app_error` with a 500, and Go has no not-found branch. |
+| api4/team.go (`getTeamMembersForUser`, `me`) | `mm-api/src/teams.rs` | PARTIAL | 4 pass | **The first route migrated *past* a permission check rather than around one.** Go guards `SanitizeRoleData` with `SessionHasPermissionToTeam`, which is unported — but that sanitiser is a **no-op when `UserId == currentUserId`** (team_member.go:147) and this route returns the caller's own memberships, so the guard cannot change the output. The sanitiser is therefore called unconditionally: provably identical to Go for `me`, and stricter rather than looser if the route is ever widened. Byte-identical against the running Go server, first try. |
 | store/sqlstore/preference_store.go (`Save`) | `mm-store/src/preference_store.rs` | PARTIAL | 2 pass | **The first write in the port.** Go's exact upsert, `ON CONFLICT (userid, category, name) DO UPDATE`, inside a transaction — Go's comment is explicit that "if one fails, everything fails", and validation runs *inside* the loop, so a batch whose third entry is invalid must leave the first two unwritten. `save` (:65) and `saveTx` (:89) are byte-identical duplicates in the Go source; ported once. One divergence ([D-090], the clone). |
 | app/preference.go (`UpdatePreferences`) | `mm-app/src/preference.rs` | PARTIAL | 4 pass | The ownership guard is the security boundary: any entry whose `user_id` differs from the path's is a **403 for the whole batch**, checked before the store is touched — without it, the upsert's `(UserId, Category, Name)` key would happily write preferences onto another account. Deferred: the sidebar sync ([D-091]) and the two WebSocket events ([D-089]). |
 | api4/preference.go (`updatePreferences`, `me`) | `mm-api/src/preferences.rs` | PARTIAL | 4 pass | **The first write route.** Success body is `ReturnStatusOK` — `{"status":"OK"}` via `w.Write`, no newline. A batch containing any `flagged_post` entry is **forwarded to Go** rather than served, because that category needs a post lookup and a channel-read permission check we have not ported — the Strangler Fig applied *inside* a route. Both of Go's batch bounds reproduced, including that an empty batch is an error rather than a no-op. |

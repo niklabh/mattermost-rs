@@ -8,7 +8,10 @@ use axum::extract::{Request, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use mm_model::preference::Preferences;
-use mm_model::preference::{PREFERENCE_CATEGORY_FLAGGED_POST, Preference};
+use mm_model::preference::{
+    PREFERENCE_CATEGORY_DIRECT_CHANNEL_SHOW, PREFERENCE_CATEGORY_FLAGGED_POST,
+    PREFERENCE_CATEGORY_GROUP_CHANNEL_SHOW, Preference,
+};
 
 use crate::AppState;
 use crate::auth::AuthenticatedSession;
@@ -16,6 +19,22 @@ use crate::error::ApiError;
 
 /// `maxUpdatePreferences` (preference.go:14).
 const MAX_UPDATE_PREFERENCES: usize = 100;
+
+/// Categories this handler must **not** serve, each for a different reason.
+///
+/// * `flagged_post` — Go loads the referenced post, loads that post's channel and checks
+///   `PermissionReadChannelContent` (preference.go:118-138). Serving it without that would let a
+///   caller learn whether a post exists in a channel they cannot read.
+/// * `direct_channel_show` / `group_channel_show` — Go's `UpdatePreferences` calls
+///   `UpdateSidebarChannelsByPreferences` (preference.go:62) to keep sidebar categories in step
+///   with DM and GM visibility. The channel store is unported, so serving these here would write
+///   a correct preference row and leave the sidebar permanently wrong — a **persisted**
+///   inconsistency a reload does not fix. Forwarding closes [D-091] without porting anything.
+const FORWARDED_CATEGORIES: &[&str] = &[
+    PREFERENCE_CATEGORY_FLAGGED_POST,
+    PREFERENCE_CATEGORY_DIRECT_CHANNEL_SHOW,
+    PREFERENCE_CATEGORY_GROUP_CHANNEL_SHOW,
+];
 
 /// Port of `updatePreferences` for the `me` case.
 ///
@@ -71,7 +90,7 @@ pub async fn update_preferences_me(
     // The part we do not implement goes to the server that does.
     if preferences
         .iter()
-        .any(|p| p.category == PREFERENCE_CATEGORY_FLAGGED_POST)
+        .any(|p| FORWARDED_CATEGORIES.contains(&p.category.as_str()))
     {
         tracing::Span::current().record("forwarded", true);
         let request = Request::from_parts(parts, Body::from(bytes));
@@ -118,7 +137,7 @@ mod tests {
     fn needs_forwarding(preferences: &[Preference]) -> bool {
         preferences
             .iter()
-            .any(|p| p.category == PREFERENCE_CATEGORY_FLAGGED_POST)
+            .any(|p| FORWARDED_CATEGORIES.contains(&p.category.as_str()))
     }
 
     /// The safety property of the partial migration: anything touching `flagged_post` must reach
@@ -134,6 +153,18 @@ mod tests {
             preference("display_settings"),
             preference(PREFERENCE_CATEGORY_FLAGGED_POST),
         ]));
+    }
+
+    /// The sidebar-bearing categories go to Go as well, because the sidebar sync behind them is
+    /// unported and skipping it would persist an inconsistency rather than merely miss an event.
+    #[test]
+    fn the_sidebar_categories_are_forwarded_too() {
+        assert!(needs_forwarding(&[preference(
+            PREFERENCE_CATEGORY_DIRECT_CHANNEL_SHOW
+        )]));
+        assert!(needs_forwarding(&[preference(
+            PREFERENCE_CATEGORY_GROUP_CHANNEL_SHOW
+        )]));
     }
 
     #[test]

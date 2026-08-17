@@ -5,6 +5,7 @@
 
 pub mod preference;
 pub mod session;
+pub mod team;
 pub mod user;
 
 use mm_store::SqlStore;

@@ -10,6 +10,7 @@ pub mod error;
 pub mod preferences;
 pub mod proxy;
 pub mod sessions;
+pub mod teams;
 pub mod users;
 
 use axum::Router;
@@ -90,6 +91,10 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/users/me/preferences",
             partially_migrated(put(preferences::update_preferences_me)),
+        )
+        .route(
+            "/api/v4/users/me/teams/members",
+            partially_migrated(get(teams::get_team_members_for_user_me)),
         )
         .fallback(proxy::forward_to_go)
         .with_state(state)
