@@ -2890,9 +2890,25 @@ Error: failed to initialize platform: Redis cannot be used in an instance withou
 license or a license without clustering
 ```
 
-The server connects to Redis, confirms `PONG`, and *then* refuses to boot. So on Team Edition —
-the baseline this port targets — the Go cache is in-process LRU and **there is no invalidation
-channel a second process can reach at all**. Do not spend another session looking for one.
+**It is the Go server that refuses to boot, not Redis.** Redis starts fine, passes its own
+healthcheck and answers the `PONG` in the line above; Mattermost then rejects its own
+configuration at `channels/app/platform/service.go:380` and exits. Their comment there calls the
+check "a hack" — the licence cannot be loaded before the store, and the store cannot be loaded
+before the cache, so the Redis client is already connected by the time anything can veto it.
+
+**There is an escape hatch, and it is not reachable from configuration.** The same condition ends
+`&& !ps.forceEnableRedis`, set by the `ForceEnableRedis()` functional option
+(`platform/options.go:139`). Its only caller in the tree is the test harness
+(`api4/apitestlib.go:133`). So it is a **build-time** switch, not an env var or a config key: a
+stock `mattermost/mattermost-team-edition` image cannot be talked into it, but a server built
+from the pinned source with that option wired in can.
+
+So the honest statement is narrower than "no channel exists": **no channel exists on a stock
+binary.** Building the Go server from source unlocks Redis cache mode, and with it external
+invalidation by `DEL` on `{cacheName}:{key}` — which needs only key names, never the msgpack
+value encoding. That is a real option for a project that already keeps the Go source pinned; it
+costs a source build of the Go server in the development stack, and it is not needed until
+stale-on-write actually bites.
 
 **(c) was insufficient.** Migrating an entity's *routes* does not give us the entity: the Go
 server reads users internally for its own permission checks and webhook paths, straight from its
@@ -2919,9 +2935,10 @@ the *last* thing to migrate; the corrected version makes them schedulable like a
 Tighten it again only when there are real users, and then per-entity — the entities where a
 stale Go read actually matters (sessions, permissions) rather than all of them.
 
-**If a clean answer is wanted later**, the lever is a Mattermost licence with clustering, which
-permits Redis cache mode — at which point the Rust side can `DEL` the key after writing and the
-staleness window closes. Worth knowing it exists; not worth blocking on.
+**If a clean answer is wanted later**, there are two levers, and the cheap one needs no licence:
+build the Go server from the pinned source with `ForceEnableRedis()`, or run a licence with
+clustering. Either permits Redis cache mode, at which point the Rust side can `DEL` the key after
+writing and the staleness window closes. Worth knowing both exist; neither is worth blocking on.
 
 **Bonus finding — this closes an open question.** The cache values are msgpack, encoded by the
 generated `user_serial_gen.go` (1,343 lines) and `session_serial_gen.go` (937). Since we never

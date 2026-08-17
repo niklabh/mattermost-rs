@@ -44,11 +44,14 @@ services:
   #   failed to initialize platform: Redis cannot be used in an instance without a license
   #   or a license without clustering
   #
-  # Out-of-process caching is enterprise-licensed, as is the cluster message bus. On Team
-  # Edition the Go server's cache is in-process LRU with no invalidation channel a second
-  # server can reach. That is the constraint behind D-087's decision: Rust reads through and
-  # never caches, and any route that WRITES an entity Go caches stays proxied to Go so Go
-  # invalidates its own cache.
+  # Note it is the GO SERVER that exits, not Redis — Redis starts, passes its healthcheck and
+  # answers the PONG above; Mattermost then vetoes its own config at
+  # channels/app/platform/service.go:380 and quits.
+  #
+  # The check ends `&& !ps.forceEnableRedis`, a BUILD-time functional option whose only caller is
+  # Mattermost's test harness. So a stock image cannot be talked into it, but a server built from
+  # the pinned source with `ForceEnableRedis()` can — which is the no-licence route to Redis cache
+  # mode if stale-on-write ever starts to bite. See D-087.
 
   mattermost:
     # No arm64 manifest is published, so the platform is forced and the container runs under
