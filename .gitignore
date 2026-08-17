@@ -19,5 +19,11 @@
 .vscode/
 *.swp
 
+# Agent tooling. CLAUDE.md is the checked-in contributor contract and stays tracked;
+# .claude/ is per-machine harness config (permissions, hooks) with no bearing on the port.
+# Ignored whole so `git status` stays a signal — an unexpected entry there is meant to mean
+# something, per the fixture-generator rule in README.md.
+.claude/
+
 # Compiled fixture generator (go build ./... in reference/dump drops it here).
 /reference/dump/dump
