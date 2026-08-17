@@ -5,6 +5,7 @@
 
 pub mod analytics_row;
 pub mod audit;
+pub mod audit_record;
 pub mod bot;
 pub mod channel;
 pub mod channel_data;

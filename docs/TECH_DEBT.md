@@ -3233,3 +3233,62 @@ name, so a future reader who deletes the "unused" binding fails a test.
 Related: `id` starts as the **string** `"0"` rather than empty, so an empty list etags as
 `11.11.0.0.0.0.0` and a list whose every `UpdateAt` is zero keeps `"0"` as its id — the same trap
 `Audits::etag` carries ([D-076]).
+
+---
+
+## D-097 · `AuditRecord::add_meta` records where Go panics
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-17 (phase 1, `audit_record.go`)
+
+Every `AddEventParameter*` function lazily creates its map:
+
+```go
+if rec.EventData.Parameters == nil {
+    rec.EventData.Parameters = make(map[string]any)
+}
+```
+
+`AddMeta` does not — its whole body is `rec.Meta[name] = val` (audit_record.go:130). `Meta` has
+no constructor anywhere in the file, so calling it on a zero-valued record assigns to a nil map
+and **panics**. Measured side by side:
+
+| call on a zero record | Go panics |
+|---|---|
+| `AddEventParameterToAuditRec` | no |
+| `AddEventParameterAuditableToAuditRec` | no |
+| `AddEventParameterAuditableArrayToAuditRec` | no |
+| `AddEventPriorState` | no |
+| **`AddMeta`** | **yes** |
+
+Ours creates the map, matching what the siblings do.
+
+**Accepted**, for three reasons. `CLAUDE.md` forbids a panic in library code. The divergence is in
+the safe direction — Go's panic surfaces as a 500 and *loses the audit record it was building*,
+where ours records the entry. And the asymmetry reads as an oversight rather than a decision: the
+four functions around it all guard, and nothing in the file explains why this one does not.
+
+The parity test asserts Go's answer for all six probes, so if upstream adds the nil check this
+stops being a divergence and the test says so.
+
+---
+
+## D-098 · `add_event_parameter` accepts a wider set than Go's generic constraint
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-17 (phase 1, `audit_record.go`)
+
+Go constrains the parameter helper to six types:
+
+```go
+func AddEventParameterToAuditRec[T string | bool | int | int64 | []string | map[string]string](...)
+```
+
+Ours takes `impl Into<serde_json::Value>`, which is strictly wider — a float or a nested object
+would compile here and not there.
+
+**Accepted** because it cannot produce a different result for any value Go accepts: each of the
+six lands in a `map[string]any` and marshals as its own JSON type on both sides, and the parity
+test drives all six. Reproducing the constraint exactly would mean a six-variant enum at every
+call site, which buys a compile error for a case no caller in the tree writes.
+
+Revisit if an audit consumer ever depends on the parameter map's value types being drawn from
+that closed set.

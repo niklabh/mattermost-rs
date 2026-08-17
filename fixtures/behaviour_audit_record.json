@@ -1,0 +1,162 @@
+{
+    "constants": {
+        "AuditKeyAPIPath": "api_path",
+        "AuditKeyActor": "actor",
+        "AuditKeyClient": "client",
+        "AuditKeyClusterID": "cluster_id",
+        "AuditKeyError": "error",
+        "AuditKeyEvent": "event",
+        "AuditKeyEventData": "event_data",
+        "AuditKeyEventName": "event_name",
+        "AuditKeyIPAddress": "ip_address",
+        "AuditKeyMeta": "meta",
+        "AuditKeySessionID": "session_id",
+        "AuditKeyStatus": "status",
+        "AuditKeyUserID": "user_id",
+        "AuditStatusAttempt": "attempt",
+        "AuditStatusFail": "fail",
+        "AuditStatusSuccess": "success"
+    },
+    "errors": [
+        {
+            "code": 418,
+            "description": "teapot",
+            "name": "explicit"
+        },
+        {
+            "app_error_error": "SomeWhere: some.error.id, detailed bit",
+            "app_error_msg": "some.error.id",
+            "code": 409,
+            "description": "SomeWhere: some.error.id, detailed bit",
+            "name": "from_app_error"
+        }
+    ],
+    "keys": {
+        "actor": [
+            "user_id",
+            "session_id",
+            "client",
+            "ip_address",
+            "x_forwarded_for"
+        ],
+        "event_data": [
+            "parameters",
+            "prior_state",
+            "resulting_state",
+            "object_type"
+        ],
+        "event_error": [
+            "description",
+            "status_code"
+        ],
+        "event_meta": [
+            "api_path",
+            "cluster_id"
+        ],
+        "record": [
+            "event_name",
+            "status",
+            "event",
+            "actor",
+            "meta",
+            "error"
+        ]
+    },
+    "nil_maps": [
+        {
+            "name": "AddEventParameterToAuditRec_on_nil_map",
+            "panics": false,
+            "parameters_after": "{\"k\":\"v\"}"
+        },
+        {
+            "name": "AddEventParameterAuditableToAuditRec_on_nil_map",
+            "panics": false,
+            "parameters_after": "{\"bot\":{\"create_at\":0,\"delete_at\":0,\"description\":\"\",\"display_name\":\"\",\"last_icon_update\":0,\"owner_id\":\"\",\"update_at\":0,\"user_id\":\"y9i4er48tt8bukijy7i3u5y9ar\",\"username\":\"b\"}}"
+        },
+        {
+            "name": "AddEventParameterAuditableArrayToAuditRec_on_nil_map",
+            "panics": false,
+            "parameters_after": "{\"bots\":[{\"create_at\":0,\"delete_at\":0,\"description\":\"\",\"display_name\":\"\",\"last_icon_update\":0,\"owner_id\":\"\",\"update_at\":0,\"user_id\":\"y9i4er48tt8bukijy7i3u5y9ar\",\"username\":\"b\"},{\"create_at\":0,\"delete_at\":0,\"description\":\"\",\"display_name\":\"\",\"last_icon_update\":0,\"owner_id\":\"\",\"update_at\":0,\"user_id\":\"y9i4er48tt8bukijy7i3u5y9ar\",\"username\":\"b\"}]}"
+        },
+        {
+            "name": "AddMeta_on_nil_map",
+            "panics": true
+        },
+        {
+            "meta_after": "{\"k\":\"v\"}",
+            "name": "AddMeta_on_existing_map",
+            "panics": false
+        },
+        {
+            "name": "AddEventPriorState_on_zero_record",
+            "panics": false,
+            "prior_state_after": "{\"create_at\":0,\"delete_at\":0,\"description\":\"\",\"display_name\":\"\",\"last_icon_update\":0,\"owner_id\":\"\",\"update_at\":0,\"user_id\":\"y9i4er48tt8bukijy7i3u5y9ar\",\"username\":\"b\"}"
+        }
+    ],
+    "parameters": [
+        {
+            "name": "mixed_types",
+            "parameters": "{\"a_bool\":true,\"a_string\":\"replaced\",\"a_string_map\":{\"k\":\"v\"},\"a_string_slice\":[\"x\",\"y\"],\"an_int\":42,\"an_int64\":9007199254740993}"
+        },
+        {
+            "name": "auditable_array",
+            "parameters": "{\"bots\":[{\"create_at\":0,\"delete_at\":0,\"description\":\"\",\"display_name\":\"\",\"last_icon_update\":0,\"owner_id\":\"\",\"update_at\":0,\"user_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaa\",\"username\":\"one\"},{\"create_at\":0,\"delete_at\":0,\"description\":\"\",\"display_name\":\"\",\"last_icon_update\":0,\"owner_id\":\"\",\"update_at\":0,\"user_id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbb\",\"username\":\"two\"}]}"
+        },
+        {
+            "name": "auditable_array_empty",
+            "parameters": "{\"bots\":[]}"
+        }
+    ],
+    "states": [
+        {
+            "name": "bot_states",
+            "object_type": "bot",
+            "prior_state": "{\"create_at\":100,\"delete_at\":0,\"description\":\"\",\"display_name\":\"Bot\",\"last_icon_update\":0,\"owner_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaa\",\"update_at\":200,\"user_id\":\"y9i4er48tt8bukijy7i3u5y9ar\",\"username\":\"botusername\"}",
+            "resulting_state": "{\"create_at\":100,\"delete_at\":0,\"description\":\"\",\"display_name\":\"Bot\",\"last_icon_update\":0,\"owner_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaa\",\"update_at\":200,\"user_id\":\"y9i4er48tt8bukijy7i3u5y9ar\",\"username\":\"botusername\"}"
+        }
+    ],
+    "status_setters": [
+        {
+            "name": "Success",
+            "status": "success"
+        },
+        {
+            "name": "Fail",
+            "status": "fail"
+        }
+    ],
+    "wire": [
+        {
+            "json": "{\"event_name\":\"\",\"status\":\"\",\"event\":{\"parameters\":null,\"prior_state\":null,\"resulting_state\":null,\"object_type\":\"\"},\"actor\":{\"user_id\":\"\",\"session_id\":\"\",\"client\":\"\",\"ip_address\":\"\",\"x_forwarded_for\":\"\"},\"meta\":null,\"error\":{}}",
+            "name": "zero"
+        },
+        {
+            "json": "{\"event_name\":\"some.event\",\"status\":\"success\",\"event\":{\"parameters\":{\"key\":\"value\"},\"prior_state\":{\"before\":1},\"resulting_state\":{\"after\":2},\"object_type\":\"bot\"},\"actor\":{\"user_id\":\"y9i4er48tt8bukijy7i3u5y9ar\",\"session_id\":\"6hoahfi4zircinud9y93beegwc\",\"client\":\"mattermost-webapp\",\"ip_address\":\"192.0.2.1\",\"x_forwarded_for\":\"198.51.100.1\"},\"meta\":{\"api_path\":\"/api/v4/bots\"},\"error\":{\"description\":\"boom\",\"status_code\":500}}",
+            "name": "full"
+        },
+        {
+            "json": "{\"event_name\":\"some.event\",\"status\":\"success\",\"event\":{\"parameters\":{\"key\":\"value\"},\"prior_state\":{\"before\":1},\"resulting_state\":{\"after\":2},\"object_type\":\"bot\"},\"actor\":{\"user_id\":\"y9i4er48tt8bukijy7i3u5y9ar\",\"session_id\":\"6hoahfi4zircinud9y93beegwc\",\"client\":\"mattermost-webapp\",\"ip_address\":\"192.0.2.1\",\"x_forwarded_for\":\"198.51.100.1\"},\"meta\":{\"api_path\":\"/api/v4/bots\"},\"error\":{}}",
+            "name": "no_error"
+        },
+        {
+            "json": "{\"event_name\":\"some.event\",\"status\":\"success\",\"event\":{\"parameters\":{\"key\":\"value\"},\"prior_state\":{\"before\":1},\"resulting_state\":{\"after\":2},\"object_type\":\"bot\"},\"actor\":{\"user_id\":\"y9i4er48tt8bukijy7i3u5y9ar\",\"session_id\":\"6hoahfi4zircinud9y93beegwc\",\"client\":\"mattermost-webapp\",\"ip_address\":\"192.0.2.1\",\"x_forwarded_for\":\"198.51.100.1\"},\"meta\":{\"api_path\":\"/api/v4/bots\"},\"error\":{\"description\":\"only a description\"}}",
+            "name": "error_desc_only"
+        },
+        {
+            "json": "{\"event_name\":\"some.event\",\"status\":\"success\",\"event\":{\"parameters\":{\"key\":\"value\"},\"prior_state\":{\"before\":1},\"resulting_state\":{\"after\":2},\"object_type\":\"bot\"},\"actor\":{\"user_id\":\"y9i4er48tt8bukijy7i3u5y9ar\",\"session_id\":\"6hoahfi4zircinud9y93beegwc\",\"client\":\"mattermost-webapp\",\"ip_address\":\"192.0.2.1\",\"x_forwarded_for\":\"198.51.100.1\"},\"meta\":{\"api_path\":\"/api/v4/bots\"},\"error\":{\"status_code\":404}}",
+            "name": "error_code_only"
+        },
+        {
+            "json": "{\"event_name\":\"\",\"status\":\"\",\"event\":{\"parameters\":{},\"prior_state\":{},\"resulting_state\":{},\"object_type\":\"\"},\"actor\":{\"user_id\":\"\",\"session_id\":\"\",\"client\":\"\",\"ip_address\":\"\",\"x_forwarded_for\":\"\"},\"meta\":{},\"error\":{}}",
+            "name": "empty_maps"
+        },
+        {
+            "json": "{\"api_path\":\"/api/v4/bots\",\"cluster_id\":\"cluster-1\"}",
+            "name": "event_meta_full"
+        },
+        {
+            "json": "{\"api_path\":\"\",\"cluster_id\":\"\"}",
+            "name": "event_meta_zero"
+        }
+    ]
+}

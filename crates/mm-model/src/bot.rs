@@ -275,8 +275,11 @@ impl Bot {
     }
 
     /// Port of `(*Bot).Auditable` (bot.go:35).
-    pub fn auditable(&self) -> serde_json::Value {
-        serde_json::json!({
+    ///
+    /// Returns [`StringInterface`] rather than a bare `Value` because Go's return type is
+    /// `map[string]any`; [`crate::audit_record::Auditable`] delegates here.
+    pub fn auditable(&self) -> crate::utils::StringInterface {
+        let value = serde_json::json!({
             "user_id": self.user_id,
             "username": self.username,
             "display_name": self.display_name,
@@ -286,19 +289,29 @@ impl Bot {
             "create_at": self.create_at,
             "update_at": self.update_at,
             "delete_at": self.delete_at,
-        })
+        });
+        match value {
+            serde_json::Value::Object(map) => map,
+            // `json!` with an object literal always produces an object; this arm is unreachable
+            // and exists because `CLAUDE.md` forbids `unwrap` in library code.
+            _ => crate::utils::StringInterface::new(),
+        }
     }
 }
 
 impl BotPatch {
     /// Port of `(*BotPatch).Auditable` (bot.go:57). The pointers marshal as their pointed-to
     /// values, so a nil field becomes `null` rather than being dropped.
-    pub fn auditable(&self) -> serde_json::Value {
-        serde_json::json!({
+    pub fn auditable(&self) -> crate::utils::StringInterface {
+        let value = serde_json::json!({
             "username": self.username,
             "display_name": self.display_name,
             "description": self.description,
-        })
+        });
+        match value {
+            serde_json::Value::Object(map) => map,
+            _ => crate::utils::StringInterface::new(),
+        }
     }
 }
 
@@ -646,7 +659,7 @@ mod go_parity {
         let bot = valid_bot_local();
         let expected: serde_json::Value =
             serde_json::from_str(case["bot"].as_str().unwrap()).unwrap();
-        assert_eq!(bot.auditable(), expected);
+        assert_eq!(serde_json::Value::Object(bot.auditable()), expected);
 
         let expected_trace: serde_json::Value =
             serde_json::from_str(case["trace"].as_str().unwrap()).unwrap();
