@@ -768,8 +768,9 @@ deployment. Until then the mime type is whatever the caller passes.
 
 ## D-031 · The project licence must become AGPL-3.0 before phase 2 lands
 
-**Status** OPEN · **Severity** blocking · **Raised** 2026-08-14 (licensing)
-**Blocks** every commit of code derived from `server/channels/` — i.e. all of phases 2 to 5.
+**Status** CLOSED · **Severity** blocking · **Raised** 2026-08-14 (licensing)
+**Closed** 2026-08-17 (licensing) — chose **(b)**, the split, by the project owner.
+**Blocked** every commit of code derived from `server/channels/` — i.e. all of phases 2 to 5.
 
 Upstream Mattermost is licensed in two parts, and the boundary falls exactly where this port
 currently sits. From the root `LICENSE.txt` of the pinned tree:
@@ -789,9 +790,11 @@ text confirming it, and our `LICENSE` is a byte-identical copy.
 derivative work, and a derivative of AGPL code cannot be redistributed under Apache-2.0.
 
 **Decision required before the first `mm-store` commit** — chosen 2026-08-14 by the project owner
-to defer, taking Apache-2.0 "for now" with this entry as the tripwire.
+to defer, taking Apache-2.0 "for now" with this entry as the tripwire. Revisited and settled
+2026-08-17, ahead of any phase-2 work rather than at the moment of the first `mm-store` commit,
+so the tripwire never had to fire.
 
-**To pay off**, one of:
+**Options that were on the table:**
 - **(a) Relicense the repository to `AGPL-3.0-only`.** Apache-2.0 is one-way compatible with
   AGPL-3.0, so the existing `mm-model` code can be carried forward without permission. This is
   the default and the cheapest path. Note it is not retroactive: anything already published under
@@ -804,6 +807,35 @@ to defer, taking Apache-2.0 "for now" with this entry as the tripwire.
 
 Whichever is chosen, `Cargo.toml`'s `license` field, `LICENSE`, `NOTICE` and the README all have
 to move together. `NOTICE` already states the current scope and the coming change.
+
+**Resolution — (b), the split.** (a) was cheaper and (b) preserves more: `mm-model` is the part
+of this repository another project is most likely to reuse, it owes nothing to the AGPL half, and
+collapsing it into an AGPL root would have given up the permissive terms for no gain. What landed:
+
+| Change | Detail |
+|---|---|
+| Root `LICENSE` | Now the **verbatim** GNU AGPL v3.0 (extracted from `reference/mattermost/LICENSE.txt:237-897`, which carries the FSF text unmodified). Verbatim rather than upstream's preamble-plus-text arrangement, so licence detectors identify it. |
+| `crates/mm-model/LICENSE` | The previous root `LICENSE`, moved with `git mv` — still byte-identical to upstream's `server/public/LICENSE.txt`. |
+| `[workspace.package]` | `license = "AGPL-3.0-only"` — the default, inherited by `mm-store`, `mm-app`, `mm-api`, `mm-ws`. |
+| `crates/mm-model/Cargo.toml` | **Overrides** back to `license = "Apache-2.0"`; no longer `license.workspace = true`. |
+| `NOTICE`, `README.md` | Both restated for the split, including the one-way-compatibility rule below. |
+
+**The rule this creates, and it is the part that can be got wrong later:** Apache-2.0 is one-way
+compatible with AGPL-3.0, so the AGPL crates may depend on `mm-model` and the reverse must never
+happen. `mm-model` cannot take code or a dependency from an AGPL crate or from
+`server/channels/`. The existing architectural rule that `mm-model` has zero internal
+dependencies already enforces it, but it is now a **licensing** constraint too, and a future
+session that "just needs one type from `mm-store`" in `mm-model` would breach the licence rather
+than merely the layering. A crate that starts consuming `server/channels/` drops its Apache
+override; it never adds one.
+
+**Deliberate:** the four AGPL crates carry `AGPL-3.0-only` while still holding zero AGPL-derived
+lines. The label is a precondition for the first such commit, not a consequence of it — the whole
+point of closing this entry ahead of phase 2 rather than during it.
+
+**Not addressed here**, because neither is a licensing question: upstream's compiled-binary MIT
+grant (we distribute source, not Mattermost, Inc.'s binaries) and the trademark position (already
+stated in `NOTICE`, unchanged).
 
 ---
 

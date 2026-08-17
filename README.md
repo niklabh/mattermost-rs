@@ -11,21 +11,14 @@ correctness and idiomatic Rust conflict on the wire format, the wire format wins
 
 ## Status: early. This is not a running server yet.
 
-Phase 1 of 5. Only the model crate has content — the other four are stubs whose `main()` is
-empty.
+Phase 1 of 5 — the model crate. The later crates are ported in dependency order; see
+[Layout](#layout) for what each one is and which phase it belongs to.
 
-| Crate | Phase | State |
-|---|---|---|
-| `mm-model` | 1 | **In progress.** 15 modules, 374 tests passing |
-| `mm-store` | 2 | Stub — doc comment only |
-| `mm-app` | 3 | Stub — doc comment only |
-| `mm-api` | 4 | Stub — `fn main() {}` |
-| `mm-ws` | 5 | Stub — `fn main() {}` |
-
-Fifteen Go files from `server/public/model/` are translated so far, three of them partially, plus
-one 4,464-entry table generated rather than transcribed. [`MIGRATION.md`](MIGRATION.md) is the
-authoritative ledger — per-file status, test counts, and the non-obvious semantics each
-translation turned up.
+**[`MIGRATION.md`](MIGRATION.md) is the authoritative ledger** — per-file status, test counts,
+and the non-obvious semantics each translation turned up. Progress is tracked there and only
+there. It is deliberately not summarised here: a README carrying counts is a README that is
+quietly wrong most of the time, and every merged file would otherwise drag an unrelated edit
+along with it.
 
 Three model files are explicitly **out of scope** and will be proxied to Go or generated rather
 than hand-translated: `client4.go` (a REST client, not server code), `permission.go`, and
@@ -116,11 +109,11 @@ Plus `gofmt -l reference/dump/` and `go vet ./...` if you touched the generator.
 
 ```
 crates/
-  mm-model/      wire types; zero internal dependencies
-  mm-store/      persistence (sqlx, Postgres); depends on mm-model
-  mm-app/        business logic; depends on mm-store; knows nothing about HTTP
-  mm-api/        REST + the Strangler Fig proxy; depends on mm-app
-  mm-ws/         WebSocket hub; separate binary so fan-out scales independently
+  mm-model/      phase 1  wire types; zero internal dependencies
+  mm-store/      phase 2  persistence (sqlx, Postgres); depends on mm-model
+  mm-app/        phase 3  business logic; depends on mm-store; knows nothing about HTTP
+  mm-api/        phase 4  REST + the Strangler Fig proxy; depends on mm-app
+  mm-ws/         phase 5  WebSocket hub; separate binary so fan-out scales independently
 fixtures/        generated parity fixtures — never edit by hand
 reference/
   mattermost/    pinned Go source, read-only, gitignored
@@ -143,8 +136,9 @@ Sessions are short and context does not carry across them. Three files carry it 
 - **`MIGRATION.md`** — what is translated, and every non-obvious Go semantic discovered while
   doing it. Most entries cost real time to find and are not recoverable by re-reading the source
   casually.
-- **`docs/TECH_DEBT.md`** — 30 numbered entries: 14 open, 10 accepted permanent divergences,
-  6 paid off. Anything skipped, approximated, or found-but-not-fixed gets an entry here.
+- **`docs/TECH_DEBT.md`** — numbered entries, each `OPEN` (owed), `ACCEPTED` (a deliberate
+  permanent divergence) or `CLOSED` (paid off). Anything skipped, approximated, or
+  found-but-not-fixed gets an entry here.
 - **`CLAUDE.md`** — the rules a contributor (human or agent) is expected to follow.
 
 ---
@@ -167,18 +161,34 @@ survives a context reset.
 
 ## License
 
-**Apache-2.0** — see [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE).
+**The license is split, the way upstream splits it** — see [`NOTICE`](NOTICE) for the full
+statement.
 
-Upstream Mattermost is licensed in two parts. `server/public/`, `server/templates/`,
-`server/i18n/` and `webapp/` are Apache-2.0; the rest of the platform is GNU AGPL v3.0 or a
-commercial license. Everything translated here so far derives from `server/public/model/` — the
-Apache-2.0 portion — so that is what this repository carries, and `LICENSE` is a byte-identical
-copy of upstream's `server/public/LICENSE.txt`.
+| Path | License | Derived from |
+|---|---|---|
+| `crates/mm-model/` | **Apache-2.0** ([text](crates/mm-model/LICENSE)) | `server/public/model/` |
+| `crates/mm-store/`, `mm-app/`, `mm-api/`, `mm-ws/` | **AGPL-3.0-only** ([text](LICENSE)) | `server/channels/{store,app,api4}/` |
+| everything else | **AGPL-3.0-only** | — |
 
-> **This must change before phase 2.** `server/channels/` is AGPL v3.0, and a translation of it
-> is a derivative work that cannot be redistributed under Apache-2.0. The license has to move to
-> `AGPL-3.0-only` (or be split the way upstream splits it) before the first `mm-store` commit.
-> Tracked as **D-031** in [`docs/TECH_DEBT.md`](docs/TECH_DEBT.md).
+Upstream Mattermost is licensed in two parts: `server/public/`, `server/templates/`,
+`server/i18n/` and `webapp/` are Apache-2.0, and the rest of the platform is GNU AGPL v3.0 or a
+commercial license from Mattermost, Inc. Collapsing that into a single AGPL root would have been
+cheaper, but `mm-model` is the part of this repo another project is most likely to want, and it
+owes nothing to the AGPL half — so it keeps the more permissive terms.
+
+`crates/mm-model/LICENSE` is a byte-identical copy of upstream's `server/public/LICENSE.txt`;
+the root `LICENSE` is the verbatim GNU AGPL v3.0.
+
+Apache-2.0 is one-way compatible with AGPL-3.0, so the AGPL crates may depend on `mm-model`.
+**The reverse must never happen:** `mm-model` cannot take code or a dependency from an
+AGPL-licensed crate, or from `server/channels/`. The existing rule that `mm-model` has zero
+internal dependencies already enforces this, but it is now a licensing requirement and not only
+an architectural one.
+
+The AGPL crates carried `AGPL-3.0-only` from before they held a single AGPL-derived line, and
+that was the point — the label is a precondition for the first commit of code derived from
+`server/channels/`, not a consequence of it. Resolved as **D-031** in
+[`docs/TECH_DEBT.md`](docs/TECH_DEBT.md).
 
 This is a translation, not a copy: no file here is copied from upstream, and a few functions
 deliberately diverge. `NOTICE` records that, as Apache-2.0 §4(b) requires.
