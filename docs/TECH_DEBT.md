@@ -3292,3 +3292,62 @@ call site, which buys a compile error for a case no caller in the tree writes.
 
 Revisit if an audit consumer ever depends on the parameter map's value types being drawn from
 that closed set.
+
+---
+
+## D-099 · `oauth.go`'s two client-registration functions are unported
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-08-17 (phase 1, `oauth.go`)
+**Depends on** `model/oauth_dcr.go` (254 lines), unported.
+
+`NewOAuthAppFromClientRegistration` (oauth.go:224) and `(*OAuthApp).ToClientRegistrationResponse`
+(oauth.go:252) are the OAuth 2.0 Dynamic Client Registration surface. Both take or return types
+that live in `oauth_dcr.go` — `ClientRegistrationRequest`, `ClientRegistrationResponse` — plus
+`GetDefaultGrantTypes()` and `GetDefaultResponseTypes()` from the same file.
+
+Everything else in `oauth.go` is ported, including the five constants those functions consume,
+which are borrowed from `access.go` and `oauth_metadata.go` and pinned by the oracle.
+
+**Worth noting before porting them:** `NewOAuthAppFromClientRegistration` mints a client secret
+with `NewId()` when the requested auth method is not `none`, which is the *only* place in the
+file that creates a secret — `PreSave` explicitly does not. So the public/confidential decision is
+made at registration and nowhere else.
+
+**To pay off** port `oauth_dcr.go`, then these two functions come almost free.
+
+---
+
+## D-100 · Two upstream oddities in `oauth.go` are reproduced deliberately
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-17 (phase 1, `oauth.go`)
+
+Both measured against Go, not read.
+
+**The callback-URL cap measures Go's slice formatting.**
+
+```go
+if len(a.CallbackUrls) == 0 || len(fmt.Sprintf("%s", a.CallbackUrls)) > 1024 {
+```
+
+`%s` on a `[]string` renders `[first second third]`, so the 1024 limit applies to that string —
+the sum of the entries **plus one separator between each plus two brackets**. Measured: one
+28-byte URL renders to 30; two 24-byte URLs render to 51, not 48. A port summing the entries
+accepts payloads Go rejects at the boundary. Reproduced by `go_format_string_slice`, which is
+tested against Go's rendering for seven corpora — including that `["a b"]` and `["a", "b"]` are
+indistinguishable, so the format is not a parseable encoding.
+
+**`Name` is capped in bytes and `Description` in runes, in the same function.** `len(a.Name) > 64`
+against `utf8.RuneCountInString(a.Description) > 512`; every other cap in the function — client
+secret 128, homepage 256, icon URL 512, app id 32 — is `len`. Measured: a 33-character name of
+two-byte runes (66 bytes) is **rejected**, a 512-character description of two-byte runes (1024
+bytes) is **accepted**. A test asserts that pair on its own so it cannot be lost in the corpus.
+
+**And a third, smaller one:** `Auditable` emits `"callback_urls:"` — with a trailing colon
+(oauth.go:68). Audit consumers read that key, so correcting it would make the two servers write
+different audit records for the same event. The parity test asserts the typo'd key is present and
+the clean one absent.
+
+Also reproduced, and not an oddity but a security property worth naming: the confidential-client
+secret comparison uses `crypto/subtle.ConstantTimeCompare`, so the port takes the `subtle` crate
+rather than `==`. A short-circuiting comparison leaks the secret's length and matching prefix
+through timing, and hand-rolling the loop is liable to be optimised back into a short-circuit.

@@ -18,6 +18,7 @@ chrono.workspace = true
 chrono-tz.workspace = true
 regex.workspace = true
 rand.workspace = true
+subtle.workspace = true
 sha1.workspace = true
 unicode-general-category.workspace = true
 base64.workspace = true

@@ -122,6 +122,9 @@ var registry = map[string]any{
 	"bot_patch":                     &model.BotPatch{},
 	"audit_record":                  &model.AuditRecord{},
 	"event_meta":                    &model.EventMeta{},
+	"oauth_app":                     &model.OAuthApp{},
+	"oauth_app_request":             &model.OAuthAppRequest{},
+	"intune_login_request":          &model.IntuneLoginRequest{},
 }
 
 // overrides pins specific fields to semantically valid values, keyed by the
@@ -508,6 +511,12 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_channel_search.json"))
+
+	if err := writeOAuthBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: oauth behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_oauth.json"))
 
 	if err := writeAuditRecordBehaviourFixture(*out); err != nil {
 		fmt.Fprintf(os.Stderr, "FAIL: audit record behaviour fixture: %v\n", err)

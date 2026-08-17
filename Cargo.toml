@@ -87,6 +87,13 @@ regex = "1"
 # CSPRNG for NewId / NewRandomString.
 rand = "0.9"
 
+# Constant-time comparison. `OAuthApp.validateConfidentialClientGrant` compares the client secret
+# with `crypto/subtle.ConstantTimeCompare`, and that is a security property rather than an
+# implementation detail: a short-circuiting `==` leaks the secret's length and its matching prefix
+# through timing. Hand-rolling the loop is exactly the kind of thing that gets optimised back into
+# a short-circuit by the compiler, so take the dependency.
+subtle = "2"
+
 # GetGroupNameFromUserIds hashes the sorted member ids with SHA-1 and hex-encodes the digest.
 # The result is the channel's Name and is therefore persisted and on the wire, so it must match
 # Go's crypto/sha1 bit for bit — this is a compatibility requirement, not a security choice.

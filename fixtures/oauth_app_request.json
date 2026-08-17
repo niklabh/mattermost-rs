@@ -1,0 +1,12 @@
+{
+    "name": "name-8bc3c2",
+    "description": "description-4cf81c",
+    "icon_url": "https://example.com/iconurl/3d9a5c",
+    "callback_urls": [
+        "https://example.com/callbackurls/e75dde",
+        "https://example.com/callbackurls/2e0745"
+    ],
+    "homepage": "homepage-a4aa39",
+    "is_trusted": true,
+    "is_public": true
+}

@@ -1,0 +1,469 @@
+{
+    "auditable": {
+        "confidential": "{\"callback_urls:\":[\"https://example.com/callback\"],\"create_at\":1600000000000,\"creator_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaa\",\"description\":\"does oauth things\",\"homepage\":\"https://example.com\",\"icon_url\":\"https://example.com/icon.png\",\"id\":\"y9i4er48tt8bukijy7i3u5y9ar\",\"is_dynamically_registered\":false,\"is_trusted\":true,\"mattermost_app_id\":\"mmapp\",\"name\":\"My OAuth App\",\"token_endpoint_auth_method\":\"client_secret_post\",\"update_at\":1650000000000}",
+        "public": "{\"callback_urls:\":[\"https://example.com/callback\"],\"create_at\":1600000000000,\"creator_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaa\",\"description\":\"does oauth things\",\"homepage\":\"https://example.com\",\"icon_url\":\"https://example.com/icon.png\",\"id\":\"y9i4er48tt8bukijy7i3u5y9ar\",\"is_dynamically_registered\":false,\"is_trusted\":true,\"mattermost_app_id\":\"mmapp\",\"name\":\"My OAuth App\",\"token_endpoint_auth_method\":\"none\",\"update_at\":1650000000000}"
+    },
+    "auth_method": [
+        {
+            "auth_method": "client_secret_post",
+            "is_public": false,
+            "name": "with_secret"
+        },
+        {
+            "auth_method": "none",
+            "is_public": true,
+            "name": "without_secret"
+        }
+    ],
+    "callback_format": [
+        {
+            "length": 2,
+            "name": "nil",
+            "rendered": "[]",
+            "sum_of_entries": 0
+        },
+        {
+            "length": 2,
+            "name": "empty",
+            "rendered": "[]",
+            "sum_of_entries": 0
+        },
+        {
+            "length": 30,
+            "name": "one",
+            "rendered": "[https://example.com/callback]",
+            "sum_of_entries": 28
+        },
+        {
+            "length": 51,
+            "name": "two",
+            "rendered": "[https://a.example.com/cb https://b.example.com/cb]",
+            "sum_of_entries": 48
+        },
+        {
+            "length": 7,
+            "name": "three",
+            "rendered": "[a b c]",
+            "sum_of_entries": 3
+        },
+        {
+            "length": 5,
+            "name": "entry_with_space",
+            "rendered": "[a b]",
+            "sum_of_entries": 3
+        },
+        {
+            "length": 3,
+            "name": "empty_entry",
+            "rendered": "[ ]",
+            "sum_of_entries": 0
+        }
+    ],
+    "constants": {
+        "AccessTokenGrantType": "authorization_code",
+        "ClientAuthMethodClientSecretPost": "client_secret_post",
+        "ClientAuthMethodNone": "none",
+        "OAuthActionEmailToSSO": "email_to_sso",
+        "OAuthActionLogin": "login",
+        "OAuthActionMobile": "mobile",
+        "OAuthActionSSOToEmail": "sso_to_email",
+        "OAuthActionSignup": "signup",
+        "RefreshTokenGrantType": "refresh_token",
+        "ScopeUser": "user"
+    },
+    "etag": [
+        {
+            "etag": "11.11.0.y9i4er48tt8bukijy7i3u5y9ar.1650000000000",
+            "name": "typical"
+        },
+        {
+            "etag": "11.11.0..0",
+            "name": "zero"
+        }
+    ],
+    "is_valid": [
+        {
+            "name": "valid",
+            "ok": true
+        },
+        {
+            "detailed_error": "",
+            "id": "model.oauth.is_valid.app_id.app_error",
+            "name": "bad_id",
+            "ok": false,
+            "status": 400,
+            "where": "OAuthApp.IsValid"
+        },
+        {
+            "detailed_error": "app_id=y9i4er48tt8bukijy7i3u5y9ar",
+            "id": "model.oauth.is_valid.create_at.app_error",
+            "name": "zero_create_at",
+            "ok": false,
+            "status": 400,
+            "where": "OAuthApp.IsValid"
+        },
+        {
+            "detailed_error": "app_id=y9i4er48tt8bukijy7i3u5y9ar",
+            "id": "model.oauth.is_valid.update_at.app_error",
+            "name": "zero_update_at",
+            "ok": false,
+            "status": 400,
+            "where": "OAuthApp.IsValid"
+        },
+        {
+            "detailed_error": "app_id=y9i4er48tt8bukijy7i3u5y9ar",
+            "id": "model.oauth.is_valid.creator_id.app_error",
+            "name": "bad_creator_id",
+            "ok": false,
+            "status": 400,
+            "where": "OAuthApp.IsValid"
+        },
+        {
+            "name": "bad_creator_id_but_dynamic",
+            "ok": true
+        },
+        {
+            "name": "client_secret_at_cap",
+            "ok": true
+        },
+        {
+            "detailed_error": "app_id=y9i4er48tt8bukijy7i3u5y9ar",
+            "id": "model.oauth.is_valid.client_secret.app_error",
+            "name": "client_secret_over_cap",
+            "ok": false,
+            "status": 400,
+            "where": "OAuthApp.IsValid"
+        },
+        {
+            "name": "empty_client_secret_is_allowed",
+            "ok": true
+        },
+        {
+            "detailed_error": "app_id=y9i4er48tt8bukijy7i3u5y9ar",
+            "id": "model.oauth.is_valid.name.app_error",
+            "name": "empty_name",
+            "ok": false,
+            "status": 400,
+            "where": "OAuthApp.IsValid"
+        },
+        {
+            "name": "name_at_cap",
+            "ok": true
+        },
+        {
+            "detailed_error": "app_id=y9i4er48tt8bukijy7i3u5y9ar",
+            "id": "model.oauth.is_valid.name.app_error",
+            "name": "name_over_cap",
+            "ok": false,
+            "status": 400,
+            "where": "OAuthApp.IsValid"
+        },
+        {
+            "detailed_error": "app_id=y9i4er48tt8bukijy7i3u5y9ar",
+            "id": "model.oauth.is_valid.name.app_error",
+            "name": "name_multibyte_33_runes_66_bytes",
+            "ok": false,
+            "status": 400,
+            "where": "OAuthApp.IsValid"
+        },
+        {
+            "name": "name_multibyte_32_runes_64_bytes",
+            "ok": true
+        },
+        {
+            "detailed_error": "app_id=y9i4er48tt8bukijy7i3u5y9ar",
+            "id": "model.oauth.is_valid.callback.app_error",
+            "name": "no_callbacks",
+            "ok": false,
+            "status": 400,
+            "where": "OAuthApp.IsValid"
+        },
+        {
+            "detailed_error": "app_id=y9i4er48tt8bukijy7i3u5y9ar",
+            "id": "model.oauth.is_valid.callback.app_error",
+            "name": "nil_callbacks",
+            "ok": false,
+            "status": 400,
+            "where": "OAuthApp.IsValid"
+        },
+        {
+            "name": "callbacks_rendering_at_cap",
+            "ok": true
+        },
+        {
+            "detailed_error": "app_id=y9i4er48tt8bukijy7i3u5y9ar",
+            "id": "model.oauth.is_valid.callback.app_error",
+            "name": "callbacks_rendering_over_cap",
+            "ok": false,
+            "status": 400,
+            "where": "OAuthApp.IsValid"
+        },
+        {
+            "detailed_error": "",
+            "id": "model.oauth.is_valid.callback.app_error",
+            "name": "callback_not_a_url",
+            "ok": false,
+            "status": 400,
+            "where": "OAuthApp.IsValid"
+        },
+        {
+            "detailed_error": "",
+            "id": "model.oauth.is_valid.callback.app_error",
+            "name": "second_callback_not_a_url",
+            "ok": false,
+            "status": 400,
+            "where": "OAuthApp.IsValid"
+        },
+        {
+            "detailed_error": "app_id=y9i4er48tt8bukijy7i3u5y9ar",
+            "id": "model.oauth.is_valid.homepage.app_error",
+            "name": "empty_homepage",
+            "ok": false,
+            "status": 400,
+            "where": "OAuthApp.IsValid"
+        },
+        {
+            "name": "empty_homepage_but_dynamic",
+            "ok": true
+        },
+        {
+            "detailed_error": "app_id=y9i4er48tt8bukijy7i3u5y9ar",
+            "id": "model.oauth.is_valid.homepage.app_error",
+            "name": "homepage_not_a_url",
+            "ok": false,
+            "status": 400,
+            "where": "OAuthApp.IsValid"
+        },
+        {
+            "detailed_error": "app_id=y9i4er48tt8bukijy7i3u5y9ar",
+            "id": "model.oauth.is_valid.homepage.app_error",
+            "name": "homepage_over_cap",
+            "ok": false,
+            "status": 400,
+            "where": "OAuthApp.IsValid"
+        },
+        {
+            "name": "description_512_multibyte_runes",
+            "ok": true
+        },
+        {
+            "detailed_error": "app_id=y9i4er48tt8bukijy7i3u5y9ar",
+            "id": "model.oauth.is_valid.description.app_error",
+            "name": "description_513_runes",
+            "ok": false,
+            "status": 400,
+            "where": "OAuthApp.IsValid"
+        },
+        {
+            "name": "empty_icon_url_is_allowed",
+            "ok": true
+        },
+        {
+            "detailed_error": "app_id=y9i4er48tt8bukijy7i3u5y9ar",
+            "id": "model.oauth.is_valid.icon_url.app_error",
+            "name": "icon_url_not_a_url",
+            "ok": false,
+            "status": 400,
+            "where": "OAuthApp.IsValid"
+        },
+        {
+            "detailed_error": "app_id=y9i4er48tt8bukijy7i3u5y9ar",
+            "id": "model.oauth.is_valid.icon_url.app_error",
+            "name": "icon_url_over_cap",
+            "ok": false,
+            "status": 400,
+            "where": "OAuthApp.IsValid"
+        },
+        {
+            "name": "mattermost_app_id_at_cap",
+            "ok": true
+        },
+        {
+            "detailed_error": "app_id=y9i4er48tt8bukijy7i3u5y9ar",
+            "id": "model.oauth.is_valid.mattermost_app_id.app_error",
+            "name": "mattermost_app_id_over_cap",
+            "ok": false,
+            "status": 400,
+            "where": "OAuthApp.IsValid"
+        }
+    ],
+    "keys": {
+        "app": [
+            "id",
+            "creator_id",
+            "create_at",
+            "update_at",
+            "client_secret",
+            "name",
+            "description",
+            "icon_url",
+            "callback_urls",
+            "homepage",
+            "is_trusted",
+            "mattermost_app_id",
+            "is_dynamically_registered"
+        ],
+        "app_request": [
+            "name",
+            "description",
+            "icon_url",
+            "callback_urls",
+            "homepage",
+            "is_trusted",
+            "is_public"
+        ],
+        "intune_login": [
+            "access_token",
+            "device_id",
+            "voip_device_id"
+        ]
+    },
+    "pre_save": [
+        {
+            "client_secret_unchanged": true,
+            "create_at_equals_update_at": true,
+            "create_at_nonzero": true,
+            "id_unchanged": true,
+            "name": "pre_save_with_id"
+        },
+        {
+            "client_secret_still_empty": true,
+            "id_generated": true,
+            "id_length": 26,
+            "name": "pre_save_without_id"
+        },
+        {
+            "create_at_unchanged": true,
+            "id_unchanged": true,
+            "name": "pre_update",
+            "update_at_nonzero": true
+        }
+    ],
+    "redirect_url": [
+        {
+            "url": "https://a.example.com/cb",
+            "valid": true
+        },
+        {
+            "url": "https://b.example.com/cb",
+            "valid": true
+        },
+        {
+            "url": "https://a.example.com/cb/",
+            "valid": false
+        },
+        {
+            "url": "https://A.example.com/cb",
+            "valid": false
+        },
+        {
+            "url": "https://a.example.com",
+            "valid": false
+        },
+        {
+            "url": "",
+            "valid": false
+        }
+    ],
+    "sanitize": [
+        {
+            "callbacks_unchanged": true,
+            "client_secret_after": "",
+            "client_secret_before": "a-client-secret",
+            "id_unchanged": true,
+            "is_trusted_unchanged": true,
+            "json_after": "{\"id\":\"y9i4er48tt8bukijy7i3u5y9ar\",\"creator_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaa\",\"create_at\":1600000000000,\"update_at\":1650000000000,\"client_secret\":\"\",\"name\":\"My OAuth App\",\"description\":\"does oauth things\",\"icon_url\":\"https://example.com/icon.png\",\"callback_urls\":[\"https://example.com/callback\"],\"homepage\":\"https://example.com\",\"is_trusted\":true,\"mattermost_app_id\":\"mmapp\"}",
+            "name": "sanitize"
+        }
+    ],
+    "validate_grant": [
+        {
+            "name": "public_auth_code_with_pkce",
+            "ok": true
+        },
+        {
+            "id": "model.oauth.validate_grant.pkce_required.app_error",
+            "name": "public_auth_code_without_pkce",
+            "ok": false,
+            "status": 400,
+            "where": "OAuthApp.validatePublicClientGrant"
+        },
+        {
+            "id": "model.oauth.validate_grant.public_client_secret.app_error",
+            "name": "public_with_secret",
+            "ok": false,
+            "status": 400,
+            "where": "OAuthApp.validatePublicClientGrant"
+        },
+        {
+            "id": "model.oauth.validate_grant.public_client_refresh_token.app_error",
+            "name": "public_refresh_token",
+            "ok": false,
+            "status": 400,
+            "where": "OAuthApp.validatePublicClientGrant"
+        },
+        {
+            "name": "public_unknown_grant",
+            "ok": true
+        },
+        {
+            "name": "confidential_correct_secret",
+            "ok": true
+        },
+        {
+            "id": "model.oauth.validate_grant.credentials.app_error",
+            "name": "confidential_wrong_secret",
+            "ok": false,
+            "status": 401,
+            "where": "OAuthApp.validateConfidentialClientGrant"
+        },
+        {
+            "id": "model.oauth.validate_grant.credentials.app_error",
+            "name": "confidential_empty_secret",
+            "ok": false,
+            "status": 401,
+            "where": "OAuthApp.validateConfidentialClientGrant"
+        },
+        {
+            "id": "model.oauth.validate_grant.credentials.app_error",
+            "name": "confidential_prefix_secret",
+            "ok": false,
+            "status": 401,
+            "where": "OAuthApp.validateConfidentialClientGrant"
+        },
+        {
+            "name": "confidential_refresh_token_ok",
+            "ok": true
+        }
+    ],
+    "wire": [
+        {
+            "json": "{\"id\":\"\",\"creator_id\":\"\",\"create_at\":0,\"update_at\":0,\"client_secret\":\"\",\"name\":\"\",\"description\":\"\",\"icon_url\":\"\",\"callback_urls\":null,\"homepage\":\"\",\"is_trusted\":false,\"mattermost_app_id\":\"\"}",
+            "name": "zero"
+        },
+        {
+            "json": "{\"id\":\"y9i4er48tt8bukijy7i3u5y9ar\",\"creator_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaa\",\"create_at\":1600000000000,\"update_at\":1650000000000,\"client_secret\":\"a-client-secret\",\"name\":\"My OAuth App\",\"description\":\"does oauth things\",\"icon_url\":\"https://example.com/icon.png\",\"callback_urls\":[\"https://example.com/callback\"],\"homepage\":\"https://example.com\",\"is_trusted\":true,\"mattermost_app_id\":\"mmapp\"}",
+            "name": "full"
+        },
+        {
+            "json": "{\"id\":\"y9i4er48tt8bukijy7i3u5y9ar\",\"creator_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaa\",\"create_at\":1600000000000,\"update_at\":1650000000000,\"client_secret\":\"a-client-secret\",\"name\":\"My OAuth App\",\"description\":\"does oauth things\",\"icon_url\":\"https://example.com/icon.png\",\"callback_urls\":[\"https://example.com/callback\"],\"homepage\":\"https://example.com\",\"is_trusted\":true,\"mattermost_app_id\":\"mmapp\",\"is_dynamically_registered\":true}",
+            "name": "dynamically_registered"
+        },
+        {
+            "json": "{\"id\":\"y9i4er48tt8bukijy7i3u5y9ar\",\"creator_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaa\",\"create_at\":1600000000000,\"update_at\":1650000000000,\"client_secret\":\"a-client-secret\",\"name\":\"My OAuth App\",\"description\":\"does oauth things\",\"icon_url\":\"https://example.com/icon.png\",\"callback_urls\":[],\"homepage\":\"https://example.com\",\"is_trusted\":true,\"mattermost_app_id\":\"mmapp\"}",
+            "name": "empty_callbacks"
+        },
+        {
+            "json": "{\"name\":\"req\",\"description\":\"d\",\"icon_url\":\"https://example.com/i.png\",\"callback_urls\":[\"https://example.com/cb\"],\"homepage\":\"https://example.com\",\"is_trusted\":true,\"is_public\":true}",
+            "name": "app_request"
+        },
+        {
+            "json": "{\"access_token\":\"tok\",\"device_id\":\"dev\",\"voip_device_id\":\"voip\"}",
+            "name": "intune_login"
+        },
+        {
+            "json": "{\"access_token\":\"\",\"device_id\":\"\"}",
+            "name": "intune_login_zero"
+        }
+    ]
+}

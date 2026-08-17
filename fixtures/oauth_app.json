@@ -1,0 +1,18 @@
+{
+    "id": "us7kr3bcswyc94iawj1n3pyy3h",
+    "creator_id": "d9tka9q5pbdbn58yit67s34gnr",
+    "create_at": 1703675086000,
+    "update_at": 1702004831000,
+    "client_secret": "clientsecret-ff0484",
+    "name": "name-991226",
+    "description": "description-809cc7",
+    "icon_url": "https://example.com/iconurl/a06dfc",
+    "callback_urls": [
+        "https://example.com/callbackurls/d18c25",
+        "https://example.com/callbackurls/13c9d8"
+    ],
+    "homepage": "homepage-03012c",
+    "is_trusted": true,
+    "mattermost_app_id": "349r7b3jckxddyqyj4d11ah6gr",
+    "is_dynamically_registered": true
+}
