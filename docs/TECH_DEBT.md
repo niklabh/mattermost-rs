@@ -3001,3 +3001,131 @@ write that keeps `LastActivityAt` accurate in the first place.
 
 **To pay off** with config, and with [D-084] in the same change — porting the check without the
 write would revoke sessions that are in fact active.
+
+---
+
+## D-089 · A write served here publishes no WebSocket event
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-08-17 (phase 2, first write route)
+**Affects** every write route from here on.
+
+Go's write paths end with `a.Publish(message)` — `UpdatePreferences` publishes
+`sidebar_category_updated` and `preferences_changed` (app/preference.go:66-76). `Publish` writes
+to the **in-process** hub and, when `clusterIFace` is set, to the cluster bus. We are a separate
+process with no cluster, so a write served by Rust reaches the database and reaches no connected
+client.
+
+The user-visible effect: a browser tab open against the Go server does not learn that its
+preferences changed, and shows stale state until something else forces a refetch. Unlike
+[D-087], which is a bounded staleness window on a cached read, this one does not self-heal —
+there is no TTL on "an event that was never sent".
+
+**Not measured.** No WebSocket client was available in the environment to observe it, so this
+entry is reasoned from `Publish`'s implementation rather than demonstrated, and is **provisional**
+in the sense `CLAUDE.md` describes. The reasoning is strong — the hub is in-process and the
+cluster bus is the enterprise component [D-087] already established we cannot reach — but it has
+not been watched happening.
+
+**To pay off**, one of:
+- **(a) Build `mm-ws`** and have clients connect to *it* rather than to Go. Correct, and it is
+  phase 5 of the plan anyway. Large.
+- **(b) Have Rust writes go through Go's API** rather than the database, so Go publishes. Costs
+  the latency of a second hop and makes the migrated route a proxy with extra steps.
+- **(c) Accept it.** For a project with no users, a missed live update is invisible; a developer
+  reloads the page. This is the current position, consistent with [D-087]'s calibration.
+
+---
+
+## D-090 · `PreferenceStore::save` clones each preference where Go mutates the caller's
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-17 (phase 2, `preference_store.go`)
+
+Go's `saveTx` calls `preference.PreUpdate()` on a value it received by pointer, so the caller's
+`model.Preferences` is normalised in place as a side effect of saving. Ours takes `&Preferences`
+and clones each entry before `pre_update`.
+
+**Accepted** because no caller in the ported tree reads the normalised form back — `Save` returns
+only an error, and the handler discards the batch afterwards. The clone is per preference in a
+batch capped at 100, so the cost is bounded and small.
+
+Revisit if a caller ever needs the post-`PreUpdate` values, which would make the difference
+observable rather than merely present.
+
+---
+
+## D-091 · Sidebar categories are not updated when preferences change
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-08-17 (phase 2, `app/preference.go`)
+
+`UpdatePreferences` calls `Store().Channel().UpdateSidebarChannelsByPreferences(preferences)`
+(preference.go:62) — Go keeps sidebar categories in step with the `direct_channel_show` and
+`group_channel_show` preferences, which is how showing or hiding a DM moves it in the sidebar.
+The channel store is not ported, so we skip it.
+
+Consequence: a client that changes DM or GM visibility **through the migrated route** gets a
+preference row that is right and a sidebar that does not follow. Unlike the missing WebSocket
+event ([D-089]), this one is a persisted inconsistency rather than a missed notification — a
+reload does not fix it.
+
+Narrow but sharp: only those two preference categories are affected, and only through our route.
+
+**To pay off** port `ChannelStore::UpdateSidebarChannelsByPreferences`. Until then, consider
+adding `direct_channel_show` / `group_channel_show` to the forwarded set alongside
+`flagged_post`, which would close it without porting anything.
+
+---
+
+## D-092 · Error messages are untranslated ids where Go sends prose
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-08-17 (phase 2, first error compared)
+**Affects** every error body this server produces.
+
+Go turns an `AppError` into a response in `web.Handler.ServeHTTP` (handlers.go:424-455), and
+three steps happen *there* rather than in the handler. Measured side by side on a 403:
+
+| field | Go | ours |
+|---|---|---|
+| `id` | `api.preference.update_preferences.set.app_error` | **same** |
+| `status_code` | 403 | **same** |
+| `detailed_error` | `""` | `""` — now **same**, see below |
+| `request_id` | populated | populated — now **same** |
+| `message` | `Unable to set user preferences.` | `api.preference.update_preferences.set.app_error` |
+
+Two of the three were closed the moment they were measured, in `ApiError::into_response`:
+
+- **`WipeDetailed`.** Go blanks `detailed_error` unless `ServiceSettings.EnableDeveloper` is on,
+  and it defaults to **off** — so the default is to wipe. Skipping it leaked internal detail Go
+  withholds; ours had been sending `userId=..., preference.UserId=...` to the client.
+- **`RequestId`.** Set on every error. Ours omitted the key entirely (`omitempty`), so the shapes
+  differed as well as the values.
+
+What remains is `Translate`, which needs the i18n bundle — the same dependency
+`post_deletion_report.go` is blocked on. Until then our `message` equals our `id`, which is
+exactly what an unconfigured Go server emits before `AppErrorInit` runs, so it is the same
+degradation rather than a novel one.
+
+**To pay off** port the i18n bundle loader and `AppError::Translate`. Worth noting the webapp
+branches on `id`, not `message`, so the practical impact is on humans reading errors.
+
+---
+
+## D-093 · A migrated method silently breaks the other methods on its path
+
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-08-17 (phase 2, first write route)
+**Closed** 2026-08-17, same session, by `partially_migrated` in `mm-api/src/lib.rs`.
+
+axum matches the **path** before the method. Registering
+`PUT /api/v4/users/me/preferences` therefore made `GET` on that same path return **405 from our
+own router**, instead of falling through to `Router::fallback` and reaching the Go server. A route
+that had been working, and that we had not touched, broke because a *different* method beside it
+was migrated.
+
+This is the Strangler Fig's sharpest edge so far, because the failure is silent and does not
+resemble its cause: the symptom was an empty response body in a parity test, not a routing error.
+It will recur on every path where methods are migrated one at a time — which is most of them,
+since `/users/{id}` alone carries GET, PUT, POST and DELETE across different handlers.
+
+**Closed** by routing every migrated path through `partially_migrated`, which attaches
+`MethodRouter::fallback(forward_to_go)` so unmigrated methods are proxied rather than rejected.
+Registering a route directly is now the thing to avoid, and
+`an_unmigrated_method_on_a_migrated_path_still_reaches_go` fails if it happens.

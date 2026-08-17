@@ -78,23 +78,24 @@ depend on `mm-model`, and `mm-model` may never depend on an AGPL crate or read
 `channel_count.go` **does not exist** — checked 2026-08-17. The earlier note guessed at the name;
 do not look for it again.
 
-## Next: `GET /api/v4/users/me/teams` or the first write route
+## Next: `GET /api/v4/users/me/teams`
 
-`/users/me/sessions` **landed** — see the ledger rows below. Both self-scoped read routes that
-were reachable without a permission system are now done, which is what makes the next choice a
-real fork rather than an obvious step:
+The first write **landed** — `PUT /api/v4/users/me/preferences`. What it taught is in the rows
+below; the short version is that writes are not the hard part, but *partial* migration is.
 
-**(a) `GET /api/v4/users/me/teams`** keeps the read-only run going. `TeamStore::GetTeamsForUser`
-is already ported, so the remaining work is `TeamStore::Get` for the teams themselves plus the
-`Team` wire type, which `mm-model` has. Cheapest next route by some distance.
+`/users/me/teams` is now the cheapest remaining route: `TeamStore::GetTeamsForUser` is already
+ported, so it needs `TeamStore::Get` for the teams themselves, and `Team` is already a wire type.
+It also pairs naturally with closing [D-091] — the sidebar sync that the preferences write skips.
 
-**(b) The first write route**, now that [D-087] no longer gates one. Something small and
-self-scoped — `PUT /api/v4/users/me/patch` is the obvious candidate. It is worth doing *early*
-rather than late, because stale-on-write is an accepted consequence rather than a blocked path,
-and the sooner a write exists the sooner that consequence is observed rather than reasoned about.
+**Not** `GET /api/v4/users/{user_id}`: still blocked behind `UserCanSeeOtherUser` ([D-082]),
+which drags in `role.go` (1,311 lines) and `permission.go` (2,789, out of scope).
 
-**Not** `GET /api/v4/users/{user_id}`: it still needs `UserCanSeeOtherUser` ([D-082]), which
-drags in `role.go` (1,311 lines) and `permission.go` (2,789, out of scope for hand-translation).
+**Not** `PUT /api/v4/users/me/patch` either, and this is worth recording because it was the
+obvious-looking candidate and is not viable: `SqlUserStore.Update` (user_store.go:258) calls
+`user.IsValid()`, which is exactly what [D-002] leaves unported and [D-001] blocks. It also needs
+`DoubleCheckPassword` for an email change (a password hasher), `CheckProviderAttributes`,
+`CheckLockedProfileFields` and four config settings. A partial port would be a **write that skips
+validation**, which is the dangerous direction.
 
 ### If porting model files instead
 
@@ -278,6 +279,11 @@ whenever a session skips, approximates, or discovers-but-does-not-close somethin
 | api4/user.go (`getSessions`, `me` only) | `mm-api/src/sessions.rs` | PARTIAL | 4 pass | **The second route served from Rust, and the first list response.** Body asserted byte-identical against the running Go server — 22,209 bytes, first try. Two things carry the session: `Sanitize` clears the token on every element (this endpoint's whole body is otherwise a set of live credentials), and Go writes it with `json.Marshal`, **not** `NewEncoder().Encode()`, so there is **no trailing newline** — the opposite of `/users/me`. Same wire type, same server, different call site ([D-086]). Deferred: the permission check, same reasoning as [D-082]. |
 | app/session.go (`GetSessions`) | `mm-app/src/session.rs` | PARTIAL | 3 pass | Blunt by design: *any* store failure is `app.session.get_sessions.app_error` with a 500. Go has no not-found branch here, because a user with no sessions is an empty list rather than a miss. |
 | — (tooling) | `crates/mm-api/tests/common/mod.rs` | DONE | — | Shared parity-test plumbing. Compiled into each test binary separately, so the login `OnceCell` is per-binary. Replaced three hand-rolled copies of the login helper. |
+| store/sqlstore/preference_store.go (`Save`) | `mm-store/src/preference_store.rs` | PARTIAL | 2 pass | **The first write in the port.** Go's exact upsert, `ON CONFLICT (userid, category, name) DO UPDATE`, inside a transaction — Go's comment is explicit that "if one fails, everything fails", and validation runs *inside* the loop, so a batch whose third entry is invalid must leave the first two unwritten. `save` (:65) and `saveTx` (:89) are byte-identical duplicates in the Go source; ported once. One divergence ([D-090], the clone). |
+| app/preference.go (`UpdatePreferences`) | `mm-app/src/preference.rs` | PARTIAL | 4 pass | The ownership guard is the security boundary: any entry whose `user_id` differs from the path's is a **403 for the whole batch**, checked before the store is touched — without it, the upsert's `(UserId, Category, Name)` key would happily write preferences onto another account. Deferred: the sidebar sync ([D-091]) and the two WebSocket events ([D-089]). |
+| api4/preference.go (`updatePreferences`, `me`) | `mm-api/src/preferences.rs` | PARTIAL | 4 pass | **The first write route.** Success body is `ReturnStatusOK` — `{"status":"OK"}` via `w.Write`, no newline. A batch containing any `flagged_post` entry is **forwarded to Go** rather than served, because that category needs a post lookup and a channel-read permission check we have not ported — the Strangler Fig applied *inside* a route. Both of Go's batch bounds reproduced, including that an empty batch is an error rather than a no-op. |
+| — (fix) | `mm-api/src/lib.rs::partially_migrated` | DONE | 1 pass | **Closes [D-093].** axum matches the path before the method, so registering `PUT` on `/users/me/preferences` made `GET` return 405 from our own router instead of reaching the proxy — silently breaking a working route by migrating a *different* method beside it. Every migrated path now carries `MethodRouter::fallback(forward_to_go)`. |
+| — (fix) | `mm-api/src/error.rs::into_response` | DONE | — | Two thirds of [D-092] closed the moment error bodies were compared side by side. Go's response pipeline (`web/handlers.go:424-455`) sets `RequestId` and calls `WipeDetailed` unless developer mode is on — which **defaults to off**, so ours had been leaking `detailed_error` content Go withholds, and omitting `request_id` entirely. Only the i18n `Translate` step remains. |
 | store/sqlstore/team_store.go (`GetTeamsForUser`) | `mm-store/src/team_store.rs` | PARTIAL | 9 pass | **Closes [D-077].** The wrapper is three lines; the content is `getTeamRoles` (team_store.go:100), which computes a member's **effective** roles from three booleans, three nullable scheme role names and whatever is already in the `Roles` column. The branch a reading would have missed: a scheme role id **in the `Roles` column sets its flag even when the column says false**, and is then excluded from `ExplicitRoles` — invisible in fresh data, where every `Roles` column is empty. `getTeamRoles` is unexported so `reference/dump` cannot reach it; verified instead by mutating the shared row and asking **both servers** the same question across six role shapes, all matching. The scheme-*derived* names stay provisional — `Schemes` is enterprise and the table is empty on Team Edition. |
 | store/sqlstore/session_store.go (`Get`) | `mm-store/src/session_store.rs` | PARTIAL | 2 pass | **First `mm-store` content.** The Strangler Fig's load-bearing query: `Token = $1 OR Id = $1 LIMIT 1`, one bind parameter against two columns. Compile-time checked by sqlx against the real schema, which is how the v11-only `NOT NULL` on `VoipDeviceId` was found rather than assumed. Deferred: the `TeamMembers` second query ([D-077]) and the other 19 interface methods. Two divergences ([D-078] NULL defaulting, [D-079] token redaction). |
 | store/sqlstore/user_store.go (`Get`) | `mm-store/src/user_store.rs` | PARTIAL | 1 pass | The `Users` LEFT JOIN `Bots` query, all 31 columns in Go's order. The join is not decoration: `is_bot` is `b.UserId IS NOT NULL`, so dropping it would make every bot a non-bot. Go's two `COALESCE`s are reproduced in SQL rather than defaulted Rust-side, so the database answers the same question for both servers. Deferred: the other ~100 interface methods. |

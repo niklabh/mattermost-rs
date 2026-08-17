@@ -14,11 +14,13 @@
 //! driver. Queries here spell them the way the database does.
 
 pub mod error;
+pub mod preference_store;
 pub mod session_store;
 pub mod team_store;
 pub mod user_store;
 
 pub use error::StoreError;
+pub use preference_store::{PreferenceStore, SqlPreferenceStore};
 pub use session_store::{SessionStore, SqlSessionStore};
 pub use team_store::{SqlTeamStore, TeamStore};
 pub use user_store::{SqlUserStore, UserStore};
@@ -33,6 +35,7 @@ use sqlx::postgres::PgPoolOptions;
 /// map obvious, while the stores stay independently constructible for tests.
 #[derive(Debug, Clone)]
 pub struct SqlStore {
+    preference: SqlPreferenceStore,
     session: SqlSessionStore,
     team: SqlTeamStore,
     user: SqlUserStore,
@@ -60,6 +63,7 @@ impl SqlStore {
     /// Build the store set over an existing pool.
     pub fn from_pool(pool: PgPool) -> Self {
         Self {
+            preference: SqlPreferenceStore::new(pool.clone()),
             session: SqlSessionStore::new(pool.clone()),
             team: SqlTeamStore::new(pool.clone()),
             user: SqlUserStore::new(pool),
@@ -69,6 +73,11 @@ impl SqlStore {
     /// Port of `store.Store.Session()`.
     pub fn session(&self) -> &SqlSessionStore {
         &self.session
+    }
+
+    /// Port of `store.Store.Preference()`.
+    pub fn preference(&self) -> &SqlPreferenceStore {
+        &self.preference
     }
 
     /// Port of `store.Store.Team()`.

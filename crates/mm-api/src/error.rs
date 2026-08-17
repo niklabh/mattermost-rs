@@ -27,6 +27,24 @@ impl ApiError {
             401,
         ))
     }
+
+    /// Port of `NewInvalidParamError` (web/context.go:254) — the answer for a body that will not
+    /// decode or fails a bounds check. 400, with the parameter name in the params map.
+    pub fn invalid_param(parameter: &str) -> Self {
+        let mut params: std::collections::HashMap<String, serde_json::Value> =
+            std::collections::HashMap::new();
+        params.insert(
+            "Name".to_owned(),
+            serde_json::Value::String(parameter.to_owned()),
+        );
+        ApiError(AppError::new(
+            "Context",
+            "api.context.invalid_body_param.app_error",
+            Some(params),
+            String::new(),
+            400,
+        ))
+    }
 }
 
 impl From<AppError> for ApiError {
@@ -36,7 +54,22 @@ impl From<AppError> for ApiError {
 }
 
 impl IntoResponse for ApiError {
-    fn into_response(self) -> Response {
+    fn into_response(mut self) -> Response {
+        // Port of the tail of `web.Handler.ServeHTTP` (channels/web/handlers.go:424-455), which
+        // is where Go turns an `AppError` into a body. Three steps happen there and nowhere else,
+        // so an `AppError` serialised straight out of a handler is NOT what a client sees:
+        //
+        //   1. `c.Err.RequestId = c.AppContext.RequestId()` — populated on every error.
+        //   2. `c.Err.Translate(c.AppContext.T)` — the id becomes a human message. Not ported;
+        //      we emit the untranslated id, which is what an unconfigured Go server also does.
+        //      See [D-092].
+        //   3. `if !EnableDeveloper { c.Err.WipeDetailed() }` — `detailed_error` is blanked. The
+        //      setting defaults to false, so **the default is to wipe**, and a port that skips
+        //      this leaks internal detail Go withholds. Reproduced unconditionally because the
+        //      config that would turn it off is not ported either.
+        self.0.request_id = mm_model::utils::new_id();
+        self.0.wipe_detailed();
+
         // `AppError.status_code` is the authority; the status line and the body must agree,
         // because clients read the body's copy. An out-of-range or unset code becomes a 500
         // rather than a panic — `from_u16` is fallible and this is library code.

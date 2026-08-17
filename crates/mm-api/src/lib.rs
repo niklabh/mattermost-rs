@@ -7,12 +7,13 @@
 
 pub mod auth;
 pub mod error;
+pub mod preferences;
 pub mod proxy;
 pub mod sessions;
 pub mod users;
 
 use axum::Router;
-use axum::routing::get;
+use axum::routing::{MethodRouter, get, put};
 use mm_app::App;
 
 /// Go's `PrivacySettings.ShowFullName` default (model/config.go).
@@ -57,13 +58,39 @@ impl AppState {
     }
 }
 
+/// Mark a path as partially migrated: the methods registered here are served locally, and
+/// **every other method on that path is forwarded**.
+///
+/// This is not optional, and forgetting it is silent. axum matches the path first: once any
+/// method is registered for `/api/v4/users/me/preferences`, a `GET` to that path returns **405**
+/// from our router instead of reaching `Router::fallback`. Migrating `PUT` would therefore break
+/// the `GET` that was previously proxied and working — measured, not theorised: the first write
+/// route did exactly that, and a parity test caught it as an empty response body.
+///
+/// So every migrated path goes through here rather than being registered directly.
+fn partially_migrated(methods: MethodRouter<AppState>) -> MethodRouter<AppState> {
+    methods.fallback(proxy::forward_to_go)
+}
+
 /// Build the router.
 ///
-/// The migrated routes are listed explicitly and everything else falls through to the proxy.
+/// The migrated routes are listed explicitly and everything else falls through to the proxy —
+/// both unregistered paths (`Router::fallback`) and unmigrated methods on registered paths
+/// (`partially_migrated`).
 pub fn router(state: AppState) -> Router {
     Router::new()
-        .route("/api/v4/users/me", get(users::get_user_me))
-        .route("/api/v4/users/me/sessions", get(sessions::get_sessions_me))
+        .route(
+            "/api/v4/users/me",
+            partially_migrated(get(users::get_user_me)),
+        )
+        .route(
+            "/api/v4/users/me/sessions",
+            partially_migrated(get(sessions::get_sessions_me)),
+        )
+        .route(
+            "/api/v4/users/me/preferences",
+            partially_migrated(put(preferences::update_preferences_me)),
+        )
         .fallback(proxy::forward_to_go)
         .with_state(state)
 }

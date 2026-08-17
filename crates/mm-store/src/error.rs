@@ -30,6 +30,18 @@ pub enum StoreError {
         source: sqlx::Error,
     },
 
+    /// A model type rejected the value before it reached the database.
+    ///
+    /// Go's store returns `*model.AppError` straight out of `Save` when `IsValid` fails, and the
+    /// app layer passes it through with `errors.As`. Carrying the `AppError` rather than a
+    /// message keeps the error id and status code intact all the way to the client — the whole
+    /// point of the type. Boxed because `AppError` is much larger than the other variants.
+    #[error("{entity} failed validation: {app_error}")]
+    Invalid {
+        entity: &'static str,
+        app_error: Box<mm_model::utils::AppError>,
+    },
+
     /// A `jsonb` column held something the model type cannot represent.
     ///
     /// Go decodes these columns into `model.StringMap` with `encoding/json` and surfaces a
