@@ -94,7 +94,7 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            serde_json::to_string(&embed).unwrap(),
+            crate::utils::go_json_marshal(&embed).unwrap(),
             r#"{"type":"","data":null}"#
         );
     }
@@ -104,7 +104,10 @@ mod tests {
         let parsed: PostEmbed = serde_json::from_str(r#"{"type":"","data":null}"#).unwrap();
         assert_eq!(parsed.data, None);
         // ...so re-marshalling drops the key. Go loses it the same way; this is not our bug.
-        assert_eq!(serde_json::to_string(&parsed).unwrap(), r#"{"type":""}"#);
+        assert_eq!(
+            crate::utils::go_json_marshal(&parsed).unwrap(),
+            r#"{"type":""}"#
+        );
     }
 
     #[test]
@@ -112,7 +115,7 @@ mod tests {
         let raw = r#"{"type":"something_new"}"#;
         let parsed: PostEmbed = serde_json::from_str(raw).unwrap();
         assert_eq!(parsed.type_, "something_new");
-        assert_eq!(serde_json::to_string(&parsed).unwrap(), raw);
+        assert_eq!(crate::utils::go_json_marshal(&parsed).unwrap(), raw);
     }
 }
 
@@ -157,7 +160,11 @@ mod go_parity {
             let want = case["roundtrip"].as_str().unwrap();
 
             let parsed: PostEmbed = serde_json::from_str(input).unwrap();
-            assert_eq!(serde_json::to_string(&parsed).unwrap(), want, "case {name}");
+            assert_eq!(
+                crate::utils::go_json_marshal(&parsed).unwrap(),
+                want,
+                "case {name}"
+            );
 
             if input != want {
                 saw_lossy = true;

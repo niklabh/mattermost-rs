@@ -9,6 +9,30 @@ client bug is not.
 
 **Status:** `OPEN` (owed) · `ACCEPTED` (deliberate permanent divergence) · `CLOSED` (paid off).
 
+## Standing decision: reproduce what we can measure, forward what we cannot
+
+Settled 2026-08-17, after four separate entries turned out to be the same question wearing
+different clothes — [D-044] (`shared/markdown`, 4,688 lines), [D-046] (ECDSA and AES-GCM),
+[D-105] (a third-party OpenGraph package) and [D-001] (the IANA subtag registry).
+
+Each is "Go leans on a package we would have to reproduce". The answer depends on **whether the
+dependency's behaviour is measurable from outside**:
+
+- **Measurable and mechanical** — the input space can be enumerated from Go itself and turned
+  into a table or a corpus. Port it. [D-001] is this: `UserLocaleMaxLength` is 5, so the accepted
+  set is finite and generable.
+- **Measurable only by reimplementing the package** — a parser, a renderer, a protocol. **Do not
+  port it; forward the routes that need it to the Go server.** That is what the Strangler Fig is
+  for, and [D-091] already demonstrated that forwarding is a *correctness* tool rather than a
+  stopgap: a handler that cannot do part of its job correctly can decline that part, and the
+  client sees no difference.
+- **Cryptographic** — a third case, because "close enough" fails open rather than loudly. Port
+  it, but only with an oracle recording Go's actual ciphertext, and only with a crate that
+  exposes the raw encoding Go emits.
+
+This is a hobby project with no users ([[licensing-must-not-gate-development]] applies): none of
+these blocks anything, and forwarding costs nothing because unmigrated is already the default.
+
 **Severity:**
 - `blocking` — something downstream cannot be built correctly until this is paid.
 - `divergence` — Rust and Go behave differently on reachable input.
@@ -19,7 +43,8 @@ client bug is not.
 
 ## D-001 · `IsValidLocale` needs the IANA subtag registry
 
-**Status** OPEN · **Severity** blocking · **Raised** 2026-08-13 (phase 1, after `user.go`)
+**Status** CLOSED · **Severity** blocking · **Raised** 2026-08-13 (phase 1, after `user.go`)
+**Closed** 2026-08-17 — the table is generated and verified; see below.
 **Blocks** `User::is_valid`, and any later `IsValid` that validates a locale.
 
 `IsValidLocale` (user.go:1105) delegates to `golang.org/x/text/language.Parse`, which validates
@@ -45,14 +70,38 @@ plus `root`. Generating the exact accepted set is mechanical, not a guess.
 - **(c) Leave unported** — current state.
 
 **Decision** Deferred 2026-08-13 by the project owner: log and revisit. Chose (c) for now.
-**To pay off** enumerate in `reference/dump/`, emit `crates/mm-model/src/locale_generated.rs`,
-then wire `User::is_valid`.
+Revisited 2026-08-17 in the batch resolution above and settled on **(a)**; done the same day.
+
+**Paid off.** `reference/dump/locale_gen.go` emits
+`crates/mm-model/src/locale_generated.rs`, and `is_valid_locale` is ported.
+
+**The enumeration is exhaustive, not sampled.** `UserLocaleMaxLength` is 5, so the reachable input
+space is every string of at most five bytes; over the characters a tag can contain that is
+**81,376,658** strings, and `language.Parse` answers all of them in about eight seconds. 234,421
+are accepted.
+
+**The emitted tables are not that set.** 234,421 strings is too many to ship as a list, so they are
+decomposed into components — 190 two-letter languages, 8,794 three-letter, 327 regions — plus a
+structural rule for `ll<sep>RR`, `root` and private-use `x-…`. The generator then **re-derives all
+81 million answers from the tables** and fails the build if one disagrees. The enumeration is the
+proof, not the payload.
+
+**That step caught a real error immediately.** The first rule missed the registry's
+**grandfathered** tags — `i-ami`, `i-bnn`, `i-hak`, `i-lux`, `i-pwn`, `i-tao`, `i-tay`, `i-tsu`,
+each in both separator spellings — and the verification named all sixteen rather than letting them
+ship. They are now a 16-entry exception table the generator derives from its **own residual**:
+whatever its rule fails to cover becomes the list, so nobody has to know in advance which tags are
+irregular. Note `i-en`, which looks identical in shape, is **not** registered and is correctly
+rejected — which is exactly why guessing the pattern would not have worked.
+
+**Cost:** the generator run grows by about 18 seconds, and `locale_generated.rs` is 1,198 lines.
 
 ---
 
 ## D-002 · `User::is_valid` and `User::pre_save` are not ported
 
-**Status** OPEN · **Severity** blocking · **Raised** 2026-08-13 (phase 1, `user.go`)
+**Status** CLOSED · **Severity** blocking · **Raised** 2026-08-13 (phase 1, `user.go`)
+**Closed** 2026-08-17 — `IsValid` landed; `PreSave` split out into [D-108].
 **Depends on** [D-001], [D-004], [D-005]
 
 `IsValid` (user.go:383) needs `IsValidEmail` (now done), `IsValidLocale` ([D-001]) and
@@ -63,7 +112,24 @@ then wire `User::is_valid`.
 passwords**. Any caller mistaking it for Go's `PreSave` would store plaintext. Rename to
 `pre_save` only when the hasher lands.
 
-**To pay off** close D-001 and D-004, define the hasher trait, port the timezone defaults.
+**Half-unblocked 2026-08-17.** [D-001] is closed and [D-004] was already, so `IsValid`'s three
+dependencies — `IsValidEmail`, `IsValidLocale`, `ValidateCustomStatus` — are all ported and
+`User::is_valid` is now writable. It is 81 lines and 18 error branches, so it wants its own oracle
+and its own session.
+
+`PreSave` is **not** unblocked: it additionally needs a `UserPasswordHasher` and
+`timezones.DefaultUserTimezone()`. Until it lands, `pre_save_partial` keeps its name and the
+warning that goes with it — a caller mistaking it for Go's `PreSave` stores plaintext.
+
+**Paid off, in half.** `User::is_valid` landed 2026-08-17 — 18 branches, all measured, including
+three a reading gets wrong: a **remote user may hold an invalid email** (only the format check is
+skipped, not emptiness or length); the timezone cap counts **runes of Go's marshalled JSON**, so a
+`<` costs six; and `Props` gates the custom-status check by **nil-ness**, so an empty-but-present
+map still validates.
+
+`PreSave` is **not** done and is now [D-108], because its remaining dependencies — a bcrypt hasher
+and the timezone defaults — have nothing to do with `IsValid`'s and deserve their own entry rather
+than keeping a closed one open.
 
 ---
 
@@ -667,6 +733,48 @@ hash iteration order.
 remains the whole of this entry — `serde_json::to_string` still does not escape `<`, `>`, `&`,
 U+2028 or U+2029, and nothing enforces the choice. The `clippy.toml` `disallowed-methods` entry
 is still the recommended fix and is still unwritten.
+
+**Measured 2026-08-17**, after `product_notices.go` shipped a wire test that used
+`serde_json::to_string`, passed every probe in the file, and failed only on the realistic one —
+`Conditions` holds semver ranges like `">=1.2.3"`, which is exactly the shape [D-022] escapes.
+
+The current spread across the crate:
+
+| | |
+|---|---|
+| modules calling `go_json_marshal` | 29 |
+| modules with a byte-exact wire test | 16 |
+| fixtures containing `<`, `>` or `&` | 23 of 132 |
+
+So the habit is largely established, and the exposure is narrower than the "nothing enforces it"
+framing suggests — but it is real, and the failure mode is now demonstrated rather than
+hypothetical: **a wire test whose fixture happens to contain no escapable character passes with
+either marshaller**, and only starts failing when the type's real data grows one.
+
+That matters beyond byte-comparison because `Post::is_valid` measures its length caps against
+Go's JSON, where each escaped character is six bytes instead of one.
+
+**Swept 2026-08-17.** Eleven modules had a byte-exact wire test and did not reference
+`go_json_marshal` at all — `audit_record`, `bot`, `channel`, `file_info`, `oauth`, `oauth_dcr`,
+`post_acknowledgement`, `post_embed`, `post_metadata`, `team_member`, `wrangler`. **37 call sites**
+were switched to the correct marshaller and every test still passed, which is the point: they were
+passing because their probes happened to contain no escapable character, and each was one data
+change away from being wrong.
+
+**The enforcement idea does not survive contact.** A source lint of the form "a file comparing
+against a fixture's `json` field must not use `serde_json::to_string`" produces false positives
+that are all legitimate: `analytics_row` asserts serde's float rendering precisely *because* it
+differs from Go's, `post_list` checks a default's shape with `contains`, `custom_status` mentions
+the function only in a doc comment. Nine files trip that rule and none of them is wrong.
+
+Nor does the stronger version work: walking every fixture and re-marshalling it would need a
+fixture-name-to-Rust-type registry, i.e. a second copy of the mapping the `#[test]`s already
+encode, which would rot separately.
+
+**Status stays OPEN, with the scope narrowed to what is actually left:** the *known* instances are
+fixed, and no mechanical guard is available. The practical defence is the habit plus this entry —
+when adding a byte-exact wire test, use `go_json_marshal`, and treat a fixture with no `<`, `>` or
+`&` in it as evidence of nothing.
 
 ---
 
@@ -1422,7 +1530,7 @@ round-trip fixtures are all **complete** objects, which is precisely why this su
 
 ## D-044 · The `mmaction://` id scan needs `shared/markdown`
 
-**Status** OPEN · **Severity** blocking · **Raised** 2026-08-14 (phase 1, `post_interactive_blocks.go`)
+**Status** ACCEPTED · **Severity** blocking · **Raised** 2026-08-14 (phase 1, `post_interactive_blocks.go`)
 **Blocks** [D-042] (`propsIsValid`), and with it `ValidateMmBlocksActions`,
 `RefreshInteractiveActionsOnPost` and the interactive-webhook path.
 
@@ -2330,7 +2438,8 @@ Two smaller pieces of the same divergence are in the same enum arm: a `scheduled
 
 ## D-069 · A generator run rewrites `behaviour_utils.json` when the host's timezone differs
 
-**Status** OPEN · **Severity** unverified · **Raised** 2026-08-16 (phase 1, `scheduled_post_recurrence.go`)
+**Status** CLOSED · **Severity** unverified · **Raised** 2026-08-16 (phase 1, `scheduled_post_recurrence.go`)
+**Closed** 2026-08-17 — the generator now pins the zone itself; see below.
 **Related** [D-032] (the rule this weakens), [D-008] (the Go behaviour underneath it)
 
 `behaviourDayBounds` records `GetStartOfDayMillis`/`GetEndOfDayMillis`, which read the calendar
@@ -2643,3 +2752,1040 @@ break cache invalidation with nothing failing.
 `the_etag_matches_go` pins both properties against Go's own answers, including the ascending and
 unsorted cases, and asserts the etag does **not** track the maximum — so if upstream ever changes
 the function to scan, the test fails rather than silently agreeing.
+
+---
+
+## D-077 · `Session.TeamMembers` is not populated
+
+**Status** CLOSED · **Severity** incomplete · **Raised** 2026-08-17 (phase 2, `session_store.go`)
+**Closed** 2026-08-17 by porting `TeamStore::GetTeamsForUser` and its scheme-roles machinery.
+**Blocked** anything that reads `Session.TeamMembers` — team-scoped permission checks above all.
+
+Go's `SqlSessionStore.Get` (session_store.go:111) does two queries, not one: after loading the
+session it calls `Team().GetTeamsForUser(...)` and keeps the members whose `DeleteAt == 0`.
+
+Ours does the first query only and leaves `team_members` at `None`. The second needs the
+scheme-roles join, which is a store method in its own right and would have doubled the slice.
+
+**Why it is safe for the vertical slice and not in general.** The slice uses the session to
+authenticate — `user_id` and expiry — and `/users/me` never reads team membership. The first
+team-scoped route ported will read it, and an empty list is indistinguishable from "member of no
+teams", so the failure is a **silent** permission denial rather than an error.
+
+**Paid off** in `mm-store/src/team_store.rs`. The wrapper was three lines; the content was
+`getTeamRoles` (team_store.go:100), which computes a member's **effective** roles from three
+booleans on `TeamMembers`, three nullable role names on the team's scheme, and whatever is
+already sitting in the `Roles` column.
+
+**The branch that would have been got wrong by reading:** a scheme role id found in the `Roles`
+column sets its flag *even when the column says false*, and is then excluded from
+`ExplicitRoles`. That is the un-migrated case, and it is invisible in the common data — every row
+in a fresh install has an empty `Roles` column, so a port that ignored the rule would pass every
+casual test and silently mis-grant team admin on any pre-migration row.
+
+**Verified against the running Go server, not reasoned.** `getTeamRoles` is unexported, so the
+usual `reference/dump` oracle cannot call it. Instead the row was mutated in the shared database
+and both servers asked the same question — Go through `GET /api/v4/users/me/teams/members`, ours
+through `SessionStore::get`. Six shapes, all matching:
+
+| `Roles` column | guest / user / admin | both servers answer |
+|---|---|---|
+| `` | f / t / t | `team_user team_admin`, explicit `` |
+| `team_admin custom_role` | t / t / **f** | `custom_role team_guest team_user team_admin`, explicit `custom_role` |
+| `custom_a custom_b` | f / f / f | `custom_a custom_b`, explicit both |
+| `team_guest` | f / f / f | `team_guest`, explicit `` |
+| `team_user team_admin team_guest` | f / f / f | all three implied, explicit `` |
+| `zzz_role team_user` | t / f / t | `zzz_role team_guest team_user team_admin` |
+
+The second row is the un-migrated case: `scheme_admin` comes back **true** from both servers
+although the column said false. `crates/mm-api/tests/parity_session_team_members.rs` keeps the
+comparison as a standing test.
+
+**One branch remains unverified against Go, deliberately.** The scheme-*derived* role names —
+where `Teams.SchemeId` is set and the implied role is the scheme's `DefaultTeamUserRole` rather
+than the constant — cannot be exercised here: `Schemes` is an enterprise feature, the table is
+empty on Team Edition, and creating a scheme needs a licence. Those branches are covered by unit
+tests transcribed from the Go source and are **provisional** in exactly the sense `CLAUDE.md`
+describes. The join is a `LEFT JOIN` precisely so the unset case still returns the member.
+
+---
+
+## D-078 · Nullable session columns default here and would fail a scan in Go
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-17 (phase 2, `session_store.go`)
+
+`Sessions` declares `NOT NULL` on `Id` and `VoipDeviceId` only. Go scans the rest into
+non-pointer struct fields, so an actual `NULL` in, say, `Roles` is a scan error and the request
+fails. We take the `Option` sqlx infers and `unwrap_or_default()`, so the same row yields an
+empty string and the request succeeds.
+
+**Accepted** because the divergence is strictly more permissive and cannot invent a wrong
+non-empty value: `NULL` becomes `""`, which is what the column means in practice. Mattermost's
+own writes never produce these NULLs, so the divergence is only reachable via a row some other
+tool wrote. Reproducing Go's failure would mean rejecting a request over a column the handler
+does not read.
+
+Revisit if a column is ever added where `NULL` and `""` mean different things.
+
+---
+
+## D-079 · The session token is redacted from errors, where Go interpolates it
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-17 (phase 2, `session_store.go`)
+
+Two places where Go puts a live credential into a string that reaches logs:
+
+- `store.NewErrNotFound("Session", fmt.Sprintf("sessionIdOrToken=%s", ...))` (session_store.go:107)
+- `model.NewAppError(..., map[string]any{"Token": token, ...})` (app/session.go:96, :115)
+
+Both are reproduced with the token replaced by `<redacted>` / omitted. The error **id**, status
+code and detail string are unchanged, so nothing a client sees differs — `AppError.params` is
+`json:"-"` and never serialised.
+
+**Accepted deliberately, and it is the one place this port is intentionally not bug-compatible.**
+The miss path runs on every request with a bad token, which is exactly the path most likely to be
+high-volume in a log aggregator. A test in `session_store.rs` asserts the token does not appear.
+
+---
+
+## D-080 · The etag's version component tracks the pinned SHA, not the peer server
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-17 (phase 2, `/users/me`)
+
+`User.Etag` prefixes `model.CurrentVersion`. Ours is the pinned tree's `11.11.0`; the development
+container runs the `latest` image, `11.10.0`. So the two servers issue different etags for a
+byte-identical user, measured:
+
+```
+go   11.10.0.y9i4er48tt8bukijy7i3u5y9ar.1786973424207..0.true.true.0
+rust 11.11.0.y9i4er48tt8bukijy7i3u5y9ar.1786973424207..0.true.true.0
+```
+
+**Accepted** because it is an environment mismatch, not a port bug: a Go server built from the
+pinned SHA agrees. The consequence during a mixed deployment is a cache miss — a client holding
+Go's etag revalidates against us and gets a 200 instead of a 304 — never a wrong body.
+
+The parity test strips the version (**three** dot-separated components, not one) and compares the
+rest, and separately asserts our prefix is `CURRENT_VERSION` so the exemption cannot widen.
+
+---
+
+## D-081 · Two token locations are not parsed
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-08-17 (phase 2, `authentication.go`)
+
+`ParseAuthTokenFromRequest` reads six locations. Four are ported — cookie, `Bearer`, `token`,
+`?access_token=`. Two are not: `X-Cloud-Token` (`TokenLocationCloudHeader`) and the
+remote-cluster token header.
+
+Neither is reachable by a normal client, and both authenticate a *different kind* of principal
+than a session — mishandling them is worse than not handling them. A request carrying only one
+of these gets 401 here and would be served by Go.
+
+**To pay off** port them with the principal types they imply, not as extra token strings.
+
+---
+
+## D-082 · `/users/me` skips the permission check because its target is always self
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-17 (phase 2, `api4/user.go`)
+**Blocks** — read this before adding `GET /users/{user_id}`.
+
+Go's `getUser` calls `UserCanSeeOtherUser(session.UserId, params.UserId)` before anything else.
+The migrated route resolves `me` only, so the target is the session's own user and the check is
+`true` by construction.
+
+**Accepted for this route and dangerous to generalise.** `getUser` is one handler serving both
+`/users/me` and `/users/{id}`; wiring the second path to this function without adding the check
+would let any authenticated user read any other user's profile. The handler's doc comment says
+so at the call site, which is where someone adding the route will be looking.
+
+---
+
+## D-083 · The terms-of-service fields are always zero
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-08-17 (phase 2, `api4/user.go`)
+
+`getUser` fetches `GetUserTermsOfService(user.Id)` when the viewer is the user or an admin and
+copies `TermsOfServiceId` / `TermsOfServiceCreateAt` onto the response (user.go:329-337). The
+`UserTermsOfService` store is not ported, so both stay zero.
+
+Invisible on a server with no ToS policy configured — which is why the parity test passes — and
+wrong on one that has: the webapp uses these fields to decide whether to show the acceptance
+gate, so a user who has accepted would be asked again. They also feed `User.Etag`, so the etag
+is wrong too.
+
+**To pay off** port `UserTermsOfServiceStore.GetByUser` and the 404-is-not-an-error branch.
+
+---
+
+## D-084 · `UpdateLastActivityAtIfNeeded` is not called on the read path
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-08-17 (phase 2, `api4/user.go`)
+
+Go's `getUser` ends with `UpdateLastActivityAtIfNeeded(session)` — a **write** on a GET, which is
+how session idle timeouts stay accurate. Ours does not.
+
+Consequence while both servers run: a user whose traffic is served by the migrated route stops
+refreshing `Sessions.LastActivityAt`, so a Go server enforcing `SessionIdleTimeoutInMinutes` may
+revoke a session belonging to an active user. Goes together with [D-088]'s idle-timeout check —
+one writes the value, the other reads it, and porting either alone is worse than neither.
+
+**To pay off** port it with the session cache, since Go's "if needed" is a cache-backed
+throttle rather than an unconditional write.
+
+---
+
+## D-085 · Privacy settings are hardcoded to Go's defaults
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-08-17 (phase 2, `mm-api`)
+**Depends on** config being ported (`model/config.go`, out of scope for hand-translation).
+
+`getUser` reads `PrivacySettings.ShowFullName` and `ShowEmailAddress` and passes both to
+`User.Etag`. `AppState` carries `true`/`true` — Go's defaults — as named constants.
+
+An admin who turns either off gets a wrong etag from us and the correct one from Go. The
+response **body** is unaffected on this route, because the self case calls `Sanitize` with an
+empty map and that strips nothing (see the note in `users.rs`); a route serving *other* users
+would have a wrong body too.
+
+**To pay off** load config. The fields are two booleans, so this is a config-plumbing task rather
+than a translation one.
+
+---
+
+## D-086 · `json.NewEncoder.Encode` appends a newline and `json.Marshal` does not
+
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-08-17 (phase 2, `/users/me`)
+**Closed** 2026-08-17, same session.
+
+The first cross-server byte comparison differed by exactly one byte in 721: Go's body ended
+`...false}\n` and ours ended `...false}`. Go's api4 handlers write with
+`json.NewEncoder(w).Encode(v)` (user.go:353), which appends `\n`; `json.Marshal` does not.
+
+Everything else matched on the first attempt — every field, every value and the **key order**,
+which serde reproduces from the struct's field order.
+
+**Closed** by pushing `b'\n'` in the handler. Recorded rather than just fixed because it is a
+property of the *call site*, not the type: every handler ported from an `Encode` call owes the
+newline, and every one ported from a `Marshal` call must not add it. `post.rs::encode_json`
+already had this right for the same reason — this is the second instance, so it is a pattern.
+
+---
+
+## D-087 · The Go server serves `/users/me` from a stale user cache
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-17 (phase 2, cross-server parity)
+**Decided** 2026-08-17 — see **Decision** below. **Constrains every write route from here on.**
+
+Measured, and the most consequential thing this slice turned up.
+
+A login bumps `Users.UpdateAt`. The Go server answers `/users/me` from an in-memory user cache
+that the login does not invalidate, so it keeps serving the pre-login row. We read through to the
+database and return the current one. At the same instant:
+
+```
+psql   updateat = 1786974497630
+go     update_at = 1786974491337     <- 6.3 s stale
+rust   update_at = 1786974497630     <- the row
+```
+
+It does not converge: fifteen seconds of polling did not change it.
+
+**We are the correct one.** That is the uncomfortable part — the divergence cannot be fixed by
+making our answer match Go's, because Go's answer does not match its own database.
+
+**Why it matters beyond this field.** The Strangler Fig assumes two servers over one database.
+It does *not* automatically give them one cache. Every read Go caches is a read where the two
+servers can disagree, and every write we make is a write Go's cache will not hear about. Go
+invalidates its caches through the cluster message bus; we publish nothing to it.
+
+**Options as first written**
+- **(a) Join the cluster bus** and publish invalidations. Correct and the largest.
+- **(b) Read-through only, never cache** on the Rust side, and accept that Go serves stale data
+  for keys we write. Cheapest; leaves the divergence in place in one direction.
+- **(c) Migrate a cached entity's reads and writes together**, so no entity is half-owned.
+  Constrains route ordering rather than requiring new machinery.
+
+---
+
+### Decision (2026-08-17): **(b), extended — read in Rust, write through Go**
+
+Two of the three options turned out to be unavailable, and the third turned out to be
+insufficient as written. All three findings are measured.
+
+**(a) is licensed away.** Invalidation is published through `ps.clusterIFace`
+(`app/platform/web_hub.go:238`), an `einterfaces.ClusterInterface`. `einterfaces/` is the
+enterprise interface surface and the only implementations live in `enterprise/`, which
+`MIGRATION.md` already lists as permanently out of scope. Implementing it would mean
+reimplementing a licensed component and speaking an internal, unstable message format.
+
+**The elegant alternative is licensed away too, and this is the part worth recording.** Setting
+`CacheSettings.CacheType = redis` moves the cache out of process, keys it `{cacheName}:{key}`
+(`cache/redis.go:83`), and — because the client uses rueidis client-side tracking with a
+five-minute TTL — deleting a key would invalidate the Go server's local copy as well. Better
+still, *invalidating* needs only the key name, never the value encoding, so it would have
+sidestepped the msgpack codecs entirely. It does not work:
+
+```
+{"msg":"Successfully connected to cache backend","backend":"redis","result":"PONG"}
+Error: failed to initialize platform: Redis cannot be used in an instance without a
+license or a license without clustering
+```
+
+**It is the Go server that refuses to boot, not Redis.** Redis starts fine, passes its own
+healthcheck and answers the `PONG` in the line above; Mattermost then rejects its own
+configuration at `channels/app/platform/service.go:380` and exits. Their comment there calls the
+check "a hack" — the licence cannot be loaded before the store, and the store cannot be loaded
+before the cache, so the Redis client is already connected by the time anything can veto it.
+
+**There is an escape hatch, and it is not reachable from configuration.** The same condition ends
+`&& !ps.forceEnableRedis`, set by the `ForceEnableRedis()` functional option
+(`platform/options.go:139`). Its only caller in the tree is the test harness
+(`api4/apitestlib.go:133`). So it is a **build-time** switch, not an env var or a config key: a
+stock `mattermost/mattermost-team-edition` image cannot be talked into it, but a server built
+from the pinned source with that option wired in can.
+
+So the honest statement is narrower than "no channel exists": **no channel exists on a stock
+binary.** Building the Go server from source unlocks Redis cache mode, and with it external
+invalidation by `DEL` on `{cacheName}:{key}` — which needs only key names, never the msgpack
+value encoding. That is a real option for a project that already keeps the Go source pinned; it
+costs a source build of the Go server in the development stack, and it is not needed until
+stale-on-write actually bites.
+
+**(c) was insufficient.** Migrating an entity's *routes* does not give us the entity: the Go
+server reads users internally for its own permission checks and webhook paths, straight from its
+own cache, regardless of which server owns the HTTP route. Route-level ownership is not
+read-level ownership.
+
+**What was chosen.** Three standing rules:
+
+1. **The Rust side never caches.** Every read goes through to Postgres. This removes one
+   direction of the problem completely and costs nothing at migration-era traffic — and it is
+   why we were the *correct* server in the measurement above, not merely a different one.
+2. **Read routes migrate freely.** We are always at least as fresh as Go, never staler.
+3. **Write routes migrate freely too — with a known consequence, not a gate.** A write we make
+   to an entity Go caches is invisible to Go until its cache entry expires. That is *staleness,
+   not corruption*: the row is correct, Postgres is consistent, and Go catches up on TTL. Port
+   the write when you want the write ported, and expect a stale read from the Go side in the
+   meantime.
+
+**Calibration, corrected 2026-08-17.** This entry first stated rule 3 as "a write route stays
+proxied to Go", making cache coherence a precondition for migrating any write. That was
+over-engineering: it converted a bounded staleness window into a hard block on development, for
+a project with no users and no uptime commitment. The blocking version would have made writes
+the *last* thing to migrate; the corrected version makes them schedulable like anything else.
+Tighten it again only when there are real users, and then per-entity — the entities where a
+stale Go read actually matters (sessions, permissions) rather than all of them.
+
+**If a clean answer is wanted later**, there are two levers, and the cheap one needs no licence:
+build the Go server from the pinned source with `ForceEnableRedis()`, or run a licence with
+clustering. Either permits Redis cache mode, at which point the Rust side can `DEL` the key after
+writing and the staleness window closes. Worth knowing both exist; neither is worth blocking on.
+
+**Bonus finding — this closes an open question.** The cache values are msgpack, encoded by the
+generated `user_serial_gen.go` (1,343 lines) and `session_serial_gen.go` (937). Since we never
+populate Go's cache under this decision, those 2,280 lines are confirmed **out of scope** rather
+than merely deprioritised. Under the Redis option we would have needed only key names, and under
+the chosen option we do not touch the cache at all — so there is no path on which they are
+required.
+
+**In the meantime** the parity test normalises `update_at` out of the byte comparison, asserts
+everything else matches exactly, and then checks our value against the row — so the exemption
+proves us right rather than hiding a difference.
+
+---
+
+## D-088 · The session idle timeout is not enforced
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-08-17 (phase 2, `app/session.go`)
+
+`GetSession` revokes a session when `ServiceSettings.SessionIdleTimeoutInMinutes > 0` and the
+session is not OAuth, not a mobile app, not a user access token, and
+`ExtendSessionLengthWithActivity` is off (session.go:118-137). Ours checks expiry only.
+
+So a session idle past the configured timeout authenticates against the migrated route and is
+revoked by Go. Needs config ([D-085]) and the revoke path; pairs with [D-084], which is the
+write that keeps `LastActivityAt` accurate in the first place.
+
+**To pay off** with config, and with [D-084] in the same change — porting the check without the
+write would revoke sessions that are in fact active.
+
+---
+
+## D-089 · A write served here publishes no WebSocket event
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-17 (phase 2, first write route)
+**Affects** every write route from here on.
+
+Go's write paths end with `a.Publish(message)` — `UpdatePreferences` publishes
+`sidebar_category_updated` and `preferences_changed` (app/preference.go:66-76). `Publish` writes
+to the **in-process** hub and, when `clusterIFace` is set, to the cluster bus. We are a separate
+process with no cluster, so a write served by Rust reaches the database and reaches no connected
+client.
+
+The user-visible effect: a browser tab open against the Go server does not learn that its
+preferences changed, and shows stale state until something else forces a refetch. Unlike
+[D-087], which is a bounded staleness window on a cached read, this one does not self-heal —
+there is no TTL on "an event that was never sent".
+
+**Not measured.** No WebSocket client was available in the environment to observe it, so this
+entry is reasoned from `Publish`'s implementation rather than demonstrated, and is **provisional**
+in the sense `CLAUDE.md` describes. The reasoning is strong — the hub is in-process and the
+cluster bus is the enterprise component [D-087] already established we cannot reach — but it has
+not been watched happening.
+
+**To pay off**, one of:
+- **(a) Build `mm-ws`** and have clients connect to *it* rather than to Go. Correct, and it is
+  phase 5 of the plan anyway. Large.
+- **(b) Have Rust writes go through Go's API** rather than the database, so Go publishes. Costs
+  the latency of a second hop and makes the migrated route a proxy with extra steps.
+- **(c) Accept it.** For a project with no users, a missed live update is invisible; a developer
+  reloads the page. This is the current position, consistent with [D-087]'s calibration.
+
+---
+
+## D-090 · `PreferenceStore::save` clones each preference where Go mutates the caller's
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-17 (phase 2, `preference_store.go`)
+
+Go's `saveTx` calls `preference.PreUpdate()` on a value it received by pointer, so the caller's
+`model.Preferences` is normalised in place as a side effect of saving. Ours takes `&Preferences`
+and clones each entry before `pre_update`.
+
+**Accepted** because no caller in the ported tree reads the normalised form back — `Save` returns
+only an error, and the handler discards the batch afterwards. The clone is per preference in a
+batch capped at 100, so the cost is bounded and small.
+
+Revisit if a caller ever needs the post-`PreUpdate` values, which would make the difference
+observable rather than merely present.
+
+---
+
+## D-091 · Sidebar categories are not updated when preferences change
+
+**Status** CLOSED · **Severity** incomplete · **Raised** 2026-08-17 (phase 2, `app/preference.go`)
+**Closed** 2026-08-17, same session — by forwarding rather than by porting.
+
+`UpdatePreferences` calls `Store().Channel().UpdateSidebarChannelsByPreferences(preferences)`
+(preference.go:62) — Go keeps sidebar categories in step with the `direct_channel_show` and
+`group_channel_show` preferences, which is how showing or hiding a DM moves it in the sidebar.
+The channel store is not ported, so we skip it.
+
+Consequence: a client that changes DM or GM visibility **through the migrated route** gets a
+preference row that is right and a sidebar that does not follow. Unlike the missing WebSocket
+event ([D-089]), this one is a persisted inconsistency rather than a missed notification — a
+reload does not fix it.
+
+Narrow but sharp: only those two preference categories are affected, and only through our route.
+
+**Closed** by taking exactly that option: `direct_channel_show` and `group_channel_show` joined
+`flagged_post` in `FORWARDED_CATEGORIES`, so a batch touching either goes to the Go server, which
+runs the sidebar sync itself. Nothing was ported and the inconsistency is gone.
+
+Worth noting the shape of the fix, because it generalises: **forwarding is a correctness tool, not
+only a stopgap.** A handler that cannot do part of its job correctly can decline that part rather
+than approximate it, and the client sees no difference. Porting
+`ChannelStore::UpdateSidebarChannelsByPreferences` later would let these categories be served
+here, but nothing is broken until then.
+
+---
+
+## D-092 · Error messages are untranslated ids where Go sends prose
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-17 (phase 2, first error compared)
+**Affects** every error body this server produces.
+
+Go turns an `AppError` into a response in `web.Handler.ServeHTTP` (handlers.go:424-455), and
+three steps happen *there* rather than in the handler. Measured side by side on a 403:
+
+| field | Go | ours |
+|---|---|---|
+| `id` | `api.preference.update_preferences.set.app_error` | **same** |
+| `status_code` | 403 | **same** |
+| `detailed_error` | `""` | `""` — now **same**, see below |
+| `request_id` | populated | populated — now **same** |
+| `message` | `Unable to set user preferences.` | `api.preference.update_preferences.set.app_error` |
+
+Two of the three were closed the moment they were measured, in `ApiError::into_response`:
+
+- **`WipeDetailed`.** Go blanks `detailed_error` unless `ServiceSettings.EnableDeveloper` is on,
+  and it defaults to **off** — so the default is to wipe. Skipping it leaked internal detail Go
+  withholds; ours had been sending `userId=..., preference.UserId=...` to the client.
+- **`RequestId`.** Set on every error. Ours omitted the key entirely (`omitempty`), so the shapes
+  differed as well as the values.
+
+What remains is `Translate`, which needs the i18n bundle — the same dependency
+`post_deletion_report.go` is blocked on. Until then our `message` equals our `id`, which is
+exactly what an unconfigured Go server emits before `AppErrorInit` runs, so it is the same
+degradation rather than a novel one.
+
+**To pay off** port the i18n bundle loader and `AppError::Translate`. Worth noting the webapp
+branches on `id`, not `message`, so the practical impact is on humans reading errors.
+
+---
+
+## D-093 · A migrated method silently breaks the other methods on its path
+
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-08-17 (phase 2, first write route)
+**Closed** 2026-08-17, same session, by `partially_migrated` in `mm-api/src/lib.rs`.
+
+axum matches the **path** before the method. Registering
+`PUT /api/v4/users/me/preferences` therefore made `GET` on that same path return **405 from our
+own router**, instead of falling through to `Router::fallback` and reaching the Go server. A route
+that had been working, and that we had not touched, broke because a *different* method beside it
+was migrated.
+
+This is the Strangler Fig's sharpest edge so far, because the failure is silent and does not
+resemble its cause: the symptom was an empty response body in a parity test, not a routing error.
+It will recur on every path where methods are migrated one at a time — which is most of them,
+since `/users/{id}` alone carries GET, PUT, POST and DELETE across different handlers.
+
+**Closed** by routing every migrated path through `partially_migrated`, which attaches
+`MethodRouter::fallback(forward_to_go)` so unmigrated methods are proxied rather than rejected.
+Registering a route directly is now the thing to avoid, and
+`an_unmigrated_method_on_a_migrated_path_still_reaches_go` fails if it happens.
+
+---
+
+## D-094 · The permission system now gates almost every remaining route
+
+**Status** OPEN · **Severity** blocking · **Raised** 2026-08-17 (phase 2, after four routes)
+**Blocks** most of api4.
+
+The self-scoped routes are nearly exhausted, and what is left runs into one wall. Measured across
+`channels/api4/`:
+
+| | |
+|---|---|
+| handlers (`func x(c *Context, ...)`) | 687 |
+| `SessionHasPermission*` call sites | **674** |
+| files containing at least one | 59 |
+
+The four migrated routes are the exception rather than a sample: each is `me`-scoped, and Go's
+checks short-circuit for self — `SessionHasPermissionToUser` returns true when
+`session.UserId == userID` (authorization.go:258), `UserCanSeeOtherUser` when
+`userID == otherUserId` (user.go:2711). That is why they were portable, and it does not extend.
+
+**Two shapes of blocker, and the difference matters.**
+
+*Escapable* — the check guards something that cannot act on this route.
+`GET /users/me/teams/members` gates `SanitizeRoleData` behind
+`SessionHasPermissionToTeam(..., PermissionManageTeamRoles)`, but that sanitiser is a no-op when
+`o.UserId == currentUserId` (team_member.go:147) and the route returns the caller's own
+memberships. The guard cannot change the output, so the route is portable and the sanitiser is
+simply called unconditionally. Migrated on that basis, and verified byte-identical against Go.
+
+*Not escapable* — the check decides what is in the response. `GET /users/me/teams` gates
+`SanitizeTeam`, which strips `email` and `invite_id` unless the caller holds `PermissionManageTeam`
+and `PermissionInviteUser` respectively (app/team.go:2303). There is no self-shortcut: a user can
+be in a team without either permission. Serving it without the check would **leak an invite id**,
+which is enough to join the team. Not migrated; forwarding, with a test asserting it stays
+forwarded.
+
+**So the next substantial step is the permission system itself, not another route.** What it needs:
+- `model/permission.go` (2,789 lines) — already out of scope for hand-translation; **generate** it.
+- `model/role.go` (1,311 lines) — the role definitions and their permission sets.
+- The scheme-roles resolution already ported in `mm-store/src/team_store.rs` is the same shape one
+  layer down, so the groundwork is not zero.
+
+**Until then**, the honest options are: forward anything permission-gated (correct, and free), or
+keep porting `mm-model` files, of which 141 remain. Neither is blocked.
+
+---
+
+## D-095 · `Bot::patch` cannot reproduce Go's nil-patch panic
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-17 (phase 1, `bot.go`)
+
+`(*Bot).Patch` takes `*BotPatch` and dereferences each field without a nil check (bot.go:143), so
+`bot.Patch(nil)` panics. The oracle probes it and records `panics: true`.
+
+Ours takes `&BotPatch`, which makes the state unrepresentable — there is no value to pass that
+would panic. `WouldPatch` is the opposite case and *is* faithful: Go guards nil there explicitly
+and answers `false`, so the port takes `Option<&BotPatch>` and reproduces that.
+
+**Accepted** because the difference is a consequence of the type system rather than a choice: the
+only way to reproduce the panic would be to take an `Option` and then `unwrap` it, which
+`CLAUDE.md` forbids in library code and which would be worse code for an unreachable state. The
+asymmetry between the two methods is Go's, and it is preserved in the signatures.
+
+Same shape as the panics accepted in [D-052] and [D-058].
+
+---
+
+## D-096 · Two upstream bugs in `bot.go` are reproduced deliberately
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-17 (phase 1, `bot.go`)
+
+Both confirmed against Go by `fixtures/behaviour_bot.json`, not read out of the source.
+
+**`IsValidCreate` reports the wrong error id for a long display name.** The branch checking
+`DisplayName` against `BotDisplayNameMaxRunes` returns `model.bot.is_valid.user_id.app_error`
+(bot.go:93) — a copy-paste of the line above it. There is no
+`model.bot.is_valid.display_name.app_error` anywhere in the tree. Measured:
+
+```
+display_name_too_long  -> model.bot.is_valid.user_id.app_error
+description_too_long   -> model.bot.is_valid.description.app_error
+```
+
+Reachable from any bot-creation form, and a client branching on the id would get a different
+answer from the two servers if we "fixed" it. The parity test asserts the wrong id explicitly, so
+removing the bug from the port fails loudly rather than silently diverging.
+
+**`BotList.Etag`'s third component is always zero.** `var delta int64` is declared, never
+assigned, and passed to `Etag` (bot.go:200), so every bot-list etag carries a literal `0` there.
+It reads as a leftover from a version that computed something. Kept, with the variable and its
+name, so a future reader who deletes the "unused" binding fails a test.
+
+Related: `id` starts as the **string** `"0"` rather than empty, so an empty list etags as
+`11.11.0.0.0.0.0` and a list whose every `UpdateAt` is zero keeps `"0"` as its id — the same trap
+`Audits::etag` carries ([D-076]).
+
+---
+
+## D-097 · `AuditRecord::add_meta` records where Go panics
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-17 (phase 1, `audit_record.go`)
+
+Every `AddEventParameter*` function lazily creates its map:
+
+```go
+if rec.EventData.Parameters == nil {
+    rec.EventData.Parameters = make(map[string]any)
+}
+```
+
+`AddMeta` does not — its whole body is `rec.Meta[name] = val` (audit_record.go:130). `Meta` has
+no constructor anywhere in the file, so calling it on a zero-valued record assigns to a nil map
+and **panics**. Measured side by side:
+
+| call on a zero record | Go panics |
+|---|---|
+| `AddEventParameterToAuditRec` | no |
+| `AddEventParameterAuditableToAuditRec` | no |
+| `AddEventParameterAuditableArrayToAuditRec` | no |
+| `AddEventPriorState` | no |
+| **`AddMeta`** | **yes** |
+
+Ours creates the map, matching what the siblings do.
+
+**Accepted**, for three reasons. `CLAUDE.md` forbids a panic in library code. The divergence is in
+the safe direction — Go's panic surfaces as a 500 and *loses the audit record it was building*,
+where ours records the entry. And the asymmetry reads as an oversight rather than a decision: the
+four functions around it all guard, and nothing in the file explains why this one does not.
+
+The parity test asserts Go's answer for all six probes, so if upstream adds the nil check this
+stops being a divergence and the test says so.
+
+---
+
+## D-098 · `add_event_parameter` accepts a wider set than Go's generic constraint
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-17 (phase 1, `audit_record.go`)
+
+Go constrains the parameter helper to six types:
+
+```go
+func AddEventParameterToAuditRec[T string | bool | int | int64 | []string | map[string]string](...)
+```
+
+Ours takes `impl Into<serde_json::Value>`, which is strictly wider — a float or a nested object
+would compile here and not there.
+
+**Accepted** because it cannot produce a different result for any value Go accepts: each of the
+six lands in a `map[string]any` and marshals as its own JSON type on both sides, and the parity
+test drives all six. Reproducing the constraint exactly would mean a six-variant enum at every
+call site, which buys a compile error for a case no caller in the tree writes.
+
+Revisit if an audit consumer ever depends on the parameter map's value types being drawn from
+that closed set.
+
+---
+
+## D-099 · `oauth.go`'s two client-registration functions are unported
+
+**Status** CLOSED · **Severity** incomplete · **Raised** 2026-08-17 (phase 1, `oauth.go`)
+**Closed** 2026-08-17, same day, by porting `oauth_dcr.go`.
+**Depended on** `model/oauth_dcr.go` (254 lines), now ported.
+
+`NewOAuthAppFromClientRegistration` (oauth.go:224) and `(*OAuthApp).ToClientRegistrationResponse`
+(oauth.go:252) are the OAuth 2.0 Dynamic Client Registration surface. Both take or return types
+that live in `oauth_dcr.go` — `ClientRegistrationRequest`, `ClientRegistrationResponse` — plus
+`GetDefaultGrantTypes()` and `GetDefaultResponseTypes()` from the same file.
+
+Everything else in `oauth.go` is ported, including the five constants those functions consume,
+which are borrowed from `access.go` and `oauth_metadata.go` and pinned by the oracle.
+
+**Worth noting before porting them:** `NewOAuthAppFromClientRegistration` mints a client secret
+with `NewId()` when the requested auth method is not `none`, which is the *only* place in the
+file that creates a secret — `PreSave` explicitly does not. So the public/confidential decision is
+made at registration and nowhere else.
+
+**Paid off** exactly that way. Two findings came with them, both measured:
+
+**`NewOAuthAppFromClientRegistration` does not re-validate.** The secret is minted when the
+requested auth method is `!= none`, not when it is `== client_secret_post` — so a
+`client_secret_basic` request, which `ClientRegistrationRequest.IsValid` **rejects**, still gets a
+confidential client if it reaches this function. Callers must validate first, and the port says so
+at the call site. A nil auth method defaults to confidential.
+
+**`ToClientRegistrationResponse` takes a `siteURL` it never reads.** Confirmed by calling with two
+different values and comparing the marshalled results, which are identical. The parameter is kept
+so the signature matches Go's, with a doc comment explaining that it does nothing.
+
+---
+
+## D-100 · Two upstream oddities in `oauth.go` are reproduced deliberately
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-17 (phase 1, `oauth.go`)
+
+Both measured against Go, not read.
+
+**The callback-URL cap measures Go's slice formatting.**
+
+```go
+if len(a.CallbackUrls) == 0 || len(fmt.Sprintf("%s", a.CallbackUrls)) > 1024 {
+```
+
+`%s` on a `[]string` renders `[first second third]`, so the 1024 limit applies to that string —
+the sum of the entries **plus one separator between each plus two brackets**. Measured: one
+28-byte URL renders to 30; two 24-byte URLs render to 51, not 48. A port summing the entries
+accepts payloads Go rejects at the boundary. Reproduced by `go_format_string_slice`, which is
+tested against Go's rendering for seven corpora — including that `["a b"]` and `["a", "b"]` are
+indistinguishable, so the format is not a parseable encoding.
+
+**`Name` is capped in bytes and `Description` in runes, in the same function.** `len(a.Name) > 64`
+against `utf8.RuneCountInString(a.Description) > 512`; every other cap in the function — client
+secret 128, homepage 256, icon URL 512, app id 32 — is `len`. Measured: a 33-character name of
+two-byte runes (66 bytes) is **rejected**, a 512-character description of two-byte runes (1024
+bytes) is **accepted**. A test asserts that pair on its own so it cannot be lost in the corpus.
+
+**And a third, smaller one:** `Auditable` emits `"callback_urls:"` — with a trailing colon
+(oauth.go:68). Audit consumers read that key, so correcting it would make the two servers write
+different audit records for the same event. The parity test asserts the typo'd key is present and
+the clean one absent.
+
+Also reproduced, and not an oddity but a security property worth naming: the confidential-client
+secret comparison uses `crypto/subtle.ConstantTimeCompare`, so the port takes the `subtle` crate
+rather than `==`. A short-circuiting comparison leaks the secret's length and matching prefix
+through timing, and hand-rolling the loop is liable to be optimised back into a short-circuit.
+
+---
+
+## D-101 · The DCR redirect-URI matcher is security-critical and entirely oracle-driven
+
+**Status** ACCEPTED · **Severity** unverified · **Raised** 2026-08-17 (phase 1, `oauth_dcr.go`)
+
+Not a divergence — a note about *why* this file's tests look disproportionate, and what would make
+them insufficient.
+
+`RedirectURIMatchesGlob` decides whether an OAuth redirect target is allowed. One case too
+permissive is an open redirect and hands an attacker a token; one case too strict breaks a working
+client. Neither shows up in a happy-path test, and the matcher is a hand-rolled recursive globber
+with three interacting layers — pattern validation, component splitting, byte-wise matching.
+
+So it is pinned by 44 glob probes, 25 pattern-validity probes and 11 allowlist probes, all
+answered by Go. Four properties are additionally asserted on their own so a regression names
+itself rather than pointing at a case index:
+
+- a host wildcard must not satisfy a path requirement (`https://example.com/evil` must **not**
+  match `https://*/cb`);
+- `*` stops at `/` and `**` does not;
+- a pattern with no query requires a candidate with none;
+- an invalid pattern never matches.
+
+**The generated sweep landed 2026-08-17, same day.** The concern above said "a property-based
+sweep would be stronger, and [D-003] showed what that buys". So it was built rather than left on
+a pile: `dcrGlobGeneratedAll` crosses 45 URIs against 72 patterns — **3,240 pairs** — and records
+Go's answer for each. Every one passes.
+
+The alphabets are chosen so each interaction is reachable rather than merely plausible: a
+subdomain host (does `*` cross a dot?), a multi-segment path (does `*` cross a slash?), a
+percent-encoded path (is `EscapedPath` matched or the decoded form?), a multi-byte path (is
+matching byte-wise?), a port (does a wildcard cover it?), and every present/absent query
+combination on both sides.
+
+Generation is **systematic, not random** — no rand, no seed — so the fixture is byte-identical on
+every run and a diff means behaviour changed. The Rust test additionally asserts the corpus is not
+degenerate: 312 of the 3,240 match, so a matcher hard-coded to `false` would fail 312 cases rather
+than passing 2,928.
+
+**Also accepted:** `redirect_uri_matches_glob_recur` is recursive with no depth limit, exactly as
+Go's is, so a pathological pattern can exhaust the stack on both servers equally. Reproducing the
+recursion rather than rewriting it iteratively keeps the matching semantics identical, which
+matters more here than the shared exposure — and the patterns are operator-configured, not
+attacker-supplied.
+
+**What remains accepted:** the sweep is systematic over a chosen alphabet, not exhaustive over
+all strings — a pattern shape outside those alphabets is still unmeasured. Widening the alphabet
+is cheap when a specific shape becomes a concern; enumerating everything is not possible.
+
+And the recursion note above stands unchanged: no depth limit, exactly as Go has none.
+
+---
+
+## D-102 · `product_notices.go`'s four matchers disagree about unknown values
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-17 (phase 1, `product_notices.go`)
+
+Not a divergence from Go — a divergence *within* Go, reproduced faithfully, and the reason this
+file could not be tidied.
+
+| method | an unrecognised value |
+|---|---|
+| `NoticeAudience.Matches` | **`false`** — a `switch` with no default, falling to `return false` |
+| `NoticeInstanceType.Matches` | **`true`** — three `if`s, then `return true` |
+| `NoticeClientType.Matches` | exact equality only |
+| `NoticeSKU.Matches` | exact equality only |
+
+So an audience nobody recognises **hides** a notice and an instance type nobody recognises
+**shows** it. Measured both ways, including for the zero value.
+
+The obvious tidy — one shared enum with a uniform fallback, or four `match` expressions written
+the same way — silently changes who sees a notice, in opposite directions depending on the field.
+`NoticeInstanceType::matches` is therefore written as Go writes it, three `if`s and a trailing
+`true`, so the permissive fallthrough stays visible rather than becoming a `_ =>` arm that reads
+like a decision.
+
+**Two smaller traps in the same file**, both pinned:
+
+* `NoticeSKU.Matches` treats `e0` and `team` as "unlicensed", so they match the **empty string**
+  and not their own names — `NoticeSKUE0.Matches("e0")` is `false`.
+* `NoticeClientType`'s `mobile` alias is **one-directional**: `mobile` matches `mobile-ios`, and
+  `mobile-ios` does not match `mobile`.
+
+---
+
+## D-103 · `NoticeClientTypeFromString` rejects two of its own constants
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-17 (phase 1, `product_notices.go`)
+
+The function accepts `web`, `mobile-ios`, `mobile-android` and `desktop`. It does **not** accept
+`mobile` or `all` — both declared `NoticeClientType` constants, and `all` is the type's documented
+default. Measured; every other input, those two included, is an error.
+
+On failure Go returns `NoticeClientTypeAll` **alongside** the error, so a caller that ignores the
+error gets the *permissive* value rather than a zero one. That is easy to lose in translation: a
+Rust `Result<NoticeClientType, SomeError>` would discard it.
+
+**Reproduced** by returning `Result<NoticeClientType, NoticeClientType>` — the error arm carries
+the fallback Go returns. Ugly, and deliberately so: the alternative is an error type that silently
+drops a value real callers may be reading.
+
+---
+
+## D-104 · `NoticeMessage`'s embed forces a hand-written `Serialize`
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-17 (phase 1, `product_notices.go`)
+
+`NoticeMessage` embeds `NoticeMessageInternal` anonymously, so Go inlines its keys and emits them
+**first**. Measured:
+
+```
+action actionParam actionText description image title id sysAdminOnly teamAdminOnly
+```
+
+serde's `#[serde(flatten)]` emits flattened keys **last**. This is [D-067] a second time — the
+same problem `ScheduledPost` has — so it is solved the same way: `Serialize` is hand-written and
+`Deserialize` still derives with `flatten`, since input order does not matter.
+
+The cost is the one [D-067] already records: the hand-written impl restates the embedded type's
+field list, so a field added to `NoticeMessageInternal` must be added here too or it silently
+vanishes from `NoticeMessage`'s output. The wire test covers it only if the fixture is
+regenerated.
+
+---
+
+## D-105 · `link_metadata.go`'s OpenGraph half needs a third-party package
+
+**Status** ACCEPTED · **Severity** incomplete · **Raised** 2026-08-17 (phase 1, `link_metadata.go`)
+**Blocks** `TruncateOpenGraph`, `FilterSVGImages`, `firstNImages`, `truncateText`, and the
+OpenGraph branches of `IsValid` and `DeserializeDataToConcreteType`.
+
+`link_metadata.go` imports `github.com/dyatlov/go-opengraph/opengraph` and its `types/image`
+package. `LinkMetadata.Data` holds a `*opengraph.OpenGraph` for HTML links, and five functions
+manipulate its fields — truncating `Title`/`Description`/`SiteName`, blanking `Article`, `Book`,
+`Profile`, `Determiner`, `Locale`, `LocalesAlternate`, `Audios` and `Videos`, and filtering
+`Images`.
+
+This is the fourth "a package does the real work" case after `net/mail`, `x/text/language`
+([D-001]), `net/url` ([D-003]) and `shared/markdown` ([D-044]) — but unlike those it is a
+**third-party** dependency rather than the Go standard library or Mattermost's own tree, which
+makes the decision different:
+
+- **(a) Port the OpenGraph types.** They are data structs plus a parser; only the structs are
+  needed here, since parsing happens elsewhere. Probably the smallest real option.
+- **(b) Find a Rust OpenGraph crate.** Risky in the way the `url` crate was for [D-003]: the wire
+  shape has to match `dyatlov`'s struct tags exactly, and a crate written to the OpenGraph spec
+  rather than to that library will differ.
+- **(c) Leave the OpenGraph link-preview path proxied to Go**, as [D-044] does for interactive
+  webhooks. Costs nothing and is reversible.
+
+**Not decided.** The portable half — the hash, the hour rounding, `IsSVGImageURL`, the wire type
+and `PreSave` — is ported and pinned; nothing depends on the rest yet.
+
+**Worth knowing before choosing:** `truncateText` uses `fmt.Sprintf("%.300s[...]", …)`, where Go's
+precision for `%s` is measured in **runes**, not bytes. It is unexported and only reachable
+through `TruncateOpenGraph`, so it is untested here and lands with whichever option is taken.
+
+---
+
+## D-106 · `LinkMetadata.Data` is a `Value`, so a struct inside it loses field order
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-08-17 (phase 1, `link_metadata.go`)
+
+`Data` is `any` in Go, holding `*PostImage`, `*opengraph.OpenGraph` or nil according to `Type`.
+It is `Option<serde_json::Value>` here, and `serde_json::Value::Object` is a **BTreeMap** — so it
+sorts keys. Measured:
+
+```
+go   "Data":{"width":100,"height":200,"format":"png","frame_count":1}
+ours "Data":{"format":"png","frame_count":1,"height":200,"width":100}
+```
+
+The values are identical and every JSON reader sees the same document, so this is a byte-level
+difference only — but this project's bar is byte-level, and the wire test says so explicitly
+rather than comparing parsed values and moving on.
+
+**It also blocks `IsValid`.** Go's validation is a *type assertion* — `o.Data.(*PostImage)` — on
+the concrete Go type. A `Value` cannot answer that question: an arbitrary object and a serialised
+`PostImage` are indistinguishable. So `IsValid` and `DeserializeDataToConcreteType` are deferred
+with the OpenGraph half rather than approximated, since approximating a validation is the
+dangerous direction.
+
+**To pay off**, type `Data` as an enum over the concrete variants:
+
+```rust
+enum LinkMetadataData { Image(PostImage), OpenGraph(/* D-105 */), Raw(serde_json::Value) }
+```
+
+which restores both field order and the type test in one move. It needs [D-105] resolved first for
+the middle variant, and needs care on the deserialise side: `#[serde(untagged)]` would try
+`PostImage` against every object, and `PostImage`'s fields all have defaults.
+
+---
+
+## Batch resolutions, 2026-08-17
+
+Six entries settled together rather than one per encounter, under the standing decision at the
+top of this file.
+
+### [D-001] — generate the locale table. **Decided: option (a).**
+
+The entry already recommended it and the project owner deferred once. It is the "measurable and
+mechanical" case: `UserLocaleMaxLength` is 5, so the accepted set is finite and enumerable *from
+Go*, and the output is a generated table beside `emoji_generated.rs` and `unicode_generated.rs`.
+
+Deciding it matters more than the table does, because it unblocks **[D-002]** — `User::is_valid`
+and `User::pre_save` — which is the highest-severity open pair and the reason `pre_save_partial`
+still carries a name warning that it does not hash passwords.
+
+Still **OPEN** as work; no longer open as a question.
+
+### [D-044] — do not port `shared/markdown`. **Decided: forward.**
+
+4,688 lines of CommonMark to serve one route family. The interactive-webhook routes stay proxied
+to the Go server indefinitely, alongside `enterprise/` and the plugin host. Reversible at any
+time, costs nothing today, and the entry's own analysis already showed the tempting shortcut —
+a stubbed scanner — **under-reports** action ids and silently rejects payloads Go accepts.
+
+Status moves to **ACCEPTED**: this is now a deliberate permanent divergence, not owed work.
+
+### [D-105] — do not port the OpenGraph package. **Decided: forward.**
+
+Same shape as [D-044] and, being third-party, worse: option (b), a Rust OpenGraph crate, would
+have to match `dyatlov`'s struct tags rather than the OpenGraph spec, which is the trap the `url`
+crate would have been for [D-003]. The link-preview path stays proxied.
+
+Status moves to **ACCEPTED**. [D-106] stays open, since it is about our own modelling rather than
+the package — but its enum needs this decision, and "forward" means the `OpenGraph` variant can
+simply hold raw JSON.
+
+### [D-046] — use RustCrypto. **Decided.**
+
+`p256`/`ecdsa` and `aes-gcm` rather than `ring`. Two reasons: Go emits an ASN.1 DER signature over
+P-256 and reads it back, which needs the raw encoding `ring` deliberately hides; and `subtle` is
+already a workspace dependency from the same family ([D-100]).
+
+The entry's other requirement stands and is the harder half: **an oracle recording Go's actual
+ciphertext** for a fixed key and nonce. A Rust-only round-trip proves nothing about cross-server
+compatibility, and this is the one area where a near-miss fails open.
+
+Still **OPEN** as work.
+
+### [D-089] — accept the missing WebSocket event.
+
+Consistent with [D-087]'s calibration: a missed live update is invisible on a project with no
+users, and a developer reloads the page. Revisit when `mm-ws` lands, which is phase 5 and the
+proper fix.
+
+Status moves to **ACCEPTED**, with the caveat the entry already carries: it is **reasoned, not
+measured** — no WebSocket client was available to watch it happen.
+
+### [D-092] — accept untranslated error ids.
+
+The remaining third of the entry needs the i18n bundle. The webapp branches on `id`, not
+`message`, so the practical cost is to humans reading errors rather than to clients. Port the
+bundle when a human-facing surface needs it — the same trigger `post_deletion_report.go` is
+waiting on.
+
+Status moves to **ACCEPTED** for the `message` field specifically; the two fixed thirds stay
+closed.
+
+---
+
+## D-107 · `User.IsValid`'s `auth_data` branch formats a pointer, so Go's own detail is unstable
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-17 (phase 1, `user.go`)
+
+```go
+if u.AuthData != nil && len(*u.AuthData) > UserAuthDataMaxLength {
+    return InvalidUserError("auth_data", u.Id, u.AuthData)   // u.AuthData is *string
+}
+```
+
+`InvalidUserError` renders its value with `%v`, and `%v` on a `*string` prints the **address**.
+The two neighbouring auth-data branches dereference first — `*u.AuthData` — so this is the only
+one that does it, which reads like an oversight rather than a choice.
+
+Measured, twice in one process:
+
+```
+value_is_an_address: true
+stable_across_calls: false
+```
+
+So Go's own `detailed_error` for this branch is **not reproducible even by Go**. There is nothing
+to match.
+
+**Our detail is `auth_data=<pointer>`.** The alternative — emitting the dereferenced value, which
+is what the sibling branches do — was rejected on privacy grounds: `AuthData` is an SSO identifier,
+`detailed_error` reaches logs, and Go's accident happens to keep it out of them. A marker preserves
+that property and signals the difference.
+
+The parity test asserts Go's recorded detail still contains `0x`, so if upstream ever dereferences
+the pointer this entry stops being a divergence and the test says so.
+
+---
+
+## D-108 · `User::pre_save` is still unported, and `pre_save_partial` is still a loaded gun
+
+**Status** OPEN · **Severity** blocking · **Raised** 2026-08-17 (phase 1, `user.go`)
+**Split from** [D-002], whose `IsValid` half is now closed.
+
+`User::is_valid` landed 2026-08-17 once [D-001] closed. `PreSave` did not, and its two remaining
+dependencies are unrelated to anything ported so far:
+
+- **A password hasher.** Go uses `golang.org/x/crypto/bcrypt`. Both servers read the same
+  `Users.Password` column, so the cost factor and hash format are load-bearing — this is a
+  cross-server compatibility problem like [D-046], not a free choice.
+- **`timezones.DefaultUserTimezone()`**, which reads a timezone list Mattermost ships.
+
+Until then `pre_save_partial` keeps its name **and the reason for it**: a caller mistaking it for
+Go's `PreSave` stores a plaintext password. It is the one genuinely dangerous thing in the crate,
+and the name is the only guard.
+
+**To pay off** decide the bcrypt crate and pin it against Go's output for a known password and
+cost, then port the timezone defaults, then rename.

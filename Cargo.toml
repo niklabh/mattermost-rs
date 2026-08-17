@@ -34,6 +34,18 @@ tokio = { version = "1", features = ["full"] }
 # HTTP
 axum = "0.8"
 
+# The Strangler Fig proxy's forward leg. rustls rather than native-tls so the build has no
+# OpenSSL dependency, matching the sqlx feature choice. No default features: the cookie store,
+# redirect following and gzip layers would all change what the proxy forwards, and the proxy must
+# hand the Go server's answer back unaltered.
+reqwest = { version = "0.12", default-features = false, features = [
+    "rustls-tls",
+    "stream",
+] }
+# Body plumbing for the proxy: axum's `Body` and reqwest's are different types.
+http-body-util = "0.1"
+tower = "0.5"
+
 # Database — Postgres only.
 sqlx = { version = "0.8", default-features = false, features = [
     "runtime-tokio-rustls",
@@ -74,6 +86,13 @@ regex = "1"
 
 # CSPRNG for NewId / NewRandomString.
 rand = "0.9"
+
+# Constant-time comparison. `OAuthApp.validateConfidentialClientGrant` compares the client secret
+# with `crypto/subtle.ConstantTimeCompare`, and that is a security property rather than an
+# implementation detail: a short-circuiting `==` leaks the secret's length and its matching prefix
+# through timing. Hand-rolling the loop is exactly the kind of thing that gets optimised back into
+# a short-circuit by the compiler, so take the dependency.
+subtle = "2"
 
 # GetGroupNameFromUserIds hashes the sorted member ids with SHA-1 and hex-encodes the digest.
 # The result is the channel's Name and is therefore persisted and on the wire, so it must match

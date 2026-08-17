@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                INSERT INTO preferences (userid, category, name, value)\n                VALUES ($1, $2, $3, $4)\n                ON CONFLICT (userid, category, name) DO UPDATE SET value = $4\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4ed45480163ee9c82df7298f489c5bdfb3330bdac16a1c11028388ae6a60e071"
+}

@@ -1,0 +1,317 @@
+{
+    "constants": {
+        "LinkMetadataMaxImages": 5,
+        "LinkMetadataMaxURLLength": 2048,
+        "LinkMetadataTypeImage": "image",
+        "LinkMetadataTypeNone": "none",
+        "LinkMetadataTypeOpengraph": "opengraph"
+    },
+    "floor_hour": [
+        {
+            "floored": 0,
+            "input": 0,
+            "is_rounded": true
+        },
+        {
+            "floored": 0,
+            "input": 1,
+            "is_rounded": false
+        },
+        {
+            "floored": 0,
+            "input": 3599999,
+            "is_rounded": false
+        },
+        {
+            "floored": 3600000,
+            "input": 3600000,
+            "is_rounded": true
+        },
+        {
+            "floored": 3600000,
+            "input": 3600001,
+            "is_rounded": false
+        },
+        {
+            "floored": 1699999200000,
+            "input": 1700000000000,
+            "is_rounded": false
+        },
+        {
+            "floored": 1700002800000,
+            "input": 1700002800000,
+            "is_rounded": true
+        },
+        {
+            "floored": -3600000,
+            "input": -1,
+            "is_rounded": false
+        },
+        {
+            "floored": -3600000,
+            "input": -3600000,
+            "is_rounded": true
+        },
+        {
+            "floored": -7200000,
+            "input": -3600001,
+            "is_rounded": false
+        }
+    ],
+    "hash": [
+        {
+            "hash": 2615243109,
+            "non_negative": true,
+            "timestamp": 0,
+            "url": ""
+        },
+        {
+            "hash": 3786499919,
+            "non_negative": true,
+            "timestamp": 0,
+            "url": "https://example.com"
+        },
+        {
+            "hash": 508477393,
+            "non_negative": true,
+            "timestamp": 1700000000000,
+            "url": ""
+        },
+        {
+            "hash": 3812718939,
+            "non_negative": true,
+            "timestamp": 1700000000000,
+            "url": "https://example.com"
+        },
+        {
+            "hash": 2957263337,
+            "non_negative": true,
+            "timestamp": 1700000003600,
+            "url": "https://example.com"
+        },
+        {
+            "hash": 454167150,
+            "non_negative": true,
+            "timestamp": 1700000000000,
+            "url": "https://example.com/"
+        },
+        {
+            "hash": 191261515,
+            "non_negative": true,
+            "timestamp": 1700000000000,
+            "url": "https://example.com/a"
+        },
+        {
+            "hash": 3470547562,
+            "non_negative": true,
+            "timestamp": 1700000000001,
+            "url": "https://example.com"
+        },
+        {
+            "hash": 9844408,
+            "non_negative": true,
+            "timestamp": 1700000000000,
+            "url": "https://example.com/café"
+        },
+        {
+            "hash": 1764095282,
+            "non_negative": true,
+            "timestamp": 1700000000000,
+            "url": "https://example.com/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "hash": 674611911,
+            "non_negative": true,
+            "timestamp": -1,
+            "url": "https://example.com"
+        },
+        {
+            "hash": 2213002567,
+            "non_negative": true,
+            "timestamp": 9223372036854775807,
+            "url": "https://example.com"
+        }
+    ],
+    "is_svg_url": [
+        {
+            "is_svg": false,
+            "url": ""
+        },
+        {
+            "is_svg": true,
+            "url": "https://example.com/a.svg"
+        },
+        {
+            "is_svg": true,
+            "url": "https://example.com/a.svgz"
+        },
+        {
+            "is_svg": true,
+            "url": "https://example.com/a.SVG"
+        },
+        {
+            "is_svg": true,
+            "url": "https://example.com/a.SvGz"
+        },
+        {
+            "is_svg": false,
+            "url": "https://example.com/a.png"
+        },
+        {
+            "is_svg": false,
+            "url": "https://example.com/a.svg.png"
+        },
+        {
+            "is_svg": true,
+            "url": "https://example.com/a.png.svg"
+        },
+        {
+            "is_svg": false,
+            "url": "https://example.com/a.png?x=.svg"
+        },
+        {
+            "is_svg": false,
+            "url": "https://example.com/a.png#.svg"
+        },
+        {
+            "is_svg": true,
+            "url": "https://example.com/.svg"
+        },
+        {
+            "is_svg": true,
+            "url": "/relative/a.svg"
+        },
+        {
+            "is_svg": true,
+            "url": "a.svg"
+        },
+        {
+            "is_svg": true,
+            "url": "https://example.com/a%2Esvg"
+        },
+        {
+            "is_svg": false,
+            "url": "://nope"
+        },
+        {
+            "is_svg": true,
+            "url": "https://example.com/a b.svg"
+        }
+    ],
+    "is_valid": [
+        {
+            "name": "valid_none",
+            "ok": true
+        },
+        {
+            "id": "model.link_metadata.is_valid.url.app_error",
+            "name": "empty_url",
+            "ok": false,
+            "status": 400,
+            "where": "LinkMetadata.IsValid"
+        },
+        {
+            "name": "url_at_cap",
+            "ok": true
+        },
+        {
+            "id": "model.link_metadata.is_valid.url_length.app_error",
+            "name": "url_over_cap",
+            "ok": false,
+            "status": 400,
+            "where": "LinkMetadata.IsValid"
+        },
+        {
+            "id": "model.link_metadata.is_valid.timestamp.app_error",
+            "name": "zero_timestamp",
+            "ok": false,
+            "status": 400,
+            "where": "LinkMetadata.IsValid"
+        },
+        {
+            "id": "model.link_metadata.is_valid.timestamp.app_error",
+            "name": "unrounded_timestamp",
+            "ok": false,
+            "status": 400,
+            "where": "LinkMetadata.IsValid"
+        },
+        {
+            "id": "model.link_metadata.is_valid.data_type.app_error",
+            "name": "type_none_with_data",
+            "ok": false,
+            "status": 400,
+            "where": "LinkMetadata.IsValid"
+        },
+        {
+            "id": "model.link_metadata.is_valid.data.app_error",
+            "name": "type_image_without_data",
+            "ok": false,
+            "status": 400,
+            "where": "LinkMetadata.IsValid"
+        },
+        {
+            "name": "type_image_with_post_image",
+            "ok": true
+        },
+        {
+            "id": "model.link_metadata.is_valid.data_type.app_error",
+            "name": "type_image_with_wrong_data",
+            "ok": false,
+            "status": 400,
+            "where": "LinkMetadata.IsValid"
+        },
+        {
+            "id": "model.link_metadata.is_valid.data_type.app_error",
+            "name": "type_image_with_value_not_pointer",
+            "ok": false,
+            "status": 400,
+            "where": "LinkMetadata.IsValid"
+        },
+        {
+            "id": "model.link_metadata.is_valid.type.app_error",
+            "name": "unknown_type",
+            "ok": false,
+            "status": 400,
+            "where": "LinkMetadata.IsValid"
+        },
+        {
+            "id": "model.link_metadata.is_valid.type.app_error",
+            "name": "empty_type",
+            "ok": false,
+            "status": 400,
+            "where": "LinkMetadata.IsValid"
+        }
+    ],
+    "keys": {
+        "link_metadata": [
+            "Hash",
+            "URL",
+            "Timestamp",
+            "Type",
+            "Data"
+        ]
+    },
+    "pre_save": [
+        {
+            "hash": 4131320235,
+            "matches_generate": true,
+            "name": "pre_save",
+            "timestamp": 1700000000000,
+            "url": "https://example.com/page"
+        }
+    ],
+    "wire": [
+        {
+            "json": "{\"Hash\":0,\"URL\":\"\",\"Timestamp\":0,\"Type\":\"\",\"Data\":null}",
+            "name": "zero"
+        },
+        {
+            "json": "{\"Hash\":1234567890,\"URL\":\"https://example.com/page\",\"Timestamp\":1700000000000,\"Type\":\"none\",\"Data\":null}",
+            "name": "type_none"
+        },
+        {
+            "json": "{\"Hash\":99,\"URL\":\"https://example.com/i.png\",\"Timestamp\":1700000000000,\"Type\":\"image\",\"Data\":{\"width\":100,\"height\":200,\"format\":\"png\",\"frame_count\":1}}",
+            "name": "type_image"
+        }
+    ]
+}

@@ -15,3 +15,9 @@ serde_json.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 chrono.workspace = true
+
+[dev-dependencies]
+# Only to construct a `sqlx::Error` when testing the store-error-to-AppError mapping. The crate
+# itself never touches sqlx — that is mm-store's business.
+sqlx.workspace = true
+tokio.workspace = true

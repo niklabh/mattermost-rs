@@ -240,7 +240,7 @@ mod tests {
     #[test]
     fn nil_and_empty_collections_are_both_omitted() {
         // Go cannot tell them apart under omitempty, so neither can we — and that is correct.
-        let zero = serde_json::to_string(&PostMetadata::default()).unwrap();
+        let zero = crate::utils::go_json_marshal(&PostMetadata::default()).unwrap();
         assert_eq!(zero, "{}");
 
         let explicit_empty = PostMetadata {
@@ -249,7 +249,10 @@ mod tests {
             recipients: Vec::new(),
             ..Default::default()
         };
-        assert_eq!(serde_json::to_string(&explicit_empty).unwrap(), "{}");
+        assert_eq!(
+            crate::utils::go_json_marshal(&explicit_empty).unwrap(),
+            "{}"
+        );
     }
 
     #[test]
@@ -288,7 +291,7 @@ mod tests {
             serde_json::from_str(r#"{"object":null,"type":"object"}"#).unwrap();
         assert_eq!(explicit.object, Some(Value::Null));
         assert!(
-            serde_json::to_string(&explicit)
+            crate::utils::go_json_marshal(&explicit)
                 .unwrap()
                 .contains(r#""object":null"#)
         );
@@ -379,7 +382,11 @@ mod go_parity {
             }
 
             let parsed = parsed.unwrap_or_else(|e| panic!("case {name}: {e}"));
-            assert_eq!(serde_json::to_string(&parsed).unwrap(), want, "case {name}");
+            assert_eq!(
+                crate::utils::go_json_marshal(&parsed).unwrap(),
+                want,
+                "case {name}"
+            );
         }
     }
 
@@ -393,7 +400,7 @@ mod go_parity {
             let input = case["json"].as_str().unwrap();
             let parsed: PostPriority = serde_json::from_str(input).unwrap();
             assert_eq!(
-                serde_json::to_string(&parsed).unwrap(),
+                crate::utils::go_json_marshal(&parsed).unwrap(),
                 case["roundtrip"].as_str().unwrap(),
                 "case {name}"
             );
@@ -413,7 +420,7 @@ mod go_parity {
             let copied = input.copy();
 
             assert_eq!(
-                serde_json::to_string(&copied).unwrap(),
+                crate::utils::go_json_marshal(&copied).unwrap(),
                 case["out"].as_str().unwrap(),
                 "case {name}"
             );

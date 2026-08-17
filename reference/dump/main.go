@@ -118,6 +118,20 @@ var registry = map[string]any{
 	"status":                        &model.Status{},
 	"preference":                    &model.Preference{},
 	"custom_status":                 &model.CustomStatus{},
+	"bot":                           &model.Bot{},
+	"bot_patch":                     &model.BotPatch{},
+	"audit_record":                  &model.AuditRecord{},
+	"event_meta":                    &model.EventMeta{},
+	"oauth_app":                     &model.OAuthApp{},
+	"oauth_app_request":             &model.OAuthAppRequest{},
+	"intune_login_request":          &model.IntuneLoginRequest{},
+	"client_registration_request":   &model.ClientRegistrationRequest{},
+	"client_registration_response":  &model.ClientRegistrationResponse{},
+	"dcr_error":                     &model.DCRError{},
+	"product_notice":                &model.ProductNotice{},
+	"notice_message":                &model.NoticeMessage{},
+	"product_notice_view_state":     &model.ProductNoticeViewState{},
+	"external_dependency":           &model.ExternalDependency{},
 }
 
 // overrides pins specific fields to semantically valid values, keyed by the
@@ -193,7 +207,36 @@ var (
 	byteSliceType  = reflect.TypeOf([]byte(nil))
 )
 
+// fixtureTimeZone is the zone every fixture is generated in.
+//
+// Some corpora legitimately depend on the server's local calendar — `GetTimeForMillis` returns
+// server-local time ([D-008]), so the day-bounds cases in behaviour_utils.json record whatever
+// zone the generator ran in. That made a plain `go run .` rewrite twenty rows on any host whose
+// zone differed, destroying the "a clean run touches only new files" signal that the whole
+// oracle discipline leans on ([D-069]).
+//
+// Pinning it here rather than asking the operator to remember `TZ=Asia/Kolkata` makes the run
+// reproducible by construction. The Rust side rebuilds each instant in the *recorded* zone, so
+// nothing depends on this particular choice — only on it being stable.
+const fixtureTimeZone = "Asia/Kolkata"
+
 func main() {
+	// Must happen before anything touches `time.Local`, which Go initialises lazily from TZ on
+	// first use. Setting it here means no caller has to.
+	if err := os.Setenv("TZ", fixtureTimeZone); err != nil {
+		fmt.Fprintf(os.Stderr, "dump: cannot pin TZ: %v\n", err)
+		os.Exit(1)
+	}
+	if time.Local.String() != fixtureTimeZone {
+		// Go may already have resolved time.Local before main ran. Fail loudly rather than write
+		// a fixture in the wrong zone — a silently zone-shifted corpus is exactly what D-069 is
+		// about.
+		fmt.Fprintf(os.Stderr,
+			"dump: TZ pinning failed: time.Local is %q, expected %q; run with TZ=%s\n",
+			time.Local.String(), fixtureTimeZone, fixtureTimeZone)
+		os.Exit(1)
+	}
+
 	out := flag.String("out", "../../fixtures", "directory to write fixtures into")
 	rustOut := flag.String("rust-out", "../../crates/mm-model/src", "directory to write generated Rust into")
 	flag.Parse()
@@ -504,6 +547,52 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_channel_search.json"))
+
+	if err := writeUserIsValidBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: user is_valid behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := writeLocaleGenerated(*out, *rustOut); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: locale table: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := writeLinkMetadataBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: link metadata behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_link_metadata.json"))
+
+	if err := writeProductNoticesBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: product notices behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_product_notices.json"))
+
+	if err := writeOAuthDCRBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: oauth dcr behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_oauth_dcr.json"))
+
+	if err := writeOAuthBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: oauth behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_oauth.json"))
+
+	if err := writeAuditRecordBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: audit record behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_audit_record.json"))
+
+	if err := writeBotBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: bot behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_bot.json"))
 
 	if err := writeLimitsBehaviourFixture(*out); err != nil {
 		fmt.Fprintf(os.Stderr, "FAIL: limits behaviour fixture: %v\n", err)

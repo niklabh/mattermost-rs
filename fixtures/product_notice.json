@@ -1,0 +1,47 @@
+{
+    "conditions": {
+        "audience": "audience-bce76f",
+        "clientType": "clienttype-87cd15",
+        "desktopVersion": [
+            "desktopversion-258144",
+            "desktopversion-275236"
+        ],
+        "displayDate": "displaydate-5033ad",
+        "instanceType": "instancetype-e3ed71",
+        "mobileVersion": [
+            "mobileversion-deb4f7",
+            "mobileversion-d6c550"
+        ],
+        "numberOfPosts": 2,
+        "numberOfUsers": 63,
+        "serverConfig": {
+            "key0-165f15": "val0-12811c",
+            "key1-1760c8": "val1-1382cf"
+        },
+        "serverVersion": [
+            "serverversion-88310d",
+            "serverversion-4e00f3"
+        ],
+        "sku": "sku-fe07ab",
+        "userConfig": {
+            "key0-6cc38b": "val0-ab70dd",
+            "key1-6dc53e": "val1-ac7290"
+        },
+        "deprecating_dependency": {
+            "name": "name-16f933",
+            "minimum_version": "minimumversion-f5c852"
+        }
+    },
+    "id": "ju617q6c5mi4j996f47h3s9mwo",
+    "localizedMessages": {
+        "key0-c0553f": {
+            "action": "action-8bbc62",
+            "actionParam": "actionparam-9335dd",
+            "actionText": "actiontext-1fbdeb",
+            "description": "description-4e13cc",
+            "image": "image-610ab8",
+            "title": "title-9e06aa"
+        }
+    },
+    "repeatable": true
+}

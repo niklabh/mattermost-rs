@@ -1,0 +1,88 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id,\n                   token,\n                   createat,\n                   expiresat,\n                   lastactivityat,\n                   userid,\n                   deviceid,\n                   voipdeviceid,\n                   roles,\n                   isoauth,\n                   props,\n                   expirednotify\n              FROM sessions\n             WHERE token = $1 OR id = $1\n             LIMIT 1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "token",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "createat",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "expiresat",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "lastactivityat",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "userid",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 6,
+        "name": "deviceid",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 7,
+        "name": "voipdeviceid",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 8,
+        "name": "roles",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 9,
+        "name": "isoauth",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 10,
+        "name": "props",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 11,
+        "name": "expirednotify",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "397a9599e9ba06a86d48b08accfe899fe59209e4e0851be26b7076edfcadc699"
+}

@@ -1,0 +1,34 @@
+{
+    "event_name": "eventname-731010",
+    "status": "status-30f902",
+    "event": {
+        "parameters": {
+            "key0-c159f3": "val0-5f20ef",
+            "key1-c25ba6": "val1-6022a2"
+        },
+        "prior_state": {
+            "key0-6c15c2": "val0-a1e1ea",
+            "key1-6b140f": "val1-a0e037"
+        },
+        "resulting_state": {
+            "key0-914ccb": "val0-b49281",
+            "key1-924e7e": "val1-b59434"
+        },
+        "object_type": "objecttype-2a4db5"
+    },
+    "actor": {
+        "user_id": "8id5x79s4at5bn1fs959pijdsy",
+        "session_id": "demw81p6misktueaexr5hzuciy",
+        "client": "client-a9851b",
+        "ip_address": "10.231.255.29",
+        "x_forwarded_for": "xforwardedfor-d94150"
+    },
+    "meta": {
+        "key0-52b697": "val0-cf0a95",
+        "key1-51b4e4": "val1-ce08e2"
+    },
+    "error": {
+        "description": "description-061df4",
+        "status_code": 65
+    }
+}

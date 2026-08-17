@@ -1,0 +1,20 @@
+{
+    "client_id": "yp76ncquzkmmcwd3hra78qcssa",
+    "client_secret": "clientsecret-e30381",
+    "redirect_uris": [
+        "redirecturis-b1a664",
+        "redirecturis-b18873"
+    ],
+    "token_endpoint_auth_method": "84hhpocdtq3w9hp4a5ya8dfujh",
+    "grant_types": [
+        "granttypes-7edd34",
+        "granttypes-7ebf43"
+    ],
+    "response_types": [
+        "responsetypes-f1b0e7",
+        "responsetypes-b31519"
+    ],
+    "scope": "scope-460ec9",
+    "client_name": "clientname-5223c8",
+    "client_uri": "clienturi-066d8d"
+}

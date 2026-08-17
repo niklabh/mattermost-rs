@@ -1,0 +1,384 @@
+{
+    "accepted_sample": [
+        "aa",
+        "ae_sx",
+        "am_in",
+        "as_be",
+        "az-tg",
+        "bg-hu",
+        "bmx",
+        "bo_xs",
+        "ca_cc",
+        "co-pf",
+        "cu-jm",
+        "da-im",
+        "dv_qv",
+        "el_nf",
+        "es_ma",
+        "fa_lb",
+        "fj_mk",
+        "fy_kp",
+        "gl-yu",
+        "gv-qa",
+        "hi-lc",
+        "ht-fk",
+        "hz-fi",
+        "ie-fj",
+        "ik-ec",
+        "is-bt",
+        "iw-cg",
+        "ji_xt",
+        "ka_su",
+        "kj_cr",
+        "km_ar",
+        "kr-ss",
+        "kv-na",
+        "la-fk",
+        "lit",
+        "lo_ss",
+        "lv_pr",
+        "mi-ye",
+        "mn-re",
+        "ms-kh",
+        "mzv",
+        "nd_td",
+        "nl_it",
+        "nr_ci",
+        "oc-tg",
+        "or-mw",
+        "pi-bf",
+        "ps_qr",
+        "qu_xt",
+        "ro_ni",
+        "sa_li",
+        "se_fx",
+        "si_ci",
+        "sm-xz",
+        "sq-tp",
+        "st-rh",
+        "sw-pw",
+        "tg-cm",
+        "tk-ag",
+        "tn_xc",
+        "ts_qt",
+        "ty_kg",
+        "ur_ck",
+        "vi_ba",
+        "wo-lu",
+        "x-amj",
+        "x-b2m",
+        "x-dgq",
+        "x-ewt",
+        "x-gax",
+        "x-hq0",
+        "x-i63",
+        "x-kk7",
+        "x-l1",
+        "x-nfd",
+        "x-ovg",
+        "x-p_l",
+        "x-rpn",
+        "x-s5q",
+        "x-uju",
+        "x-vzx",
+        "x-xd1",
+        "x-yt4",
+        "x-z97",
+        "x-1oa",
+        "x-24d",
+        "x-4ih",
+        "x-5yk",
+        "x-7co",
+        "x-8sr",
+        "x-98u",
+        "x_bmy",
+        "x_c21",
+        "x_eg5",
+        "x_fw8",
+        "x_hbb",
+        "x_ire",
+        "x_j7h",
+        "x_lll",
+        "x_m1o",
+        "x_ofs",
+        "x_pvv",
+        "x_q_0",
+        "x_sp2",
+        "x_t55",
+        "x_vj9",
+        "x_w0b",
+        "x_yef",
+        "x_zui",
+        "x_0-m",
+        "x_2op",
+        "x_34s",
+        "x_5iw",
+        "x_6yz",
+        "x_8c3",
+        "x_9s6",
+        "yo_lb",
+        "zu-sk"
+    ],
+    "accepted_total": 234421,
+    "exceptions": [
+        "i-ami",
+        "i-bnn",
+        "i-hak",
+        "i-lux",
+        "i-pwn",
+        "i-tao",
+        "i-tay",
+        "i-tsu",
+        "i_ami",
+        "i_bnn",
+        "i_hak",
+        "i_lux",
+        "i_pwn",
+        "i_tao",
+        "i_tay",
+        "i_tsu"
+    ],
+    "max_length": 5,
+    "probes": [
+        {
+            "input": "",
+            "valid": true,
+            "parse_ok": false
+        },
+        {
+            "input": "en",
+            "valid": true,
+            "parse_ok": true
+        },
+        {
+            "input": "eng",
+            "valid": true,
+            "parse_ok": true
+        },
+        {
+            "input": "zh-CN",
+            "valid": true,
+            "parse_ok": true
+        },
+        {
+            "input": "pt-br",
+            "valid": true,
+            "parse_ok": true
+        },
+        {
+            "input": "en_US",
+            "valid": true,
+            "parse_ok": true
+        },
+        {
+            "input": "root",
+            "valid": true,
+            "parse_ok": true
+        },
+        {
+            "input": "und",
+            "valid": true,
+            "parse_ok": true
+        },
+        {
+            "input": "qaa",
+            "valid": true,
+            "parse_ok": true
+        },
+        {
+            "input": "mul",
+            "valid": true,
+            "parse_ok": true
+        },
+        {
+            "input": "zxx",
+            "valid": true,
+            "parse_ok": true
+        },
+        {
+            "input": "xx",
+            "valid": false,
+            "parse_ok": false
+        },
+        {
+            "input": "xxx",
+            "valid": false,
+            "parse_ok": false
+        },
+        {
+            "input": "engl",
+            "valid": false,
+            "parse_ok": false
+        },
+        {
+            "input": "zh-Ha",
+            "valid": false,
+            "parse_ok": false
+        },
+        {
+            "input": "en-1",
+            "valid": false,
+            "parse_ok": false
+        },
+        {
+            "input": "i-en",
+            "valid": false,
+            "parse_ok": false
+        },
+        {
+            "input": "a-b",
+            "valid": false,
+            "parse_ok": false
+        },
+        {
+            "input": "C",
+            "valid": false,
+            "parse_ok": false
+        },
+        {
+            "input": "POSIX",
+            "valid": false,
+            "parse_ok": false
+        },
+        {
+            "input": "en-USA",
+            "valid": false,
+            "parse_ok": true
+        },
+        {
+            "input": "en_USA",
+            "valid": false,
+            "parse_ok": true
+        },
+        {
+            "input": "EN",
+            "valid": true,
+            "parse_ok": true
+        },
+        {
+            "input": "En",
+            "valid": true,
+            "parse_ok": true
+        },
+        {
+            "input": "eN",
+            "valid": true,
+            "parse_ok": true
+        },
+        {
+            "input": "EN_US",
+            "valid": true,
+            "parse_ok": true
+        },
+        {
+            "input": "en_us",
+            "valid": true,
+            "parse_ok": true
+        },
+        {
+            "input": "EN-us",
+            "valid": true,
+            "parse_ok": true
+        },
+        {
+            "input": "en-US",
+            "valid": true,
+            "parse_ok": true
+        },
+        {
+            "input": "en_US",
+            "valid": true,
+            "parse_ok": true
+        },
+        {
+            "input": "x-a",
+            "valid": true,
+            "parse_ok": true
+        },
+        {
+            "input": "x-ab",
+            "valid": true,
+            "parse_ok": true
+        },
+        {
+            "input": "x-abc",
+            "valid": true,
+            "parse_ok": true
+        },
+        {
+            "input": "x-a-b",
+            "valid": true,
+            "parse_ok": true
+        },
+        {
+            "input": "x_a_b",
+            "valid": true,
+            "parse_ok": true
+        },
+        {
+            "input": "x-",
+            "valid": false,
+            "parse_ok": false
+        },
+        {
+            "input": "x--a",
+            "valid": false,
+            "parse_ok": false
+        },
+        {
+            "input": "en US",
+            "valid": false,
+            "parse_ok": false
+        },
+        {
+            "input": "en.US",
+            "valid": false,
+            "parse_ok": false
+        },
+        {
+            "input": "en+US",
+            "valid": false,
+            "parse_ok": false
+        },
+        {
+            "input": "én",
+            "valid": false,
+            "parse_ok": false
+        },
+        {
+            "input": "en\tUS",
+            "valid": false,
+            "parse_ok": false
+        },
+        {
+            "input": "en/US",
+            "valid": false,
+            "parse_ok": false
+        },
+        {
+            "input": "1",
+            "valid": false,
+            "parse_ok": false
+        },
+        {
+            "input": "12",
+            "valid": false,
+            "parse_ok": false
+        },
+        {
+            "input": "123",
+            "valid": false,
+            "parse_ok": false
+        },
+        {
+            "input": "en-99",
+            "valid": false,
+            "parse_ok": false
+        },
+        {
+            "input": "99",
+            "valid": false,
+            "parse_ok": false
+        }
+    ]
+}
