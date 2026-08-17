@@ -2904,17 +2904,24 @@ read-level ownership.
 1. **The Rust side never caches.** Every read goes through to Postgres. This removes one
    direction of the problem completely and costs nothing at migration-era traffic — and it is
    why we were the *correct* server in the measurement above, not merely a different one.
-2. **A route that writes an entity the Go server caches stays proxied to Go**, so Go performs the
-   write and runs its own invalidation exactly as it does today. This is free: unmigrated is
-   already the default, and the proxy is the fallback, so "not migrating it" requires no code.
-3. **Read routes migrate freely.** We are always at least as fresh as Go, never staler.
+2. **Read routes migrate freely.** We are always at least as fresh as Go, never staler.
+3. **Write routes migrate freely too — with a known consequence, not a gate.** A write we make
+   to an entity Go caches is invisible to Go until its cache entry expires. That is *staleness,
+   not corruption*: the row is correct, Postgres is consistent, and Go catches up on TTL. Port
+   the write when you want the write ported, and expect a stale read from the Go side in the
+   meantime.
 
-The uncomfortable consequence, stated plainly: **writes are the last thing to migrate, not the
-next thing.** Reads can move at whatever pace the porting sustains; a write cannot move until the
-Go server no longer reads that entity — which in practice means until it is being retired.
+**Calibration, corrected 2026-08-17.** This entry first stated rule 3 as "a write route stays
+proxied to Go", making cache coherence a precondition for migrating any write. That was
+over-engineering: it converted a bounded staleness window into a hard block on development, for
+a project with no users and no uptime commitment. The blocking version would have made writes
+the *last* thing to migrate; the corrected version makes them schedulable like anything else.
+Tighten it again only when there are real users, and then per-entity — the entities where a
+stale Go read actually matters (sessions, permissions) rather than all of them.
 
-**Revisit only** for a deployment with an Enterprise licence including clustering, where Redis
-cache mode is permitted and rule 2 can be relaxed to "write directly, then `DEL` the key".
+**If a clean answer is wanted later**, the lever is a Mattermost licence with clustering, which
+permits Redis cache mode — at which point the Rust side can `DEL` the key after writing and the
+staleness window closes. Worth knowing it exists; not worth blocking on.
 
 **Bonus finding — this closes an open question.** The cache values are msgpack, encoded by the
 generated `user_serial_gen.go` (1,343 lines) and `session_serial_gen.go` (937). Since we never

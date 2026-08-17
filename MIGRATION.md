@@ -28,13 +28,12 @@ an in-memory user cache that a login does not invalidate, so it serves an `updat
 seconds stale and not converging** while we return the row's actual value. We are the correct
 one, which is the uncomfortable part: the divergence cannot be closed by matching Go.
 
-**Decision — read in Rust, write through Go.** Three rules, and the second is the one that
-changes the plan:
+**Decision — Rust reads through, and stale-on-write is accepted:**
 
 1. The Rust side **never caches**; every read goes through to Postgres.
-2. A route that **writes** an entity Go caches **stays proxied to Go**, so Go runs its own
-   invalidation. Free to adopt — unmigrated is the default and the proxy is the fallback.
-3. Read routes migrate freely; we are never staler than Go.
+2. Read routes migrate freely; we are never staler than Go.
+3. Write routes migrate freely as well. A write we make is invisible to Go until its cache entry
+   expires — **staleness, not corruption**. Port writes when convenient and accept the window.
 
 Both alternatives are licensed away, measured rather than assumed. The cluster bus is
 `einterfaces.ClusterInterface`, implemented only in the out-of-scope `enterprise/` tree. Redis
@@ -44,8 +43,10 @@ the value encoding — makes the server connect to Redis, log `PONG`, and then r
 Team Edition there is **no invalidation channel a second process can reach**; do not go looking
 for one again.
 
-**So writes are the last thing to migrate, not the next thing.** Reads move at whatever pace the
-porting sustains; a write cannot move until the Go server no longer reads that entity.
+An earlier version of this entry made writes wait on cache coherence. That was over-engineering
+for a project with no users: it turned a bounded staleness window into a block on development.
+Revisit per-entity when there are real users — sessions and permissions are where a stale Go
+read would actually matter, not everything.
 
 This also settles the `*_serial_gen.go` question: those 2,280 generated lines are the **msgpack
 codecs for Go's cache**, and since we never populate that cache, they are confirmed out of scope.
