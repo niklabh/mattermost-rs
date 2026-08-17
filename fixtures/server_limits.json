@@ -1,0 +1,9 @@
+{
+    "maxUsersLimit": 98,
+    "maxUsersHardLimit": 75,
+    "activeUserCount": 13,
+    "singleChannelGuestCount": 93,
+    "singleChannelGuestLimit": 89,
+    "postHistoryLimit": 58,
+    "lastAccessiblePostTime": 10
+}

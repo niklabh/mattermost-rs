@@ -814,6 +814,25 @@ impl Values {
         self.0.get(key.as_bytes())?.first().map(Vec::as_slice)
     }
 
+    /// Go's `values[key]` with its `ok` flag — **not** `Values.Get`, which collapses "absent"
+    /// and "present but empty" into the same empty string.
+    ///
+    /// `mention_map.go` is the reason this exists: it branches on the `ok` flag and then on
+    /// `len()`, and a key present with a zero-length slice takes a different path from an absent
+    /// one. That state is unreachable through [`parse_query`] and perfectly reachable through
+    /// [`Values::add`] and a hand-built map, which is how Go's callers construct query values.
+    pub fn get_all(&self, key: &str) -> Option<&[Vec<u8>]> {
+        self.0.get(key.as_bytes()).map(Vec::as_slice)
+    }
+
+    /// Go's `values[key] = […]` — a direct map assignment, which `Values.Set` cannot express
+    /// because it always stores exactly one value. The reachable case it exists for is the
+    /// **empty** slice: present with length zero, which [`Self::get_all`] reports as `Some(&[])`
+    /// and which several Go call sites branch on differently from an absent key.
+    pub fn set_all(&mut self, key: &str, values: Vec<Vec<u8>>) {
+        self.0.insert(key.as_bytes().to_vec(), values);
+    }
+
     /// Port of `Values.Set` — replaces every existing value for the key.
     pub fn set(&mut self, key: &str, value: &str) {
         self.0

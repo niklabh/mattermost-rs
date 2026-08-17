@@ -43,7 +43,7 @@ sqlx = { version = "0.8", default-features = false, features = [
 
 # Serde
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde_json = { version = "1", features = ["raw_value"] }
 
 # Errors
 thiserror = "2"
@@ -55,6 +55,14 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Time — Go stores epoch milliseconds as i64; chrono is for conversion only.
 chrono = "0.4"
+
+# The IANA timezone database. Needed because `ScheduledPost.IsValid` validates
+# `repeat_timezone` with `time.LoadLocation`, which is a *filesystem* lookup against the host's
+# tzdata — so Go's accepted set is a deployment artifact, not a language property (see D-065).
+# An embedded, case-sensitive IANA table is what a Linux Go server effectively answers, and it is
+# also what `scheduled_post_recurrence.go`'s next-occurrence arithmetic will need. No default
+# features: the serde and filesystem integrations are not used.
+chrono-tz = { version = "0.10", default-features = false }
 
 # Validation. The Go identifier regexes have non-obvious alternation
 # (`^[a-z0-9]+([a-z\-0-9]+|(__)?)[a-z0-9]+$`); hand-rolling equivalents is where

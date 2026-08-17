@@ -1,0 +1,280 @@
+{
+    "decode": [
+        {
+            "active_user_count": 0,
+            "err": null,
+            "in": "{}",
+            "json_after": "{\"maxUsersLimit\":0,\"maxUsersHardLimit\":0,\"activeUserCount\":0,\"singleChannelGuestCount\":0,\"singleChannelGuestLimit\":0,\"postHistoryLimit\":0,\"lastAccessiblePostTime\":0}",
+            "max_users_limit": 0,
+            "name": "empty",
+            "ok": true,
+            "panicked": false
+        },
+        {
+            "active_user_count": 5,
+            "err": null,
+            "in": "{\"activeUserCount\":5}",
+            "json_after": "{\"maxUsersLimit\":0,\"maxUsersHardLimit\":0,\"activeUserCount\":5,\"singleChannelGuestCount\":0,\"singleChannelGuestLimit\":0,\"postHistoryLimit\":0,\"lastAccessiblePostTime\":0}",
+            "max_users_limit": 0,
+            "name": "partial",
+            "ok": true,
+            "panicked": false
+        },
+        {
+            "active_user_count": 3,
+            "err": null,
+            "in": "{\"maxUsersLimit\":1,\"maxUsersHardLimit\":2,\"activeUserCount\":3,\"singleChannelGuestCount\":4,\"singleChannelGuestLimit\":5,\"postHistoryLimit\":6,\"lastAccessiblePostTime\":7}",
+            "json_after": "{\"maxUsersLimit\":1,\"maxUsersHardLimit\":2,\"activeUserCount\":3,\"singleChannelGuestCount\":4,\"singleChannelGuestLimit\":5,\"postHistoryLimit\":6,\"lastAccessiblePostTime\":7}",
+            "max_users_limit": 1,
+            "name": "full",
+            "ok": true,
+            "panicked": false
+        },
+        {
+            "active_user_count": 0,
+            "err": null,
+            "in": "{\"nope\":1}",
+            "json_after": "{\"maxUsersLimit\":0,\"maxUsersHardLimit\":0,\"activeUserCount\":0,\"singleChannelGuestCount\":0,\"singleChannelGuestLimit\":0,\"postHistoryLimit\":0,\"lastAccessiblePostTime\":0}",
+            "max_users_limit": 0,
+            "name": "unknown_key",
+            "ok": true,
+            "panicked": false
+        },
+        {
+            "active_user_count": 0,
+            "err": null,
+            "in": "{\"activeUserCount\":null}",
+            "json_after": "{\"maxUsersLimit\":0,\"maxUsersHardLimit\":0,\"activeUserCount\":0,\"singleChannelGuestCount\":0,\"singleChannelGuestLimit\":0,\"postHistoryLimit\":0,\"lastAccessiblePostTime\":0}",
+            "max_users_limit": 0,
+            "name": "null_int",
+            "ok": true,
+            "panicked": false
+        },
+        {
+            "active_user_count": 0,
+            "err": "json: cannot unmarshal number 1.5 into Go struct field ServerLimits.activeUserCount of type int64",
+            "in": "{\"activeUserCount\":1.5}",
+            "json_after": "{\"maxUsersLimit\":0,\"maxUsersHardLimit\":0,\"activeUserCount\":0,\"singleChannelGuestCount\":0,\"singleChannelGuestLimit\":0,\"postHistoryLimit\":0,\"lastAccessiblePostTime\":0}",
+            "max_users_limit": 0,
+            "name": "fractional",
+            "ok": false,
+            "panicked": false
+        },
+        {
+            "active_user_count": 0,
+            "err": "json: cannot unmarshal number 1.0 into Go struct field ServerLimits.activeUserCount of type int64",
+            "in": "{\"activeUserCount\":1.0}",
+            "json_after": "{\"maxUsersLimit\":0,\"maxUsersHardLimit\":0,\"activeUserCount\":0,\"singleChannelGuestCount\":0,\"singleChannelGuestLimit\":0,\"postHistoryLimit\":0,\"lastAccessiblePostTime\":0}",
+            "max_users_limit": 0,
+            "name": "fractional_but_whole",
+            "ok": false,
+            "panicked": false
+        },
+        {
+            "active_user_count": 0,
+            "err": "json: cannot unmarshal number 1e3 into Go struct field ServerLimits.activeUserCount of type int64",
+            "in": "{\"activeUserCount\":1e3}",
+            "json_after": "{\"maxUsersLimit\":0,\"maxUsersHardLimit\":0,\"activeUserCount\":0,\"singleChannelGuestCount\":0,\"singleChannelGuestLimit\":0,\"postHistoryLimit\":0,\"lastAccessiblePostTime\":0}",
+            "max_users_limit": 0,
+            "name": "exponent",
+            "ok": false,
+            "panicked": false
+        },
+        {
+            "active_user_count": 0,
+            "err": "json: cannot unmarshal string into Go struct field ServerLimits.activeUserCount of type int64",
+            "in": "{\"activeUserCount\":\"5\"}",
+            "json_after": "{\"maxUsersLimit\":0,\"maxUsersHardLimit\":0,\"activeUserCount\":0,\"singleChannelGuestCount\":0,\"singleChannelGuestLimit\":0,\"postHistoryLimit\":0,\"lastAccessiblePostTime\":0}",
+            "max_users_limit": 0,
+            "name": "quoted_number",
+            "ok": false,
+            "panicked": false
+        },
+        {
+            "active_user_count": 0,
+            "err": "json: cannot unmarshal bool into Go struct field ServerLimits.activeUserCount of type int64",
+            "in": "{\"activeUserCount\":true}",
+            "json_after": "{\"maxUsersLimit\":0,\"maxUsersHardLimit\":0,\"activeUserCount\":0,\"singleChannelGuestCount\":0,\"singleChannelGuestLimit\":0,\"postHistoryLimit\":0,\"lastAccessiblePostTime\":0}",
+            "max_users_limit": 0,
+            "name": "bool",
+            "ok": false,
+            "panicked": false
+        },
+        {
+            "active_user_count": 9223372036854775807,
+            "err": null,
+            "in": "{\"activeUserCount\":9223372036854775807}",
+            "json_after": "{\"maxUsersLimit\":0,\"maxUsersHardLimit\":0,\"activeUserCount\":9223372036854775807,\"singleChannelGuestCount\":0,\"singleChannelGuestLimit\":0,\"postHistoryLimit\":0,\"lastAccessiblePostTime\":0}",
+            "max_users_limit": 0,
+            "name": "max_int64",
+            "ok": true,
+            "panicked": false
+        },
+        {
+            "active_user_count": 0,
+            "err": "json: cannot unmarshal number 9223372036854775808 into Go struct field ServerLimits.activeUserCount of type int64",
+            "in": "{\"activeUserCount\":9223372036854775808}",
+            "json_after": "{\"maxUsersLimit\":0,\"maxUsersHardLimit\":0,\"activeUserCount\":0,\"singleChannelGuestCount\":0,\"singleChannelGuestLimit\":0,\"postHistoryLimit\":0,\"lastAccessiblePostTime\":0}",
+            "max_users_limit": 0,
+            "name": "out_of_range",
+            "ok": false,
+            "panicked": false
+        },
+        {
+            "active_user_count": 2,
+            "err": null,
+            "in": "{\"activeUserCount\":1,\"activeUserCount\":2}",
+            "json_after": "{\"maxUsersLimit\":0,\"maxUsersHardLimit\":0,\"activeUserCount\":2,\"singleChannelGuestCount\":0,\"singleChannelGuestLimit\":0,\"postHistoryLimit\":0,\"lastAccessiblePostTime\":0}",
+            "max_users_limit": 0,
+            "name": "duplicate_key",
+            "ok": true,
+            "panicked": false
+        }
+    ],
+    "key_casing": [
+        {
+            "in": "{\"maxUsersLimit\":42}",
+            "key": "maxUsersLimit",
+            "name": "declared_tag",
+            "ok": true,
+            "panicked": false,
+            "populated": true,
+            "value": 42
+        },
+        {
+            "in": "{\"MaxUsersLimit\":42}",
+            "key": "MaxUsersLimit",
+            "name": "go_field_name",
+            "ok": true,
+            "panicked": false,
+            "populated": true,
+            "value": 42
+        },
+        {
+            "in": "{\"maxuserslimit\":42}",
+            "key": "maxuserslimit",
+            "name": "all_lower",
+            "ok": true,
+            "panicked": false,
+            "populated": true,
+            "value": 42
+        },
+        {
+            "in": "{\"MAXUSERSLIMIT\":42}",
+            "key": "MAXUSERSLIMIT",
+            "name": "all_upper",
+            "ok": true,
+            "panicked": false,
+            "populated": true,
+            "value": 42
+        },
+        {
+            "in": "{\"mAxUsErSlImIt\":42}",
+            "key": "mAxUsErSlImIt",
+            "name": "mixed",
+            "ok": true,
+            "panicked": false,
+            "populated": true,
+            "value": 42
+        },
+        {
+            "in": "{\"max_users_limit\":42}",
+            "key": "max_users_limit",
+            "name": "snake_case",
+            "ok": true,
+            "panicked": false,
+            "populated": false,
+            "value": 0
+        },
+        {
+            "in": "{\"max-users-limit\":42}",
+            "key": "max-users-limit",
+            "name": "kebab_case",
+            "ok": true,
+            "panicked": false,
+            "populated": false,
+            "value": 0
+        }
+    ],
+    "keys": [
+        "maxUsersLimit",
+        "maxUsersHardLimit",
+        "activeUserCount",
+        "singleChannelGuestCount",
+        "singleChannelGuestLimit",
+        "postHistoryLimit",
+        "lastAccessiblePostTime"
+    ],
+    "wire": [
+        {
+            "json": "{\"maxUsersLimit\":0,\"maxUsersHardLimit\":0,\"activeUserCount\":0,\"singleChannelGuestCount\":0,\"singleChannelGuestLimit\":0,\"postHistoryLimit\":0,\"lastAccessiblePostTime\":0}",
+            "name": "all_zero",
+            "panicked": false
+        },
+        {
+            "json": "{\"maxUsersLimit\":10000,\"maxUsersHardLimit\":11000,\"activeUserCount\":8423,\"singleChannelGuestCount\":12,\"singleChannelGuestLimit\":50,\"postHistoryLimit\":5000,\"lastAccessiblePostTime\":1700000000000}",
+            "name": "typical",
+            "panicked": false
+        },
+        {
+            "json": "{\"maxUsersLimit\":100,\"maxUsersHardLimit\":120,\"activeUserCount\":110,\"singleChannelGuestCount\":0,\"singleChannelGuestLimit\":0,\"postHistoryLimit\":0,\"lastAccessiblePostTime\":0}",
+            "name": "over_soft_limit",
+            "panicked": false
+        },
+        {
+            "json": "{\"maxUsersLimit\":100,\"maxUsersHardLimit\":10,\"activeUserCount\":0,\"singleChannelGuestCount\":0,\"singleChannelGuestLimit\":0,\"postHistoryLimit\":0,\"lastAccessiblePostTime\":0}",
+            "name": "inverted_limits",
+            "panicked": false
+        },
+        {
+            "json": "{\"maxUsersLimit\":0,\"maxUsersHardLimit\":0,\"activeUserCount\":5,\"singleChannelGuestCount\":0,\"singleChannelGuestLimit\":0,\"postHistoryLimit\":0,\"lastAccessiblePostTime\":0}",
+            "name": "unlimited_history",
+            "panicked": false
+        },
+        {
+            "json": "{\"maxUsersLimit\":-1,\"maxUsersHardLimit\":0,\"activeUserCount\":0,\"singleChannelGuestCount\":0,\"singleChannelGuestLimit\":0,\"postHistoryLimit\":0,\"lastAccessiblePostTime\":-1}",
+            "name": "negative",
+            "panicked": false
+        },
+        {
+            "json": "{\"maxUsersLimit\":9223372036854775807,\"maxUsersHardLimit\":0,\"activeUserCount\":0,\"singleChannelGuestCount\":0,\"singleChannelGuestLimit\":0,\"postHistoryLimit\":0,\"lastAccessiblePostTime\":-9223372036854775808}",
+            "name": "int64_bounds",
+            "panicked": false
+        },
+        {
+            "json": "{\"maxUsersLimit\":1,\"maxUsersHardLimit\":0,\"activeUserCount\":0,\"singleChannelGuestCount\":0,\"singleChannelGuestLimit\":0,\"postHistoryLimit\":0,\"lastAccessiblePostTime\":0}",
+            "name": "only_max_users_limit",
+            "panicked": false
+        },
+        {
+            "json": "{\"maxUsersLimit\":0,\"maxUsersHardLimit\":2,\"activeUserCount\":0,\"singleChannelGuestCount\":0,\"singleChannelGuestLimit\":0,\"postHistoryLimit\":0,\"lastAccessiblePostTime\":0}",
+            "name": "only_max_users_hard_limit",
+            "panicked": false
+        },
+        {
+            "json": "{\"maxUsersLimit\":0,\"maxUsersHardLimit\":0,\"activeUserCount\":3,\"singleChannelGuestCount\":0,\"singleChannelGuestLimit\":0,\"postHistoryLimit\":0,\"lastAccessiblePostTime\":0}",
+            "name": "only_active_user_count",
+            "panicked": false
+        },
+        {
+            "json": "{\"maxUsersLimit\":0,\"maxUsersHardLimit\":0,\"activeUserCount\":0,\"singleChannelGuestCount\":4,\"singleChannelGuestLimit\":0,\"postHistoryLimit\":0,\"lastAccessiblePostTime\":0}",
+            "name": "only_single_channel_guest_count",
+            "panicked": false
+        },
+        {
+            "json": "{\"maxUsersLimit\":0,\"maxUsersHardLimit\":0,\"activeUserCount\":0,\"singleChannelGuestCount\":0,\"singleChannelGuestLimit\":5,\"postHistoryLimit\":0,\"lastAccessiblePostTime\":0}",
+            "name": "only_single_channel_guest_limit",
+            "panicked": false
+        },
+        {
+            "json": "{\"maxUsersLimit\":0,\"maxUsersHardLimit\":0,\"activeUserCount\":0,\"singleChannelGuestCount\":0,\"singleChannelGuestLimit\":0,\"postHistoryLimit\":6,\"lastAccessiblePostTime\":0}",
+            "name": "only_post_history_limit",
+            "panicked": false
+        },
+        {
+            "json": "{\"maxUsersLimit\":0,\"maxUsersHardLimit\":0,\"activeUserCount\":0,\"singleChannelGuestCount\":0,\"singleChannelGuestLimit\":0,\"postHistoryLimit\":0,\"lastAccessiblePostTime\":7}",
+            "name": "only_last_accessible_post_time",
+            "panicked": false
+        }
+    ]
+}

@@ -1,0 +1,677 @@
+{
+    "from_values": [
+        {
+            "name": "nil_values",
+            "in": null,
+            "user": {},
+            "user_err": "",
+            "channel": {},
+            "channel_err": "",
+            "user_nil": false,
+            "channel_nil": false
+        },
+        {
+            "name": "empty_values",
+            "in": {},
+            "user": {},
+            "user_err": "",
+            "channel": {},
+            "channel_err": "",
+            "user_nil": false,
+            "channel_nil": false
+        },
+        {
+            "name": "unrelated_keys_only",
+            "in": {
+                "page": [
+                    "1"
+                ],
+                "per_page": [
+                    "60"
+                ]
+            },
+            "user": {},
+            "user_err": "",
+            "channel": {},
+            "channel_err": "",
+            "user_nil": false,
+            "channel_nil": false
+        },
+        {
+            "name": "neither_key",
+            "in": {
+                "channel_mentions": [
+                    "c"
+                ],
+                "channel_mentions_ids": [
+                    "ci"
+                ]
+            },
+            "user": {},
+            "user_err": "",
+            "channel": {
+                "c": "ci"
+            },
+            "channel_err": "",
+            "user_nil": false,
+            "channel_nil": false
+        },
+        {
+            "name": "mentions_only",
+            "in": {
+                "user_mentions": [
+                    "m"
+                ]
+            },
+            "user": null,
+            "user_err": "user_mentions_ids key not found",
+            "channel": {},
+            "channel_err": "",
+            "user_nil": true,
+            "channel_nil": false
+        },
+        {
+            "name": "ids_only",
+            "in": {
+                "user_mentions_ids": [
+                    "i"
+                ]
+            },
+            "user": null,
+            "user_err": "user_mentions key not found",
+            "channel": {},
+            "channel_err": "",
+            "user_nil": true,
+            "channel_nil": false
+        },
+        {
+            "name": "both_empty_slices",
+            "in": {
+                "user_mentions": [],
+                "user_mentions_ids": []
+            },
+            "user": {},
+            "user_err": "",
+            "channel": {},
+            "channel_err": "",
+            "user_nil": false,
+            "channel_nil": false
+        },
+        {
+            "name": "mentions_empty_slice_ids_present",
+            "in": {
+                "user_mentions": [],
+                "user_mentions_ids": [
+                    "i"
+                ]
+            },
+            "user": null,
+            "user_err": "keys user_mentions and user_mentions_ids have different length",
+            "channel": {},
+            "channel_err": "",
+            "user_nil": true,
+            "channel_nil": false
+        },
+        {
+            "name": "one_pair",
+            "in": {
+                "user_mentions": [
+                    "town-square"
+                ],
+                "user_mentions_ids": [
+                    "cid1"
+                ]
+            },
+            "user": {
+                "town-square": "cid1"
+            },
+            "user_err": "",
+            "channel": {},
+            "channel_err": "",
+            "user_nil": false,
+            "channel_nil": false
+        },
+        {
+            "name": "two_pairs",
+            "in": {
+                "user_mentions": [
+                    "alice",
+                    "bob"
+                ],
+                "user_mentions_ids": [
+                    "id-a",
+                    "id-b"
+                ]
+            },
+            "user": {
+                "alice": "id-a",
+                "bob": "id-b"
+            },
+            "user_err": "",
+            "channel": {},
+            "channel_err": "",
+            "user_nil": false,
+            "channel_nil": false
+        },
+        {
+            "name": "length_mismatch_more_mentions",
+            "in": {
+                "user_mentions": [
+                    "a",
+                    "b"
+                ],
+                "user_mentions_ids": [
+                    "id-a"
+                ]
+            },
+            "user": null,
+            "user_err": "keys user_mentions and user_mentions_ids have different length",
+            "channel": {},
+            "channel_err": "",
+            "user_nil": true,
+            "channel_nil": false
+        },
+        {
+            "name": "length_mismatch_more_ids",
+            "in": {
+                "user_mentions": [
+                    "a"
+                ],
+                "user_mentions_ids": [
+                    "id-a",
+                    "id-b"
+                ]
+            },
+            "user": null,
+            "user_err": "keys user_mentions and user_mentions_ids have different length",
+            "channel": {},
+            "channel_err": "",
+            "user_nil": true,
+            "channel_nil": false
+        },
+        {
+            "name": "duplicate_same_id",
+            "in": {
+                "user_mentions": [
+                    "a",
+                    "a"
+                ],
+                "user_mentions_ids": [
+                    "id-a",
+                    "id-a"
+                ]
+            },
+            "user": {
+                "a": "id-a"
+            },
+            "user_err": "",
+            "channel": {},
+            "channel_err": "",
+            "user_nil": false,
+            "channel_nil": false
+        },
+        {
+            "name": "duplicate_different_id",
+            "in": {
+                "user_mentions": [
+                    "a",
+                    "a"
+                ],
+                "user_mentions_ids": [
+                    "id-a",
+                    "id-b"
+                ]
+            },
+            "user": null,
+            "user_err": "key a has two different values: id-a and id-b",
+            "channel": {},
+            "channel_err": "",
+            "user_nil": true,
+            "channel_nil": false
+        },
+        {
+            "name": "duplicate_clash_ordering",
+            "in": {
+                "user_mentions": [
+                    "a",
+                    "a",
+                    "a"
+                ],
+                "user_mentions_ids": [
+                    "first",
+                    "second",
+                    "third"
+                ]
+            },
+            "user": null,
+            "user_err": "key a has two different values: first and second",
+            "channel": {},
+            "channel_err": "",
+            "user_nil": true,
+            "channel_nil": false
+        },
+        {
+            "name": "empty_mention",
+            "in": {
+                "user_mentions": [
+                    ""
+                ],
+                "user_mentions_ids": [
+                    "id"
+                ]
+            },
+            "user": {
+                "": "id"
+            },
+            "user_err": "",
+            "channel": {},
+            "channel_err": "",
+            "user_nil": false,
+            "channel_nil": false
+        },
+        {
+            "name": "empty_id",
+            "in": {
+                "user_mentions": [
+                    "a"
+                ],
+                "user_mentions_ids": [
+                    ""
+                ]
+            },
+            "user": {
+                "a": ""
+            },
+            "user_err": "",
+            "channel": {},
+            "channel_err": "",
+            "user_nil": false,
+            "channel_nil": false
+        },
+        {
+            "name": "both_empty_strings",
+            "in": {
+                "user_mentions": [
+                    ""
+                ],
+                "user_mentions_ids": [
+                    ""
+                ]
+            },
+            "user": {
+                "": ""
+            },
+            "user_err": "",
+            "channel": {},
+            "channel_err": "",
+            "user_nil": false,
+            "channel_nil": false
+        },
+        {
+            "name": "mention_keeps_tilde",
+            "in": {
+                "user_mentions": [
+                    "~town"
+                ],
+                "user_mentions_ids": [
+                    "id"
+                ]
+            },
+            "user": {
+                "~town": "id"
+            },
+            "user_err": "",
+            "channel": {},
+            "channel_err": "",
+            "user_nil": false,
+            "channel_nil": false
+        },
+        {
+            "name": "id_is_not_an_id",
+            "in": {
+                "user_mentions": [
+                    "a"
+                ],
+                "user_mentions_ids": [
+                    "nope"
+                ]
+            },
+            "user": {
+                "a": "nope"
+            },
+            "user_err": "",
+            "channel": {},
+            "channel_err": "",
+            "user_nil": false,
+            "channel_nil": false
+        },
+        {
+            "name": "non_ascii",
+            "in": {
+                "user_mentions": [
+                    "café",
+                    "日本"
+                ],
+                "user_mentions_ids": [
+                    "i1",
+                    "i2"
+                ]
+            },
+            "user": {
+                "café": "i1",
+                "日本": "i2"
+            },
+            "user_err": "",
+            "channel": {},
+            "channel_err": "",
+            "user_nil": false,
+            "channel_nil": false
+        },
+        {
+            "name": "whitespace",
+            "in": {
+                "user_mentions": [
+                    " a b "
+                ],
+                "user_mentions_ids": [
+                    "\tid\n"
+                ]
+            },
+            "user": {
+                " a b ": "\tid\n"
+            },
+            "user_err": "",
+            "channel": {},
+            "channel_err": "",
+            "user_nil": false,
+            "channel_nil": false
+        },
+        {
+            "name": "both_families",
+            "in": {
+                "channel_mentions": [
+                    "c"
+                ],
+                "channel_mentions_ids": [
+                    "ci"
+                ],
+                "user_mentions": [
+                    "u"
+                ],
+                "user_mentions_ids": [
+                    "ui"
+                ]
+            },
+            "user": {
+                "u": "ui"
+            },
+            "user_err": "",
+            "channel": {
+                "c": "ci"
+            },
+            "channel_err": "",
+            "user_nil": false,
+            "channel_nil": false
+        },
+        {
+            "name": "channel_only_pair",
+            "in": {
+                "channel_mentions": [
+                    "c"
+                ],
+                "channel_mentions_ids": [
+                    "ci"
+                ]
+            },
+            "user": {},
+            "user_err": "",
+            "channel": {
+                "c": "ci"
+            },
+            "channel_err": "",
+            "user_nil": false,
+            "channel_nil": false
+        },
+        {
+            "name": "channel_mentions_only",
+            "in": {
+                "channel_mentions": [
+                    "c"
+                ]
+            },
+            "user": {},
+            "user_err": "",
+            "channel": null,
+            "channel_err": "channel_mentions_ids key not found",
+            "user_nil": false,
+            "channel_nil": true
+        }
+    ],
+    "keys": {
+        "channel_encoded": "channel_mentions=m\u0026channel_mentions_ids=i",
+        "channel_keys": [
+            "channel_mentions",
+            "channel_mentions_ids"
+        ],
+        "user_encoded": "user_mentions=m\u0026user_mentions_ids=i",
+        "user_keys": [
+            "user_mentions",
+            "user_mentions_ids"
+        ]
+    },
+    "to_values": [
+        {
+            "name": "nil_map",
+            "in": null,
+            "mentions": [],
+            "ids": [],
+            "user_encode_sorted": "",
+            "channel_encode_sorted": "",
+            "user_encode_actual": "",
+            "channel_encode_actual": "",
+            "deterministic": true,
+            "round_trips": true
+        },
+        {
+            "name": "empty_map",
+            "in": {},
+            "mentions": [],
+            "ids": [],
+            "user_encode_sorted": "",
+            "channel_encode_sorted": "",
+            "user_encode_actual": "",
+            "channel_encode_actual": "",
+            "deterministic": true,
+            "round_trips": true
+        },
+        {
+            "name": "one_pair",
+            "in": {
+                "alice": "id-a"
+            },
+            "mentions": [
+                "alice"
+            ],
+            "ids": [
+                "id-a"
+            ],
+            "user_encode_sorted": "user_mentions=alice\u0026user_mentions_ids=id-a",
+            "channel_encode_sorted": "channel_mentions=alice\u0026channel_mentions_ids=id-a",
+            "user_encode_actual": "user_mentions=alice\u0026user_mentions_ids=id-a",
+            "channel_encode_actual": "channel_mentions=alice\u0026channel_mentions_ids=id-a",
+            "deterministic": true,
+            "round_trips": true
+        },
+        {
+            "name": "two_pairs",
+            "in": {
+                "alice": "id-a",
+                "bob": "id-b"
+            },
+            "mentions": [
+                "alice",
+                "bob"
+            ],
+            "ids": [
+                "id-a",
+                "id-b"
+            ],
+            "user_encode_sorted": "user_mentions=alice\u0026user_mentions=bob\u0026user_mentions_ids=id-a\u0026user_mentions_ids=id-b",
+            "channel_encode_sorted": "channel_mentions=alice\u0026channel_mentions=bob\u0026channel_mentions_ids=id-a\u0026channel_mentions_ids=id-b",
+            "user_encode_actual": "",
+            "channel_encode_actual": "",
+            "deterministic": false,
+            "round_trips": true
+        },
+        {
+            "name": "three_pairs",
+            "in": {
+                "a": "1",
+                "b": "2",
+                "c": "3"
+            },
+            "mentions": [
+                "a",
+                "b",
+                "c"
+            ],
+            "ids": [
+                "1",
+                "2",
+                "3"
+            ],
+            "user_encode_sorted": "user_mentions=a\u0026user_mentions=b\u0026user_mentions=c\u0026user_mentions_ids=1\u0026user_mentions_ids=2\u0026user_mentions_ids=3",
+            "channel_encode_sorted": "channel_mentions=a\u0026channel_mentions=b\u0026channel_mentions=c\u0026channel_mentions_ids=1\u0026channel_mentions_ids=2\u0026channel_mentions_ids=3",
+            "user_encode_actual": "",
+            "channel_encode_actual": "",
+            "deterministic": false,
+            "round_trips": true
+        },
+        {
+            "name": "empty_mention",
+            "in": {
+                "": "id"
+            },
+            "mentions": [
+                ""
+            ],
+            "ids": [
+                "id"
+            ],
+            "user_encode_sorted": "user_mentions=\u0026user_mentions_ids=id",
+            "channel_encode_sorted": "channel_mentions=\u0026channel_mentions_ids=id",
+            "user_encode_actual": "user_mentions=\u0026user_mentions_ids=id",
+            "channel_encode_actual": "channel_mentions=\u0026channel_mentions_ids=id",
+            "deterministic": true,
+            "round_trips": true
+        },
+        {
+            "name": "empty_id",
+            "in": {
+                "a": ""
+            },
+            "mentions": [
+                "a"
+            ],
+            "ids": [
+                ""
+            ],
+            "user_encode_sorted": "user_mentions=a\u0026user_mentions_ids=",
+            "channel_encode_sorted": "channel_mentions=a\u0026channel_mentions_ids=",
+            "user_encode_actual": "user_mentions=a\u0026user_mentions_ids=",
+            "channel_encode_actual": "channel_mentions=a\u0026channel_mentions_ids=",
+            "deterministic": true,
+            "round_trips": true
+        },
+        {
+            "name": "both_empty",
+            "in": {
+                "": ""
+            },
+            "mentions": [
+                ""
+            ],
+            "ids": [
+                ""
+            ],
+            "user_encode_sorted": "user_mentions=\u0026user_mentions_ids=",
+            "channel_encode_sorted": "channel_mentions=\u0026channel_mentions_ids=",
+            "user_encode_actual": "user_mentions=\u0026user_mentions_ids=",
+            "channel_encode_actual": "channel_mentions=\u0026channel_mentions_ids=",
+            "deterministic": true,
+            "round_trips": true
+        },
+        {
+            "name": "needs_escaping",
+            "in": {
+                "a b": "c\u0026d=e"
+            },
+            "mentions": [
+                "a b"
+            ],
+            "ids": [
+                "c\u0026d=e"
+            ],
+            "user_encode_sorted": "user_mentions=a+b\u0026user_mentions_ids=c%26d%3De",
+            "channel_encode_sorted": "channel_mentions=a+b\u0026channel_mentions_ids=c%26d%3De",
+            "user_encode_actual": "user_mentions=a+b\u0026user_mentions_ids=c%26d%3De",
+            "channel_encode_actual": "channel_mentions=a+b\u0026channel_mentions_ids=c%26d%3De",
+            "deterministic": true,
+            "round_trips": true
+        },
+        {
+            "name": "non_ascii",
+            "in": {
+                "café": "日本"
+            },
+            "mentions": [
+                "café"
+            ],
+            "ids": [
+                "日本"
+            ],
+            "user_encode_sorted": "user_mentions=caf%C3%A9\u0026user_mentions_ids=%E6%97%A5%E6%9C%AC",
+            "channel_encode_sorted": "channel_mentions=caf%C3%A9\u0026channel_mentions_ids=%E6%97%A5%E6%9C%AC",
+            "user_encode_actual": "user_mentions=caf%C3%A9\u0026user_mentions_ids=%E6%97%A5%E6%9C%AC",
+            "channel_encode_actual": "channel_mentions=caf%C3%A9\u0026channel_mentions_ids=%E6%97%A5%E6%9C%AC",
+            "deterministic": true,
+            "round_trips": true
+        },
+        {
+            "name": "tilde_prefix",
+            "in": {
+                "~town-square": "cid"
+            },
+            "mentions": [
+                "~town-square"
+            ],
+            "ids": [
+                "cid"
+            ],
+            "user_encode_sorted": "user_mentions=~town-square\u0026user_mentions_ids=cid",
+            "channel_encode_sorted": "channel_mentions=~town-square\u0026channel_mentions_ids=cid",
+            "user_encode_actual": "user_mentions=~town-square\u0026user_mentions_ids=cid",
+            "channel_encode_actual": "channel_mentions=~town-square\u0026channel_mentions_ids=cid",
+            "deterministic": true,
+            "round_trips": true
+        },
+        {
+            "name": "plus_and_percent",
+            "in": {
+                "a+b": "%41"
+            },
+            "mentions": [
+                "a+b"
+            ],
+            "ids": [
+                "%41"
+            ],
+            "user_encode_sorted": "user_mentions=a%2Bb\u0026user_mentions_ids=%2541",
+            "channel_encode_sorted": "channel_mentions=a%2Bb\u0026channel_mentions_ids=%2541",
+            "user_encode_actual": "user_mentions=a%2Bb\u0026user_mentions_ids=%2541",
+            "channel_encode_actual": "channel_mentions=a%2Bb\u0026channel_mentions_ids=%2541",
+            "deterministic": true,
+            "round_trips": true
+        }
+    ]
+}

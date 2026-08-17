@@ -24,11 +24,12 @@
 //! `HashSet::contains`, `Vec::contains`, `==`, `Vec::retain`, `Clone` — so they are aliased
 //! rather than wrapped.
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::sync::LazyLock;
 
-use chrono::{DateTime, Datelike, FixedOffset, Local, TimeZone, Utc};
+use chrono::{DateTime, Datelike, Local, NaiveDate, TimeZone, Utc};
 use rand::RngCore;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -87,6 +88,95 @@ pub fn json_values_equal_like_go(a: &serde_json::Value, b: &serde_json::Value) -
         }
         _ => a == b,
     }
+}
+
+/// Go's **`encoding/json`** rendering of a `float64` — which is not [`go_format_float`], and not
+/// serde_json's either.
+///
+/// There are three renderings of a float in play and they disagree on most values:
+///
+/// | value | `encoding/json` (this) | `%v` ([`go_format_float`]) | serde_json |
+/// |---|---|---|---|
+/// | `1.0` | `1` | `1` | `1.0` |
+/// | `1234567.0` | `1234567` | `1.234567e+06` | `1234567.0` |
+/// | `1e-6` | `0.000001` | `1e-06` | `1e-6` |
+/// | `1e-7` | `1e-7` | `1e-07` | `1e-7` |
+/// | `9.999999999999999e20` | `999999999999999900000` | `9.999999999999999e+20` | `9.999999999999999e+20` |
+///
+/// Go's encoder is (`encoding/json/encode.go`, `floatEncoder`):
+///
+/// ```text
+/// fmt := byte('f')
+/// if abs := math.Abs(f); abs != 0 && (abs < 1e-6 || abs >= 1e21) { fmt = 'e' }
+/// b = strconv.AppendFloat(b, f, fmt, -1, 64)
+/// if fmt == 'e' { rewrite a trailing "e-09" to "e-9" }
+/// ```
+///
+/// So the thresholds are `1e-6` and `1e21` — not `%g`'s `1e-4`/`1e6` — and the **negative**
+/// exponent has one leading zero stripped while the positive one keeps it: `1e-7` and `1e+21`.
+///
+/// `None` for `NaN`, `+Inf` and `-Inf`: Go's `json.Marshal` returns
+/// `json: unsupported value: NaN` and emits **nothing**, so one bad value fails the whole
+/// document rather than degrading to `null`. Callers must propagate that, not substitute.
+///
+/// Measured against Go over 29 values spanning both thresholds from each side; serde_json
+/// disagrees on 11 of them.
+pub fn go_json_format_float(f: f64) -> Option<String> {
+    if f.is_nan() || f.is_infinite() {
+        return None;
+    }
+
+    // Go spells this `abs < 1e-6 || abs >= 1e21`; the half-open range is the same test, and
+    // clippy prefers it.
+    let abs = f.abs();
+    if abs != 0.0 && !(1e-6..1e21).contains(&abs) {
+        return Some(strip_exponent_zero(&format_exponential(f)));
+    }
+    Some(format_decimal(f))
+}
+
+/// `strconv.FormatFloat(f, 'e', -1, 64)`: `d.ddde±dd`, shortest round-tripping digits, exponent
+/// signed and at least two digits.
+///
+/// Rust's `LowerExp` gives the same digits in the same normalised form but writes the exponent
+/// as `e-7`/`e21` — no `+`, no zero padding — so only the exponent needs rebuilding.
+fn format_exponential(f: f64) -> String {
+    let sci = format!("{f:e}");
+    let Some((mantissa, exp_str)) = sci.split_once('e') else {
+        return sci;
+    };
+    let Ok(exp) = exp_str.parse::<i32>() else {
+        return sci;
+    };
+    let sign = if exp < 0 { '-' } else { '+' };
+    format!("{mantissa}e{sign}{:02}", exp.abs())
+}
+
+/// `strconv.FormatFloat(f, 'f', -1, 64)`: positional, shortest round-tripping digits, never an
+/// exponent and never a trailing `.0`.
+///
+/// Rust's `Display` is positional too and agrees on the digits, but writes `-0` for negative zero
+/// exactly as Go does — so this is a thin wrapper today. It exists as a named function because
+/// the two could drift and because the call site should say which `strconv` mode it means.
+fn format_decimal(f: f64) -> String {
+    format!("{f}")
+}
+
+/// Go's fixup for `'e'` output: `1e-07` becomes `1e-7`.
+///
+/// It fires only on a **negative** two-digit exponent whose first digit is zero, which is why
+/// `1e+21` keeps its two digits and `1e-07` does not. Reproduced as the same narrow rewrite Go
+/// performs rather than as general zero-stripping — `1e-107` must not become `1e-17`.
+fn strip_exponent_zero(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let n = bytes.len();
+    if n >= 4 && bytes[n - 4] == b'e' && bytes[n - 3] == b'-' && bytes[n - 2] == b'0' {
+        let mut out = String::with_capacity(n - 1);
+        out.push_str(&s[..n - 2]);
+        out.push(s.as_bytes()[n - 1] as char);
+        return out;
+    }
+    s.to_string()
 }
 
 /// Go's `fmt.Sprintf("%v", f)` for a `float64`, which is `strconv.FormatFloat(f, 'g', -1, 64)`.
@@ -497,11 +587,17 @@ pub fn get_time_for_millis(millis: i64) -> Option<DateTime<Local>> {
 }
 
 /// Port of `model.PadDateStringZeros` (utils.go:463).
+///
+/// **The length test is in bytes, not characters.** Go's `len(part) == 1` counts bytes, so a
+/// single Arabic-Indic digit — two bytes — is left unpadded and the date goes on to fail its
+/// parse. An earlier version of this function counted `chars()` and padded it, which is the one
+/// input where the two disagree; the `pad_date_string_zeros` section of
+/// `fixtures/behaviour_search_params.json` is what caught it.
 pub fn pad_date_string_zeros(date_string: &str) -> String {
     date_string
         .split('-')
         .map(|part| {
-            if part.chars().count() == 1 {
+            if part.len() == 1 {
                 format!("0{part}")
             } else {
                 part.to_string()
@@ -515,42 +611,56 @@ pub fn pad_date_string_zeros(date_string: &str) -> String {
 ///
 /// The calendar date is taken from `this_time` **in its own zone** and then reinterpreted at
 /// `tz_offset_seconds`, which is what Go's `time.Date(y, m, d, ..., fixedZone)` does.
+///
+/// **The offset is not range-checked, deliberately.** `time.FixedZone` accepts any `int` of
+/// seconds, and `SearchParams.TimeZoneOffset` arrives from a client, so `86400` and `1000000`
+/// are reachable values that Go answers for. An earlier version of this function built a
+/// `chrono::FixedOffset`, which stops at ±86399 and returned `None` for all of them; the
+/// `day_millis` section of `fixtures/behaviour_search_params.json` is what caught it. The
+/// arithmetic below has no such limit.
 pub fn get_start_of_day_millis<Tz: TimeZone>(
     this_time: &DateTime<Tz>,
-    tz_offset_seconds: i32,
+    tz_offset_seconds: i64,
 ) -> Option<i64> {
-    let zone = FixedOffset::east_opt(tz_offset_seconds)?;
-    zone.with_ymd_and_hms(
-        this_time.year(),
-        this_time.month(),
-        this_time.day(),
-        0,
-        0,
-        0,
-    )
-    .single()
-    .map(|t| t.timestamp_millis())
+    day_millis_at(this_time, 0, tz_offset_seconds)
 }
 
 /// Port of `model.GetEndOfDayMillis` (utils.go:482).
 ///
-/// Go builds 23:59:59.999999999; `UnixMilli` truncates the nanoseconds, so the result is
-/// `.999`.
+/// Go builds 23:59:59.999999999; `UnixMilli` truncates the nanoseconds, so the result is exactly
+/// `GetStartOfDayMillis` plus 86,399,999 — a fixed zone has no DST, so no day is a different
+/// length. Measured across the whole `day_millis` corpus, including pre-epoch dates where the
+/// truncation direction is easy to get wrong.
 pub fn get_end_of_day_millis<Tz: TimeZone>(
     this_time: &DateTime<Tz>,
-    tz_offset_seconds: i32,
+    tz_offset_seconds: i64,
 ) -> Option<i64> {
-    let zone = FixedOffset::east_opt(tz_offset_seconds)?;
-    zone.with_ymd_and_hms(
-        this_time.year(),
-        this_time.month(),
-        this_time.day(),
-        23,
-        59,
-        59,
-    )
-    .single()
-    .map(|t| t.timestamp_millis() + 999)
+    day_millis_at(this_time, MILLIS_TO_END_OF_DAY, tz_offset_seconds)
+}
+
+/// 23:59:59.999 after midnight, in milliseconds.
+const MILLIS_TO_END_OF_DAY: i64 = 86_399_999;
+
+/// The shared body of the two helpers above: midnight UTC on `this_time`'s calendar date, moved
+/// `into_day` milliseconds forward, then shifted by the offset.
+///
+/// Returns `None` only for a date outside chrono's range or on arithmetic overflow. Go cannot
+/// fail here, so that is a widening of the contract rather than a behavioural difference — no
+/// reachable `SearchParams` produces one.
+fn day_millis_at<Tz: TimeZone>(
+    this_time: &DateTime<Tz>,
+    into_day: i64,
+    tz_offset_seconds: i64,
+) -> Option<i64> {
+    let midnight_utc =
+        NaiveDate::from_ymd_opt(this_time.year(), this_time.month(), this_time.day())?
+            .and_hms_opt(0, 0, 0)?
+            .and_utc()
+            .timestamp_millis();
+
+    midnight_utc
+        .checked_add(into_day)?
+        .checked_sub(tz_offset_seconds.checked_mul(1_000)?)
 }
 
 // ---------------------------------------------------------------------------
@@ -577,8 +687,40 @@ static VALID_SIMPLE_ALPHA_NUM_HYPHEN_UNDERSCORE: LazyLock<Option<Regex>> =
 static VALID_SIMPLE_ALPHA_NUM_HYPHEN_UNDERSCORE_PLUS: LazyLock<Option<Regex>> =
     LazyLock::new(|| compile(r"^[a-zA-Z0-9+_-]+$"));
 
+/// Port of `model.validHashtag` (utils.go:744). Go: `^(#\pL[\pL\d\-_.]*[\pL\d])$`.
+///
+/// `\d` is spelled `[0-9]` here on purpose — see [`is_valid_hashtag`].
+static VALID_HASHTAG: LazyLock<Option<Regex>> =
+    LazyLock::new(|| compile(r"^(#\p{L}[\p{L}0-9\-_.]*[\p{L}0-9])$"));
+
+/// Port of `model.hashtagStart` (utils.go:746). Go: `^#{2,}`.
+static HASHTAG_START: LazyLock<Option<Regex>> = LazyLock::new(|| compile(r"^#{2,}"));
+
 fn matches(re: &LazyLock<Option<Regex>>, s: &str) -> bool {
     re.as_ref().is_some_and(|re| re.is_match(s))
+}
+
+/// Port of `model.validHashtag`'s only use (utils.go:763) — is this word a hashtag?
+///
+/// **Go's `\d` is ASCII and Rust's is not**, so the pattern is transcribed with `[0-9]`. Go's
+/// `regexp` implements the Perl classes over ASCII only, while the `regex` crate's `\d` is
+/// `\p{Nd}` — which would make `#a٣` a valid hashtag here and not in Go. Measured over 169
+/// codepoints in `fixtures/behaviour_search_params.json`; see [`crate::search_params`] for the
+/// same trap in the two term-trimming patterns.
+///
+/// Requires at least three characters: `#`, a letter, and a final letter or digit. `#a` is
+/// **not** a hashtag, which is why a one-letter tag searches as a plain term.
+pub fn is_valid_hashtag(word: &str) -> bool {
+    matches(&VALID_HASHTAG, word)
+}
+
+/// Port of `hashtagStart.ReplaceAllString(word, "#")` (utils.go:761) — collapses a run of two or
+/// more leading `#` into one. Anchored, so at most one replacement happens.
+pub fn collapse_leading_hashes(word: &str) -> Cow<'_, str> {
+    match HASHTAG_START.as_ref() {
+        Some(re) => re.replace(word, "#"),
+        None => Cow::Borrowed(word),
+    }
 }
 
 /// Port of `model.isValidAlphaNum` (utils.go:717). Unexported in Go; used by `team.go`.
@@ -1157,10 +1299,11 @@ impl std::error::Error for AppError {
 }
 
 // ---------------------------------------------------------------------------
-// go_time — Go's `time.Time` JSON encoding
+// go_time — Go's `time.Time` JSON encoding, and its calendar arithmetic
 // ---------------------------------------------------------------------------
 
-/// Go's `time.Time` as `encoding/json` writes and reads it.
+/// Go's `time.Time` as `encoding/json` writes and reads it, plus the two `time` functions that
+/// do calendar arithmetic in a named zone ([`go_time::date_in_zone`], [`go_time::add_date_days`]).
 ///
 /// Almost every timestamp in the model package is an `int64` of epoch milliseconds, but a
 /// handful of types (`CustomStatus.ExpiresAt` first among them) hold a real `time.Time`, which
@@ -1358,6 +1501,90 @@ pub mod go_time {
         parse(&raw)
             .ok_or_else(|| D::Error::invalid_value(Unexpected::Str(&raw), &"an RFC 3339 timestamp"))
     }
+
+    // -- calendar arithmetic in a named zone ---------------------------------------------
+
+    /// Port of `time.Date` — specifically its **normalisation**, which is the part that has no
+    /// specification and therefore cannot be reasoned about.
+    ///
+    /// Turning a wall clock into an instant is ambiguous twice a year. Go's doc says only that
+    /// "the choice of time zone, and therefore the time, is not guaranteed", so what a port has
+    /// to reproduce is the implementation:
+    ///
+    /// ```text
+    /// unix := <the wall clock read as if it were UTC>
+    /// _, offset, start, end, _ := loc.lookup(unix)
+    /// if offset != 0 {
+    ///     switch utc := unix - int64(offset); {
+    ///     case utc < start: _, offset, _, _, _ = loc.lookup(start - 1)
+    ///     case utc >= end:  _, offset, _, _, _ = loc.lookup(end)
+    ///     }
+    ///     unix -= int64(offset)
+    /// }
+    /// ```
+    ///
+    /// The `start`/`end` boundaries are not reachable through any timezone crate, but they are
+    /// not needed. `utc < start` says `utc` sits in the interval *before* the one holding
+    /// `unix`, so `lookup(start - 1)` is `lookup(utc)`; `utc >= end` says it sits in the one
+    /// *after*, so `lookup(end)` is `lookup(utc)` again. Both branches therefore reduce to "the
+    /// offset at `utc`", and the whole function collapses to:
+    ///
+    /// ```text
+    /// o0 = offset(unix); cand = unix - o0; o1 = offset(cand)
+    /// if o1 == o0 { cand } else { unix - o1 }
+    /// ```
+    ///
+    /// which also subsumes the `offset != 0` guard, since `o0 == 0` makes `cand == unix` and
+    /// `o1 == o0`. The reduction assumes at most one transition between `unix` and `cand` —
+    /// they are at most 26 hours apart, and no zone in tzdata changes offset twice inside a day.
+    ///
+    /// **`chrono`'s `LocalResult` is not a substitute**, and mapping its three arms onto a rule
+    /// is where a plausible port goes wrong. There is no rule: because Go looks the offset up on
+    /// the wall clock *read as a UTC instant*, which side of a transition it lands on is decided
+    /// by the sign of the zone's own offset. Measured over 280 probes in
+    /// `fixtures/behaviour_scheduled_post_recurrence.json`:
+    ///
+    /// | | negative-offset zone | positive-offset zone |
+    /// |---|---|---|
+    /// | skipped local time (`LocalResult::None`) | resolves **backwards**, before the gap | resolves **forwards**, after it |
+    /// | repeated local time (`LocalResult::Ambiguous`) | the **earlier** instant | the **later** instant |
+    ///
+    /// So `Ambiguous(a, _) => a` — the mapping that reads as obviously right — is wrong for
+    /// Europe/London, and `None` has no `LocalResult` answer to map at all.
+    ///
+    /// Returns `None` only on arithmetic that leaves `chrono`'s representable range.
+    pub fn date_in_zone<T: chrono::TimeZone>(wall: NaiveDateTime, tz: &T) -> Option<DateTime<T>> {
+        // Go's `unix`: the wall clock's calendar fields read as though they were UTC. It is not
+        // an instant, and the arithmetic below is the only thing that turns it into one.
+        let pseudo = wall.and_utc();
+
+        let offset_at = |t: &DateTime<chrono::Utc>| {
+            chrono::Offset::fix(&tz.offset_from_utc_datetime(&t.naive_utc())).local_minus_utc()
+        };
+
+        let o0 = offset_at(&pseudo);
+        let candidate = pseudo.checked_sub_signed(chrono::TimeDelta::seconds(o0.into()))?;
+
+        let o1 = offset_at(&candidate);
+        let utc = if o1 == o0 {
+            candidate
+        } else {
+            pseudo.checked_sub_signed(chrono::TimeDelta::seconds(o1.into()))?
+        };
+
+        Some(utc.with_timezone(tz))
+    }
+
+    /// Port of `(Time).AddDate(0, 0, days)`.
+    ///
+    /// Go's `AddDate` is `Date(y, m, d+days, h, mi, s, ns, loc)` — it adds **calendar** days and
+    /// keeps the wall clock, then re-resolves through [`date_in_zone`]. That is not the same as
+    /// adding `days * 86_400` seconds: across a DST boundary the two differ by the size of the
+    /// shift, and across a skipped local hour the wall clock does not survive at all.
+    pub fn add_date_days<T: chrono::TimeZone>(t: &DateTime<T>, days: u64) -> Option<DateTime<T>> {
+        let wall = t.naive_local().checked_add_days(chrono::Days::new(days))?;
+        date_in_zone(wall, &t.timezone())
+    }
 }
 
 #[cfg(test)]
@@ -1549,6 +1776,8 @@ mod tests {
         assert!(VALID_SIMPLE_ALPHA_NUM.is_some());
         assert!(VALID_SIMPLE_ALPHA_NUM_HYPHEN_UNDERSCORE.is_some());
         assert!(VALID_SIMPLE_ALPHA_NUM_HYPHEN_UNDERSCORE_PLUS.is_some());
+        assert!(VALID_HASHTAG.is_some());
+        assert!(HASHTAG_START.is_some());
     }
 
     #[test]
@@ -1806,6 +2035,9 @@ mod tests {
 #[cfg(test)]
 mod go_parity {
     use super::*;
+    // Only the tests need a `FixedOffset` now: `day_millis_at` does the arithmetic itself,
+    // because Go's offset is unbounded and chrono's type is not.
+    use chrono::FixedOffset;
     use serde_json::Value;
 
     fn oracle() -> Value {
@@ -2010,7 +2242,7 @@ mod go_parity {
         let oracle = oracle();
         for case in oracle["day_bounds"].as_array().unwrap() {
             let millis = case["millis"].as_i64().unwrap();
-            let offset = case["offset"].as_i64().unwrap() as i32;
+            let offset = case["offset"].as_i64().unwrap();
 
             // Rebuild the instant in the timezone the Go run actually used, rather than
             // this machine's. GetStartOfDayMillis reads the calendar date off the input's

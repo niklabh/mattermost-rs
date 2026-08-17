@@ -1606,7 +1606,11 @@ fn validate_date_or_date_time_format(value: &str) -> Option<String> {
 /// requires exactly four digits of year and exactly two each of month and day, rejects leading
 /// or trailing text, and then range-checks the calendar date — so `2023-02-29` fails and
 /// `2024-02-29` passes.
-fn parse_go_iso_date(value: &str) -> Option<(i32, u32, u32)> {
+///
+/// `pub(crate)` because `search_params.go` calls `time.Parse` with the same layout six times over
+/// and re-transcribing the scanner there would be a second definition to keep in step — the same
+/// reasoning that closed the [D-005] borrows.
+pub(crate) fn parse_go_iso_date(value: &str) -> Option<(i32, u32, u32)> {
     let mut scan = GoScanner::new(value);
     let date = scan.date()?;
     scan.end()?;

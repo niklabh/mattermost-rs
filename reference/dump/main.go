@@ -74,24 +74,50 @@ var registry = map[string]any{
 	"set_channel_members_response":  &model.SetChannelMembersResponse{},
 	"set_channel_members_error":     &model.SetChannelMembersError{},
 
-	"emoji":                  &model.Emoji{},
-	"reaction":               &model.Reaction{},
-	"file_info":              &model.FileInfo{},
-	"get_file_infos_options": &model.GetFileInfosOptions{},
-	"post_embed":             &model.PostEmbed{},
-	"post_acknowledgement":   &model.PostAcknowledgement{},
-	"post_metadata":          &model.PostMetadata{},
-	"post_image":             &model.PostImage{},
-	"post_translation":       &model.PostTranslation{},
-	"post_priority":          &model.PostPriority{},
-	"post":                   &model.Post{},
-	"post_list":              &model.PostList{},
-	"wrangler_post_list":     &model.WranglerPostList{},
-	"session":                &model.Session{},
-	"team_member":            &model.TeamMember{},
-	"status":                 &model.Status{},
-	"preference":             &model.Preference{},
-	"custom_status":          &model.CustomStatus{},
+	"emoji":                         &model.Emoji{},
+	"reaction":                      &model.Reaction{},
+	"file_info":                     &model.FileInfo{},
+	"get_file_infos_options":        &model.GetFileInfosOptions{},
+	"post_embed":                    &model.PostEmbed{},
+	"post_acknowledgement":          &model.PostAcknowledgement{},
+	"post_metadata":                 &model.PostMetadata{},
+	"post_image":                    &model.PostImage{},
+	"post_translation":              &model.PostTranslation{},
+	"post_priority":                 &model.PostPriority{},
+	"post":                          &model.Post{},
+	"post_list":                     &model.PostList{},
+	"post_search_results":           &model.PostSearchResults{},
+	"file_info_list":                &model.FileInfoList{},
+	"file_info_search_results":      &model.FileInfoSearchResults{},
+	"file_upload_response":          &model.FileUploadResponse{},
+	"channel_view":                  &model.ChannelView{},
+	"channel_data":                  &model.ChannelData{},
+	"channel_member_history":        &model.ChannelMemberHistory{},
+	"channel_member_history_result": &model.ChannelMemberHistoryResult{},
+	"analytics_row":                 &model.AnalyticsRow{},
+	"team_stats":                    &model.TeamStats{},
+	"users_stats":                   &model.UsersStats{},
+	"cluster_stats":                 &model.ClusterStats{},
+	"channel_search":                &model.ChannelSearch{},
+	"server_limits":                 &model.ServerLimits{},
+	"emoji_search":                  &model.EmojiSearch{},
+	"user_autocomplete_in_channel":  &model.UserAutocompleteInChannel{},
+	"user_autocomplete_in_team":     &model.UserAutocompleteInTeam{},
+	"user_autocomplete":             &model.UserAutocomplete{},
+	"audit":                         &model.Audit{},
+	"user_access_token_search":      &model.UserAccessTokenSearch{},
+	"channel_view_response":         &model.ChannelViewResponse{},
+	"presign_url_response":          &model.PresignURLResponse{},
+	"post_info":                     &model.PostInfo{},
+	"draft":                         &model.Draft{},
+	"scheduled_post":                &model.ScheduledPost{},
+	"search_params":                 &model.SearchParams{},
+	"wrangler_post_list":            &model.WranglerPostList{},
+	"session":                       &model.Session{},
+	"team_member":                   &model.TeamMember{},
+	"status":                        &model.Status{},
+	"preference":                    &model.Preference{},
+	"custom_status":                 &model.CustomStatus{},
 }
 
 // overrides pins specific fields to semantically valid values, keyed by the
@@ -371,6 +397,138 @@ func main() {
 	}
 	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_post_list.json"))
 
+	if err := writePostSearchResultsBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: post search results behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_post_search_results.json"))
+
+	if err := writeSearchParamsBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: search params behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_search_params.json"))
+
+	if err := writePostInfoBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: post info behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_post_info.json"))
+
+	if err := writeFileInfoListBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: file info list behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_file_info_list.json"))
+
+	if err := writeDraftBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: draft behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_draft.json"))
+
+	if err := writeChannelMentionsBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: channel mentions behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_channel_mentions.json"))
+
+	if err := writeMentionMapBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: mention map behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_mention_map.json"))
+
+	if err := writeScheduledPostBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: scheduled post behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_scheduled_post.json"))
+
+	if err := writeScheduledPostRecurrenceBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: scheduled post recurrence behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_scheduled_post_recurrence.json"))
+
+	if err := writeFileInfoSearchResultsBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: file info search results behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_file_info_search_results.json"))
+
+	if err := writeFileBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: file behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_file.json"))
+
+	if err := writeUnicodeBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: unicode behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_unicode.json"))
+
+	if err := writeChannelViewBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: channel view behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_channel_view.json"))
+
+	if err := writeChannelDataBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: channel data behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_channel_data.json"))
+
+	if err := writeChannelMemberHistoryBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: channel member history behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_channel_member_history.json"))
+
+	if err := writeAnalyticsRowBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: analytics row behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_analytics_row.json"))
+
+	if err := writeStatsBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: stats behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_stats.json"))
+
+	if err := writeChannelSearchBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: channel search behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_channel_search.json"))
+
+	if err := writeLimitsBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: limits behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_limits.json"))
+
+	if err := writeSearchRequestsBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: search requests behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_search_requests.json"))
+
+	if err := writeUserAutocompleteBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: user autocomplete behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_user_autocomplete.json"))
+
+	if err := writeAuditBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: audit behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_audit.json"))
+
 	// Not a fixture: a generated Rust source file. See behaviour_emoji.go for why the emoji
 	// table is emitted rather than transcribed.
 	if err := writeEmojiTable(*rustOut); err != nil {
@@ -379,7 +537,13 @@ func main() {
 	}
 	fmt.Printf("wrote %s\n", filepath.Join(*rustOut, "emoji_generated.rs"))
 
-	fmt.Printf("\n%d fixtures written, all top-level fields present.\n", len(names)+21)
+	if err := writeCjkScriptTable(*rustOut); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: cjk script table: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*rustOut, "unicode_generated.rs"))
+
+	fmt.Printf("\n%d fixtures written, all top-level fields present.\n", len(names)+38)
 }
 
 type populator struct {

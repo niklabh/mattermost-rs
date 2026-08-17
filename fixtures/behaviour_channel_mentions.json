@@ -1,0 +1,3812 @@
+{
+    "from_attachments": [
+        {
+            "name": "nil_slice",
+            "in": null,
+            "out": null,
+            "nil": true,
+            "has_nil_element": false
+        },
+        {
+            "name": "empty_slice",
+            "in": [],
+            "out": null,
+            "nil": true,
+            "has_nil_element": false
+        },
+        {
+            "name": "nil_attachment",
+            "in": [
+                null
+            ],
+            "out": null,
+            "nil": true,
+            "has_nil_element": true
+        },
+        {
+            "name": "empty_attachment",
+            "in": [
+                {
+                    "id": 0,
+                    "fallback": "",
+                    "color": "",
+                    "pretext": "",
+                    "author_name": "",
+                    "author_link": "",
+                    "author_icon": "",
+                    "title": "",
+                    "title_link": "",
+                    "text": "",
+                    "fields": null,
+                    "image_url": "",
+                    "thumb_url": "",
+                    "footer": "",
+                    "footer_icon": "",
+                    "ts": null
+                }
+            ],
+            "out": null,
+            "nil": true,
+            "has_nil_element": false
+        },
+        {
+            "name": "pretext_only",
+            "in": [
+                {
+                    "id": 0,
+                    "fallback": "",
+                    "color": "",
+                    "pretext": " ~pre",
+                    "author_name": "",
+                    "author_link": "",
+                    "author_icon": "",
+                    "title": "",
+                    "title_link": "",
+                    "text": "",
+                    "fields": null,
+                    "image_url": "",
+                    "thumb_url": "",
+                    "footer": "",
+                    "footer_icon": "",
+                    "ts": null
+                }
+            ],
+            "out": [
+                "pre"
+            ],
+            "nil": false,
+            "has_nil_element": false
+        },
+        {
+            "name": "text_only",
+            "in": [
+                {
+                    "id": 0,
+                    "fallback": "",
+                    "color": "",
+                    "pretext": "",
+                    "author_name": "",
+                    "author_link": "",
+                    "author_icon": "",
+                    "title": "",
+                    "title_link": "",
+                    "text": " ~txt",
+                    "fields": null,
+                    "image_url": "",
+                    "thumb_url": "",
+                    "footer": "",
+                    "footer_icon": "",
+                    "ts": null
+                }
+            ],
+            "out": [
+                "txt"
+            ],
+            "nil": false,
+            "has_nil_element": false
+        },
+        {
+            "name": "title_is_ignored",
+            "in": [
+                {
+                    "id": 0,
+                    "fallback": "",
+                    "color": "",
+                    "pretext": "",
+                    "author_name": "",
+                    "author_link": "",
+                    "author_icon": "",
+                    "title": " ~title",
+                    "title_link": "",
+                    "text": "",
+                    "fields": null,
+                    "image_url": "",
+                    "thumb_url": "",
+                    "footer": "",
+                    "footer_icon": "",
+                    "ts": null
+                }
+            ],
+            "out": null,
+            "nil": true,
+            "has_nil_element": false
+        },
+        {
+            "name": "fallback_is_ignored",
+            "in": [
+                {
+                    "id": 0,
+                    "fallback": " ~fallback",
+                    "color": "",
+                    "pretext": "",
+                    "author_name": "",
+                    "author_link": "",
+                    "author_icon": "",
+                    "title": "",
+                    "title_link": "",
+                    "text": "",
+                    "fields": null,
+                    "image_url": "",
+                    "thumb_url": "",
+                    "footer": "",
+                    "footer_icon": "",
+                    "ts": null
+                }
+            ],
+            "out": null,
+            "nil": true,
+            "has_nil_element": false
+        },
+        {
+            "name": "author_name_is_ignored",
+            "in": [
+                {
+                    "id": 0,
+                    "fallback": "",
+                    "color": "",
+                    "pretext": "",
+                    "author_name": " ~author",
+                    "author_link": "",
+                    "author_icon": "",
+                    "title": "",
+                    "title_link": "",
+                    "text": "",
+                    "fields": null,
+                    "image_url": "",
+                    "thumb_url": "",
+                    "footer": "",
+                    "footer_icon": "",
+                    "ts": null
+                }
+            ],
+            "out": null,
+            "nil": true,
+            "has_nil_element": false
+        },
+        {
+            "name": "footer_is_ignored",
+            "in": [
+                {
+                    "id": 0,
+                    "fallback": "",
+                    "color": "",
+                    "pretext": "",
+                    "author_name": "",
+                    "author_link": "",
+                    "author_icon": "",
+                    "title": "",
+                    "title_link": "",
+                    "text": "",
+                    "fields": null,
+                    "image_url": "",
+                    "thumb_url": "",
+                    "footer": " ~footer",
+                    "footer_icon": "",
+                    "ts": null
+                }
+            ],
+            "out": null,
+            "nil": true,
+            "has_nil_element": false
+        },
+        {
+            "name": "field_title_is_ignored",
+            "in": [
+                {
+                    "id": 0,
+                    "fallback": "",
+                    "color": "",
+                    "pretext": "",
+                    "author_name": "",
+                    "author_link": "",
+                    "author_icon": "",
+                    "title": "",
+                    "title_link": "",
+                    "text": "",
+                    "fields": [
+                        {
+                            "title": " ~ftitle",
+                            "value": " ~fvalue",
+                            "short": false
+                        }
+                    ],
+                    "image_url": "",
+                    "thumb_url": "",
+                    "footer": "",
+                    "footer_icon": "",
+                    "ts": null
+                }
+            ],
+            "out": [
+                "fvalue"
+            ],
+            "nil": false,
+            "has_nil_element": false
+        },
+        {
+            "name": "order_within_attachment",
+            "in": [
+                {
+                    "id": 0,
+                    "fallback": "",
+                    "color": "",
+                    "pretext": " ~pre",
+                    "author_name": "",
+                    "author_link": "",
+                    "author_icon": "",
+                    "title": "",
+                    "title_link": "",
+                    "text": " ~txt",
+                    "fields": [
+                        {
+                            "title": "",
+                            "value": " ~f1",
+                            "short": false
+                        },
+                        {
+                            "title": "",
+                            "value": " ~f2",
+                            "short": false
+                        }
+                    ],
+                    "image_url": "",
+                    "thumb_url": "",
+                    "footer": "",
+                    "footer_icon": "",
+                    "ts": null
+                }
+            ],
+            "out": [
+                "pre",
+                "txt",
+                "f1",
+                "f2"
+            ],
+            "nil": false,
+            "has_nil_element": false
+        },
+        {
+            "name": "order_across_attachments",
+            "in": [
+                {
+                    "id": 0,
+                    "fallback": "",
+                    "color": "",
+                    "pretext": "",
+                    "author_name": "",
+                    "author_link": "",
+                    "author_icon": "",
+                    "title": "",
+                    "title_link": "",
+                    "text": " ~second",
+                    "fields": null,
+                    "image_url": "",
+                    "thumb_url": "",
+                    "footer": "",
+                    "footer_icon": "",
+                    "ts": null
+                },
+                {
+                    "id": 0,
+                    "fallback": "",
+                    "color": "",
+                    "pretext": " ~first",
+                    "author_name": "",
+                    "author_link": "",
+                    "author_icon": "",
+                    "title": "",
+                    "title_link": "",
+                    "text": "",
+                    "fields": null,
+                    "image_url": "",
+                    "thumb_url": "",
+                    "footer": "",
+                    "footer_icon": "",
+                    "ts": null
+                }
+            ],
+            "out": [
+                "second",
+                "first"
+            ],
+            "nil": false,
+            "has_nil_element": false
+        },
+        {
+            "name": "dedup_across_attachments",
+            "in": [
+                {
+                    "id": 0,
+                    "fallback": "",
+                    "color": "",
+                    "pretext": "",
+                    "author_name": "",
+                    "author_link": "",
+                    "author_icon": "",
+                    "title": "",
+                    "title_link": "",
+                    "text": " ~a ~b",
+                    "fields": null,
+                    "image_url": "",
+                    "thumb_url": "",
+                    "footer": "",
+                    "footer_icon": "",
+                    "ts": null
+                },
+                {
+                    "id": 0,
+                    "fallback": "",
+                    "color": "",
+                    "pretext": "",
+                    "author_name": "",
+                    "author_link": "",
+                    "author_icon": "",
+                    "title": "",
+                    "title_link": "",
+                    "text": " ~b ~c",
+                    "fields": null,
+                    "image_url": "",
+                    "thumb_url": "",
+                    "footer": "",
+                    "footer_icon": "",
+                    "ts": null
+                }
+            ],
+            "out": [
+                "a",
+                "b",
+                "c"
+            ],
+            "nil": false,
+            "has_nil_element": false
+        },
+        {
+            "name": "dedup_pretext_and_text",
+            "in": [
+                {
+                    "id": 0,
+                    "fallback": "",
+                    "color": "",
+                    "pretext": " ~a",
+                    "author_name": "",
+                    "author_link": "",
+                    "author_icon": "",
+                    "title": "",
+                    "title_link": "",
+                    "text": " ~a",
+                    "fields": null,
+                    "image_url": "",
+                    "thumb_url": "",
+                    "footer": "",
+                    "footer_icon": "",
+                    "ts": null
+                }
+            ],
+            "out": [
+                "a"
+            ],
+            "nil": false,
+            "has_nil_element": false
+        },
+        {
+            "name": "nil_field",
+            "in": [
+                {
+                    "id": 0,
+                    "fallback": "",
+                    "color": "",
+                    "pretext": "",
+                    "author_name": "",
+                    "author_link": "",
+                    "author_icon": "",
+                    "title": "",
+                    "title_link": "",
+                    "text": "",
+                    "fields": [
+                        null,
+                        {
+                            "title": "",
+                            "value": " ~after",
+                            "short": false
+                        }
+                    ],
+                    "image_url": "",
+                    "thumb_url": "",
+                    "footer": "",
+                    "footer_icon": "",
+                    "ts": null
+                }
+            ],
+            "out": [
+                "after"
+            ],
+            "nil": false,
+            "has_nil_element": true
+        },
+        {
+            "name": "field_value_number",
+            "in": [
+                {
+                    "id": 0,
+                    "fallback": "",
+                    "color": "",
+                    "pretext": "",
+                    "author_name": "",
+                    "author_link": "",
+                    "author_icon": "",
+                    "title": "",
+                    "title_link": "",
+                    "text": "",
+                    "fields": [
+                        {
+                            "title": "",
+                            "value": 42,
+                            "short": false
+                        }
+                    ],
+                    "image_url": "",
+                    "thumb_url": "",
+                    "footer": "",
+                    "footer_icon": "",
+                    "ts": null
+                }
+            ],
+            "out": null,
+            "nil": true,
+            "has_nil_element": false
+        },
+        {
+            "name": "field_value_bool",
+            "in": [
+                {
+                    "id": 0,
+                    "fallback": "",
+                    "color": "",
+                    "pretext": "",
+                    "author_name": "",
+                    "author_link": "",
+                    "author_icon": "",
+                    "title": "",
+                    "title_link": "",
+                    "text": "",
+                    "fields": [
+                        {
+                            "title": "",
+                            "value": true,
+                            "short": false
+                        }
+                    ],
+                    "image_url": "",
+                    "thumb_url": "",
+                    "footer": "",
+                    "footer_icon": "",
+                    "ts": null
+                }
+            ],
+            "out": null,
+            "nil": true,
+            "has_nil_element": false
+        },
+        {
+            "name": "field_value_nil",
+            "in": [
+                {
+                    "id": 0,
+                    "fallback": "",
+                    "color": "",
+                    "pretext": "",
+                    "author_name": "",
+                    "author_link": "",
+                    "author_icon": "",
+                    "title": "",
+                    "title_link": "",
+                    "text": "",
+                    "fields": [
+                        {
+                            "title": "",
+                            "value": null,
+                            "short": false
+                        }
+                    ],
+                    "image_url": "",
+                    "thumb_url": "",
+                    "footer": "",
+                    "footer_icon": "",
+                    "ts": null
+                }
+            ],
+            "out": null,
+            "nil": true,
+            "has_nil_element": false
+        },
+        {
+            "name": "field_value_slice",
+            "in": [
+                {
+                    "id": 0,
+                    "fallback": "",
+                    "color": "",
+                    "pretext": "",
+                    "author_name": "",
+                    "author_link": "",
+                    "author_icon": "",
+                    "title": "",
+                    "title_link": "",
+                    "text": "",
+                    "fields": [
+                        {
+                            "title": "",
+                            "value": [
+                                " ~inslice"
+                            ],
+                            "short": false
+                        }
+                    ],
+                    "image_url": "",
+                    "thumb_url": "",
+                    "footer": "",
+                    "footer_icon": "",
+                    "ts": null
+                }
+            ],
+            "out": null,
+            "nil": true,
+            "has_nil_element": false
+        },
+        {
+            "name": "field_value_map",
+            "in": [
+                {
+                    "id": 0,
+                    "fallback": "",
+                    "color": "",
+                    "pretext": "",
+                    "author_name": "",
+                    "author_link": "",
+                    "author_icon": "",
+                    "title": "",
+                    "title_link": "",
+                    "text": "",
+                    "fields": [
+                        {
+                            "title": "",
+                            "value": {
+                                "k": " ~inmap"
+                            },
+                            "short": false
+                        }
+                    ],
+                    "image_url": "",
+                    "thumb_url": "",
+                    "footer": "",
+                    "footer_icon": "",
+                    "ts": null
+                }
+            ],
+            "out": null,
+            "nil": true,
+            "has_nil_element": false
+        },
+        {
+            "name": "field_value_string_survives",
+            "in": [
+                {
+                    "id": 0,
+                    "fallback": "",
+                    "color": "",
+                    "pretext": "",
+                    "author_name": "",
+                    "author_link": "",
+                    "author_icon": "",
+                    "title": "",
+                    "title_link": "",
+                    "text": "",
+                    "fields": [
+                        {
+                            "title": "",
+                            "value": 42,
+                            "short": false
+                        },
+                        {
+                            "title": "",
+                            "value": " ~kept",
+                            "short": false
+                        }
+                    ],
+                    "image_url": "",
+                    "thumb_url": "",
+                    "footer": "",
+                    "footer_icon": "",
+                    "ts": null
+                }
+            ],
+            "out": [
+                "kept"
+            ],
+            "nil": false,
+            "has_nil_element": false
+        },
+        {
+            "name": "non_ascii_neighbour",
+            "in": [
+                {
+                    "id": 0,
+                    "fallback": "",
+                    "color": "",
+                    "pretext": "",
+                    "author_name": "",
+                    "author_link": "",
+                    "author_icon": "",
+                    "title": "",
+                    "title_link": "",
+                    "text": "é~chan",
+                    "fields": null,
+                    "image_url": "",
+                    "thumb_url": "",
+                    "footer": "",
+                    "footer_icon": "",
+                    "ts": null
+                }
+            ],
+            "out": [
+                "chan"
+            ],
+            "nil": false,
+            "has_nil_element": false
+        }
+    ],
+    "from_strings": [
+        {
+            "name": "nil_slice",
+            "in": null,
+            "out": null,
+            "nil": true
+        },
+        {
+            "name": "empty_slice",
+            "in": [],
+            "out": null,
+            "nil": true
+        },
+        {
+            "name": "empty_string",
+            "in": [
+                ""
+            ],
+            "out": null,
+            "nil": true
+        },
+        {
+            "name": "no_tilde",
+            "in": [
+                "hello world"
+            ],
+            "out": null,
+            "nil": true
+        },
+        {
+            "name": "bare_tilde",
+            "in": [
+                "~"
+            ],
+            "out": null,
+            "nil": true
+        },
+        {
+            "name": "tilde_then_space",
+            "in": [
+                "~ chan"
+            ],
+            "out": null,
+            "nil": true
+        },
+        {
+            "name": "simple",
+            "in": [
+                "~town-square"
+            ],
+            "out": [
+                "town-square"
+            ],
+            "nil": false
+        },
+        {
+            "name": "leading_space",
+            "in": [
+                "go to ~town-square please"
+            ],
+            "out": [
+                "town-square"
+            ],
+            "nil": false
+        },
+        {
+            "name": "after_letter",
+            "in": [
+                "a~chan"
+            ],
+            "out": null,
+            "nil": true
+        },
+        {
+            "name": "after_digit",
+            "in": [
+                "1~chan"
+            ],
+            "out": null,
+            "nil": true
+        },
+        {
+            "name": "after_underscore",
+            "in": [
+                "_~chan"
+            ],
+            "out": null,
+            "nil": true
+        },
+        {
+            "name": "after_hyphen",
+            "in": [
+                "-~chan"
+            ],
+            "out": [
+                "chan"
+            ],
+            "nil": false
+        },
+        {
+            "name": "after_period",
+            "in": [
+                ".~chan"
+            ],
+            "out": [
+                "chan"
+            ],
+            "nil": false
+        },
+        {
+            "name": "after_open_paren",
+            "in": [
+                "(~chan"
+            ],
+            "out": [
+                "chan"
+            ],
+            "nil": false
+        },
+        {
+            "name": "at_string_start",
+            "in": [
+                "~chan"
+            ],
+            "out": [
+                "chan"
+            ],
+            "nil": false
+        },
+        {
+            "name": "after_newline",
+            "in": [
+                "line\n~chan"
+            ],
+            "out": [
+                "chan"
+            ],
+            "nil": false
+        },
+        {
+            "name": "after_tab",
+            "in": [
+                "a\t~chan"
+            ],
+            "out": [
+                "chan"
+            ],
+            "nil": false
+        },
+        {
+            "name": "double_tilde",
+            "in": [
+                "~~chan"
+            ],
+            "out": [
+                "chan"
+            ],
+            "nil": false
+        },
+        {
+            "name": "triple_tilde",
+            "in": [
+                "~~~chan"
+            ],
+            "out": [
+                "chan"
+            ],
+            "nil": false
+        },
+        {
+            "name": "adjacent_mentions",
+            "in": [
+                "~a~b"
+            ],
+            "out": [
+                "a"
+            ],
+            "nil": false
+        },
+        {
+            "name": "mention_then_tilde",
+            "in": [
+                "~abc~"
+            ],
+            "out": [
+                "abc"
+            ],
+            "nil": false
+        },
+        {
+            "name": "all_class_chars",
+            "in": [
+                " ~aZ09-_"
+            ],
+            "out": [
+                "aZ09-_"
+            ],
+            "nil": false
+        },
+        {
+            "name": "stops_at_period",
+            "in": [
+                " ~chan.next"
+            ],
+            "out": [
+                "chan"
+            ],
+            "nil": false
+        },
+        {
+            "name": "stops_at_slash",
+            "in": [
+                " ~chan/next"
+            ],
+            "out": [
+                "chan"
+            ],
+            "nil": false
+        },
+        {
+            "name": "stops_at_colon",
+            "in": [
+                " ~chan:"
+            ],
+            "out": [
+                "chan"
+            ],
+            "nil": false
+        },
+        {
+            "name": "only_hyphen",
+            "in": [
+                " ~-"
+            ],
+            "out": [
+                "-"
+            ],
+            "nil": false
+        },
+        {
+            "name": "only_underscore",
+            "in": [
+                " ~_"
+            ],
+            "out": [
+                "_"
+            ],
+            "nil": false
+        },
+        {
+            "name": "repeat_same_string",
+            "in": [
+                " ~a ~b ~a"
+            ],
+            "out": [
+                "a",
+                "b"
+            ],
+            "nil": false
+        },
+        {
+            "name": "repeat_across_strings",
+            "in": [
+                " ~a ~b",
+                " ~a ~c"
+            ],
+            "out": [
+                "a",
+                "b",
+                "c"
+            ],
+            "nil": false
+        },
+        {
+            "name": "case_sensitive_dedup",
+            "in": [
+                " ~Chan ~chan"
+            ],
+            "out": [
+                "Chan",
+                "chan"
+            ],
+            "nil": false
+        },
+        {
+            "name": "order_is_first_appearance",
+            "in": [
+                " ~z ~y ~x ~z ~y"
+            ],
+            "out": [
+                "z",
+                "y",
+                "x"
+            ],
+            "nil": false
+        },
+        {
+            "name": "mixed_with_tildeless",
+            "in": [
+                "nothing here",
+                " ~a",
+                "still nothing",
+                " ~b"
+            ],
+            "out": [
+                "a",
+                "b"
+            ],
+            "nil": false
+        },
+        {
+            "name": "empty_strings_interleaved",
+            "in": [
+                "",
+                " ~a",
+                ""
+            ],
+            "out": [
+                "a"
+            ],
+            "nil": false
+        },
+        {
+            "name": "after_accented_letter",
+            "in": [
+                "é~chan"
+            ],
+            "out": [
+                "chan"
+            ],
+            "nil": false
+        },
+        {
+            "name": "after_cjk",
+            "in": [
+                "日~chan"
+            ],
+            "out": [
+                "chan"
+            ],
+            "nil": false
+        },
+        {
+            "name": "after_emoji",
+            "in": [
+                "😀~chan"
+            ],
+            "out": [
+                "chan"
+            ],
+            "nil": false
+        },
+        {
+            "name": "after_nbsp",
+            "in": [
+                "a ~chan"
+            ],
+            "out": [
+                "chan"
+            ],
+            "nil": false
+        },
+        {
+            "name": "after_zwsp",
+            "in": [
+                "a​~chan"
+            ],
+            "out": [
+                "chan"
+            ],
+            "nil": false
+        },
+        {
+            "name": "after_combining_mark",
+            "in": [
+                "á~chan"
+            ],
+            "out": [
+                "chan"
+            ],
+            "nil": false
+        },
+        {
+            "name": "non_ascii_in_name",
+            "in": [
+                " ~chané"
+            ],
+            "out": [
+                "chan"
+            ],
+            "nil": false
+        },
+        {
+            "name": "fullwidth_tilde",
+            "in": [
+                " ～chan"
+            ],
+            "out": null,
+            "nil": true
+        },
+        {
+            "name": "multiline",
+            "in": [
+                "~one\n~two\r\n~three"
+            ],
+            "out": [
+                "one",
+                "two",
+                "three"
+            ],
+            "nil": false
+        },
+        {
+            "name": "very_long_name",
+            "in": [
+                " ~aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            ],
+            "out": [
+                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            ],
+            "nil": false
+        }
+    ],
+    "post_methods": [
+        {
+            "name": "empty",
+            "post": {
+                "id": "",
+                "create_at": 0,
+                "update_at": 0,
+                "edit_at": 0,
+                "delete_at": 0,
+                "is_pinned": false,
+                "user_id": "",
+                "channel_id": "",
+                "root_id": "",
+                "original_id": "",
+                "message": "",
+                "type": "",
+                "props": null,
+                "hashtags": "",
+                "file_ids": null,
+                "pending_post_id": "",
+                "reply_count": 0,
+                "last_reply_at": 0,
+                "participants": null
+            },
+            "message": null,
+            "all": null,
+            "with_blocks": null,
+            "without_blocks": null
+        },
+        {
+            "name": "message_only",
+            "post": {
+                "id": "",
+                "create_at": 0,
+                "update_at": 0,
+                "edit_at": 0,
+                "delete_at": 0,
+                "is_pinned": false,
+                "user_id": "",
+                "channel_id": "",
+                "root_id": "",
+                "original_id": "",
+                "message": "go to ~town-square",
+                "type": "",
+                "props": null,
+                "hashtags": "",
+                "file_ids": null,
+                "pending_post_id": "",
+                "reply_count": 0,
+                "last_reply_at": 0,
+                "participants": null
+            },
+            "message": [
+                "town-square"
+            ],
+            "all": [
+                "town-square"
+            ],
+            "with_blocks": [
+                "town-square"
+            ],
+            "without_blocks": [
+                "town-square"
+            ]
+        },
+        {
+            "name": "message_glued",
+            "post": {
+                "id": "",
+                "create_at": 0,
+                "update_at": 0,
+                "edit_at": 0,
+                "delete_at": 0,
+                "is_pinned": false,
+                "user_id": "",
+                "channel_id": "",
+                "root_id": "",
+                "original_id": "",
+                "message": "a~chan",
+                "type": "",
+                "props": null,
+                "hashtags": "",
+                "file_ids": null,
+                "pending_post_id": "",
+                "reply_count": 0,
+                "last_reply_at": 0,
+                "participants": null
+            },
+            "message": null,
+            "all": null,
+            "with_blocks": null,
+            "without_blocks": null
+        },
+        {
+            "name": "attachment_text",
+            "post": {
+                "id": "",
+                "create_at": 0,
+                "update_at": 0,
+                "edit_at": 0,
+                "delete_at": 0,
+                "is_pinned": false,
+                "user_id": "",
+                "channel_id": "",
+                "root_id": "",
+                "original_id": "",
+                "message": " ~msg",
+                "type": "",
+                "props": {
+                    "attachments": [
+                        {
+                            "text": " ~att"
+                        }
+                    ]
+                },
+                "hashtags": "",
+                "file_ids": null,
+                "pending_post_id": "",
+                "reply_count": 0,
+                "last_reply_at": 0,
+                "participants": null
+            },
+            "message": [
+                "msg"
+            ],
+            "all": [
+                "msg",
+                "att"
+            ],
+            "with_blocks": [
+                "msg",
+                "att"
+            ],
+            "without_blocks": [
+                "msg",
+                "att"
+            ]
+        },
+        {
+            "name": "attachment_title",
+            "post": {
+                "id": "",
+                "create_at": 0,
+                "update_at": 0,
+                "edit_at": 0,
+                "delete_at": 0,
+                "is_pinned": false,
+                "user_id": "",
+                "channel_id": "",
+                "root_id": "",
+                "original_id": "",
+                "message": "",
+                "type": "",
+                "props": {
+                    "attachments": [
+                        {
+                            "title": " ~atitle"
+                        }
+                    ]
+                },
+                "hashtags": "",
+                "file_ids": null,
+                "pending_post_id": "",
+                "reply_count": 0,
+                "last_reply_at": 0,
+                "participants": null
+            },
+            "message": null,
+            "all": [
+                "atitle"
+            ],
+            "with_blocks": [
+                "atitle"
+            ],
+            "without_blocks": [
+                "atitle"
+            ]
+        },
+        {
+            "name": "attachment_field_value",
+            "post": {
+                "id": "",
+                "create_at": 0,
+                "update_at": 0,
+                "edit_at": 0,
+                "delete_at": 0,
+                "is_pinned": false,
+                "user_id": "",
+                "channel_id": "",
+                "root_id": "",
+                "original_id": "",
+                "message": "",
+                "type": "",
+                "props": {
+                    "attachments": [
+                        {
+                            "fields": [
+                                {
+                                    "title": " ~ft",
+                                    "value": " ~fv"
+                                }
+                            ]
+                        }
+                    ]
+                },
+                "hashtags": "",
+                "file_ids": null,
+                "pending_post_id": "",
+                "reply_count": 0,
+                "last_reply_at": 0,
+                "participants": null
+            },
+            "message": null,
+            "all": [
+                "ft",
+                "fv"
+            ],
+            "with_blocks": [
+                "ft",
+                "fv"
+            ],
+            "without_blocks": [
+                "ft",
+                "fv"
+            ]
+        },
+        {
+            "name": "dedup_message_and_attachment",
+            "post": {
+                "id": "",
+                "create_at": 0,
+                "update_at": 0,
+                "edit_at": 0,
+                "delete_at": 0,
+                "is_pinned": false,
+                "user_id": "",
+                "channel_id": "",
+                "root_id": "",
+                "original_id": "",
+                "message": " ~same",
+                "type": "",
+                "props": {
+                    "attachments": [
+                        {
+                            "text": " ~same"
+                        }
+                    ]
+                },
+                "hashtags": "",
+                "file_ids": null,
+                "pending_post_id": "",
+                "reply_count": 0,
+                "last_reply_at": 0,
+                "participants": null
+            },
+            "message": [
+                "same"
+            ],
+            "all": [
+                "same"
+            ],
+            "with_blocks": [
+                "same"
+            ],
+            "without_blocks": [
+                "same"
+            ]
+        },
+        {
+            "name": "mm_blocks",
+            "post": {
+                "id": "",
+                "create_at": 0,
+                "update_at": 0,
+                "edit_at": 0,
+                "delete_at": 0,
+                "is_pinned": false,
+                "user_id": "",
+                "channel_id": "",
+                "root_id": "",
+                "original_id": "",
+                "message": " ~msg",
+                "type": "",
+                "props": {
+                    "mm_blocks": [
+                        {
+                            "text": " ~inmmblock",
+                            "type": "text"
+                        }
+                    ]
+                },
+                "hashtags": "",
+                "file_ids": null,
+                "pending_post_id": "",
+                "reply_count": 0,
+                "last_reply_at": 0,
+                "participants": null
+            },
+            "message": [
+                "msg"
+            ],
+            "all": [
+                "msg",
+                "inmmblock"
+            ],
+            "with_blocks": [
+                "msg",
+                "inmmblock"
+            ],
+            "without_blocks": [
+                "msg"
+            ]
+        },
+        {
+            "name": "blocks",
+            "post": {
+                "id": "",
+                "create_at": 0,
+                "update_at": 0,
+                "edit_at": 0,
+                "delete_at": 0,
+                "is_pinned": false,
+                "user_id": "",
+                "channel_id": "",
+                "root_id": "",
+                "original_id": "",
+                "message": " ~msg",
+                "type": "",
+                "props": {
+                    "blocks": [
+                        {
+                            "text": {
+                                "text": " ~inblocks",
+                                "type": "mrkdwn"
+                            },
+                            "type": "section"
+                        }
+                    ]
+                },
+                "hashtags": "",
+                "file_ids": null,
+                "pending_post_id": "",
+                "reply_count": 0,
+                "last_reply_at": 0,
+                "participants": null
+            },
+            "message": [
+                "msg"
+            ],
+            "all": [
+                "msg",
+                "inblocks"
+            ],
+            "with_blocks": [
+                "msg",
+                "inblocks"
+            ],
+            "without_blocks": [
+                "msg"
+            ]
+        },
+        {
+            "name": "cards",
+            "post": {
+                "id": "",
+                "create_at": 0,
+                "update_at": 0,
+                "edit_at": 0,
+                "delete_at": 0,
+                "is_pinned": false,
+                "user_id": "",
+                "channel_id": "",
+                "root_id": "",
+                "original_id": "",
+                "message": " ~msg",
+                "type": "",
+                "props": {
+                    "cards": [
+                        {
+                            "body": [
+                                {
+                                    "text": " ~incard",
+                                    "type": "TextBlock"
+                                }
+                            ]
+                        }
+                    ]
+                },
+                "hashtags": "",
+                "file_ids": null,
+                "pending_post_id": "",
+                "reply_count": 0,
+                "last_reply_at": 0,
+                "participants": null
+            },
+            "message": [
+                "msg"
+            ],
+            "all": [
+                "msg",
+                "incard"
+            ],
+            "with_blocks": [
+                "msg",
+                "incard"
+            ],
+            "without_blocks": [
+                "msg"
+            ]
+        },
+        {
+            "name": "all_three_dialects",
+            "post": {
+                "id": "",
+                "create_at": 0,
+                "update_at": 0,
+                "edit_at": 0,
+                "delete_at": 0,
+                "is_pinned": false,
+                "user_id": "",
+                "channel_id": "",
+                "root_id": "",
+                "original_id": "",
+                "message": " ~msg",
+                "type": "",
+                "props": {
+                    "blocks": [
+                        {
+                            "text": {
+                                "text": " ~b1",
+                                "type": "mrkdwn"
+                            },
+                            "type": "section"
+                        }
+                    ],
+                    "cards": [
+                        {
+                            "body": [
+                                {
+                                    "text": " ~c1",
+                                    "type": "TextBlock"
+                                }
+                            ]
+                        }
+                    ],
+                    "mm_blocks": [
+                        {
+                            "text": " ~m1",
+                            "type": "text"
+                        }
+                    ]
+                },
+                "hashtags": "",
+                "file_ids": null,
+                "pending_post_id": "",
+                "reply_count": 0,
+                "last_reply_at": 0,
+                "participants": null
+            },
+            "message": [
+                "msg"
+            ],
+            "all": [
+                "msg",
+                "m1",
+                "b1",
+                "c1"
+            ],
+            "with_blocks": [
+                "msg",
+                "m1",
+                "b1",
+                "c1"
+            ],
+            "without_blocks": [
+                "msg"
+            ]
+        },
+        {
+            "name": "non_ascii",
+            "post": {
+                "id": "",
+                "create_at": 0,
+                "update_at": 0,
+                "edit_at": 0,
+                "delete_at": 0,
+                "is_pinned": false,
+                "user_id": "",
+                "channel_id": "",
+                "root_id": "",
+                "original_id": "",
+                "message": "é~chan",
+                "type": "",
+                "props": null,
+                "hashtags": "",
+                "file_ids": null,
+                "pending_post_id": "",
+                "reply_count": 0,
+                "last_reply_at": 0,
+                "participants": null
+            },
+            "message": [
+                "chan"
+            ],
+            "all": [
+                "chan"
+            ],
+            "with_blocks": [
+                "chan"
+            ],
+            "without_blocks": [
+                "chan"
+            ]
+        }
+    ],
+    "single": [
+        {
+            "name": "",
+            "in": [
+                ""
+            ],
+            "out": null,
+            "nil": true
+        },
+        {
+            "name": "~chan",
+            "in": [
+                "~chan"
+            ],
+            "out": [
+                "chan"
+            ],
+            "nil": false
+        },
+        {
+            "name": "a~chan",
+            "in": [
+                "a~chan"
+            ],
+            "out": null,
+            "nil": true
+        },
+        {
+            "name": " ~a ~b ~a",
+            "in": [
+                " ~a ~b ~a"
+            ],
+            "out": [
+                "a",
+                "b"
+            ],
+            "nil": false
+        },
+        {
+            "name": "~a\n~b",
+            "in": [
+                "~a\n~b"
+            ],
+            "out": [
+                "a",
+                "b"
+            ],
+            "nil": false
+        },
+        {
+            "name": "é~chan",
+            "in": [
+                "é~chan"
+            ],
+            "out": [
+                "chan"
+            ],
+            "nil": false
+        }
+    ],
+    "sweep": [
+        {
+            "codepoint": 0,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 1,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 2,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 3,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 4,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 5,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 6,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 7,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 8,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 9,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 10,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 11,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 12,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 13,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 14,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 15,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 16,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 17,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 18,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 19,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 20,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 21,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 22,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 23,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 24,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 25,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 26,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 27,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 28,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 29,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 30,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 31,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 32,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 33,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 34,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 35,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 36,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 37,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 38,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 39,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 40,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 41,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 42,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 43,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 44,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 45,
+            "prefix": [
+                "chan"
+            ],
+            "first": [
+                "-"
+            ],
+            "middle": [
+                "ch-an"
+            ],
+            "suffix": [
+                "chan-"
+            ]
+        },
+        {
+            "codepoint": 46,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 47,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 48,
+            "prefix": null,
+            "first": [
+                "0"
+            ],
+            "middle": [
+                "ch0an"
+            ],
+            "suffix": [
+                "chan0"
+            ]
+        },
+        {
+            "codepoint": 49,
+            "prefix": null,
+            "first": [
+                "1"
+            ],
+            "middle": [
+                "ch1an"
+            ],
+            "suffix": [
+                "chan1"
+            ]
+        },
+        {
+            "codepoint": 50,
+            "prefix": null,
+            "first": [
+                "2"
+            ],
+            "middle": [
+                "ch2an"
+            ],
+            "suffix": [
+                "chan2"
+            ]
+        },
+        {
+            "codepoint": 51,
+            "prefix": null,
+            "first": [
+                "3"
+            ],
+            "middle": [
+                "ch3an"
+            ],
+            "suffix": [
+                "chan3"
+            ]
+        },
+        {
+            "codepoint": 52,
+            "prefix": null,
+            "first": [
+                "4"
+            ],
+            "middle": [
+                "ch4an"
+            ],
+            "suffix": [
+                "chan4"
+            ]
+        },
+        {
+            "codepoint": 53,
+            "prefix": null,
+            "first": [
+                "5"
+            ],
+            "middle": [
+                "ch5an"
+            ],
+            "suffix": [
+                "chan5"
+            ]
+        },
+        {
+            "codepoint": 54,
+            "prefix": null,
+            "first": [
+                "6"
+            ],
+            "middle": [
+                "ch6an"
+            ],
+            "suffix": [
+                "chan6"
+            ]
+        },
+        {
+            "codepoint": 55,
+            "prefix": null,
+            "first": [
+                "7"
+            ],
+            "middle": [
+                "ch7an"
+            ],
+            "suffix": [
+                "chan7"
+            ]
+        },
+        {
+            "codepoint": 56,
+            "prefix": null,
+            "first": [
+                "8"
+            ],
+            "middle": [
+                "ch8an"
+            ],
+            "suffix": [
+                "chan8"
+            ]
+        },
+        {
+            "codepoint": 57,
+            "prefix": null,
+            "first": [
+                "9"
+            ],
+            "middle": [
+                "ch9an"
+            ],
+            "suffix": [
+                "chan9"
+            ]
+        },
+        {
+            "codepoint": 58,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 59,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 60,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 61,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 62,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 63,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 64,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 65,
+            "prefix": null,
+            "first": [
+                "A"
+            ],
+            "middle": [
+                "chAan"
+            ],
+            "suffix": [
+                "chanA"
+            ]
+        },
+        {
+            "codepoint": 66,
+            "prefix": null,
+            "first": [
+                "B"
+            ],
+            "middle": [
+                "chBan"
+            ],
+            "suffix": [
+                "chanB"
+            ]
+        },
+        {
+            "codepoint": 67,
+            "prefix": null,
+            "first": [
+                "C"
+            ],
+            "middle": [
+                "chCan"
+            ],
+            "suffix": [
+                "chanC"
+            ]
+        },
+        {
+            "codepoint": 68,
+            "prefix": null,
+            "first": [
+                "D"
+            ],
+            "middle": [
+                "chDan"
+            ],
+            "suffix": [
+                "chanD"
+            ]
+        },
+        {
+            "codepoint": 69,
+            "prefix": null,
+            "first": [
+                "E"
+            ],
+            "middle": [
+                "chEan"
+            ],
+            "suffix": [
+                "chanE"
+            ]
+        },
+        {
+            "codepoint": 70,
+            "prefix": null,
+            "first": [
+                "F"
+            ],
+            "middle": [
+                "chFan"
+            ],
+            "suffix": [
+                "chanF"
+            ]
+        },
+        {
+            "codepoint": 71,
+            "prefix": null,
+            "first": [
+                "G"
+            ],
+            "middle": [
+                "chGan"
+            ],
+            "suffix": [
+                "chanG"
+            ]
+        },
+        {
+            "codepoint": 72,
+            "prefix": null,
+            "first": [
+                "H"
+            ],
+            "middle": [
+                "chHan"
+            ],
+            "suffix": [
+                "chanH"
+            ]
+        },
+        {
+            "codepoint": 73,
+            "prefix": null,
+            "first": [
+                "I"
+            ],
+            "middle": [
+                "chIan"
+            ],
+            "suffix": [
+                "chanI"
+            ]
+        },
+        {
+            "codepoint": 74,
+            "prefix": null,
+            "first": [
+                "J"
+            ],
+            "middle": [
+                "chJan"
+            ],
+            "suffix": [
+                "chanJ"
+            ]
+        },
+        {
+            "codepoint": 75,
+            "prefix": null,
+            "first": [
+                "K"
+            ],
+            "middle": [
+                "chKan"
+            ],
+            "suffix": [
+                "chanK"
+            ]
+        },
+        {
+            "codepoint": 76,
+            "prefix": null,
+            "first": [
+                "L"
+            ],
+            "middle": [
+                "chLan"
+            ],
+            "suffix": [
+                "chanL"
+            ]
+        },
+        {
+            "codepoint": 77,
+            "prefix": null,
+            "first": [
+                "M"
+            ],
+            "middle": [
+                "chMan"
+            ],
+            "suffix": [
+                "chanM"
+            ]
+        },
+        {
+            "codepoint": 78,
+            "prefix": null,
+            "first": [
+                "N"
+            ],
+            "middle": [
+                "chNan"
+            ],
+            "suffix": [
+                "chanN"
+            ]
+        },
+        {
+            "codepoint": 79,
+            "prefix": null,
+            "first": [
+                "O"
+            ],
+            "middle": [
+                "chOan"
+            ],
+            "suffix": [
+                "chanO"
+            ]
+        },
+        {
+            "codepoint": 80,
+            "prefix": null,
+            "first": [
+                "P"
+            ],
+            "middle": [
+                "chPan"
+            ],
+            "suffix": [
+                "chanP"
+            ]
+        },
+        {
+            "codepoint": 81,
+            "prefix": null,
+            "first": [
+                "Q"
+            ],
+            "middle": [
+                "chQan"
+            ],
+            "suffix": [
+                "chanQ"
+            ]
+        },
+        {
+            "codepoint": 82,
+            "prefix": null,
+            "first": [
+                "R"
+            ],
+            "middle": [
+                "chRan"
+            ],
+            "suffix": [
+                "chanR"
+            ]
+        },
+        {
+            "codepoint": 83,
+            "prefix": null,
+            "first": [
+                "S"
+            ],
+            "middle": [
+                "chSan"
+            ],
+            "suffix": [
+                "chanS"
+            ]
+        },
+        {
+            "codepoint": 84,
+            "prefix": null,
+            "first": [
+                "T"
+            ],
+            "middle": [
+                "chTan"
+            ],
+            "suffix": [
+                "chanT"
+            ]
+        },
+        {
+            "codepoint": 85,
+            "prefix": null,
+            "first": [
+                "U"
+            ],
+            "middle": [
+                "chUan"
+            ],
+            "suffix": [
+                "chanU"
+            ]
+        },
+        {
+            "codepoint": 86,
+            "prefix": null,
+            "first": [
+                "V"
+            ],
+            "middle": [
+                "chVan"
+            ],
+            "suffix": [
+                "chanV"
+            ]
+        },
+        {
+            "codepoint": 87,
+            "prefix": null,
+            "first": [
+                "W"
+            ],
+            "middle": [
+                "chWan"
+            ],
+            "suffix": [
+                "chanW"
+            ]
+        },
+        {
+            "codepoint": 88,
+            "prefix": null,
+            "first": [
+                "X"
+            ],
+            "middle": [
+                "chXan"
+            ],
+            "suffix": [
+                "chanX"
+            ]
+        },
+        {
+            "codepoint": 89,
+            "prefix": null,
+            "first": [
+                "Y"
+            ],
+            "middle": [
+                "chYan"
+            ],
+            "suffix": [
+                "chanY"
+            ]
+        },
+        {
+            "codepoint": 90,
+            "prefix": null,
+            "first": [
+                "Z"
+            ],
+            "middle": [
+                "chZan"
+            ],
+            "suffix": [
+                "chanZ"
+            ]
+        },
+        {
+            "codepoint": 91,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 92,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 93,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 94,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 95,
+            "prefix": null,
+            "first": [
+                "_"
+            ],
+            "middle": [
+                "ch_an"
+            ],
+            "suffix": [
+                "chan_"
+            ]
+        },
+        {
+            "codepoint": 96,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 97,
+            "prefix": null,
+            "first": [
+                "a"
+            ],
+            "middle": [
+                "chaan"
+            ],
+            "suffix": [
+                "chana"
+            ]
+        },
+        {
+            "codepoint": 98,
+            "prefix": null,
+            "first": [
+                "b"
+            ],
+            "middle": [
+                "chban"
+            ],
+            "suffix": [
+                "chanb"
+            ]
+        },
+        {
+            "codepoint": 99,
+            "prefix": null,
+            "first": [
+                "c"
+            ],
+            "middle": [
+                "chcan"
+            ],
+            "suffix": [
+                "chanc"
+            ]
+        },
+        {
+            "codepoint": 100,
+            "prefix": null,
+            "first": [
+                "d"
+            ],
+            "middle": [
+                "chdan"
+            ],
+            "suffix": [
+                "chand"
+            ]
+        },
+        {
+            "codepoint": 101,
+            "prefix": null,
+            "first": [
+                "e"
+            ],
+            "middle": [
+                "chean"
+            ],
+            "suffix": [
+                "chane"
+            ]
+        },
+        {
+            "codepoint": 102,
+            "prefix": null,
+            "first": [
+                "f"
+            ],
+            "middle": [
+                "chfan"
+            ],
+            "suffix": [
+                "chanf"
+            ]
+        },
+        {
+            "codepoint": 103,
+            "prefix": null,
+            "first": [
+                "g"
+            ],
+            "middle": [
+                "chgan"
+            ],
+            "suffix": [
+                "chang"
+            ]
+        },
+        {
+            "codepoint": 104,
+            "prefix": null,
+            "first": [
+                "h"
+            ],
+            "middle": [
+                "chhan"
+            ],
+            "suffix": [
+                "chanh"
+            ]
+        },
+        {
+            "codepoint": 105,
+            "prefix": null,
+            "first": [
+                "i"
+            ],
+            "middle": [
+                "chian"
+            ],
+            "suffix": [
+                "chani"
+            ]
+        },
+        {
+            "codepoint": 106,
+            "prefix": null,
+            "first": [
+                "j"
+            ],
+            "middle": [
+                "chjan"
+            ],
+            "suffix": [
+                "chanj"
+            ]
+        },
+        {
+            "codepoint": 107,
+            "prefix": null,
+            "first": [
+                "k"
+            ],
+            "middle": [
+                "chkan"
+            ],
+            "suffix": [
+                "chank"
+            ]
+        },
+        {
+            "codepoint": 108,
+            "prefix": null,
+            "first": [
+                "l"
+            ],
+            "middle": [
+                "chlan"
+            ],
+            "suffix": [
+                "chanl"
+            ]
+        },
+        {
+            "codepoint": 109,
+            "prefix": null,
+            "first": [
+                "m"
+            ],
+            "middle": [
+                "chman"
+            ],
+            "suffix": [
+                "chanm"
+            ]
+        },
+        {
+            "codepoint": 110,
+            "prefix": null,
+            "first": [
+                "n"
+            ],
+            "middle": [
+                "chnan"
+            ],
+            "suffix": [
+                "chann"
+            ]
+        },
+        {
+            "codepoint": 111,
+            "prefix": null,
+            "first": [
+                "o"
+            ],
+            "middle": [
+                "choan"
+            ],
+            "suffix": [
+                "chano"
+            ]
+        },
+        {
+            "codepoint": 112,
+            "prefix": null,
+            "first": [
+                "p"
+            ],
+            "middle": [
+                "chpan"
+            ],
+            "suffix": [
+                "chanp"
+            ]
+        },
+        {
+            "codepoint": 113,
+            "prefix": null,
+            "first": [
+                "q"
+            ],
+            "middle": [
+                "chqan"
+            ],
+            "suffix": [
+                "chanq"
+            ]
+        },
+        {
+            "codepoint": 114,
+            "prefix": null,
+            "first": [
+                "r"
+            ],
+            "middle": [
+                "chran"
+            ],
+            "suffix": [
+                "chanr"
+            ]
+        },
+        {
+            "codepoint": 115,
+            "prefix": null,
+            "first": [
+                "s"
+            ],
+            "middle": [
+                "chsan"
+            ],
+            "suffix": [
+                "chans"
+            ]
+        },
+        {
+            "codepoint": 116,
+            "prefix": null,
+            "first": [
+                "t"
+            ],
+            "middle": [
+                "chtan"
+            ],
+            "suffix": [
+                "chant"
+            ]
+        },
+        {
+            "codepoint": 117,
+            "prefix": null,
+            "first": [
+                "u"
+            ],
+            "middle": [
+                "chuan"
+            ],
+            "suffix": [
+                "chanu"
+            ]
+        },
+        {
+            "codepoint": 118,
+            "prefix": null,
+            "first": [
+                "v"
+            ],
+            "middle": [
+                "chvan"
+            ],
+            "suffix": [
+                "chanv"
+            ]
+        },
+        {
+            "codepoint": 119,
+            "prefix": null,
+            "first": [
+                "w"
+            ],
+            "middle": [
+                "chwan"
+            ],
+            "suffix": [
+                "chanw"
+            ]
+        },
+        {
+            "codepoint": 120,
+            "prefix": null,
+            "first": [
+                "x"
+            ],
+            "middle": [
+                "chxan"
+            ],
+            "suffix": [
+                "chanx"
+            ]
+        },
+        {
+            "codepoint": 121,
+            "prefix": null,
+            "first": [
+                "y"
+            ],
+            "middle": [
+                "chyan"
+            ],
+            "suffix": [
+                "chany"
+            ]
+        },
+        {
+            "codepoint": 122,
+            "prefix": null,
+            "first": [
+                "z"
+            ],
+            "middle": [
+                "chzan"
+            ],
+            "suffix": [
+                "chanz"
+            ]
+        },
+        {
+            "codepoint": 123,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 124,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 125,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 126,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 127,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 233,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 201,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 241,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 223,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 937,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 1076,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 1488,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 1575,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 26085,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 12402,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 54620,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 1635,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 2409,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 8550,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 189,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 65347,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 65299,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 65374,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 65343,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 65293,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 8208,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 8211,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 8722,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 160,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 8199,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 8203,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 8205,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 65279,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 769,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 837,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 6158,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 8232,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 133,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 128512,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 128077,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        },
+        {
+            "codepoint": 119808,
+            "prefix": [
+                "chan"
+            ],
+            "first": null,
+            "middle": [
+                "ch"
+            ],
+            "suffix": [
+                "chan"
+            ]
+        }
+    ]
+}

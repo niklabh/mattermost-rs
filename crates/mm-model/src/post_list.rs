@@ -19,12 +19,15 @@
 //!
 //! Every row is measured in `fixtures/behaviour_post_list.json`, not read off the source.
 //!
-//! # `Etag` is order-independent here, unlike `ChannelList::etag`
+//! # `Etag`'s **map** half is order-independent; its first component is not
 //!
-//! Go iterates a **map** to compute it, so an order-dependent answer would be nondeterministic
-//! between runs of the same server. The `v.Id > id` tie-break is what saves it: the loop is a
-//! maximum over the pair `(update_at, id)` seeded with `(0, "0")`. That seed is reachable — a
-//! post with `update_at: 0` and an id above `"0"` beats it, one below does not.
+//! Go iterates a map to pick the newest post, so an iteration-order-dependent answer would be
+//! nondeterministic between runs of the same server. The `v.Id > id` tie-break is what saves it:
+//! the loop is a maximum over the pair `(update_at, id)` seeded with `(0, "0")`. That seed is
+//! reachable — a post with `update_at: 0` and an id above `"0"` beats it, one below does not.
+//!
+//! The etag's *first* component is `Order[0]`, so the result does depend on `order` — reversing
+//! it changes the etag. `FileInfoList::etag` is the same function, character for character.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -89,6 +92,25 @@ pub enum EncodeJsonError {
 }
 
 impl PostList {
+    /// Every JSON key this type claims, in declaration order.
+    ///
+    /// Exists for [`crate::post_search_results::PostSearchResults`], which embeds a **nillable**
+    /// `*PostList` that Go allocates lazily — only once a decode walks into it for a key it
+    /// recognises. Deciding that needs the key set, and `burn_on_read_posts` is deliberately
+    /// absent because it is `json:"-"` in Go and therefore an *unknown* key there too.
+    ///
+    /// Pinned against the Go struct tags by
+    /// `post_search_results::go_parity::the_promoted_key_set_matches_go`, so a field added
+    /// upstream fails a test rather than silently narrowing the set.
+    pub const WIRE_KEYS: [&'static str; 6] = [
+        "order",
+        "posts",
+        "next_post_id",
+        "prev_post_id",
+        "has_next",
+        "first_inaccessible_post_time",
+    ];
+
     /// Port of `model.NewPostList` (post_list.go:26).
     ///
     /// **Not the same as [`PostList::default`].** `Default` is Go's zero value, where all three

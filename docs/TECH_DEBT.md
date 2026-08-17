@@ -160,6 +160,13 @@ it carried a drift test that read the value out of the oracle (see D-010) — th
 the remaining borrows should adopt, one oracle line and one assertion each, rather than waiting
 for their owning file to be translated.
 
+**Narrowed again 2026-08-16** (`scheduled_post_recurrence.go`). The two `ScheduledPostRepeatType*`
+constants were borrowed into `scheduled_post.rs` because `BaseIsValid`'s switch needs both and
+their owning file was unported. They now live in `scheduled_post_recurrence::` and
+`scheduled_post.rs` re-exports them, so both paths resolve and there is one definition. Same shape
+as `CURRENT_VERSION` above; a third borrow paid off by translating its owner rather than by
+adding a drift test.
+
 **To pay off** move each into its own module as that file is translated, and delete `external`.
 
 ---
@@ -616,6 +623,12 @@ tests distinguish them.
 own output) or add a `#[deny]`-style lint / clippy.toml `disallowed-methods` entry pointing
 `serde_json::to_string` at the right helper. The second is cheap and is the recommended option.
 
+**Third hazard behind the same fix, 2026-08-17.** [D-073] adds float rendering: three renderings
+are live, they disagree on 10–12 of 29 measured values, and `serde_json::to_string` on an `f64` is
+the wrong one. The `disallowed-methods` entry now covers `serde_json::to_string`,
+`str::to_lowercase` and a bare `f64` serialization. It has been the recommended fix for three days
+and is still unwritten; each new hazard makes it cheaper relative to the alternative.
+
 **Widened 2026-08-14** by [D-029]: `str::to_lowercase` is a third std method that looks right and
 silently is not (Go's `strings.ToLower` is a different function). One `disallowed-methods` entry
 should cover both, and the emoji session proved the failure mode is real rather than theoretical
@@ -660,12 +673,14 @@ is still the recommended fix and is still unwritten.
 ## D-028 · `Auditable` is unported on three types, and `Emoji`'s has an upstream bug
 
 **Status** OPEN · **Severity** incomplete · **Raised** 2026-08-14 (phase 1, `emoji.go`)
-**Widened** 2026-08-14 (`file_info.go`)
+**Widened** 2026-08-14 (`file_info.go`, then `post_search_results.go`)
 
-`(*Emoji).Auditable` (emoji.go:29), `(*FileInfo).Auditable` (file_info.go:86) and
-`ChannelMember`'s are all skipped for the same reason: audit projections are not wire types and
-belong with the audit layer, which does not exist yet. `FileInfo`'s is a straight ten-key
-projection with no surprises.
+`(*Emoji).Auditable` (emoji.go:29), `(*FileInfo).Auditable` (file_info.go:86),
+`(*PostSearchResults).Auditable` (post_search_results.go:43) and `ChannelMember`'s are all
+skipped for the same reason: audit projections are not wire types and belong with the audit
+layer, which does not exist yet. `FileInfo`'s is a straight ten-key projection with no surprises.
+`PostSearchResults`' is two keys and is the one place in that file the nil embed is handled
+rather than dereferenced — port it with the guard intact, or it joins [D-054].
 
 Recorded here because it carries a copy-paste bug that must survive the port:
 
@@ -849,6 +864,13 @@ This is **not** new to `post_metadata.go` — it is a convention already shipped
 | `MessageAttachment.Actions []*PostAction` | `Vec<PostAction>` | `message_attachment.rs` |
 | `PostList.{Posts,BurnOnReadPosts}` `map[string]*Post` | `Option<BTreeMap<String, Post>>` | `post_list.rs` |
 | `WranglerPostList.Posts []*Post` | `Option<Vec<Post>>` | `wrangler.rs` |
+| `FileInfoList.FileInfos` `map[string]*FileInfo` | `Option<BTreeMap<String, FileInfo>>` | `file_info_list.rs` |
+| `FileUploadResponse.FileInfos []*FileInfo` | `Option<Vec<FileInfo>>` | `file.rs` |
+| `UserAutocompleteInChannel.{InChannel,OutOfChannel}` `[]*User` | `Option<Vec<User>>` | `user_autocomplete.rs` |
+| `UserAutocompleteInTeam.InTeam []*User` | `Option<Vec<User>>` | `user_autocomplete.rs` |
+| `UserAutocomplete.Users []*User` | `Option<Vec<User>>` | `user_autocomplete.rs` |
+| `UserAutocomplete.{OutOfChannel,Agents}` `[]*User` **+ omitempty** | `Vec<User>` | `user_autocomplete.rs` — see below |
+| `AnalyticsRows []*AnalyticsRow` | `Vec<AnalyticsRow>` | `analytics_row.rs` |
 
 `post_metadata.go` is only where it stopped being hypothetical: the `embeds_nil_element` oracle
 case is a **failing** decode, asserted explicitly in
@@ -890,8 +912,16 @@ survives Go's filters and reaches a decode we perform. `a_nil_action_option_drop
 where_go_keeps_it` pins it.
 
 **(c) for now**, revisit if the app layer ever sees a real nil element. Whatever is chosen must
-be applied to all five types above at once — the value of the current state is that it is
-uniform.
+be applied to all the types above at once — the value of the current state is that it is uniform.
+
+**One row in that table is a `Vec` rather than an `Option<Vec>` and it is not an inconsistency.**
+`UserAutocomplete.{OutOfChannel,Agents}` carry `omitempty`, so Go drops a nil slice *and* an empty
+one and the two are indistinguishable on the wire — an `Option` there would invent a distinction
+Go cannot express. That is the general rule the crate follows and it is worth stating here because
+this table makes the shapes look uniform when the *tags* are what decide: no `omitempty` →
+`Option<Vec<T>>`, `omitempty` → `Vec<T>` with a length predicate. `user_autocomplete.go` is the
+clearest case, because `out_of_channel` appears in two structs in the same file under different
+rules. Option (a) would replace the element type in both, not the container.
 
 **Widened 2026-08-14** by `post_list.go`, where the exposure is a whole *response*: a
 `{"posts":{"p1":null}}` document decodes in Go with `p1` present and nil, and fails our decode
@@ -1178,6 +1208,61 @@ rejected.
 **(c) for now.** Revisit at the API layer, where one boundary-level decoder could cover every
 type at once — which is the argument for doing it there rather than in `mm-model`.
 
+**Widest instance measured 2026-08-17** (`channel_member_history.go`), and it also bounds the
+rule. That file and `channel_member_history_result.go` carry **no `json:` tags at all**, so every
+wire key is a Go field name in PascalCase — and Go's fallback means `channelid`, `CHANNELID` and
+`cHaNnElId` all populate `ChannelId` there while none does here. Where the earlier instances cost
+one field or one embed, this costs *every key of the type*, and the same is true of
+`wrangler.go`, the other tagless type.
+
+The bound is the useful half: the fallback folds **case only, not punctuation**. `channel_id` and
+`channel-id` are unknown keys in Go too, so the divergent set for a key is exactly its
+case-variants and not "any plausible spelling" — which is what makes option (b) a finite,
+well-defined transformation rather than a guess. `only_the_declared_key_casing_decodes_here`
+drives all six spellings and asserts which three Go accepts.
+
+**Stated precisely 2026-08-17** (`team_stats.go`), because the bound above reads as a
+counterexample and is not. `{"Total_Member_Count":5}` **does** populate `TotalMemberCount`, even
+though `channel_id` failed to populate `ChannelId` one file earlier. Both are the same rule: Go
+folds case against the field's **effective name**, which is the `json:` tag when there is one and
+the Go field name when there is not. `total_member_count` is the tag, so it already contains the
+underscores and `Total_Member_Count` folds onto it; `ChannelId` is a field name, and no
+underscored spelling folds onto that.
+
+So the divergent set for a key is the case-variants **of its effective name** — still finite,
+still mechanical, but a boundary decoder has to fold against the tag rather than against the Rust
+field identifier. `the_case_fold_is_against_the_tag_not_the_field_name` pins it, and it is worth
+reading before implementing option (b).
+
+**And the set's size depends on the tag's own casing, measured 2026-08-17** (`limits.go`). That
+file tags everything camelCase — `maxUsersLimit` — which is a **third** naming convention after
+snake_case and tagless PascalCase. It widens the exposure, because the Go *field name*
+`MaxUsersLimit` is itself a case-variant of its tag, so Go accepts both spellings where a
+snake_case tag admits no PascalCase spelling at all. Four of seven probed spellings diverge there
+against three of six for a tagless type.
+
+The reassuring half: `max_users_limit` — the spelling a Rust port invents by habit after sixty
+snake_case files — populates the field on **neither** side, because the fold still does not cross
+punctuation. So a mis-tagged field is a silent no-op rather than a silent mis-read, and a
+comparison against Go's key list catches it. `the_key_casing_matches_go` drives all seven.
+
+**A second entry now points at the same fix.** [D-071] (a repeated key takes the last value in Go
+and fails the decode here) is the other crate-wide `encoding/json`-versus-serde decode
+difference, and option (b) closes both: a boundary decoder that parses into a
+`serde_json::Value` resolves duplicates for free, because `serde_json::Map` keeps the last value.
+Neither entry justifies that machinery alone; together they do.
+
+**Second measured instance 2026-08-16** (`file_info_search_results.go`), and it is worse than the
+first because the casing decides a **structural** question rather than one field's value.
+`{"ORDER":[]}` makes Go allocate the embedded `*FileInfoList` and set `order` on it, so the
+response carries five keys; here it is an unknown key and the embed stays nil, so the response
+carries one. Same for `PostSearchResults`, where the divergence is five keys too. A field-value
+disagreement is a wrong value; this is a differently-shaped document.
+
+Pinned by `uppercase_key_only` in both types' oracles, asserted as a divergence rather than
+skipped. It strengthens option (b): a boundary decoder that folds keys once would fix the
+structural case and the field case together, and there is no per-field alias that could.
+
 ---
 
 ## D-041 · `AllStrings` covers everything except the interactive blocks
@@ -1273,6 +1358,21 @@ Of the 61 that do not, three groups are already safe and should not be touched:
 which carry the attribute per field instead. The rest — `Channel` and its satellites,
 `ChannelMember` and its, `User`, `Team`, `Session`, `TeamMember` and the ten in
 `integration_action.rs` — reject a partial document that Go accepts.
+
+**Confirmed again 2026-08-17** (`channel_data.go`), and the encounter is worth recording because
+of how it was avoided rather than how it was hit. The `ChannelData` oracle's first draft wrote its
+corpus as hand-written JSON literals — `{"channel":{}}`, `{"channel":{"id":"c1","update_at":1}}` —
+which are perfectly good probes of Go and which the Rust port cannot decode at all, because
+`Channel` and `ChannelMember` are both on the unfixed list above. Three parity tests failed with
+`missing field`.
+
+The fix was **not** to add the attribute to those two containers, which would be one file of a
+61-file audit and would leave the crate more inconsistent than it is now. It was to build the
+corpus from Go **values** and marshal them, so every document is complete. That is better oracle
+design independently: what the wire format has to agree on is the document the Go *server* emits,
+and a partial document tests D-043 rather than the file under translation. Worth copying — a
+behaviour oracle for a type with nested model structs should marshal from values, not hand-write
+JSON, until this entry is paid.
 
 **One field paid 2026-08-14** (`mm_blocks_actions.go`), and it is worth recording because it was
 found the way the entry predicts: `MmBlocksActionCookie.actions` was the one field in that struct
@@ -1679,3 +1779,835 @@ reached for `go_clone` here would materialise a nil `order` into `[]` and change
 
 **To pay off** close [D-044], port `RewriteImageURLs` and `Post::with_rewritten_image_urls`, then
 this is four lines and one oracle section.
+
+---
+
+## D-054 · Three `PostSearchResults` methods panic on a nil embed
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-14 (phase 1, `post_search_results.go`)
+**Related** [D-052], which is the same call on `PostList`, and [D-018] on `ChannelMember`
+
+`PostSearchResults` embeds a **pointer**, `*PostList`. `ToJSON`, `EncodeJSON` and `ForPlugin` all
+dereference it without a nil check, so each crashes the Go server on a value the type's own
+constructor produces — `MakePostSearchResults(nil, matches)` is a legal call, and `Auditable` is
+written with an explicit `if o.PostList != nil` guard, so the nil state is not theoretical.
+
+| Go | reached through | ours |
+|---|---|---|
+| `ToJSON` (post_search_results.go:25) | `psCopy.PostList.StripActionIntegrations()` → `o.Posts` | marshals what is there |
+| `EncodeJSON` (post_search_results.go:32) | same call, on the receiver | same |
+| `ForPlugin` (post_search_results.go:37) | `plCopy.PostList.ForPlugin()` → `Clone()` → `len(o.Order)` | keeps the embed `None` |
+
+What makes this worse than [D-052] is **which** documents reach it. The embed is nil for every
+document carrying none of `PostList::WIRE_KEYS` — measured, not read — and that includes the
+ordinary `{"matches":{"<post-id>":["term"]}}`. So a search response that carried matches and no
+posts is a 500 from `ToJSON`, not an empty result. Nine of the nineteen corpus documents crash,
+in all three methods — 27 of the oracle's 76 recorded answers.
+
+Accepted for [D-052]'s reason: `CLAUDE.md` forbids `panic!` in library code, the divergence is
+only observable where the Go server returns a 500, and the answer we give in its place is exactly
+what Go's own marshaller emits for a nil embed (`{"matches":…}` with the six promoted keys
+dropped). Each is asserted in the parity tests rather than skipped —
+`to_json_matches_go_and_strips_the_receiver` requires that the panicking cases are precisely the
+nil-embed ones, so if upstream adds a nil check the oracle row flips and the test still holds.
+
+---
+
+## D-055 · `PostSearchResults::for_plugin` does not alias the caller's `Matches`
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-14 (phase 1, `post_search_results.go`)
+**Related** [D-024], the same hazard on `RecentCustomStatuses`
+
+`(*PostSearchResults).ForPlugin` opens with `plCopy := *o`, which copies the `Matches` **map
+header**. It then replaces the `PostList` pointer, so the two values end up with independent post
+lists and a *shared* matches map: writing a key through the returned copy is visible on the
+receiver. Measured — `matches_aliased: true` on every corpus case with a non-nil map — rather
+than inferred from the assignment.
+
+The Rust port clones the map, so the two are independent.
+
+Accepted for [D-024]'s reason: reproducing the sharing means `Rc<RefCell<…>>` or an `&mut`
+signature, i.e. exporting a footgun to make a side effect that no Go call site relies on. Every
+`ForPlugin` caller in the Go tree hands the result straight to a plugin API and drops the
+original.
+
+Flagged because it is the second aliasing divergence in the crate and the two are opposite in
+shape: [D-024] is a receiver mutated by a method that looks pure, this is a *result* that shares
+state with a receiver left visibly untouched. A ported call site that writes to
+`results.matches` after taking a `for_plugin` copy would silently change behaviour — check for
+that when the search endpoint lands.
+
+---
+
+## D-056 · `go vet` is not clean on `reference/dump/behaviour_post.go`
+
+**Status** OPEN · **Severity** unverified · **Raised** 2026-08-14 (phase 1, `post_search_results.go`)
+
+Thirteen findings, all the same one:
+
+```
+behaviour_post.go:238:9: range var c copies lock: struct{name string; p model.Post}
+    contains model.Post contains sync.RWMutex
+```
+
+`model.Post` carries an unexported `propsMu sync.RWMutex` guarding `Props` (post.go:156), so the
+corpus slices of `struct{name string; p model.Post}` copy a mutex every time they are ranged over
+or assigned. Found while checking the tooling for this session; it predates it, and no other
+`behaviour_*.go` file trips it because they hold their corpora as JSON strings rather than as
+built `Post` values.
+
+**Why it is probably harmless.** The generator is single-threaded and never contends the lock, so
+copying an unlocked mutex produces an unlocked mutex. The failure mode `vet` is warning about —
+copying a *held* lock, so two values share a corrupted state — needs concurrency the generator
+does not have.
+
+**Why it is logged rather than shrugged off.** It is unverified, not proven-safe: `Post.Props`
+accessors take the lock, and a corpus case that copies a `Post` *while* an accessor holds it would
+produce a fixture value that depends on lock state. More practically, a non-clean `vet` is a
+signal that stops being read once it is routine, and the "definition of done" in `CLAUDE.md`
+implies a clean one.
+
+**To pay off** hold the corpus as `[]struct{name, doc string}` and decode per case — the shape
+every other behaviour file already uses — or take the corpus by pointer. Mechanical either way;
+it is a change to ~7 loops in one file, none of which affects a recorded value.
+
+---
+
+## D-057 · `null` into a scalar field is accepted by Go and rejected crate-wide
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-08-14 (phase 1, `search_params.go`)
+**Related** [D-043] (absent keys, which is the *other* half of the same contract) and [D-033]
+
+Go's `encoding/json` documents that unmarshalling `null` into anything other than an interface,
+map, pointer or slice **has no effect and produces no error** — the destination keeps its zero
+value. So `{"terms":null,"modifier":null}` is a legal `SearchParams`, and Go re-emits it as
+`{"modifier":""}`.
+
+serde has no such rule. `String`, `bool` and `i64` all reject `null` outright, so the whole
+document fails to decode. Measured, not read off the Go docs: the `wire` section of
+`fixtures/behaviour_search_params.json` records Go's answer for two such documents, and a probe
+across the crate confirmed the same rejection on `Post.message`, `Channel.display_name` and
+`Session.create_at`.
+
+**Reachability is the same as [D-043]'s and the fix is not.** D-043 was closed with a
+container-level `#[serde(default)]`, which handles an *absent* key. An explicitly null one still
+fails, and there is no container-level switch for it — closing this means a `deserialize_with` on
+every scalar field of every wire type, or a custom `Deserializer` wrapper that maps null to
+`Default` before the derive sees it.
+
+**The slice half is already closed for `SearchParams`** and deliberately so, not as an
+inconsistency: every other nullable slice in the crate is an `Option<Vec<T>>`, which decodes
+`null` fine. `SearchParams`' six lists are bare `Vec`s — Go's `omitempty` drops nil and empty
+alike, so no `Option` is warranted — and `null_as_empty` restores the decode behaviour the
+`Option` would have given. The scalars are left alone precisely because fixing one type out of
+seventy-five would be the inconsistency.
+
+**The rule reaches slice elements too, measured 2026-08-17** (`channel_search.go`): `[null]` into
+a `[]string` gives Go `[""]` and gives us a failed decode. Logged separately as [D-075] because
+the *fix* is shared but the shape is not — it is the same `null`-to-zero-value rule one level
+down, and no earlier corpus had put a `null` inside an array of scalars. A boundary decoder that
+folds `null` to the default closes both at once; a per-field `deserialize_with` helper would close
+only this entry.
+
+**To pay off** decide the convention once, then apply it everywhere at the same time — the same
+instruction [D-033] carries. A `#[serde(deserialize_with = …)]` helper per scalar type
+(`null_as_default::<String>` and friends) is the cheap version; a wrapping `Deserializer` that
+turns `null` into "use the default" for every field is the version that cannot be forgotten on a
+new type.
+
+Pinned rather than shrugged off: `a_null_scalar_is_accepted_by_go_and_rejected_here` asserts both
+sides — that Go accepts the two documents and that we do not — so closing this fails the test and
+the exemption gets deleted rather than lingering.
+
+**Third measured instance 2026-08-16** (`file.go`), and the first where the surrounding corpus
+makes the *scope* of the divergence precise rather than merely noting it. `PresignURLResponse
+.Expiration` was driven with all 17 shapes a client could put in a numeric field — integers at
+both `int64` bounds, an out-of-range integer, `1.0`, `1e9`, two quoted numbers, a bool, an object
+and an array. Go and `serde_json` return the **same verdict on sixteen of the seventeen**; `null`
+is the only one they disagree about.
+
+That is worth recording because it bounds the work. This entry could read as "serde's scalar
+decoding differs from Go's", which would imply a per-type audit; what is actually true is that
+the two agree everywhere except `null`, so a single `null`-to-default mechanism closes the whole
+entry and nothing else needs checking. `duration_unmarshal_matches_go` drives all seventeen and
+exempts exactly one by name.
+
+---
+
+## D-058 · Three `FileInfoList` paths panic in Go and answer here
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-14 (phase 1, `file_info_list.go`)
+**Related** [D-052] (the same three shapes on `PostList`), [D-018], [D-033]
+
+`CLAUDE.md` forbids `panic!` in library code, and three of this type's paths reach one in Go. All
+three are measured under `recover` in `fixtures/behaviour_file_info_list.json`.
+
+| Go | why it panics | ours |
+|---|---|---|
+| `AddFileInfo` (file_info_list.go:54) | nil-checks the **map**, then dereferences the **argument** for its key | takes `FileInfo` by move — no nil to pass |
+| `SortByCreateAt` (file_info_list.go:87) | the comparator dereferences `o.FileInfos[o.Order[i]]` for an order id with no file | treats the missing file as `create_at: 0` |
+| `Etag` (file_info_list.go:93) | ranges the map and reads `v.UpdateAt` off a nil `*FileInfo` | unreachable — [D-033] means the map cannot hold one |
+
+Two of the three are made **unrepresentable** rather than merely handled, which is a stronger
+position than [D-052]'s and worth stating: `AddFileInfo`'s nil argument has no Rust spelling, and
+`Etag`'s nil map value cannot survive a decode. Only `SortByCreateAt`'s is a live divergence, and
+it needs an order id with no matching file — which `AddOrder` produces without complaint, so it is
+reachable through the public API rather than only through a malformed document.
+
+Accepted for [D-052]'s reason: the divergence is only observable where the Go server returns a
+500, and the alternatives are panicking (forbidden) or silently dropping the file. Asserted rather
+than skipped — `sort_by_create_at_answers_where_go_panics` requires that exactly one corpus case
+crashes Go and checks where the missing id lands for us, and `add_file_info_matches_go` requires
+that Go crashed on **every** nil argument. If upstream adds a nil check, both tests fail and this
+can be revisited.
+
+**Note for the store layer.** `AddFileInfo`'s crash is the one a caller can trip without a
+malformed document: any code path holding a `*FileInfo` that a lookup might have left nil. Ported
+call sites get the compiler's help here; Go's do not.
+
+---
+
+## D-059 · `Post::is_valid` takes an unsigned size limit where Go's is signed
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-08-14 (phase 1, `draft.go`)
+
+`(*Post).IsValid(maxPostSize int)` and `(*Draft).IsValid(maxDraftSize int)` take Go's `int` —
+**signed**. Both compare `utf8.RuneCountInString(o.Message) > max`, so a negative limit rejects
+every message including the empty one, and a zero limit rejects every non-empty one.
+
+`crates/mm-model/src/post.rs::Post::is_valid` takes `usize`, which cannot represent the negative
+case at all. `draft.rs::Draft::is_valid` takes `i64`, which can, and the oracle pins it
+(`message_max_negative`: an empty message with `max = -1` is a `message_length` error in Go).
+
+The two signatures now disagree with each other, which is the actual debt — a call site being
+ported from Go passes the same config-derived `int` to both and has to think about it once per
+type. Reachability of the negative case itself is low: the value comes from
+`ServiceSettings.MaxPostSize`, which the config validator constrains, so it takes a hand-edited
+config or an unvalidated plugin call to go negative.
+
+**To pay off** change `Post::is_valid`'s parameter to `i64` and add the two corpus cases
+(`message_max_zero`, `message_max_negative`) to `reference/dump/behaviour_post.go`, which
+currently drives only the zero case. One-line change on each side; deferred here only because
+`post.rs` is not this session's file and re-running its oracle rewrites a 1.7 MB committed
+fixture.
+
+---
+
+## D-060 · `behaviour_post.json` embeds 1.7 MB of pure padding
+
+**Status** OPEN · **Severity** unverified · **Raised** 2026-08-14 (phase 1, `draft.go`)
+**Related** [D-032]
+
+`PostPropsMaxRunes` is 800,000, so any corpus case that probes the props cap embeds an
+800,000-character string. `fixtures/behaviour_post.json` has two such cases and is 1.7 MB;
+`behaviour_draft.json` would have been 4 MB with five.
+
+The draft oracle solved it with a `pad` descriptor — the marshalled draft holds `""` at the padded
+key and the fixture records `{field, key, prefix, fill, count}`, which the Rust side expands
+before decoding. The result is 80 KB and the assertions are unchanged. `behaviour_post.json` still
+embeds its padding.
+
+This is a readability debt rather than a correctness one, and it is the same concern [D-032]
+raises from the other direction: a fixture is an oracle only if a human can open it and check what
+it claims. A 1.7 MB line nobody scrolls through is not being checked.
+
+**To pay off** apply `draftPad`'s shape to `postIsValidAll`'s `props_at_limit` and
+`props_over_limit`. It rewrites a committed fixture, so it wants its own session and a diff that
+shows only those two cases changing.
+
+---
+
+## D-061 · A nil result and an empty one are the same `Vec` here
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-14 (phase 1, `channel_mentions.go`)
+**Related** [D-033] (the same nil/empty question on the *input* side)
+
+All three functions in channel_mentions.go declare `var names []string` and return it, so
+"nothing matched" is a **nil** slice, not an empty one. `json.Marshal` renders that as `null`
+where an empty slice renders as `[]`. Ours returns `Vec::new()` for both, and Rust has no
+spelling for the difference.
+
+Measured across the corpus: 6 of the 44 `ChannelMentionsFromStrings` cases and 6 of the 23
+attachment cases return nil, and **none of the three functions can return an empty non-nil
+slice** — the only way to get a zero-length result is the nil path. So the two states are not
+merely indistinguishable to us, they are indistinguishable in Go as well for these functions.
+
+Reachability of an observable difference is therefore limited to a caller that marshals the
+result directly. Go has one candidate: `FillInPostProps` writes the answer into
+`props.channel_mentions`. It is unported, so this entry exists to be read when it lands — if it
+stores the raw slice, a post with no channel mentions gets `"channel_mentions":null` from Go and
+`"channel_mentions":[]` from us, into the same `Posts.Props` column.
+
+**To pay off**, if that call site turns out to store the raw value: return
+`Option<Vec<String>>` from the three functions, or have the *caller* map an empty result to
+`Value::Null`. The second is cheaper and keeps the mention API honest.
+
+---
+
+## D-062 · Go's `\b`/`\B` are ASCII and the `regex` crate's are Unicode
+
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-08-14 (phase 1, `channel_mentions.go`)
+**Closed** 2026-08-14, same session — the only affected pattern in the crate was this file's.
+**Related** [D-027] (the same shape of hazard: a std/crate API that looks right and is not)
+
+Go's RE2 defines `\b` and `\B` over the **ASCII** word class `[0-9A-Za-z_]`. The `regex` crate
+defines them over Unicode. A pattern string copied from Go compiles in Rust and silently means
+something else:
+
+| input | Go `\B~[a-zA-Z0-9\-_]+` | Rust, bare `\B` | Rust, `(?-u:\B)` |
+|---|---|---|---|
+| `a~chan` | no match | no match | no match |
+| `é~chan` | `chan` | **no match** | `chan` |
+| `日~chan` | `chan` | **no match** | `chan` |
+| `٣~chan` | `chan` | **no match** | `chan` |
+
+This is the third member of a family already in this register: `\d`/`\s` are ASCII in Go and
+Unicode in the crate (`search_params.go`, spelled out as `0-9` and the five whitespace bytes),
+and `unicode.IsLetter` is general-category `L` where `char::is_alphabetic` is the Alphabetic
+*property* (`utils.go` note 3). All three have the same failure mode — the naive port compiles,
+passes an ASCII test corpus, and diverges on real user text.
+
+**How it was paid.** `channel_mentions::CHANNEL_MENTION_REGEX` uses `(?-u:\B)`, and a
+164-codepoint sweep drives every ASCII byte plus 36 curated non-ASCII characters through four
+positions in the pattern. Six tests fail if the `(?-u:…)` is dropped, which was verified by
+dropping it. The sweep also pins the character class as ASCII-only in all three of its positions.
+
+**Residual hazard**, and the reason this is worth reading rather than filing: nothing stops the
+next transcribed Go pattern from carrying a bare `\b`. There is no lint for it — `clippy.toml`'s
+`disallowed-methods` cannot see inside a string literal. The only defence is the habit: **every
+Go regex ported into this crate gets a codepoint sweep before it is trusted.** `\b`, `\B`, `\d`,
+`\D`, `\s`, `\S` and `\w` are all ASCII in Go and all Unicode in the crate.
+
+---
+
+## D-063 · `ToURLValues` emits one ordering where Go emits any
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-14 (phase 1, `mention_map.go`)
+**Related** [D-051] (Go's unstable sort), [D-027] (map iteration order, the other direction)
+
+`mentionsToURLValues` (mention_map.go:71) ranges a Go map, and Go randomises map iteration. It
+adds the mention and the id to two *parallel* slices under two different keys, so the pairing
+survives — but the order does not. `Values.Encode` sorts by key and there are only two keys, so
+the slice under each keeps insertion order: a two-entry mention map encodes two ways from one
+input, a three-entry one six ways, and the same Go process produces different bytes on successive
+calls.
+
+`StringMap` is a `BTreeMap`, so ours always emits the sorted-by-mention ordering — one of the
+orderings Go can produce, never the others.
+
+**Why this is accepted rather than owed.** The consumer is
+`mentionsFromURLValues`, which pairs by index; permuting the two slices together is exactly the
+transformation it is invariant under. The oracle records `round_trips: true` for all twelve corpus
+maps, and `a_reversed_go_ordering_decodes_to_the_same_map` builds an ordering we never emit and
+decodes it to the same map. So a Rust client and a Go server agree about content and disagree only
+about query-string bytes.
+
+**Where it could still bite**, and why it is logged rather than shrugged off:
+
+- **A signed or hashed URL.** Anything that MACs the query string would see two different
+  messages for one map. Nothing in the tree does this today; `AddMmBlocksActionCookies` ([D-046])
+  is the nearest thing and does not touch these keys.
+- **A test or a cache key built from the encoded string.** Ours is stable, Go's is not, so a Go
+  test asserting an exact encoding can only have one entry — which is a hint that upstream knows.
+
+**Not to be "fixed" by randomising ours.** Deterministic output is strictly better here; the entry
+exists so that whoever compares a Rust-generated URL against a Go-generated one knows why the byte
+strings differ and that it is not a bug.
+
+---
+
+## D-064 · A query parameter that is not UTF-8 is an error here and a map key in Go
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-08-14 (phase 1, `mention_map.go`)
+**Related** [D-033] (the same shape: Go accepts, we refuse), [D-057]
+
+Go's `url.Values` is `map[string][]string`, and a Go `string` is an arbitrary byte sequence. So
+`?user_mentions=%80&user_mentions_ids=abc` gives `UserMentionMapFromURLValues` a map whose key is
+the single byte `0x80` — no error, no replacement character. `crate::go_url::Values` already
+models this correctly (its keys and values are `Vec<u8>`, which is why the URL corpus can record
+`?a=%80` at all), but `UserMentionMap` is a `StringMap` and cannot hold it.
+
+`MentionMapError::NotUtf8` is the result: a fifth error variant with no Go counterpart, returned
+where Go returns a map.
+
+**Reachability is low but it is client-controlled**, which is the part worth noting — it takes one
+percent-escape in a query parameter, not a malformed internal state. The consequence is a 400
+where Go would have built a map that then matched nothing, so the *outcome* for the user is
+similar; the difference is which side reports it.
+
+**Options**
+- **(a) Type the maps as `BTreeMap<Vec<u8>, Vec<u8>>`.** Exactly faithful, and it would infect
+  every call site with byte handling for a state no correct client produces.
+- **(b) `String::from_utf8_lossy`.** Silently rewrites the key to `U+FFFD`, so the map is
+  non-empty and wrong. Worse than erroring.
+- **(c) The typed error.** Current state. Visible, testable, and it cannot corrupt a key.
+
+**(c) for now.** Revisit if the API layer turns out to need Go's exact status code for this input
+— which is the one thing the corpus cannot tell us, because Go has no code path for it.
+
+---
+
+## D-065 · `time.LoadLocation` is a filesystem lookup, so Go has no single answer
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-14 (phase 1, `scheduled_post.go`)
+**Related** [D-030] (`mime.TypeByExtension`, the same shape), [D-008]
+
+`ScheduledPost.BaseIsValid` validates `repeat_timezone` with `time.LoadLocation`, which consults
+`$ZONEINFO` and then the **host's** zoneinfo directory. The accepted set is therefore a property
+of the machine, not of Go — two Mattermost servers on different base images can disagree about
+whether the same scheduled post is valid.
+
+The 50-name corpus in `fixtures/behaviour_scheduled_post.json` was generated on macOS and shows it
+plainly:
+
+| name | Go here | why |
+|---|---|---|
+| `america/new_york`, `AMERICA/NEW_YORK`, `utc` | **accepted** | APFS is case-insensitive |
+| `America//New_York` | **accepted** | the OS collapses the doubled separator |
+| `America/New_York/` | rejected, `not a directory` | an **OS error**, not Go's |
+| `../etc/passwd`, `/UTC` | rejected, `time: invalid location name` | Go's own path guard |
+| `US/Pacific-New` | rejected | dropped from recent tzdata |
+
+The first four would all behave differently on a Linux server with a case-sensitive filesystem —
+which is what production runs.
+
+**What was ported.** `chrono_tz::Tz::from_str`, an embedded case-sensitive IANA table: what a
+Linux Go server effectively answers. It agrees with the corpus on **44 of 50** names. The six that
+differ are the four filesystem artifacts above plus `""` and `"Local"`, which Go special-cases to
+UTC and to the server's own zone — and which `base_is_valid` rejects *before* the lookup runs, so
+`chrono_tz` not knowing them is unobservable.
+`the_timezone_table_agrees_with_go_except_on_host_artifacts` lists all six by name with the reason
+each differs, so a **new** disagreement fails the test rather than widening a skip predicate.
+
+**The error text is not reproduced exactly.** Go appends `LoadLocation`'s own message to the
+`detailed_error`, which is `unknown time zone <name>` for a missing zone and an OS error string
+for a path-shaped one. Ours always emits the first form. A client parsing that suffix would see a
+difference on `America/New_York/`-shaped input; nothing does, and the error id and status are
+identical.
+
+**Adding `chrono-tz` is the other half of this entry.** It is a new workspace dependency, chosen
+over (a) embedding a name list — which would go stale silently — and (b) taking the validator as a
+parameter the way [D-030] moved the mime lookup to the caller. (b) was rejected here because,
+unlike a mime type, the timezone is *validated* rather than *resolved*, so pushing it out would
+put a wire-visible 400 in the app layer. `scheduled_post_recurrence.go`'s next-occurrence
+arithmetic will need the real tz data regardless.
+
+**Widened 2026-08-16** by `scheduled_post_recurrence.go`, which reaches `LoadLocation` a second
+time — `ComputeNextScheduledAt` loads the zone itself rather than taking a location. Two things
+changed and one did not:
+
+- **`""` is no longer a divergence.** Go *documents* `LoadLocation("")` as UTC, which is portable
+  in a way the filesystem lookup is not, so `scheduled_post_recurrence::load_location`
+  special-cases it. `base_is_valid` still rejects an empty `repeat_timezone` for a weekly post,
+  so the two are consistent: the name is invalid, and it is not a lookup *failure*.
+- **`"Local"` is still a divergence**, and now a reachable one: `ComputeNextScheduledAt` is a
+  public method with no validation in front of it, where before the only caller was `BaseIsValid`
+  itself. Go resolves it against the host and we return the load error.
+  `local_is_rejected_where_go_accepts_it` asserts the divergence rather than skipping it.
+- **The error text is still not reproduced exactly**, for the reason above. Go's
+  `failed to load repeat timezone %q: %w` wraps `LoadLocation`'s message, which is
+  `time: invalid location name` for `../etc/passwd` and an OS error for
+  `America/New_York/`-shaped input; ours always emits `unknown time zone <name>`.
+  `compute_next_scheduled_at_matches_go` compares the full string for the repeat-type arm and
+  only the prefix for this one, so the divergence is bounded by a test rather than by a comment.
+
+The corpus also records `america/new_york` as **accepted** by the generating macOS host and
+rejected by us, which is the same case-insensitive-filesystem artifact the 50-name sweep found.
+It is listed by name in `HOST_DEPENDENT` alongside `Local`.
+
+---
+
+## D-066 · `ToPost` aliases the scheduled post's files and metadata in Go
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-14 (phase 1, `scheduled_post.go`)
+**Related** [D-015] (`Channel::deep_copy`), [D-024], [D-034]
+
+`(*ScheduledPost).ToPost` (scheduled_post.go:116) writes `FileIds: s.FileIds` and
+`Metadata: s.Metadata` into the new `Post`. Both are references: the slice shares its backing
+array and the metadata shares its pointer, so the post and the scheduled post are the **same**
+metadata afterwards. Ours clones.
+
+That matters more here than in the earlier members of this family, because `ToPost` then
+**mutates** the metadata it just aliased: when the priority map is complete it does
+`post.Metadata.Priority = &PostPriority{…}`. In Go that writes through to
+`s.Metadata.Priority` — converting a scheduled post to a post silently gives the *scheduled post*
+a typed priority it did not have. Ours leaves the receiver untouched.
+
+Reachability is real but the consequence is small: the Go call site sends the post and then
+deletes the scheduled-post row, so nobody reads the mutated receiver. Logged because the app-layer
+port will have the same code in front of it, and "convert, then inspect the original" is a natural
+thing to write.
+
+Accepted for [D-015]'s reason: reproducing the aliasing means `Arc<Mutex<…>>` on two fields to
+make a discarded value match.
+
+---
+
+## D-067 · `ScheduledPost`'s `Serialize` restates `Draft`'s field list
+
+**Status** OPEN · **Severity** unverified · **Raised** 2026-08-14 (phase 1, `scheduled_post.go`)
+
+Go's anonymous field inlines `Draft`'s nine keys into `ScheduledPost`'s object **before** its own
+six. `#[serde(flatten)]` compiles and puts them **last**, so `Serialize` is hand-written in
+`scheduled_post.rs` and repeats Draft's field names, order and skip predicates.
+
+The hazard is a field added to `Draft` upstream and not to that impl: it would vanish from the
+scheduled-post wire form while the draft's own tests stayed green.
+
+Two things stand in the way today, and neither is a real guarantee:
+
+- `the_embedded_half_comes_first` asserts a scheduled post's JSON *starts with* its draft's JSON
+  minus the closing brace. That catches an omission, a reorder and a renamed key — it is the
+  strong one, and it is why this entry is `unverified` rather than `divergence`.
+- `the_wire_format_matches_go` is byte-exact against the oracle, which would also catch it — but
+  only after the fixture is regenerated against a newer Go tree.
+
+**To pay off**, if a second embedding shows up (Go's model package has several): factor the
+draft's field emission into a helper on `Draft` that both impls call, e.g. a
+`fn serialize_fields<S: SerializeStruct>(&self, s: &mut S)`. One definition, and the compiler
+enforces it. Not done for a single call site.
+
+---
+
+## D-068 · `compute_next_scheduled_at` gives up where Go loops on
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-16 (phase 1, `scheduled_post_recurrence.go`)
+
+`ComputeNextScheduledAt` advances a week at a time until the candidate is after `now`, with no
+bound on the number of steps:
+
+```go
+for !next.After(now) { next = next.AddDate(0, 0, 7) }
+```
+
+Go's `time.Time` reaches year 292277026596, so a `now` near `math.MaxInt64` milliseconds makes
+that loop run about fifteen billion times — it does not terminate in any useful sense, but it
+never errors either. `chrono`'s range stops at year 262143, so ours returns
+`ComputeNextScheduledAtError::OutOfRange` after roughly 13.7 million steps instead.
+
+Not worth closing. `BaseIsValid` rejects any `scheduled_at` more than five seconds in the past
+([D-059]'s sibling check), so a schedule that could reach the boundary cannot be stored, and
+`now_millis` comes from the clock. Reaching it takes a hand-built `ScheduledPost` and a
+`now_millis` around 8e15. The alternative — reproducing Go's non-termination — is not a behaviour
+worth having.
+
+Two smaller pieces of the same divergence are in the same enum arm: a `scheduled_at` outside
+`chrono`'s range fails immediately, where Go's `time.UnixMilli` would accept it.
+
+---
+
+## D-069 · A generator run rewrites `behaviour_utils.json` when the host's timezone differs
+
+**Status** OPEN · **Severity** unverified · **Raised** 2026-08-16 (phase 1, `scheduled_post_recurrence.go`)
+**Related** [D-032] (the rule this weakens), [D-008] (the Go behaviour underneath it)
+
+`behaviourDayBounds` records `GetStartOfDayMillis`/`GetEndOfDayMillis`, which read the calendar
+date in the **server's** zone ([D-008]). The corpus therefore depends on `TZ` at generation time,
+and this session's first `go run .` rewrote all twenty rows of `fixtures/behaviour_utils.json`
+purely because this machine sits at UTC+01:00 and the committed fixture was generated at
+UTC+05:30.
+
+Nothing is wrong with either fixture: the row carries `local_offset` and the Rust test rebuilds
+the instant in the *recorded* zone rather than the host's, so `day_bounds_match_go` passes against
+both. Verified this session — re-running under `TZ=Asia/Kolkata` reproduced all 73 fixtures
+byte-identically, which is what isolates the cause to `TZ` and nothing else.
+
+**Why it is logged anyway.** [D-032] closed on the principle that a clean generator run touches
+only new files, so anything else in `git status` is a signal worth reading. A fixture that rewrites
+itself on a differently-configured machine destroys that signal for every fixture, exactly as a
+`time.Now` call would — it is the same failure mode arriving through the environment instead of
+through the code. Whoever generates next on a third machine will see the same diff and have to
+rediscover that it is benign.
+
+**To pay off**, one of:
+- **(a) Pin the zone in the generator** — `os.Setenv("TZ", "Asia/Kolkata")` before the day-bounds
+  corpus, or run the whole binary under a fixed `TZ`. Cheapest, and it makes the recorded
+  `local_offset` a constant rather than an accident. *Recommended.*
+- **(b) Record the corpus under several zones at once**, which would also widen [D-008]'s
+  evidence. More useful, more work.
+- **(c) Leave it**, and rely on this entry.
+
+---
+
+## D-070 · The CJK script tables carry the Go toolchain's Unicode version, not the pinned tree's
+
+**Status** ACCEPTED · **Severity** unverified · **Raised** 2026-08-16 (phase 1, `unicode.go`)
+**Related** [D-021] (the generator reads the Go source tree), [D-030], [D-065] (both
+environment-dependent answers)
+
+`ContainsCJK` delegates to `unicode.Han` and three sibling `RangeTable`s, which live in the **Go
+standard library** rather than in Mattermost. `crates/mm-model/src/unicode_generated.rs` is
+emitted from them, so its content is a property of whichever `go` compiled the generator —
+currently Go 1.26.2, Unicode **15.0.0** — and not of the SHA `reference/mattermost` is pinned to.
+
+Three consequences:
+
+1. **Re-running the generator under a newer Go rewrites a committed source file.** Same hazard
+   class as [D-069], arriving through the toolchain instead of through `TZ`. Unicode assigns new
+   codepoints every year and the CJK extension blocks are where most of them land, so this will
+   move — Unicode 16.0 added extension I at `U+2EBF0..U+2EE5D`.
+2. **Two Mattermost servers built against different Go releases already disagree**, so there is
+   no single answer to match. This is [D-030]'s shape exactly: the "correct" behaviour is a
+   property of a deployment.
+3. **The disagreement is narrow and one-directional.** A newer table is a superset for these four
+   scripts — Unicode does not un-assign codepoints — so the only reachable difference is a
+   recently assigned character that a newer server calls CJK and an older one does not.
+
+**Why accepted rather than open.** The alternatives are worse: pinning our own copy of the
+Unicode data makes us disagree with *every* Go server rather than with some of them, and taking a
+third-party script crate substitutes its vendored version for the toolchain's without making the
+coupling any weaker.
+
+**What guards it.** `unicode::CJK_UNICODE_VERSION` is emitted alongside the tables and
+`the_unicode_version_matches_the_generator` asserts it against the fixture, so a Go upgrade fails
+one test with an obvious cause rather than a scatter of codepoint failures. The version is also
+`pub`, because "which Unicode do these tables speak" is a deployment question an operator may
+need to answer.
+
+**To revisit** if a caller's answer ever reaches the wire. Nothing in `server/public/` calls
+`ContainsCJK` today — only its own test does — so the blast radius is currently zero, and that is
+worth re-checking when the app layer lands.
+
+---
+
+## D-071 · A repeated JSON key takes the last value in Go and fails the decode here
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-08-16 (phase 1, `channel_view.go`)
+**Related** [D-040] (the other crate-wide `encoding/json`-versus-serde decode difference)
+
+`encoding/json` has no duplicate-key rule: it walks the object and assigns each field as it comes,
+so the **last** occurrence wins. `serde_derive`'s generated `Deserialize` tracks which fields it
+has seen and returns `duplicate field \`status\`` on the second one, failing the whole document.
+
+Measured: `{"status":"first","status":"second"}` gives Go a `ChannelViewResponse` with
+`Status == "second"`; we return a 400.
+
+**The crate is currently inconsistent about this**, which is the part worth fixing even if the
+divergence itself is left. The two hand-written `Deserialize` impls —
+`post_search_results.rs` and `file_info_search_results.rs` — take the last value, matching Go,
+and both say so in a comment. Every *derived* impl in the crate rejects. So the behaviour depends
+on whether the type happened to need a hand-written decoder, which is not a distinction anyone
+chose.
+
+**It does not apply to map keys.** A repeated key inside a `map[string]T` overwrites in Go and
+overwrites in a `BTreeMap` too, so `{"a":1,"a":2}` gives `{"a":2}` on both sides.
+`the_response_wire_format_matches_go` covers both cases and only the struct one is exempted.
+
+**Reachability** is [D-040]'s: real clients emit each key once, and the exposure is hand-written
+integrations, webhook payloads, and anything that concatenates JSON fragments. Unlike D-040 the
+failure is loud — a 400 rather than a silently dropped value — which makes it the less dangerous
+of the two.
+
+**Options**
+- **(a) `#[serde(deny_unknown_fields)]`-style container attribute.** There is none for this;
+  serde has no "last one wins" switch.
+- **(b) A boundary decoder.** The same one [D-040] option (b) proposes: preprocess into a
+  `serde_json::Value` at the API edge, where a duplicate key is resolved by the parser before the
+  derive sees it. `serde_json::Map` keeps the last value, so this falls out for free — one
+  mechanism closes both entries.
+- **(c) Leave it.** Current state.
+
+**(c) for now, and (b) is the same recommendation D-040 already carries** — which is the useful
+result here. Two independent crate-wide decode divergences now point at the same fix, and neither
+is worth solving alone.
+
+---
+
+## D-072 · `ChannelData::etag` answers where Go panics on a nil channel
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-17 (phase 1, `channel_data.go`)
+**Related** [D-052], [D-054], [D-058], [D-018] — the same family, now five files deep
+
+`(*ChannelData).Etag` (channel_data.go:11) guards one pointer and dereferences the other three
+lines later:
+
+```go
+var mt int64
+if o.Member != nil { mt = o.Member.LastUpdateAt }
+return Etag(o.Channel.Id, o.Channel.UpdateAt, o.Channel.LastPostAt, mt)
+```
+
+A nil `Member` yields `0`; a nil `Channel` crashes. Measured under `recover` — three of the
+eleven corpus cases are a panic, and the oracle records *which* pointer was nil for each, so the
+attribution is not an inference.
+
+**Reachability is high, which is what separates this from the rest of the family.** Neither field
+has `omitempty`, so `{}`, `{"channel":null}` and any document carrying only a member all decode
+to a nil channel, and `ChannelData{}` from any code path has both nil. The other entries in this
+family need a specific malformed collection; this one needs an empty struct.
+
+**What ours does.** Returns the etag Go itself produces for a zero-valued channel:
+`11.11.0..0.0.<member_time>`. The value is measured rather than chosen — `&Channel{}` is in the
+corpus and takes the same path in Go — so the divergence is narrowed to "a nil channel and a
+zero-valued channel are indistinguishable here", rather than us inventing a sentinel.
+
+Accepted for [D-052]'s reason: `panic!` is forbidden in library code, the alternative is an
+`Option<String>` return that every call site would have to unwrap for a state the Go server 500s
+on, and the divergence is only observable where Go crashes.
+`etag_matches_go` asserts the panic cases explicitly — including that Go panicked *because* the
+channel was nil — so if upstream adds the guard the oracle row flips and the test says so.
+
+---
+
+## D-073 · Three float renderings are live in the crate and nothing enforces the choice
+
+**Status** OPEN · **Severity** unverified · **Raised** 2026-08-17 (phase 1, `analytics_row.go`)
+**Related** [D-027], which is the same shape of hazard for string escaping and map ordering
+
+`analytics_row.go` put the first `float64` on the wire, and it turns out there are **three**
+renderings of a `float64` in play, all reachable, all plausible at a call site:
+
+| helper | Go equivalent | `1234567.0` | `1e-6` | `9.999999999999999e20` |
+|---|---|---|---|---|
+| `utils::go_json_format_float` | `encoding/json`'s encoder | `1234567` | `0.000001` | `999999999999999900000` |
+| `utils::go_format_float` | `fmt`'s `%v`, i.e. `%g` | `1.234567e+06` | `1e-06` | `9.999999999999999e+20` |
+| `serde_json::to_string` | — | `1234567.0` | `1e-6` | `9.999999999999999e+20` |
+
+Measured over 29 values: `go_format_float` disagrees with the JSON rendering on **10** of them
+and serde_json on **12**. The disagreements are not on exotic values — every integral float is in
+both sets, and an analytics count is an integer.
+
+The two Go helpers are both correct and both needed: `%v` is what `Etag`, the multierror layout
+and every `Sprintf` call site produce, and the JSON encoder is what any wire float must use. The
+debt is that a third caller has three plausible-looking options and only a test distinguishes
+them — exactly [D-027]'s complaint about `serde_json::to_string` versus the two Go marshallers.
+
+**What guards it today.** `analytics_row::go_parity::the_float_rendering_matches_go` asserts the
+JSON rendering, asserts `%v`'s answer separately, and **counts** the disagreements — so if a
+future change made the two agree, or made the corpus stop straddling the thresholds, the count
+moves and the test fails rather than quietly proving nothing.
+
+**To pay off** the same `clippy.toml` `disallowed-methods` entry [D-027] has been recommending
+since 2026-08-14, extended to point a bare `f64` serialization at `go_json_format_float`. It is
+now three hazards behind one unwritten config file — `serde_json::to_string`,
+`str::to_lowercase`, and this.
+
+---
+
+## D-074 · Go's `int` is platform-width and `ClusterStats` uses it
+
+**Status** ACCEPTED · **Severity** unverified · **Raised** 2026-08-17 (phase 1, `cluster_stats.go`)
+**Related** [D-070], [D-030], [D-065], [D-008] — the family of answers that depend on the machine
+
+`ClusterStats` declares its three counts as bare `int` where `TeamStats` and `UsersStats` use
+`int64`:
+
+```go
+TotalWebsocketConnections int   // cluster_stats.go:8
+```
+
+Go's `int` is 64-bit on `amd64`/`arm64` and 32-bit on a 32-bit build, so the accepted wire range
+for those three fields is a property of the **builder's target**, not of the type.
+
+**Measured rather than assumed.** `fixtures/behaviour_stats.json` records `strconv.IntSize` (64 on
+the generating host) and drives eleven numeric bounds through an `int` field and an `int64` field
+side by side. They agree on all eleven — `2147483648`, both `int64` extremes, and the two values
+just past them, which both reject. That agreement is what licenses mapping `int` to `i64` here;
+without it the mapping would have been a habit.
+
+**What would differ on a 32-bit build.** Go would reject `2147483648` into
+`total_websocket_connections` and we would accept it — a websocket count that large is not
+reachable, so the exposure is theoretical rather than merely unlikely.
+
+Accepted rather than open: Mattermost publishes no 32-bit server, and closing it would mean a
+platform-conditional wire type — `#[cfg(target_pointer_width)]` on a struct field — which is a
+real cost against an unreachable state.
+
+**What guards it.** `go_int_and_go_int64_agree_on_this_host` asserts `int_size == 64` with a
+message naming this entry, so regenerating the fixture on a 32-bit builder fails one test that
+says exactly what changed rather than producing a quietly weaker corpus. It also asserts the
+per-case `agree` flag, so a future Go release changing either type's decode rules fails too.
+
+**Other `int` fields will appear.** This is the first in the tree; the same measurement should be
+cited rather than repeated when the next one lands.
+
+---
+
+## D-075 · `null` inside a `[]string` is the empty string in Go and a decode failure here
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-08-17 (phase 1, `channel_search.go`)
+**Related** [D-057] (the same rule at struct-field position), [D-033] (a nil element in a `[]*T`)
+
+`{"team_ids":[null]}` decodes in Go to a one-element slice holding `""`, and re-marshals as
+`{"team_ids":[""]}`. `serde_json` rejects the document: `invalid type: null, expected a string`.
+
+This is **[D-057]'s rule one level down**. That entry covers `null` into a struct field, where
+Go's decoder writes the zero value and moves on; the same decoder does the same thing to a slice
+element, and the crate has never measured it there before because no earlier corpus put a `null`
+inside an array of scalars.
+
+**It is not [D-033].** That entry is about `[]*T` — a slice of *pointers*, where Go's nil element
+is a nil pointer and re-marshals as `null`. Here the element type is a plain `string`, the nil
+becomes `""`, and the round trip is lossy in Go itself: `[null]` in, `[""]` out. So the two
+entries have different fixes and should not be merged.
+
+| | Go decodes to | Go re-emits | we do |
+|---|---|---|---|
+| `[]*T` with `[null]` ([D-033]) | a nil element | `[null]` | reject |
+| `[]string` with `[null]` (this) | `""` | `[""]` | reject |
+
+**Reachability** is a client sending a partial list — a search request built by concatenating ids
+where one is missing is the plausible shape. Go silently searches for the empty-string team id;
+we return a 400. Arguably ours is the better behaviour, which is exactly why it needs recording:
+it is still a disagreement between two servers on one database.
+
+**Options** are [D-057]'s, and the same boundary decoder closes both — a `null`-to-default
+transform applied before the derive sees the document handles a slice element as readily as a
+struct field. Every other nullable slice in the crate is an `Option<Vec<T>>`, which handles a
+`null` *slice* fine; this is only about a `null` **element**.
+
+**Widened 2026-08-17** (`audits.go`) from `[]string` to **any non-pointer element type**.
+`Audits` is `[]Audit` — the first value-element slice in the tree — and `[null]` gives Go a
+one-element slice holding a **zero-valued `Audit`**, seven keys and all, rather than an error. So
+the rule is not about strings: `encoding/json` writes the element type's zero value whatever it
+is, and only a *pointer* element gets to stay nil ([D-033]).
+
+That completes the picture for slices, and the three cases need keeping apart because their Go
+answers differ:
+
+| element type | `[null]` in Go | Go re-emits | we do |
+|---|---|---|---|
+| `[]*T` ([D-033]) | a nil element | `[null]` | reject |
+| `[]string` (this) | `""` | `[""]` | reject |
+| `[]T` for a struct `T` (this) | a zero-valued `T` | the full zero object | reject |
+
+**(c) leave it for now**, pinned by `the_decode_matches_go` in `channel_search.rs` and
+`a_null_element_becomes_a_zero_audit_in_go` in `audit.rs`, both of which assert Go's actual result
+rather than skipping the case.
+
+---
+
+## D-076 · `Audits::etag` is only correct if the caller sorted the list
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-17 (phase 1, `audits.go`)
+**Related** [D-010] and MIGRATION.md's channel_list notes, which describe how every *other* list
+etag is computed
+
+```go
+func (o Audits) Etag() string {
+    if len(o) > 0 { return Etag(o[0].CreateAt) }   // the first in the list is always the most current
+    return ""
+}
+```
+
+Two properties, both reproduced verbatim and both worth flagging before the audit store is ported:
+
+1. **An empty list etags to `""`.** Every other list etag in the crate returns a versioned string
+   for an empty list — `ChannelList` gives `11.11.0.0.0.0.0`. This gives the empty string, which
+   is not an etag. A handler that writes it into an `ETag:` header emits an empty header, and a
+   conditional request against it will not behave as a caller expects.
+
+2. **It reads element `[0]` rather than scanning for the maximum.** The comment asserts the
+   ordering instead of the code establishing it. Measured: an ascending list yields the etag of
+   its **oldest** row, and an unsorted list yields neither the newest nor the oldest — so the
+   etag can stay constant while newer audits arrive, and the client never refetches.
+
+**This is not our divergence — it is Go's, faithfully reproduced.** It is logged because the
+correctness of the value is a property of the **query that produced the list**, not of the
+function, and that dependency is invisible at the call site. Whoever ports the audit store must
+preserve the `ORDER BY CreateAt DESC`; a port that changed the ordering for any other reason would
+break cache invalidation with nothing failing.
+
+`the_etag_matches_go` pins both properties against Go's own answers, including the ascending and
+unsorted cases, and asserts the etag does **not** track the maximum — so if upstream ever changes
+the function to scan, the test fails rather than silently agreeing.

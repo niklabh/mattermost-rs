@@ -1,0 +1,2327 @@
+{
+    "is_valid": [
+        {
+            "name": "valid",
+            "draft": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 1700000002000,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "hello",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ],
+                "priority": {
+                    "priority": "urgent"
+                }
+            },
+            "max_draft_size": 4000,
+            "where": "",
+            "error_id": "",
+            "detailed": "",
+            "status": 0,
+            "base_where": "",
+            "base_error_id": "",
+            "base_detailed": ""
+        },
+        {
+            "name": "message_at_limit",
+            "draft": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 1700000002000,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "aaaaaaaaaa",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ],
+                "priority": {
+                    "priority": "urgent"
+                }
+            },
+            "max_draft_size": 10,
+            "where": "",
+            "error_id": "",
+            "detailed": "",
+            "status": 0,
+            "base_where": "",
+            "base_error_id": "",
+            "base_detailed": ""
+        },
+        {
+            "name": "message_over_limit",
+            "draft": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 1700000002000,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "aaaaaaaaaaa",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ],
+                "priority": {
+                    "priority": "urgent"
+                }
+            },
+            "max_draft_size": 10,
+            "where": "Drafts.IsValid",
+            "error_id": "model.draft.is_valid.message_length.app_error",
+            "detailed": "channelid=qr6kf7ztp7yifxt4wm5xn51bke",
+            "status": 400,
+            "base_where": "",
+            "base_error_id": "",
+            "base_detailed": ""
+        },
+        {
+            "name": "message_runes_not_bytes",
+            "draft": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 1700000002000,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "éééééééééé",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ],
+                "priority": {
+                    "priority": "urgent"
+                }
+            },
+            "max_draft_size": 10,
+            "where": "",
+            "error_id": "",
+            "detailed": "",
+            "status": 0,
+            "base_where": "",
+            "base_error_id": "",
+            "base_detailed": ""
+        },
+        {
+            "name": "message_runes_over",
+            "draft": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 1700000002000,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "ééééééééééé",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ],
+                "priority": {
+                    "priority": "urgent"
+                }
+            },
+            "max_draft_size": 10,
+            "where": "Drafts.IsValid",
+            "error_id": "model.draft.is_valid.message_length.app_error",
+            "detailed": "channelid=qr6kf7ztp7yifxt4wm5xn51bke",
+            "status": 400,
+            "base_where": "",
+            "base_error_id": "",
+            "base_detailed": ""
+        },
+        {
+            "name": "message_max_zero",
+            "draft": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 1700000002000,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "a",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ],
+                "priority": {
+                    "priority": "urgent"
+                }
+            },
+            "max_draft_size": 0,
+            "where": "Drafts.IsValid",
+            "error_id": "model.draft.is_valid.message_length.app_error",
+            "detailed": "channelid=qr6kf7ztp7yifxt4wm5xn51bke",
+            "status": 400,
+            "base_where": "",
+            "base_error_id": "",
+            "base_detailed": ""
+        },
+        {
+            "name": "message_max_zero_empty",
+            "draft": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 1700000002000,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ],
+                "priority": {
+                    "priority": "urgent"
+                }
+            },
+            "max_draft_size": 0,
+            "where": "",
+            "error_id": "",
+            "detailed": "",
+            "status": 0,
+            "base_where": "",
+            "base_error_id": "",
+            "base_detailed": ""
+        },
+        {
+            "name": "message_max_negative",
+            "draft": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 1700000002000,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ],
+                "priority": {
+                    "priority": "urgent"
+                }
+            },
+            "max_draft_size": -1,
+            "where": "Drafts.IsValid",
+            "error_id": "model.draft.is_valid.message_length.app_error",
+            "detailed": "channelid=qr6kf7ztp7yifxt4wm5xn51bke",
+            "status": 400,
+            "base_where": "",
+            "base_error_id": "",
+            "base_detailed": ""
+        },
+        {
+            "name": "message_over_and_create_at_zero",
+            "draft": {
+                "create_at": 0,
+                "update_at": 1700000001000,
+                "delete_at": 1700000002000,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "aaaaaaaaaaa",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ],
+                "priority": {
+                    "priority": "urgent"
+                }
+            },
+            "max_draft_size": 10,
+            "where": "Drafts.IsValid",
+            "error_id": "model.draft.is_valid.message_length.app_error",
+            "detailed": "channelid=qr6kf7ztp7yifxt4wm5xn51bke",
+            "status": 400,
+            "base_where": "Drafts.IsValid",
+            "base_error_id": "model.draft.is_valid.create_at.app_error",
+            "base_detailed": "channelid=qr6kf7ztp7yifxt4wm5xn51bke"
+        },
+        {
+            "name": "message_over_and_bad_user_id",
+            "draft": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 1700000002000,
+                "user_id": "nope",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "aaaaaaaaaaa",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ],
+                "priority": {
+                    "priority": "urgent"
+                }
+            },
+            "max_draft_size": 10,
+            "where": "Drafts.IsValid",
+            "error_id": "model.draft.is_valid.message_length.app_error",
+            "detailed": "channelid=qr6kf7ztp7yifxt4wm5xn51bke",
+            "status": 400,
+            "base_where": "Drafts.IsValid",
+            "base_error_id": "model.draft.is_valid.user_id.app_error",
+            "base_detailed": ""
+        },
+        {
+            "name": "create_at_zero",
+            "draft": {
+                "create_at": 0,
+                "update_at": 1700000001000,
+                "delete_at": 1700000002000,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "hello",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ],
+                "priority": {
+                    "priority": "urgent"
+                }
+            },
+            "max_draft_size": 4000,
+            "where": "Drafts.IsValid",
+            "error_id": "model.draft.is_valid.create_at.app_error",
+            "detailed": "channelid=qr6kf7ztp7yifxt4wm5xn51bke",
+            "status": 400,
+            "base_where": "Drafts.IsValid",
+            "base_error_id": "model.draft.is_valid.create_at.app_error",
+            "base_detailed": "channelid=qr6kf7ztp7yifxt4wm5xn51bke"
+        },
+        {
+            "name": "create_at_negative",
+            "draft": {
+                "create_at": -1,
+                "update_at": 1700000001000,
+                "delete_at": 1700000002000,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "hello",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ],
+                "priority": {
+                    "priority": "urgent"
+                }
+            },
+            "max_draft_size": 4000,
+            "where": "",
+            "error_id": "",
+            "detailed": "",
+            "status": 0,
+            "base_where": "",
+            "base_error_id": "",
+            "base_detailed": ""
+        },
+        {
+            "name": "update_at_zero",
+            "draft": {
+                "create_at": 1700000000000,
+                "update_at": 0,
+                "delete_at": 1700000002000,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "hello",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ],
+                "priority": {
+                    "priority": "urgent"
+                }
+            },
+            "max_draft_size": 4000,
+            "where": "Drafts.IsValid",
+            "error_id": "model.draft.is_valid.update_at.app_error",
+            "detailed": "channelid=qr6kf7ztp7yifxt4wm5xn51bke",
+            "status": 400,
+            "base_where": "Drafts.IsValid",
+            "base_error_id": "model.draft.is_valid.update_at.app_error",
+            "base_detailed": "channelid=qr6kf7ztp7yifxt4wm5xn51bke"
+        },
+        {
+            "name": "update_at_negative",
+            "draft": {
+                "create_at": 1700000000000,
+                "update_at": -1,
+                "delete_at": 1700000002000,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "hello",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ],
+                "priority": {
+                    "priority": "urgent"
+                }
+            },
+            "max_draft_size": 4000,
+            "where": "",
+            "error_id": "",
+            "detailed": "",
+            "status": 0,
+            "base_where": "",
+            "base_error_id": "",
+            "base_detailed": ""
+        },
+        {
+            "name": "delete_at_zero",
+            "draft": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 0,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "hello",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ],
+                "priority": {
+                    "priority": "urgent"
+                }
+            },
+            "max_draft_size": 4000,
+            "where": "",
+            "error_id": "",
+            "detailed": "",
+            "status": 0,
+            "base_where": "",
+            "base_error_id": "",
+            "base_detailed": ""
+        },
+        {
+            "name": "delete_at_negative",
+            "draft": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": -1,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "hello",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ],
+                "priority": {
+                    "priority": "urgent"
+                }
+            },
+            "max_draft_size": 4000,
+            "where": "",
+            "error_id": "",
+            "detailed": "",
+            "status": 0,
+            "base_where": "",
+            "base_error_id": "",
+            "base_detailed": ""
+        },
+        {
+            "name": "user_id_empty",
+            "draft": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 1700000002000,
+                "user_id": "",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "hello",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ],
+                "priority": {
+                    "priority": "urgent"
+                }
+            },
+            "max_draft_size": 4000,
+            "where": "Drafts.IsValid",
+            "error_id": "model.draft.is_valid.user_id.app_error",
+            "detailed": "",
+            "status": 400,
+            "base_where": "Drafts.IsValid",
+            "base_error_id": "model.draft.is_valid.user_id.app_error",
+            "base_detailed": ""
+        },
+        {
+            "name": "user_id_nonsense",
+            "draft": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 1700000002000,
+                "user_id": "nope",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "hello",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ],
+                "priority": {
+                    "priority": "urgent"
+                }
+            },
+            "max_draft_size": 4000,
+            "where": "Drafts.IsValid",
+            "error_id": "model.draft.is_valid.user_id.app_error",
+            "detailed": "",
+            "status": 400,
+            "base_where": "Drafts.IsValid",
+            "base_error_id": "model.draft.is_valid.user_id.app_error",
+            "base_detailed": ""
+        },
+        {
+            "name": "user_id_25",
+            "draft": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 1700000002000,
+                "user_id": "aaaaaaaaaaaaaaaaaaaaaaaaa",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "hello",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ],
+                "priority": {
+                    "priority": "urgent"
+                }
+            },
+            "max_draft_size": 4000,
+            "where": "Drafts.IsValid",
+            "error_id": "model.draft.is_valid.user_id.app_error",
+            "detailed": "",
+            "status": 400,
+            "base_where": "Drafts.IsValid",
+            "base_error_id": "model.draft.is_valid.user_id.app_error",
+            "base_detailed": ""
+        },
+        {
+            "name": "user_id_27",
+            "draft": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 1700000002000,
+                "user_id": "aaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "hello",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ],
+                "priority": {
+                    "priority": "urgent"
+                }
+            },
+            "max_draft_size": 4000,
+            "where": "Drafts.IsValid",
+            "error_id": "model.draft.is_valid.user_id.app_error",
+            "detailed": "",
+            "status": 400,
+            "base_where": "Drafts.IsValid",
+            "base_error_id": "model.draft.is_valid.user_id.app_error",
+            "base_detailed": ""
+        },
+        {
+            "name": "user_id_13_two_byte",
+            "draft": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 1700000002000,
+                "user_id": "ééééééééééééé",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "hello",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ],
+                "priority": {
+                    "priority": "urgent"
+                }
+            },
+            "max_draft_size": 4000,
+            "where": "",
+            "error_id": "",
+            "detailed": "",
+            "status": 0,
+            "base_where": "",
+            "base_error_id": "",
+            "base_detailed": ""
+        },
+        {
+            "name": "channel_id_empty",
+            "draft": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 1700000002000,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "hello",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ],
+                "priority": {
+                    "priority": "urgent"
+                }
+            },
+            "max_draft_size": 4000,
+            "where": "Drafts.IsValid",
+            "error_id": "model.draft.is_valid.channel_id.app_error",
+            "detailed": "",
+            "status": 400,
+            "base_where": "Drafts.IsValid",
+            "base_error_id": "model.draft.is_valid.channel_id.app_error",
+            "base_detailed": ""
+        },
+        {
+            "name": "channel_id_nonsense",
+            "draft": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 1700000002000,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "nope",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "hello",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ],
+                "priority": {
+                    "priority": "urgent"
+                }
+            },
+            "max_draft_size": 4000,
+            "where": "Drafts.IsValid",
+            "error_id": "model.draft.is_valid.channel_id.app_error",
+            "detailed": "",
+            "status": 400,
+            "base_where": "Drafts.IsValid",
+            "base_error_id": "model.draft.is_valid.channel_id.app_error",
+            "base_detailed": ""
+        },
+        {
+            "name": "root_id_empty",
+            "draft": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 1700000002000,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "",
+                "message": "hello",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ],
+                "priority": {
+                    "priority": "urgent"
+                }
+            },
+            "max_draft_size": 4000,
+            "where": "",
+            "error_id": "",
+            "detailed": "",
+            "status": 0,
+            "base_where": "",
+            "base_error_id": "",
+            "base_detailed": ""
+        },
+        {
+            "name": "root_id_nonsense",
+            "draft": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 1700000002000,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "nope",
+                "message": "hello",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ],
+                "priority": {
+                    "priority": "urgent"
+                }
+            },
+            "max_draft_size": 4000,
+            "where": "Drafts.IsValid",
+            "error_id": "model.draft.is_valid.root_id.app_error",
+            "detailed": "",
+            "status": 400,
+            "base_where": "Drafts.IsValid",
+            "base_error_id": "model.draft.is_valid.root_id.app_error",
+            "base_detailed": ""
+        },
+        {
+            "name": "type_empty",
+            "draft": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 1700000002000,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "hello",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ],
+                "priority": {
+                    "priority": "urgent"
+                }
+            },
+            "max_draft_size": 4000,
+            "where": "",
+            "error_id": "",
+            "detailed": "",
+            "status": 0,
+            "base_where": "",
+            "base_error_id": "",
+            "base_detailed": ""
+        },
+        {
+            "name": "type_nonsense",
+            "draft": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 1700000002000,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "hello",
+                "type": "system_nope",
+                "props": {
+                    "a": "b"
+                },
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ],
+                "priority": {
+                    "priority": "urgent"
+                }
+            },
+            "max_draft_size": 4000,
+            "where": "",
+            "error_id": "",
+            "detailed": "",
+            "status": 0,
+            "base_where": "",
+            "base_error_id": "",
+            "base_detailed": ""
+        },
+        {
+            "name": "type_long",
+            "draft": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 1700000002000,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "hello",
+                "type": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                "props": {
+                    "a": "b"
+                },
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ],
+                "priority": {
+                    "priority": "urgent"
+                }
+            },
+            "max_draft_size": 4000,
+            "where": "",
+            "error_id": "",
+            "detailed": "",
+            "status": 0,
+            "base_where": "",
+            "base_error_id": "",
+            "base_detailed": ""
+        },
+        {
+            "name": "file_ids_nil",
+            "draft": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 1700000002000,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "hello",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "priority": {
+                    "priority": "urgent"
+                }
+            },
+            "max_draft_size": 4000,
+            "where": "",
+            "error_id": "",
+            "detailed": "",
+            "status": 0,
+            "base_where": "",
+            "base_error_id": "",
+            "base_detailed": ""
+        },
+        {
+            "name": "file_ids_empty",
+            "draft": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 1700000002000,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "hello",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "priority": {
+                    "priority": "urgent"
+                }
+            },
+            "max_draft_size": 4000,
+            "where": "",
+            "error_id": "",
+            "detailed": "",
+            "status": 0,
+            "base_where": "",
+            "base_error_id": "",
+            "base_detailed": ""
+        },
+        {
+            "name": "file_ids_at_limit",
+            "draft": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 1700000002000,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "hello",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "file_ids": [
+                    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                ],
+                "priority": {
+                    "priority": "urgent"
+                }
+            },
+            "max_draft_size": 4000,
+            "where": "",
+            "error_id": "",
+            "detailed": "",
+            "status": 0,
+            "base_where": "",
+            "base_error_id": "",
+            "base_detailed": ""
+        },
+        {
+            "name": "file_ids_over_limit",
+            "draft": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 1700000002000,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "hello",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "file_ids": [
+                    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                ],
+                "priority": {
+                    "priority": "urgent"
+                }
+            },
+            "max_draft_size": 4000,
+            "where": "Drafts.IsValid",
+            "error_id": "model.draft.is_valid.file_ids.app_error",
+            "detailed": "channelid=qr6kf7ztp7yifxt4wm5xn51bke",
+            "status": 400,
+            "base_where": "Drafts.IsValid",
+            "base_error_id": "model.draft.is_valid.file_ids.app_error",
+            "base_detailed": "channelid=qr6kf7ztp7yifxt4wm5xn51bke"
+        },
+        {
+            "name": "file_ids_nonsense",
+            "draft": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 1700000002000,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "hello",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "file_ids": [
+                    "nope"
+                ],
+                "priority": {
+                    "priority": "urgent"
+                }
+            },
+            "max_draft_size": 4000,
+            "where": "",
+            "error_id": "",
+            "detailed": "",
+            "status": 0,
+            "base_where": "",
+            "base_error_id": "",
+            "base_detailed": ""
+        },
+        {
+            "name": "props_nil",
+            "draft": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 1700000002000,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "hello",
+                "type": "",
+                "props": null,
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ],
+                "priority": {
+                    "priority": "urgent"
+                }
+            },
+            "max_draft_size": 4000,
+            "where": "",
+            "error_id": "",
+            "detailed": "",
+            "status": 0,
+            "base_where": "",
+            "base_error_id": "",
+            "base_detailed": ""
+        },
+        {
+            "name": "props_empty",
+            "draft": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 1700000002000,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "hello",
+                "type": "",
+                "props": {},
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ],
+                "priority": {
+                    "priority": "urgent"
+                }
+            },
+            "max_draft_size": 4000,
+            "where": "",
+            "error_id": "",
+            "detailed": "",
+            "status": 0,
+            "base_where": "",
+            "base_error_id": "",
+            "base_detailed": ""
+        },
+        {
+            "name": "props_at_limit",
+            "draft": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 1700000002000,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "hello",
+                "type": "",
+                "props": {
+                    "a": ""
+                },
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ],
+                "priority": {
+                    "priority": "urgent"
+                }
+            },
+            "pad": {
+                "field": "props",
+                "key": "a",
+                "prefix": "",
+                "fill": "x",
+                "count": 799992
+            },
+            "max_draft_size": 4000,
+            "where": "",
+            "error_id": "",
+            "detailed": "",
+            "status": 0,
+            "base_where": "",
+            "base_error_id": "",
+            "base_detailed": ""
+        },
+        {
+            "name": "props_over_limit",
+            "draft": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 1700000002000,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "hello",
+                "type": "",
+                "props": {
+                    "a": ""
+                },
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ],
+                "priority": {
+                    "priority": "urgent"
+                }
+            },
+            "pad": {
+                "field": "props",
+                "key": "a",
+                "prefix": "",
+                "fill": "x",
+                "count": 799993
+            },
+            "max_draft_size": 4000,
+            "where": "Drafts.IsValid",
+            "error_id": "model.draft.is_valid.props.app_error",
+            "detailed": "channelid=qr6kf7ztp7yifxt4wm5xn51bke",
+            "status": 400,
+            "base_where": "Drafts.IsValid",
+            "base_error_id": "model.draft.is_valid.props.app_error",
+            "base_detailed": "channelid=qr6kf7ztp7yifxt4wm5xn51bke"
+        },
+        {
+            "name": "props_escaped_over_limit",
+            "draft": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 1700000002000,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "hello",
+                "type": "",
+                "props": {
+                    "a": ""
+                },
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ],
+                "priority": {
+                    "priority": "urgent"
+                }
+            },
+            "pad": {
+                "field": "props",
+                "key": "a",
+                "prefix": "\u003c",
+                "fill": "x",
+                "count": 799991
+            },
+            "max_draft_size": 4000,
+            "where": "Drafts.IsValid",
+            "error_id": "model.draft.is_valid.props.app_error",
+            "detailed": "channelid=qr6kf7ztp7yifxt4wm5xn51bke",
+            "status": 400,
+            "base_where": "Drafts.IsValid",
+            "base_error_id": "model.draft.is_valid.props.app_error",
+            "base_detailed": "channelid=qr6kf7ztp7yifxt4wm5xn51bke"
+        },
+        {
+            "name": "priority_nil",
+            "draft": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 1700000002000,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "hello",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ]
+            },
+            "max_draft_size": 4000,
+            "where": "",
+            "error_id": "",
+            "detailed": "",
+            "status": 0,
+            "base_where": "",
+            "base_error_id": "",
+            "base_detailed": ""
+        },
+        {
+            "name": "priority_empty",
+            "draft": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 1700000002000,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "hello",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ]
+            },
+            "max_draft_size": 4000,
+            "where": "",
+            "error_id": "",
+            "detailed": "",
+            "status": 0,
+            "base_where": "",
+            "base_error_id": "",
+            "base_detailed": ""
+        },
+        {
+            "name": "priority_at_limit",
+            "draft": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 1700000002000,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "hello",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ],
+                "priority": {
+                    "a": ""
+                }
+            },
+            "pad": {
+                "field": "priority",
+                "key": "a",
+                "prefix": "",
+                "fill": "x",
+                "count": 799992
+            },
+            "max_draft_size": 4000,
+            "where": "",
+            "error_id": "",
+            "detailed": "",
+            "status": 0,
+            "base_where": "",
+            "base_error_id": "",
+            "base_detailed": ""
+        },
+        {
+            "name": "priority_over_limit",
+            "draft": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 1700000002000,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "hello",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ],
+                "priority": {
+                    "a": ""
+                }
+            },
+            "pad": {
+                "field": "priority",
+                "key": "a",
+                "prefix": "",
+                "fill": "x",
+                "count": 799993
+            },
+            "max_draft_size": 4000,
+            "where": "Drafts.IsValid",
+            "error_id": "model.draft.is_valid.priority.app_error",
+            "detailed": "channelid=qr6kf7ztp7yifxt4wm5xn51bke",
+            "status": 400,
+            "base_where": "Drafts.IsValid",
+            "base_error_id": "model.draft.is_valid.priority.app_error",
+            "base_detailed": "channelid=qr6kf7ztp7yifxt4wm5xn51bke"
+        },
+        {
+            "name": "priority_nonsense",
+            "draft": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 1700000002000,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "hello",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ],
+                "priority": {
+                    "priority": 17,
+                    "requested_ack": "yes"
+                }
+            },
+            "max_draft_size": 4000,
+            "where": "",
+            "error_id": "",
+            "detailed": "",
+            "status": 0,
+            "base_where": "",
+            "base_error_id": "",
+            "base_detailed": ""
+        },
+        {
+            "name": "metadata_nil",
+            "draft": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 1700000002000,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "hello",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ],
+                "priority": {
+                    "priority": "urgent"
+                }
+            },
+            "max_draft_size": 4000,
+            "where": "",
+            "error_id": "",
+            "detailed": "",
+            "status": 0,
+            "base_where": "",
+            "base_error_id": "",
+            "base_detailed": ""
+        },
+        {
+            "name": "metadata_empty",
+            "draft": {
+                "create_at": 1700000000000,
+                "update_at": 1700000001000,
+                "delete_at": 1700000002000,
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "channel_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "root_id": "g1ku9ozj3bhub3hs89bqu1m3gy",
+                "message": "hello",
+                "type": "",
+                "props": {
+                    "a": "b"
+                },
+                "file_ids": [
+                    "6bdz674pgq767e4jx75w4pf57a"
+                ],
+                "metadata": {},
+                "priority": {
+                    "priority": "urgent"
+                }
+            },
+            "max_draft_size": 4000,
+            "where": "",
+            "error_id": "",
+            "detailed": "",
+            "status": 0,
+            "base_where": "",
+            "base_error_id": "",
+            "base_detailed": ""
+        }
+    ],
+    "pre_commit": [
+        {
+            "name": "all_zero",
+            "in": {},
+            "create_at_was_kept": true,
+            "create_at_value": 0,
+            "update_at_equals_create_at": true,
+            "update_at_moved": false,
+            "delete_at_out": 0,
+            "props_nil_out": false,
+            "props_out": {},
+            "file_ids_nil_out": false,
+            "file_ids_out": [],
+            "priority_nil_out": true
+        },
+        {
+            "name": "create_at_set",
+            "in": {
+                "create_at": 1700000000000,
+                "update_at": 1700000000000
+            },
+            "create_at_was_kept": true,
+            "create_at_value": 1700000000000,
+            "update_at_equals_create_at": true,
+            "update_at_moved": false,
+            "delete_at_out": 0,
+            "props_nil_out": false,
+            "props_out": {},
+            "file_ids_nil_out": false,
+            "file_ids_out": [],
+            "priority_nil_out": true
+        },
+        {
+            "name": "create_at_set_delete_at_set",
+            "in": {
+                "create_at": 1700000000000,
+                "delete_at": 1700000005000
+            },
+            "create_at_was_kept": true,
+            "create_at_value": 1700000000000,
+            "update_at_equals_create_at": false,
+            "update_at_moved": false,
+            "delete_at_out": 1700000005000,
+            "props_nil_out": false,
+            "props_out": {},
+            "file_ids_nil_out": false,
+            "file_ids_out": [],
+            "priority_nil_out": true
+        },
+        {
+            "name": "create_at_negative",
+            "in": {
+                "create_at": -1
+            },
+            "create_at_was_kept": true,
+            "create_at_value": -1,
+            "update_at_equals_create_at": false,
+            "update_at_moved": false,
+            "delete_at_out": 0,
+            "props_nil_out": false,
+            "props_out": {},
+            "file_ids_nil_out": false,
+            "file_ids_out": [],
+            "priority_nil_out": true
+        },
+        {
+            "name": "delete_at_only",
+            "in": {
+                "delete_at": 1700000005000
+            },
+            "create_at_was_kept": true,
+            "create_at_value": 0,
+            "update_at_equals_create_at": true,
+            "update_at_moved": false,
+            "delete_at_out": 1700000005000,
+            "props_nil_out": false,
+            "props_out": {},
+            "file_ids_nil_out": false,
+            "file_ids_out": [],
+            "priority_nil_out": true
+        },
+        {
+            "name": "props_null",
+            "in": {
+                "create_at": 1,
+                "props": null
+            },
+            "create_at_was_kept": true,
+            "create_at_value": 1,
+            "update_at_equals_create_at": false,
+            "update_at_moved": false,
+            "delete_at_out": 0,
+            "props_nil_out": false,
+            "props_out": {},
+            "file_ids_nil_out": false,
+            "file_ids_out": [],
+            "priority_nil_out": true
+        },
+        {
+            "name": "props_empty",
+            "in": {
+                "create_at": 1,
+                "props": {}
+            },
+            "create_at_was_kept": true,
+            "create_at_value": 1,
+            "update_at_equals_create_at": false,
+            "update_at_moved": false,
+            "delete_at_out": 0,
+            "props_nil_out": false,
+            "props_out": {},
+            "file_ids_nil_out": false,
+            "file_ids_out": [],
+            "priority_nil_out": true
+        },
+        {
+            "name": "props_set",
+            "in": {
+                "create_at": 1,
+                "props": {
+                    "b": 2,
+                    "a": 1
+                }
+            },
+            "create_at_was_kept": true,
+            "create_at_value": 1,
+            "update_at_equals_create_at": false,
+            "update_at_moved": false,
+            "delete_at_out": 0,
+            "props_nil_out": false,
+            "props_out": {
+                "a": 1,
+                "b": 2
+            },
+            "file_ids_nil_out": false,
+            "file_ids_out": [],
+            "priority_nil_out": true
+        },
+        {
+            "name": "file_ids_null",
+            "in": {
+                "create_at": 1,
+                "file_ids": null
+            },
+            "create_at_was_kept": true,
+            "create_at_value": 1,
+            "update_at_equals_create_at": false,
+            "update_at_moved": false,
+            "delete_at_out": 0,
+            "props_nil_out": false,
+            "props_out": {},
+            "file_ids_nil_out": false,
+            "file_ids_out": [],
+            "priority_nil_out": true
+        },
+        {
+            "name": "file_ids_empty",
+            "in": {
+                "create_at": 1,
+                "file_ids": []
+            },
+            "create_at_was_kept": true,
+            "create_at_value": 1,
+            "update_at_equals_create_at": false,
+            "update_at_moved": false,
+            "delete_at_out": 0,
+            "props_nil_out": false,
+            "props_out": {},
+            "file_ids_nil_out": false,
+            "file_ids_out": [],
+            "priority_nil_out": true
+        },
+        {
+            "name": "file_ids_unsorted",
+            "in": {
+                "create_at": 1,
+                "file_ids": [
+                    "c",
+                    "a",
+                    "b"
+                ]
+            },
+            "create_at_was_kept": true,
+            "create_at_value": 1,
+            "update_at_equals_create_at": false,
+            "update_at_moved": false,
+            "delete_at_out": 0,
+            "props_nil_out": false,
+            "props_out": {},
+            "file_ids_nil_out": false,
+            "file_ids_out": [
+                "a",
+                "b",
+                "c"
+            ],
+            "priority_nil_out": true
+        },
+        {
+            "name": "file_ids_dupes",
+            "in": {
+                "create_at": 1,
+                "file_ids": [
+                    "b",
+                    "a",
+                    "b",
+                    "a",
+                    "b"
+                ]
+            },
+            "create_at_was_kept": true,
+            "create_at_value": 1,
+            "update_at_equals_create_at": false,
+            "update_at_moved": false,
+            "delete_at_out": 0,
+            "props_nil_out": false,
+            "props_out": {},
+            "file_ids_nil_out": false,
+            "file_ids_out": [
+                "a",
+                "b"
+            ],
+            "priority_nil_out": true
+        },
+        {
+            "name": "file_ids_all_same",
+            "in": {
+                "create_at": 1,
+                "file_ids": [
+                    "a",
+                    "a",
+                    "a"
+                ]
+            },
+            "create_at_was_kept": true,
+            "create_at_value": 1,
+            "update_at_equals_create_at": false,
+            "update_at_moved": false,
+            "delete_at_out": 0,
+            "props_nil_out": false,
+            "props_out": {},
+            "file_ids_nil_out": false,
+            "file_ids_out": [
+                "a"
+            ],
+            "priority_nil_out": true
+        },
+        {
+            "name": "file_ids_single",
+            "in": {
+                "create_at": 1,
+                "file_ids": [
+                    "z"
+                ]
+            },
+            "create_at_was_kept": true,
+            "create_at_value": 1,
+            "update_at_equals_create_at": false,
+            "update_at_moved": false,
+            "delete_at_out": 0,
+            "props_nil_out": false,
+            "props_out": {},
+            "file_ids_nil_out": false,
+            "file_ids_out": [
+                "z"
+            ],
+            "priority_nil_out": true
+        },
+        {
+            "name": "file_ids_case",
+            "in": {
+                "create_at": 1,
+                "file_ids": [
+                    "b",
+                    "A",
+                    "a",
+                    "B"
+                ]
+            },
+            "create_at_was_kept": true,
+            "create_at_value": 1,
+            "update_at_equals_create_at": false,
+            "update_at_moved": false,
+            "delete_at_out": 0,
+            "props_nil_out": false,
+            "props_out": {},
+            "file_ids_nil_out": false,
+            "file_ids_out": [
+                "A",
+                "B",
+                "a",
+                "b"
+            ],
+            "priority_nil_out": true
+        },
+        {
+            "name": "file_ids_empty_string",
+            "in": {
+                "create_at": 1,
+                "file_ids": [
+                    "",
+                    "a",
+                    ""
+                ]
+            },
+            "create_at_was_kept": true,
+            "create_at_value": 1,
+            "update_at_equals_create_at": false,
+            "update_at_moved": false,
+            "delete_at_out": 0,
+            "props_nil_out": false,
+            "props_out": {},
+            "file_ids_nil_out": false,
+            "file_ids_out": [
+                "",
+                "a"
+            ],
+            "priority_nil_out": true
+        },
+        {
+            "name": "priority_null",
+            "in": {
+                "create_at": 1,
+                "priority": null
+            },
+            "create_at_was_kept": true,
+            "create_at_value": 1,
+            "update_at_equals_create_at": false,
+            "update_at_moved": false,
+            "delete_at_out": 0,
+            "props_nil_out": false,
+            "props_out": {},
+            "file_ids_nil_out": false,
+            "file_ids_out": [],
+            "priority_nil_out": true
+        },
+        {
+            "name": "priority_set",
+            "in": {
+                "create_at": 1,
+                "priority": {
+                    "priority": "urgent"
+                }
+            },
+            "create_at_was_kept": true,
+            "create_at_value": 1,
+            "update_at_equals_create_at": false,
+            "update_at_moved": false,
+            "delete_at_out": 0,
+            "props_nil_out": false,
+            "props_out": {},
+            "file_ids_nil_out": false,
+            "file_ids_out": [],
+            "priority_nil_out": false
+        }
+    ],
+    "pre_save": [
+        {
+            "name": "all_zero",
+            "in": {},
+            "create_at_was_kept": false,
+            "create_at_value": 0,
+            "update_at_equals_create_at": true,
+            "update_at_moved": true,
+            "delete_at_out": 0,
+            "props_nil_out": false,
+            "props_out": {},
+            "file_ids_nil_out": false,
+            "file_ids_out": [],
+            "priority_nil_out": true
+        },
+        {
+            "name": "create_at_set",
+            "in": {
+                "create_at": 1700000000000,
+                "update_at": 1700000000000
+            },
+            "create_at_was_kept": true,
+            "create_at_value": 1700000000000,
+            "update_at_equals_create_at": false,
+            "update_at_moved": true,
+            "delete_at_out": 0,
+            "props_nil_out": false,
+            "props_out": {},
+            "file_ids_nil_out": false,
+            "file_ids_out": [],
+            "priority_nil_out": true
+        },
+        {
+            "name": "create_at_set_delete_at_set",
+            "in": {
+                "create_at": 1700000000000,
+                "delete_at": 1700000005000
+            },
+            "create_at_was_kept": true,
+            "create_at_value": 1700000000000,
+            "update_at_equals_create_at": false,
+            "update_at_moved": true,
+            "delete_at_out": 0,
+            "props_nil_out": false,
+            "props_out": {},
+            "file_ids_nil_out": false,
+            "file_ids_out": [],
+            "priority_nil_out": true
+        },
+        {
+            "name": "create_at_negative",
+            "in": {
+                "create_at": -1
+            },
+            "create_at_was_kept": true,
+            "create_at_value": -1,
+            "update_at_equals_create_at": false,
+            "update_at_moved": true,
+            "delete_at_out": 0,
+            "props_nil_out": false,
+            "props_out": {},
+            "file_ids_nil_out": false,
+            "file_ids_out": [],
+            "priority_nil_out": true
+        },
+        {
+            "name": "delete_at_only",
+            "in": {
+                "delete_at": 1700000005000
+            },
+            "create_at_was_kept": false,
+            "create_at_value": 0,
+            "update_at_equals_create_at": true,
+            "update_at_moved": true,
+            "delete_at_out": 0,
+            "props_nil_out": false,
+            "props_out": {},
+            "file_ids_nil_out": false,
+            "file_ids_out": [],
+            "priority_nil_out": true
+        },
+        {
+            "name": "props_null",
+            "in": {
+                "create_at": 1,
+                "props": null
+            },
+            "create_at_was_kept": true,
+            "create_at_value": 1,
+            "update_at_equals_create_at": false,
+            "update_at_moved": true,
+            "delete_at_out": 0,
+            "props_nil_out": false,
+            "props_out": {},
+            "file_ids_nil_out": false,
+            "file_ids_out": [],
+            "priority_nil_out": true
+        },
+        {
+            "name": "props_empty",
+            "in": {
+                "create_at": 1,
+                "props": {}
+            },
+            "create_at_was_kept": true,
+            "create_at_value": 1,
+            "update_at_equals_create_at": false,
+            "update_at_moved": true,
+            "delete_at_out": 0,
+            "props_nil_out": false,
+            "props_out": {},
+            "file_ids_nil_out": false,
+            "file_ids_out": [],
+            "priority_nil_out": true
+        },
+        {
+            "name": "props_set",
+            "in": {
+                "create_at": 1,
+                "props": {
+                    "b": 2,
+                    "a": 1
+                }
+            },
+            "create_at_was_kept": true,
+            "create_at_value": 1,
+            "update_at_equals_create_at": false,
+            "update_at_moved": true,
+            "delete_at_out": 0,
+            "props_nil_out": false,
+            "props_out": {
+                "a": 1,
+                "b": 2
+            },
+            "file_ids_nil_out": false,
+            "file_ids_out": [],
+            "priority_nil_out": true
+        },
+        {
+            "name": "file_ids_null",
+            "in": {
+                "create_at": 1,
+                "file_ids": null
+            },
+            "create_at_was_kept": true,
+            "create_at_value": 1,
+            "update_at_equals_create_at": false,
+            "update_at_moved": true,
+            "delete_at_out": 0,
+            "props_nil_out": false,
+            "props_out": {},
+            "file_ids_nil_out": false,
+            "file_ids_out": [],
+            "priority_nil_out": true
+        },
+        {
+            "name": "file_ids_empty",
+            "in": {
+                "create_at": 1,
+                "file_ids": []
+            },
+            "create_at_was_kept": true,
+            "create_at_value": 1,
+            "update_at_equals_create_at": false,
+            "update_at_moved": true,
+            "delete_at_out": 0,
+            "props_nil_out": false,
+            "props_out": {},
+            "file_ids_nil_out": false,
+            "file_ids_out": [],
+            "priority_nil_out": true
+        },
+        {
+            "name": "file_ids_unsorted",
+            "in": {
+                "create_at": 1,
+                "file_ids": [
+                    "c",
+                    "a",
+                    "b"
+                ]
+            },
+            "create_at_was_kept": true,
+            "create_at_value": 1,
+            "update_at_equals_create_at": false,
+            "update_at_moved": true,
+            "delete_at_out": 0,
+            "props_nil_out": false,
+            "props_out": {},
+            "file_ids_nil_out": false,
+            "file_ids_out": [
+                "a",
+                "b",
+                "c"
+            ],
+            "priority_nil_out": true
+        },
+        {
+            "name": "file_ids_dupes",
+            "in": {
+                "create_at": 1,
+                "file_ids": [
+                    "b",
+                    "a",
+                    "b",
+                    "a",
+                    "b"
+                ]
+            },
+            "create_at_was_kept": true,
+            "create_at_value": 1,
+            "update_at_equals_create_at": false,
+            "update_at_moved": true,
+            "delete_at_out": 0,
+            "props_nil_out": false,
+            "props_out": {},
+            "file_ids_nil_out": false,
+            "file_ids_out": [
+                "a",
+                "b"
+            ],
+            "priority_nil_out": true
+        },
+        {
+            "name": "file_ids_all_same",
+            "in": {
+                "create_at": 1,
+                "file_ids": [
+                    "a",
+                    "a",
+                    "a"
+                ]
+            },
+            "create_at_was_kept": true,
+            "create_at_value": 1,
+            "update_at_equals_create_at": false,
+            "update_at_moved": true,
+            "delete_at_out": 0,
+            "props_nil_out": false,
+            "props_out": {},
+            "file_ids_nil_out": false,
+            "file_ids_out": [
+                "a"
+            ],
+            "priority_nil_out": true
+        },
+        {
+            "name": "file_ids_single",
+            "in": {
+                "create_at": 1,
+                "file_ids": [
+                    "z"
+                ]
+            },
+            "create_at_was_kept": true,
+            "create_at_value": 1,
+            "update_at_equals_create_at": false,
+            "update_at_moved": true,
+            "delete_at_out": 0,
+            "props_nil_out": false,
+            "props_out": {},
+            "file_ids_nil_out": false,
+            "file_ids_out": [
+                "z"
+            ],
+            "priority_nil_out": true
+        },
+        {
+            "name": "file_ids_case",
+            "in": {
+                "create_at": 1,
+                "file_ids": [
+                    "b",
+                    "A",
+                    "a",
+                    "B"
+                ]
+            },
+            "create_at_was_kept": true,
+            "create_at_value": 1,
+            "update_at_equals_create_at": false,
+            "update_at_moved": true,
+            "delete_at_out": 0,
+            "props_nil_out": false,
+            "props_out": {},
+            "file_ids_nil_out": false,
+            "file_ids_out": [
+                "A",
+                "B",
+                "a",
+                "b"
+            ],
+            "priority_nil_out": true
+        },
+        {
+            "name": "file_ids_empty_string",
+            "in": {
+                "create_at": 1,
+                "file_ids": [
+                    "",
+                    "a",
+                    ""
+                ]
+            },
+            "create_at_was_kept": true,
+            "create_at_value": 1,
+            "update_at_equals_create_at": false,
+            "update_at_moved": true,
+            "delete_at_out": 0,
+            "props_nil_out": false,
+            "props_out": {},
+            "file_ids_nil_out": false,
+            "file_ids_out": [
+                "",
+                "a"
+            ],
+            "priority_nil_out": true
+        },
+        {
+            "name": "priority_null",
+            "in": {
+                "create_at": 1,
+                "priority": null
+            },
+            "create_at_was_kept": true,
+            "create_at_value": 1,
+            "update_at_equals_create_at": false,
+            "update_at_moved": true,
+            "delete_at_out": 0,
+            "props_nil_out": false,
+            "props_out": {},
+            "file_ids_nil_out": false,
+            "file_ids_out": [],
+            "priority_nil_out": true
+        },
+        {
+            "name": "priority_set",
+            "in": {
+                "create_at": 1,
+                "priority": {
+                    "priority": "urgent"
+                }
+            },
+            "create_at_was_kept": true,
+            "create_at_value": 1,
+            "update_at_equals_create_at": false,
+            "update_at_moved": true,
+            "delete_at_out": 0,
+            "props_nil_out": false,
+            "props_out": {},
+            "file_ids_nil_out": false,
+            "file_ids_out": [],
+            "priority_nil_out": false
+        }
+    ],
+    "props_accessors": [
+        {
+            "draft": "{\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"user_id\":\"\",\"channel_id\":\"\",\"root_id\":\"\",\"message\":\"\",\"type\":\"\",\"props\":null}",
+            "json_out": "null",
+            "name": "set_nil",
+            "nil_out": true
+        },
+        {
+            "draft": "{\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"user_id\":\"\",\"channel_id\":\"\",\"root_id\":\"\",\"message\":\"\",\"type\":\"\",\"props\":{}}",
+            "json_out": "{}",
+            "name": "set_empty",
+            "nil_out": false
+        },
+        {
+            "draft": "{\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"user_id\":\"\",\"channel_id\":\"\",\"root_id\":\"\",\"message\":\"\",\"type\":\"\",\"props\":{\"a\":\"b\"}}",
+            "json_out": "{\"a\":\"b\"}",
+            "name": "set_value",
+            "nil_out": false
+        }
+    ],
+    "wire": [
+        {
+            "err": null,
+            "file_ids_nil": true,
+            "in": "{}",
+            "metadata_nil": true,
+            "name": "empty_object",
+            "out": "{\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"user_id\":\"\",\"channel_id\":\"\",\"root_id\":\"\",\"message\":\"\",\"type\":\"\",\"props\":null}",
+            "panicked": false,
+            "priority_nil": true,
+            "props_nil": true
+        },
+        {
+            "err": null,
+            "file_ids_nil": false,
+            "in": "{\"create_at\":1700000000000,\"update_at\":1700000001000,\"delete_at\":1700000002000,\"user_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"channel_id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"root_id\":\"g1ku9ozj3bhub3hs89bqu1m3gy\",\"message\":\"hello\",\"type\":\"custom_draft\",\"props\":{\"a\":\"b\"},\"file_ids\":[\"f1\",\"f2\"],\"metadata\":{\"emojis\":[{\"name\":\"smile\"}]},\"priority\":{\"priority\":\"urgent\"}}",
+            "metadata_nil": false,
+            "name": "all_fields",
+            "out": "{\"create_at\":1700000000000,\"update_at\":1700000001000,\"delete_at\":1700000002000,\"user_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"channel_id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"root_id\":\"g1ku9ozj3bhub3hs89bqu1m3gy\",\"message\":\"hello\",\"type\":\"custom_draft\",\"props\":{\"a\":\"b\"},\"file_ids\":[\"f1\",\"f2\"],\"metadata\":{\"emojis\":[{\"id\":\"\",\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"creator_id\":\"\",\"name\":\"smile\"}]},\"priority\":{\"priority\":\"urgent\"}}",
+            "panicked": false,
+            "priority_nil": false,
+            "props_nil": false
+        },
+        {
+            "err": null,
+            "file_ids_nil": true,
+            "in": "{\"message\":\"m\"}",
+            "metadata_nil": true,
+            "name": "props_absent",
+            "out": "{\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"user_id\":\"\",\"channel_id\":\"\",\"root_id\":\"\",\"message\":\"m\",\"type\":\"\",\"props\":null}",
+            "panicked": false,
+            "priority_nil": true,
+            "props_nil": true
+        },
+        {
+            "err": null,
+            "file_ids_nil": true,
+            "in": "{\"props\":null}",
+            "metadata_nil": true,
+            "name": "props_null",
+            "out": "{\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"user_id\":\"\",\"channel_id\":\"\",\"root_id\":\"\",\"message\":\"\",\"type\":\"\",\"props\":null}",
+            "panicked": false,
+            "priority_nil": true,
+            "props_nil": true
+        },
+        {
+            "err": null,
+            "file_ids_nil": true,
+            "in": "{\"props\":{}}",
+            "metadata_nil": true,
+            "name": "props_empty",
+            "out": "{\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"user_id\":\"\",\"channel_id\":\"\",\"root_id\":\"\",\"message\":\"\",\"type\":\"\",\"props\":{}}",
+            "panicked": false,
+            "priority_nil": true,
+            "props_nil": false
+        },
+        {
+            "err": null,
+            "file_ids_nil": true,
+            "in": "{\"props\":{\"z\":1,\"a\":{\"b\":[true,null,2.5]}}}",
+            "metadata_nil": true,
+            "name": "props_nested",
+            "out": "{\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"user_id\":\"\",\"channel_id\":\"\",\"root_id\":\"\",\"message\":\"\",\"type\":\"\",\"props\":{\"a\":{\"b\":[true,null,2.5]},\"z\":1}}",
+            "panicked": false,
+            "priority_nil": true,
+            "props_nil": false
+        },
+        {
+            "err": null,
+            "file_ids_nil": true,
+            "in": "{\"message\":\"m\"}",
+            "metadata_nil": true,
+            "name": "file_ids_absent",
+            "out": "{\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"user_id\":\"\",\"channel_id\":\"\",\"root_id\":\"\",\"message\":\"m\",\"type\":\"\",\"props\":null}",
+            "panicked": false,
+            "priority_nil": true,
+            "props_nil": true
+        },
+        {
+            "err": null,
+            "file_ids_nil": true,
+            "in": "{\"file_ids\":null}",
+            "metadata_nil": true,
+            "name": "file_ids_null",
+            "out": "{\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"user_id\":\"\",\"channel_id\":\"\",\"root_id\":\"\",\"message\":\"\",\"type\":\"\",\"props\":null}",
+            "panicked": false,
+            "priority_nil": true,
+            "props_nil": true
+        },
+        {
+            "err": null,
+            "file_ids_nil": false,
+            "in": "{\"file_ids\":[]}",
+            "metadata_nil": true,
+            "name": "file_ids_empty",
+            "out": "{\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"user_id\":\"\",\"channel_id\":\"\",\"root_id\":\"\",\"message\":\"\",\"type\":\"\",\"props\":null}",
+            "panicked": false,
+            "priority_nil": true,
+            "props_nil": true
+        },
+        {
+            "err": null,
+            "file_ids_nil": false,
+            "in": "{\"file_ids\":[\"b\",\"a\",\"b\"]}",
+            "metadata_nil": true,
+            "name": "file_ids_dupes",
+            "out": "{\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"user_id\":\"\",\"channel_id\":\"\",\"root_id\":\"\",\"message\":\"\",\"type\":\"\",\"props\":null,\"file_ids\":[\"b\",\"a\",\"b\"]}",
+            "panicked": false,
+            "priority_nil": true,
+            "props_nil": true
+        },
+        {
+            "err": null,
+            "file_ids_nil": true,
+            "in": "{\"priority\":null}",
+            "metadata_nil": true,
+            "name": "priority_null",
+            "out": "{\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"user_id\":\"\",\"channel_id\":\"\",\"root_id\":\"\",\"message\":\"\",\"type\":\"\",\"props\":null}",
+            "panicked": false,
+            "priority_nil": true,
+            "props_nil": true
+        },
+        {
+            "err": null,
+            "file_ids_nil": true,
+            "in": "{\"priority\":{}}",
+            "metadata_nil": true,
+            "name": "priority_empty",
+            "out": "{\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"user_id\":\"\",\"channel_id\":\"\",\"root_id\":\"\",\"message\":\"\",\"type\":\"\",\"props\":null}",
+            "panicked": false,
+            "priority_nil": false,
+            "props_nil": true
+        },
+        {
+            "err": null,
+            "file_ids_nil": true,
+            "in": "{\"priority\":{\"priority\":\"urgent\",\"requested_ack\":true,\"nonsense\":[1]}}",
+            "metadata_nil": true,
+            "name": "priority_arbitrary",
+            "out": "{\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"user_id\":\"\",\"channel_id\":\"\",\"root_id\":\"\",\"message\":\"\",\"type\":\"\",\"props\":null,\"priority\":{\"nonsense\":[1],\"priority\":\"urgent\",\"requested_ack\":true}}",
+            "panicked": false,
+            "priority_nil": false,
+            "props_nil": true
+        },
+        {
+            "err": null,
+            "file_ids_nil": true,
+            "in": "{\"metadata\":null}",
+            "metadata_nil": true,
+            "name": "metadata_null",
+            "out": "{\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"user_id\":\"\",\"channel_id\":\"\",\"root_id\":\"\",\"message\":\"\",\"type\":\"\",\"props\":null}",
+            "panicked": false,
+            "priority_nil": true,
+            "props_nil": true
+        },
+        {
+            "err": null,
+            "file_ids_nil": true,
+            "in": "{\"metadata\":{}}",
+            "metadata_nil": false,
+            "name": "metadata_empty",
+            "out": "{\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"user_id\":\"\",\"channel_id\":\"\",\"root_id\":\"\",\"message\":\"\",\"type\":\"\",\"props\":null,\"metadata\":{}}",
+            "panicked": false,
+            "priority_nil": true,
+            "props_nil": true
+        },
+        {
+            "err": null,
+            "file_ids_nil": true,
+            "in": "{\"type\":\"\"}",
+            "metadata_nil": true,
+            "name": "type_empty",
+            "out": "{\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"user_id\":\"\",\"channel_id\":\"\",\"root_id\":\"\",\"message\":\"\",\"type\":\"\",\"props\":null}",
+            "panicked": false,
+            "priority_nil": true,
+            "props_nil": true
+        },
+        {
+            "err": null,
+            "file_ids_nil": true,
+            "in": "{\"message\":\"a\u003cb\u003ec\u0026d\",\"props\":{\"k\":\"\u003cscript\u003e\"}}",
+            "metadata_nil": true,
+            "name": "escapes",
+            "out": "{\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"user_id\":\"\",\"channel_id\":\"\",\"root_id\":\"\",\"message\":\"a\\u003cb\\u003ec\\u0026d\",\"type\":\"\",\"props\":{\"k\":\"\\u003cscript\\u003e\"}}",
+            "panicked": false,
+            "priority_nil": true,
+            "props_nil": false
+        },
+        {
+            "err": null,
+            "file_ids_nil": true,
+            "in": "{\"nope\":1,\"message\":\"m\"}",
+            "metadata_nil": true,
+            "name": "unknown_key",
+            "out": "{\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"user_id\":\"\",\"channel_id\":\"\",\"root_id\":\"\",\"message\":\"m\",\"type\":\"\",\"props\":null}",
+            "panicked": false,
+            "priority_nil": true,
+            "props_nil": true
+        },
+        {
+            "err": null,
+            "file_ids_nil": true,
+            "in": "{\"message\":null,\"create_at\":null,\"user_id\":null}",
+            "metadata_nil": true,
+            "name": "null_scalars",
+            "out": "{\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"user_id\":\"\",\"channel_id\":\"\",\"root_id\":\"\",\"message\":\"\",\"type\":\"\",\"props\":null}",
+            "panicked": false,
+            "priority_nil": true,
+            "props_nil": true
+        },
+        {
+            "err": null,
+            "file_ids_nil": true,
+            "in": "",
+            "metadata_nil": true,
+            "name": "zero_value",
+            "out": "{\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"user_id\":\"\",\"channel_id\":\"\",\"root_id\":\"\",\"message\":\"\",\"type\":\"\",\"props\":null}",
+            "panicked": false,
+            "priority_nil": true,
+            "props_nil": true
+        }
+    ]
+}

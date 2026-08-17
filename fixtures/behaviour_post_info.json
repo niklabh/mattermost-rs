@@ -1,0 +1,119 @@
+{
+    "constants": {
+        "PostAttributesPropertyGroupName": "post_attributes",
+        "PostAttributesPropertyGroupSchemaVersion": 1
+    },
+    "wire": [
+        {
+            "channel_type": "",
+            "err": null,
+            "in": "{}",
+            "name": "empty_object",
+            "out": "{\"channel_id\":\"\",\"channel_type\":\"\",\"channel_display_name\":\"\",\"has_joined_channel\":false,\"team_id\":\"\",\"team_type\":\"\",\"team_display_name\":\"\",\"has_joined_team\":false}",
+            "panicked": false
+        },
+        {
+            "channel_type": "O",
+            "err": null,
+            "in": "{\"channel_id\":\"c1\",\"channel_type\":\"O\",\"channel_display_name\":\"Town Square\",\"has_joined_channel\":true,\"team_id\":\"t1\",\"team_type\":\"O\",\"team_display_name\":\"Core\",\"has_joined_team\":true}",
+            "name": "all_fields",
+            "out": "{\"channel_id\":\"c1\",\"channel_type\":\"O\",\"channel_display_name\":\"Town Square\",\"has_joined_channel\":true,\"team_id\":\"t1\",\"team_type\":\"O\",\"team_display_name\":\"Core\",\"has_joined_team\":true}",
+            "panicked": false
+        },
+        {
+            "channel_type": "",
+            "err": null,
+            "in": "{\"channel_id\":\"c1\",\"has_joined_channel\":false,\"has_joined_team\":false}",
+            "name": "false_bools",
+            "out": "{\"channel_id\":\"c1\",\"channel_type\":\"\",\"channel_display_name\":\"\",\"has_joined_channel\":false,\"team_id\":\"\",\"team_type\":\"\",\"team_display_name\":\"\",\"has_joined_team\":false}",
+            "panicked": false
+        },
+        {
+            "channel_type": "P",
+            "err": null,
+            "in": "{\"channel_type\":\"P\"}",
+            "name": "type_private",
+            "out": "{\"channel_id\":\"\",\"channel_type\":\"P\",\"channel_display_name\":\"\",\"has_joined_channel\":false,\"team_id\":\"\",\"team_type\":\"\",\"team_display_name\":\"\",\"has_joined_team\":false}",
+            "panicked": false
+        },
+        {
+            "channel_type": "D",
+            "err": null,
+            "in": "{\"channel_type\":\"D\"}",
+            "name": "type_direct",
+            "out": "{\"channel_id\":\"\",\"channel_type\":\"D\",\"channel_display_name\":\"\",\"has_joined_channel\":false,\"team_id\":\"\",\"team_type\":\"\",\"team_display_name\":\"\",\"has_joined_team\":false}",
+            "panicked": false
+        },
+        {
+            "channel_type": "G",
+            "err": null,
+            "in": "{\"channel_type\":\"G\"}",
+            "name": "type_group",
+            "out": "{\"channel_id\":\"\",\"channel_type\":\"G\",\"channel_display_name\":\"\",\"has_joined_channel\":false,\"team_id\":\"\",\"team_type\":\"\",\"team_display_name\":\"\",\"has_joined_team\":false}",
+            "panicked": false
+        },
+        {
+            "channel_type": "BO",
+            "err": null,
+            "in": "{\"channel_type\":\"BO\"}",
+            "name": "type_board",
+            "out": "{\"channel_id\":\"\",\"channel_type\":\"BO\",\"channel_display_name\":\"\",\"has_joined_channel\":false,\"team_id\":\"\",\"team_type\":\"\",\"team_display_name\":\"\",\"has_joined_team\":false}",
+            "panicked": false
+        },
+        {
+            "channel_type": "NOT_A_TYPE",
+            "err": null,
+            "in": "{\"channel_type\":\"NOT_A_TYPE\"}",
+            "name": "type_unknown",
+            "out": "{\"channel_id\":\"\",\"channel_type\":\"NOT_A_TYPE\",\"channel_display_name\":\"\",\"has_joined_channel\":false,\"team_id\":\"\",\"team_type\":\"\",\"team_display_name\":\"\",\"has_joined_team\":false}",
+            "panicked": false
+        },
+        {
+            "channel_type": "",
+            "err": null,
+            "in": "{\"channel_type\":\"\"}",
+            "name": "type_empty",
+            "out": "{\"channel_id\":\"\",\"channel_type\":\"\",\"channel_display_name\":\"\",\"has_joined_channel\":false,\"team_id\":\"\",\"team_type\":\"\",\"team_display_name\":\"\",\"has_joined_team\":false}",
+            "panicked": false
+        },
+        {
+            "channel_type": "",
+            "err": null,
+            "in": "{\"team_type\":\"NOT_A_TYPE\"}",
+            "name": "team_type_unknown",
+            "out": "{\"channel_id\":\"\",\"channel_type\":\"\",\"channel_display_name\":\"\",\"has_joined_channel\":false,\"team_id\":\"\",\"team_type\":\"NOT_A_TYPE\",\"team_display_name\":\"\",\"has_joined_team\":false}",
+            "panicked": false
+        },
+        {
+            "channel_type": "",
+            "err": null,
+            "in": "{\"nope\":1,\"channel_id\":\"c1\"}",
+            "name": "unknown_key",
+            "out": "{\"channel_id\":\"c1\",\"channel_type\":\"\",\"channel_display_name\":\"\",\"has_joined_channel\":false,\"team_id\":\"\",\"team_type\":\"\",\"team_display_name\":\"\",\"has_joined_team\":false}",
+            "panicked": false
+        },
+        {
+            "channel_type": "",
+            "err": null,
+            "in": "{\"channel_id\":null,\"has_joined_team\":null,\"channel_type\":null}",
+            "name": "null_scalars",
+            "out": "{\"channel_id\":\"\",\"channel_type\":\"\",\"channel_display_name\":\"\",\"has_joined_channel\":false,\"team_id\":\"\",\"team_type\":\"\",\"team_display_name\":\"\",\"has_joined_team\":false}",
+            "panicked": false
+        },
+        {
+            "channel_type": "",
+            "err": null,
+            "in": "{\"channel_display_name\":\"a\u003cb\u003ec\u0026d\",\"team_display_name\":\"\\\"quoted\\\"\"}",
+            "name": "escapes",
+            "out": "{\"channel_id\":\"\",\"channel_type\":\"\",\"channel_display_name\":\"a\\u003cb\\u003ec\\u0026d\",\"has_joined_channel\":false,\"team_id\":\"\",\"team_type\":\"\",\"team_display_name\":\"\\\"quoted\\\"\",\"has_joined_team\":false}",
+            "panicked": false
+        },
+        {
+            "err": null,
+            "in": "",
+            "name": "zero_value",
+            "out": "{\"channel_id\":\"\",\"channel_type\":\"\",\"channel_display_name\":\"\",\"has_joined_channel\":false,\"team_id\":\"\",\"team_type\":\"\",\"team_display_name\":\"\",\"has_joined_team\":false}",
+            "panicked": false
+        }
+    ]
+}

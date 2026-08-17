@@ -1,0 +1,160 @@
+{
+    "decode": [
+        {
+            "err": null,
+            "in": "{}",
+            "json_after": "{\"term\":\"\",\"prefix_only\":false}",
+            "name": "empty",
+            "ok": true,
+            "panicked": false,
+            "prefix_only": false,
+            "term": ""
+        },
+        {
+            "err": null,
+            "in": "{\"term\":\"smile\",\"prefix_only\":true}",
+            "json_after": "{\"term\":\"smile\",\"prefix_only\":true}",
+            "name": "full",
+            "ok": true,
+            "panicked": false,
+            "prefix_only": true,
+            "term": "smile"
+        },
+        {
+            "err": null,
+            "in": "{\"term\":\"smile\"}",
+            "json_after": "{\"term\":\"smile\",\"prefix_only\":false}",
+            "name": "partial",
+            "ok": true,
+            "panicked": false,
+            "prefix_only": false,
+            "term": "smile"
+        },
+        {
+            "err": null,
+            "in": "{\"nope\":1}",
+            "json_after": "{\"term\":\"\",\"prefix_only\":false}",
+            "name": "unknown_key",
+            "ok": true,
+            "panicked": false,
+            "prefix_only": false,
+            "term": ""
+        },
+        {
+            "err": null,
+            "in": "{\"term\":null}",
+            "json_after": "{\"term\":\"\",\"prefix_only\":false}",
+            "name": "null_string",
+            "ok": true,
+            "panicked": false,
+            "prefix_only": false,
+            "term": ""
+        },
+        {
+            "err": null,
+            "in": "{\"prefix_only\":null}",
+            "json_after": "{\"term\":\"\",\"prefix_only\":false}",
+            "name": "null_bool",
+            "ok": true,
+            "panicked": false,
+            "prefix_only": false,
+            "term": ""
+        },
+        {
+            "err": null,
+            "in": "{\"Prefix_Only\":true}",
+            "json_after": "{\"term\":\"\",\"prefix_only\":true}",
+            "name": "folded_key",
+            "ok": true,
+            "panicked": false,
+            "prefix_only": true,
+            "term": ""
+        },
+        {
+            "err": null,
+            "in": "{\"term\":\"first\",\"term\":\"second\"}",
+            "json_after": "{\"term\":\"second\",\"prefix_only\":false}",
+            "name": "duplicate_key",
+            "ok": true,
+            "panicked": false,
+            "prefix_only": false,
+            "term": "second"
+        },
+        {
+            "err": "json: cannot unmarshal number into Go struct field EmojiSearch.term of type string",
+            "in": "{\"term\":5}",
+            "json_after": "{\"term\":\"\",\"prefix_only\":false}",
+            "name": "number_into_string",
+            "ok": false,
+            "panicked": false,
+            "prefix_only": false,
+            "term": ""
+        },
+        {
+            "err": "json: cannot unmarshal string into Go struct field EmojiSearch.prefix_only of type bool",
+            "in": "{\"prefix_only\":\"true\"}",
+            "json_after": "{\"term\":\"\",\"prefix_only\":false}",
+            "name": "string_into_bool",
+            "ok": false,
+            "panicked": false,
+            "prefix_only": false,
+            "term": ""
+        }
+    ],
+    "emoji_keys": [
+        "term",
+        "prefix_only"
+    ],
+    "emoji_wire": [
+        {
+            "json": "{\"term\":\"\",\"prefix_only\":false}",
+            "name": "zero",
+            "panicked": false
+        },
+        {
+            "json": "{\"term\":\"smile\",\"prefix_only\":false}",
+            "name": "term_only",
+            "panicked": false
+        },
+        {
+            "json": "{\"term\":\"\",\"prefix_only\":true}",
+            "name": "prefix_only",
+            "panicked": false
+        },
+        {
+            "json": "{\"term\":\"smile\",\"prefix_only\":true}",
+            "name": "both",
+            "panicked": false
+        },
+        {
+            "json": "{\"term\":\"\\u003ca\\u003e\\u0026b\",\"prefix_only\":false}",
+            "name": "escaped",
+            "panicked": false
+        },
+        {
+            "json": "{\"term\":\"😀 日本\",\"prefix_only\":false}",
+            "name": "unicode",
+            "panicked": false
+        }
+    ],
+    "token_keys": [
+        "term"
+    ],
+    "token_wire": [
+        {
+            "json": "{\"term\":\"\"}",
+            "name": "zero",
+            "panicked": false
+        },
+        {
+            "json": "{\"term\":\"6bdz674pgq767e4jx75w4pf57a\"}",
+            "name": "term",
+            "panicked": false
+        },
+        {
+            "json": "{\"term\":\"\\u003ca\\u003e\\u0026b\"}",
+            "name": "escaped",
+            "panicked": false
+        }
+    ]
+}

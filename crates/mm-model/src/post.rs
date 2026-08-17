@@ -8,13 +8,17 @@
 //! walkers live in [`crate::post_interactive_blocks`], plus `ToJSON`/`EncodeJSON`, unblocked by
 //! `Post::strip_action_integrations` in [`crate::integration_action`].
 //!
+//! `ChannelMentions`, `ChannelMentionsAll` and `ChannelMentionsAllWithOptions` are methods on
+//! `Post` but live in [`crate::channel_mentions`] alongside the free functions they wrap — the
+//! whole surface is one regex whose Go and Rust spellings disagree, and splitting it would put
+//! the trap and its explanation in different files.
+//!
 //! Not yet ported, each waiting on a dependency rather than on effort:
 //!
 //! | Go | waits on |
 //! |---|---|
 //! | `propsIsValid`, `ValidateProps`, `nonEmptyInteractivePayloadPropKeys` | the markdown parser ([D-044]) and `ValidateMmBlocksActions` ([D-042]) |
 //! | `RewriteImageURLs`, `WithRewrittenImageURLs` | `shared/markdown` |
-//! | `ChannelMentions*` | `channel_mentions.go` |
 //! | `GetPreviewPost`, `ForPlugin` | `permalink.go` |
 //! | `Auditable`, `LogClone` | the audit layer ([D-028]) |
 //! | the `Rewrite*` and `ReportPost*` families | their own chunk |

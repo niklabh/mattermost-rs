@@ -1,0 +1,490 @@
+{
+    "constants": {
+        "MaxImageSize": 24385536,
+        "MaxImageSizeHeight": 4032,
+        "MaxImageSizeWidth": 6048
+    },
+    "duration_marshal": [
+        {
+            "in_struct": "{\"url\":\"u\",\"expiration\":0}",
+            "json": "0",
+            "name": "zero",
+            "nanoseconds": 0,
+            "panicked": false,
+            "string": "0s"
+        },
+        {
+            "in_struct": "{\"url\":\"u\",\"expiration\":1}",
+            "json": "1",
+            "name": "one_nanosecond",
+            "nanoseconds": 1,
+            "panicked": false,
+            "string": "1ns"
+        },
+        {
+            "in_struct": "{\"url\":\"u\",\"expiration\":1000}",
+            "json": "1000",
+            "name": "one_microsecond",
+            "nanoseconds": 1000,
+            "panicked": false,
+            "string": "1µs"
+        },
+        {
+            "in_struct": "{\"url\":\"u\",\"expiration\":1000000}",
+            "json": "1000000",
+            "name": "one_millisecond",
+            "nanoseconds": 1000000,
+            "panicked": false,
+            "string": "1ms"
+        },
+        {
+            "in_struct": "{\"url\":\"u\",\"expiration\":1000000000}",
+            "json": "1000000000",
+            "name": "one_second",
+            "nanoseconds": 1000000000,
+            "panicked": false,
+            "string": "1s"
+        },
+        {
+            "in_struct": "{\"url\":\"u\",\"expiration\":60000000000}",
+            "json": "60000000000",
+            "name": "one_minute",
+            "nanoseconds": 60000000000,
+            "panicked": false,
+            "string": "1m0s"
+        },
+        {
+            "in_struct": "{\"url\":\"u\",\"expiration\":3600000000000}",
+            "json": "3600000000000",
+            "name": "one_hour",
+            "nanoseconds": 3600000000000,
+            "panicked": false,
+            "string": "1h0m0s"
+        },
+        {
+            "in_struct": "{\"url\":\"u\",\"expiration\":86400000000000}",
+            "json": "86400000000000",
+            "name": "twenty_four_hours",
+            "nanoseconds": 86400000000000,
+            "panicked": false,
+            "string": "24h0m0s"
+        },
+        {
+            "in_struct": "{\"url\":\"u\",\"expiration\":-1}",
+            "json": "-1",
+            "name": "negative_one_nanosecond",
+            "nanoseconds": -1,
+            "panicked": false,
+            "string": "-1ns"
+        },
+        {
+            "in_struct": "{\"url\":\"u\",\"expiration\":-3600000000000}",
+            "json": "-3600000000000",
+            "name": "negative_hour",
+            "nanoseconds": -3600000000000,
+            "panicked": false,
+            "string": "-1h0m0s"
+        },
+        {
+            "in_struct": "{\"url\":\"u\",\"expiration\":5400500000007}",
+            "json": "5400500000007",
+            "name": "awkward",
+            "nanoseconds": 5400500000007,
+            "panicked": false,
+            "string": "1h30m0.500000007s"
+        },
+        {
+            "in_struct": "{\"url\":\"u\",\"expiration\":9223372036854775807}",
+            "json": "9223372036854775807",
+            "name": "max_int64",
+            "nanoseconds": 9223372036854775807,
+            "panicked": false,
+            "string": "2562047h47m16.854775807s"
+        },
+        {
+            "in_struct": "{\"url\":\"u\",\"expiration\":-9223372036854775808}",
+            "json": "-9223372036854775808",
+            "name": "min_int64",
+            "nanoseconds": -9223372036854775808,
+            "panicked": false,
+            "string": "-2562047h47m16.854775808s"
+        }
+    ],
+    "duration_unmarshal": [
+        {
+            "err": null,
+            "expiration_after": 0,
+            "in": "{\"url\":\"https://example.com/f\",\"expiration\":0}",
+            "json_after": "{\"url\":\"https://example.com/f\",\"expiration\":0}",
+            "name": "zero",
+            "ok": true,
+            "panicked": false,
+            "raw": "0",
+            "url_after": "https://example.com/f"
+        },
+        {
+            "err": null,
+            "expiration_after": 1,
+            "in": "{\"url\":\"https://example.com/f\",\"expiration\":1}",
+            "json_after": "{\"url\":\"https://example.com/f\",\"expiration\":1}",
+            "name": "one",
+            "ok": true,
+            "panicked": false,
+            "raw": "1",
+            "url_after": "https://example.com/f"
+        },
+        {
+            "err": null,
+            "expiration_after": 3600000000000,
+            "in": "{\"url\":\"https://example.com/f\",\"expiration\":3600000000000}",
+            "json_after": "{\"url\":\"https://example.com/f\",\"expiration\":3600000000000}",
+            "name": "hour_in_nanoseconds",
+            "ok": true,
+            "panicked": false,
+            "raw": "3600000000000",
+            "url_after": "https://example.com/f"
+        },
+        {
+            "err": null,
+            "expiration_after": -1,
+            "in": "{\"url\":\"https://example.com/f\",\"expiration\":-1}",
+            "json_after": "{\"url\":\"https://example.com/f\",\"expiration\":-1}",
+            "name": "negative",
+            "ok": true,
+            "panicked": false,
+            "raw": "-1",
+            "url_after": "https://example.com/f"
+        },
+        {
+            "err": null,
+            "expiration_after": 9223372036854775807,
+            "in": "{\"url\":\"https://example.com/f\",\"expiration\":9223372036854775807}",
+            "json_after": "{\"url\":\"https://example.com/f\",\"expiration\":9223372036854775807}",
+            "name": "max_int64",
+            "ok": true,
+            "panicked": false,
+            "raw": "9223372036854775807",
+            "url_after": "https://example.com/f"
+        },
+        {
+            "err": null,
+            "expiration_after": -9223372036854775808,
+            "in": "{\"url\":\"https://example.com/f\",\"expiration\":-9223372036854775808}",
+            "json_after": "{\"url\":\"https://example.com/f\",\"expiration\":-9223372036854775808}",
+            "name": "min_int64",
+            "ok": true,
+            "panicked": false,
+            "raw": "-9223372036854775808",
+            "url_after": "https://example.com/f"
+        },
+        {
+            "err": "json: cannot unmarshal number 9223372036854775808 into Go struct field PresignURLResponse.expiration of type time.Duration",
+            "expiration_after": 0,
+            "in": "{\"url\":\"https://example.com/f\",\"expiration\":9223372036854775808}",
+            "json_after": "{\"url\":\"https://example.com/f\",\"expiration\":0}",
+            "name": "max_int64_plus_one",
+            "ok": false,
+            "panicked": false,
+            "raw": "9223372036854775808",
+            "url_after": "https://example.com/f"
+        },
+        {
+            "err": "json: cannot unmarshal number 1.0 into Go struct field PresignURLResponse.expiration of type time.Duration",
+            "expiration_after": 0,
+            "in": "{\"url\":\"https://example.com/f\",\"expiration\":1.0}",
+            "json_after": "{\"url\":\"https://example.com/f\",\"expiration\":0}",
+            "name": "fractional_but_whole",
+            "ok": false,
+            "panicked": false,
+            "raw": "1.0",
+            "url_after": "https://example.com/f"
+        },
+        {
+            "err": "json: cannot unmarshal number 1.5 into Go struct field PresignURLResponse.expiration of type time.Duration",
+            "expiration_after": 0,
+            "in": "{\"url\":\"https://example.com/f\",\"expiration\":1.5}",
+            "json_after": "{\"url\":\"https://example.com/f\",\"expiration\":0}",
+            "name": "fractional",
+            "ok": false,
+            "panicked": false,
+            "raw": "1.5",
+            "url_after": "https://example.com/f"
+        },
+        {
+            "err": "json: cannot unmarshal number 1e9 into Go struct field PresignURLResponse.expiration of type time.Duration",
+            "expiration_after": 0,
+            "in": "{\"url\":\"https://example.com/f\",\"expiration\":1e9}",
+            "json_after": "{\"url\":\"https://example.com/f\",\"expiration\":0}",
+            "name": "exponent",
+            "ok": false,
+            "panicked": false,
+            "raw": "1e9",
+            "url_after": "https://example.com/f"
+        },
+        {
+            "err": "json: cannot unmarshal number 1e19 into Go struct field PresignURLResponse.expiration of type time.Duration",
+            "expiration_after": 0,
+            "in": "{\"url\":\"https://example.com/f\",\"expiration\":1e19}",
+            "json_after": "{\"url\":\"https://example.com/f\",\"expiration\":0}",
+            "name": "exponent_huge",
+            "ok": false,
+            "panicked": false,
+            "raw": "1e19",
+            "url_after": "https://example.com/f"
+        },
+        {
+            "err": "json: cannot unmarshal string into Go struct field PresignURLResponse.expiration of type time.Duration",
+            "expiration_after": 0,
+            "in": "{\"url\":\"https://example.com/f\",\"expiration\":\"1h\"}",
+            "json_after": "{\"url\":\"https://example.com/f\",\"expiration\":0}",
+            "name": "duration_string",
+            "ok": false,
+            "panicked": false,
+            "raw": "\"1h\"",
+            "url_after": "https://example.com/f"
+        },
+        {
+            "err": "json: cannot unmarshal string into Go struct field PresignURLResponse.expiration of type time.Duration",
+            "expiration_after": 0,
+            "in": "{\"url\":\"https://example.com/f\",\"expiration\":\"3600000000000\"}",
+            "json_after": "{\"url\":\"https://example.com/f\",\"expiration\":0}",
+            "name": "quoted_number",
+            "ok": false,
+            "panicked": false,
+            "raw": "\"3600000000000\"",
+            "url_after": "https://example.com/f"
+        },
+        {
+            "err": null,
+            "expiration_after": 0,
+            "in": "{\"url\":\"https://example.com/f\",\"expiration\":null}",
+            "json_after": "{\"url\":\"https://example.com/f\",\"expiration\":0}",
+            "name": "null",
+            "ok": true,
+            "panicked": false,
+            "raw": "null",
+            "url_after": "https://example.com/f"
+        },
+        {
+            "err": "json: cannot unmarshal bool into Go struct field PresignURLResponse.expiration of type time.Duration",
+            "expiration_after": 0,
+            "in": "{\"url\":\"https://example.com/f\",\"expiration\":true}",
+            "json_after": "{\"url\":\"https://example.com/f\",\"expiration\":0}",
+            "name": "bool",
+            "ok": false,
+            "panicked": false,
+            "raw": "true",
+            "url_after": "https://example.com/f"
+        },
+        {
+            "err": "json: cannot unmarshal object into Go struct field PresignURLResponse.expiration of type time.Duration",
+            "expiration_after": 0,
+            "in": "{\"url\":\"https://example.com/f\",\"expiration\":{}}",
+            "json_after": "{\"url\":\"https://example.com/f\",\"expiration\":0}",
+            "name": "object",
+            "ok": false,
+            "panicked": false,
+            "raw": "{}",
+            "url_after": "https://example.com/f"
+        },
+        {
+            "err": "json: cannot unmarshal array into Go struct field PresignURLResponse.expiration of type time.Duration",
+            "expiration_after": 0,
+            "in": "{\"url\":\"https://example.com/f\",\"expiration\":[]}",
+            "json_after": "{\"url\":\"https://example.com/f\",\"expiration\":0}",
+            "name": "array",
+            "ok": false,
+            "panicked": false,
+            "raw": "[]",
+            "url_after": "https://example.com/f"
+        }
+    ],
+    "presign_wire": [
+        {
+            "expiration": 0,
+            "in": "{}",
+            "json": "{\"url\":\"\",\"expiration\":0}",
+            "name": "zero",
+            "panicked": false,
+            "url": ""
+        },
+        {
+            "expiration": 0,
+            "in": "{\"url\":\"https://example.com/f\"}",
+            "json": "{\"url\":\"https://example.com/f\",\"expiration\":0}",
+            "name": "url_only",
+            "panicked": false,
+            "url": "https://example.com/f"
+        },
+        {
+            "expiration": 3600000000000,
+            "in": "{\"expiration\":3600000000000}",
+            "json": "{\"url\":\"\",\"expiration\":3600000000000}",
+            "name": "expiration_only",
+            "panicked": false,
+            "url": ""
+        },
+        {
+            "expiration": 900000000000,
+            "in": "{\"url\":\"https://example.com/f?x=1\",\"expiration\":900000000000}",
+            "json": "{\"url\":\"https://example.com/f?x=1\",\"expiration\":900000000000}",
+            "name": "both",
+            "panicked": false,
+            "url": "https://example.com/f?x=1"
+        },
+        {
+            "expiration": 0,
+            "in": "{\"url\":\"\",\"expiration\":0}",
+            "json": "{\"url\":\"\",\"expiration\":0}",
+            "name": "empty_url",
+            "panicked": false,
+            "url": ""
+        },
+        {
+            "expiration": 0,
+            "in": "{\"URL\":\"https://example.com/f\"}",
+            "json": "{\"url\":\"https://example.com/f\",\"expiration\":0}",
+            "name": "uppercase_key",
+            "panicked": false,
+            "url": "https://example.com/f"
+        },
+        {
+            "expiration": 0,
+            "in": "{\"url\":\"https://example.com/f?a=1\u0026b=2\u003cx\u003e\"}",
+            "json": "{\"url\":\"https://example.com/f?a=1\\u0026b=2\\u003cx\\u003e\",\"expiration\":0}",
+            "name": "escaped_url",
+            "panicked": false,
+            "url": "https://example.com/f?a=1\u0026b=2\u003cx\u003e"
+        },
+        {
+            "expiration": 0,
+            "in": "{\"nope\":1}",
+            "json": "{\"url\":\"\",\"expiration\":0}",
+            "name": "unknown_key",
+            "panicked": false,
+            "url": ""
+        }
+    ],
+    "upload_wire": [
+        {
+            "ids_nil": true,
+            "in": "{}",
+            "info_element_nil": [],
+            "infos_len": 0,
+            "infos_nil": true,
+            "json": "{\"file_infos\":null,\"client_ids\":null}",
+            "name": "zero",
+            "panicked": false
+        },
+        {
+            "ids_nil": true,
+            "in": "{\"file_infos\":null,\"client_ids\":null}",
+            "info_element_nil": [],
+            "infos_len": 0,
+            "infos_nil": true,
+            "json": "{\"file_infos\":null,\"client_ids\":null}",
+            "name": "explicit_nulls",
+            "panicked": false
+        },
+        {
+            "ids_nil": false,
+            "in": "{\"file_infos\":[],\"client_ids\":[]}",
+            "info_element_nil": [],
+            "infos_len": 0,
+            "infos_nil": false,
+            "json": "{\"file_infos\":[],\"client_ids\":[]}",
+            "name": "empty",
+            "panicked": false
+        },
+        {
+            "ids_nil": true,
+            "in": "{\"file_infos\":[{\"id\":\"f1\",\"user_id\":\"u1\",\"channel_id\":\"c1\",\"create_at\":100,\"update_at\":100,\"name\":\"one.txt\",\"extension\":\"txt\",\"size\":11,\"mime_type\":\"text/plain\"}]}",
+            "info_element_nil": [
+                false
+            ],
+            "infos_len": 1,
+            "infos_nil": false,
+            "json": "{\"file_infos\":[{\"id\":\"f1\",\"user_id\":\"u1\",\"channel_id\":\"c1\",\"create_at\":100,\"update_at\":100,\"delete_at\":0,\"name\":\"one.txt\",\"extension\":\"txt\",\"size\":11,\"mime_type\":\"text/plain\",\"mini_preview\":null,\"remote_id\":null,\"archived\":false}],\"client_ids\":null}",
+            "name": "infos_only",
+            "panicked": false
+        },
+        {
+            "ids_nil": false,
+            "in": "{\"client_ids\":[\"c-1\",\"c-2\"]}",
+            "info_element_nil": [],
+            "infos_len": 0,
+            "infos_nil": true,
+            "json": "{\"file_infos\":null,\"client_ids\":[\"c-1\",\"c-2\"]}",
+            "name": "ids_only",
+            "panicked": false
+        },
+        {
+            "ids_nil": false,
+            "in": "{\"file_infos\":[{\"id\":\"f1\",\"user_id\":\"u1\",\"channel_id\":\"c1\",\"create_at\":100,\"update_at\":100,\"name\":\"one.txt\",\"extension\":\"txt\",\"size\":11,\"mime_type\":\"text/plain\"},{\"id\":\"f2\",\"user_id\":\"u2\",\"channel_id\":\"c1\",\"create_at\":200,\"update_at\":300,\"name\":\"two.png\",\"extension\":\"png\",\"size\":22,\"mime_type\":\"image/png\"}],\"client_ids\":[\"c-1\",\"c-2\"]}",
+            "info_element_nil": [
+                false,
+                false
+            ],
+            "infos_len": 2,
+            "infos_nil": false,
+            "json": "{\"file_infos\":[{\"id\":\"f1\",\"user_id\":\"u1\",\"channel_id\":\"c1\",\"create_at\":100,\"update_at\":100,\"delete_at\":0,\"name\":\"one.txt\",\"extension\":\"txt\",\"size\":11,\"mime_type\":\"text/plain\",\"mini_preview\":null,\"remote_id\":null,\"archived\":false},{\"id\":\"f2\",\"user_id\":\"u2\",\"channel_id\":\"c1\",\"create_at\":200,\"update_at\":300,\"delete_at\":0,\"name\":\"two.png\",\"extension\":\"png\",\"size\":22,\"mime_type\":\"image/png\",\"mini_preview\":null,\"remote_id\":null,\"archived\":false}],\"client_ids\":[\"c-1\",\"c-2\"]}",
+            "name": "both",
+            "panicked": false
+        },
+        {
+            "ids_nil": false,
+            "in": "{\"client_ids\":[\"\"]}",
+            "info_element_nil": [],
+            "infos_len": 0,
+            "infos_nil": true,
+            "json": "{\"file_infos\":null,\"client_ids\":[\"\"]}",
+            "name": "empty_id",
+            "panicked": false
+        },
+        {
+            "ids_nil": false,
+            "in": "{\"client_ids\":[\"c-1\",\"c-1\"]}",
+            "info_element_nil": [],
+            "infos_len": 0,
+            "infos_nil": true,
+            "json": "{\"file_infos\":null,\"client_ids\":[\"c-1\",\"c-1\"]}",
+            "name": "duplicate_ids",
+            "panicked": false
+        },
+        {
+            "ids_nil": false,
+            "in": "{\"file_infos\":[null],\"client_ids\":[\"c-1\"]}",
+            "info_element_nil": [
+                true
+            ],
+            "infos_len": 1,
+            "infos_nil": false,
+            "json": "{\"file_infos\":[null],\"client_ids\":[\"c-1\"]}",
+            "name": "nil_info",
+            "panicked": false
+        },
+        {
+            "ids_nil": false,
+            "in": "{\"file_infos\":[{\"id\":\"f1\",\"user_id\":\"u1\",\"channel_id\":\"c1\",\"create_at\":100,\"update_at\":100,\"name\":\"one.txt\",\"extension\":\"txt\",\"size\":11,\"mime_type\":\"text/plain\"},null],\"client_ids\":[]}",
+            "info_element_nil": [
+                false,
+                true
+            ],
+            "infos_len": 2,
+            "infos_nil": false,
+            "json": "{\"file_infos\":[{\"id\":\"f1\",\"user_id\":\"u1\",\"channel_id\":\"c1\",\"create_at\":100,\"update_at\":100,\"delete_at\":0,\"name\":\"one.txt\",\"extension\":\"txt\",\"size\":11,\"mime_type\":\"text/plain\",\"mini_preview\":null,\"remote_id\":null,\"archived\":false},null],\"client_ids\":[]}",
+            "name": "nil_info_among_real",
+            "panicked": false
+        },
+        {
+            "ids_nil": true,
+            "in": "{\"nope\":1}",
+            "info_element_nil": [],
+            "infos_len": 0,
+            "infos_nil": true,
+            "json": "{\"file_infos\":null,\"client_ids\":null}",
+            "name": "unknown_key",
+            "panicked": false
+        }
+    ]
+}

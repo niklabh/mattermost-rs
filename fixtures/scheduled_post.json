@@ -1,0 +1,121 @@
+{
+    "create_at": 1706442078000,
+    "update_at": 1706145679000,
+    "delete_at": 1705117389000,
+    "user_id": "w34ne4j3z7uursmsrtwuuod8ge",
+    "channel_id": "b1qwdmuuiitgmxh6egz88muncw",
+    "root_id": "srznqjzio69z39tcrhuxmbi9xo",
+    "message": "message-fe6e27",
+    "type": "type-5a5274",
+    "props": {
+        "key0-08607b": "val0-652979",
+        "key1-09622e": "val1-662b2c"
+    },
+    "file_ids": [
+        "fileids-e57b82",
+        "fileids-a4f0d1"
+    ],
+    "metadata": {
+        "embeds": [
+            {
+                "type": "type-54fbef",
+                "url": "https://example.com/url/4f1a4f",
+                "data": "data-4d38d6"
+            }
+        ],
+        "emojis": [
+            {
+                "id": "8ghk9bowpuzzxbisi6dbe49xqh",
+                "create_at": 1702578786000,
+                "update_at": 1702240091000,
+                "delete_at": 1705495161000,
+                "creator_id": "zpanc1g6mhxc1ndxr3rphzo63r",
+                "name": "name-5a2b25"
+            }
+        ],
+        "files": [
+            {
+                "id": "srws973jimh799t8p951ukx35h",
+                "user_id": "6cb1k8p6jqcmgoynrwq5h1wasc",
+                "post_id": "y9zjxnbk6tyo6i8c16rnih4bbh",
+                "channel_id": "ibsw5aq61o3q1s5xjzo77fj17r",
+                "create_at": 1706362474000,
+                "update_at": 1705792099000,
+                "delete_at": 1700754929000,
+                "name": "name-f52220",
+                "extension": "extension-3eeef4",
+                "size": 99,
+                "mime_type": "mimetype-3e571a",
+                "width": 2,
+                "height": 53,
+                "has_preview_image": true,
+                "mini_preview": "Ynl0ZXMtbWluaXByZXZpZXc=",
+                "remote_id": "7cwk48jge1nm6qb8iwq1cohrzh",
+                "archived": true
+            }
+        ],
+        "redacted_file_count": 94,
+        "images": {
+            "key0-ffe5d3": {
+                "width": 60,
+                "height": 55,
+                "format": "format-28ab13",
+                "frame_count": 2
+            }
+        },
+        "reactions": [
+            {
+                "user_id": "j8yjmwepet5t3fi61zeo4o5zdo",
+                "post_id": "ub89ohhjzq7jq14t9b3auxf41h",
+                "emoji_name": "emojiname-bae00e",
+                "create_at": 1704649325000,
+                "update_at": 1703901120000,
+                "delete_at": 1705814306000,
+                "remote_id": "ropx8cypfmnmjia56qay4k6rso",
+                "channel_id": "irtbrwmarcak97tynjezoetoih"
+            }
+        ],
+        "priority": {
+            "priority": "priority-c6a389",
+            "requested_ack": true,
+            "persistent_notifications": true,
+            "PostId": "ee6gknmmhptqf7j7cwrsz3dnhe",
+            "ChannelId": "wx6n351szftkuh84fuzfpqdnir"
+        },
+        "acknowledgements": [
+            {
+                "user_id": "tnqw93ohoko3aqh9j9ub3y7buo",
+                "post_id": "fw3zt6ch4ocwc6ttxdh33wa3ea",
+                "acknowledged_at": 1701728876000,
+                "channel_id": "fajf3wpd35xgbaeumue48u66cy",
+                "remote_id": "5rou948qapea4jty89wq7o1ttw"
+            }
+        ],
+        "translations": {
+            "key0-7cb9c4": {
+                "text": "text-218d9b",
+                "object": {
+                    "key": "value"
+                },
+                "type": "type-9cd999",
+                "state": "state-ceec02",
+                "source_lang": "sourcelang-68c000"
+            }
+        },
+        "expire_at": 1700452770000,
+        "recipients": [
+            "recipients-e891bd",
+            "recipients-22c1d8"
+        ]
+    },
+    "priority": {
+        "key0-4bce61": "val0-2b1cd1",
+        "key1-4cd014": "val1-2c1e84"
+    },
+    "id": "xm1hkcf7xrbh4mx8awam46od3w",
+    "scheduled_at": 1706436466000,
+    "processed_at": 1702780773000,
+    "error_code": "errorcode-45f2dd",
+    "repeat_type": "repeattype-2e6a25",
+    "repeat_timezone": "repeattimezone-e8ecf7"
+}

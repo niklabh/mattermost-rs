@@ -1,0 +1,182 @@
+{
+    "audit_keys": [
+        "id",
+        "create_at",
+        "user_id",
+        "action",
+        "extra_info",
+        "ip_address",
+        "session_id"
+    ],
+    "audit_wire": [
+        {
+            "json": "{\"id\":\"\",\"create_at\":0,\"user_id\":\"\",\"action\":\"\",\"extra_info\":\"\",\"ip_address\":\"\",\"session_id\":\"\"}",
+            "name": "zero",
+            "panicked": false
+        },
+        {
+            "json": "{\"id\":\"a1\",\"create_at\":1700000000000,\"user_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"action\":\"/api/v4/users/login\",\"extra_info\":\"success\",\"ip_address\":\"10.0.0.1\",\"session_id\":\"qr6kf7ztp7yifxt4wm5xn51bke\"}",
+            "name": "typical",
+            "panicked": false
+        },
+        {
+            "json": "{\"id\":\"\",\"create_at\":1,\"user_id\":\"\",\"action\":\"\",\"extra_info\":\"\",\"ip_address\":\"\",\"session_id\":\"\"}",
+            "name": "empty_strings",
+            "panicked": false
+        },
+        {
+            "json": "{\"id\":\"a\",\"create_at\":-1,\"user_id\":\"\",\"action\":\"\",\"extra_info\":\"\",\"ip_address\":\"\",\"session_id\":\"\"}",
+            "name": "negative_create_at",
+            "panicked": false
+        },
+        {
+            "json": "{\"id\":\"a\",\"create_at\":9223372036854775807,\"user_id\":\"\",\"action\":\"\",\"extra_info\":\"\",\"ip_address\":\"\",\"session_id\":\"\"}",
+            "name": "int64_bounds",
+            "panicked": false
+        },
+        {
+            "json": "{\"id\":\"a\",\"create_at\":0,\"user_id\":\"\",\"action\":\"\",\"extra_info\":\"\\u003ca\\u003e\\u0026b\\u2028c\",\"ip_address\":\"\",\"session_id\":\"\"}",
+            "name": "escaped_extra_info",
+            "panicked": false
+        },
+        {
+            "json": "{\"id\":\"a\",\"create_at\":0,\"user_id\":\"\",\"action\":\"\",\"extra_info\":\"\",\"ip_address\":\"2001:db8::1\",\"session_id\":\"\"}",
+            "name": "ipv6",
+            "panicked": false
+        }
+    ],
+    "audits_wire": [
+        {
+            "json": "null",
+            "len": 0,
+            "name": "nil",
+            "nil": true,
+            "panicked": false
+        },
+        {
+            "json": "[]",
+            "len": 0,
+            "name": "empty",
+            "nil": false,
+            "panicked": false
+        },
+        {
+            "json": "[{\"id\":\"a1\",\"create_at\":100,\"user_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"action\":\"/api/v4/users/login\",\"extra_info\":\"success\",\"ip_address\":\"10.0.0.1\",\"session_id\":\"qr6kf7ztp7yifxt4wm5xn51bke\"}]",
+            "len": 1,
+            "name": "one",
+            "nil": false,
+            "panicked": false
+        },
+        {
+            "json": "[{\"id\":\"a1\",\"create_at\":300,\"user_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"action\":\"/api/v4/users/login\",\"extra_info\":\"success\",\"ip_address\":\"10.0.0.1\",\"session_id\":\"qr6kf7ztp7yifxt4wm5xn51bke\"},{\"id\":\"a2\",\"create_at\":200,\"user_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"action\":\"/api/v4/users/login\",\"extra_info\":\"success\",\"ip_address\":\"10.0.0.1\",\"session_id\":\"qr6kf7ztp7yifxt4wm5xn51bke\"},{\"id\":\"a3\",\"create_at\":100,\"user_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"action\":\"/api/v4/users/login\",\"extra_info\":\"success\",\"ip_address\":\"10.0.0.1\",\"session_id\":\"qr6kf7ztp7yifxt4wm5xn51bke\"}]",
+            "len": 3,
+            "name": "several",
+            "nil": false,
+            "panicked": false
+        }
+    ],
+    "etag": [
+        {
+            "etag": "",
+            "is_empty_string": true,
+            "len": 0,
+            "name": "nil",
+            "panicked": false
+        },
+        {
+            "etag": "",
+            "is_empty_string": true,
+            "len": 0,
+            "name": "empty",
+            "panicked": false
+        },
+        {
+            "etag": "11.11.0.1700000000000",
+            "first_create_at": 1700000000000,
+            "first_is_max": true,
+            "is_empty_string": false,
+            "len": 1,
+            "max_create_at": 1700000000000,
+            "name": "one",
+            "panicked": false
+        },
+        {
+            "etag": "11.11.0.300",
+            "first_create_at": 300,
+            "first_is_max": true,
+            "is_empty_string": false,
+            "len": 3,
+            "max_create_at": 300,
+            "name": "sorted_descending",
+            "panicked": false
+        },
+        {
+            "etag": "11.11.0.100",
+            "first_create_at": 100,
+            "first_is_max": false,
+            "is_empty_string": false,
+            "len": 3,
+            "max_create_at": 300,
+            "name": "sorted_ascending",
+            "panicked": false
+        },
+        {
+            "etag": "11.11.0.200",
+            "first_create_at": 200,
+            "first_is_max": false,
+            "is_empty_string": false,
+            "len": 3,
+            "max_create_at": 300,
+            "name": "unsorted",
+            "panicked": false
+        },
+        {
+            "etag": "11.11.0.0",
+            "first_create_at": 0,
+            "first_is_max": false,
+            "is_empty_string": false,
+            "len": 2,
+            "max_create_at": 999,
+            "name": "zero_create_at",
+            "panicked": false
+        },
+        {
+            "etag": "11.11.0.-1",
+            "first_create_at": -1,
+            "first_is_max": true,
+            "is_empty_string": false,
+            "len": 1,
+            "max_create_at": -1,
+            "name": "negative_create_at",
+            "panicked": false
+        },
+        {
+            "etag": "11.11.0.9223372036854775807",
+            "first_create_at": 9223372036854775807,
+            "first_is_max": true,
+            "is_empty_string": false,
+            "len": 1,
+            "max_create_at": 9223372036854775807,
+            "name": "max_int64",
+            "panicked": false
+        },
+        {
+            "etag": "11.11.0.-9223372036854775808",
+            "first_create_at": -9223372036854775808,
+            "first_is_max": true,
+            "is_empty_string": false,
+            "len": 1,
+            "max_create_at": -9223372036854775808,
+            "name": "min_int64",
+            "panicked": false
+        }
+    ],
+    "null_element": {
+        "element_is_pointer": false,
+        "err": null,
+        "in": "[null]",
+        "json_after": "[{\"id\":\"\",\"create_at\":0,\"user_id\":\"\",\"action\":\"\",\"extra_info\":\"\",\"ip_address\":\"\",\"session_id\":\"\"}]",
+        "ok": true,
+        "panicked": false
+    }
+}

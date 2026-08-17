@@ -1,0 +1,251 @@
+{
+    "etag": [
+        {
+            "channel_nil": true,
+            "in": "{\"channel\":null,\"member\":null}",
+            "member_nil": true,
+            "name": "both_nil",
+            "panicked": true
+        },
+        {
+            "channel_nil": true,
+            "in": "{\"channel\":null,\"member\":{\"channel_id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"user_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"roles\":\"channel_user\",\"last_viewed_at\":400,\"msg_count\":5,\"mention_count\":1,\"mention_count_root\":0,\"urgent_mention_count\":0,\"msg_count_root\":0,\"notify_props\":{\"desktop\":\"default\",\"mark_unread\":\"all\"},\"last_update_at\":500,\"scheme_guest\":false,\"scheme_user\":true,\"scheme_admin\":false,\"explicit_roles\":\"\",\"autotranslation_disabled\":false}}",
+            "member_nil": false,
+            "name": "member_only",
+            "panicked": true
+        },
+        {
+            "channel_nil": true,
+            "in": "{\"channel\":null,\"member\":{\"channel_id\":\"\",\"user_id\":\"\",\"roles\":\"\",\"last_viewed_at\":0,\"msg_count\":0,\"mention_count\":0,\"mention_count_root\":0,\"urgent_mention_count\":0,\"msg_count_root\":0,\"notify_props\":null,\"last_update_at\":0,\"scheme_guest\":false,\"scheme_user\":false,\"scheme_admin\":false,\"explicit_roles\":\"\",\"autotranslation_disabled\":false}}",
+            "member_nil": false,
+            "name": "nil_channel_zero_member",
+            "panicked": true
+        },
+        {
+            "channel_nil": false,
+            "etag": "11.11.0.qr6kf7ztp7yifxt4wm5xn51bke.200.300.0",
+            "in": "{\"channel\":{\"id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"create_at\":100,\"update_at\":200,\"delete_at\":0,\"team_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"type\":\"O\",\"display_name\":\"Town Square\",\"name\":\"town-square\",\"header\":\"h\",\"purpose\":\"p\",\"last_post_at\":300,\"total_msg_count\":7,\"extra_update_at\":0,\"creator_id\":\"\",\"scheme_id\":null,\"props\":null,\"group_constrained\":null,\"autotranslation\":false,\"shared\":null,\"total_msg_count_root\":0,\"policy_id\":null,\"last_root_post_at\":0,\"banner_info\":null,\"policy_enforced\":false,\"policy_is_active\":false,\"default_category_name\":\"\",\"managed_category_name\":\"\",\"discoverable\":false},\"member\":null}",
+            "member_nil": true,
+            "name": "channel_only",
+            "panicked": false
+        },
+        {
+            "channel_nil": false,
+            "etag": "11.11.0.qr6kf7ztp7yifxt4wm5xn51bke.200.300.500",
+            "in": "{\"channel\":{\"id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"create_at\":100,\"update_at\":200,\"delete_at\":0,\"team_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"type\":\"O\",\"display_name\":\"Town Square\",\"name\":\"town-square\",\"header\":\"h\",\"purpose\":\"p\",\"last_post_at\":300,\"total_msg_count\":7,\"extra_update_at\":0,\"creator_id\":\"\",\"scheme_id\":null,\"props\":null,\"group_constrained\":null,\"autotranslation\":false,\"shared\":null,\"total_msg_count_root\":0,\"policy_id\":null,\"last_root_post_at\":0,\"banner_info\":null,\"policy_enforced\":false,\"policy_is_active\":false,\"default_category_name\":\"\",\"managed_category_name\":\"\",\"discoverable\":false},\"member\":{\"channel_id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"user_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"roles\":\"channel_user\",\"last_viewed_at\":400,\"msg_count\":5,\"mention_count\":1,\"mention_count_root\":0,\"urgent_mention_count\":0,\"msg_count_root\":0,\"notify_props\":{\"desktop\":\"default\",\"mark_unread\":\"all\"},\"last_update_at\":500,\"scheme_guest\":false,\"scheme_user\":true,\"scheme_admin\":false,\"explicit_roles\":\"\",\"autotranslation_disabled\":false}}",
+            "member_nil": false,
+            "name": "both",
+            "panicked": false
+        },
+        {
+            "channel_nil": false,
+            "etag": "11.11.0.qr6kf7ztp7yifxt4wm5xn51bke.200.300.0",
+            "in": "{\"channel\":{\"id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"create_at\":100,\"update_at\":200,\"delete_at\":0,\"team_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"type\":\"O\",\"display_name\":\"Town Square\",\"name\":\"town-square\",\"header\":\"h\",\"purpose\":\"p\",\"last_post_at\":300,\"total_msg_count\":7,\"extra_update_at\":0,\"creator_id\":\"\",\"scheme_id\":null,\"props\":null,\"group_constrained\":null,\"autotranslation\":false,\"shared\":null,\"total_msg_count_root\":0,\"policy_id\":null,\"last_root_post_at\":0,\"banner_info\":null,\"policy_enforced\":false,\"policy_is_active\":false,\"default_category_name\":\"\",\"managed_category_name\":\"\",\"discoverable\":false},\"member\":{\"channel_id\":\"\",\"user_id\":\"\",\"roles\":\"\",\"last_viewed_at\":0,\"msg_count\":0,\"mention_count\":0,\"mention_count_root\":0,\"urgent_mention_count\":0,\"msg_count_root\":0,\"notify_props\":null,\"last_update_at\":0,\"scheme_guest\":false,\"scheme_user\":false,\"scheme_admin\":false,\"explicit_roles\":\"\",\"autotranslation_disabled\":false}}",
+            "member_nil": false,
+            "name": "zero_member",
+            "panicked": false
+        },
+        {
+            "channel_nil": false,
+            "etag": "11.11.0..0.0.500",
+            "in": "{\"channel\":{\"id\":\"\",\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"team_id\":\"\",\"type\":\"\",\"display_name\":\"\",\"name\":\"\",\"header\":\"\",\"purpose\":\"\",\"last_post_at\":0,\"total_msg_count\":0,\"extra_update_at\":0,\"creator_id\":\"\",\"scheme_id\":null,\"props\":null,\"group_constrained\":null,\"autotranslation\":false,\"shared\":null,\"total_msg_count_root\":0,\"policy_id\":null,\"last_root_post_at\":0,\"banner_info\":null,\"policy_enforced\":false,\"policy_is_active\":false,\"default_category_name\":\"\",\"managed_category_name\":\"\",\"discoverable\":false},\"member\":{\"channel_id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"user_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"roles\":\"channel_user\",\"last_viewed_at\":400,\"msg_count\":5,\"mention_count\":1,\"mention_count_root\":0,\"urgent_mention_count\":0,\"msg_count_root\":0,\"notify_props\":{\"desktop\":\"default\",\"mark_unread\":\"all\"},\"last_update_at\":500,\"scheme_guest\":false,\"scheme_user\":true,\"scheme_admin\":false,\"explicit_roles\":\"\",\"autotranslation_disabled\":false}}",
+            "member_nil": false,
+            "name": "zero_channel",
+            "panicked": false
+        },
+        {
+            "channel_nil": false,
+            "etag": "11.11.0..0.0.0",
+            "in": "{\"channel\":{\"id\":\"\",\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"team_id\":\"\",\"type\":\"\",\"display_name\":\"\",\"name\":\"\",\"header\":\"\",\"purpose\":\"\",\"last_post_at\":0,\"total_msg_count\":0,\"extra_update_at\":0,\"creator_id\":\"\",\"scheme_id\":null,\"props\":null,\"group_constrained\":null,\"autotranslation\":false,\"shared\":null,\"total_msg_count_root\":0,\"policy_id\":null,\"last_root_post_at\":0,\"banner_info\":null,\"policy_enforced\":false,\"policy_is_active\":false,\"default_category_name\":\"\",\"managed_category_name\":\"\",\"discoverable\":false},\"member\":{\"channel_id\":\"\",\"user_id\":\"\",\"roles\":\"\",\"last_viewed_at\":0,\"msg_count\":0,\"mention_count\":0,\"mention_count_root\":0,\"urgent_mention_count\":0,\"msg_count_root\":0,\"notify_props\":null,\"last_update_at\":0,\"scheme_guest\":false,\"scheme_user\":false,\"scheme_admin\":false,\"explicit_roles\":\"\",\"autotranslation_disabled\":false}}",
+            "member_nil": false,
+            "name": "both_zero",
+            "panicked": false
+        },
+        {
+            "channel_nil": false,
+            "etag": "11.11.0.qr6kf7ztp7yifxt4wm5xn51bke.-1.-2.-3",
+            "in": "{\"channel\":{\"id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"create_at\":100,\"update_at\":-1,\"delete_at\":0,\"team_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"type\":\"O\",\"display_name\":\"Town Square\",\"name\":\"town-square\",\"header\":\"h\",\"purpose\":\"p\",\"last_post_at\":-2,\"total_msg_count\":7,\"extra_update_at\":0,\"creator_id\":\"\",\"scheme_id\":null,\"props\":null,\"group_constrained\":null,\"autotranslation\":false,\"shared\":null,\"total_msg_count_root\":0,\"policy_id\":null,\"last_root_post_at\":0,\"banner_info\":null,\"policy_enforced\":false,\"policy_is_active\":false,\"default_category_name\":\"\",\"managed_category_name\":\"\",\"discoverable\":false},\"member\":{\"channel_id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"user_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"roles\":\"channel_user\",\"last_viewed_at\":400,\"msg_count\":5,\"mention_count\":1,\"mention_count_root\":0,\"urgent_mention_count\":0,\"msg_count_root\":0,\"notify_props\":{\"desktop\":\"default\",\"mark_unread\":\"all\"},\"last_update_at\":-3,\"scheme_guest\":false,\"scheme_user\":true,\"scheme_admin\":false,\"explicit_roles\":\"\",\"autotranslation_disabled\":false}}",
+            "member_nil": false,
+            "name": "negative_timestamps",
+            "panicked": false
+        },
+        {
+            "channel_nil": false,
+            "etag": "11.11.0.a.b.200.300.0",
+            "in": "{\"channel\":{\"id\":\"a.b\",\"create_at\":100,\"update_at\":200,\"delete_at\":0,\"team_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"type\":\"O\",\"display_name\":\"Town Square\",\"name\":\"town-square\",\"header\":\"h\",\"purpose\":\"p\",\"last_post_at\":300,\"total_msg_count\":7,\"extra_update_at\":0,\"creator_id\":\"\",\"scheme_id\":null,\"props\":null,\"group_constrained\":null,\"autotranslation\":false,\"shared\":null,\"total_msg_count_root\":0,\"policy_id\":null,\"last_root_post_at\":0,\"banner_info\":null,\"policy_enforced\":false,\"policy_is_active\":false,\"default_category_name\":\"\",\"managed_category_name\":\"\",\"discoverable\":false},\"member\":null}",
+            "member_nil": true,
+            "name": "id_with_a_dot",
+            "panicked": false
+        },
+        {
+            "channel_nil": false,
+            "etag": "11.11.0..200.300.0",
+            "in": "{\"channel\":{\"id\":\"\",\"create_at\":100,\"update_at\":200,\"delete_at\":0,\"team_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"type\":\"O\",\"display_name\":\"Town Square\",\"name\":\"town-square\",\"header\":\"h\",\"purpose\":\"p\",\"last_post_at\":300,\"total_msg_count\":7,\"extra_update_at\":0,\"creator_id\":\"\",\"scheme_id\":null,\"props\":null,\"group_constrained\":null,\"autotranslation\":false,\"shared\":null,\"total_msg_count_root\":0,\"policy_id\":null,\"last_root_post_at\":0,\"banner_info\":null,\"policy_enforced\":false,\"policy_is_active\":false,\"default_category_name\":\"\",\"managed_category_name\":\"\",\"discoverable\":false},\"member\":null}",
+            "member_nil": true,
+            "name": "empty_id",
+            "panicked": false
+        }
+    ],
+    "etag_parts": [
+        {
+            "differs_from_baseline": false,
+            "etag": "11.11.0.qr6kf7ztp7yifxt4wm5xn51bke.200.300.500",
+            "in": "{\"channel\":{\"id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"create_at\":100,\"update_at\":200,\"delete_at\":0,\"team_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"type\":\"O\",\"display_name\":\"Town Square\",\"name\":\"town-square\",\"header\":\"h\",\"purpose\":\"p\",\"last_post_at\":300,\"total_msg_count\":7,\"extra_update_at\":0,\"creator_id\":\"\",\"scheme_id\":null,\"props\":null,\"group_constrained\":null,\"autotranslation\":false,\"shared\":null,\"total_msg_count_root\":0,\"policy_id\":null,\"last_root_post_at\":0,\"banner_info\":null,\"policy_enforced\":false,\"policy_is_active\":false,\"default_category_name\":\"\",\"managed_category_name\":\"\",\"discoverable\":false},\"member\":{\"channel_id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"user_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"roles\":\"channel_user\",\"last_viewed_at\":400,\"msg_count\":5,\"mention_count\":1,\"mention_count_root\":0,\"urgent_mention_count\":0,\"msg_count_root\":0,\"notify_props\":{\"desktop\":\"default\",\"mark_unread\":\"all\"},\"last_update_at\":500,\"scheme_guest\":false,\"scheme_user\":true,\"scheme_admin\":false,\"explicit_roles\":\"\",\"autotranslation_disabled\":false}}",
+            "name": "baseline",
+            "panicked": false
+        },
+        {
+            "differs_from_baseline": true,
+            "etag": "11.11.0.CHANGED.200.300.500",
+            "in": "{\"channel\":{\"id\":\"CHANGED\",\"create_at\":100,\"update_at\":200,\"delete_at\":0,\"team_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"type\":\"O\",\"display_name\":\"Town Square\",\"name\":\"town-square\",\"header\":\"h\",\"purpose\":\"p\",\"last_post_at\":300,\"total_msg_count\":7,\"extra_update_at\":0,\"creator_id\":\"\",\"scheme_id\":null,\"props\":null,\"group_constrained\":null,\"autotranslation\":false,\"shared\":null,\"total_msg_count_root\":0,\"policy_id\":null,\"last_root_post_at\":0,\"banner_info\":null,\"policy_enforced\":false,\"policy_is_active\":false,\"default_category_name\":\"\",\"managed_category_name\":\"\",\"discoverable\":false},\"member\":{\"channel_id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"user_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"roles\":\"channel_user\",\"last_viewed_at\":400,\"msg_count\":5,\"mention_count\":1,\"mention_count_root\":0,\"urgent_mention_count\":0,\"msg_count_root\":0,\"notify_props\":{\"desktop\":\"default\",\"mark_unread\":\"all\"},\"last_update_at\":500,\"scheme_guest\":false,\"scheme_user\":true,\"scheme_admin\":false,\"explicit_roles\":\"\",\"autotranslation_disabled\":false}}",
+            "name": "channel_id",
+            "panicked": false
+        },
+        {
+            "differs_from_baseline": true,
+            "etag": "11.11.0.qr6kf7ztp7yifxt4wm5xn51bke.999.300.500",
+            "in": "{\"channel\":{\"id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"create_at\":100,\"update_at\":999,\"delete_at\":0,\"team_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"type\":\"O\",\"display_name\":\"Town Square\",\"name\":\"town-square\",\"header\":\"h\",\"purpose\":\"p\",\"last_post_at\":300,\"total_msg_count\":7,\"extra_update_at\":0,\"creator_id\":\"\",\"scheme_id\":null,\"props\":null,\"group_constrained\":null,\"autotranslation\":false,\"shared\":null,\"total_msg_count_root\":0,\"policy_id\":null,\"last_root_post_at\":0,\"banner_info\":null,\"policy_enforced\":false,\"policy_is_active\":false,\"default_category_name\":\"\",\"managed_category_name\":\"\",\"discoverable\":false},\"member\":{\"channel_id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"user_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"roles\":\"channel_user\",\"last_viewed_at\":400,\"msg_count\":5,\"mention_count\":1,\"mention_count_root\":0,\"urgent_mention_count\":0,\"msg_count_root\":0,\"notify_props\":{\"desktop\":\"default\",\"mark_unread\":\"all\"},\"last_update_at\":500,\"scheme_guest\":false,\"scheme_user\":true,\"scheme_admin\":false,\"explicit_roles\":\"\",\"autotranslation_disabled\":false}}",
+            "name": "channel_update_at",
+            "panicked": false
+        },
+        {
+            "differs_from_baseline": true,
+            "etag": "11.11.0.qr6kf7ztp7yifxt4wm5xn51bke.200.999.500",
+            "in": "{\"channel\":{\"id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"create_at\":100,\"update_at\":200,\"delete_at\":0,\"team_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"type\":\"O\",\"display_name\":\"Town Square\",\"name\":\"town-square\",\"header\":\"h\",\"purpose\":\"p\",\"last_post_at\":999,\"total_msg_count\":7,\"extra_update_at\":0,\"creator_id\":\"\",\"scheme_id\":null,\"props\":null,\"group_constrained\":null,\"autotranslation\":false,\"shared\":null,\"total_msg_count_root\":0,\"policy_id\":null,\"last_root_post_at\":0,\"banner_info\":null,\"policy_enforced\":false,\"policy_is_active\":false,\"default_category_name\":\"\",\"managed_category_name\":\"\",\"discoverable\":false},\"member\":{\"channel_id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"user_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"roles\":\"channel_user\",\"last_viewed_at\":400,\"msg_count\":5,\"mention_count\":1,\"mention_count_root\":0,\"urgent_mention_count\":0,\"msg_count_root\":0,\"notify_props\":{\"desktop\":\"default\",\"mark_unread\":\"all\"},\"last_update_at\":500,\"scheme_guest\":false,\"scheme_user\":true,\"scheme_admin\":false,\"explicit_roles\":\"\",\"autotranslation_disabled\":false}}",
+            "name": "channel_last_post_at",
+            "panicked": false
+        },
+        {
+            "differs_from_baseline": true,
+            "etag": "11.11.0.qr6kf7ztp7yifxt4wm5xn51bke.200.300.999",
+            "in": "{\"channel\":{\"id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"create_at\":100,\"update_at\":200,\"delete_at\":0,\"team_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"type\":\"O\",\"display_name\":\"Town Square\",\"name\":\"town-square\",\"header\":\"h\",\"purpose\":\"p\",\"last_post_at\":300,\"total_msg_count\":7,\"extra_update_at\":0,\"creator_id\":\"\",\"scheme_id\":null,\"props\":null,\"group_constrained\":null,\"autotranslation\":false,\"shared\":null,\"total_msg_count_root\":0,\"policy_id\":null,\"last_root_post_at\":0,\"banner_info\":null,\"policy_enforced\":false,\"policy_is_active\":false,\"default_category_name\":\"\",\"managed_category_name\":\"\",\"discoverable\":false},\"member\":{\"channel_id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"user_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"roles\":\"channel_user\",\"last_viewed_at\":400,\"msg_count\":5,\"mention_count\":1,\"mention_count_root\":0,\"urgent_mention_count\":0,\"msg_count_root\":0,\"notify_props\":{\"desktop\":\"default\",\"mark_unread\":\"all\"},\"last_update_at\":999,\"scheme_guest\":false,\"scheme_user\":true,\"scheme_admin\":false,\"explicit_roles\":\"\",\"autotranslation_disabled\":false}}",
+            "name": "member_last_update_at",
+            "panicked": false
+        },
+        {
+            "differs_from_baseline": false,
+            "etag": "11.11.0.qr6kf7ztp7yifxt4wm5xn51bke.200.300.500",
+            "in": "{\"channel\":{\"id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"create_at\":100,\"update_at\":200,\"delete_at\":0,\"team_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"type\":\"O\",\"display_name\":\"Town Square\",\"name\":\"town-square\",\"header\":\"h\",\"purpose\":\"p\",\"last_post_at\":300,\"total_msg_count\":7,\"extra_update_at\":0,\"creator_id\":\"\",\"scheme_id\":null,\"props\":null,\"group_constrained\":null,\"autotranslation\":false,\"shared\":null,\"total_msg_count_root\":0,\"policy_id\":null,\"last_root_post_at\":0,\"banner_info\":null,\"policy_enforced\":false,\"policy_is_active\":false,\"default_category_name\":\"\",\"managed_category_name\":\"\",\"discoverable\":false},\"member\":{\"channel_id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"user_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"roles\":\"channel_admin\",\"last_viewed_at\":400,\"msg_count\":5,\"mention_count\":1,\"mention_count_root\":0,\"urgent_mention_count\":0,\"msg_count_root\":0,\"notify_props\":{\"desktop\":\"default\",\"mark_unread\":\"all\"},\"last_update_at\":500,\"scheme_guest\":false,\"scheme_user\":true,\"scheme_admin\":false,\"explicit_roles\":\"\",\"autotranslation_disabled\":false}}",
+            "name": "member_roles",
+            "panicked": false
+        },
+        {
+            "differs_from_baseline": false,
+            "etag": "11.11.0.qr6kf7ztp7yifxt4wm5xn51bke.200.300.500",
+            "in": "{\"channel\":{\"id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"create_at\":100,\"update_at\":200,\"delete_at\":0,\"team_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"type\":\"O\",\"display_name\":\"Town Square\",\"name\":\"town-square\",\"header\":\"h\",\"purpose\":\"p\",\"last_post_at\":300,\"total_msg_count\":7,\"extra_update_at\":0,\"creator_id\":\"\",\"scheme_id\":null,\"props\":null,\"group_constrained\":null,\"autotranslation\":false,\"shared\":null,\"total_msg_count_root\":0,\"policy_id\":null,\"last_root_post_at\":0,\"banner_info\":null,\"policy_enforced\":false,\"policy_is_active\":false,\"default_category_name\":\"\",\"managed_category_name\":\"\",\"discoverable\":false},\"member\":{\"channel_id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"user_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"roles\":\"channel_user\",\"last_viewed_at\":9999,\"msg_count\":5,\"mention_count\":1,\"mention_count_root\":0,\"urgent_mention_count\":0,\"msg_count_root\":0,\"notify_props\":{\"desktop\":\"default\",\"mark_unread\":\"all\"},\"last_update_at\":500,\"scheme_guest\":false,\"scheme_user\":true,\"scheme_admin\":false,\"explicit_roles\":\"\",\"autotranslation_disabled\":false}}",
+            "name": "member_last_viewed_at",
+            "panicked": false
+        },
+        {
+            "differs_from_baseline": false,
+            "etag": "11.11.0.qr6kf7ztp7yifxt4wm5xn51bke.200.300.500",
+            "in": "{\"channel\":{\"id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"create_at\":100,\"update_at\":200,\"delete_at\":0,\"team_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"type\":\"O\",\"display_name\":\"Town Square\",\"name\":\"town-square\",\"header\":\"h\",\"purpose\":\"p\",\"last_post_at\":300,\"total_msg_count\":7,\"extra_update_at\":0,\"creator_id\":\"\",\"scheme_id\":null,\"props\":null,\"group_constrained\":null,\"autotranslation\":false,\"shared\":null,\"total_msg_count_root\":0,\"policy_id\":null,\"last_root_post_at\":0,\"banner_info\":null,\"policy_enforced\":false,\"policy_is_active\":false,\"default_category_name\":\"\",\"managed_category_name\":\"\",\"discoverable\":false},\"member\":{\"channel_id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"user_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"roles\":\"channel_user\",\"last_viewed_at\":400,\"msg_count\":9999,\"mention_count\":1,\"mention_count_root\":0,\"urgent_mention_count\":0,\"msg_count_root\":0,\"notify_props\":{\"desktop\":\"default\",\"mark_unread\":\"all\"},\"last_update_at\":500,\"scheme_guest\":false,\"scheme_user\":true,\"scheme_admin\":false,\"explicit_roles\":\"\",\"autotranslation_disabled\":false}}",
+            "name": "member_msg_count",
+            "panicked": false
+        },
+        {
+            "differs_from_baseline": false,
+            "etag": "11.11.0.qr6kf7ztp7yifxt4wm5xn51bke.200.300.500",
+            "in": "{\"channel\":{\"id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"create_at\":100,\"update_at\":200,\"delete_at\":0,\"team_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"type\":\"O\",\"display_name\":\"Town Square\",\"name\":\"town-square\",\"header\":\"h\",\"purpose\":\"p\",\"last_post_at\":300,\"total_msg_count\":7,\"extra_update_at\":0,\"creator_id\":\"\",\"scheme_id\":null,\"props\":null,\"group_constrained\":null,\"autotranslation\":false,\"shared\":null,\"total_msg_count_root\":0,\"policy_id\":null,\"last_root_post_at\":0,\"banner_info\":null,\"policy_enforced\":false,\"policy_is_active\":false,\"default_category_name\":\"\",\"managed_category_name\":\"\",\"discoverable\":false},\"member\":{\"channel_id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"user_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"roles\":\"channel_user\",\"last_viewed_at\":400,\"msg_count\":5,\"mention_count\":9999,\"mention_count_root\":0,\"urgent_mention_count\":0,\"msg_count_root\":0,\"notify_props\":{\"desktop\":\"default\",\"mark_unread\":\"all\"},\"last_update_at\":500,\"scheme_guest\":false,\"scheme_user\":true,\"scheme_admin\":false,\"explicit_roles\":\"\",\"autotranslation_disabled\":false}}",
+            "name": "member_mention_count",
+            "panicked": false
+        },
+        {
+            "differs_from_baseline": false,
+            "etag": "11.11.0.qr6kf7ztp7yifxt4wm5xn51bke.200.300.500",
+            "in": "{\"channel\":{\"id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"create_at\":100,\"update_at\":200,\"delete_at\":0,\"team_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"type\":\"O\",\"display_name\":\"Town Square\",\"name\":\"town-square\",\"header\":\"h\",\"purpose\":\"p\",\"last_post_at\":300,\"total_msg_count\":7,\"extra_update_at\":0,\"creator_id\":\"\",\"scheme_id\":null,\"props\":null,\"group_constrained\":null,\"autotranslation\":false,\"shared\":null,\"total_msg_count_root\":0,\"policy_id\":null,\"last_root_post_at\":0,\"banner_info\":null,\"policy_enforced\":false,\"policy_is_active\":false,\"default_category_name\":\"\",\"managed_category_name\":\"\",\"discoverable\":false},\"member\":{\"channel_id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"user_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"roles\":\"channel_user\",\"last_viewed_at\":400,\"msg_count\":5,\"mention_count\":1,\"mention_count_root\":0,\"urgent_mention_count\":0,\"msg_count_root\":0,\"notify_props\":{\"desktop\":\"none\"},\"last_update_at\":500,\"scheme_guest\":false,\"scheme_user\":true,\"scheme_admin\":false,\"explicit_roles\":\"\",\"autotranslation_disabled\":false}}",
+            "name": "member_notify_props",
+            "panicked": false
+        },
+        {
+            "differs_from_baseline": false,
+            "etag": "11.11.0.qr6kf7ztp7yifxt4wm5xn51bke.200.300.500",
+            "in": "{\"channel\":{\"id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"create_at\":100,\"update_at\":200,\"delete_at\":0,\"team_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"type\":\"O\",\"display_name\":\"CHANGED\",\"name\":\"town-square\",\"header\":\"h\",\"purpose\":\"p\",\"last_post_at\":300,\"total_msg_count\":7,\"extra_update_at\":0,\"creator_id\":\"\",\"scheme_id\":null,\"props\":null,\"group_constrained\":null,\"autotranslation\":false,\"shared\":null,\"total_msg_count_root\":0,\"policy_id\":null,\"last_root_post_at\":0,\"banner_info\":null,\"policy_enforced\":false,\"policy_is_active\":false,\"default_category_name\":\"\",\"managed_category_name\":\"\",\"discoverable\":false},\"member\":{\"channel_id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"user_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"roles\":\"channel_user\",\"last_viewed_at\":400,\"msg_count\":5,\"mention_count\":1,\"mention_count_root\":0,\"urgent_mention_count\":0,\"msg_count_root\":0,\"notify_props\":{\"desktop\":\"default\",\"mark_unread\":\"all\"},\"last_update_at\":500,\"scheme_guest\":false,\"scheme_user\":true,\"scheme_admin\":false,\"explicit_roles\":\"\",\"autotranslation_disabled\":false}}",
+            "name": "channel_display_name",
+            "panicked": false
+        },
+        {
+            "differs_from_baseline": false,
+            "etag": "11.11.0.qr6kf7ztp7yifxt4wm5xn51bke.200.300.500",
+            "in": "{\"channel\":{\"id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"create_at\":100,\"update_at\":200,\"delete_at\":0,\"team_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"type\":\"O\",\"display_name\":\"Town Square\",\"name\":\"town-square\",\"header\":\"h\",\"purpose\":\"p\",\"last_post_at\":300,\"total_msg_count\":9999,\"extra_update_at\":0,\"creator_id\":\"\",\"scheme_id\":null,\"props\":null,\"group_constrained\":null,\"autotranslation\":false,\"shared\":null,\"total_msg_count_root\":0,\"policy_id\":null,\"last_root_post_at\":0,\"banner_info\":null,\"policy_enforced\":false,\"policy_is_active\":false,\"default_category_name\":\"\",\"managed_category_name\":\"\",\"discoverable\":false},\"member\":{\"channel_id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"user_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"roles\":\"channel_user\",\"last_viewed_at\":400,\"msg_count\":5,\"mention_count\":1,\"mention_count_root\":0,\"urgent_mention_count\":0,\"msg_count_root\":0,\"notify_props\":{\"desktop\":\"default\",\"mark_unread\":\"all\"},\"last_update_at\":500,\"scheme_guest\":false,\"scheme_user\":true,\"scheme_admin\":false,\"explicit_roles\":\"\",\"autotranslation_disabled\":false}}",
+            "name": "channel_total_msg_count",
+            "panicked": false
+        },
+        {
+            "differs_from_baseline": false,
+            "etag": "11.11.0.qr6kf7ztp7yifxt4wm5xn51bke.200.300.500",
+            "in": "{\"channel\":{\"id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"create_at\":100,\"update_at\":200,\"delete_at\":9999,\"team_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"type\":\"O\",\"display_name\":\"Town Square\",\"name\":\"town-square\",\"header\":\"h\",\"purpose\":\"p\",\"last_post_at\":300,\"total_msg_count\":7,\"extra_update_at\":0,\"creator_id\":\"\",\"scheme_id\":null,\"props\":null,\"group_constrained\":null,\"autotranslation\":false,\"shared\":null,\"total_msg_count_root\":0,\"policy_id\":null,\"last_root_post_at\":0,\"banner_info\":null,\"policy_enforced\":false,\"policy_is_active\":false,\"default_category_name\":\"\",\"managed_category_name\":\"\",\"discoverable\":false},\"member\":{\"channel_id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"user_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"roles\":\"channel_user\",\"last_viewed_at\":400,\"msg_count\":5,\"mention_count\":1,\"mention_count_root\":0,\"urgent_mention_count\":0,\"msg_count_root\":0,\"notify_props\":{\"desktop\":\"default\",\"mark_unread\":\"all\"},\"last_update_at\":500,\"scheme_guest\":false,\"scheme_user\":true,\"scheme_admin\":false,\"explicit_roles\":\"\",\"autotranslation_disabled\":false}}",
+            "name": "channel_delete_at",
+            "panicked": false
+        },
+        {
+            "differs_from_baseline": false,
+            "etag": "11.11.0.qr6kf7ztp7yifxt4wm5xn51bke.200.300.500",
+            "in": "{\"channel\":{\"id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"create_at\":9999,\"update_at\":200,\"delete_at\":0,\"team_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"type\":\"O\",\"display_name\":\"Town Square\",\"name\":\"town-square\",\"header\":\"h\",\"purpose\":\"p\",\"last_post_at\":300,\"total_msg_count\":7,\"extra_update_at\":0,\"creator_id\":\"\",\"scheme_id\":null,\"props\":null,\"group_constrained\":null,\"autotranslation\":false,\"shared\":null,\"total_msg_count_root\":0,\"policy_id\":null,\"last_root_post_at\":0,\"banner_info\":null,\"policy_enforced\":false,\"policy_is_active\":false,\"default_category_name\":\"\",\"managed_category_name\":\"\",\"discoverable\":false},\"member\":{\"channel_id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"user_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"roles\":\"channel_user\",\"last_viewed_at\":400,\"msg_count\":5,\"mention_count\":1,\"mention_count_root\":0,\"urgent_mention_count\":0,\"msg_count_root\":0,\"notify_props\":{\"desktop\":\"default\",\"mark_unread\":\"all\"},\"last_update_at\":500,\"scheme_guest\":false,\"scheme_user\":true,\"scheme_admin\":false,\"explicit_roles\":\"\",\"autotranslation_disabled\":false}}",
+            "name": "channel_create_at",
+            "panicked": false
+        }
+    ],
+    "wire": [
+        {
+            "in": "{\"channel\":null,\"member\":null}",
+            "name": "zero",
+            "out": {
+                "channel_nil": true,
+                "json": "{\"channel\":null,\"member\":null}",
+                "member_nil": true
+            },
+            "panicked": false
+        },
+        {
+            "in": "{\"channel\":{\"id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"create_at\":100,\"update_at\":200,\"delete_at\":0,\"team_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"type\":\"O\",\"display_name\":\"Town Square\",\"name\":\"town-square\",\"header\":\"h\",\"purpose\":\"p\",\"last_post_at\":300,\"total_msg_count\":7,\"extra_update_at\":0,\"creator_id\":\"\",\"scheme_id\":null,\"props\":null,\"group_constrained\":null,\"autotranslation\":false,\"shared\":null,\"total_msg_count_root\":0,\"policy_id\":null,\"last_root_post_at\":0,\"banner_info\":null,\"policy_enforced\":false,\"policy_is_active\":false,\"default_category_name\":\"\",\"managed_category_name\":\"\",\"discoverable\":false},\"member\":null}",
+            "name": "channel_only",
+            "out": {
+                "channel_nil": false,
+                "json": "{\"channel\":{\"id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"create_at\":100,\"update_at\":200,\"delete_at\":0,\"team_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"type\":\"O\",\"display_name\":\"Town Square\",\"name\":\"town-square\",\"header\":\"h\",\"purpose\":\"p\",\"last_post_at\":300,\"total_msg_count\":7,\"extra_update_at\":0,\"creator_id\":\"\",\"scheme_id\":null,\"props\":null,\"group_constrained\":null,\"autotranslation\":false,\"shared\":null,\"total_msg_count_root\":0,\"policy_id\":null,\"last_root_post_at\":0,\"banner_info\":null,\"policy_enforced\":false,\"policy_is_active\":false,\"default_category_name\":\"\",\"managed_category_name\":\"\",\"discoverable\":false},\"member\":null}",
+                "member_nil": true
+            },
+            "panicked": false
+        },
+        {
+            "in": "{\"channel\":null,\"member\":{\"channel_id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"user_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"roles\":\"channel_user\",\"last_viewed_at\":400,\"msg_count\":5,\"mention_count\":1,\"mention_count_root\":0,\"urgent_mention_count\":0,\"msg_count_root\":0,\"notify_props\":{\"desktop\":\"default\",\"mark_unread\":\"all\"},\"last_update_at\":500,\"scheme_guest\":false,\"scheme_user\":true,\"scheme_admin\":false,\"explicit_roles\":\"\",\"autotranslation_disabled\":false}}",
+            "name": "member_only",
+            "out": {
+                "channel_nil": true,
+                "json": "{\"channel\":null,\"member\":{\"channel_id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"user_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"roles\":\"channel_user\",\"last_viewed_at\":400,\"msg_count\":5,\"mention_count\":1,\"mention_count_root\":0,\"urgent_mention_count\":0,\"msg_count_root\":0,\"notify_props\":{\"desktop\":\"default\",\"mark_unread\":\"all\"},\"last_update_at\":500,\"scheme_guest\":false,\"scheme_user\":true,\"scheme_admin\":false,\"explicit_roles\":\"\",\"autotranslation_disabled\":false}}",
+                "member_nil": false
+            },
+            "panicked": false
+        },
+        {
+            "in": "{\"channel\":{\"id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"create_at\":100,\"update_at\":200,\"delete_at\":0,\"team_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"type\":\"O\",\"display_name\":\"Town Square\",\"name\":\"town-square\",\"header\":\"h\",\"purpose\":\"p\",\"last_post_at\":300,\"total_msg_count\":7,\"extra_update_at\":0,\"creator_id\":\"\",\"scheme_id\":null,\"props\":null,\"group_constrained\":null,\"autotranslation\":false,\"shared\":null,\"total_msg_count_root\":0,\"policy_id\":null,\"last_root_post_at\":0,\"banner_info\":null,\"policy_enforced\":false,\"policy_is_active\":false,\"default_category_name\":\"\",\"managed_category_name\":\"\",\"discoverable\":false},\"member\":{\"channel_id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"user_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"roles\":\"channel_user\",\"last_viewed_at\":400,\"msg_count\":5,\"mention_count\":1,\"mention_count_root\":0,\"urgent_mention_count\":0,\"msg_count_root\":0,\"notify_props\":{\"desktop\":\"default\",\"mark_unread\":\"all\"},\"last_update_at\":500,\"scheme_guest\":false,\"scheme_user\":true,\"scheme_admin\":false,\"explicit_roles\":\"\",\"autotranslation_disabled\":false}}",
+            "name": "both",
+            "out": {
+                "channel_nil": false,
+                "json": "{\"channel\":{\"id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"create_at\":100,\"update_at\":200,\"delete_at\":0,\"team_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"type\":\"O\",\"display_name\":\"Town Square\",\"name\":\"town-square\",\"header\":\"h\",\"purpose\":\"p\",\"last_post_at\":300,\"total_msg_count\":7,\"extra_update_at\":0,\"creator_id\":\"\",\"scheme_id\":null,\"props\":null,\"group_constrained\":null,\"autotranslation\":false,\"shared\":null,\"total_msg_count_root\":0,\"policy_id\":null,\"last_root_post_at\":0,\"banner_info\":null,\"policy_enforced\":false,\"policy_is_active\":false,\"default_category_name\":\"\",\"managed_category_name\":\"\",\"discoverable\":false},\"member\":{\"channel_id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"user_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"roles\":\"channel_user\",\"last_viewed_at\":400,\"msg_count\":5,\"mention_count\":1,\"mention_count_root\":0,\"urgent_mention_count\":0,\"msg_count_root\":0,\"notify_props\":{\"desktop\":\"default\",\"mark_unread\":\"all\"},\"last_update_at\":500,\"scheme_guest\":false,\"scheme_user\":true,\"scheme_admin\":false,\"explicit_roles\":\"\",\"autotranslation_disabled\":false}}",
+                "member_nil": false
+            },
+            "panicked": false
+        },
+        {
+            "in": "{\"channel\":{\"id\":\"\",\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"team_id\":\"\",\"type\":\"\",\"display_name\":\"\",\"name\":\"\",\"header\":\"\",\"purpose\":\"\",\"last_post_at\":0,\"total_msg_count\":0,\"extra_update_at\":0,\"creator_id\":\"\",\"scheme_id\":null,\"props\":null,\"group_constrained\":null,\"autotranslation\":false,\"shared\":null,\"total_msg_count_root\":0,\"policy_id\":null,\"last_root_post_at\":0,\"banner_info\":null,\"policy_enforced\":false,\"policy_is_active\":false,\"default_category_name\":\"\",\"managed_category_name\":\"\",\"discoverable\":false},\"member\":{\"channel_id\":\"\",\"user_id\":\"\",\"roles\":\"\",\"last_viewed_at\":0,\"msg_count\":0,\"mention_count\":0,\"mention_count_root\":0,\"urgent_mention_count\":0,\"msg_count_root\":0,\"notify_props\":null,\"last_update_at\":0,\"scheme_guest\":false,\"scheme_user\":false,\"scheme_admin\":false,\"explicit_roles\":\"\",\"autotranslation_disabled\":false}}",
+            "name": "zero_objects",
+            "out": {
+                "channel_nil": false,
+                "json": "{\"channel\":{\"id\":\"\",\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"team_id\":\"\",\"type\":\"\",\"display_name\":\"\",\"name\":\"\",\"header\":\"\",\"purpose\":\"\",\"last_post_at\":0,\"total_msg_count\":0,\"extra_update_at\":0,\"creator_id\":\"\",\"scheme_id\":null,\"props\":null,\"group_constrained\":null,\"autotranslation\":false,\"shared\":null,\"total_msg_count_root\":0,\"policy_id\":null,\"last_root_post_at\":0,\"banner_info\":null,\"policy_enforced\":false,\"policy_is_active\":false,\"default_category_name\":\"\",\"managed_category_name\":\"\",\"discoverable\":false},\"member\":{\"channel_id\":\"\",\"user_id\":\"\",\"roles\":\"\",\"last_viewed_at\":0,\"msg_count\":0,\"mention_count\":0,\"mention_count_root\":0,\"urgent_mention_count\":0,\"msg_count_root\":0,\"notify_props\":null,\"last_update_at\":0,\"scheme_guest\":false,\"scheme_user\":false,\"scheme_admin\":false,\"explicit_roles\":\"\",\"autotranslation_disabled\":false}}",
+                "member_nil": false
+            },
+            "panicked": false
+        },
+        {
+            "in": "{\"channel\":{\"id\":\"\",\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"team_id\":\"\",\"type\":\"\",\"display_name\":\"\",\"name\":\"\",\"header\":\"\",\"purpose\":\"\",\"last_post_at\":0,\"total_msg_count\":0,\"extra_update_at\":0,\"creator_id\":\"\",\"scheme_id\":null,\"props\":null,\"group_constrained\":null,\"autotranslation\":false,\"shared\":null,\"total_msg_count_root\":0,\"policy_id\":null,\"last_root_post_at\":0,\"banner_info\":null,\"policy_enforced\":false,\"policy_is_active\":false,\"default_category_name\":\"\",\"managed_category_name\":\"\",\"discoverable\":false},\"member\":{\"channel_id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"user_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"roles\":\"channel_user\",\"last_viewed_at\":400,\"msg_count\":5,\"mention_count\":1,\"mention_count_root\":0,\"urgent_mention_count\":0,\"msg_count_root\":0,\"notify_props\":{\"desktop\":\"default\",\"mark_unread\":\"all\"},\"last_update_at\":500,\"scheme_guest\":false,\"scheme_user\":true,\"scheme_admin\":false,\"explicit_roles\":\"\",\"autotranslation_disabled\":false}}",
+            "name": "zero_channel_real_member",
+            "out": {
+                "channel_nil": false,
+                "json": "{\"channel\":{\"id\":\"\",\"create_at\":0,\"update_at\":0,\"delete_at\":0,\"team_id\":\"\",\"type\":\"\",\"display_name\":\"\",\"name\":\"\",\"header\":\"\",\"purpose\":\"\",\"last_post_at\":0,\"total_msg_count\":0,\"extra_update_at\":0,\"creator_id\":\"\",\"scheme_id\":null,\"props\":null,\"group_constrained\":null,\"autotranslation\":false,\"shared\":null,\"total_msg_count_root\":0,\"policy_id\":null,\"last_root_post_at\":0,\"banner_info\":null,\"policy_enforced\":false,\"policy_is_active\":false,\"default_category_name\":\"\",\"managed_category_name\":\"\",\"discoverable\":false},\"member\":{\"channel_id\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"user_id\":\"6bdz674pgq767e4jx75w4pf57a\",\"roles\":\"channel_user\",\"last_viewed_at\":400,\"msg_count\":5,\"mention_count\":1,\"mention_count_root\":0,\"urgent_mention_count\":0,\"msg_count_root\":0,\"notify_props\":{\"desktop\":\"default\",\"mark_unread\":\"all\"},\"last_update_at\":500,\"scheme_guest\":false,\"scheme_user\":true,\"scheme_admin\":false,\"explicit_roles\":\"\",\"autotranslation_disabled\":false}}",
+                "member_nil": false
+            },
+            "panicked": false
+        }
+    ]
+}

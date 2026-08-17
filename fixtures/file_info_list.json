@@ -1,0 +1,30 @@
+{
+    "order": [
+        "order-d00b77",
+        "order-cfed86"
+    ],
+    "file_infos": {
+        "key0-3b638c": {
+            "id": "xqsticgqu1t5u1fmdkac7g7dzr",
+            "user_id": "arykn9dou4gdgdz9wb68b8ccgc",
+            "post_id": "6gjhw7eskctxqxw13j4tcwtn6h",
+            "channel_id": "mmmxsg5eybgahdqa9cpsoykpta",
+            "create_at": 1701415184000,
+            "update_at": 1707768081000,
+            "delete_at": 1701115247000,
+            "name": "name-494184",
+            "extension": "extension-4a4fbc",
+            "size": 65,
+            "mime_type": "mimetype-f915a6",
+            "width": 48,
+            "height": 79,
+            "has_preview_image": true,
+            "mini_preview": "Ynl0ZXMtbWluaXByZXZpZXc=",
+            "remote_id": "ewu6ttdrhoijtrtf7dngja3kuy",
+            "archived": true
+        }
+    },
+    "next_file_info_id": "55maj6iqg71c9rq3ou7khqdr3h",
+    "prev_file_info_id": "xkyzu8g97ogz6mcdxgqp95epxh",
+    "first_inaccessible_file_time": 22
+}

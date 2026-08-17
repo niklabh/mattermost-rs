@@ -1,0 +1,277 @@
+{
+    "history_keys": [
+        "ChannelId",
+        "UserId",
+        "JoinTime",
+        "LeaveTime"
+    ],
+    "history_wire": [
+        {
+            "json": "{\"ChannelId\":\"\",\"UserId\":\"\",\"JoinTime\":0,\"LeaveTime\":null}",
+            "leave_time_nil": true,
+            "name": "zero",
+            "panicked": false
+        },
+        {
+            "json": "{\"ChannelId\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"UserId\":\"6bdz674pgq767e4jx75w4pf57a\",\"JoinTime\":1700000000000,\"LeaveTime\":null}",
+            "leave_time_nil": true,
+            "name": "still_present",
+            "panicked": false
+        },
+        {
+            "json": "{\"ChannelId\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"UserId\":\"6bdz674pgq767e4jx75w4pf57a\",\"JoinTime\":1700000000000,\"LeaveTime\":1700000060000}",
+            "leave_time_nil": false,
+            "name": "left",
+            "panicked": false
+        },
+        {
+            "json": "{\"ChannelId\":\"\",\"UserId\":\"\",\"JoinTime\":1,\"LeaveTime\":0}",
+            "leave_time_nil": false,
+            "name": "left_at_zero",
+            "panicked": false
+        },
+        {
+            "json": "{\"ChannelId\":\"\",\"UserId\":\"\",\"JoinTime\":-1,\"LeaveTime\":-2}",
+            "leave_time_nil": false,
+            "name": "negative_times",
+            "panicked": false
+        },
+        {
+            "json": "{\"ChannelId\":\"\",\"UserId\":\"\",\"JoinTime\":-9223372036854775808,\"LeaveTime\":9223372036854775807}",
+            "leave_time_nil": false,
+            "name": "int64_bounds",
+            "panicked": false
+        },
+        {
+            "json": "{\"ChannelId\":\"\\u003ca\\u003e\\u0026b\",\"UserId\":\"c\\u2028d\",\"JoinTime\":0,\"LeaveTime\":null}",
+            "leave_time_nil": true,
+            "name": "escaped",
+            "panicked": false
+        }
+    ],
+    "key_casing_decode": [
+        {
+            "channel_id": "c1",
+            "in": "{\"ChannelId\":\"c1\",\"JoinTime\":100}",
+            "key": "ChannelId",
+            "name": "declared",
+            "ok": true,
+            "panicked": false,
+            "populated": true
+        },
+        {
+            "channel_id": "",
+            "in": "{\"channel_id\":\"c1\",\"JoinTime\":100}",
+            "key": "channel_id",
+            "name": "snake_case",
+            "ok": true,
+            "panicked": false,
+            "populated": false
+        },
+        {
+            "channel_id": "c1",
+            "in": "{\"channelid\":\"c1\",\"JoinTime\":100}",
+            "key": "channelid",
+            "name": "lowercase",
+            "ok": true,
+            "panicked": false,
+            "populated": true
+        },
+        {
+            "channel_id": "c1",
+            "in": "{\"CHANNELID\":\"c1\",\"JoinTime\":100}",
+            "key": "CHANNELID",
+            "name": "uppercase",
+            "ok": true,
+            "panicked": false,
+            "populated": true
+        },
+        {
+            "channel_id": "c1",
+            "in": "{\"cHaNnElId\":\"c1\",\"JoinTime\":100}",
+            "key": "cHaNnElId",
+            "name": "mixed",
+            "ok": true,
+            "panicked": false,
+            "populated": true
+        },
+        {
+            "channel_id": "",
+            "in": "{\"channel-id\":\"c1\",\"JoinTime\":100}",
+            "key": "channel-id",
+            "name": "hyphenated",
+            "ok": true,
+            "panicked": false,
+            "populated": false
+        }
+    ],
+    "leave_time_decode": [
+        {
+            "err": null,
+            "in": "{\"ChannelId\":\"c1\",\"UserId\":\"u1\",\"JoinTime\":100,\"LeaveTime\":1700000060000}",
+            "join_time_after": 100,
+            "json_after": "{\"ChannelId\":\"c1\",\"UserId\":\"u1\",\"JoinTime\":100,\"LeaveTime\":1700000060000}",
+            "leave_time": 1700000060000,
+            "leave_time_nil": false,
+            "name": "integer",
+            "ok": true,
+            "panicked": false,
+            "raw": "1700000060000"
+        },
+        {
+            "err": null,
+            "in": "{\"ChannelId\":\"c1\",\"UserId\":\"u1\",\"JoinTime\":100,\"LeaveTime\":0}",
+            "join_time_after": 100,
+            "json_after": "{\"ChannelId\":\"c1\",\"UserId\":\"u1\",\"JoinTime\":100,\"LeaveTime\":0}",
+            "leave_time": 0,
+            "leave_time_nil": false,
+            "name": "zero",
+            "ok": true,
+            "panicked": false,
+            "raw": "0"
+        },
+        {
+            "err": null,
+            "in": "{\"ChannelId\":\"c1\",\"UserId\":\"u1\",\"JoinTime\":100,\"LeaveTime\":-1}",
+            "join_time_after": 100,
+            "json_after": "{\"ChannelId\":\"c1\",\"UserId\":\"u1\",\"JoinTime\":100,\"LeaveTime\":-1}",
+            "leave_time": -1,
+            "leave_time_nil": false,
+            "name": "negative",
+            "ok": true,
+            "panicked": false,
+            "raw": "-1"
+        },
+        {
+            "err": null,
+            "in": "{\"ChannelId\":\"c1\",\"UserId\":\"u1\",\"JoinTime\":100,\"LeaveTime\":null}",
+            "join_time_after": 100,
+            "json_after": "{\"ChannelId\":\"c1\",\"UserId\":\"u1\",\"JoinTime\":100,\"LeaveTime\":null}",
+            "leave_time_nil": true,
+            "name": "null",
+            "ok": true,
+            "panicked": false,
+            "raw": "null"
+        },
+        {
+            "err": null,
+            "in": "{\"ChannelId\":\"c1\",\"UserId\":\"u1\",\"JoinTime\":100,\"LeaveTime\":9223372036854775807}",
+            "join_time_after": 100,
+            "json_after": "{\"ChannelId\":\"c1\",\"UserId\":\"u1\",\"JoinTime\":100,\"LeaveTime\":9223372036854775807}",
+            "leave_time": 9223372036854775807,
+            "leave_time_nil": false,
+            "name": "max_int64",
+            "ok": true,
+            "panicked": false,
+            "raw": "9223372036854775807"
+        },
+        {
+            "err": "json: cannot unmarshal number 9223372036854775808 into Go struct field ChannelMemberHistory.LeaveTime of type int64",
+            "in": "{\"ChannelId\":\"c1\",\"UserId\":\"u1\",\"JoinTime\":100,\"LeaveTime\":9223372036854775808}",
+            "join_time_after": 100,
+            "json_after": "{\"ChannelId\":\"c1\",\"UserId\":\"u1\",\"JoinTime\":100,\"LeaveTime\":0}",
+            "leave_time": 0,
+            "leave_time_nil": false,
+            "name": "max_int64_plus_one",
+            "ok": false,
+            "panicked": false,
+            "raw": "9223372036854775808"
+        },
+        {
+            "err": "json: cannot unmarshal number 1.0 into Go struct field ChannelMemberHistory.LeaveTime of type int64",
+            "in": "{\"ChannelId\":\"c1\",\"UserId\":\"u1\",\"JoinTime\":100,\"LeaveTime\":1.0}",
+            "join_time_after": 100,
+            "json_after": "{\"ChannelId\":\"c1\",\"UserId\":\"u1\",\"JoinTime\":100,\"LeaveTime\":0}",
+            "leave_time": 0,
+            "leave_time_nil": false,
+            "name": "fractional_but_whole",
+            "ok": false,
+            "panicked": false,
+            "raw": "1.0"
+        },
+        {
+            "err": "json: cannot unmarshal number 1.5 into Go struct field ChannelMemberHistory.LeaveTime of type int64",
+            "in": "{\"ChannelId\":\"c1\",\"UserId\":\"u1\",\"JoinTime\":100,\"LeaveTime\":1.5}",
+            "join_time_after": 100,
+            "json_after": "{\"ChannelId\":\"c1\",\"UserId\":\"u1\",\"JoinTime\":100,\"LeaveTime\":0}",
+            "leave_time": 0,
+            "leave_time_nil": false,
+            "name": "fractional",
+            "ok": false,
+            "panicked": false,
+            "raw": "1.5"
+        },
+        {
+            "err": "json: cannot unmarshal string into Go struct field ChannelMemberHistory.LeaveTime of type int64",
+            "in": "{\"ChannelId\":\"c1\",\"UserId\":\"u1\",\"JoinTime\":100,\"LeaveTime\":\"1\"}",
+            "join_time_after": 100,
+            "json_after": "{\"ChannelId\":\"c1\",\"UserId\":\"u1\",\"JoinTime\":100,\"LeaveTime\":0}",
+            "leave_time": 0,
+            "leave_time_nil": false,
+            "name": "quoted_number",
+            "ok": false,
+            "panicked": false,
+            "raw": "\"1\""
+        },
+        {
+            "err": "json: cannot unmarshal bool into Go struct field ChannelMemberHistory.LeaveTime of type int64",
+            "in": "{\"ChannelId\":\"c1\",\"UserId\":\"u1\",\"JoinTime\":100,\"LeaveTime\":true}",
+            "join_time_after": 100,
+            "json_after": "{\"ChannelId\":\"c1\",\"UserId\":\"u1\",\"JoinTime\":100,\"LeaveTime\":0}",
+            "leave_time": 0,
+            "leave_time_nil": false,
+            "name": "bool",
+            "ok": false,
+            "panicked": false,
+            "raw": "true"
+        }
+    ],
+    "result_keys": [
+        "ChannelId",
+        "UserId",
+        "JoinTime",
+        "LeaveTime",
+        "UserEmail",
+        "Username",
+        "IsBot",
+        "UserDeleteAt"
+    ],
+    "result_wire": [
+        {
+            "json": "{\"ChannelId\":\"\",\"UserId\":\"\",\"JoinTime\":0,\"LeaveTime\":null,\"UserEmail\":\"\",\"Username\":\"\",\"IsBot\":false,\"UserDeleteAt\":0}",
+            "leave_time_nil": true,
+            "name": "zero",
+            "panicked": false
+        },
+        {
+            "json": "{\"ChannelId\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"UserId\":\"6bdz674pgq767e4jx75w4pf57a\",\"JoinTime\":1700000000000,\"LeaveTime\":null,\"UserEmail\":\"user@example.com\",\"Username\":\"parity-user\",\"IsBot\":false,\"UserDeleteAt\":0}",
+            "leave_time_nil": true,
+            "name": "joined_only",
+            "panicked": false
+        },
+        {
+            "json": "{\"ChannelId\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"UserId\":\"6bdz674pgq767e4jx75w4pf57a\",\"JoinTime\":1700000000000,\"LeaveTime\":1700000060000,\"UserEmail\":\"user@example.com\",\"Username\":\"parity-user\",\"IsBot\":false,\"UserDeleteAt\":0}",
+            "leave_time_nil": false,
+            "name": "left",
+            "panicked": false
+        },
+        {
+            "json": "{\"ChannelId\":\"\",\"UserId\":\"6bdz674pgq767e4jx75w4pf57a\",\"JoinTime\":1,\"LeaveTime\":null,\"UserEmail\":\"bot@example.com\",\"Username\":\"a-bot\",\"IsBot\":true,\"UserDeleteAt\":0}",
+            "leave_time_nil": true,
+            "name": "bot",
+            "panicked": false
+        },
+        {
+            "json": "{\"ChannelId\":\"\",\"UserId\":\"6bdz674pgq767e4jx75w4pf57a\",\"JoinTime\":1,\"LeaveTime\":null,\"UserEmail\":\"\",\"Username\":\"gone\",\"IsBot\":false,\"UserDeleteAt\":1700000000000}",
+            "leave_time_nil": true,
+            "name": "deleted_user",
+            "panicked": false
+        },
+        {
+            "json": "{\"ChannelId\":\"qr6kf7ztp7yifxt4wm5xn51bke\",\"UserId\":\"6bdz674pgq767e4jx75w4pf57a\",\"JoinTime\":100,\"LeaveTime\":200,\"UserEmail\":\"user@example.com\",\"Username\":\"parity-user\",\"IsBot\":true,\"UserDeleteAt\":300}",
+            "leave_time_nil": false,
+            "name": "all_set",
+            "panicked": false
+        }
+    ]
+}
