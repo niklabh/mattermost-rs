@@ -6,6 +6,7 @@
 pub mod analytics_row;
 pub mod audit;
 pub mod audit_record;
+pub mod authorize;
 pub mod bot;
 pub mod channel;
 pub mod channel_data;
@@ -26,6 +27,7 @@ pub mod file_info_list;
 pub mod file_info_search_results;
 pub mod go_url;
 pub mod integration_action;
+pub mod job;
 pub mod limits;
 pub mod link_metadata;
 pub mod locale_generated;
@@ -58,6 +60,10 @@ pub mod stats;
 pub mod status;
 pub mod team;
 pub mod team_member;
+pub mod timeutils;
+pub mod timezones;
+/// The supported-zone table, emitted from Go by `reference/dump`. Private: `timezones` re-exports it.
+mod timezones_generated;
 pub mod unicode;
 /// The four CJK script range tables, emitted from Go by `reference/dump`. Private: `unicode`
 /// wraps them, and they are Go's `unicode` package rather than a Mattermost source file.
@@ -66,4 +72,5 @@ pub mod user;
 pub mod user_autocomplete;
 pub mod utils;
 pub mod version;
+pub mod view;
 pub mod wrangler;

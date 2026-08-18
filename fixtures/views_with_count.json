@@ -1,0 +1,21 @@
+{
+    "views": [
+        {
+            "id": "33adao48mfye9ym18tbwqs1yth",
+            "channel_id": "iwrugy69jrpwf6o8gcb761y5ee",
+            "type": "type-015141",
+            "creator_id": "bah3bqeoy8gz9oj41nhtyyspxh",
+            "title": "title-de068a",
+            "description": "description-89fcfb",
+            "sort_order": 93,
+            "props": {
+                "key0-0c1c59": "val0-18f5c7",
+                "key1-0b1aa6": "val1-17f414"
+            },
+            "create_at": 1703877185000,
+            "update_at": 1703922636000,
+            "delete_at": 1704137502000
+        }
+    ],
+    "total_count": 4
+}

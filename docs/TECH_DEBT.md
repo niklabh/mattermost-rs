@@ -131,6 +131,10 @@ map still validates.
 and the timezone defaults — have nothing to do with `IsValid`'s and deserve their own entry rather
 than keeping a closed one open.
 
+**Fully paid 2026-08-17**, later the same day: [D-108] closed, `User::pre_save` landed and
+`pre_save_partial` was **deleted** rather than renamed. Note the dependency named above was wrong —
+Go writes **PBKDF2**, not bcrypt; see [D-108] for what that changed.
+
 ---
 
 ## D-003 · `IsValidHTTPURL` needs an RFC 3986 parser
@@ -1125,7 +1129,8 @@ attachments** — the actions keep whatever ids the client sent, or none. For a 
 `props.attachments` the two are identical, which is every case in the oracle corpus today.
 
 Not renamed the way `User::pre_save_partial` was ([D-002]): the failure mode there was storing a
-plaintext password, which is a security incident. This one is a missing id on an interactive
+plaintext password, which is a security incident. (That function no longer exists — [D-108] closed
+2026-08-17 and it became `User::pre_save`. It is cited here as the precedent, not as live code.) This one is a missing id on an interactive
 button, and the whole interactive-message surface is unported anyway, so a mid-sized rename would
 buy nothing. **Revisit when `integration_action.go` lands** — that is the same session that must
 port `StripActionIntegrations`, and therefore `Post::ToJSON`/`EncodeJSON`, which are deferred for
@@ -1417,7 +1422,7 @@ ends with `appendHumanReadableInteractiveStrings`, which walks `props.mm_blocks`
 
 What shipped is `Post::all_strings_omitting_interactive_blocks`, exact against Go for
 `OmitInteractiveBlocks: true` over all 45 corpus cases. It is named for the half it omits, the
-same way `User::pre_save_partial` is — not because a caller could store a plaintext password, but
+same way `User::pre_save_partial` was — not because a caller could store a plaintext password, but
 because the missing strings feed mention checks and search indexing, so a caller mistaking it for
 `AllStrings` would silently under-index every post carrying an interactive payload.
 
@@ -3680,7 +3685,8 @@ Go*, and the output is a generated table beside `emoji_generated.rs` and `unicod
 
 Deciding it matters more than the table does, because it unblocks **[D-002]** — `User::is_valid`
 and `User::pre_save` — which is the highest-severity open pair and the reason `pre_save_partial`
-still carries a name warning that it does not hash passwords.
+still carries a name warning that it does not hash passwords. (Both landed on 2026-08-17; the
+warning-named function is gone. See [D-108].)
 
 Still **OPEN** as work; no longer open as a question.
 
@@ -3772,8 +3778,9 @@ the pointer this entry stops being a divergence and the test says so.
 
 ## D-108 · `User::pre_save` is still unported, and `pre_save_partial` is still a loaded gun
 
-**Status** OPEN · **Severity** blocking · **Raised** 2026-08-17 (phase 1, `user.go`)
-**Split from** [D-002], whose `IsValid` half is now closed.
+**Status** CLOSED · **Severity** blocking · **Raised** 2026-08-17 (phase 1, `user.go`)
+**Closed** 2026-08-17 — `pre_save` landed, `pre_save_partial` is gone. With it, [D-002] is fully paid.
+**Split from** [D-002], whose `IsValid` half closed first.
 
 `User::is_valid` landed 2026-08-17 once [D-001] closed. `PreSave` did not, and its two remaining
 dependencies are unrelated to anything ported so far:
@@ -3789,3 +3796,511 @@ and the name is the only guard.
 
 **To pay off** decide the bcrypt crate and pin it against Go's output for a known password and
 cost, then port the timezone defaults, then rename.
+
+---
+
+### Paid off — and the premise above was wrong
+
+**bcrypt is not what a Mattermost server writes.** The entry says "Go uses
+`golang.org/x/crypto/bcrypt`", which was true of the codebase for years and is **not** true at the
+pinned SHA. `channels/app/password/hashers/hashers.go`:
+
+```go
+latestHasher PasswordHasher = DefaultPBKDF2()
+```
+
+and the *only* caller of `User.PreSave` in the entire tree,
+`channels/store/sqlstore/user_store.go:180`:
+
+```go
+if err := user.PreSave(hashers.GetLatestHasher()); err != nil {
+```
+
+So every password the Go server writes into the shared `Users.Password` column today is a
+**PBKDF2 PHC string**, `$pbkdf2$f=SHA256,w=600000,l=32$<salt>$<hash>`. bcrypt survives only as the
+fallback `GetHasherFromPHCString` returns for a stored value that does not parse as PHC — i.e.
+rows written before Mattermost's own migration.
+
+Doing exactly what this entry asked — pick a bcrypt crate, pin the cost — would have produced a
+Rust server writing the **superseded** format into a column the Go server is actively migrating
+away from. Not a break (Go routes non-PHC rows back to bcrypt and they still authenticate) but a
+new divergence, introduced while closing an entry about avoiding one.
+
+**What landed.** `crates/mm-app/src/password/`, in `mm-app` rather than `mm-model` because the
+implementations derive from `server/channels/` and `mm-model` is Apache-2.0 ([D-031]). Go draws
+the line in the same place, which is *why* the hasher is a parameter to `PreSave` at all.
+
+| | |
+|---|---|
+| `mm-model::user::UserPasswordHasher` | the trait (user.go:78), plus `PasswordHashError` for `ErrPasswordTooLong` and Go's opaque half |
+| `mm-app::password::Pbkdf2` | `pbkdf2` + `hmac` + `sha2`. **The default**, matching `latestHasher` |
+| `mm-app::password::BCrypt` | the `bcrypt` crate, cost 10. Ported anyway — old rows still have to verify |
+| `mm-model::timezones` | `shared/timezones/`, whole; 592 zones **generated** into `timezones_generated.rs` |
+
+**The pinning is exact, not structural.** Both algorithms are deterministic *given the salt*, and
+both stored formats carry their salt. So `behaviour_password.json` holds hashes the Go package
+actually produced, and the Rust tests decode the salt back out, recompute, and assert **the whole
+Go string byte-for-byte** — six passwords per hasher, including an embedded NUL and both sides of
+the 72-byte cap. That is "Rust emits Go's bytes", not merely "Rust can read Go's", and it needed no
+cross-process handshake.
+
+The fixture's hashes are literals, which is normally the guessing the oracle exists to prevent —
+so **the generator re-verifies every one against Go before writing**: `CompareHashAndPassword` must
+accept it for its password and reject it for another, `bcrypt.Cost` must report 10, and the PBKDF2
+PHC must parse and satisfy `IsPHCValid`. A mistyped character fails the generator, not a
+downstream test. They are literals rather than fresh calls because both hashers salt randomly and
+a fixture that called them would be rewritten on every run — [D-032]'s defect.
+
+**Three findings the corpus produced rather than confirmed:**
+
+1. **bcrypt truncates at 72 bytes, and the two Go layers disagree about it.**
+   `x/crypto/bcrypt.CompareHashAndPassword` **accepts** a 73-byte password against a hash of its
+   first 72 — the classic truncation — while `GenerateFromPassword` refuses to create one. The
+   `hashers` package puts the length check back on the compare path, so *through the package* it is
+   rejected. A port reproducing the crate rather than the package would authenticate a login the Go
+   server denies. Found because the generator's negative control (append a character) failed on the
+   72-byte case; pinned as `bcrypt_truncation` for whoever ports verification ([D-109]).
+2. **The 72-byte cap is bcrypt's, and PBKDF2 inherited it for no algorithmic reason.** PBKDF2
+   accepts any length; `hashers` applies one rule to every hasher. A port reasoning from the
+   algorithm would leave it off the PBKDF2 path and accept a password Go rejects.
+3. **The timezone guard is `== nil`, not `len() == 0`** — so an empty-but-present map is left
+   empty, while `NotifyProps` three lines above *does* use `len() == 0`. Smoothing the two into a
+   consistency Go does not have is the obvious mistake.
+
+**Cost:** four new dependencies (`pbkdf2`, `hmac`, `sha2`, `bcrypt`), and `[profile.dev.package.*]`
+entries building them at `opt-level = 3` — the parity tests must run at Go's real 600,000
+iterations, because the iteration count is part of what they match.
+
+---
+
+## D-109 · The password **verification** half is unported
+
+**Status** CLOSED · **Severity** incomplete · **Raised** 2026-08-17 (phase 2, `hashers/`)
+**Closed** 2026-08-18 — `phcparser`, both `CompareHashAndPassword`s, both `IsPHCValid`s and
+`GetHasherFromPHCString` all landed. Only `App.migratePassword` remains, and it belongs with the
+login route rather than here.
+**Blocked** the login route, and any password-change flow.
+
+[D-108] ported the write half — `Hash` on both hashers — because that is all `User::PreSave`
+needs. The read half is not ported:
+
+| Go | why it was left |
+|---|---|
+| `phcparser` (`channels/app/password/phcparser/parser.go`) | a hand-written state-machine parser; needs its own corpus |
+| `PasswordHasher.CompareHashAndPassword` | needs the parser to know which hasher a stored value belongs to |
+| `PasswordHasher.IsPHCValid` | ditto, and it is what decides whether a row needs migrating |
+| `GetHasherFromPHCString` | the router: PHC → PBKDF2, anything else → bcrypt |
+| `App.migratePassword` | re-hashes an old row on successful login |
+
+Nothing is blocked by this that is not already blocked by the login route being forwarded, and
+forwarding is correct — the Go server verifies against the same column and reaches the same answer.
+
+**Two facts the port will need, both already measured and pinned** in
+`fixtures/behaviour_password.json` rather than left to be rediscovered:
+
+- **The 72-byte length check must be on the compare path too.** `x/crypto` accepts a 73-byte
+  password against a 72-byte hash; the `hashers` package does not. Reproducing the crate's
+  behaviour instead of the package's would accept a login Go rejects. Pinned under
+  `bcrypt_truncation`, asserted by
+  `password::bcrypt_hasher::go_parity::the_truncation_boundary_is_pinned_for_whoever_ports_verification`.
+- **`GetHasherFromPHCString` defaults to bcrypt on a parse failure**, so an unparseable stored
+  value is not an error — it is a legacy row. Pinned under
+  `which_hasher_writes.bcrypt_is_still_the_fallback`.
+
+The comparison must be constant-time. `subtle` is already a workspace dependency for
+`OAuthApp::validate_confidential_client_grant`, and Go uses `crypto/subtle.ConstantTimeCompare`
+here for the same reason.
+
+---
+
+### Paid off
+
+`crates/mm-app/src/password/phcparser.rs` plus the verification methods on both hashers and the
+router in `mod.rs`. `mm-app` is now at 51 tests, and
+`verify_go_parity::hashes_go_wrote_verify_here` is the one that matters: every hash the **Go**
+package produced, through both hashers, verifies here.
+
+**The parser is where the content was.** 434 lines of hand-written state machine, and the corpus
+overturned five readings of it:
+
+1. **A bcrypt hash does not parse — and that is the mechanism, not a bug.** `$2a$10$…` gives
+   `id="2a"`, then `10` as a salt, then a digest containing `.`, which is not base64. The failure
+   is how `GetHasherFromPHCString` recognises a legacy row, and the whole stored string then
+   becomes the PHC's `Hash`. This entry's own framing ("PHC → PBKDF2, anything else → bcrypt") was
+   right by accident: the "anything else" includes strings that parse perfectly.
+2. **An unknown function id routes to bcrypt even when the string parses.** A valid
+   `$argon2id$v=19$…` PHC is well-formed, is not PBKDF2, and falls to the `default` arm — so it is
+   handed to bcrypt with the parsed PHC **discarded**.
+3. **`$pbkdf2` with bad or missing parameters is a hard error**, not a fallback, because it matched
+   the id and `NewPBKDF2FromPHC` then runs. A bare `$pbkdf2` fails with
+   `invalid work factor parameter 'w='`.
+4. **The first parameter name is validated against a wider class than every later one.** It is
+   scanned as `B64ENCODED` before the parser knows whether it is a name or a salt, then used as a
+   name unchecked — so `$x$A=1` and `$x$a+b/c=1` are accepted while `$x$a=1,B=2` is not.
+5. **`v` means three different things in three positions**: the version key in first position, an
+   error in second position after a version block, and an ordinary parameter name inside the comma
+   loop. The check that reads as though it guards first position is unreachable from there.
+
+Plus a NUL byte being **swallowed** rather than rejected or treated as a terminator (`read` returns
+the `eof` sentinel, which *is* `rune(0)`, and `scanIdent` breaks without unreading), and
+`parseToken` **discarding the literal** on failure so most error messages say `found ""` instead of
+naming the offending character.
+
+**`MaxRunes` counts bytes, and getting that pinned took three attempts** — recorded because the
+process is the lesson, not the conclusion:
+
+- Draft 1 asserted a hand-picked "decisive" input. It was not decisive: every character in all four
+  classes is single-byte, so within a legal prefix the byte index equals the rune index and both
+  limiters cut in the same place. The test passed and proved nothing.
+- A **mutation** — switching the port to count runes — passed the entire suite. That is what
+  exposed it.
+- Draft 2 concluded the two are therefore indistinguishable. Also wrong: when the 256-byte cut
+  lands *inside* a multi-byte character, Go decodes the orphaned lead byte as U+FFFD where a rune
+  limiter would deliver the whole character, and the error text differs. Four of 24 boundary inputs
+  do this; the same mutation now fails.
+
+The rule this suggests: **when a test passes on the first run, mutate the thing it claims to
+measure.** Both earlier drafts were green.
+
+**One correction to what [D-108] shipped.** `hashers.ErrPasswordTooLong` is
+`fmt.Errorf("hashers: %w", model.ErrPasswordTooLong)` — the hasher hands `PreSave` the *wrapped*
+error, so the `AppError`'s `detailed_error` reads `hashers: password too long; …` and
+`errors.Is` still finds the sentinel. [D-108]'s `PasswordHashError` had a flat `TooLong` variant
+that could reproduce one of those and not the other, so the 400's wire text was nine bytes short.
+Fixed: the enum gained a `Wrapped` variant and an `is_too_long()` that walks the chain, and
+`pre_save` branches on the predicate rather than the variant. Had `pre_save` kept matching the bare
+variant while the real hasher returned a wrapped one, **every genuinely too-long password would
+have taken the 500 branch instead of the 400.**
+
+**Not closed with it:** `App.migratePassword`, which re-hashes a stale row on successful login.
+`is_latest_hasher` is the predicate it branches on and is ported; the function itself needs the
+login route and the store, so it lands with those. FIPS remains [D-110].
+
+**Cost:** `cargo test -p mm-app` now takes ~54s, almost all of it PBKDF2 at Go's real 600,000
+iterations. A cheap work factor would make the compare corpus meaningless — the iteration count is
+part of what is being matched — so the time is the price of the assertion, not waste.
+
+---
+
+## D-110 · FIPS mode is not modelled
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-08-17 (phase 2, `hashers/`)
+
+`hashers/fips.go` and `fips_default.go` are build-tagged: under `requirefips`, `fipsMinKeyLength`
+becomes `model.PasswordFIPSMinimumLength` and `PBKDF2.CompareHashAndPassword` short-circuits to
+`ErrMismatchedHashAndPassword` for any password shorter than it, because the OpenSSL 3.x FIPS
+provider refuses such a key outright (NIST SP 800-132).
+
+Not ported: it only affects the compare path ([D-109]), and it is a **deployment** property rather
+than a code one — a FIPS Mattermost is a different binary. Rust has no build tags; the equivalent
+is a cargo feature, and choosing one before there is a caller would be guessing at the shape.
+
+Worth recording because the behaviour is counter-intuitive: under FIPS a short password does not
+fail to hash, it fails to *verify*, so an account created on a non-FIPS build can become
+unloggable after a FIPS upgrade. That is upstream's behaviour, not a divergence we would be
+introducing.
+
+---
+
+## D-111 · The `user_is_valid` oracle wrote a heap address into a committed fixture
+
+**Status** CLOSED · **Severity** unverified · **Raised** 2026-08-17 (phase 1, `user.go`)
+**Closed** 2026-08-17, same day it was found. **Related** [D-032], [D-107]
+
+Same defect as [D-032] and found the same way: an unexplained `M fixtures/behaviour_user_is_valid.json`
+after a generator run that should have touched only new files.
+
+[D-107]'s note claimed the fixture "records whether the detail is stable rather than the detail
+itself for that branch". That was true of the dedicated `auth_data_ptr` probe and **false of the
+`cases` section**, which recorded `detailed_error` verbatim — including
+`auth_data=0x452662b10900`, a heap address that differs on every run.
+
+Two things followed from it:
+
+- Every generator run rewrote the file, destroying the "a clean run touches only new files" signal
+  that [D-069] had just restored.
+- The only thing pinning [D-107] was `case["detailed_error"].contains("0x")` in `user.rs`. The
+  `auth_data_ptr` probe — the section written *specifically* to record this properly — had **no
+  Rust test reading it at all**.
+
+**Fixed:** `uvRedactAddresses` replaces the hex with `<address>` before writing, and
+`user::go_parity::auth_data_detail_is_an_unstable_address` now asserts the probe directly —
+`value_is_an_address` and, more usefully, `stable_across_calls == false`, which is the fact that
+makes the value unrecordable in the first place. The case-level assertion now checks the redaction
+fired, which is the same signal in a deterministic form.
+
+The general lesson is [D-032]'s and is now worth stating once: **a fixture created in the same
+session as its writer has nothing to diff against**, so a nondeterminism in it cannot be seen until
+someone runs the generator for an unrelated reason. Both instances surfaced exactly that way.
+
+---
+
+## D-112 · The oracle module now builds against the AGPL half of the Go tree
+
+**Status** ACCEPTED · **Severity** unverified · **Raised** 2026-08-17 (phase 2, `hashers/`)
+**Related** [D-021], [D-031]
+
+`reference/dump` previously required only `server/public`. Generating `behaviour_password.json`
+needs `channels/app/password/hashers`, so `go.mod` now also requires
+`github.com/mattermost/mattermost/server/v8`, replaced to the local clone the same way.
+
+**This is not a licence problem**, and the reasoning is worth recording so it is not re-litigated:
+`reference/dump` sits at the repository root, which is AGPL-3.0-only ([D-031]). The constraint is
+that **`mm-model` may not derive from `server/channels/`** — and it does not: `behaviour_password.json`
+is consumed by `mm-app`'s tests alone. A future oracle feeding an `mm-model` test must stay within
+`server/public`.
+
+Two real costs:
+
+1. **`go mod tidy` bumped `golang.org/x/text` from v0.37.0 to v0.40.0**, which is the package
+   `IsValidLocale` delegates to and therefore the source of the entire 9,327-entry locale table
+   ([D-001]). Checked rather than assumed: the regenerated `locale_generated.rs` is byte-identical.
+   And v0.40.0 is the *correct* version — `server/public/go.mod` pins v0.37.0, but the server
+   binary builds from `server/go.mod`, which pins **v0.40.0**, and MVS selects it for the `public`
+   packages too. The oracle now matches the shipping binary rather than the sub-module.
+2. **A much larger dependency graph is reachable from the generator.** Nothing else imports from
+   it today. If a future oracle pulls in something that touches the filesystem or the network at
+   init, the determinism guarantee weakens; the existing "no rand, no `time.Now`" rule in
+   `main.go`'s header is the place to extend if that happens.
+
+Accepted rather than open: the alternative was reproducing the PHC format and the cost constants
+by transcription, i.e. exactly the guessing the oracle exists to eliminate — and it is what would
+have hidden the PBKDF2 finding in [D-108].
+
+---
+
+## D-113 · `verify_pkce` compares in constant time; Go does not
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-18 (phase 1, `authorize.go`)
+
+`(*AuthData).VerifyPKCE` (authorize.go:235) finishes with a plain string comparison:
+
+```go
+return calculatedChallenge == ad.CodeChallenge
+```
+
+The Rust port uses `subtle::ConstantTimeEq` instead. **Every input produces the same answer** — the
+divergence is in timing alone, and no test can observe it.
+
+Accepted rather than reproduced-exactly for two reasons. It is free: `subtle` is already a
+workspace dependency for `OAuthApp::validate_confidential_client_grant`, and the comparison is 43
+bytes. And the alternative is a short-circuiting `==` on a security path, which is the shape of
+thing that gets flagged in review forever afterwards.
+
+**Worth being honest about how much this buys: very little.** The stored `code_challenge` is not a
+secret — the client sends it in the authorization request, in a URL. An attacker who could learn it
+through timing would still need to invert SHA-256 to produce a matching verifier. So this is
+defence in depth rather than a fix for a live leak, and it is recorded here so nobody later
+"restores parity" by reverting it without knowing which direction is which.
+
+Note the same is **not** true of `ValidatePKCEForClientType`'s branches, which short-circuit on
+emptiness and are reproduced exactly: those leak only whether a field was empty, which the response
+already says.
+
+---
+
+## D-114 · `AuthorizeRequest.IsValid` reports `AuthData.IsValid` — do not "fix" it
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-18 (phase 1, `authorize.go`)
+
+All five branches `(*AuthorizeRequest).IsValid` owns (authorize.go:112, 116, 120, 124, 128) build
+their error with `NewAppError("AuthData.IsValid", …)` — the name of the function above it. A
+copy-paste.
+
+What makes it recognisable rather than debatable is that the **two branches it delegates get it
+right**: the PKCE one reports `AuthorizeRequest.validatePKCE` and the resource one
+`AuthorizeRequest.IsValid`. So the `Where` is inconsistent inside a single function, and both
+spellings of the correct value appear a few lines from the wrong one.
+
+`Where` is on the wire — `AppError` serialises it, and it is what a client or an operator reads to
+locate a 400. Repairing it would make the Rust server describe the same rejection differently from
+the Go server it sits in front of.
+
+Reproduced verbatim, with `const W: &str = "AuthData.IsValid";` carrying a comment saying it is
+upstream's. Pinned by `authorize::go_parity::authorize_request_reports_auth_datas_where`, which
+asserts **both** halves — the wrong value on the owned branches and the right one on the delegated
+ones. If upstream fixes it, that test fails, which is the signal we want. Same treatment as
+[D-016], [D-019] and [D-096].
+
+---
+
+## D-115 · `AuthData.IsExpired` overflows in int32 — reproduced
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-18 (phase 1, `authorize.go`)
+
+```go
+func (ad *AuthData) IsExpired() bool {
+	return GetMillis() > ad.CreateAt+int64(ad.ExpiresIn*1000)
+}
+```
+
+`ExpiresIn` is an **`int32`**, so `ExpiresIn*1000` is evaluated at int32 width and widened only
+afterwards. Go does not panic on non-constant integer overflow, so it wraps silently. Measured:
+
+| `expires_in` | Go's product | what the line reads like | threshold |
+|---|---|---|---|
+| 600 | 600,000 | 600,000 | ten minutes out |
+| 2,147,483 | 2,147,483,000 | same | ~24 days out |
+| 2,147,484 | **−2,147,483,296** | 2,147,484,000 | ~24 days **before** `CreateAt` |
+| 2,147,483,647 | **−1,000** | 2,147,483,647,000 | one second before `CreateAt` |
+| −2,147,483,648 | **0** | −2,147,483,648,000 | exactly `CreateAt` |
+
+So an authorization code with the largest expressible expiry is **already expired**, and one with
+`i32::MIN` expires at the instant it was created. Nothing in the tree can produce those values
+today — `PreSave` writes 600 and `IsValid` only rejects zero — but `expires_in` is a wire field, so
+a client-supplied value reaches it.
+
+**Fails closed**, which is why this is a divergence to reproduce rather than a vulnerability to
+report: the overflow makes codes expire sooner, never later. A port that "fixed" it with
+`i64::from(expires_in) * 1000` would make the Rust server accept a code the Go server rejects,
+against the same `OAuthAuthData` row — which is the failure that matters.
+
+Ported as `self.create_at + i64::from(self.expires_in.wrapping_mul(1000))`. `expiry_threshold_millis`
+is split out from `is_expired` so the arithmetic is assertable without a clock, and
+`the_expiry_threshold_matches_go` drives ten values against Go's own products — including an
+explicit `assert_ne!` against the intuitive translation, so the wrong port cannot pass.
+
+Note also that `IsValid` guards `ExpiresIn == 0` and **not** `<= 0`, so a negative expiry validates
+and then makes `IsExpired` true forever. Same class, same reasoning, same treatment.
+
+---
+
+## D-116 · `View::clone` deep-copies props; Go's `Clone` shares nested maps
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-18 (phase 1, `view.go`)
+**Related** [D-015], [D-024]
+
+`(*View).Clone` (view.go:137) copies the struct, then the props map one level deep:
+
+```go
+v.Props = make(StringInterface, len(o.Props))
+maps.Copy(v.Props, o.Props)
+```
+
+`maps.Copy` is **shallow**, so a nested object inside `Props` is the same `map[string]any` in both
+the original and the clone. Measured: mutating `Props["nested"]["k"]` through the original is
+visible through the clone. Only the top level is independent.
+
+Rust's `Clone` on `serde_json::Map` copies the whole tree, so ours is fully independent.
+
+Accepted rather than open, for the same reason as [D-015]: reproducing the aliasing would mean
+`Arc<Mutex<…>>` inside a wire type, and no Go call site relies on it — `Clone`'s callers all
+discard the original. Flagged because a call site being ported that mutates the clone and then
+reads the original would change behaviour silently.
+
+Both directions are asserted rather than assumed: the oracle records Go's sharing as
+`clone.nested_map_is_shared = true`, and
+`view::go_parity::clone_shares_nested_maps_in_go_and_not_here` asserts that value **and** the
+opposite behaviour on our side. If upstream switches to a deep copy the test fails, which is the
+signal we want.
+
+---
+
+## D-117 · `View`'s nil-versus-empty props distinction cannot survive the wire
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-18 (phase 1, `view.go`)
+
+`validateKanbanProps` (view.go:197) branches on nil-ness:
+
+| `Props` | error id |
+|---|---|
+| nil | `model.view.is_valid.props.kanban_required.app_error` |
+| `{}` | `model.view.is_valid.props.kanban_field_id.app_error` |
+
+But `View.Props` carries `omitempty`, and Go's `omitempty` on a map drops **nil and empty alike**.
+So the two states serialise to the identical document, and decoding that document yields nil.
+
+**This is Go's divergence, not ours** — the Go server has exactly the same hole. It is recorded
+because the shape is a trap in both directions:
+
+- A port that modelled `Props` as a non-`Option` map would collapse the distinction *inbound* too,
+  changing which error a client sees for `"props":{}`.
+- A port that dropped the `is_empty` half of the skip predicate would emit `"props":{}` where Go
+  emits nothing, which is a wire difference.
+
+Ported as `Option<StringInterface>` with a predicate that skips `None` **and** `Some(empty)`, so
+the distinction is preserved in memory and inbound, and lost outbound exactly as Go loses it.
+`view::tests::nil_and_empty_props_differ_in_validation_and_not_on_the_wire` asserts all three
+halves: the two error ids differ, the two documents are byte-identical, and a round trip collapses
+the second into the first.
+
+No action is owed unless upstream removes the `omitempty`.
+
+---
+
+## D-118 · `ParseFormatedMillis`'s error *text* is not reproduced
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-18 (phase 1, `job.go`)
+
+Go's `time.Parse` failures describe its own layout machinery:
+
+```text
+parsing time "2023-11-14T16:43:20" as "2006-01-02T15:04:05.999Z07:00": cannot parse "" as "Z07:00"
+parsing time "2023-11-14" as "2006-01-02T15:04:05.999Z07:00": cannot parse "" as "T"
+parsing time "not a timestamp" as "2006-01-02T15:04:05.999Z07:00": cannot parse "not a timestamp" as "2006"
+```
+
+The trailing clause names the **layout element** that failed and the remaining input at that point,
+so reproducing it means reproducing `time.Parse`'s element-by-element walk. `timeutils::TimeParseError`
+carries the first half only.
+
+Accepted rather than open. The only caller is `Job.UnmarshalYAML` ([D-119], unported), the error
+reaches a CLI import operator rather than a client, and no `AppError` id depends on it.
+
+**What *is* exact** and asserted over all eleven corpus inputs: the accept/reject verdict and the
+parsed value — including the two that a reading gets wrong. An empty string returns **zero with no
+error**, by an early return that predates the layout; and extra precision is **truncated**, so
+`.9999` is 999 milliseconds rather than a rejection or a rounding.
+
+---
+
+## D-119 · `Job`'s YAML codec is unported
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-08-18 (phase 1, `job.go`)
+
+`(*Job).MarshalYAML` (job.go:118) and `UnmarshalYAML` (job.go:142) render the three timestamps as
+**formatted strings** rather than integers, via `timeutils`. They exist for the CLI export/import
+path.
+
+Not ported because the workspace has no YAML codec and nothing needs one. Taking a dependency to
+serve a code path with no caller is the wrong order.
+
+**The hard half is already done.** The interesting behaviour is not the YAML — it is
+`timeutils::format_millis`, which is timezone-dependent and elides trailing zeros, and
+`parse_formated_millis`, which tolerates an empty string and truncates precision. Both are ported
+and pinned in `fixtures/behaviour_job.json`. What remains is field-name glue plus a crate choice.
+
+Note the YAML struct's field names are `create_at`/`start_at`/`last_activity_at`, matching the JSON
+tags, but its local variables inside `UnmarshalYAML` are named `createAt`, `updateAt` and
+`deleteAt` — leftovers from whatever type it was copied from. They are assigned to the right
+fields; the names are noise. Do not let them suggest the mapping is anything other than positional.
+
+---
+
+## D-120 · `AllJobTypes` omits eighteen declared job types
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-18 (phase 1, `job.go`)
+
+job.go declares **42** `JobType*` constants. `AllJobTypes` lists **24**. `IsValidJobType` is a
+linear scan of that array, so eighteen declared types fail the model's own validator:
+
+`cli_message_export`, `resend_invitation_email`, `upgrade_notify_admin`, `trial_notify_admin`,
+`post_persistent_notifications`, `install_plugin_notify_admin`, `hosted_purchase_screening`,
+`s3_path_migration`, `delete_empty_drafts_migration`, `delete_orphan_drafts_migration`,
+`export_users_to_csv`, `delete_dms_preferences_migration`, `access_control_sync`,
+`access_control_team_sync`, `push_proxy_auth`, `recap`, `delete_expired_posts`,
+`autotranslation_recovery`.
+
+**Not our divergence — Go's**, and reproduced exactly. It is recorded because the shape invites a
+"fix": a port that derived `AllJobTypes` from the constant list, or that added the missing ones,
+would accept job types the Go server rejects, on a shared `Jobs` table.
+
+**Why it is survivable, and the second half of the finding:** `Job.IsValid` **never calls
+`IsValidJobType`**. So a job row carrying any of the eighteen validates and stores fine; only
+whatever calls `IsValidJobType` directly — the scheduler, in `server/channels/`, unported — turns
+it away. The two halves have to be ported together or the gap changes shape.
+
+Pinned by `job::go_parity::eighteen_declared_job_types_are_rejected`, which asserts the count on
+both sides (42 declared, 24 accepted, 18 rejected) and every individual verdict, and by
+`all_job_types_matches_go`, which asserts the array in **Go's order**. If upstream adds a missing
+type, both fail.

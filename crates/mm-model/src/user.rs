@@ -1,15 +1,20 @@
 //! Port of `model/user.go` (user.go:1–1160).
 //!
+//! # The write path is complete as of 2026-08-17
+//!
+//! [`User::is_valid`] and [`User::pre_save`] both landed, closing [D-002] and [D-108]. There is
+//! no longer a `pre_save_partial`: it existed only while the hasher and the timezone defaults
+//! were missing, and its name was the only thing stopping a caller storing a plaintext password.
+//!
+//! [`User::pre_save`] takes a [`UserPasswordHasher`], exactly as Go's does. The implementations
+//! are in `mm-app`, not here, because they derive from `channels/app/password/`, which is the
+//! **AGPL** half of the Go tree and unreachable from this Apache-2.0 crate ([D-031]).
+//!
 //! # Deliberately not translated here
 //!
-//! - **`User::IsValid`** (user.go:383) and **`PreSave`** (user.go:486). Both depend on ports
-//!   that are parser work in their own right — `IsValidEmail` (Go's `net/mail`) and
-//!   `IsValidLocale` (`golang.org/x/text/language`, BCP 47) — plus `CustomStatus` and
-//!   `timezones.DefaultUserTimezone()`. Shipping them against a guessed email or locale rule
-//!   would put a wrong validator on the write path, which is worse than not having one.
 //! - `IsValidUserRoles` needs `IsValidRoleName` from `role.go`.
 //! - `CleanUsername` takes an mlog logger; it belongs with the logging layer.
-//! - `GetTimezoneLocation` needs a tz database lookup (`chrono-tz`), deferred with `IsValid`.
+//! - `GetTimezoneLocation` needs a tz database lookup (`chrono-tz`).
 //! - `Auditable`/`LogClone` are audit-log projections, not wire types; they follow the audit
 //!   layer.
 //! - `UserSlice` filters (user.go:295–362) are `Iterator::filter` at every call site.
@@ -75,6 +80,102 @@ pub const USER_PASSWORD_MAX_LENGTH: usize = 72;
 pub const USER_LOCALE_MAX_LENGTH: usize = 5;
 pub const USER_TIMEZONE_MAX_RUNES: usize = 256;
 pub const USER_ROLES_MAX_LENGTH: usize = 256;
+
+// ---------------------------------------------------------------------------
+// The password hasher seam (user.go:74-80)
+// ---------------------------------------------------------------------------
+
+/// Port of `model.ErrPasswordTooLong` (user.go:76) and the other failures a hasher can report.
+///
+/// Go has one sentinel and returns everything else as an opaque `error`; `User.PreSave` branches
+/// on `errors.Is(err, ErrPasswordTooLong)` and treats the rest as a 500. This enum draws the same
+/// line, with [`Self::Other`] standing in for Go's opaque half.
+///
+/// The `Display` text reproduces Go's exactly, because it reaches the wire: `PreSave` `Wrap`s it,
+/// and `AppError::to_json` folds a wrapped error into `detailed_error`.
+///
+/// # Why there is a `Wrapped` variant
+///
+/// Go's hasher package does not hand back `model.ErrPasswordTooLong` itself. It hands back
+///
+/// ```text
+/// hashers.ErrPasswordTooLong = fmt.Errorf("hashers: %w", model.ErrPasswordTooLong)
+/// ```
+///
+/// so the text a client sees is `hashers: password too long; …`, prefix included, while
+/// `errors.Is(err, model.ErrPasswordTooLong)` still matches through the wrap. A flat two-variant
+/// enum can reproduce one of those and not the other; [`Self::Wrapped`] plus [`Self::is_too_long`]
+/// reproduces both.
+#[derive(Debug, thiserror::Error)]
+pub enum PasswordHashError {
+    /// Go: `fmt.Errorf("password too long; maximum length in bytes: %d", UserPasswordMaxLength)`.
+    ///
+    /// The cap is counted in **bytes**, not runes — `USER_PASSWORD_MAX_LENGTH` is 72 because
+    /// that is bcrypt's block limit, and the PBKDF2 hasher that superseded bcrypt inherited it
+    /// rather than needing it.
+    #[error("password too long; maximum length in bytes: {USER_PASSWORD_MAX_LENGTH}")]
+    TooLong,
+
+    /// Go's `fmt.Errorf("<prefix>: %w", inner)` — the text gains a prefix and the sentinel stays
+    /// findable underneath it.
+    #[error("{prefix}: {source}")]
+    Wrapped {
+        prefix: String,
+        #[source]
+        source: Box<PasswordHashError>,
+    },
+
+    /// Anything else the hasher failed at — a CSPRNG failure, a bad parameter set.
+    #[error("{0}")]
+    Other(String),
+}
+
+impl PasswordHashError {
+    /// Go's `errors.Is(err, ErrPasswordTooLong)`, which walks the `%w` chain.
+    ///
+    /// This is the test `User::pre_save` branches on, so a hasher may wrap the sentinel as deeply
+    /// as it likes without changing which `AppError` comes out.
+    pub fn is_too_long(&self) -> bool {
+        match self {
+            Self::TooLong => true,
+            Self::Wrapped { source, .. } => source.is_too_long(),
+            Self::Other(_) => false,
+        }
+    }
+
+    /// Go's `fmt.Errorf("{prefix}: %w", self)`.
+    #[must_use]
+    pub fn wrap(self, prefix: impl Into<String>) -> Self {
+        Self::Wrapped {
+            prefix: prefix.into(),
+            source: Box::new(self),
+        }
+    }
+}
+
+/// Port of `model.UserPasswordHasher` (user.go:78).
+///
+/// One method, and the reason it is an interface in Go is the reason it is a trait here: the
+/// implementations live in `channels/app/password/hashers`, which is **AGPL** and therefore
+/// unreachable from this Apache-2.0 crate ([D-031]). `mm-app` provides them.
+///
+/// Not `async` — hashing is CPU-bound rather than IO-bound, and Go's is synchronous. A caller on
+/// a tokio worker should reach for `spawn_blocking`: PBKDF2 at 600,000 iterations takes on the
+/// order of a quarter-second, which is far past what a runtime thread should be held for.
+///
+/// # Which implementation
+///
+/// At the pinned SHA the answer is **PBKDF2**, not bcrypt — see `mm-app`'s `password` module.
+/// `Users.Password` is shared with the running Go server, so this is a compatibility decision
+/// rather than a free one.
+pub trait UserPasswordHasher {
+    /// Port of `UserPasswordHasher.Hash` (user.go:79).
+    ///
+    /// Returns the complete stored representation — for both shipped hashers, a `$`-delimited
+    /// string carrying the algorithm, its parameters and the salt, so the value is
+    /// self-describing and a later verification needs nothing but the column.
+    fn hash(&self, password: &str) -> Result<String, PasswordHashError>;
+}
 
 /// Constants owned by other Go files, duplicated here because `user.go` needs them.
 ///
@@ -819,13 +920,41 @@ impl User {
         }
     }
 
-    /// The `PreSave` steps that do not depend on un-ported code (user.go:486-531).
+    /// Port of `(*User).PreSave` (user.go:486). Closes [D-108], and with it [D-002].
     ///
-    /// Password hashing, the `timezones.DefaultUserTimezone()` default and the custom-status
-    /// re-save are **not** applied — see the module docs. This is deliberately not named
-    /// `pre_save`: it is not a drop-in replacement, and calling it on a write path expecting
-    /// Go's behaviour would silently store an unhashed password.
-    pub fn pre_save_partial(&mut self) {
+    /// Renamed from `pre_save_partial`, which existed only because this could not be written:
+    /// that function skipped the password, the timezone default and the custom-status re-save,
+    /// and its name was the only thing stopping a caller storing a plaintext password with it.
+    ///
+    /// # The hasher is a parameter, and that is not an abstraction we added
+    ///
+    /// Go's signature is `PreSave(hasher UserPasswordHasher)`. The concrete hasher lives in
+    /// `channels/app/password/hashers`, which is the **AGPL** half of the tree and therefore
+    /// cannot be reached from this crate at all ([D-031]). `mm-app` supplies it, exactly as Go's
+    /// `user_store.go:180` does:
+    ///
+    /// ```text
+    /// user.PreSave(hashers.GetLatestHasher())
+    /// ```
+    ///
+    /// # Order matters
+    ///
+    /// The password is hashed **after** `Id` is assigned, because both error branches interpolate
+    /// `user_id=` into the detail. And the custom-status re-save runs **last**, after `Props` has
+    /// been materialised, so it cannot hit a nil map.
+    ///
+    /// # `Timezone` is filled only when nil
+    ///
+    /// `if u.Timezone == nil`, not `len(...) == 0`. An empty-but-present map stays empty — the
+    /// same nil-vs-empty distinction [`Self::is_valid`]'s props check turns on. `NotifyProps`
+    /// three lines above uses `len() == 0` and therefore does *not* behave this way, which is
+    /// easy to smooth over into a consistency that Go does not have.
+    ///
+    /// # Errors
+    ///
+    /// The two hashing branches, and nothing else. A too-long password is a 400 and any other
+    /// hasher failure is a 500; both carry `user_id=` as the detail.
+    pub fn pre_save(&mut self, hasher: &dyn UserPasswordHasher) -> utils::AppResult {
         if self.id.is_empty() {
             self.id = new_id();
         }
@@ -859,6 +988,56 @@ impl User {
         if self.notify_props.as_ref().is_none_or(StringMap::is_empty) {
             self.set_default_notifications();
         }
+
+        if self.timezone.is_none() {
+            self.timezone = Some(crate::timezones::default_user_timezone());
+        }
+
+        if !self.password.is_empty() {
+            match hasher.hash(&self.password) {
+                Ok(hashed) => self.password = hashed,
+                // `errors.Is(err, ErrPasswordTooLong)` in Go, so a hasher that *wraps* the
+                // sentinel still takes this branch — and the shipped one does, as
+                // `hashers.ErrPasswordTooLong`. Matching the bare variant would send every real
+                // too-long password down the 500 branch.
+                Err(err) if err.is_too_long() => {
+                    return Err(Box::new(
+                        utils::AppError::new(
+                            "User.PreSave",
+                            "model.user.pre_save.password_too_long.app_error",
+                            None,
+                            format!("user_id={}", self.id),
+                            400,
+                        )
+                        .wrap(err),
+                    ));
+                }
+                Err(err) => {
+                    return Err(Box::new(
+                        utils::AppError::new(
+                            "User.PreSave",
+                            "model.user.pre_save.password_hash.app_error",
+                            None,
+                            format!("user_id={}", self.id),
+                            500,
+                        )
+                        .wrap(err),
+                    ));
+                }
+            }
+        }
+
+        // Go: `cs := u.GetCustomStatus(); if cs != nil { cs.PreSave(); u.SetCustomStatus(cs) }`.
+        //
+        // A marshalling failure is unreachable — the value came out of `GetCustomStatus`, so it
+        // decoded — and Go discards the return of `SetCustomStatus` anyway, so a `?` here would
+        // invent an error branch Go does not have.
+        if let Some(mut cs) = self.get_custom_status() {
+            cs.pre_save();
+            let _ = self.set_custom_status(&cs);
+        }
+
+        Ok(())
     }
 
     // -- sanitization -------------------------------------------------------
@@ -1832,12 +2011,12 @@ mod tests {
     // -- lifecycle ----------------------------------------------------------
 
     #[test]
-    fn pre_save_partial_fills_identity_and_timestamps() {
+    fn pre_save_fills_identity_and_timestamps() {
         let mut user = User {
             email: "ADA@Example.COM".into(),
             ..Default::default()
         };
-        user.pre_save_partial();
+        user.pre_save(&StubHasher::ok()).unwrap();
 
         assert!(utils::is_valid_id(&user.id));
         assert_eq!(user.username.len(), 27, "generated username is 'a' + 26");
@@ -1848,17 +2027,21 @@ mod tests {
         assert_eq!(user.locale, DEFAULT_LOCALE);
         assert!(user.props.is_some());
         assert_eq!(user.notify_props.as_ref().map(StringMap::len), Some(13));
+        assert_eq!(
+            user.timezone,
+            Some(crate::timezones::default_user_timezone())
+        );
     }
 
     #[test]
-    fn pre_save_partial_preserves_an_existing_id_and_create_at() {
+    fn pre_save_preserves_an_existing_id_and_create_at() {
         let mut user = User {
             id: "existingid1234567890abcde".into(),
             create_at: 12345,
             username: "Ada".into(),
             ..Default::default()
         };
-        user.pre_save_partial();
+        user.pre_save(&StubHasher::ok()).unwrap();
 
         assert_eq!(user.id, "existingid1234567890abcde");
         assert_eq!(user.create_at, 12345);
@@ -1867,13 +2050,250 @@ mod tests {
     }
 
     #[test]
-    fn pre_save_partial_nils_an_empty_auth_data_pointer() {
+    fn pre_save_nils_an_empty_auth_data_pointer() {
         let mut user = User {
             auth_data: Some(String::new()),
             ..Default::default()
         };
-        user.pre_save_partial();
+        user.pre_save(&StubHasher::ok()).unwrap();
         assert!(user.auth_data.is_none());
+    }
+
+    /// A hasher that records what it was given, so `pre_save` can be driven without `mm-app`.
+    ///
+    /// `mm-model` is Apache-2.0 and cannot depend on the AGPL crate that holds the real hashers
+    /// ([D-031]), so the real ones are pinned against Go in `mm-app`'s own tests. What is
+    /// testable *here* is the seam: that the password is hashed at all, that the hash replaces
+    /// the plaintext, and that each failure maps to the right `AppError`.
+    struct StubHasher {
+        result: Result<String, PasswordHashError>,
+    }
+
+    impl StubHasher {
+        fn ok() -> Self {
+            Self {
+                result: Ok("$stub$hashed".to_owned()),
+            }
+        }
+        fn failing(err: PasswordHashError) -> Self {
+            Self { result: Err(err) }
+        }
+    }
+
+    impl UserPasswordHasher for StubHasher {
+        fn hash(&self, _password: &str) -> Result<String, PasswordHashError> {
+            match &self.result {
+                Ok(s) => Ok(s.clone()),
+                Err(e) => Err(rebuild(e)),
+            }
+        }
+    }
+
+    /// `PasswordHashError` is not `Clone` (it boxes a source), so the stub rebuilds it.
+    fn rebuild(e: &PasswordHashError) -> PasswordHashError {
+        match e {
+            PasswordHashError::TooLong => PasswordHashError::TooLong,
+            PasswordHashError::Other(m) => PasswordHashError::Other(m.clone()),
+            PasswordHashError::Wrapped { prefix, source } => rebuild(source).wrap(prefix.clone()),
+        }
+    }
+
+    #[test]
+    fn pre_save_replaces_the_plaintext_password_with_the_hash() {
+        let mut user = User {
+            password: "hunter2".into(),
+            ..Default::default()
+        };
+        user.pre_save(&StubHasher::ok()).unwrap();
+        assert_eq!(user.password, "$stub$hashed");
+    }
+
+    /// The guard is `!= ""`, so a user with no password is stored with no password — the SSO and
+    /// bot paths — rather than with a hash of the empty string.
+    #[test]
+    fn pre_save_leaves_an_empty_password_alone() {
+        let mut user = User::default();
+        user.pre_save(&StubHasher::ok()).unwrap();
+        assert_eq!(user.password, "");
+    }
+
+    #[test]
+    fn pre_save_maps_a_too_long_password_to_a_400() {
+        let mut user = User {
+            id: "existingid1234567890abcde".into(),
+            password: "x".repeat(USER_PASSWORD_MAX_LENGTH + 1),
+            ..Default::default()
+        };
+        let err = user
+            .pre_save(&StubHasher::failing(PasswordHashError::TooLong))
+            .unwrap_err();
+
+        assert_eq!(err.id, "model.user.pre_save.password_too_long.app_error");
+        assert_eq!(err.where_, "User.PreSave");
+        assert_eq!(err.status_code, 400);
+        assert_eq!(err.detailed_error, "user_id=existingid1234567890abcde");
+        // Go `Wrap`s the hasher's error, which folds into the wire detail.
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&err.to_json().unwrap()).unwrap()["detailed_error"],
+            "user_id=existingid1234567890abcde, password too long; maximum length in bytes: 72"
+        );
+        // The plaintext must not survive a failed hash.
+        assert_eq!(user.password, "x".repeat(USER_PASSWORD_MAX_LENGTH + 1));
+    }
+
+    /// The shipped hasher wraps the sentinel, and the prefix reaches the client.
+    ///
+    /// Go's `hashers.ErrPasswordTooLong` is `fmt.Errorf("hashers: %w", model.ErrPasswordTooLong)`,
+    /// so `detailed_error` carries `hashers: ` and `errors.Is` still matches. Both halves are
+    /// asserted here: the 400 branch is still taken, and the text is the wrapped one.
+    #[test]
+    fn a_wrapped_too_long_error_still_takes_the_400_branch() {
+        let mut user = User {
+            id: "existingid1234567890abcde".into(),
+            password: "x".repeat(USER_PASSWORD_MAX_LENGTH + 1),
+            ..Default::default()
+        };
+        let err = user
+            .pre_save(&StubHasher::failing(
+                PasswordHashError::TooLong.wrap("hashers"),
+            ))
+            .unwrap_err();
+
+        assert_eq!(err.id, "model.user.pre_save.password_too_long.app_error");
+        assert_eq!(err.status_code, 400);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&err.to_json().unwrap()).unwrap()["detailed_error"],
+            "user_id=existingid1234567890abcde, hashers: password too long; \
+             maximum length in bytes: 72"
+        );
+    }
+
+    #[test]
+    fn is_too_long_walks_the_wrap_chain() {
+        assert!(PasswordHashError::TooLong.is_too_long());
+        assert!(PasswordHashError::TooLong.wrap("hashers").is_too_long());
+        assert!(
+            PasswordHashError::TooLong
+                .wrap("hashers")
+                .wrap("outer")
+                .is_too_long()
+        );
+        assert!(!PasswordHashError::Other("boom".into()).is_too_long());
+        assert!(
+            !PasswordHashError::Other("boom".into())
+                .wrap("hashers")
+                .is_too_long()
+        );
+    }
+
+    #[test]
+    fn pre_save_maps_any_other_hasher_failure_to_a_500() {
+        let mut user = User {
+            id: "existingid1234567890abcde".into(),
+            password: "hunter2".into(),
+            ..Default::default()
+        };
+        let err = user
+            .pre_save(&StubHasher::failing(PasswordHashError::Other(
+                "entropy pool exhausted".into(),
+            )))
+            .unwrap_err();
+
+        assert_eq!(err.id, "model.user.pre_save.password_hash.app_error");
+        assert_eq!(err.status_code, 500);
+        assert_eq!(err.detailed_error, "user_id=existingid1234567890abcde");
+    }
+
+    /// The id is assigned *before* hashing, so the error detail names the user even when the
+    /// caller supplied no id. Reordering the two would emit `user_id=`.
+    #[test]
+    fn pre_save_error_detail_carries_a_generated_id() {
+        let mut user = User {
+            password: "hunter2".into(),
+            ..Default::default()
+        };
+        let err = user
+            .pre_save(&StubHasher::failing(PasswordHashError::TooLong))
+            .unwrap_err();
+        assert_eq!(err.detailed_error, format!("user_id={}", user.id));
+        assert!(utils::is_valid_id(&user.id));
+    }
+
+    /// `if u.Timezone == nil`, not `len(...) == 0`.
+    #[test]
+    fn pre_save_fills_a_nil_timezone_but_not_an_empty_one() {
+        let mut nil_tz = User::default();
+        nil_tz.pre_save(&StubHasher::ok()).unwrap();
+        assert_eq!(nil_tz.timezone.as_ref().map(StringMap::len), Some(3));
+
+        let mut empty_tz = User {
+            timezone: Some(StringMap::new()),
+            ..Default::default()
+        };
+        empty_tz.pre_save(&StubHasher::ok()).unwrap();
+        assert_eq!(
+            empty_tz.timezone.as_ref().map(StringMap::len),
+            Some(0),
+            "an empty-but-present map is left empty — the guard is on nil"
+        );
+
+        let mut set_tz = User {
+            timezone: Some(StringMap::from([(
+                "manualTimezone".to_owned(),
+                "Asia/Kolkata".to_owned(),
+            )])),
+            ..Default::default()
+        };
+        set_tz.pre_save(&StubHasher::ok()).unwrap();
+        assert_eq!(
+            set_tz.get_preferred_timezone(),
+            "Asia/Kolkata",
+            "an existing timezone is untouched"
+        );
+    }
+
+    /// The trailing `cs.PreSave()` + `SetCustomStatus(cs)` (user.go:546-550), which
+    /// `pre_save_partial` never had.
+    #[test]
+    fn pre_save_re_saves_the_custom_status() {
+        let mut user = User::default();
+        // An expiry in the future with no duration is the one shape `CustomStatus::pre_save`
+        // mutates — it promotes the duration to `date_and_time`. A zero expiry counts as already
+        // expired and would leave the status untouched, which would make this test pass whether
+        // or not the re-save ran at all.
+        let cs = CustomStatus {
+            text: "focusing".into(),
+            expires_at: (chrono::Utc::now() + chrono::Duration::hours(1)).into(),
+            ..Default::default()
+        };
+        user.set_custom_status(&cs).unwrap();
+        assert_eq!(
+            user.get_custom_status().unwrap().duration,
+            "",
+            "precondition: stored without a duration"
+        );
+
+        user.pre_save(&StubHasher::ok()).unwrap();
+
+        let stored = user.get_custom_status().expect("still present");
+        assert_eq!(
+            stored.duration,
+            crate::custom_status::DURATION_DATE_AND_TIME
+        );
+        assert_eq!(stored.text, "focusing");
+    }
+
+    /// A user with no custom status must not grow one.
+    #[test]
+    fn pre_save_does_not_invent_a_custom_status() {
+        let mut user = User::default();
+        user.pre_save(&StubHasher::ok()).unwrap();
+        assert!(user.get_custom_status().is_none());
+        assert_eq!(
+            user.props.as_ref().map(StringMap::len),
+            Some(0),
+            "Props is materialised but stays empty"
+        );
     }
 
     #[test]
@@ -2586,6 +3006,26 @@ mod is_valid_go_parity {
         u
     }
 
+    /// [D-107], pinned against the probe rather than against a redacted case.
+    ///
+    /// Go's `auth_data` branch renders a `*string` with `%v`, so its detail carries a heap
+    /// address that differs between two calls **in the same process**. That is why ours says
+    /// `<pointer>`: there is no value to match, only a shape. If either assertion below flips,
+    /// upstream dereferenced the pointer and D-107 becomes closable.
+    #[test]
+    fn auth_data_detail_is_an_unstable_address() {
+        let probe = &oracle()["auth_data_ptr"];
+        assert_eq!(probe["id"], "model.user.is_valid.auth_data.app_error");
+        assert_eq!(
+            probe["value_is_an_address"], true,
+            "Go still formats the pointer rather than its pointee"
+        );
+        assert_eq!(
+            probe["stable_across_calls"], false,
+            "two calls in one process disagree, so no fixture could record the value"
+        );
+    }
+
     #[test]
     fn constants_match_go() {
         let c = &oracle()["constants"];
@@ -2622,10 +3062,17 @@ mod is_valid_go_parity {
 
             // The `auth_data` length branch interpolates a POINTER in Go, so its detail holds a
             // memory address that changes between calls. Ours holds a marker. See D-107.
+            //
+            // The oracle **redacts** that address before writing the fixture, or the file would
+            // be rewritten by every generator run. `auth_data_detail_is_an_unstable_address`
+            // below is what pins the underlying fact; this branch only checks that the redaction
+            // fired, which is the signal that Go still formats a pointer here.
             if name == "auth_data_over_cap" {
-                assert!(
-                    case["detailed_error"].as_str().unwrap().contains("0x"),
-                    "Go's detail should still be an address; if not, D-107 can be closed"
+                assert_eq!(
+                    case["detailed_error"].as_str().unwrap(),
+                    format!("user_id={} auth_data=<address>", valid_user().id),
+                    "the oracle should have redacted Go's address; if the marker is gone, \
+                     Go stopped formatting a pointer and D-107 can be closed"
                 );
                 assert_eq!(
                     err.detailed_error,

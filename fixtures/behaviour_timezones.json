@@ -1,0 +1,59 @@
+{
+    "default_user_timezone": {
+        "insertion_note": "useAutomaticTimezone, automaticTimezone, manualTimezone",
+        "len": 3,
+        "marshalled": "{\"automaticTimezone\":\"\",\"manualTimezone\":\"\",\"useAutomaticTimezone\":\"true\"}",
+        "rune_count_of_marshalled": 74,
+        "use_automatic_timezone_go_type": "string",
+        "user_timezone_max_runes": 256,
+        "value": {
+            "automaticTimezone": "",
+            "manualTimezone": "",
+            "useAutomaticTimezone": "true"
+        }
+    },
+    "freshness": {
+        "mutating_one_call_leaks_into_another": false,
+        "second_call_manual_timezone": ""
+    },
+    "pre_save": [
+        {
+            "in_len": 0,
+            "in_nil": true,
+            "name": "nil",
+            "out": {
+                "automaticTimezone": "",
+                "manualTimezone": "",
+                "useAutomaticTimezone": "true"
+            },
+            "out_len": 3,
+            "replaced": true
+        },
+        {
+            "in_len": 0,
+            "in_nil": false,
+            "name": "empty_but_present",
+            "out": {},
+            "out_len": 0,
+            "replaced": false
+        },
+        {
+            "in_len": 2,
+            "in_nil": false,
+            "name": "already_set",
+            "out": {
+                "manualTimezone": "Asia/Kolkata",
+                "useAutomaticTimezone": "false"
+            },
+            "out_len": 2,
+            "replaced": false
+        }
+    ],
+    "supported": {
+        "first": "Africa/Abidjan",
+        "fnv1a64": 17258942571110263673,
+        "is_sorted": true,
+        "last": "Zulu",
+        "len": 592
+    }
+}

@@ -301,11 +301,28 @@ func userIsValidAll() []map[string]any {
 			entry["id"] = err.Id
 			entry["where"] = err.Where
 			entry["status"] = err.StatusCode
-			entry["detailed_error"] = err.DetailedError
+			entry["detailed_error"] = uvRedactAddresses(err.DetailedError)
 		}
 		out = append(out, entry)
 	}
 	return out
+}
+
+// uvRedactAddresses replaces a formatted pointer with a placeholder.
+//
+// The `auth_data` branch passes a `*string` to a `%v`, so its detail carries a **heap address**
+// ([D-107]). That value changes on every run, which would rewrite this committed fixture on each
+// generator invocation and destroy the "a clean run touches only new files" signal — the same
+// class of defect as [D-032]. The address is not a fact worth recording anyway: what matters is
+// that Go emits one at all, and `userAuthDataPointerProbe` records exactly that, separately.
+func uvRedactAddresses(detail string) string {
+	head, tail, found := strings.Cut(detail, "auth_data=0x")
+	if !found {
+		return detail
+	}
+	// Drop the hex digits that follow, keeping anything after them.
+	rest := strings.TrimLeft(tail, "0123456789abcdefABCDEF")
+	return head + "auth_data=<address>" + rest
 }
 
 // The pointer-formatting branch, probed on its own.

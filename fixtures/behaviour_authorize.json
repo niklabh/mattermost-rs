@@ -1,0 +1,2433 @@
+{
+    "auth_data_is_valid": [
+        {
+            "name": "valid",
+            "ok": true
+        },
+        {
+            "detailed_error": "",
+            "id": "model.authorize.is_valid.client_id.app_error",
+            "name": "bad_client_id",
+            "ok": false,
+            "status": 400,
+            "where": "AuthData.IsValid"
+        },
+        {
+            "detailed_error": "",
+            "id": "model.authorize.is_valid.client_id.app_error",
+            "name": "empty_client_id",
+            "ok": false,
+            "status": 400,
+            "where": "AuthData.IsValid"
+        },
+        {
+            "detailed_error": "",
+            "id": "model.authorize.is_valid.user_id.app_error",
+            "name": "bad_user_id",
+            "ok": false,
+            "status": 400,
+            "where": "AuthData.IsValid"
+        },
+        {
+            "detailed_error": "client_id=abcdefghijklmnopqrstuvwxyz",
+            "id": "model.authorize.is_valid.auth_code.app_error",
+            "name": "empty_code",
+            "ok": false,
+            "status": 400,
+            "where": "AuthData.IsValid"
+        },
+        {
+            "name": "code_at_cap",
+            "ok": true
+        },
+        {
+            "detailed_error": "client_id=abcdefghijklmnopqrstuvwxyz",
+            "id": "model.authorize.is_valid.auth_code.app_error",
+            "name": "code_over_cap",
+            "ok": false,
+            "status": 400,
+            "where": "AuthData.IsValid"
+        },
+        {
+            "name": "code_multibyte_at_cap",
+            "ok": true
+        },
+        {
+            "detailed_error": "client_id=abcdefghijklmnopqrstuvwxyz",
+            "id": "model.authorize.is_valid.auth_code.app_error",
+            "name": "code_multibyte_over_cap",
+            "ok": false,
+            "status": 400,
+            "where": "AuthData.IsValid"
+        },
+        {
+            "detailed_error": "",
+            "id": "model.authorize.is_valid.expires.app_error",
+            "name": "zero_expires_in",
+            "ok": false,
+            "status": 400,
+            "where": "AuthData.IsValid"
+        },
+        {
+            "name": "negative_expires_in",
+            "ok": true
+        },
+        {
+            "detailed_error": "client_id=abcdefghijklmnopqrstuvwxyz",
+            "id": "model.authorize.is_valid.create_at.app_error",
+            "name": "zero_create_at",
+            "ok": false,
+            "status": 400,
+            "where": "AuthData.IsValid"
+        },
+        {
+            "detailed_error": "client_id=abcdefghijklmnopqrstuvwxyz",
+            "id": "model.authorize.is_valid.create_at.app_error",
+            "name": "negative_create_at",
+            "ok": false,
+            "status": 400,
+            "where": "AuthData.IsValid"
+        },
+        {
+            "detailed_error": "client_id=abcdefghijklmnopqrstuvwxyz",
+            "id": "model.authorize.is_valid.redirect_uri.app_error",
+            "name": "empty_redirect_uri",
+            "ok": false,
+            "status": 400,
+            "where": "AuthData.IsValid"
+        },
+        {
+            "detailed_error": "client_id=abcdefghijklmnopqrstuvwxyz",
+            "id": "model.authorize.is_valid.redirect_uri.app_error",
+            "name": "non_http_redirect_uri",
+            "ok": false,
+            "status": 400,
+            "where": "AuthData.IsValid"
+        },
+        {
+            "detailed_error": "client_id=abcdefghijklmnopqrstuvwxyz",
+            "id": "model.authorize.is_valid.redirect_uri.app_error",
+            "name": "relative_redirect_uri",
+            "ok": false,
+            "status": 400,
+            "where": "AuthData.IsValid"
+        },
+        {
+            "name": "redirect_uri_at_cap",
+            "ok": true
+        },
+        {
+            "detailed_error": "client_id=abcdefghijklmnopqrstuvwxyz",
+            "id": "model.authorize.is_valid.redirect_uri.app_error",
+            "name": "redirect_uri_over_cap",
+            "ok": false,
+            "status": 400,
+            "where": "AuthData.IsValid"
+        },
+        {
+            "name": "state_at_cap",
+            "ok": true
+        },
+        {
+            "detailed_error": "client_id=abcdefghijklmnopqrstuvwxyz",
+            "id": "model.authorize.is_valid.state.app_error",
+            "name": "state_over_cap",
+            "ok": false,
+            "status": 400,
+            "where": "AuthData.IsValid"
+        },
+        {
+            "name": "scope_at_cap",
+            "ok": true
+        },
+        {
+            "detailed_error": "client_id=abcdefghijklmnopqrstuvwxyz",
+            "id": "model.authorize.is_valid.scope.app_error",
+            "name": "scope_over_cap",
+            "ok": false,
+            "status": 400,
+            "where": "AuthData.IsValid"
+        },
+        {
+            "name": "pkce_both_empty_is_skipped",
+            "ok": true
+        },
+        {
+            "detailed_error": "client_id=abcdefghijklmnopqrstuvwxyz",
+            "id": "model.authorize.is_valid.code_challenge_method.app_error",
+            "name": "pkce_challenge_only",
+            "ok": false,
+            "status": 400,
+            "where": "AuthData.validatePKCE"
+        },
+        {
+            "detailed_error": "client_id=abcdefghijklmnopqrstuvwxyz",
+            "id": "model.authorize.is_valid.code_challenge.app_error",
+            "name": "pkce_method_only",
+            "ok": false,
+            "status": 400,
+            "where": "AuthData.validatePKCE"
+        },
+        {
+            "name": "pkce_valid",
+            "ok": true
+        },
+        {
+            "detailed_error": "client_id=abcdefghijklmnopqrstuvwxyz, method=plain",
+            "id": "model.authorize.is_valid.code_challenge_method.unsupported.app_error",
+            "name": "pkce_plain_method",
+            "ok": false,
+            "status": 400,
+            "where": "AuthData.validatePKCE"
+        },
+        {
+            "detailed_error": "client_id=abcdefghijklmnopqrstuvwxyz, method=s256",
+            "id": "model.authorize.is_valid.code_challenge_method.unsupported.app_error",
+            "name": "pkce_lowercase_method",
+            "ok": false,
+            "status": 400,
+            "where": "AuthData.validatePKCE"
+        },
+        {
+            "detailed_error": "client_id=abcdefghijklmnopqrstuvwxyz",
+            "id": "model.authorize.is_valid.code_challenge.length.app_error",
+            "name": "pkce_challenge_under_min",
+            "ok": false,
+            "status": 400,
+            "where": "AuthData.validatePKCE"
+        },
+        {
+            "name": "pkce_challenge_at_max",
+            "ok": true
+        },
+        {
+            "detailed_error": "client_id=abcdefghijklmnopqrstuvwxyz",
+            "id": "model.authorize.is_valid.code_challenge.length.app_error",
+            "name": "pkce_challenge_over_max",
+            "ok": false,
+            "status": 400,
+            "where": "AuthData.validatePKCE"
+        },
+        {
+            "detailed_error": "client_id=abcdefghijklmnopqrstuvwxyz",
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "name": "pkce_challenge_bad_charset",
+            "ok": false,
+            "status": 400,
+            "where": "AuthData.validatePKCE"
+        },
+        {
+            "detailed_error": "client_id=abcdefghijklmnopqrstuvwxyz",
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "name": "pkce_challenge_with_padding",
+            "ok": false,
+            "status": 400,
+            "where": "AuthData.validatePKCE"
+        },
+        {
+            "name": "resource_valid",
+            "ok": true
+        },
+        {
+            "detailed_error": "client_id=abcdefghijklmnopqrstuvwxyz",
+            "id": "model.authorize.is_valid.resource.not_absolute.app_error",
+            "name": "resource_relative",
+            "ok": false,
+            "status": 400,
+            "where": "AuthData.IsValid"
+        },
+        {
+            "detailed_error": "client_id=abcdefghijklmnopqrstuvwxyz",
+            "id": "model.authorize.is_valid.resource.has_fragment.app_error",
+            "name": "resource_with_fragment",
+            "ok": false,
+            "status": 400,
+            "where": "AuthData.IsValid"
+        },
+        {
+            "name": "resource_at_cap",
+            "ok": true
+        },
+        {
+            "detailed_error": "client_id=abcdefghijklmnopqrstuvwxyz",
+            "id": "model.authorize.is_valid.resource.length.app_error",
+            "name": "resource_over_cap",
+            "ok": false,
+            "status": 400,
+            "where": "AuthData.IsValid"
+        },
+        {
+            "detailed_error": "",
+            "id": "model.authorize.is_valid.client_id.app_error",
+            "name": "bad_client_id_and_bad_user_id",
+            "ok": false,
+            "status": 400,
+            "where": "AuthData.IsValid"
+        },
+        {
+            "detailed_error": "client_id=abcdefghijklmnopqrstuvwxyz",
+            "id": "model.authorize.is_valid.auth_code.app_error",
+            "name": "bad_code_and_bad_pkce",
+            "ok": false,
+            "status": 400,
+            "where": "AuthData.IsValid"
+        },
+        {
+            "detailed_error": "client_id=abcdefghijklmnopqrstuvwxyz, method=plain",
+            "id": "model.authorize.is_valid.code_challenge_method.unsupported.app_error",
+            "name": "bad_pkce_and_bad_resource",
+            "ok": false,
+            "status": 400,
+            "where": "AuthData.validatePKCE"
+        }
+    ],
+    "authorize_request_is_valid": [
+        {
+            "name": "valid",
+            "ok": true
+        },
+        {
+            "name": "implicit_response_type",
+            "ok": true
+        },
+        {
+            "name": "nonsense_response_type",
+            "ok": true
+        },
+        {
+            "detailed_error": "",
+            "id": "model.authorize.is_valid.response_type.app_error",
+            "name": "empty_response_type",
+            "ok": false,
+            "status": 400,
+            "where": "AuthData.IsValid"
+        },
+        {
+            "detailed_error": "",
+            "id": "model.authorize.is_valid.client_id.app_error",
+            "name": "bad_client_id",
+            "ok": false,
+            "status": 400,
+            "where": "AuthData.IsValid"
+        },
+        {
+            "detailed_error": "client_id=abcdefghijklmnopqrstuvwxyz",
+            "id": "model.authorize.is_valid.redirect_uri.app_error",
+            "name": "empty_redirect_uri",
+            "ok": false,
+            "status": 400,
+            "where": "AuthData.IsValid"
+        },
+        {
+            "detailed_error": "client_id=abcdefghijklmnopqrstuvwxyz",
+            "id": "model.authorize.is_valid.redirect_uri.app_error",
+            "name": "relative_redirect_uri",
+            "ok": false,
+            "status": 400,
+            "where": "AuthData.IsValid"
+        },
+        {
+            "detailed_error": "client_id=abcdefghijklmnopqrstuvwxyz",
+            "id": "model.authorize.is_valid.redirect_uri.app_error",
+            "name": "redirect_uri_over_cap",
+            "ok": false,
+            "status": 400,
+            "where": "AuthData.IsValid"
+        },
+        {
+            "detailed_error": "client_id=abcdefghijklmnopqrstuvwxyz",
+            "id": "model.authorize.is_valid.state.app_error",
+            "name": "state_over_cap",
+            "ok": false,
+            "status": 400,
+            "where": "AuthData.IsValid"
+        },
+        {
+            "detailed_error": "client_id=abcdefghijklmnopqrstuvwxyz",
+            "id": "model.authorize.is_valid.scope.app_error",
+            "name": "scope_over_cap",
+            "ok": false,
+            "status": 400,
+            "where": "AuthData.IsValid"
+        },
+        {
+            "detailed_error": "client_id=abcdefghijklmnopqrstuvwxyz",
+            "id": "model.authorize.is_valid.code_challenge_method.app_error",
+            "name": "pkce_challenge_only",
+            "ok": false,
+            "status": 400,
+            "where": "AuthorizeRequest.validatePKCE"
+        },
+        {
+            "detailed_error": "client_id=abcdefghijklmnopqrstuvwxyz",
+            "id": "model.authorize.is_valid.code_challenge.app_error",
+            "name": "pkce_method_only",
+            "ok": false,
+            "status": 400,
+            "where": "AuthorizeRequest.validatePKCE"
+        },
+        {
+            "name": "pkce_valid",
+            "ok": true
+        },
+        {
+            "detailed_error": "client_id=abcdefghijklmnopqrstuvwxyz, method=plain",
+            "id": "model.authorize.is_valid.code_challenge_method.unsupported.app_error",
+            "name": "pkce_plain_method",
+            "ok": false,
+            "status": 400,
+            "where": "AuthorizeRequest.validatePKCE"
+        },
+        {
+            "detailed_error": "client_id=abcdefghijklmnopqrstuvwxyz",
+            "id": "model.authorize.is_valid.resource.not_absolute.app_error",
+            "name": "resource_relative",
+            "ok": false,
+            "status": 400,
+            "where": "AuthorizeRequest.IsValid"
+        },
+        {
+            "detailed_error": "client_id=abcdefghijklmnopqrstuvwxyz",
+            "id": "model.authorize.is_valid.resource.has_fragment.app_error",
+            "name": "resource_with_fragment",
+            "ok": false,
+            "status": 400,
+            "where": "AuthorizeRequest.IsValid"
+        },
+        {
+            "detailed_error": "",
+            "id": "model.authorize.is_valid.client_id.app_error",
+            "name": "bad_client_id_and_empty_response_type",
+            "ok": false,
+            "status": 400,
+            "where": "AuthData.IsValid"
+        }
+    ],
+    "code_challenge_charset": [
+        {
+            "challenge_bytes": 43,
+            "codepoint": 0,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 1,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 2,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 3,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 4,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 5,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 6,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 7,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 8,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 9,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 10,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 11,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 12,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 13,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 14,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 15,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 16,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 17,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 18,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 19,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 20,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 21,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 22,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 23,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 24,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 25,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 26,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 27,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 28,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 29,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 30,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 31,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 32,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 33,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 34,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 35,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 36,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 37,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 38,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 39,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 40,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 41,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 42,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 43,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 44,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 45,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 46,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 47,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 48,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 49,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 50,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 51,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 52,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 53,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 54,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 55,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 56,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 57,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 58,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 59,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 60,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 61,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 62,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 63,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 64,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 65,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 66,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 67,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 68,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 69,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 70,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 71,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 72,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 73,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 74,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 75,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 76,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 77,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 78,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 79,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 80,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 81,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 82,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 83,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 84,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 85,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 86,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 87,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 88,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 89,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 90,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 91,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 92,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 93,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 94,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 95,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 96,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 97,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 98,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 99,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 100,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 101,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 102,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 103,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 104,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 105,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 106,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 107,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 108,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 109,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 110,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 111,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 112,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 113,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 114,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 115,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 116,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 117,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 118,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 119,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 120,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 121,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 122,
+            "ok": true
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 123,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 124,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 125,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 126,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 43,
+            "codepoint": 127,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 44,
+            "codepoint": 233,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 44,
+            "codepoint": 304,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 45,
+            "codepoint": 20013,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 44,
+            "codepoint": 160,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 45,
+            "codepoint": 65279,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        },
+        {
+            "challenge_bytes": 45,
+            "codepoint": 8232,
+            "id": "model.authorize.is_valid.code_challenge.format.app_error",
+            "ok": false
+        }
+    ],
+    "code_verifier_charset": [
+        {
+            "codepoint": 0,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 1,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 2,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 3,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 4,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 5,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 6,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 7,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 8,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 9,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 10,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 11,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 12,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 13,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 14,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 15,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 16,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 17,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 18,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 19,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 20,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 21,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 22,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 23,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 24,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 25,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 26,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 27,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 28,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 29,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 30,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 31,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 32,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 33,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 34,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 35,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 36,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 37,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 38,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 39,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 40,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 41,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 42,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 43,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 44,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 45,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 46,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 47,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 48,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 49,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 50,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 51,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 52,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 53,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 54,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 55,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 56,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 57,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 58,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 59,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 60,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 61,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 62,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 63,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 64,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 65,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 66,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 67,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 68,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 69,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 70,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 71,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 72,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 73,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 74,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 75,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 76,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 77,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 78,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 79,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 80,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 81,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 82,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 83,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 84,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 85,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 86,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 87,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 88,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 89,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 90,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 91,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 92,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 93,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 94,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 95,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 96,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 97,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 98,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 99,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 100,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 101,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 102,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 103,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 104,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 105,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 106,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 107,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 108,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 109,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 110,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 111,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 112,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 113,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 114,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 115,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 116,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 117,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 118,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 119,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 120,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 121,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 122,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 123,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 124,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 125,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 126,
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 127,
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "codepoint": 233,
+            "verified": false,
+            "verifier_bytes": 44
+        },
+        {
+            "codepoint": 304,
+            "verified": false,
+            "verifier_bytes": 44
+        },
+        {
+            "codepoint": 20013,
+            "verified": false,
+            "verifier_bytes": 45
+        },
+        {
+            "codepoint": 160,
+            "verified": false,
+            "verifier_bytes": 44
+        },
+        {
+            "codepoint": 65279,
+            "verified": false,
+            "verifier_bytes": 45
+        },
+        {
+            "codepoint": 8232,
+            "verified": false,
+            "verifier_bytes": 45
+        }
+    ],
+    "constants": {
+        "AuthCodeExpireTime": 600,
+        "AuthCodeResponseType": "code",
+        "DefaultScope": "user",
+        "ImplicitResponseType": "token",
+        "PKCECodeChallengeMaxLength": 128,
+        "PKCECodeChallengeMethodS256": "S256",
+        "PKCECodeChallengeMinLength": 43,
+        "PKCECodeVerifierMaxLength": 128,
+        "PKCECodeVerifierMinLength": 43,
+        "auth_code_expire_time_unit": "seconds"
+    },
+    "is_expired": [
+        {
+            "create_at": 1700000000000,
+            "expires_in": 0,
+            "expiry_threshold": 1700000000000,
+            "overflows": false,
+            "threshold_is_before_create_at": false,
+            "widened_product": 0,
+            "wrapped_product": 0
+        },
+        {
+            "create_at": 1700000000000,
+            "expires_in": 1,
+            "expiry_threshold": 1700000001000,
+            "overflows": false,
+            "threshold_is_before_create_at": false,
+            "widened_product": 1000,
+            "wrapped_product": 1000
+        },
+        {
+            "create_at": 1700000000000,
+            "expires_in": 600,
+            "expiry_threshold": 1700000600000,
+            "overflows": false,
+            "threshold_is_before_create_at": false,
+            "widened_product": 600000,
+            "wrapped_product": 600000
+        },
+        {
+            "create_at": 1700000000000,
+            "expires_in": 600,
+            "expiry_threshold": 1700000600000,
+            "overflows": false,
+            "threshold_is_before_create_at": false,
+            "widened_product": 600000,
+            "wrapped_product": 600000
+        },
+        {
+            "create_at": 1700000000000,
+            "expires_in": -1,
+            "expiry_threshold": 1699999999000,
+            "overflows": false,
+            "threshold_is_before_create_at": true,
+            "widened_product": -1000,
+            "wrapped_product": -1000
+        },
+        {
+            "create_at": 1700000000000,
+            "expires_in": 2147483,
+            "expiry_threshold": 1702147483000,
+            "overflows": false,
+            "threshold_is_before_create_at": false,
+            "widened_product": 2147483000,
+            "wrapped_product": 2147483000
+        },
+        {
+            "create_at": 1700000000000,
+            "expires_in": 2147484,
+            "expiry_threshold": 1697852516704,
+            "overflows": true,
+            "threshold_is_before_create_at": true,
+            "widened_product": 2147484000,
+            "wrapped_product": -2147483296
+        },
+        {
+            "create_at": 1700000000000,
+            "expires_in": 2200000,
+            "expiry_threshold": 1697905032704,
+            "overflows": true,
+            "threshold_is_before_create_at": true,
+            "widened_product": 2200000000,
+            "wrapped_product": -2094967296
+        },
+        {
+            "create_at": 1700000000000,
+            "expires_in": 2147483647,
+            "expiry_threshold": 1699999999000,
+            "overflows": true,
+            "threshold_is_before_create_at": true,
+            "widened_product": 2147483647000,
+            "wrapped_product": -1000
+        },
+        {
+            "create_at": 1700000000000,
+            "expires_in": -2147483648,
+            "expiry_threshold": 1700000000000,
+            "overflows": true,
+            "threshold_is_before_create_at": false,
+            "widened_product": -2147483648000,
+            "wrapped_product": 0
+        }
+    ],
+    "pre_save": [
+        {
+            "create_at_uses_now": true,
+            "in_create_at": 0,
+            "in_expires_in": 0,
+            "in_scope": "",
+            "name": "all_zero",
+            "out_expires_in": 600,
+            "out_scope": "user"
+        },
+        {
+            "create_at_uses_now": true,
+            "in_create_at": 0,
+            "in_expires_in": 42,
+            "in_scope": "",
+            "name": "expires_in_set",
+            "out_expires_in": 42,
+            "out_scope": "user"
+        },
+        {
+            "create_at_uses_now": false,
+            "in_create_at": 1700000000000,
+            "in_expires_in": 0,
+            "in_scope": "",
+            "name": "create_at_set",
+            "out_create_at": 1700000000000,
+            "out_expires_in": 600,
+            "out_scope": "user"
+        },
+        {
+            "create_at_uses_now": true,
+            "in_create_at": 0,
+            "in_expires_in": 0,
+            "in_scope": "custom",
+            "name": "scope_set",
+            "out_expires_in": 600,
+            "out_scope": "custom"
+        },
+        {
+            "create_at_uses_now": false,
+            "in_create_at": 1700000000000,
+            "in_expires_in": 42,
+            "in_scope": "custom",
+            "name": "everything_set",
+            "out_create_at": 1700000000000,
+            "out_expires_in": 42,
+            "out_scope": "custom"
+        },
+        {
+            "create_at_uses_now": false,
+            "in_create_at": 1,
+            "in_expires_in": -5,
+            "in_scope": "x",
+            "name": "negative_expires_in",
+            "out_create_at": 1,
+            "out_expires_in": -5,
+            "out_scope": "x"
+        }
+    ],
+    "validate_pkce_for_client": [
+        {
+            "code_challenge": "",
+            "code_verifier": "",
+            "detailed_error": "client_id=abcdefghijklmnopqrstuvwxyz",
+            "id": "model.authorize.validate_pkce.public_client_required.app_error",
+            "is_public_client": true,
+            "method": "",
+            "name": "no_pkce_no_verifier",
+            "ok": false,
+            "status": 400,
+            "where": "AuthData.ValidatePKCEForClientType"
+        },
+        {
+            "code_challenge": "",
+            "code_verifier": "",
+            "is_public_client": false,
+            "method": "",
+            "name": "no_pkce_no_verifier",
+            "ok": true
+        },
+        {
+            "code_challenge": "",
+            "code_verifier": "abcdefghijklmnopqrstuvwxyz0123456789-._~ABC",
+            "detailed_error": "client_id=abcdefghijklmnopqrstuvwxyz",
+            "id": "model.authorize.validate_pkce.public_client_required.app_error",
+            "is_public_client": true,
+            "method": "",
+            "name": "no_pkce_with_verifier",
+            "ok": false,
+            "status": 400,
+            "where": "AuthData.ValidatePKCEForClientType"
+        },
+        {
+            "code_challenge": "",
+            "code_verifier": "abcdefghijklmnopqrstuvwxyz0123456789-._~ABC",
+            "detailed_error": "client_id=abcdefghijklmnopqrstuvwxyz",
+            "id": "model.authorize.validate_pkce.not_used_in_auth.app_error",
+            "is_public_client": false,
+            "method": "",
+            "name": "no_pkce_with_verifier",
+            "ok": false,
+            "status": 400,
+            "where": "AuthData.ValidatePKCEForClientType"
+        },
+        {
+            "code_challenge": "01ZMlLDptILCmAeK1WZ14Du9xRCvfr-aPWvX7e4Hk4U",
+            "code_verifier": "abcdefghijklmnopqrstuvwxyz0123456789-._~ABC",
+            "is_public_client": true,
+            "method": "S256",
+            "name": "pkce_correct_verifier",
+            "ok": true
+        },
+        {
+            "code_challenge": "01ZMlLDptILCmAeK1WZ14Du9xRCvfr-aPWvX7e4Hk4U",
+            "code_verifier": "abcdefghijklmnopqrstuvwxyz0123456789-._~ABC",
+            "is_public_client": false,
+            "method": "S256",
+            "name": "pkce_correct_verifier",
+            "ok": true
+        },
+        {
+            "code_challenge": "01ZMlLDptILCmAeK1WZ14Du9xRCvfr-aPWvX7e4Hk4U",
+            "code_verifier": "bbcdefghijklmnopqrstuvwxyz0123456789-._~ABC",
+            "detailed_error": "client_id=abcdefghijklmnopqrstuvwxyz",
+            "id": "model.authorize.validate_pkce.verification_failed.app_error",
+            "is_public_client": true,
+            "method": "S256",
+            "name": "pkce_wrong_verifier",
+            "ok": false,
+            "status": 400,
+            "where": "AuthData.ValidatePKCEForClientType"
+        },
+        {
+            "code_challenge": "01ZMlLDptILCmAeK1WZ14Du9xRCvfr-aPWvX7e4Hk4U",
+            "code_verifier": "bbcdefghijklmnopqrstuvwxyz0123456789-._~ABC",
+            "detailed_error": "client_id=abcdefghijklmnopqrstuvwxyz",
+            "id": "model.authorize.validate_pkce.verification_failed.app_error",
+            "is_public_client": false,
+            "method": "S256",
+            "name": "pkce_wrong_verifier",
+            "ok": false,
+            "status": 400,
+            "where": "AuthData.ValidatePKCEForClientType"
+        },
+        {
+            "code_challenge": "01ZMlLDptILCmAeK1WZ14Du9xRCvfr-aPWvX7e4Hk4U",
+            "code_verifier": "",
+            "detailed_error": "client_id=abcdefghijklmnopqrstuvwxyz",
+            "id": "model.authorize.validate_pkce.verifier_required.app_error",
+            "is_public_client": true,
+            "method": "S256",
+            "name": "pkce_no_verifier",
+            "ok": false,
+            "status": 400,
+            "where": "AuthData.ValidatePKCEForClientType"
+        },
+        {
+            "code_challenge": "01ZMlLDptILCmAeK1WZ14Du9xRCvfr-aPWvX7e4Hk4U",
+            "code_verifier": "",
+            "detailed_error": "client_id=abcdefghijklmnopqrstuvwxyz",
+            "id": "model.authorize.validate_pkce.verifier_required.app_error",
+            "is_public_client": false,
+            "method": "S256",
+            "name": "pkce_no_verifier",
+            "ok": false,
+            "status": 400,
+            "where": "AuthData.ValidatePKCEForClientType"
+        },
+        {
+            "code_challenge": "01ZMlLDptILCmAeK1WZ14Du9xRCvfr-aPWvX7e4Hk4U",
+            "code_verifier": "abcdefghijklmnopqrstuvwxyz0123456789-._~ABC",
+            "detailed_error": "client_id=abcdefghijklmnopqrstuvwxyz",
+            "id": "model.authorize.validate_pkce.verification_failed.app_error",
+            "is_public_client": true,
+            "method": "",
+            "name": "challenge_without_method_correct_verifier",
+            "ok": false,
+            "status": 400,
+            "where": "AuthData.ValidatePKCEForClientType"
+        },
+        {
+            "code_challenge": "01ZMlLDptILCmAeK1WZ14Du9xRCvfr-aPWvX7e4Hk4U",
+            "code_verifier": "abcdefghijklmnopqrstuvwxyz0123456789-._~ABC",
+            "detailed_error": "client_id=abcdefghijklmnopqrstuvwxyz",
+            "id": "model.authorize.validate_pkce.verification_failed.app_error",
+            "is_public_client": false,
+            "method": "",
+            "name": "challenge_without_method_correct_verifier",
+            "ok": false,
+            "status": 400,
+            "where": "AuthData.ValidatePKCEForClientType"
+        },
+        {
+            "code_challenge": "",
+            "code_verifier": "abcdefghijklmnopqrstuvwxyz0123456789-._~ABC",
+            "detailed_error": "client_id=abcdefghijklmnopqrstuvwxyz",
+            "id": "model.authorize.validate_pkce.public_client_required.app_error",
+            "is_public_client": true,
+            "method": "S256",
+            "name": "method_without_challenge",
+            "ok": false,
+            "status": 400,
+            "where": "AuthData.ValidatePKCEForClientType"
+        },
+        {
+            "code_challenge": "",
+            "code_verifier": "abcdefghijklmnopqrstuvwxyz0123456789-._~ABC",
+            "detailed_error": "client_id=abcdefghijklmnopqrstuvwxyz",
+            "id": "model.authorize.validate_pkce.not_used_in_auth.app_error",
+            "is_public_client": false,
+            "method": "S256",
+            "name": "method_without_challenge",
+            "ok": false,
+            "status": 400,
+            "where": "AuthData.ValidatePKCEForClientType"
+        },
+        {
+            "code_challenge": "",
+            "code_verifier": "",
+            "detailed_error": "client_id=abcdefghijklmnopqrstuvwxyz",
+            "id": "model.authorize.validate_pkce.public_client_required.app_error",
+            "is_public_client": true,
+            "method": "S256",
+            "name": "method_without_challenge_no_verifier",
+            "ok": false,
+            "status": 400,
+            "where": "AuthData.ValidatePKCEForClientType"
+        },
+        {
+            "code_challenge": "",
+            "code_verifier": "",
+            "is_public_client": false,
+            "method": "S256",
+            "name": "method_without_challenge_no_verifier",
+            "ok": true
+        }
+    ],
+    "validate_resource_parameter": [
+        {
+            "name": "empty",
+            "ok": true,
+            "resource": "",
+            "resource_bytes": 0
+        },
+        {
+            "name": "absolute_https",
+            "ok": true,
+            "resource": "https://api.example.com/v1",
+            "resource_bytes": 26
+        },
+        {
+            "name": "absolute_http",
+            "ok": true,
+            "resource": "http://api.example.com/v1",
+            "resource_bytes": 25
+        },
+        {
+            "name": "custom_scheme",
+            "ok": true,
+            "resource": "urn:example:resource",
+            "resource_bytes": 20
+        },
+        {
+            "name": "mailto",
+            "ok": true,
+            "resource": "mailto:someone@example.com",
+            "resource_bytes": 26
+        },
+        {
+            "detailed_error": "client_id=abcdefghijklmnopqrstuvwxyz",
+            "id": "model.authorize.is_valid.resource.not_absolute.app_error",
+            "name": "relative",
+            "ok": false,
+            "resource": "/v1/resource",
+            "resource_bytes": 12,
+            "status": 400,
+            "where": "probe"
+        },
+        {
+            "detailed_error": "client_id=abcdefghijklmnopqrstuvwxyz",
+            "id": "model.authorize.is_valid.resource.not_absolute.app_error",
+            "name": "scheme_relative",
+            "ok": false,
+            "resource": "//api.example.com/v1",
+            "resource_bytes": 20,
+            "status": 400,
+            "where": "probe"
+        },
+        {
+            "detailed_error": "client_id=abcdefghijklmnopqrstuvwxyz",
+            "id": "model.authorize.is_valid.resource.not_absolute.app_error",
+            "name": "bare_host",
+            "ok": false,
+            "resource": "api.example.com",
+            "resource_bytes": 15,
+            "status": 400,
+            "where": "probe"
+        },
+        {
+            "detailed_error": "client_id=abcdefghijklmnopqrstuvwxyz",
+            "id": "model.authorize.is_valid.resource.has_fragment.app_error",
+            "name": "with_fragment",
+            "ok": false,
+            "resource": "https://api.example.com/v1#section",
+            "resource_bytes": 34,
+            "status": 400,
+            "where": "probe"
+        },
+        {
+            "name": "with_empty_fragment",
+            "ok": true,
+            "resource": "https://api.example.com/v1#",
+            "resource_bytes": 27
+        },
+        {
+            "name": "with_query",
+            "ok": true,
+            "resource": "https://api.example.com/v1?a=b",
+            "resource_bytes": 30
+        },
+        {
+            "name": "at_cap",
+            "ok": true,
+            "resource": "https://api.example.com/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+            "resource_bytes": 512
+        },
+        {
+            "detailed_error": "client_id=abcdefghijklmnopqrstuvwxyz",
+            "id": "model.authorize.is_valid.resource.length.app_error",
+            "name": "over_cap",
+            "ok": false,
+            "resource": "https://api.example.com/rrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrrr",
+            "resource_bytes": 513,
+            "status": 400,
+            "where": "probe"
+        },
+        {
+            "detailed_error": "client_id=abcdefghijklmnopqrstuvwxyz",
+            "id": "model.authorize.is_valid.resource.invalid_uri.app_error",
+            "name": "control_character",
+            "ok": false,
+            "resource": "https://api.example.com/",
+            "resource_bytes": 25,
+            "status": 400,
+            "where": "probe"
+        },
+        {
+            "detailed_error": "client_id=abcdefghijklmnopqrstuvwxyz",
+            "id": "model.authorize.is_valid.resource.invalid_uri.app_error",
+            "name": "bad_percent_escape",
+            "ok": false,
+            "resource": "https://api.example.com/%zz",
+            "resource_bytes": 27,
+            "status": 400,
+            "where": "probe"
+        },
+        {
+            "detailed_error": "client_id=abcdefghijklmnopqrstuvwxyz",
+            "id": "model.authorize.is_valid.resource.invalid_uri.app_error",
+            "name": "invalid_port",
+            "ok": false,
+            "resource": "https://api.example.com:port/v1",
+            "resource_bytes": 31,
+            "status": 400,
+            "where": "probe"
+        },
+        {
+            "name": "space",
+            "ok": true,
+            "resource": "https://api.example.com/a b",
+            "resource_bytes": 27
+        },
+        {
+            "name": "multibyte",
+            "ok": true,
+            "resource": "https://api.example.com/é",
+            "resource_bytes": 26
+        }
+    ],
+    "verify_pkce": [
+        {
+            "code_challenge": "",
+            "code_verifier": "",
+            "method": "",
+            "name": "no_pkce_empty_verifier",
+            "verified": true,
+            "verifier_bytes": 0
+        },
+        {
+            "code_challenge": "",
+            "code_verifier": "anything at all",
+            "method": "",
+            "name": "no_pkce_any_verifier",
+            "verified": true,
+            "verifier_bytes": 15
+        },
+        {
+            "code_challenge": "01ZMlLDptILCmAeK1WZ14Du9xRCvfr-aPWvX7e4Hk4U",
+            "code_verifier": "abcdefghijklmnopqrstuvwxyz0123456789-._~ABC",
+            "method": "",
+            "name": "challenge_without_method",
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "code_challenge": "",
+            "code_verifier": "abcdefghijklmnopqrstuvwxyz0123456789-._~ABC",
+            "method": "S256",
+            "name": "method_without_challenge",
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "code_challenge": "01ZMlLDptILCmAeK1WZ14Du9xRCvfr-aPWvX7e4Hk4U",
+            "code_verifier": "abcdefghijklmnopqrstuvwxyz0123456789-._~ABC",
+            "method": "S256",
+            "name": "correct_verifier",
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "code_challenge": "01ZMlLDptILCmAeK1WZ14Du9xRCvfr-aPWvX7e4Hk4U",
+            "code_verifier": "bbcdefghijklmnopqrstuvwxyz0123456789-._~ABC",
+            "method": "S256",
+            "name": "wrong_verifier",
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "code_challenge": "01ZMlLDptILCmAeK1WZ14Du9xRCvfr-aPWvX7e4Hk4U",
+            "code_verifier": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "method": "S256",
+            "name": "verifier_under_min",
+            "verified": false,
+            "verifier_bytes": 42
+        },
+        {
+            "code_challenge": "ZtNPunH49FD35FWYhT5Tv8I7vRKQJ8uxMaL0_9eHjNA",
+            "code_verifier": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "method": "S256",
+            "name": "verifier_at_min",
+            "verified": true,
+            "verifier_bytes": 43
+        },
+        {
+            "code_challenge": "aDbPE7rEAOkQUHHNavRwhN-srU5eMCyUv-0k4BOvtz4",
+            "code_verifier": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "method": "S256",
+            "name": "verifier_at_max",
+            "verified": true,
+            "verifier_bytes": 128
+        },
+        {
+            "code_challenge": "wSywJKLlVRzKDgj86PHF4xRVXMP-9jKe6ZSj23UhZq4",
+            "code_verifier": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "method": "S256",
+            "name": "verifier_over_max",
+            "verified": false,
+            "verifier_bytes": 129
+        },
+        {
+            "code_challenge": "iwXbWFm6ct1JDeJlZO8FYEXe0UbbNRVyu6etiydm5O8",
+            "code_verifier": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa+",
+            "method": "S256",
+            "name": "verifier_bad_charset",
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "code_challenge": "-g29hpCnJNpprjDScyDRU2xU9nhSgGNcHa8OR43cdIM",
+            "code_verifier": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/",
+            "method": "S256",
+            "name": "verifier_with_slash",
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "code_challenge": "abcdefghijklmnopqrstuvwxyz0123456789-._~ABC",
+            "code_verifier": "abcdefghijklmnopqrstuvwxyz0123456789-._~ABC",
+            "method": "plain",
+            "name": "plain_method_rejected",
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "code_challenge": "01ZMlLDptILCmAeK1WZ14Du9xRCvfr-aPWvX7e4Hk4U",
+            "code_verifier": "abcdefghijklmnopqrstuvwxyz0123456789-._~ABC",
+            "method": "s256",
+            "name": "lowercase_method_rejected",
+            "verified": false,
+            "verifier_bytes": 43
+        },
+        {
+            "code_challenge": "01ZMlLDptILCmAeK1WZ14Du9xRCvfr+aPWvX7e4Hk4U",
+            "code_verifier": "abcdefghijklmnopqrstuvwxyz0123456789-._~ABC",
+            "method": "S256",
+            "name": "standard_base64_challenge",
+            "verified": false,
+            "verifier_bytes": 43
+        }
+    ],
+    "where_is_copy_pasted": {
+        "auth_data_own_branch": "AuthData.IsValid",
+        "authorize_request_own_branch": "AuthData.IsValid",
+        "authorize_request_pkce_branch": "AuthorizeRequest.validatePKCE",
+        "authorize_request_resource_branch": "AuthorizeRequest.IsValid",
+        "delegated_branches_name_the_right_one": true,
+        "own_branch_names_the_wrong_type": true
+    }
+}

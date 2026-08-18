@@ -1,0 +1,16 @@
+{
+    "id": "uon1ko4mk45ioua8ribwsi7zmy",
+    "channel_id": "iqte6161dur7m6fyt7f7rg6j4w",
+    "type": "type-024461",
+    "creator_id": "oy64na795crmgc39wft59zyesc",
+    "title": "title-d52940",
+    "description": "description-746da4",
+    "sort_order": 27,
+    "props": {
+        "key0-08fb78": "val0-6d3be5",
+        "key1-07f9c5": "val1-6c3a32"
+    },
+    "create_at": 1705433427000,
+    "update_at": 1704010190000,
+    "delete_at": 1702949248000
+}

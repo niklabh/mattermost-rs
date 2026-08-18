@@ -111,7 +111,40 @@ unicode-general-category = "1"
 # thing that goes subtly wrong, so take the dependency.
 base64 = "0.22"
 
+# Password hashing. Both crates exist for ONE reason: `Users.Password` is shared with the running
+# Go server, so the stored representation is a wire format like any other and must match
+# byte-for-byte. See [D-108] and `crates/mm-app/src/password/`.
+#
+# `pbkdf2` is what a Mattermost server at the pinned SHA actually writes — `hashers.latestHasher`
+# is `DefaultPBKDF2()`. `hmac`/`sha2` are its PRF. The `simple` feature is off: it emits
+# password-hash crate PHC strings, and Go writes its OWN PHC dialect, which we build by hand.
+pbkdf2 = { version = "0.12", default-features = false }
+hmac = "0.12"
+sha2 = "0.10"
+
+# `bcrypt` is the LEGACY hasher, kept because rows written before Mattermost's PBKDF2 migration
+# are still bcrypt and `GetHasherFromPHCString` still routes to it. Chosen over rolling blowfish
+# by hand, and over `rust-crypto`, because it exposes `hash_with_salt` — which is what makes the
+# parity test exact rather than structural: given Go's salt we can assert Go's whole string.
+bcrypt = { version = "0.15", default-features = false, features = ["std"] }
+
 # SanitizeFilename NFC-normalizes before truncating to 256 codepoints, so a decomposed name is a
 # different length than its composed form: 200 * "e+combining acute" is 400 runes in and 200 out.
 # Without normalization the Rust port truncates at a different point and stores a different name.
 unicode-normalization = "0.1"
+
+# Password hashing runs 600,000 SHA-256 iterations per hash — Go's real work factor, which the
+# parity tests must use because the iteration count is part of what they match. Unoptimised these
+# crates make `cargo test` take minutes rather than seconds, so build just them with optimisation
+# even in dev/test. This changes no behaviour; it is the standard remedy for a crypto dependency
+# in a debug build.
+[profile.dev.package.sha2]
+opt-level = 3
+[profile.dev.package.pbkdf2]
+opt-level = 3
+[profile.dev.package.hmac]
+opt-level = 3
+[profile.dev.package.blowfish]
+opt-level = 3
+[profile.dev.package.bcrypt]
+opt-level = 3

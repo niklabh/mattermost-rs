@@ -1,0 +1,1665 @@
+{
+    "auditable": {
+        "json": "{\"channel_id\":\"zyxwvutsrqponmlkjihgfedcba\",\"create_at\":1700000000000,\"creator_id\":\"0123456789abcdefghijklmnop\",\"delete_at\":0,\"id\":\"abcdefghijklmnopqrstuvwxyz\",\"type\":\"kanban\",\"update_at\":1700000001000}",
+        "key_count": 7,
+        "omits_description": true,
+        "omits_props": true,
+        "omits_sort_order": true,
+        "omits_title": true,
+        "type_value": "kanban"
+    },
+    "clone": {
+        "nested_map_is_shared": true,
+        "nil_receiver_returns_nil": true,
+        "title_is_independent": true,
+        "top_level_key_is_independent": true
+    },
+    "constants": {
+        "BoardsPropertyFieldAssignee": "assignee",
+        "BoardsPropertyFieldNameBoard": "board",
+        "BoardsPropertyFieldStatus": "status",
+        "BoardsPropertyGroupName": "boards",
+        "BoardsStatusColorComplete": "green",
+        "BoardsStatusColorInProgress": "blue",
+        "BoardsStatusColorTodo": "default",
+        "BoardsStatusOptionComplete": "Complete",
+        "BoardsStatusOptionInProgress": "In Progress",
+        "BoardsStatusOptionTodo": "Todo",
+        "MaxKanbanColumns": 100,
+        "MaxViewsPerChannel": 50,
+        "ViewDescriptionMaxRunes": 1024,
+        "ViewQueryDefaultPerPage": 20,
+        "ViewQueryMaxPerPage": 200,
+        "ViewTitleMaxRunes": 256,
+        "ViewTypeKanban": "kanban"
+    },
+    "is_valid": [
+        {
+            "name": "valid",
+            "ok": true
+        },
+        {
+            "detailed_error": "",
+            "has_params": false,
+            "id": "model.view.is_valid.id.app_error",
+            "name": "bad_id",
+            "ok": false,
+            "params": null,
+            "status": 400,
+            "where": "View.IsValid"
+        },
+        {
+            "detailed_error": "",
+            "has_params": false,
+            "id": "model.view.is_valid.id.app_error",
+            "name": "empty_id",
+            "ok": false,
+            "params": null,
+            "status": 400,
+            "where": "View.IsValid"
+        },
+        {
+            "detailed_error": "id=abcdefghijklmnopqrstuvwxyz",
+            "has_params": false,
+            "id": "model.view.is_valid.channel_id.app_error",
+            "name": "bad_channel_id",
+            "ok": false,
+            "params": null,
+            "status": 400,
+            "where": "View.IsValid"
+        },
+        {
+            "detailed_error": "id=abcdefghijklmnopqrstuvwxyz",
+            "has_params": false,
+            "id": "model.view.is_valid.creator_id.app_error",
+            "name": "bad_creator_id",
+            "ok": false,
+            "params": null,
+            "status": 400,
+            "where": "View.IsValid"
+        },
+        {
+            "detailed_error": "id=abcdefghijklmnopqrstuvwxyz",
+            "has_params": false,
+            "id": "model.view.is_valid.type.app_error",
+            "name": "empty_type",
+            "ok": false,
+            "params": null,
+            "status": 400,
+            "where": "View.IsValid"
+        },
+        {
+            "detailed_error": "id=abcdefghijklmnopqrstuvwxyz",
+            "has_params": false,
+            "id": "model.view.is_valid.type.app_error",
+            "name": "unknown_type",
+            "ok": false,
+            "params": null,
+            "status": 400,
+            "where": "View.IsValid"
+        },
+        {
+            "detailed_error": "id=abcdefghijklmnopqrstuvwxyz",
+            "has_params": false,
+            "id": "model.view.is_valid.type.app_error",
+            "name": "uppercase_type",
+            "ok": false,
+            "params": null,
+            "status": 400,
+            "where": "View.IsValid"
+        },
+        {
+            "detailed_error": "id=abcdefghijklmnopqrstuvwxyz",
+            "has_params": false,
+            "id": "model.view.is_valid.title.app_error",
+            "name": "empty_title",
+            "ok": false,
+            "params": null,
+            "status": 400,
+            "where": "View.IsValid"
+        },
+        {
+            "detailed_error": "id=abcdefghijklmnopqrstuvwxyz",
+            "has_params": false,
+            "id": "model.view.is_valid.title.app_error",
+            "name": "whitespace_title",
+            "ok": false,
+            "params": null,
+            "status": 400,
+            "where": "View.IsValid"
+        },
+        {
+            "detailed_error": "id=abcdefghijklmnopqrstuvwxyz",
+            "has_params": false,
+            "id": "model.view.is_valid.title.app_error",
+            "name": "nbsp_only_title",
+            "ok": false,
+            "params": null,
+            "status": 400,
+            "where": "View.IsValid"
+        },
+        {
+            "name": "zwsp_only_title",
+            "ok": true
+        },
+        {
+            "name": "title_at_cap",
+            "ok": true
+        },
+        {
+            "detailed_error": "id=abcdefghijklmnopqrstuvwxyz",
+            "has_params": false,
+            "id": "model.view.is_valid.title.app_error",
+            "name": "title_over_cap",
+            "ok": false,
+            "params": null,
+            "status": 400,
+            "where": "View.IsValid"
+        },
+        {
+            "detailed_error": "id=abcdefghijklmnopqrstuvwxyz",
+            "has_params": false,
+            "id": "model.view.is_valid.title.app_error",
+            "name": "title_padded_over_cap",
+            "ok": false,
+            "params": null,
+            "status": 400,
+            "where": "View.IsValid"
+        },
+        {
+            "name": "title_multibyte_at_cap",
+            "ok": true
+        },
+        {
+            "detailed_error": "id=abcdefghijklmnopqrstuvwxyz",
+            "has_params": false,
+            "id": "model.view.is_valid.title.app_error",
+            "name": "title_multibyte_over_cap",
+            "ok": false,
+            "params": null,
+            "status": 400,
+            "where": "View.IsValid"
+        },
+        {
+            "name": "description_at_cap",
+            "ok": true
+        },
+        {
+            "detailed_error": "id=abcdefghijklmnopqrstuvwxyz",
+            "has_params": false,
+            "id": "model.view.is_valid.description.app_error",
+            "name": "description_over_cap",
+            "ok": false,
+            "params": null,
+            "status": 400,
+            "where": "View.IsValid"
+        },
+        {
+            "name": "empty_description_is_fine",
+            "ok": true
+        },
+        {
+            "detailed_error": "id=abcdefghijklmnopqrstuvwxyz",
+            "has_params": false,
+            "id": "model.view.is_valid.create_at.app_error",
+            "name": "zero_create_at",
+            "ok": false,
+            "params": null,
+            "status": 400,
+            "where": "View.IsValid"
+        },
+        {
+            "detailed_error": "id=abcdefghijklmnopqrstuvwxyz",
+            "has_params": false,
+            "id": "model.view.is_valid.update_at.app_error",
+            "name": "zero_update_at",
+            "ok": false,
+            "params": null,
+            "status": 400,
+            "where": "View.IsValid"
+        },
+        {
+            "name": "negative_create_at",
+            "ok": true
+        },
+        {
+            "name": "negative_sort_order",
+            "ok": true
+        },
+        {
+            "detailed_error": "",
+            "has_params": false,
+            "id": "model.view.is_valid.props.kanban_required.app_error",
+            "name": "nil_props",
+            "ok": false,
+            "params": null,
+            "status": 400,
+            "where": "View.IsValid"
+        },
+        {
+            "detailed_error": "",
+            "has_params": false,
+            "id": "model.view.is_valid.props.kanban_field_id.app_error",
+            "name": "empty_props",
+            "ok": false,
+            "params": null,
+            "status": 400,
+            "where": "View.IsValid"
+        },
+        {
+            "detailed_error": "",
+            "has_params": false,
+            "id": "model.view.is_valid.props.kanban_field_id.app_error",
+            "name": "props_missing_group_by",
+            "ok": false,
+            "params": null,
+            "status": 400,
+            "where": "View.IsValid"
+        },
+        {
+            "detailed_error": "kanban props unmarshal: json: cannot unmarshal string into Go struct field KanbanProps.group_by of type model.KanbanGroupBy",
+            "has_params": false,
+            "id": "model.view.is_valid.props.kanban_invalid.app_error",
+            "name": "props_group_by_is_a_string",
+            "ok": false,
+            "params": null,
+            "status": 400,
+            "where": "View.IsValid"
+        },
+        {
+            "detailed_error": "kanban props unmarshal: json: cannot unmarshal number into Go struct field KanbanProps.group_by of type model.KanbanGroupBy",
+            "has_params": false,
+            "id": "model.view.is_valid.props.kanban_invalid.app_error",
+            "name": "props_group_by_is_a_number",
+            "ok": false,
+            "params": null,
+            "status": 400,
+            "where": "View.IsValid"
+        },
+        {
+            "detailed_error": "kanban props unmarshal: json: cannot unmarshal string into Go struct field KanbanGroupBy.group_by.columns of type []model.KanbanColumn",
+            "has_params": false,
+            "id": "model.view.is_valid.props.kanban_invalid.app_error",
+            "name": "props_columns_is_a_string",
+            "ok": false,
+            "params": null,
+            "status": 400,
+            "where": "View.IsValid"
+        },
+        {
+            "detailed_error": "kanban props unmarshal: json: cannot unmarshal number into Go struct field KanbanGroupBy.group_by.field_id of type string",
+            "has_params": false,
+            "id": "model.view.is_valid.props.kanban_invalid.app_error",
+            "name": "props_field_id_is_a_number",
+            "ok": false,
+            "params": null,
+            "status": 400,
+            "where": "View.IsValid"
+        },
+        {
+            "detailed_error": "",
+            "has_params": false,
+            "id": "model.view.is_valid.props.kanban_field_id.app_error",
+            "name": "props_bad_field_id",
+            "ok": false,
+            "params": null,
+            "status": 400,
+            "where": "View.IsValid"
+        },
+        {
+            "detailed_error": "",
+            "has_params": false,
+            "id": "model.view.is_valid.props.kanban_columns_empty.app_error",
+            "name": "props_empty_columns",
+            "ok": false,
+            "params": null,
+            "status": 400,
+            "where": "View.IsValid"
+        },
+        {
+            "detailed_error": "",
+            "has_params": false,
+            "id": "model.view.is_valid.props.kanban_columns_empty.app_error",
+            "name": "props_null_columns",
+            "ok": false,
+            "params": null,
+            "status": 400,
+            "where": "View.IsValid"
+        },
+        {
+            "name": "props_columns_at_max",
+            "ok": true
+        },
+        {
+            "detailed_error": "",
+            "has_params": false,
+            "id": "model.view.is_valid.props.kanban_columns_max.app_error",
+            "name": "props_columns_over_max",
+            "ok": false,
+            "params": null,
+            "status": 400,
+            "where": "View.IsValid"
+        },
+        {
+            "detailed_error": "",
+            "has_params": true,
+            "id": "model.view.is_valid.props.kanban_column_id.app_error",
+            "name": "props_bad_column_id",
+            "ok": false,
+            "params": {
+                "Index": 0
+            },
+            "status": 400,
+            "where": "View.IsValid"
+        },
+        {
+            "detailed_error": "",
+            "has_params": true,
+            "id": "model.view.is_valid.props.kanban_column_name.app_error",
+            "name": "props_empty_column_name",
+            "ok": false,
+            "params": {
+                "Index": 0
+            },
+            "status": 400,
+            "where": "View.IsValid"
+        },
+        {
+            "detailed_error": "",
+            "has_params": true,
+            "id": "model.view.is_valid.props.kanban_column_options.app_error",
+            "name": "props_empty_column_options",
+            "ok": false,
+            "params": {
+                "Index": 0
+            },
+            "status": 400,
+            "where": "View.IsValid"
+        },
+        {
+            "detailed_error": "",
+            "has_params": true,
+            "id": "model.view.is_valid.props.kanban_column_id.app_error",
+            "name": "props_second_column_bad",
+            "ok": false,
+            "params": {
+                "Index": 1
+            },
+            "status": 400,
+            "where": "View.IsValid"
+        },
+        {
+            "detailed_error": "",
+            "has_params": true,
+            "id": "model.view.is_valid.props.kanban_column_options.app_error",
+            "name": "props_third_column_no_options",
+            "ok": false,
+            "params": {
+                "Index": 2
+            },
+            "status": 400,
+            "where": "View.IsValid"
+        },
+        {
+            "name": "props_extra_keys_ignored",
+            "ok": true
+        },
+        {
+            "detailed_error": "",
+            "has_params": false,
+            "id": "model.view.is_valid.id.app_error",
+            "name": "bad_id_and_bad_props",
+            "ok": false,
+            "params": null,
+            "status": 400,
+            "where": "View.IsValid"
+        },
+        {
+            "detailed_error": "id=abcdefghijklmnopqrstuvwxyz",
+            "has_params": false,
+            "id": "model.view.is_valid.type.app_error",
+            "name": "bad_type_and_bad_title",
+            "ok": false,
+            "params": null,
+            "status": 400,
+            "where": "View.IsValid"
+        },
+        {
+            "detailed_error": "id=abcdefghijklmnopqrstuvwxyz",
+            "has_params": false,
+            "id": "model.view.is_valid.update_at.app_error",
+            "name": "zero_update_at_and_nil_props",
+            "ok": false,
+            "params": null,
+            "status": 400,
+            "where": "View.IsValid"
+        }
+    ],
+    "kanban_props": [
+        {
+            "column_count": 0,
+            "columns_is_nil": true,
+            "columns_json": "null",
+            "field_id": "",
+            "input": "{}",
+            "name": "empty_object",
+            "ok": true
+        },
+        {
+            "column_count": 0,
+            "columns_is_nil": true,
+            "columns_json": "null",
+            "field_id": "",
+            "input": "{\"a\":1,\"b\":\"two\"}",
+            "name": "unknown_keys",
+            "ok": true
+        },
+        {
+            "error": "kanban props unmarshal: json: cannot unmarshal string into Go struct field KanbanProps.group_by of type model.KanbanGroupBy",
+            "input": "{\"group_by\":\"nope\"}",
+            "name": "group_by_string",
+            "ok": false
+        },
+        {
+            "error": "kanban props unmarshal: json: cannot unmarshal number into Go struct field KanbanProps.group_by of type model.KanbanGroupBy",
+            "input": "{\"group_by\":42}",
+            "name": "group_by_number",
+            "ok": false
+        },
+        {
+            "error": "kanban props unmarshal: json: cannot unmarshal array into Go struct field KanbanProps.group_by of type model.KanbanGroupBy",
+            "input": "{\"group_by\":[]}",
+            "name": "group_by_array",
+            "ok": false
+        },
+        {
+            "column_count": 0,
+            "columns_is_nil": true,
+            "columns_json": "null",
+            "field_id": "",
+            "input": "{\"group_by\":null}",
+            "name": "group_by_null",
+            "ok": true
+        },
+        {
+            "column_count": 0,
+            "columns_is_nil": true,
+            "columns_json": "null",
+            "field_id": "",
+            "input": "{\"group_by\":{}}",
+            "name": "group_by_empty",
+            "ok": true
+        },
+        {
+            "error": "kanban props unmarshal: json: cannot unmarshal number into Go struct field KanbanGroupBy.group_by.field_id of type string",
+            "input": "{\"group_by\":{\"field_id\":42}}",
+            "name": "field_id_number",
+            "ok": false
+        },
+        {
+            "error": "kanban props unmarshal: json: cannot unmarshal string into Go struct field KanbanGroupBy.group_by.columns of type []model.KanbanColumn",
+            "input": "{\"group_by\":{\"field_id\":\"x\",\"columns\":\"nope\"}}",
+            "name": "columns_string",
+            "ok": false
+        },
+        {
+            "column_count": 0,
+            "columns_is_nil": true,
+            "columns_json": "null",
+            "field_id": "x",
+            "input": "{\"group_by\":{\"field_id\":\"x\",\"columns\":null}}",
+            "name": "columns_null",
+            "ok": true
+        },
+        {
+            "column_count": 0,
+            "columns_is_nil": false,
+            "columns_json": "[]",
+            "field_id": "x",
+            "input": "{\"group_by\":{\"field_id\":\"x\",\"columns\":[]}}",
+            "name": "columns_empty",
+            "ok": true
+        },
+        {
+            "error": "kanban props unmarshal: json: cannot unmarshal string into Go struct field KanbanColumn.group_by.columns.option_ids of type []string",
+            "input": "{\"group_by\":{\"field_id\":\"x\",\"columns\":[{\"option_ids\":\"nope\"}]}}",
+            "name": "column_option_ids_string",
+            "ok": false
+        },
+        {
+            "error": "kanban props unmarshal: json: cannot unmarshal number into Go struct field KanbanColumn.group_by.columns.id of type string",
+            "input": "{\"group_by\":{\"field_id\":\"x\",\"columns\":[{\"id\":7}]}}",
+            "name": "column_id_number",
+            "ok": false
+        },
+        {
+            "error": "kanban props unmarshal: json: cannot unmarshal bool into Go struct field KanbanProps.group_by of type model.KanbanGroupBy",
+            "input": "{\"group_by\":true}",
+            "name": "group_by_bool",
+            "ok": false
+        },
+        {
+            "error": "kanban props unmarshal: json: cannot unmarshal bool into Go struct field KanbanGroupBy.group_by.field_id of type string",
+            "input": "{\"group_by\":{\"field_id\":false}}",
+            "name": "field_id_bool",
+            "ok": false
+        },
+        {
+            "error": "kanban props unmarshal: json: cannot unmarshal object into Go struct field KanbanGroupBy.group_by.field_id of type string",
+            "input": "{\"group_by\":{\"field_id\":{}}}",
+            "name": "field_id_object",
+            "ok": false
+        },
+        {
+            "column_count": 0,
+            "columns_is_nil": false,
+            "columns_json": "[]",
+            "field_id": "",
+            "input": "{\"group_by\":{\"field_id\":null,\"columns\":[]}}",
+            "name": "field_id_null",
+            "ok": true
+        },
+        {
+            "error": "kanban props unmarshal: json: cannot unmarshal object into Go struct field KanbanGroupBy.group_by.columns of type []model.KanbanColumn",
+            "input": "{\"group_by\":{\"columns\":{}}}",
+            "name": "columns_object",
+            "ok": false
+        },
+        {
+            "error": "kanban props unmarshal: json: cannot unmarshal string into Go struct field KanbanGroupBy.group_by.columns of type model.KanbanColumn",
+            "input": "{\"group_by\":{\"columns\":[\"nope\"]}}",
+            "name": "columns_element_string",
+            "ok": false
+        },
+        {
+            "column_count": 1,
+            "columns_is_nil": false,
+            "columns_json": "[{\"id\":\"\",\"name\":\"\",\"option_ids\":null}]",
+            "field_id": "",
+            "input": "{\"group_by\":{\"columns\":[null]}}",
+            "name": "columns_element_null",
+            "ok": true
+        },
+        {
+            "error": "kanban props unmarshal: json: cannot unmarshal number into Go struct field KanbanColumn.group_by.columns.name of type string",
+            "input": "{\"group_by\":{\"columns\":[{\"name\":1}]}}",
+            "name": "column_name_number",
+            "ok": false
+        },
+        {
+            "error": "kanban props unmarshal: json: cannot unmarshal number into Go struct field KanbanColumn.group_by.columns.option_ids of type string",
+            "input": "{\"group_by\":{\"columns\":[{\"option_ids\":[1]}]}}",
+            "name": "option_ids_element_number",
+            "ok": false
+        },
+        {
+            "column_count": 1,
+            "columns_is_nil": false,
+            "columns_json": "[{\"id\":\"\",\"name\":\"\",\"option_ids\":[\"\"]}]",
+            "field_id": "",
+            "input": "{\"group_by\":{\"columns\":[{\"option_ids\":[null]}]}}",
+            "name": "option_ids_element_null",
+            "ok": true
+        },
+        {
+            "column_count": 1,
+            "columns_is_nil": false,
+            "columns_json": "[{\"id\":\"\",\"name\":\"\",\"option_ids\":null}]",
+            "field_id": "",
+            "input": "{\"group_by\":{\"columns\":[{\"option_ids\":null}]}}",
+            "name": "option_ids_null",
+            "ok": true
+        },
+        {
+            "error": "kanban props unmarshal: json: cannot unmarshal string into Go struct field KanbanGroupBy.group_by.columns of type []model.KanbanColumn",
+            "input": "{\"group_by\":{\"field_id\":1,\"columns\":\"nope\"}}",
+            "name": "two_errors_columns_and_field_id",
+            "ok": false
+        },
+        {
+            "error": "kanban props unmarshal: json: cannot unmarshal number into Go struct field KanbanColumn.group_by.columns.id of type string",
+            "input": "{\"group_by\":{\"columns\":[{\"id\":\"a\"},{\"id\":2},{\"name\":3}]}}",
+            "name": "two_errors_second_column",
+            "ok": false
+        },
+        {
+            "column_count": 1,
+            "columns_is_nil": false,
+            "columns_json": "[{\"id\":\"a\",\"name\":\"n\",\"option_ids\":[\"o\"]}]",
+            "field_id": "x",
+            "input": "{\"group_by\":{\"field_id\":\"x\",\"columns\":[{\"id\":\"a\",\"name\":\"n\",\"option_ids\":[\"o\"]}]}}",
+            "name": "well_formed",
+            "ok": true
+        }
+    ],
+    "patch": [
+        {
+            "name": "nil_patch",
+            "out_json": "{\"id\":\"abcdefghijklmnopqrstuvwxyz\",\"channel_id\":\"zyxwvutsrqponmlkjihgfedcba\",\"type\":\"kanban\",\"creator_id\":\"0123456789abcdefghijklmnop\",\"title\":\"Sprint board\",\"description\":\"The team's kanban\",\"sort_order\":3,\"props\":{\"group_by\":{\"columns\":[{\"id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbb\",\"name\":\"Todo\",\"option_ids\":[\"opt-1\"]}],\"field_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaa\"}},\"create_at\":1700000000000,\"update_at\":1700000001000,\"delete_at\":0}",
+            "patch_is_nil": true,
+            "props_is_nil": false,
+            "props_len": 1
+        },
+        {
+            "name": "empty_patch",
+            "out_json": "{\"id\":\"abcdefghijklmnopqrstuvwxyz\",\"channel_id\":\"zyxwvutsrqponmlkjihgfedcba\",\"type\":\"kanban\",\"creator_id\":\"0123456789abcdefghijklmnop\",\"title\":\"Sprint board\",\"description\":\"The team's kanban\",\"sort_order\":3,\"props\":{\"group_by\":{\"columns\":[{\"id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbb\",\"name\":\"Todo\",\"option_ids\":[\"opt-1\"]}],\"field_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaa\"}},\"create_at\":1700000000000,\"update_at\":1700000001000,\"delete_at\":0}",
+            "patch_is_nil": false,
+            "props_is_nil": false,
+            "props_len": 1
+        },
+        {
+            "name": "title",
+            "out_json": "{\"id\":\"abcdefghijklmnopqrstuvwxyz\",\"channel_id\":\"zyxwvutsrqponmlkjihgfedcba\",\"type\":\"kanban\",\"creator_id\":\"0123456789abcdefghijklmnop\",\"title\":\"New title\",\"description\":\"The team's kanban\",\"sort_order\":3,\"props\":{\"group_by\":{\"columns\":[{\"id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbb\",\"name\":\"Todo\",\"option_ids\":[\"opt-1\"]}],\"field_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaa\"}},\"create_at\":1700000000000,\"update_at\":1700000001000,\"delete_at\":0}",
+            "patch_is_nil": false,
+            "props_is_nil": false,
+            "props_len": 1
+        },
+        {
+            "name": "empty_title",
+            "out_json": "{\"id\":\"abcdefghijklmnopqrstuvwxyz\",\"channel_id\":\"zyxwvutsrqponmlkjihgfedcba\",\"type\":\"kanban\",\"creator_id\":\"0123456789abcdefghijklmnop\",\"title\":\"\",\"description\":\"The team's kanban\",\"sort_order\":3,\"props\":{\"group_by\":{\"columns\":[{\"id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbb\",\"name\":\"Todo\",\"option_ids\":[\"opt-1\"]}],\"field_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaa\"}},\"create_at\":1700000000000,\"update_at\":1700000001000,\"delete_at\":0}",
+            "patch_is_nil": false,
+            "props_is_nil": false,
+            "props_len": 1
+        },
+        {
+            "name": "description",
+            "out_json": "{\"id\":\"abcdefghijklmnopqrstuvwxyz\",\"channel_id\":\"zyxwvutsrqponmlkjihgfedcba\",\"type\":\"kanban\",\"creator_id\":\"0123456789abcdefghijklmnop\",\"title\":\"Sprint board\",\"description\":\"New description\",\"sort_order\":3,\"props\":{\"group_by\":{\"columns\":[{\"id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbb\",\"name\":\"Todo\",\"option_ids\":[\"opt-1\"]}],\"field_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaa\"}},\"create_at\":1700000000000,\"update_at\":1700000001000,\"delete_at\":0}",
+            "patch_is_nil": false,
+            "props_is_nil": false,
+            "props_len": 1
+        },
+        {
+            "name": "empty_description",
+            "out_json": "{\"id\":\"abcdefghijklmnopqrstuvwxyz\",\"channel_id\":\"zyxwvutsrqponmlkjihgfedcba\",\"type\":\"kanban\",\"creator_id\":\"0123456789abcdefghijklmnop\",\"title\":\"Sprint board\",\"sort_order\":3,\"props\":{\"group_by\":{\"columns\":[{\"id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbb\",\"name\":\"Todo\",\"option_ids\":[\"opt-1\"]}],\"field_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaa\"}},\"create_at\":1700000000000,\"update_at\":1700000001000,\"delete_at\":0}",
+            "patch_is_nil": false,
+            "props_is_nil": false,
+            "props_len": 1
+        },
+        {
+            "name": "sort_order",
+            "out_json": "{\"id\":\"abcdefghijklmnopqrstuvwxyz\",\"channel_id\":\"zyxwvutsrqponmlkjihgfedcba\",\"type\":\"kanban\",\"creator_id\":\"0123456789abcdefghijklmnop\",\"title\":\"Sprint board\",\"description\":\"The team's kanban\",\"sort_order\":42,\"props\":{\"group_by\":{\"columns\":[{\"id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbb\",\"name\":\"Todo\",\"option_ids\":[\"opt-1\"]}],\"field_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaa\"}},\"create_at\":1700000000000,\"update_at\":1700000001000,\"delete_at\":0}",
+            "patch_is_nil": false,
+            "props_is_nil": false,
+            "props_len": 1
+        },
+        {
+            "name": "zero_sort_order",
+            "out_json": "{\"id\":\"abcdefghijklmnopqrstuvwxyz\",\"channel_id\":\"zyxwvutsrqponmlkjihgfedcba\",\"type\":\"kanban\",\"creator_id\":\"0123456789abcdefghijklmnop\",\"title\":\"Sprint board\",\"description\":\"The team's kanban\",\"sort_order\":0,\"props\":{\"group_by\":{\"columns\":[{\"id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbb\",\"name\":\"Todo\",\"option_ids\":[\"opt-1\"]}],\"field_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaa\"}},\"create_at\":1700000000000,\"update_at\":1700000001000,\"delete_at\":0}",
+            "patch_is_nil": false,
+            "props_is_nil": false,
+            "props_len": 1
+        },
+        {
+            "name": "props",
+            "out_json": "{\"id\":\"abcdefghijklmnopqrstuvwxyz\",\"channel_id\":\"zyxwvutsrqponmlkjihgfedcba\",\"type\":\"kanban\",\"creator_id\":\"0123456789abcdefghijklmnop\",\"title\":\"Sprint board\",\"description\":\"The team's kanban\",\"sort_order\":3,\"props\":{\"a\":1},\"create_at\":1700000000000,\"update_at\":1700000001000,\"delete_at\":0}",
+            "patch_is_nil": false,
+            "props_is_nil": false,
+            "props_len": 1
+        },
+        {
+            "name": "empty_props",
+            "out_json": "{\"id\":\"abcdefghijklmnopqrstuvwxyz\",\"channel_id\":\"zyxwvutsrqponmlkjihgfedcba\",\"type\":\"kanban\",\"creator_id\":\"0123456789abcdefghijklmnop\",\"title\":\"Sprint board\",\"description\":\"The team's kanban\",\"sort_order\":3,\"create_at\":1700000000000,\"update_at\":1700000001000,\"delete_at\":0}",
+            "patch_is_nil": false,
+            "props_is_nil": false,
+            "props_len": 0
+        },
+        {
+            "name": "nil_props_pointer_target",
+            "out_json": "{\"id\":\"abcdefghijklmnopqrstuvwxyz\",\"channel_id\":\"zyxwvutsrqponmlkjihgfedcba\",\"type\":\"kanban\",\"creator_id\":\"0123456789abcdefghijklmnop\",\"title\":\"Sprint board\",\"description\":\"The team's kanban\",\"sort_order\":3,\"create_at\":1700000000000,\"update_at\":1700000001000,\"delete_at\":0}",
+            "patch_is_nil": false,
+            "props_is_nil": false,
+            "props_len": 0
+        },
+        {
+            "name": "everything",
+            "out_json": "{\"id\":\"abcdefghijklmnopqrstuvwxyz\",\"channel_id\":\"zyxwvutsrqponmlkjihgfedcba\",\"type\":\"kanban\",\"creator_id\":\"0123456789abcdefghijklmnop\",\"title\":\"T\",\"description\":\"D\",\"sort_order\":7,\"props\":{\"z\":true},\"create_at\":1700000000000,\"update_at\":1700000001000,\"delete_at\":0}",
+            "patch_is_nil": false,
+            "props_is_nil": false,
+            "props_len": 1
+        }
+    ],
+    "pre_save": [
+        {
+            "create_at_uses_now": true,
+            "id_is_generated": true,
+            "in_create_at": 0,
+            "in_id_empty": true,
+            "name": "all_zero",
+            "out_delete_at": 0,
+            "update_at_equals_create_at": true
+        },
+        {
+            "create_at_uses_now": true,
+            "id_is_generated": false,
+            "in_create_at": 0,
+            "in_id_empty": false,
+            "name": "id_set",
+            "out_delete_at": 0,
+            "out_id": "abcdefghijklmnopqrstuvwxyz",
+            "update_at_equals_create_at": true
+        },
+        {
+            "create_at_uses_now": false,
+            "id_is_generated": true,
+            "in_create_at": 1700000000000,
+            "in_id_empty": true,
+            "name": "create_at_set",
+            "out_create_at": 1700000000000,
+            "out_delete_at": 0,
+            "out_update_at": 1700000000000,
+            "update_at_equals_create_at": true
+        },
+        {
+            "create_at_uses_now": false,
+            "id_is_generated": false,
+            "in_create_at": 1700000000000,
+            "in_id_empty": false,
+            "name": "everything_set",
+            "out_create_at": 1700000000000,
+            "out_delete_at": 0,
+            "out_id": "abcdefghijklmnopqrstuvwxyz",
+            "out_update_at": 1700000000000,
+            "update_at_equals_create_at": true
+        },
+        {
+            "create_at_uses_now": false,
+            "id_is_generated": false,
+            "in_create_at": 1,
+            "in_id_empty": false,
+            "name": "deleted",
+            "out_create_at": 1,
+            "out_delete_at": 0,
+            "out_id": "abcdefghijklmnopqrstuvwxyz",
+            "out_update_at": 1,
+            "update_at_equals_create_at": true
+        }
+    ],
+    "to_props": [
+        {
+            "name": "zero",
+            "ok": true,
+            "props_json": "{\"group_by\":{\"columns\":null,\"field_id\":\"\"}}"
+        },
+        {
+            "name": "field_only",
+            "ok": true,
+            "props_json": "{\"group_by\":{\"columns\":null,\"field_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaa\"}}"
+        },
+        {
+            "name": "one_column",
+            "ok": true,
+            "props_json": "{\"group_by\":{\"columns\":[{\"id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbb\",\"name\":\"Todo\",\"option_ids\":[\"a\",\"b\"]}],\"field_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaa\"}}"
+        },
+        {
+            "name": "empty_columns_slice",
+            "ok": true,
+            "props_json": "{\"group_by\":{\"columns\":[],\"field_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaa\"}}"
+        },
+        {
+            "name": "column_with_nil_options",
+            "ok": true,
+            "props_json": "{\"group_by\":{\"columns\":[{\"id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbb\",\"name\":\"Todo\",\"option_ids\":null}],\"field_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaa\"}}"
+        }
+    ],
+    "trim_space_charset": [
+        {
+            "codepoint": 0,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 1,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 2,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 3,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 4,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 5,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 6,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 7,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 8,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 9,
+            "title_rejected": true,
+            "trims_to_empty": true
+        },
+        {
+            "codepoint": 10,
+            "title_rejected": true,
+            "trims_to_empty": true
+        },
+        {
+            "codepoint": 11,
+            "title_rejected": true,
+            "trims_to_empty": true
+        },
+        {
+            "codepoint": 12,
+            "title_rejected": true,
+            "trims_to_empty": true
+        },
+        {
+            "codepoint": 13,
+            "title_rejected": true,
+            "trims_to_empty": true
+        },
+        {
+            "codepoint": 14,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 15,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 16,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 17,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 18,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 19,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 20,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 21,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 22,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 23,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 24,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 25,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 26,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 27,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 28,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 29,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 30,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 31,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 32,
+            "title_rejected": true,
+            "trims_to_empty": true
+        },
+        {
+            "codepoint": 33,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 34,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 35,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 36,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 37,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 38,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 39,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 40,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 41,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 42,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 43,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 44,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 45,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 46,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 47,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 48,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 49,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 50,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 51,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 52,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 53,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 54,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 55,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 56,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 57,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 58,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 59,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 60,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 61,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 62,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 63,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 64,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 65,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 66,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 67,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 68,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 69,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 70,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 71,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 72,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 73,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 74,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 75,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 76,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 77,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 78,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 79,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 80,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 81,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 82,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 83,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 84,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 85,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 86,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 87,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 88,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 89,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 90,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 91,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 92,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 93,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 94,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 95,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 96,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 97,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 98,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 99,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 100,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 101,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 102,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 103,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 104,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 105,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 106,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 107,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 108,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 109,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 110,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 111,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 112,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 113,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 114,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 115,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 116,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 117,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 118,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 119,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 120,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 121,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 122,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 123,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 124,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 125,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 126,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 127,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 133,
+            "title_rejected": true,
+            "trims_to_empty": true
+        },
+        {
+            "codepoint": 160,
+            "title_rejected": true,
+            "trims_to_empty": true
+        },
+        {
+            "codepoint": 5760,
+            "title_rejected": true,
+            "trims_to_empty": true
+        },
+        {
+            "codepoint": 8192,
+            "title_rejected": true,
+            "trims_to_empty": true
+        },
+        {
+            "codepoint": 8193,
+            "title_rejected": true,
+            "trims_to_empty": true
+        },
+        {
+            "codepoint": 8194,
+            "title_rejected": true,
+            "trims_to_empty": true
+        },
+        {
+            "codepoint": 8232,
+            "title_rejected": true,
+            "trims_to_empty": true
+        },
+        {
+            "codepoint": 8233,
+            "title_rejected": true,
+            "trims_to_empty": true
+        },
+        {
+            "codepoint": 12288,
+            "title_rejected": true,
+            "trims_to_empty": true
+        },
+        {
+            "codepoint": 8203,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 65279,
+            "title_rejected": false,
+            "trims_to_empty": false
+        },
+        {
+            "codepoint": 6158,
+            "title_rejected": false,
+            "trims_to_empty": false
+        }
+    ],
+    "wire": [
+        {
+            "json": "{\"id\":\"\",\"channel_id\":\"\",\"type\":\"\",\"creator_id\":\"\",\"title\":\"\",\"sort_order\":0,\"create_at\":0,\"update_at\":0,\"delete_at\":0}",
+            "keys": [
+                "channel_id",
+                "create_at",
+                "creator_id",
+                "delete_at",
+                "id",
+                "sort_order",
+                "title",
+                "type",
+                "update_at"
+            ],
+            "name": "zero"
+        },
+        {
+            "json": "{\"id\":\"abcdefghijklmnopqrstuvwxyz\",\"channel_id\":\"zyxwvutsrqponmlkjihgfedcba\",\"type\":\"kanban\",\"creator_id\":\"0123456789abcdefghijklmnop\",\"title\":\"Sprint board\",\"description\":\"The team's kanban\",\"sort_order\":3,\"props\":{\"group_by\":{\"columns\":[{\"id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbb\",\"name\":\"Todo\",\"option_ids\":[\"opt-1\"]}],\"field_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaa\"}},\"create_at\":1700000000000,\"update_at\":1700000001000,\"delete_at\":0}",
+            "keys": [
+                "channel_id",
+                "create_at",
+                "creator_id",
+                "delete_at",
+                "description",
+                "id",
+                "props",
+                "sort_order",
+                "title",
+                "type",
+                "update_at"
+            ],
+            "name": "full"
+        },
+        {
+            "json": "{\"id\":\"abcdefghijklmnopqrstuvwxyz\",\"channel_id\":\"zyxwvutsrqponmlkjihgfedcba\",\"type\":\"kanban\",\"creator_id\":\"0123456789abcdefghijklmnop\",\"title\":\"Sprint board\",\"sort_order\":3,\"props\":{\"group_by\":{\"columns\":[{\"id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbb\",\"name\":\"Todo\",\"option_ids\":[\"opt-1\"]}],\"field_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaa\"}},\"create_at\":1700000000000,\"update_at\":1700000001000,\"delete_at\":0}",
+            "keys": [
+                "channel_id",
+                "create_at",
+                "creator_id",
+                "delete_at",
+                "id",
+                "props",
+                "sort_order",
+                "title",
+                "type",
+                "update_at"
+            ],
+            "name": "no_description"
+        },
+        {
+            "json": "{\"id\":\"abcdefghijklmnopqrstuvwxyz\",\"channel_id\":\"zyxwvutsrqponmlkjihgfedcba\",\"type\":\"kanban\",\"creator_id\":\"0123456789abcdefghijklmnop\",\"title\":\"Sprint board\",\"description\":\"The team's kanban\",\"sort_order\":3,\"create_at\":1700000000000,\"update_at\":1700000001000,\"delete_at\":0}",
+            "keys": [
+                "channel_id",
+                "create_at",
+                "creator_id",
+                "delete_at",
+                "description",
+                "id",
+                "sort_order",
+                "title",
+                "type",
+                "update_at"
+            ],
+            "name": "nil_props"
+        },
+        {
+            "json": "{\"id\":\"abcdefghijklmnopqrstuvwxyz\",\"channel_id\":\"zyxwvutsrqponmlkjihgfedcba\",\"type\":\"kanban\",\"creator_id\":\"0123456789abcdefghijklmnop\",\"title\":\"Sprint board\",\"description\":\"The team's kanban\",\"sort_order\":3,\"create_at\":1700000000000,\"update_at\":1700000001000,\"delete_at\":0}",
+            "keys": [
+                "channel_id",
+                "create_at",
+                "creator_id",
+                "delete_at",
+                "description",
+                "id",
+                "sort_order",
+                "title",
+                "type",
+                "update_at"
+            ],
+            "name": "empty_props"
+        },
+        {
+            "json": "{\"id\":\"abcdefghijklmnopqrstuvwxyz\",\"channel_id\":\"zyxwvutsrqponmlkjihgfedcba\",\"type\":\"kanban\",\"creator_id\":\"0123456789abcdefghijklmnop\",\"title\":\"Sprint board\",\"description\":\"The team's kanban\",\"sort_order\":-1,\"props\":{\"group_by\":{\"columns\":[{\"id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbb\",\"name\":\"Todo\",\"option_ids\":[\"opt-1\"]}],\"field_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaa\"}},\"create_at\":1700000000000,\"update_at\":1700000001000,\"delete_at\":0}",
+            "keys": [
+                "channel_id",
+                "create_at",
+                "creator_id",
+                "delete_at",
+                "description",
+                "id",
+                "props",
+                "sort_order",
+                "title",
+                "type",
+                "update_at"
+            ],
+            "name": "negative_sort_order"
+        },
+        {
+            "json": "{\"views\":null,\"total_count\":7}",
+            "keys": [
+                "total_count",
+                "views"
+            ],
+            "name": "views_with_count_nil"
+        },
+        {
+            "json": "{\"views\":[],\"total_count\":0}",
+            "keys": [
+                "total_count",
+                "views"
+            ],
+            "name": "views_with_count_empty"
+        },
+        {
+            "json": "{\"views\":[{\"id\":\"abcdefghijklmnopqrstuvwxyz\",\"channel_id\":\"zyxwvutsrqponmlkjihgfedcba\",\"type\":\"kanban\",\"creator_id\":\"0123456789abcdefghijklmnop\",\"title\":\"Sprint board\",\"description\":\"The team's kanban\",\"sort_order\":3,\"props\":{\"group_by\":{\"columns\":[{\"id\":\"bbbbbbbbbbbbbbbbbbbbbbbbbb\",\"name\":\"Todo\",\"option_ids\":[\"opt-1\"]}],\"field_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaa\"}},\"create_at\":1700000000000,\"update_at\":1700000001000,\"delete_at\":0}],\"total_count\":1}",
+            "keys": [
+                "total_count",
+                "views"
+            ],
+            "name": "views_with_count_one"
+        },
+        {
+            "json": "{\"views\":[null],\"total_count\":1}",
+            "keys": [
+                "total_count",
+                "views"
+            ],
+            "name": "views_with_count_null_element"
+        },
+        {
+            "json": "{\"title\":null,\"description\":null,\"sort_order\":null,\"props\":null}",
+            "keys": [
+                "description",
+                "props",
+                "sort_order",
+                "title"
+            ],
+            "name": "view_patch_zero"
+        },
+        {
+            "json": "{\"title\":\"T\",\"description\":null,\"sort_order\":null,\"props\":null}",
+            "keys": [
+                "description",
+                "props",
+                "sort_order",
+                "title"
+            ],
+            "name": "view_patch_title_only"
+        },
+        {
+            "json": "{\"Page\":2,\"PerPage\":50}",
+            "keys": [
+                "Page",
+                "PerPage"
+            ],
+            "name": "view_query_opts"
+        }
+    ]
+}

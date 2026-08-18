@@ -281,7 +281,10 @@ func writeLocaleGenerated(outDir, rustOutDir string) error {
 		len(exceptions)), exceptions)
 
 	rustPath := filepath.Join(rustOutDir, "locale_generated.rs")
-	if err := os.WriteFile(rustPath, []byte(b.String()), 0o644); err != nil {
+	// Trim the trailing blank line `emit` leaves after the last table. `cargo fmt` strips it, so
+	// leaving it in makes the generator and the formatter disagree by one byte and every clean
+	// generator run shows a spurious modification — which is exactly the signal [D-069] restored.
+	if err := os.WriteFile(rustPath, []byte(strings.TrimRight(b.String(), "\n")+"\n"), 0o644); err != nil {
 		return err
 	}
 	fmt.Printf("wrote %s (%d + %d + %d + %d entries, rule verified against %d inputs)\n",

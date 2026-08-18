@@ -1,0 +1,3898 @@
+{
+    "cases": [
+        {
+            "hash": "oWnpQnGjl+x+6J08bTP1OVQ+7ZF29qMaucfyyDY0Rlw",
+            "id": "pbkdf2",
+            "input_b64": "JHBia2RmMiRmPVNIQTI1Nix3PTYwMDAwMCxsPTMyJDRFSjBhb3FTSFp0MGRLTzhjY3ovT1Ekb1ducFFuR2psK3grNkowOGJUUDFPVlErN1pGMjlxTWF1Y2Z5eURZMFJsdw==",
+            "input_bytes": 97,
+            "input_runes": 97,
+            "name": "real_pbkdf2",
+            "ok": true,
+            "params": {
+                "f": "SHA256",
+                "l": "32",
+                "w": "600000"
+            },
+            "params_is_nil": false,
+            "params_len": 3,
+            "salt": "4EJ0aoqSHZt0dKO8ccz/OQ",
+            "version": ""
+        },
+        {
+            "error": "found \"\", expected EOF",
+            "hash": "",
+            "id": "",
+            "input_b64": "JDJhJDEwJGdTWnlsQXVwUmFEU2JUaFBSZE5IYS5hOTFCcVZ1d24uN0I1N1A2MGJDUkdZaFhadFlmT0NL",
+            "input_bytes": 60,
+            "input_runes": 60,
+            "name": "real_bcrypt",
+            "ok": false,
+            "params": null,
+            "params_is_nil": true,
+            "params_len": 0,
+            "salt": "",
+            "version": ""
+        },
+        {
+            "hash": "",
+            "id": "argon2id",
+            "input_b64": "JGFyZ29uMmlk",
+            "input_bytes": 9,
+            "input_runes": 9,
+            "name": "id_only",
+            "ok": true,
+            "params": {},
+            "params_is_nil": false,
+            "params_len": 0,
+            "salt": "",
+            "version": ""
+        },
+        {
+            "hash": "",
+            "id": "argon2id",
+            "input_b64": "JGFyZ29uMmlkJHY9MTk=",
+            "input_bytes": 14,
+            "input_runes": 14,
+            "name": "id_and_version",
+            "ok": true,
+            "params": {},
+            "params_is_nil": false,
+            "params_len": 0,
+            "salt": "",
+            "version": "19"
+        },
+        {
+            "hash": "",
+            "id": "argon2id",
+            "input_b64": "JGFyZ29uMmlkJG09NjU1MzY=",
+            "input_bytes": 17,
+            "input_runes": 17,
+            "name": "id_and_one_param",
+            "ok": true,
+            "params": {
+                "m": "65536"
+            },
+            "params_is_nil": false,
+            "params_len": 1,
+            "salt": "",
+            "version": ""
+        },
+        {
+            "hash": "",
+            "id": "argon2id",
+            "input_b64": "JGFyZ29uMmlkJG09NjU1MzYsdD0yLHA9MQ==",
+            "input_bytes": 25,
+            "input_runes": 25,
+            "name": "id_and_params",
+            "ok": true,
+            "params": {
+                "m": "65536",
+                "p": "1",
+                "t": "2"
+            },
+            "params_is_nil": false,
+            "params_len": 3,
+            "salt": "",
+            "version": ""
+        },
+        {
+            "hash": "",
+            "id": "argon2id",
+            "input_b64": "JGFyZ29uMmlkJHY9MTkkbT02NTUzNix0PTIscD0x",
+            "input_bytes": 30,
+            "input_runes": 30,
+            "name": "id_version_params",
+            "ok": true,
+            "params": {
+                "m": "65536",
+                "p": "1",
+                "t": "2"
+            },
+            "params_is_nil": false,
+            "params_len": 3,
+            "salt": "",
+            "version": "19"
+        },
+        {
+            "hash": "",
+            "id": "argon2id",
+            "input_b64": "JGFyZ29uMmlkJGMyOXRaWE5oYkhR",
+            "input_bytes": 21,
+            "input_runes": 21,
+            "name": "id_and_salt",
+            "ok": true,
+            "params": {},
+            "params_is_nil": false,
+            "params_len": 0,
+            "salt": "c29tZXNhbHQ",
+            "version": ""
+        },
+        {
+            "hash": "aGFzaA",
+            "id": "argon2id",
+            "input_b64": "JGFyZ29uMmlkJGMyOXRaWE5oYkhRJGFHRnphQQ==",
+            "input_bytes": 28,
+            "input_runes": 28,
+            "name": "id_salt_hash",
+            "ok": true,
+            "params": {},
+            "params_is_nil": false,
+            "params_len": 0,
+            "salt": "c29tZXNhbHQ",
+            "version": ""
+        },
+        {
+            "hash": "",
+            "id": "argon2id",
+            "input_b64": "JGFyZ29uMmlkJHY9MTkkYzI5dFpYTmhiSFE=",
+            "input_bytes": 26,
+            "input_runes": 26,
+            "name": "id_version_salt",
+            "ok": true,
+            "params": {},
+            "params_is_nil": false,
+            "params_len": 0,
+            "salt": "c29tZXNhbHQ",
+            "version": "19"
+        },
+        {
+            "hash": "aGFzaA",
+            "id": "argon2id",
+            "input_b64": "JGFyZ29uMmlkJHY9MTkkYzI5dFpYTmhiSFEkYUdGemFB",
+            "input_bytes": 33,
+            "input_runes": 33,
+            "name": "id_version_salt_hash",
+            "ok": true,
+            "params": {},
+            "params_is_nil": false,
+            "params_len": 0,
+            "salt": "c29tZXNhbHQ",
+            "version": "19"
+        },
+        {
+            "hash": "",
+            "id": "argon2id",
+            "input_b64": "JGFyZ29uMmlkJG09NjU1MzYsdD0yJGMyOXRaWE5oYkhR",
+            "input_bytes": 33,
+            "input_runes": 33,
+            "name": "id_params_salt",
+            "ok": true,
+            "params": {
+                "m": "65536",
+                "t": "2"
+            },
+            "params_is_nil": false,
+            "params_len": 2,
+            "salt": "c29tZXNhbHQ",
+            "version": ""
+        },
+        {
+            "hash": "aGFzaA",
+            "id": "argon2id",
+            "input_b64": "JGFyZ29uMmlkJG09NjU1MzYsdD0yJGMyOXRaWE5oYkhRJGFHRnphQQ==",
+            "input_bytes": 40,
+            "input_runes": 40,
+            "name": "id_params_salt_hash",
+            "ok": true,
+            "params": {
+                "m": "65536",
+                "t": "2"
+            },
+            "params_is_nil": false,
+            "params_len": 2,
+            "salt": "c29tZXNhbHQ",
+            "version": ""
+        },
+        {
+            "hash": "aGFzaA",
+            "id": "argon2id",
+            "input_b64": "JGFyZ29uMmlkJHY9MTkkbT02NTUzNix0PTIscD0xJGMyOXRaWE5oYkhRJGFHRnphQQ==",
+            "input_bytes": 49,
+            "input_runes": 49,
+            "name": "id_version_params_salt_hash",
+            "ok": true,
+            "params": {
+                "m": "65536",
+                "p": "1",
+                "t": "2"
+            },
+            "params_is_nil": false,
+            "params_len": 3,
+            "salt": "c29tZXNhbHQ",
+            "version": "19"
+        },
+        {
+            "hash": "",
+            "id": "pbkdf2-sha256",
+            "input_b64": "JHBia2RmMi1zaGEyNTYkeD0x",
+            "input_bytes": 18,
+            "input_runes": 18,
+            "name": "id_with_digits_and_minus",
+            "ok": true,
+            "params": {
+                "x": "1"
+            },
+            "params_is_nil": false,
+            "params_len": 1,
+            "salt": "",
+            "version": ""
+        },
+        {
+            "error": "failed to parse function ID: found \"\", expected a function identifier",
+            "hash": "",
+            "id": "",
+            "input_b64": "JEFyZ29uMmlk",
+            "input_bytes": 9,
+            "input_runes": 9,
+            "name": "id_uppercase_rejected",
+            "ok": false,
+            "params": null,
+            "params_is_nil": true,
+            "params_len": 0,
+            "salt": "",
+            "version": ""
+        },
+        {
+            "error": "found \"_\", expected '$' or EOF",
+            "hash": "",
+            "id": "",
+            "input_b64": "JGFyZ29uXzI=",
+            "input_bytes": 8,
+            "input_runes": 8,
+            "name": "id_underscore_rejected",
+            "ok": false,
+            "params": null,
+            "params_is_nil": true,
+            "params_len": 0,
+            "salt": "",
+            "version": ""
+        },
+        {
+            "hash": "",
+            "id": "pbkdf2",
+            "input_b64": "JHBia2RmMiRmPVNIQTI1Ng==",
+            "input_bytes": 16,
+            "input_runes": 16,
+            "name": "param_value_uppercase_ok",
+            "ok": true,
+            "params": {
+                "f": "SHA256"
+            },
+            "params_is_nil": false,
+            "params_len": 1,
+            "salt": "",
+            "version": ""
+        },
+        {
+            "hash": "",
+            "id": "x",
+            "input_b64": "JHgkYT1BOS8rLi0=",
+            "input_bytes": 11,
+            "input_runes": 11,
+            "name": "param_value_symbols_ok",
+            "ok": true,
+            "params": {
+                "a": "A9/+.-"
+            },
+            "params_is_nil": false,
+            "params_len": 1,
+            "salt": "",
+            "version": ""
+        },
+        {
+            "hash": "",
+            "id": "x",
+            "input_b64": "JHgkYT0xLGI9Mg==",
+            "input_bytes": 10,
+            "input_runes": 10,
+            "name": "param_value_comma_ends_it",
+            "ok": true,
+            "params": {
+                "a": "1",
+                "b": "2"
+            },
+            "params_is_nil": false,
+            "params_len": 2,
+            "salt": "",
+            "version": ""
+        },
+        {
+            "hash": "",
+            "id": "x",
+            "input_b64": "JHgkQT0x",
+            "input_bytes": 6,
+            "input_runes": 6,
+            "name": "first_param_name_may_be_uppercase",
+            "ok": true,
+            "params": {
+                "A": "1"
+            },
+            "params_is_nil": false,
+            "params_len": 1,
+            "salt": "",
+            "version": ""
+        },
+        {
+            "hash": "",
+            "id": "x",
+            "input_b64": "JHgkYStiL2M9MQ==",
+            "input_bytes": 10,
+            "input_runes": 10,
+            "name": "first_param_name_may_hold_b64_symbols",
+            "ok": true,
+            "params": {
+                "a+b/c": "1"
+            },
+            "params_is_nil": false,
+            "params_len": 1,
+            "salt": "",
+            "version": ""
+        },
+        {
+            "error": "found \"B\", expected '$'",
+            "hash": "",
+            "id": "",
+            "input_b64": "JHgkYT0xLEI9Mg==",
+            "input_bytes": 10,
+            "input_runes": 10,
+            "name": "later_param_name_uppercase",
+            "ok": false,
+            "params": null,
+            "params_is_nil": true,
+            "params_len": 0,
+            "salt": "",
+            "version": ""
+        },
+        {
+            "error": "failed parsing value from parameter \"b\": found \"+\", expected '$'",
+            "hash": "",
+            "id": "",
+            "input_b64": "JHgkYT0xLGIrYz0y",
+            "input_bytes": 12,
+            "input_runes": 12,
+            "name": "later_param_name_b64_symbols",
+            "ok": false,
+            "params": null,
+            "params_is_nil": true,
+            "params_len": 0,
+            "salt": "",
+            "version": ""
+        },
+        {
+            "hash": "",
+            "id": "x",
+            "input_b64": "JHgkYWIrL2Nk",
+            "input_bytes": 9,
+            "input_runes": 9,
+            "name": "salt_plus_and_slash_ok",
+            "ok": true,
+            "params": {},
+            "params_is_nil": false,
+            "params_len": 0,
+            "salt": "ab+/cd",
+            "version": ""
+        },
+        {
+            "error": "found \"-\", expected either '$', or '=' or EOF",
+            "hash": "",
+            "id": "",
+            "input_b64": "JHgkYWItY2Q=",
+            "input_bytes": 8,
+            "input_runes": 8,
+            "name": "salt_minus_is_not_b64",
+            "ok": false,
+            "params": null,
+            "params_is_nil": true,
+            "params_len": 0,
+            "salt": "",
+            "version": ""
+        },
+        {
+            "error": "found \"\", expected a value for parameter \"YWJj\"",
+            "hash": "",
+            "id": "",
+            "input_b64": "JHgkWVdKaj0=",
+            "input_bytes": 8,
+            "input_runes": 8,
+            "name": "salt_equals_padding_rejected",
+            "ok": false,
+            "params": null,
+            "params_is_nil": true,
+            "params_len": 0,
+            "salt": "",
+            "version": ""
+        },
+        {
+            "hash": "",
+            "id": "x",
+            "input_b64": "JHgkdj0yJGMyOXRaWE5oYkhR",
+            "input_bytes": 18,
+            "input_runes": 18,
+            "name": "v_in_first_position_is_the_version",
+            "ok": true,
+            "params": {},
+            "params_is_nil": false,
+            "params_len": 0,
+            "salt": "c29tZXNhbHQ",
+            "version": "2"
+        },
+        {
+            "hash": "",
+            "id": "x",
+            "input_b64": "JHgkYT0xLHY9MiRjMjl0WlhOaGJIUQ==",
+            "input_bytes": 22,
+            "input_runes": 22,
+            "name": "v_as_later_param_accepted",
+            "ok": true,
+            "params": {
+                "a": "1",
+                "v": "2"
+            },
+            "params_is_nil": false,
+            "params_len": 2,
+            "salt": "c29tZXNhbHQ",
+            "version": ""
+        },
+        {
+            "hash": "",
+            "id": "x",
+            "input_b64": "JHgkdj0xOSRhPTEsdj0yJGMyOXRaWE5oYkhR",
+            "input_bytes": 27,
+            "input_runes": 27,
+            "name": "version_then_param_named_v",
+            "ok": true,
+            "params": {
+                "a": "1",
+                "v": "2"
+            },
+            "params_is_nil": false,
+            "params_len": 2,
+            "salt": "c29tZXNhbHQ",
+            "version": "19"
+        },
+        {
+            "hash": "",
+            "id": "x",
+            "input_b64": "JHgkYT0xLGE9MiRjMjl0WlhOaGJIUQ==",
+            "input_bytes": 22,
+            "input_runes": 22,
+            "name": "duplicate_param_last_wins",
+            "ok": true,
+            "params": {
+                "a": "2"
+            },
+            "params_is_nil": false,
+            "params_len": 1,
+            "salt": "c29tZXNhbHQ",
+            "version": ""
+        },
+        {
+            "error": "failed to parse function ID: found \"\", expected '$'",
+            "hash": "",
+            "id": "",
+            "input_b64": "",
+            "input_bytes": 0,
+            "input_runes": 0,
+            "name": "empty",
+            "ok": false,
+            "params": null,
+            "params_is_nil": true,
+            "params_len": 0,
+            "salt": "",
+            "version": ""
+        },
+        {
+            "error": "failed to parse function ID: found \"\", expected '$'",
+            "hash": "",
+            "id": "",
+            "input_b64": "cGJrZGYyJGY9U0hBMjU2",
+            "input_bytes": 15,
+            "input_runes": 15,
+            "name": "no_leading_dollar",
+            "ok": false,
+            "params": null,
+            "params_is_nil": true,
+            "params_len": 0,
+            "salt": "",
+            "version": ""
+        },
+        {
+            "error": "failed to parse function ID: found \"\", expected a function identifier",
+            "hash": "",
+            "id": "",
+            "input_b64": "JA==",
+            "input_bytes": 1,
+            "input_runes": 1,
+            "name": "dollar_only",
+            "ok": false,
+            "params": null,
+            "params_is_nil": true,
+            "params_len": 0,
+            "salt": "",
+            "version": ""
+        },
+        {
+            "error": "failed to parse function ID: found \"\", expected a function identifier",
+            "hash": "",
+            "id": "",
+            "input_b64": "JCQ=",
+            "input_bytes": 2,
+            "input_runes": 2,
+            "name": "dollar_dollar",
+            "ok": false,
+            "params": null,
+            "params_is_nil": true,
+            "params_len": 0,
+            "salt": "",
+            "version": ""
+        },
+        {
+            "error": "failed to parse function ID: found \"\", expected a function identifier",
+            "hash": "",
+            "id": "",
+            "input_b64": "JCRhPTE=",
+            "input_bytes": 5,
+            "input_runes": 5,
+            "name": "empty_id_then_params",
+            "ok": false,
+            "params": null,
+            "params_is_nil": true,
+            "params_len": 0,
+            "salt": "",
+            "version": ""
+        },
+        {
+            "error": "found \"\", expected a value for parameter \"a\"",
+            "hash": "",
+            "id": "",
+            "input_b64": "JHgkYT0=",
+            "input_bytes": 5,
+            "input_runes": 5,
+            "name": "param_without_value",
+            "ok": false,
+            "params": null,
+            "params_is_nil": true,
+            "params_len": 0,
+            "salt": "",
+            "version": ""
+        },
+        {
+            "error": "found \"\", expected the hash",
+            "hash": "",
+            "id": "",
+            "input_b64": "JHgkYSQ=",
+            "input_bytes": 5,
+            "input_runes": 5,
+            "name": "param_without_equals",
+            "ok": false,
+            "params": null,
+            "params_is_nil": true,
+            "params_len": 0,
+            "salt": "",
+            "version": ""
+        },
+        {
+            "error": "found \"\", expected '$'",
+            "hash": "",
+            "id": "",
+            "input_b64": "JHgkYT0xLA==",
+            "input_bytes": 7,
+            "input_runes": 7,
+            "name": "trailing_comma",
+            "ok": false,
+            "params": null,
+            "params_is_nil": true,
+            "params_len": 0,
+            "salt": "",
+            "version": ""
+        },
+        {
+            "error": "found \"\", expected '$'",
+            "hash": "",
+            "id": "",
+            "input_b64": "JHgkYT0xJA==",
+            "input_bytes": 7,
+            "input_runes": 7,
+            "name": "trailing_dollar_after_params",
+            "ok": false,
+            "params": null,
+            "params_is_nil": true,
+            "params_len": 0,
+            "salt": "",
+            "version": ""
+        },
+        {
+            "error": "found \"\", expected the hash",
+            "hash": "",
+            "id": "",
+            "input_b64": "JHgkYzI5dFpYTmhiSFEk",
+            "input_bytes": 15,
+            "input_runes": 15,
+            "name": "trailing_dollar_after_salt",
+            "ok": false,
+            "params": null,
+            "params_is_nil": true,
+            "params_len": 0,
+            "salt": "",
+            "version": ""
+        },
+        {
+            "error": "found \"\", expected EOF",
+            "hash": "",
+            "id": "",
+            "input_b64": "JHgkYzI5dFpYTmhiSFEkYUdGemFBJG1vcmU=",
+            "input_bytes": 26,
+            "input_runes": 26,
+            "name": "extra_field_after_hash",
+            "ok": false,
+            "params": null,
+            "params_is_nil": true,
+            "params_len": 0,
+            "salt": "",
+            "version": ""
+        },
+        {
+            "error": "found \"\", expected EOF",
+            "hash": "",
+            "id": "",
+            "input_b64": "JHgkYzI5dFpYTmhiSFEkYUdGemFBIQ==",
+            "input_bytes": 22,
+            "input_runes": 22,
+            "name": "garbage_after_hash",
+            "ok": false,
+            "params": null,
+            "params_is_nil": true,
+            "params_len": 0,
+            "salt": "",
+            "version": ""
+        },
+        {
+            "error": "found \" \", expected '$' or EOF",
+            "hash": "",
+            "id": "",
+            "input_b64": "JGFyZyBvbjI=",
+            "input_bytes": 8,
+            "input_runes": 8,
+            "name": "space_in_id",
+            "ok": false,
+            "params": null,
+            "params_is_nil": true,
+            "params_len": 0,
+            "salt": "",
+            "version": ""
+        },
+        {
+            "error": "failed to parse function ID: found \"\", expected '$'",
+            "hash": "",
+            "id": "",
+            "input_b64": "ICR4",
+            "input_bytes": 3,
+            "input_runes": 3,
+            "name": "space_before_dollar",
+            "ok": false,
+            "params": null,
+            "params_is_nil": true,
+            "params_len": 0,
+            "salt": "",
+            "version": ""
+        },
+        {
+            "error": "failed parsing version string: found \"\", expected '$'",
+            "hash": "",
+            "id": "",
+            "input_b64": "JHgkdj0=",
+            "input_bytes": 5,
+            "input_runes": 5,
+            "name": "version_without_value",
+            "ok": false,
+            "params": null,
+            "params_is_nil": true,
+            "params_len": 0,
+            "salt": "",
+            "version": ""
+        },
+        {
+            "error": "found 'v' as a parameter name, which is only allowed as the version key",
+            "hash": "",
+            "id": "",
+            "input_b64": "JHgkdj0xJHY9Mg==",
+            "input_bytes": 10,
+            "input_runes": 10,
+            "name": "version_twice",
+            "ok": false,
+            "params": null,
+            "params_is_nil": true,
+            "params_len": 0,
+            "salt": "",
+            "version": ""
+        },
+        {
+            "error": "found \"\", expected the version key, 'v', a parameter name or the salt: found \",\", expected '$'",
+            "hash": "",
+            "id": "",
+            "input_b64": "JHgkLGE9MQ==",
+            "input_bytes": 7,
+            "input_runes": 7,
+            "name": "comma_before_any_param",
+            "ok": false,
+            "params": null,
+            "params_is_nil": true,
+            "params_len": 0,
+            "salt": "",
+            "version": ""
+        },
+        {
+            "error": "failed to parse function ID: found \"\", expected a function identifier",
+            "hash": "",
+            "id": "",
+            "input_b64": "JD14",
+            "input_bytes": 3,
+            "input_runes": 3,
+            "name": "equals_as_first_char",
+            "ok": false,
+            "params": null,
+            "params_is_nil": true,
+            "params_len": 0,
+            "salt": "",
+            "version": ""
+        },
+        {
+            "error": "found \"o\", expected '$' or EOF",
+            "hash": "",
+            "id": "",
+            "input_b64": "JGFyZwBvbjJpZA==",
+            "input_bytes": 10,
+            "input_runes": 10,
+            "name": "nul_mid_id",
+            "ok": false,
+            "params": null,
+            "params_is_nil": true,
+            "params_len": 0,
+            "salt": "",
+            "version": ""
+        },
+        {
+            "hash": "",
+            "id": "x",
+            "input_b64": "JHgAJGE9MQ==",
+            "input_bytes": 7,
+            "input_runes": 7,
+            "name": "nul_before_params",
+            "ok": true,
+            "params": {
+                "a": "1"
+            },
+            "params_is_nil": false,
+            "params_len": 1,
+            "salt": "",
+            "version": ""
+        },
+        {
+            "error": "found \"\", expected EOF",
+            "hash": "",
+            "id": "",
+            "input_b64": "JHgkYzI5dFpYTmhiSFEkYUdGAHphQQ==",
+            "input_bytes": 22,
+            "input_runes": 22,
+            "name": "nul_mid_hash",
+            "ok": false,
+            "params": null,
+            "params_is_nil": true,
+            "params_len": 0,
+            "salt": "",
+            "version": ""
+        },
+        {
+            "error": "found \"�\", expected '$' or EOF",
+            "hash": "",
+            "id": "",
+            "input_b64": "JGFyZ4BvbjI=",
+            "input_bytes": 8,
+            "input_runes": 8,
+            "name": "invalid_utf8_in_id",
+            "ok": false,
+            "params": null,
+            "params_is_nil": true,
+            "params_len": 0,
+            "salt": "",
+            "version": ""
+        },
+        {
+            "error": "found \"�\", expected '$' or EOF",
+            "hash": "",
+            "id": "",
+            "input_b64": "JGFyZ29uMoA=",
+            "input_bytes": 8,
+            "input_runes": 8,
+            "name": "invalid_utf8_after_id",
+            "ok": false,
+            "params": null,
+            "params_is_nil": true,
+            "params_len": 0,
+            "salt": "",
+            "version": ""
+        },
+        {
+            "error": "found \"ó\", expected '$' or EOF",
+            "hash": "",
+            "id": "",
+            "input_b64": "JGFyZ8OzbjI=",
+            "input_bytes": 8,
+            "input_runes": 7,
+            "name": "multibyte_in_id",
+            "ok": false,
+            "params": null,
+            "params_is_nil": true,
+            "params_len": 0,
+            "salt": "",
+            "version": ""
+        },
+        {
+            "error": "found \"\", expected a value for parameter \"a\"",
+            "hash": "",
+            "id": "",
+            "input_b64": "JHgkYT3DqQ==",
+            "input_bytes": 7,
+            "input_runes": 6,
+            "name": "multibyte_in_param_value",
+            "ok": false,
+            "params": null,
+            "params_is_nil": true,
+            "params_len": 0,
+            "salt": "",
+            "version": ""
+        },
+        {
+            "hash": "",
+            "id": "x",
+            "input_b64": "JHgkYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYQ==",
+            "input_bytes": 253,
+            "input_runes": 253,
+            "name": "ascii_salt_total_253_bytes",
+            "ok": true,
+            "params": {},
+            "params_is_nil": false,
+            "params_len": 0,
+            "salt": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "version": ""
+        },
+        {
+            "hash": "",
+            "id": "x",
+            "input_b64": "JHgkYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFh",
+            "input_bytes": 255,
+            "input_runes": 255,
+            "name": "ascii_salt_total_255_bytes",
+            "ok": true,
+            "params": {},
+            "params_is_nil": false,
+            "params_len": 0,
+            "salt": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "version": ""
+        },
+        {
+            "hash": "",
+            "id": "x",
+            "input_b64": "JHgkYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYQ==",
+            "input_bytes": 256,
+            "input_runes": 256,
+            "name": "ascii_salt_total_256_bytes",
+            "ok": true,
+            "params": {},
+            "params_is_nil": false,
+            "params_len": 0,
+            "salt": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "version": ""
+        },
+        {
+            "hash": "",
+            "id": "x",
+            "input_b64": "JHgkYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE=",
+            "input_bytes": 263,
+            "input_runes": 263,
+            "name": "ascii_salt_total_263_bytes",
+            "ok": true,
+            "params": {},
+            "params_is_nil": false,
+            "params_len": 0,
+            "salt": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "version": ""
+        },
+        {
+            "error": "failed to parse function ID: found \"\", expected a function identifier",
+            "hash": "",
+            "id": "",
+            "input_b64": "JMOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6nDqcOpw6k=",
+            "input_bytes": 401,
+            "input_runes": 201,
+            "name": "two_hundred_two_byte_runes_in_id",
+            "ok": false,
+            "params": null,
+            "params_is_nil": true,
+            "params_len": 0,
+            "salt": "",
+            "version": ""
+        },
+        {
+            "hash": "",
+            "id": "x",
+            "input_b64": "JHgkYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYQ==",
+            "input_bytes": 403,
+            "input_runes": 403,
+            "name": "salt_cut_by_the_limit",
+            "ok": true,
+            "params": {},
+            "params_is_nil": false,
+            "params_len": 0,
+            "salt": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "version": ""
+        },
+        {
+            "hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "id": "x",
+            "input_b64": "JHgkYzI5dFpYTmhiSFEkYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYg==",
+            "input_bytes": 415,
+            "input_runes": 415,
+            "name": "hash_cut_by_the_limit",
+            "ok": true,
+            "params": {},
+            "params_is_nil": false,
+            "params_len": 0,
+            "salt": "c29tZXNhbHQ",
+            "version": ""
+        }
+    ],
+    "character_classes": {
+        "function_id": [
+            {
+                "codepoint": 0,
+                "ok": false
+            },
+            {
+                "codepoint": 1,
+                "ok": false
+            },
+            {
+                "codepoint": 2,
+                "ok": false
+            },
+            {
+                "codepoint": 3,
+                "ok": false
+            },
+            {
+                "codepoint": 4,
+                "ok": false
+            },
+            {
+                "codepoint": 5,
+                "ok": false
+            },
+            {
+                "codepoint": 6,
+                "ok": false
+            },
+            {
+                "codepoint": 7,
+                "ok": false
+            },
+            {
+                "codepoint": 8,
+                "ok": false
+            },
+            {
+                "codepoint": 9,
+                "ok": false
+            },
+            {
+                "codepoint": 10,
+                "ok": false
+            },
+            {
+                "codepoint": 11,
+                "ok": false
+            },
+            {
+                "codepoint": 12,
+                "ok": false
+            },
+            {
+                "codepoint": 13,
+                "ok": false
+            },
+            {
+                "codepoint": 14,
+                "ok": false
+            },
+            {
+                "codepoint": 15,
+                "ok": false
+            },
+            {
+                "codepoint": 16,
+                "ok": false
+            },
+            {
+                "codepoint": 17,
+                "ok": false
+            },
+            {
+                "codepoint": 18,
+                "ok": false
+            },
+            {
+                "codepoint": 19,
+                "ok": false
+            },
+            {
+                "codepoint": 20,
+                "ok": false
+            },
+            {
+                "codepoint": 21,
+                "ok": false
+            },
+            {
+                "codepoint": 22,
+                "ok": false
+            },
+            {
+                "codepoint": 23,
+                "ok": false
+            },
+            {
+                "codepoint": 24,
+                "ok": false
+            },
+            {
+                "codepoint": 25,
+                "ok": false
+            },
+            {
+                "codepoint": 26,
+                "ok": false
+            },
+            {
+                "codepoint": 27,
+                "ok": false
+            },
+            {
+                "codepoint": 28,
+                "ok": false
+            },
+            {
+                "codepoint": 29,
+                "ok": false
+            },
+            {
+                "codepoint": 30,
+                "ok": false
+            },
+            {
+                "codepoint": 31,
+                "ok": false
+            },
+            {
+                "codepoint": 32,
+                "ok": false
+            },
+            {
+                "codepoint": 33,
+                "ok": false
+            },
+            {
+                "codepoint": 34,
+                "ok": false
+            },
+            {
+                "codepoint": 35,
+                "ok": false
+            },
+            {
+                "codepoint": 36,
+                "contains": false,
+                "field": "a",
+                "ok": true
+            },
+            {
+                "codepoint": 37,
+                "ok": false
+            },
+            {
+                "codepoint": 38,
+                "ok": false
+            },
+            {
+                "codepoint": 39,
+                "ok": false
+            },
+            {
+                "codepoint": 40,
+                "ok": false
+            },
+            {
+                "codepoint": 41,
+                "ok": false
+            },
+            {
+                "codepoint": 42,
+                "ok": false
+            },
+            {
+                "codepoint": 43,
+                "ok": false
+            },
+            {
+                "codepoint": 44,
+                "ok": false
+            },
+            {
+                "codepoint": 45,
+                "contains": true,
+                "field": "a-b",
+                "ok": true
+            },
+            {
+                "codepoint": 46,
+                "ok": false
+            },
+            {
+                "codepoint": 47,
+                "ok": false
+            },
+            {
+                "codepoint": 48,
+                "contains": true,
+                "field": "a0b",
+                "ok": true
+            },
+            {
+                "codepoint": 49,
+                "contains": true,
+                "field": "a1b",
+                "ok": true
+            },
+            {
+                "codepoint": 50,
+                "contains": true,
+                "field": "a2b",
+                "ok": true
+            },
+            {
+                "codepoint": 51,
+                "contains": true,
+                "field": "a3b",
+                "ok": true
+            },
+            {
+                "codepoint": 52,
+                "contains": true,
+                "field": "a4b",
+                "ok": true
+            },
+            {
+                "codepoint": 53,
+                "contains": true,
+                "field": "a5b",
+                "ok": true
+            },
+            {
+                "codepoint": 54,
+                "contains": true,
+                "field": "a6b",
+                "ok": true
+            },
+            {
+                "codepoint": 55,
+                "contains": true,
+                "field": "a7b",
+                "ok": true
+            },
+            {
+                "codepoint": 56,
+                "contains": true,
+                "field": "a8b",
+                "ok": true
+            },
+            {
+                "codepoint": 57,
+                "contains": true,
+                "field": "a9b",
+                "ok": true
+            },
+            {
+                "codepoint": 58,
+                "ok": false
+            },
+            {
+                "codepoint": 59,
+                "ok": false
+            },
+            {
+                "codepoint": 60,
+                "ok": false
+            },
+            {
+                "codepoint": 61,
+                "ok": false
+            },
+            {
+                "codepoint": 62,
+                "ok": false
+            },
+            {
+                "codepoint": 63,
+                "ok": false
+            },
+            {
+                "codepoint": 64,
+                "ok": false
+            },
+            {
+                "codepoint": 65,
+                "ok": false
+            },
+            {
+                "codepoint": 66,
+                "ok": false
+            },
+            {
+                "codepoint": 67,
+                "ok": false
+            },
+            {
+                "codepoint": 68,
+                "ok": false
+            },
+            {
+                "codepoint": 69,
+                "ok": false
+            },
+            {
+                "codepoint": 70,
+                "ok": false
+            },
+            {
+                "codepoint": 71,
+                "ok": false
+            },
+            {
+                "codepoint": 72,
+                "ok": false
+            },
+            {
+                "codepoint": 73,
+                "ok": false
+            },
+            {
+                "codepoint": 74,
+                "ok": false
+            },
+            {
+                "codepoint": 75,
+                "ok": false
+            },
+            {
+                "codepoint": 76,
+                "ok": false
+            },
+            {
+                "codepoint": 77,
+                "ok": false
+            },
+            {
+                "codepoint": 78,
+                "ok": false
+            },
+            {
+                "codepoint": 79,
+                "ok": false
+            },
+            {
+                "codepoint": 80,
+                "ok": false
+            },
+            {
+                "codepoint": 81,
+                "ok": false
+            },
+            {
+                "codepoint": 82,
+                "ok": false
+            },
+            {
+                "codepoint": 83,
+                "ok": false
+            },
+            {
+                "codepoint": 84,
+                "ok": false
+            },
+            {
+                "codepoint": 85,
+                "ok": false
+            },
+            {
+                "codepoint": 86,
+                "ok": false
+            },
+            {
+                "codepoint": 87,
+                "ok": false
+            },
+            {
+                "codepoint": 88,
+                "ok": false
+            },
+            {
+                "codepoint": 89,
+                "ok": false
+            },
+            {
+                "codepoint": 90,
+                "ok": false
+            },
+            {
+                "codepoint": 91,
+                "ok": false
+            },
+            {
+                "codepoint": 92,
+                "ok": false
+            },
+            {
+                "codepoint": 93,
+                "ok": false
+            },
+            {
+                "codepoint": 94,
+                "ok": false
+            },
+            {
+                "codepoint": 95,
+                "ok": false
+            },
+            {
+                "codepoint": 96,
+                "ok": false
+            },
+            {
+                "codepoint": 97,
+                "contains": true,
+                "field": "aab",
+                "ok": true
+            },
+            {
+                "codepoint": 98,
+                "contains": true,
+                "field": "abb",
+                "ok": true
+            },
+            {
+                "codepoint": 99,
+                "contains": true,
+                "field": "acb",
+                "ok": true
+            },
+            {
+                "codepoint": 100,
+                "contains": true,
+                "field": "adb",
+                "ok": true
+            },
+            {
+                "codepoint": 101,
+                "contains": true,
+                "field": "aeb",
+                "ok": true
+            },
+            {
+                "codepoint": 102,
+                "contains": true,
+                "field": "afb",
+                "ok": true
+            },
+            {
+                "codepoint": 103,
+                "contains": true,
+                "field": "agb",
+                "ok": true
+            },
+            {
+                "codepoint": 104,
+                "contains": true,
+                "field": "ahb",
+                "ok": true
+            },
+            {
+                "codepoint": 105,
+                "contains": true,
+                "field": "aib",
+                "ok": true
+            },
+            {
+                "codepoint": 106,
+                "contains": true,
+                "field": "ajb",
+                "ok": true
+            },
+            {
+                "codepoint": 107,
+                "contains": true,
+                "field": "akb",
+                "ok": true
+            },
+            {
+                "codepoint": 108,
+                "contains": true,
+                "field": "alb",
+                "ok": true
+            },
+            {
+                "codepoint": 109,
+                "contains": true,
+                "field": "amb",
+                "ok": true
+            },
+            {
+                "codepoint": 110,
+                "contains": true,
+                "field": "anb",
+                "ok": true
+            },
+            {
+                "codepoint": 111,
+                "contains": true,
+                "field": "aob",
+                "ok": true
+            },
+            {
+                "codepoint": 112,
+                "contains": true,
+                "field": "apb",
+                "ok": true
+            },
+            {
+                "codepoint": 113,
+                "contains": true,
+                "field": "aqb",
+                "ok": true
+            },
+            {
+                "codepoint": 114,
+                "contains": true,
+                "field": "arb",
+                "ok": true
+            },
+            {
+                "codepoint": 115,
+                "contains": true,
+                "field": "asb",
+                "ok": true
+            },
+            {
+                "codepoint": 116,
+                "contains": true,
+                "field": "atb",
+                "ok": true
+            },
+            {
+                "codepoint": 117,
+                "contains": true,
+                "field": "aub",
+                "ok": true
+            },
+            {
+                "codepoint": 118,
+                "contains": true,
+                "field": "avb",
+                "ok": true
+            },
+            {
+                "codepoint": 119,
+                "contains": true,
+                "field": "awb",
+                "ok": true
+            },
+            {
+                "codepoint": 120,
+                "contains": true,
+                "field": "axb",
+                "ok": true
+            },
+            {
+                "codepoint": 121,
+                "contains": true,
+                "field": "ayb",
+                "ok": true
+            },
+            {
+                "codepoint": 122,
+                "contains": true,
+                "field": "azb",
+                "ok": true
+            },
+            {
+                "codepoint": 123,
+                "ok": false
+            },
+            {
+                "codepoint": 124,
+                "ok": false
+            },
+            {
+                "codepoint": 125,
+                "ok": false
+            },
+            {
+                "codepoint": 126,
+                "ok": false
+            },
+            {
+                "codepoint": 127,
+                "ok": false
+            },
+            {
+                "codepoint": 233,
+                "ok": false
+            },
+            {
+                "codepoint": 304,
+                "ok": false
+            },
+            {
+                "codepoint": 20013,
+                "ok": false
+            },
+            {
+                "codepoint": 32,
+                "ok": false
+            },
+            {
+                "codepoint": 65279,
+                "ok": false
+            },
+            {
+                "codepoint": 65533,
+                "ok": false
+            }
+        ],
+        "param_name": [
+            {
+                "codepoint": 0,
+                "ok": false
+            },
+            {
+                "codepoint": 1,
+                "ok": false
+            },
+            {
+                "codepoint": 2,
+                "ok": false
+            },
+            {
+                "codepoint": 3,
+                "ok": false
+            },
+            {
+                "codepoint": 4,
+                "ok": false
+            },
+            {
+                "codepoint": 5,
+                "ok": false
+            },
+            {
+                "codepoint": 6,
+                "ok": false
+            },
+            {
+                "codepoint": 7,
+                "ok": false
+            },
+            {
+                "codepoint": 8,
+                "ok": false
+            },
+            {
+                "codepoint": 9,
+                "ok": false
+            },
+            {
+                "codepoint": 10,
+                "ok": false
+            },
+            {
+                "codepoint": 11,
+                "ok": false
+            },
+            {
+                "codepoint": 12,
+                "ok": false
+            },
+            {
+                "codepoint": 13,
+                "ok": false
+            },
+            {
+                "codepoint": 14,
+                "ok": false
+            },
+            {
+                "codepoint": 15,
+                "ok": false
+            },
+            {
+                "codepoint": 16,
+                "ok": false
+            },
+            {
+                "codepoint": 17,
+                "ok": false
+            },
+            {
+                "codepoint": 18,
+                "ok": false
+            },
+            {
+                "codepoint": 19,
+                "ok": false
+            },
+            {
+                "codepoint": 20,
+                "ok": false
+            },
+            {
+                "codepoint": 21,
+                "ok": false
+            },
+            {
+                "codepoint": 22,
+                "ok": false
+            },
+            {
+                "codepoint": 23,
+                "ok": false
+            },
+            {
+                "codepoint": 24,
+                "ok": false
+            },
+            {
+                "codepoint": 25,
+                "ok": false
+            },
+            {
+                "codepoint": 26,
+                "ok": false
+            },
+            {
+                "codepoint": 27,
+                "ok": false
+            },
+            {
+                "codepoint": 28,
+                "ok": false
+            },
+            {
+                "codepoint": 29,
+                "ok": false
+            },
+            {
+                "codepoint": 30,
+                "ok": false
+            },
+            {
+                "codepoint": 31,
+                "ok": false
+            },
+            {
+                "codepoint": 32,
+                "ok": false
+            },
+            {
+                "codepoint": 33,
+                "ok": false
+            },
+            {
+                "codepoint": 34,
+                "ok": false
+            },
+            {
+                "codepoint": 35,
+                "ok": false
+            },
+            {
+                "codepoint": 36,
+                "ok": false
+            },
+            {
+                "codepoint": 37,
+                "ok": false
+            },
+            {
+                "codepoint": 38,
+                "ok": false
+            },
+            {
+                "codepoint": 39,
+                "ok": false
+            },
+            {
+                "codepoint": 40,
+                "ok": false
+            },
+            {
+                "codepoint": 41,
+                "ok": false
+            },
+            {
+                "codepoint": 42,
+                "ok": false
+            },
+            {
+                "codepoint": 43,
+                "contains": true,
+                "field": "a+b",
+                "ok": true
+            },
+            {
+                "codepoint": 44,
+                "ok": false
+            },
+            {
+                "codepoint": 45,
+                "ok": false
+            },
+            {
+                "codepoint": 46,
+                "ok": false
+            },
+            {
+                "codepoint": 47,
+                "contains": true,
+                "field": "a/b",
+                "ok": true
+            },
+            {
+                "codepoint": 48,
+                "contains": true,
+                "field": "a0b",
+                "ok": true
+            },
+            {
+                "codepoint": 49,
+                "contains": true,
+                "field": "a1b",
+                "ok": true
+            },
+            {
+                "codepoint": 50,
+                "contains": true,
+                "field": "a2b",
+                "ok": true
+            },
+            {
+                "codepoint": 51,
+                "contains": true,
+                "field": "a3b",
+                "ok": true
+            },
+            {
+                "codepoint": 52,
+                "contains": true,
+                "field": "a4b",
+                "ok": true
+            },
+            {
+                "codepoint": 53,
+                "contains": true,
+                "field": "a5b",
+                "ok": true
+            },
+            {
+                "codepoint": 54,
+                "contains": true,
+                "field": "a6b",
+                "ok": true
+            },
+            {
+                "codepoint": 55,
+                "contains": true,
+                "field": "a7b",
+                "ok": true
+            },
+            {
+                "codepoint": 56,
+                "contains": true,
+                "field": "a8b",
+                "ok": true
+            },
+            {
+                "codepoint": 57,
+                "contains": true,
+                "field": "a9b",
+                "ok": true
+            },
+            {
+                "codepoint": 58,
+                "ok": false
+            },
+            {
+                "codepoint": 59,
+                "ok": false
+            },
+            {
+                "codepoint": 60,
+                "ok": false
+            },
+            {
+                "codepoint": 61,
+                "ok": false
+            },
+            {
+                "codepoint": 62,
+                "ok": false
+            },
+            {
+                "codepoint": 63,
+                "ok": false
+            },
+            {
+                "codepoint": 64,
+                "ok": false
+            },
+            {
+                "codepoint": 65,
+                "contains": true,
+                "field": "aAb",
+                "ok": true
+            },
+            {
+                "codepoint": 66,
+                "contains": true,
+                "field": "aBb",
+                "ok": true
+            },
+            {
+                "codepoint": 67,
+                "contains": true,
+                "field": "aCb",
+                "ok": true
+            },
+            {
+                "codepoint": 68,
+                "contains": true,
+                "field": "aDb",
+                "ok": true
+            },
+            {
+                "codepoint": 69,
+                "contains": true,
+                "field": "aEb",
+                "ok": true
+            },
+            {
+                "codepoint": 70,
+                "contains": true,
+                "field": "aFb",
+                "ok": true
+            },
+            {
+                "codepoint": 71,
+                "contains": true,
+                "field": "aGb",
+                "ok": true
+            },
+            {
+                "codepoint": 72,
+                "contains": true,
+                "field": "aHb",
+                "ok": true
+            },
+            {
+                "codepoint": 73,
+                "contains": true,
+                "field": "aIb",
+                "ok": true
+            },
+            {
+                "codepoint": 74,
+                "contains": true,
+                "field": "aJb",
+                "ok": true
+            },
+            {
+                "codepoint": 75,
+                "contains": true,
+                "field": "aKb",
+                "ok": true
+            },
+            {
+                "codepoint": 76,
+                "contains": true,
+                "field": "aLb",
+                "ok": true
+            },
+            {
+                "codepoint": 77,
+                "contains": true,
+                "field": "aMb",
+                "ok": true
+            },
+            {
+                "codepoint": 78,
+                "contains": true,
+                "field": "aNb",
+                "ok": true
+            },
+            {
+                "codepoint": 79,
+                "contains": true,
+                "field": "aOb",
+                "ok": true
+            },
+            {
+                "codepoint": 80,
+                "contains": true,
+                "field": "aPb",
+                "ok": true
+            },
+            {
+                "codepoint": 81,
+                "contains": true,
+                "field": "aQb",
+                "ok": true
+            },
+            {
+                "codepoint": 82,
+                "contains": true,
+                "field": "aRb",
+                "ok": true
+            },
+            {
+                "codepoint": 83,
+                "contains": true,
+                "field": "aSb",
+                "ok": true
+            },
+            {
+                "codepoint": 84,
+                "contains": true,
+                "field": "aTb",
+                "ok": true
+            },
+            {
+                "codepoint": 85,
+                "contains": true,
+                "field": "aUb",
+                "ok": true
+            },
+            {
+                "codepoint": 86,
+                "contains": true,
+                "field": "aVb",
+                "ok": true
+            },
+            {
+                "codepoint": 87,
+                "contains": true,
+                "field": "aWb",
+                "ok": true
+            },
+            {
+                "codepoint": 88,
+                "contains": true,
+                "field": "aXb",
+                "ok": true
+            },
+            {
+                "codepoint": 89,
+                "contains": true,
+                "field": "aYb",
+                "ok": true
+            },
+            {
+                "codepoint": 90,
+                "contains": true,
+                "field": "aZb",
+                "ok": true
+            },
+            {
+                "codepoint": 91,
+                "ok": false
+            },
+            {
+                "codepoint": 92,
+                "ok": false
+            },
+            {
+                "codepoint": 93,
+                "ok": false
+            },
+            {
+                "codepoint": 94,
+                "ok": false
+            },
+            {
+                "codepoint": 95,
+                "ok": false
+            },
+            {
+                "codepoint": 96,
+                "ok": false
+            },
+            {
+                "codepoint": 97,
+                "contains": true,
+                "field": "aab",
+                "ok": true
+            },
+            {
+                "codepoint": 98,
+                "contains": true,
+                "field": "abb",
+                "ok": true
+            },
+            {
+                "codepoint": 99,
+                "contains": true,
+                "field": "acb",
+                "ok": true
+            },
+            {
+                "codepoint": 100,
+                "contains": true,
+                "field": "adb",
+                "ok": true
+            },
+            {
+                "codepoint": 101,
+                "contains": true,
+                "field": "aeb",
+                "ok": true
+            },
+            {
+                "codepoint": 102,
+                "contains": true,
+                "field": "afb",
+                "ok": true
+            },
+            {
+                "codepoint": 103,
+                "contains": true,
+                "field": "agb",
+                "ok": true
+            },
+            {
+                "codepoint": 104,
+                "contains": true,
+                "field": "ahb",
+                "ok": true
+            },
+            {
+                "codepoint": 105,
+                "contains": true,
+                "field": "aib",
+                "ok": true
+            },
+            {
+                "codepoint": 106,
+                "contains": true,
+                "field": "ajb",
+                "ok": true
+            },
+            {
+                "codepoint": 107,
+                "contains": true,
+                "field": "akb",
+                "ok": true
+            },
+            {
+                "codepoint": 108,
+                "contains": true,
+                "field": "alb",
+                "ok": true
+            },
+            {
+                "codepoint": 109,
+                "contains": true,
+                "field": "amb",
+                "ok": true
+            },
+            {
+                "codepoint": 110,
+                "contains": true,
+                "field": "anb",
+                "ok": true
+            },
+            {
+                "codepoint": 111,
+                "contains": true,
+                "field": "aob",
+                "ok": true
+            },
+            {
+                "codepoint": 112,
+                "contains": true,
+                "field": "apb",
+                "ok": true
+            },
+            {
+                "codepoint": 113,
+                "contains": true,
+                "field": "aqb",
+                "ok": true
+            },
+            {
+                "codepoint": 114,
+                "contains": true,
+                "field": "arb",
+                "ok": true
+            },
+            {
+                "codepoint": 115,
+                "contains": true,
+                "field": "asb",
+                "ok": true
+            },
+            {
+                "codepoint": 116,
+                "contains": true,
+                "field": "atb",
+                "ok": true
+            },
+            {
+                "codepoint": 117,
+                "contains": true,
+                "field": "aub",
+                "ok": true
+            },
+            {
+                "codepoint": 118,
+                "contains": true,
+                "field": "avb",
+                "ok": true
+            },
+            {
+                "codepoint": 119,
+                "contains": true,
+                "field": "awb",
+                "ok": true
+            },
+            {
+                "codepoint": 120,
+                "contains": true,
+                "field": "axb",
+                "ok": true
+            },
+            {
+                "codepoint": 121,
+                "contains": true,
+                "field": "ayb",
+                "ok": true
+            },
+            {
+                "codepoint": 122,
+                "contains": true,
+                "field": "azb",
+                "ok": true
+            },
+            {
+                "codepoint": 123,
+                "ok": false
+            },
+            {
+                "codepoint": 124,
+                "ok": false
+            },
+            {
+                "codepoint": 125,
+                "ok": false
+            },
+            {
+                "codepoint": 126,
+                "ok": false
+            },
+            {
+                "codepoint": 127,
+                "ok": false
+            },
+            {
+                "codepoint": 233,
+                "ok": false
+            },
+            {
+                "codepoint": 304,
+                "ok": false
+            },
+            {
+                "codepoint": 20013,
+                "ok": false
+            },
+            {
+                "codepoint": 32,
+                "ok": false
+            },
+            {
+                "codepoint": 65279,
+                "ok": false
+            },
+            {
+                "codepoint": 65533,
+                "ok": false
+            }
+        ],
+        "param_value": [
+            {
+                "codepoint": 0,
+                "ok": false
+            },
+            {
+                "codepoint": 1,
+                "ok": false
+            },
+            {
+                "codepoint": 2,
+                "ok": false
+            },
+            {
+                "codepoint": 3,
+                "ok": false
+            },
+            {
+                "codepoint": 4,
+                "ok": false
+            },
+            {
+                "codepoint": 5,
+                "ok": false
+            },
+            {
+                "codepoint": 6,
+                "ok": false
+            },
+            {
+                "codepoint": 7,
+                "ok": false
+            },
+            {
+                "codepoint": 8,
+                "ok": false
+            },
+            {
+                "codepoint": 9,
+                "ok": false
+            },
+            {
+                "codepoint": 10,
+                "ok": false
+            },
+            {
+                "codepoint": 11,
+                "ok": false
+            },
+            {
+                "codepoint": 12,
+                "ok": false
+            },
+            {
+                "codepoint": 13,
+                "ok": false
+            },
+            {
+                "codepoint": 14,
+                "ok": false
+            },
+            {
+                "codepoint": 15,
+                "ok": false
+            },
+            {
+                "codepoint": 16,
+                "ok": false
+            },
+            {
+                "codepoint": 17,
+                "ok": false
+            },
+            {
+                "codepoint": 18,
+                "ok": false
+            },
+            {
+                "codepoint": 19,
+                "ok": false
+            },
+            {
+                "codepoint": 20,
+                "ok": false
+            },
+            {
+                "codepoint": 21,
+                "ok": false
+            },
+            {
+                "codepoint": 22,
+                "ok": false
+            },
+            {
+                "codepoint": 23,
+                "ok": false
+            },
+            {
+                "codepoint": 24,
+                "ok": false
+            },
+            {
+                "codepoint": 25,
+                "ok": false
+            },
+            {
+                "codepoint": 26,
+                "ok": false
+            },
+            {
+                "codepoint": 27,
+                "ok": false
+            },
+            {
+                "codepoint": 28,
+                "ok": false
+            },
+            {
+                "codepoint": 29,
+                "ok": false
+            },
+            {
+                "codepoint": 30,
+                "ok": false
+            },
+            {
+                "codepoint": 31,
+                "ok": false
+            },
+            {
+                "codepoint": 32,
+                "ok": false
+            },
+            {
+                "codepoint": 33,
+                "ok": false
+            },
+            {
+                "codepoint": 34,
+                "ok": false
+            },
+            {
+                "codepoint": 35,
+                "ok": false
+            },
+            {
+                "codepoint": 36,
+                "contains": false,
+                "field": "a",
+                "ok": true
+            },
+            {
+                "codepoint": 37,
+                "ok": false
+            },
+            {
+                "codepoint": 38,
+                "ok": false
+            },
+            {
+                "codepoint": 39,
+                "ok": false
+            },
+            {
+                "codepoint": 40,
+                "ok": false
+            },
+            {
+                "codepoint": 41,
+                "ok": false
+            },
+            {
+                "codepoint": 42,
+                "ok": false
+            },
+            {
+                "codepoint": 43,
+                "contains": true,
+                "field": "a+b",
+                "ok": true
+            },
+            {
+                "codepoint": 44,
+                "ok": false
+            },
+            {
+                "codepoint": 45,
+                "contains": true,
+                "field": "a-b",
+                "ok": true
+            },
+            {
+                "codepoint": 46,
+                "contains": true,
+                "field": "a.b",
+                "ok": true
+            },
+            {
+                "codepoint": 47,
+                "contains": true,
+                "field": "a/b",
+                "ok": true
+            },
+            {
+                "codepoint": 48,
+                "contains": true,
+                "field": "a0b",
+                "ok": true
+            },
+            {
+                "codepoint": 49,
+                "contains": true,
+                "field": "a1b",
+                "ok": true
+            },
+            {
+                "codepoint": 50,
+                "contains": true,
+                "field": "a2b",
+                "ok": true
+            },
+            {
+                "codepoint": 51,
+                "contains": true,
+                "field": "a3b",
+                "ok": true
+            },
+            {
+                "codepoint": 52,
+                "contains": true,
+                "field": "a4b",
+                "ok": true
+            },
+            {
+                "codepoint": 53,
+                "contains": true,
+                "field": "a5b",
+                "ok": true
+            },
+            {
+                "codepoint": 54,
+                "contains": true,
+                "field": "a6b",
+                "ok": true
+            },
+            {
+                "codepoint": 55,
+                "contains": true,
+                "field": "a7b",
+                "ok": true
+            },
+            {
+                "codepoint": 56,
+                "contains": true,
+                "field": "a8b",
+                "ok": true
+            },
+            {
+                "codepoint": 57,
+                "contains": true,
+                "field": "a9b",
+                "ok": true
+            },
+            {
+                "codepoint": 58,
+                "ok": false
+            },
+            {
+                "codepoint": 59,
+                "ok": false
+            },
+            {
+                "codepoint": 60,
+                "ok": false
+            },
+            {
+                "codepoint": 61,
+                "ok": false
+            },
+            {
+                "codepoint": 62,
+                "ok": false
+            },
+            {
+                "codepoint": 63,
+                "ok": false
+            },
+            {
+                "codepoint": 64,
+                "ok": false
+            },
+            {
+                "codepoint": 65,
+                "contains": true,
+                "field": "aAb",
+                "ok": true
+            },
+            {
+                "codepoint": 66,
+                "contains": true,
+                "field": "aBb",
+                "ok": true
+            },
+            {
+                "codepoint": 67,
+                "contains": true,
+                "field": "aCb",
+                "ok": true
+            },
+            {
+                "codepoint": 68,
+                "contains": true,
+                "field": "aDb",
+                "ok": true
+            },
+            {
+                "codepoint": 69,
+                "contains": true,
+                "field": "aEb",
+                "ok": true
+            },
+            {
+                "codepoint": 70,
+                "contains": true,
+                "field": "aFb",
+                "ok": true
+            },
+            {
+                "codepoint": 71,
+                "contains": true,
+                "field": "aGb",
+                "ok": true
+            },
+            {
+                "codepoint": 72,
+                "contains": true,
+                "field": "aHb",
+                "ok": true
+            },
+            {
+                "codepoint": 73,
+                "contains": true,
+                "field": "aIb",
+                "ok": true
+            },
+            {
+                "codepoint": 74,
+                "contains": true,
+                "field": "aJb",
+                "ok": true
+            },
+            {
+                "codepoint": 75,
+                "contains": true,
+                "field": "aKb",
+                "ok": true
+            },
+            {
+                "codepoint": 76,
+                "contains": true,
+                "field": "aLb",
+                "ok": true
+            },
+            {
+                "codepoint": 77,
+                "contains": true,
+                "field": "aMb",
+                "ok": true
+            },
+            {
+                "codepoint": 78,
+                "contains": true,
+                "field": "aNb",
+                "ok": true
+            },
+            {
+                "codepoint": 79,
+                "contains": true,
+                "field": "aOb",
+                "ok": true
+            },
+            {
+                "codepoint": 80,
+                "contains": true,
+                "field": "aPb",
+                "ok": true
+            },
+            {
+                "codepoint": 81,
+                "contains": true,
+                "field": "aQb",
+                "ok": true
+            },
+            {
+                "codepoint": 82,
+                "contains": true,
+                "field": "aRb",
+                "ok": true
+            },
+            {
+                "codepoint": 83,
+                "contains": true,
+                "field": "aSb",
+                "ok": true
+            },
+            {
+                "codepoint": 84,
+                "contains": true,
+                "field": "aTb",
+                "ok": true
+            },
+            {
+                "codepoint": 85,
+                "contains": true,
+                "field": "aUb",
+                "ok": true
+            },
+            {
+                "codepoint": 86,
+                "contains": true,
+                "field": "aVb",
+                "ok": true
+            },
+            {
+                "codepoint": 87,
+                "contains": true,
+                "field": "aWb",
+                "ok": true
+            },
+            {
+                "codepoint": 88,
+                "contains": true,
+                "field": "aXb",
+                "ok": true
+            },
+            {
+                "codepoint": 89,
+                "contains": true,
+                "field": "aYb",
+                "ok": true
+            },
+            {
+                "codepoint": 90,
+                "contains": true,
+                "field": "aZb",
+                "ok": true
+            },
+            {
+                "codepoint": 91,
+                "ok": false
+            },
+            {
+                "codepoint": 92,
+                "ok": false
+            },
+            {
+                "codepoint": 93,
+                "ok": false
+            },
+            {
+                "codepoint": 94,
+                "ok": false
+            },
+            {
+                "codepoint": 95,
+                "ok": false
+            },
+            {
+                "codepoint": 96,
+                "ok": false
+            },
+            {
+                "codepoint": 97,
+                "contains": true,
+                "field": "aab",
+                "ok": true
+            },
+            {
+                "codepoint": 98,
+                "contains": true,
+                "field": "abb",
+                "ok": true
+            },
+            {
+                "codepoint": 99,
+                "contains": true,
+                "field": "acb",
+                "ok": true
+            },
+            {
+                "codepoint": 100,
+                "contains": true,
+                "field": "adb",
+                "ok": true
+            },
+            {
+                "codepoint": 101,
+                "contains": true,
+                "field": "aeb",
+                "ok": true
+            },
+            {
+                "codepoint": 102,
+                "contains": true,
+                "field": "afb",
+                "ok": true
+            },
+            {
+                "codepoint": 103,
+                "contains": true,
+                "field": "agb",
+                "ok": true
+            },
+            {
+                "codepoint": 104,
+                "contains": true,
+                "field": "ahb",
+                "ok": true
+            },
+            {
+                "codepoint": 105,
+                "contains": true,
+                "field": "aib",
+                "ok": true
+            },
+            {
+                "codepoint": 106,
+                "contains": true,
+                "field": "ajb",
+                "ok": true
+            },
+            {
+                "codepoint": 107,
+                "contains": true,
+                "field": "akb",
+                "ok": true
+            },
+            {
+                "codepoint": 108,
+                "contains": true,
+                "field": "alb",
+                "ok": true
+            },
+            {
+                "codepoint": 109,
+                "contains": true,
+                "field": "amb",
+                "ok": true
+            },
+            {
+                "codepoint": 110,
+                "contains": true,
+                "field": "anb",
+                "ok": true
+            },
+            {
+                "codepoint": 111,
+                "contains": true,
+                "field": "aob",
+                "ok": true
+            },
+            {
+                "codepoint": 112,
+                "contains": true,
+                "field": "apb",
+                "ok": true
+            },
+            {
+                "codepoint": 113,
+                "contains": true,
+                "field": "aqb",
+                "ok": true
+            },
+            {
+                "codepoint": 114,
+                "contains": true,
+                "field": "arb",
+                "ok": true
+            },
+            {
+                "codepoint": 115,
+                "contains": true,
+                "field": "asb",
+                "ok": true
+            },
+            {
+                "codepoint": 116,
+                "contains": true,
+                "field": "atb",
+                "ok": true
+            },
+            {
+                "codepoint": 117,
+                "contains": true,
+                "field": "aub",
+                "ok": true
+            },
+            {
+                "codepoint": 118,
+                "contains": true,
+                "field": "avb",
+                "ok": true
+            },
+            {
+                "codepoint": 119,
+                "contains": true,
+                "field": "awb",
+                "ok": true
+            },
+            {
+                "codepoint": 120,
+                "contains": true,
+                "field": "axb",
+                "ok": true
+            },
+            {
+                "codepoint": 121,
+                "contains": true,
+                "field": "ayb",
+                "ok": true
+            },
+            {
+                "codepoint": 122,
+                "contains": true,
+                "field": "azb",
+                "ok": true
+            },
+            {
+                "codepoint": 123,
+                "ok": false
+            },
+            {
+                "codepoint": 124,
+                "ok": false
+            },
+            {
+                "codepoint": 125,
+                "ok": false
+            },
+            {
+                "codepoint": 126,
+                "ok": false
+            },
+            {
+                "codepoint": 127,
+                "ok": false
+            },
+            {
+                "codepoint": 233,
+                "ok": false
+            },
+            {
+                "codepoint": 304,
+                "ok": false
+            },
+            {
+                "codepoint": 20013,
+                "ok": false
+            },
+            {
+                "codepoint": 32,
+                "ok": false
+            },
+            {
+                "codepoint": 65279,
+                "ok": false
+            },
+            {
+                "codepoint": 65533,
+                "ok": false
+            }
+        ],
+        "salt": [
+            {
+                "codepoint": 0,
+                "ok": false
+            },
+            {
+                "codepoint": 1,
+                "ok": false
+            },
+            {
+                "codepoint": 2,
+                "ok": false
+            },
+            {
+                "codepoint": 3,
+                "ok": false
+            },
+            {
+                "codepoint": 4,
+                "ok": false
+            },
+            {
+                "codepoint": 5,
+                "ok": false
+            },
+            {
+                "codepoint": 6,
+                "ok": false
+            },
+            {
+                "codepoint": 7,
+                "ok": false
+            },
+            {
+                "codepoint": 8,
+                "ok": false
+            },
+            {
+                "codepoint": 9,
+                "ok": false
+            },
+            {
+                "codepoint": 10,
+                "ok": false
+            },
+            {
+                "codepoint": 11,
+                "ok": false
+            },
+            {
+                "codepoint": 12,
+                "ok": false
+            },
+            {
+                "codepoint": 13,
+                "ok": false
+            },
+            {
+                "codepoint": 14,
+                "ok": false
+            },
+            {
+                "codepoint": 15,
+                "ok": false
+            },
+            {
+                "codepoint": 16,
+                "ok": false
+            },
+            {
+                "codepoint": 17,
+                "ok": false
+            },
+            {
+                "codepoint": 18,
+                "ok": false
+            },
+            {
+                "codepoint": 19,
+                "ok": false
+            },
+            {
+                "codepoint": 20,
+                "ok": false
+            },
+            {
+                "codepoint": 21,
+                "ok": false
+            },
+            {
+                "codepoint": 22,
+                "ok": false
+            },
+            {
+                "codepoint": 23,
+                "ok": false
+            },
+            {
+                "codepoint": 24,
+                "ok": false
+            },
+            {
+                "codepoint": 25,
+                "ok": false
+            },
+            {
+                "codepoint": 26,
+                "ok": false
+            },
+            {
+                "codepoint": 27,
+                "ok": false
+            },
+            {
+                "codepoint": 28,
+                "ok": false
+            },
+            {
+                "codepoint": 29,
+                "ok": false
+            },
+            {
+                "codepoint": 30,
+                "ok": false
+            },
+            {
+                "codepoint": 31,
+                "ok": false
+            },
+            {
+                "codepoint": 32,
+                "ok": false
+            },
+            {
+                "codepoint": 33,
+                "ok": false
+            },
+            {
+                "codepoint": 34,
+                "ok": false
+            },
+            {
+                "codepoint": 35,
+                "ok": false
+            },
+            {
+                "codepoint": 36,
+                "contains": false,
+                "field": "a",
+                "ok": true
+            },
+            {
+                "codepoint": 37,
+                "ok": false
+            },
+            {
+                "codepoint": 38,
+                "ok": false
+            },
+            {
+                "codepoint": 39,
+                "ok": false
+            },
+            {
+                "codepoint": 40,
+                "ok": false
+            },
+            {
+                "codepoint": 41,
+                "ok": false
+            },
+            {
+                "codepoint": 42,
+                "ok": false
+            },
+            {
+                "codepoint": 43,
+                "contains": true,
+                "field": "a+b",
+                "ok": true
+            },
+            {
+                "codepoint": 44,
+                "ok": false
+            },
+            {
+                "codepoint": 45,
+                "ok": false
+            },
+            {
+                "codepoint": 46,
+                "ok": false
+            },
+            {
+                "codepoint": 47,
+                "contains": true,
+                "field": "a/b",
+                "ok": true
+            },
+            {
+                "codepoint": 48,
+                "contains": true,
+                "field": "a0b",
+                "ok": true
+            },
+            {
+                "codepoint": 49,
+                "contains": true,
+                "field": "a1b",
+                "ok": true
+            },
+            {
+                "codepoint": 50,
+                "contains": true,
+                "field": "a2b",
+                "ok": true
+            },
+            {
+                "codepoint": 51,
+                "contains": true,
+                "field": "a3b",
+                "ok": true
+            },
+            {
+                "codepoint": 52,
+                "contains": true,
+                "field": "a4b",
+                "ok": true
+            },
+            {
+                "codepoint": 53,
+                "contains": true,
+                "field": "a5b",
+                "ok": true
+            },
+            {
+                "codepoint": 54,
+                "contains": true,
+                "field": "a6b",
+                "ok": true
+            },
+            {
+                "codepoint": 55,
+                "contains": true,
+                "field": "a7b",
+                "ok": true
+            },
+            {
+                "codepoint": 56,
+                "contains": true,
+                "field": "a8b",
+                "ok": true
+            },
+            {
+                "codepoint": 57,
+                "contains": true,
+                "field": "a9b",
+                "ok": true
+            },
+            {
+                "codepoint": 58,
+                "ok": false
+            },
+            {
+                "codepoint": 59,
+                "ok": false
+            },
+            {
+                "codepoint": 60,
+                "ok": false
+            },
+            {
+                "codepoint": 61,
+                "contains": false,
+                "field": "",
+                "ok": true
+            },
+            {
+                "codepoint": 62,
+                "ok": false
+            },
+            {
+                "codepoint": 63,
+                "ok": false
+            },
+            {
+                "codepoint": 64,
+                "ok": false
+            },
+            {
+                "codepoint": 65,
+                "contains": true,
+                "field": "aAb",
+                "ok": true
+            },
+            {
+                "codepoint": 66,
+                "contains": true,
+                "field": "aBb",
+                "ok": true
+            },
+            {
+                "codepoint": 67,
+                "contains": true,
+                "field": "aCb",
+                "ok": true
+            },
+            {
+                "codepoint": 68,
+                "contains": true,
+                "field": "aDb",
+                "ok": true
+            },
+            {
+                "codepoint": 69,
+                "contains": true,
+                "field": "aEb",
+                "ok": true
+            },
+            {
+                "codepoint": 70,
+                "contains": true,
+                "field": "aFb",
+                "ok": true
+            },
+            {
+                "codepoint": 71,
+                "contains": true,
+                "field": "aGb",
+                "ok": true
+            },
+            {
+                "codepoint": 72,
+                "contains": true,
+                "field": "aHb",
+                "ok": true
+            },
+            {
+                "codepoint": 73,
+                "contains": true,
+                "field": "aIb",
+                "ok": true
+            },
+            {
+                "codepoint": 74,
+                "contains": true,
+                "field": "aJb",
+                "ok": true
+            },
+            {
+                "codepoint": 75,
+                "contains": true,
+                "field": "aKb",
+                "ok": true
+            },
+            {
+                "codepoint": 76,
+                "contains": true,
+                "field": "aLb",
+                "ok": true
+            },
+            {
+                "codepoint": 77,
+                "contains": true,
+                "field": "aMb",
+                "ok": true
+            },
+            {
+                "codepoint": 78,
+                "contains": true,
+                "field": "aNb",
+                "ok": true
+            },
+            {
+                "codepoint": 79,
+                "contains": true,
+                "field": "aOb",
+                "ok": true
+            },
+            {
+                "codepoint": 80,
+                "contains": true,
+                "field": "aPb",
+                "ok": true
+            },
+            {
+                "codepoint": 81,
+                "contains": true,
+                "field": "aQb",
+                "ok": true
+            },
+            {
+                "codepoint": 82,
+                "contains": true,
+                "field": "aRb",
+                "ok": true
+            },
+            {
+                "codepoint": 83,
+                "contains": true,
+                "field": "aSb",
+                "ok": true
+            },
+            {
+                "codepoint": 84,
+                "contains": true,
+                "field": "aTb",
+                "ok": true
+            },
+            {
+                "codepoint": 85,
+                "contains": true,
+                "field": "aUb",
+                "ok": true
+            },
+            {
+                "codepoint": 86,
+                "contains": true,
+                "field": "aVb",
+                "ok": true
+            },
+            {
+                "codepoint": 87,
+                "contains": true,
+                "field": "aWb",
+                "ok": true
+            },
+            {
+                "codepoint": 88,
+                "contains": true,
+                "field": "aXb",
+                "ok": true
+            },
+            {
+                "codepoint": 89,
+                "contains": true,
+                "field": "aYb",
+                "ok": true
+            },
+            {
+                "codepoint": 90,
+                "contains": true,
+                "field": "aZb",
+                "ok": true
+            },
+            {
+                "codepoint": 91,
+                "ok": false
+            },
+            {
+                "codepoint": 92,
+                "ok": false
+            },
+            {
+                "codepoint": 93,
+                "ok": false
+            },
+            {
+                "codepoint": 94,
+                "ok": false
+            },
+            {
+                "codepoint": 95,
+                "ok": false
+            },
+            {
+                "codepoint": 96,
+                "ok": false
+            },
+            {
+                "codepoint": 97,
+                "contains": true,
+                "field": "aab",
+                "ok": true
+            },
+            {
+                "codepoint": 98,
+                "contains": true,
+                "field": "abb",
+                "ok": true
+            },
+            {
+                "codepoint": 99,
+                "contains": true,
+                "field": "acb",
+                "ok": true
+            },
+            {
+                "codepoint": 100,
+                "contains": true,
+                "field": "adb",
+                "ok": true
+            },
+            {
+                "codepoint": 101,
+                "contains": true,
+                "field": "aeb",
+                "ok": true
+            },
+            {
+                "codepoint": 102,
+                "contains": true,
+                "field": "afb",
+                "ok": true
+            },
+            {
+                "codepoint": 103,
+                "contains": true,
+                "field": "agb",
+                "ok": true
+            },
+            {
+                "codepoint": 104,
+                "contains": true,
+                "field": "ahb",
+                "ok": true
+            },
+            {
+                "codepoint": 105,
+                "contains": true,
+                "field": "aib",
+                "ok": true
+            },
+            {
+                "codepoint": 106,
+                "contains": true,
+                "field": "ajb",
+                "ok": true
+            },
+            {
+                "codepoint": 107,
+                "contains": true,
+                "field": "akb",
+                "ok": true
+            },
+            {
+                "codepoint": 108,
+                "contains": true,
+                "field": "alb",
+                "ok": true
+            },
+            {
+                "codepoint": 109,
+                "contains": true,
+                "field": "amb",
+                "ok": true
+            },
+            {
+                "codepoint": 110,
+                "contains": true,
+                "field": "anb",
+                "ok": true
+            },
+            {
+                "codepoint": 111,
+                "contains": true,
+                "field": "aob",
+                "ok": true
+            },
+            {
+                "codepoint": 112,
+                "contains": true,
+                "field": "apb",
+                "ok": true
+            },
+            {
+                "codepoint": 113,
+                "contains": true,
+                "field": "aqb",
+                "ok": true
+            },
+            {
+                "codepoint": 114,
+                "contains": true,
+                "field": "arb",
+                "ok": true
+            },
+            {
+                "codepoint": 115,
+                "contains": true,
+                "field": "asb",
+                "ok": true
+            },
+            {
+                "codepoint": 116,
+                "contains": true,
+                "field": "atb",
+                "ok": true
+            },
+            {
+                "codepoint": 117,
+                "contains": true,
+                "field": "aub",
+                "ok": true
+            },
+            {
+                "codepoint": 118,
+                "contains": true,
+                "field": "avb",
+                "ok": true
+            },
+            {
+                "codepoint": 119,
+                "contains": true,
+                "field": "awb",
+                "ok": true
+            },
+            {
+                "codepoint": 120,
+                "contains": true,
+                "field": "axb",
+                "ok": true
+            },
+            {
+                "codepoint": 121,
+                "contains": true,
+                "field": "ayb",
+                "ok": true
+            },
+            {
+                "codepoint": 122,
+                "contains": true,
+                "field": "azb",
+                "ok": true
+            },
+            {
+                "codepoint": 123,
+                "ok": false
+            },
+            {
+                "codepoint": 124,
+                "ok": false
+            },
+            {
+                "codepoint": 125,
+                "ok": false
+            },
+            {
+                "codepoint": 126,
+                "ok": false
+            },
+            {
+                "codepoint": 127,
+                "ok": false
+            },
+            {
+                "codepoint": 233,
+                "ok": false
+            },
+            {
+                "codepoint": 304,
+                "ok": false
+            },
+            {
+                "codepoint": 20013,
+                "ok": false
+            },
+            {
+                "codepoint": 32,
+                "ok": false
+            },
+            {
+                "codepoint": 65279,
+                "ok": false
+            },
+            {
+                "codepoint": 65533,
+                "ok": false
+            }
+        ]
+    },
+    "constants": {
+        "MaxRunes": 256,
+        "limiter_counts": "bytes — io.LimitReader(r, MaxRunes)"
+    },
+    "limit": {
+        "aligned_boundary_is_not_decisive": {
+            "error": null,
+            "input_bytes": 456,
+            "input_runes": 356,
+            "parses": true,
+            "salt": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "salt_len": 253,
+            "see_instead": "limit_boundary",
+            "why_not": "every character in all four classes is single-byte, so within a legal prefix byte index == rune index"
+        },
+        "limit_is_bytes": true,
+        "longest_intact_ascii_salt": 253,
+        "max_runes_constant": 256,
+        "over_limit_truncates_not_errors": {
+            "hash_is_short": true,
+            "hash_len_in": 400,
+            "hash_len_out": 241,
+            "input_bytes": 415,
+            "parses": true
+        },
+        "total_len_at_that_point": 256,
+        "two_byte_input_bytes": 513,
+        "two_byte_input_errors": true,
+        "two_byte_input_runes": 257
+    },
+    "limit_boundary": [
+        {
+            "error": "found \"é\", expected either '$', or '=' or EOF",
+            "input_bytes": 403,
+            "input_runes": 303,
+            "legal_prefix": 200,
+            "ok": false,
+            "pad": "é",
+            "pad_bytes": 2,
+            "salt": "",
+            "salt_len": 0
+        },
+        {
+            "error": "found \"中\", expected either '$', or '=' or EOF",
+            "input_bytes": 503,
+            "input_runes": 303,
+            "legal_prefix": 200,
+            "ok": false,
+            "pad": "中",
+            "pad_bytes": 3,
+            "salt": "",
+            "salt_len": 0
+        },
+        {
+            "error": "found \"🔒\", expected either '$', or '=' or EOF",
+            "input_bytes": 603,
+            "input_runes": 303,
+            "legal_prefix": 200,
+            "ok": false,
+            "pad": "🔒",
+            "pad_bytes": 4,
+            "salt": "",
+            "salt_len": 0
+        },
+        {
+            "error": "found \"é\", expected either '$', or '=' or EOF",
+            "input_bytes": 453,
+            "input_runes": 353,
+            "legal_prefix": 250,
+            "ok": false,
+            "pad": "é",
+            "pad_bytes": 2,
+            "salt": "",
+            "salt_len": 0
+        },
+        {
+            "error": "found \"中\", expected either '$', or '=' or EOF",
+            "input_bytes": 553,
+            "input_runes": 353,
+            "legal_prefix": 250,
+            "ok": false,
+            "pad": "中",
+            "pad_bytes": 3,
+            "salt": "",
+            "salt_len": 0
+        },
+        {
+            "error": "found \"�\", expected either '$', or '=' or EOF",
+            "input_bytes": 653,
+            "input_runes": 353,
+            "legal_prefix": 250,
+            "ok": false,
+            "pad": "🔒",
+            "pad_bytes": 4,
+            "salt": "",
+            "salt_len": 0
+        },
+        {
+            "error": "found \"�\", expected either '$', or '=' or EOF",
+            "input_bytes": 455,
+            "input_runes": 355,
+            "legal_prefix": 252,
+            "ok": false,
+            "pad": "é",
+            "pad_bytes": 2,
+            "salt": "",
+            "salt_len": 0
+        },
+        {
+            "error": "found \"�\", expected either '$', or '=' or EOF",
+            "input_bytes": 555,
+            "input_runes": 355,
+            "legal_prefix": 252,
+            "ok": false,
+            "pad": "中",
+            "pad_bytes": 3,
+            "salt": "",
+            "salt_len": 0
+        },
+        {
+            "error": "found \"�\", expected either '$', or '=' or EOF",
+            "input_bytes": 655,
+            "input_runes": 355,
+            "legal_prefix": 252,
+            "ok": false,
+            "pad": "🔒",
+            "pad_bytes": 4,
+            "salt": "",
+            "salt_len": 0
+        },
+        {
+            "error": null,
+            "input_bytes": 456,
+            "input_runes": 356,
+            "legal_prefix": 253,
+            "ok": true,
+            "pad": "é",
+            "pad_bytes": 2,
+            "salt": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "salt_len": 253
+        },
+        {
+            "error": null,
+            "input_bytes": 556,
+            "input_runes": 356,
+            "legal_prefix": 253,
+            "ok": true,
+            "pad": "中",
+            "pad_bytes": 3,
+            "salt": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "salt_len": 253
+        },
+        {
+            "error": null,
+            "input_bytes": 656,
+            "input_runes": 356,
+            "legal_prefix": 253,
+            "ok": true,
+            "pad": "🔒",
+            "pad_bytes": 4,
+            "salt": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "salt_len": 253
+        },
+        {
+            "error": null,
+            "input_bytes": 457,
+            "input_runes": 357,
+            "legal_prefix": 254,
+            "ok": true,
+            "pad": "é",
+            "pad_bytes": 2,
+            "salt": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "salt_len": 253
+        },
+        {
+            "error": null,
+            "input_bytes": 557,
+            "input_runes": 357,
+            "legal_prefix": 254,
+            "ok": true,
+            "pad": "中",
+            "pad_bytes": 3,
+            "salt": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "salt_len": 253
+        },
+        {
+            "error": null,
+            "input_bytes": 657,
+            "input_runes": 357,
+            "legal_prefix": 254,
+            "ok": true,
+            "pad": "🔒",
+            "pad_bytes": 4,
+            "salt": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "salt_len": 253
+        },
+        {
+            "error": null,
+            "input_bytes": 458,
+            "input_runes": 358,
+            "legal_prefix": 255,
+            "ok": true,
+            "pad": "é",
+            "pad_bytes": 2,
+            "salt": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "salt_len": 253
+        },
+        {
+            "error": null,
+            "input_bytes": 558,
+            "input_runes": 358,
+            "legal_prefix": 255,
+            "ok": true,
+            "pad": "中",
+            "pad_bytes": 3,
+            "salt": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "salt_len": 253
+        },
+        {
+            "error": null,
+            "input_bytes": 658,
+            "input_runes": 358,
+            "legal_prefix": 255,
+            "ok": true,
+            "pad": "🔒",
+            "pad_bytes": 4,
+            "salt": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "salt_len": 253
+        },
+        {
+            "error": null,
+            "input_bytes": 459,
+            "input_runes": 359,
+            "legal_prefix": 256,
+            "ok": true,
+            "pad": "é",
+            "pad_bytes": 2,
+            "salt": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "salt_len": 253
+        },
+        {
+            "error": null,
+            "input_bytes": 559,
+            "input_runes": 359,
+            "legal_prefix": 256,
+            "ok": true,
+            "pad": "中",
+            "pad_bytes": 3,
+            "salt": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "salt_len": 253
+        },
+        {
+            "error": null,
+            "input_bytes": 659,
+            "input_runes": 359,
+            "legal_prefix": 256,
+            "ok": true,
+            "pad": "🔒",
+            "pad_bytes": 4,
+            "salt": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "salt_len": 253
+        },
+        {
+            "error": null,
+            "input_bytes": 503,
+            "input_runes": 403,
+            "legal_prefix": 300,
+            "ok": true,
+            "pad": "é",
+            "pad_bytes": 2,
+            "salt": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "salt_len": 253
+        },
+        {
+            "error": null,
+            "input_bytes": 603,
+            "input_runes": 403,
+            "legal_prefix": 300,
+            "ok": true,
+            "pad": "中",
+            "pad_bytes": 3,
+            "salt": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "salt_len": 253
+        },
+        {
+            "error": null,
+            "input_bytes": 703,
+            "input_runes": 403,
+            "legal_prefix": 300,
+            "ok": true,
+            "pad": "🔒",
+            "pad_bytes": 4,
+            "salt": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "salt_len": 253
+        }
+    ],
+    "tokens": {
+        "B64ENCODED": 256,
+        "COMMA": 8,
+        "DOLLARSIGN": 4,
+        "EOF": 2,
+        "EQUALSIGN": 16,
+        "FUNCTIONID": 32,
+        "IDENT": 480,
+        "ILLEGAL": 1,
+        "PARAMNAME": 64,
+        "PARAMVALUE": 128,
+        "ident_is_or": true
+    }
+}
