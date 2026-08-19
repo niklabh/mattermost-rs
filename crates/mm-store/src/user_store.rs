@@ -95,10 +95,19 @@ impl UserStore for SqlUserStore {
 
         // Go unmarshals these three unconditionally and returns the error, so a malformed column
         // is a failed request on both sides rather than a silently empty map.
+        //
+        // **A JSON `null` is not malformed.** These columns are `jsonb`, which can hold the JSON
+        // value `null` as distinct from SQL NULL, and the Go server writes exactly that: four of
+        // the five users in the development database have `mfausedtimestamps = 'null'::jsonb`.
+        // Go's `json.Unmarshal` turns a JSON null into a nil map or slice without complaint, so
+        // both null shapes mean "absent" and only a *type* mismatch is an error. Treating JSON
+        // null as a decode failure made `GET /users/me` a 500 for every user except the one the
+        // parity tests happen to log in as — see [D-135].
         let decode_map = |value: Option<serde_json::Value>,
                           column: &'static str|
          -> Result<Option<StringMap>, StoreError> {
             match value {
+                None | Some(serde_json::Value::Null) => Ok(None),
                 Some(value) => Ok(Some(serde_json::from_value::<StringMap>(value).map_err(
                     |source| StoreError::Decode {
                         entity: "User",
@@ -106,11 +115,11 @@ impl UserStore for SqlUserStore {
                         source,
                     },
                 )?)),
-                None => Ok(None),
             }
         };
 
         let mfa_used_timestamps = match row.mfausedtimestamps {
+            None | Some(serde_json::Value::Null) => None,
             Some(value) => Some(serde_json::from_value::<StringArray>(value).map_err(
                 |source| StoreError::Decode {
                     entity: "User",
@@ -118,7 +127,6 @@ impl UserStore for SqlUserStore {
                     source,
                 },
             )?),
-            None => None,
         };
 
         Ok(User {

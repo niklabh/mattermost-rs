@@ -4532,8 +4532,8 @@ that protects the same signal).
 
 ## D-130 · The Go server we compare against is a different version from the source we port
 
-**Status** OPEN · **Severity** unverified · **Raised** 2026-08-19 (phase 2, role/scheme stores)
-**Affects** every cross-server parity claim in `mm-api`.
+**Status** CLOSED · **Severity** unverified · **Raised and closed** 2026-08-19 (phase 2)
+**Affected** every cross-server parity claim in `mm-api`.
 
 `docker-compose.yml:59` pins `mattermost/mattermost-team-edition:**latest**`. The reference tree is
 pinned by SHA to **11.11.0** (`versions[0]` in version.go). The container currently reports
@@ -4563,12 +4563,35 @@ roles disagreeing **in both directions**:
    formats rarely change between minors, which is why nothing has caught fire, but "rarely" is not
    the standard the rest of this project holds itself to, and nobody had recorded the gap.
 
-**The fix is one line and it is not obviously safe to apply unasked.** Pinning the compose image to
-the tag matching the SHA is correct in principle, but Mattermost's schema migrations are one-way:
-a database migrated by 11.10.0 may not be readable by an older build, and the current volume has
-already been migrated. Whoever pays this should decide between pinning the tag and recreating the
-volume, or re-pinning the reference SHA to the 11.10.0 tree. Recording the choice matters more than
-which one is taken.
+**Paid 2026-08-19: the image is pinned and the volume was recreated.** The alternative — re-pinning
+the reference SHA to 11.10.0 — was rejected because every ported file cites line numbers in the
+11.11.0 tree, in `MIGRATION.md` and in a `Port of ...` doc comment on essentially every public item.
+
+`docker-compose.yml` now pins **`11.11.0-rc1`**, not `latest`. Two things about that tag:
+
+- There is no final `11.11.0` image. The pinned SHA (2026-08-13) is pre-release, and the only
+  published artifacts for the minor are `11.11.0-rc1` and the moving `release-11.11`. rc1 is the
+  closest **fixed** tag; `release-11.11` would reintroduce exactly the drift this entry is about.
+- Move the pin to `11.11.0` when it ships, and recreate the volume again — the migrations are
+  one-way in the other direction too.
+
+`X-Version-Id` now reports `11.11.0`, and **every suite passes against it**: the four `mm-api`
+parity files (including the byte-identical `/users/me`), the store suite and the authorization
+suite. So the skew had not in fact broken anything — but the claim is now measured rather than
+hoped, which was the whole point.
+
+**Two consequences worth knowing.**
+
+1. Recreating the volume mints new ids, and three test files hardcoded them. They now discover what
+   they need: the parity tests take the user id from the login response, and the authorization tests
+   query for the admin and insert their own plain users. A hardcoded id from a recreated volume
+   fails as *"permission denied"*, which is the most misleading possible symptom for a permission
+   test.
+2. A fresh volume has no team, and `parity_session_team_members` failed with the message it was
+   written to produce — *"the fixture user belongs to no team, so the parity assertions would be
+   vacuous"*. That test earned its keep. The README now documents the two setup calls.
+
+**Related** [D-136], which is what re-running the role diff against the matched version revealed.
 
 **Related** [D-069] (the `TZ` pin, the same class of "the environment is part of the oracle").
 
@@ -4648,3 +4671,102 @@ theirs".
 
 Worth reporting upstream if this project ever files anything upstream. Recorded here either way, so
 the difference is a decision rather than an accident.
+
+---
+
+## D-134 · Most of `authorization.go` is unported, and each part waits on a different thing
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-08-19 (phase 2, authorization)
+
+Ported: `RolesGrantPermission`, `SessionHasPermissionTo`, `SessionHasPermissionToAny`,
+`SessionHasPermissionToTeam`, `SessionHasPermissionToUser`, and `GetRolesByNames` with the
+higher-scoped merge behind it. That is the system-, team- and user-scoped surface — enough to gate a
+route that does not name a channel.
+
+What is left, grouped by what each is actually waiting for:
+
+- **A channel store** — `SessionHasPermissionToChannel`, `…ToChannels`, `…ToChannelByPost`,
+  `…ToReadPost`, `…ToReadChannel`, `HasPermissionToResolveChannelMention`,
+  `HasPermissionToChannelMemberCount`. This is the largest group and the most valuable: channel
+  membership is what most api4 handlers gate on. It needs `ChannelStore.GetMember` and the channel
+  scheme resolution, which is the same shape `team_store.rs` already does for teams.
+- **`Config`** — `SessionHasPermissionToAndNotRestrictedAdmin` reads
+  `ExperimentalSettings.RestrictSystemAdmin`. config.go is translated lazily; this is one bool.
+- **Other stores** — `…ToGroup` (group store), `…ToCategory` (channel category store),
+  `…ToManageBot` (bot store, and it returns an `*AppError` rather than a bool, deliberately, so the
+  failure can be told apart), the three property-field checks (property store).
+- **`HasPermissionTo*`** — the `askingUserId` variants of everything above. They differ from the
+  session variants in one way that matters: they load the user's roles from the database instead of
+  taking them from the session, so they see role changes a live session does not.
+
+Nothing here is blocked on a decision; each is blocked on a store.
+
+---
+
+## D-135 · A `jsonb` column holding JSON `null` was treated as a decode failure
+
+**Status** CLOSED · **Severity** blocking · **Raised and closed** 2026-08-19 (phase 2, authorization)
+
+`SqlUserStore.get` decoded `props`, `notifyprops`, `timezone` and `mfausedtimestamps` with
+`serde_json::from_value`, mapping any error to `StoreError::Decode`. Those columns are `jsonb`,
+which distinguishes SQL NULL from the JSON value `null` — and the Go server writes the latter.
+**Four of the five users in the development database have `mfausedtimestamps = 'null'::jsonb`**, and
+every one of them failed to load with
+
+```
+User.mfausedtimestamps held JSON that does not decode into the model type
+```
+
+**`GET /users/me` — the vertical slice's flagship route, the one whose byte-identical response is
+the project's headline claim — was a 500 for four users out of five.** It passed every test because
+the parity suite logs in as `sliceuser`, whose column holds `[]`.
+
+Go's `json.Unmarshal` turns a JSON null into a nil map or slice without complaint, so both null
+shapes mean "absent" and only a *type* mismatch is an error. Fixed by matching
+`None | Some(Value::Null) => None` in both decoders. No wire change: the field carries `omitempty`
+in Go and `skip_serializing_if` here, so an absent value is an omitted key either way — the fix
+turns a 500 into exactly the bytes Go sends.
+
+**Found by accident**, which is the part worth keeping. A `SessionHasPermissionToUser` test needed
+to act on a user who was not a system admin, picked one at random from the database, and it denied.
+The check was right; the store underneath it was not.
+
+**The lesson for the corpus, not just the code:** a test suite that always reads the same row is
+testing that row. The store suite now reads **every** user in the database and asserts each decodes,
+which is what a regression test for this class has to look like.
+
+**Related** [D-130] (the other "the environment is part of the oracle" finding from the same
+session).
+
+---
+
+## D-136 · `MakeDefaultRoles()` is the seed, not the effective permission set
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-19 (phase 2, after [D-130])
+
+With the server and the source finally on the same minor, the generated default-role table was
+diffed against the 24 rows the Go server writes at startup. The result is asymmetric, and the
+asymmetry is the finding:
+
+- **Nothing is generated-only.** For all 24 roles, every permission our table claims is one the
+  running server also grants. That was the dangerous direction — a port claiming a permission the
+  reference does not grant would over-grant — and it is empty.
+- **Ten roles have database-only extras.** `channel_admin` gains `create_post` and `add_reaction`,
+  `system_user` gains `create_emojis`/`delete_emojis`, `team_user` gains the two playbook-create
+  permissions, and so on.
+
+The mechanism is not version skew this time. The `systems` table lists roughly forty completed
+permission migrations — `add_channel_bookmarks_permissions`, `add_edit_file_attachment_permission`,
+`EmojisPermissionsMigrationComplete`, `add_channel_auto_translation_permissions` and the rest — that
+the server runs at startup and that **add permissions to existing roles**. `MakeDefaultRoles()` is
+the seed a fresh install starts from; the persisted rows are that seed plus every migration since.
+
+**What this means for the port, and it is not "fix the table".** The table is a faithful port of
+`MakeDefaultRoles()` and should stay one. But it is **not** the answer to "what may a `system_user`
+do" on a running server, and nothing should use it that way. `RolesGrantPermission` already reads
+the `Roles` table rather than the generated constants, which is correct and now demonstrably load
+bearing: answering from the table would deny `create_post` to every channel admin.
+
+The migrations themselves live in `channels/app/` and are a phase-3 concern — they only matter for
+standing up a *new* database, which this project never does. Recorded so the next person to compare
+the two does not conclude the generator is broken.

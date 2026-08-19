@@ -58,16 +58,39 @@ pub async fn go_minted_token(client: &reqwest::Client) -> String {
                 "login against Go failed; the fixture user may not exist yet"
             );
 
-            response
+            let token = response
                 .headers()
                 .get("token")
                 .expect("Go returns the session token in a `Token` header")
                 .to_str()
                 .expect("the token is ASCII")
-                .to_owned()
+                .to_owned();
+
+            // The login body is the user, so the id comes from the same round trip. Tests used to
+            // hardcode it, which broke the moment [D-130] required recreating the volume: ids are
+            // minted per database, and a stale one fails as "permission denied" rather than as
+            // "that user does not exist".
+            let user: serde_json::Value = response.json().await.expect("login returns the user");
+            let id = user["id"]
+                .as_str()
+                .expect("the user carries an id")
+                .to_owned();
+            USER_ID.set(id).expect("set once");
+
+            token
         })
         .await
         .clone()
+}
+
+static USER_ID: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// The logged-in user's id. Panics unless [`go_minted_token`] has run, which every caller does
+/// first because it is how they get a token at all.
+pub fn logged_in_user_id() -> &'static str {
+    USER_ID
+        .get()
+        .expect("call go_minted_token first — the id comes from the login response")
 }
 
 /// Fetch a path from both servers with the same token, returning `(go_body, rust_body)`.

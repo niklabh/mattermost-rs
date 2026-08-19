@@ -56,7 +56,16 @@ services:
   mattermost:
     # No arm64 manifest is published, so the platform is forced and the container runs under
     # emulation on Apple silicon. It is slow to boot and fine for a forward target.
-    image: mattermost/mattermost-team-edition:latest
+    # PINNED, and it must stay pinned: `latest` was 11.10.0 while the reference tree is pinned by
+    # SHA to 11.11.0, so every parity claim in this repo was measured against a server one minor
+    # out of step without anyone noticing. See D-130.
+    #
+    # There is no final `11.11.0` image yet — the pinned SHA (2026-08-13) is pre-release, and the
+    # only published artifacts for this minor are `11.11.0-rc1` and the moving `release-11.11`.
+    # rc1 is the closest fixed tag. Move this to `11.11.0` when it ships, and recreate the volume
+    # again: Mattermost's migrations are one-way, so a database migrated by a newer build cannot be
+    # read by an older one.
+    image: mattermost/mattermost-team-edition:11.11.0-rc1
     platform: linux/amd64
     container_name: mmrs-mattermost
     restart: unless-stopped
