@@ -4407,6 +4407,10 @@ several other `Sanitize` methods in the tree use the same constant, and two defi
 be worse than one in the wrong file. The value is pinned against Go by
 `role::go_parity::constants_match_go`, so a drifted copy fails rather than diverging quietly.
 
+**Moved to `utils.rs` 2026-08-19**, when `scheme.go` landed and gave it a second user. Keeping it in
+`role.rs` would have had `scheme.rs` importing a config constant from the role module, which is a
+worse lie about where it belongs than `utils` is. Still owed, still config.go's.
+
 ---
 
 ## D-125 · Three role.go functions have no defined output order, and it is Go's map iteration
@@ -4473,7 +4477,7 @@ can reproduce without an `unwrap` that `CLAUDE.md` forbids in library code. Same
 
 ---
 
-## D-128 · `Role`'s YAML codec is unported
+## D-128 · The `Role` and `Scheme` YAML codecs are unported
 
 **Status** OPEN · **Severity** incomplete · **Raised** 2026-08-19 (phase 1, role.go)
 
@@ -4488,3 +4492,159 @@ in `mm-model` needs it today.
 Two things to carry into that session: the YAML struct is a *different shape* from the JSON one —
 the timestamps are **strings** in YAML and numbers in JSON — and `ParseFormatedMillis`'s error text
 is [D-118], still unreproduced.
+
+**Extended 2026-08-19 to `Scheme`**, which has the identical pair (scheme.go:73, 116) with the same
+three string timestamps and the same shape difference. Both should land together; they are one
+decision, not two.
+
+---
+
+## D-129 · `behaviour_role.json` was regenerating itself on every run
+
+**Status** CLOSED · **Severity** unverified · **Raised and closed** 2026-08-19 (phase 1, scheme.go)
+
+`behaviour_role.go` seeded its `IsValid` corpus with `model.NewId()`, so every `go run .` rewrote
+twenty lines of a committed fixture with a fresh random id. That is [D-032]'s defect exactly, and
+the rule it breaks is the one that makes the generator useful: *"Output is deterministic, so a clean
+run touches only the new files; anything else in `git status` is a signal."* With the fixture
+churning on every run, that signal reads as noise and the next real drift hides inside it.
+
+Found the way the rule intends — a clean regeneration during the scheme.go session showed
+`M fixtures/behaviour_role.json` with nothing else to explain it.
+
+Both corpora now pin a **fixed** id (the one the registry filler already produces for
+`fixtures/role.json` and `fixtures/scheme.json`) and the generator calls `model.IsValidId` on the
+literal, so a mistyped constant panics in the generator rather than silently producing a corpus
+whose "valid id" case tests the invalid branch. Verified: two consecutive runs now leave the file
+byte-identical.
+
+**The committed fixture changes as a result** — twenty `id` values move from a random 26-character
+string to the pinned one. No Rust test asserts the id's *value*; they assert the verdicts it
+produces, which are unchanged.
+
+**Note for whoever reviews PR #5:** the defective generator is in that PR. The fix rides on the
+scheme.go branch, so #5 carries a fixture that rewrites itself until this lands.
+
+**Related** [D-032] (a fixture whose hashes were regenerated per run), [D-069] (the `TZ` pinning
+that protects the same signal).
+
+---
+
+## D-130 · The Go server we compare against is a different version from the source we port
+
+**Status** OPEN · **Severity** unverified · **Raised** 2026-08-19 (phase 2, role/scheme stores)
+**Affects** every cross-server parity claim in `mm-api`.
+
+`docker-compose.yml:59` pins `mattermost/mattermost-team-edition:**latest**`. The reference tree is
+pinned by SHA to **11.11.0** (`versions[0]` in version.go). The container currently reports
+`X-Version-Id: 11.10.0...` — **one minor behind**, and drifting on its own schedule, since `latest`
+moves and the SHA does not.
+
+**How it was found.** The `Roles` table holds 24 rows the Go server wrote at startup, which looked
+like the best possible oracle for the generated default-role table. Diffing them showed 13 of 24
+roles disagreeing **in both directions**:
+
+- *Generated-only*: `sysconsole_read_ai_recaps`, `manage_public_channel_auto_translation`,
+  `manage_private_channel_auto_translation` — permissions 11.11.0 adds and 11.10.0 has never heard
+  of.
+- *Database-only*: `purge_bleve_indexes`, `create_post_bleve_indexes_job`,
+  `sysconsole_read_experimental_bleve` — permissions 11.11.0 lists as **deprecated** and no longer
+  grants by default.
+- Plus app-layer augmentation: the server expands ancillary permissions before writing, so the
+  persisted set is not `MakeDefaultRoles()`'s output under any version.
+
+**What this costs.** Two things, and the second is the one that matters:
+
+1. The live database cannot verify the generated role tables. Handled — the DB tests assert store
+   behaviour (rows parse, round-trip, deleted rows resolve) rather than model content.
+2. **Every `mm-api` parity test is comparing our 11.11.0 port against an 11.10.0 server.** The
+   vertical slice's byte-identical claim for `/users/me`, the four migrated routes, the
+   forwarded-route assertions — all of them measured against a server one minor out of step. Wire
+   formats rarely change between minors, which is why nothing has caught fire, but "rarely" is not
+   the standard the rest of this project holds itself to, and nobody had recorded the gap.
+
+**The fix is one line and it is not obviously safe to apply unasked.** Pinning the compose image to
+the tag matching the SHA is correct in principle, but Mattermost's schema migrations are one-way:
+a database migrated by 11.10.0 may not be readable by an older build, and the current volume has
+already been migrated. Whoever pays this should decide between pinning the tag and recreating the
+volume, or re-pinning the reference SHA to the 11.10.0 tree. Recording the choice matters more than
+which one is taken.
+
+**Related** [D-069] (the `TZ` pin, the same class of "the environment is part of the oracle").
+
+---
+
+## D-131 · The role and scheme stores are read-only
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-08-19 (phase 2, role/scheme stores)
+
+Ported: `RoleStore.Get`, `GetAll`, `GetByName`, `GetByNames`; `SchemeStore.Get`, `GetByName`,
+`GetAllPage`, `CountByScope`. That is what a permission check needs, and it is deliberately where
+this session stopped.
+
+Not ported, and grouped by what each would cost:
+
+- **Writes** — `RoleStore.Save`, `SavePreservingUnknownPermissions`, `Delete`,
+  `PermanentDeleteAll`; `SchemeStore.Save`, `Delete`, `PermanentDeleteAll`. `Save` is not a simple
+  upsert: it runs `validateForSave` (role_store.go:118), which is where MM-68830's
+  unknown-permission tolerance lives, and `SchemeStore.Save` creates the scheme's **roles** in the
+  same transaction (scheme_store.go:102) and calls `filterModerated` (:317). A write session, not
+  an afternoon.
+- ~~**`ChannelHigherScopedPermissions`**~~ — **landed 2026-08-19**, with the `IN` list
+  parameterised rather than interpolated ([D-133]) and both upstream quirks reproduced ([D-132]).
+- **`AllChannelSchemeRoles`**, **`ChannelRolesUnderTeamRole`** (:438, :478) — both only matter once
+  schemes exist, which on Team Edition they never do.
+- **`CountWithoutPermission`** (scheme_store.go:480) — a system-console statistic.
+
+Nothing downstream is blocked: a permission check resolves roles by name, which `GetByNames`
+covers.
+
+---
+
+## D-132 · `ChannelHigherScopedPermissions` splits the permission column differently from every other read, and keys the result on `""`
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-19 (phase 2, role store)
+
+Two upstream quirks in the same twelve lines (role_store.go:431-434), both reproduced.
+
+**1. `strings.Split(s, " ")`, not `strings.Fields`.** Every other read of `Roles.Permissions` —
+`ToModel`, and therefore `Get`, `GetAll`, `GetByName`, `GetByNames` — uses `strings.Fields`, which
+collapses whitespace runs and drops empties. This one splits on a single space with no collapsing.
+Since the writer emits a **leading space** per entry, the resulting list always begins with an
+**empty string**, and an empty column becomes `[""]` — a one-element list, not an empty one.
+
+Harmless today: the only consumer is `MergeChannelHigherScopedPermissions`, which asks the list for
+membership, and `""` is not a permission id. But "harmless" is a property of the current caller, not
+of the function, and two splitters disagreeing about the same column is exactly the difference a
+port irons out without noticing. Pinned by a test asserting the empty first element is *present*.
+
+**2. The result map has an empty-string key.** Go writes all three role names for every row
+unconditionally, and the first two UNION branches select `''` for the two names they do not carry.
+So `map[""]` is written on every row, and its value is whichever row the database returned last —
+which is a row order, not a defined answer. No caller looks up `""`, so the value never matters;
+the *presence* is asserted, the value deliberately is not.
+
+A port that skipped empty names would produce a map that is more sensible and not Go's.
+
+---
+
+## D-133 · Go builds the higher-scoped permissions query by string interpolation; this port binds
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-19 (phase 2, role store)
+
+`channelHigherScopedPermissionsQuery` (role_store.go:411) assembles its `IN` list with
+`strings.Join(roleNames, "', '")` and formats it straight into the SQL text. A role name containing
+an apostrophe would break the statement or inject into it.
+
+**Not reachable through the API today**: `IsValidRoleName` restricts names to `[a-z0-9_]`, and every
+role that arrives over the wire passes it. It is reachable through any row written by something that
+did not validate — a migration, an import, a direct `INSERT`, or a future Go caller that forgets.
+
+This port binds `$1` as a `text[]` instead. For every legal role name the two produce identical
+results, which is what the DB-backed test measures. **Deliberately not bug-compatible**: reproducing
+a string-interpolated query to be faithful would be choosing fidelity over the one property the two
+servers must never differ on, and the Strangler Fig has no mechanism for "our SQL injection matches
+theirs".
+
+Worth reporting upstream if this project ever files anything upstream. Recorded here either way, so
+the difference is a decision rather than an accident.

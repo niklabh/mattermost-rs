@@ -144,6 +144,11 @@ var registry = map[string]any{
 	"permission":                    &model.Permission{},
 	"role":                          &model.Role{},
 	"role_patch":                    &model.RolePatch{},
+	"scheme":                        &model.Scheme{},
+	"scheme_patch":                  &model.SchemePatch{},
+	"scheme_id_patch":               &model.SchemeIDPatch{},
+	"scheme_conveyor":               &model.SchemeConveyor{},
+	"scheme_roles":                  &model.SchemeRoles{},
 }
 
 // overrides pins specific fields to semantically valid values, keyed by the
@@ -173,6 +178,19 @@ var overrides = map[string]any{
 	"permission.scope":                   model.PermissionScopeChannel,
 	"role.name":                          "custom_role",
 	"role.permissions":                   []string{"create_post", "edit_post"},
+	"scheme.name":                        "custom_scheme",
+	"scheme.scope":                       model.SchemeScopeTeam,
+	"scheme.defaultteamadminrole":        "custom_team_admin",
+	"scheme.defaultteamuserrole":         "custom_team_user",
+	"scheme.defaultteamguestrole":        "custom_team_guest",
+	"scheme.defaultchanneladminrole":     "custom_channel_admin",
+	"scheme.defaultchanneluserrole":      "custom_channel_user",
+	"scheme.defaultchannelguestrole":     "custom_channel_guest",
+	"scheme.defaultplaybookadminrole":    "custom_playbook_admin",
+	"scheme.defaultplaybookmemberrole":   "custom_playbook_member",
+	"scheme.defaultrunadminrole":         "custom_run_admin",
+	"scheme.defaultrunmemberrole":        "custom_run_member",
+	"scheme_conveyor.scope":              model.SchemeScopeTeam,
 	"status.status":                      "online",
 	"team.type":                          "O",
 	"team.name":                          "core-team",
@@ -590,6 +608,11 @@ func main() {
 
 	if err := writeRoleBehaviourFixture(*out); err != nil {
 		fmt.Fprintf(os.Stderr, "FAIL: role behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := writeSchemeBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: scheme behaviour fixture: %v\n", err)
 		os.Exit(1)
 	}
 

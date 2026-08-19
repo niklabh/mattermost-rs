@@ -1,0 +1,55 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT CAST('' AS varchar)               AS guest_role_name,\n                   roleschemes.defaultchanneluserrole  AS user_role_name,\n                   roleschemes.defaultchanneladminrole AS admin_role_name,\n                   CAST('' AS text)                  AS higher_scoped_guest_permissions,\n                   userroles.permissions             AS higher_scoped_user_permissions,\n                   adminroles.permissions            AS higher_scoped_admin_permissions\n              FROM schemes AS roleschemes\n              JOIN channels ON channels.schemeid = roleschemes.id\n              JOIN teams ON teams.id = channels.teamid\n              JOIN schemes ON schemes.id = teams.schemeid\n             RIGHT JOIN roles AS userroles ON userroles.name = schemes.defaultchanneluserrole\n             RIGHT JOIN roles AS adminroles ON adminroles.name = schemes.defaultchanneladminrole\n             WHERE roleschemes.defaultchanneluserrole = ANY($1)\n                OR roleschemes.defaultchanneladminrole = ANY($1)\n\n            UNION\n\n            SELECT roleschemes.defaultchannelguestrole AS guest_role_name,\n                   CAST('' AS varchar)                 AS user_role_name,\n                   CAST('' AS varchar)                 AS admin_role_name,\n                   guestroles.permissions              AS higher_scoped_guest_permissions,\n                   CAST('' AS text)                    AS higher_scoped_user_permissions,\n                   CAST('' AS text)                    AS higher_scoped_admin_permissions\n              FROM schemes AS roleschemes\n              JOIN channels ON channels.schemeid = roleschemes.id\n              JOIN teams ON teams.id = channels.teamid\n              JOIN schemes ON schemes.id = teams.schemeid\n             RIGHT JOIN roles AS guestroles ON guestroles.name = schemes.defaultchannelguestrole\n             WHERE roleschemes.defaultchannelguestrole = ANY($1)\n\n            UNION\n\n            SELECT schemes.defaultchannelguestrole AS guest_role_name,\n                   schemes.defaultchanneluserrole  AS user_role_name,\n                   schemes.defaultchanneladminrole AS admin_role_name,\n                   guestroles.permissions          AS higher_scoped_guest_permissions,\n                   userroles.permissions           AS higher_scoped_user_permissions,\n                   adminroles.permissions          AS higher_scoped_admin_permissions\n              FROM schemes\n              JOIN channels ON channels.schemeid = schemes.id\n              JOIN teams ON teams.id = channels.teamid\n              JOIN roles AS guestroles ON guestroles.name = $2\n              JOIN roles AS userroles ON userroles.name = $3\n              JOIN roles AS adminroles ON adminroles.name = $4\n             WHERE (schemes.defaultchannelguestrole = ANY($1)\n                 OR schemes.defaultchanneluserrole = ANY($1)\n                 OR schemes.defaultchanneladminrole = ANY($1))\n               AND (teams.schemeid = '' OR teams.schemeid IS NULL)\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "guest_role_name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "user_role_name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "admin_role_name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "higher_scoped_guest_permissions",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "higher_scoped_user_permissions",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "higher_scoped_admin_permissions",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "TextArray",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "8fd805ff9640c6ea1cabf936534cc3bc140ec825076b2152802f06781016ef9b"
+}

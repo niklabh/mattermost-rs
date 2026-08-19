@@ -2552,6 +2552,13 @@ mod http_url_go_parity {
     }
 }
 
+/// Port of `model.FakeSetting` (config.go:92) — thirty-two asterisks.
+///
+/// It belongs to config.go, which `MIGRATION.md` translates lazily, section by section, so it has
+/// no home yet; `Role::sanitize` and `Scheme::sanitize` are its first users here. Move it when the
+/// config section that owns it lands — [D-124]. Pinned against Go by both files' parity tests.
+pub const FAKE_SETTING: &str = "********************************";
+
 /// Port of `strconv.Quote`, which is what `fmt`'s `%q` verb produces for a string.
 ///
 /// Rust's `{:?}` is **not** substitutable. Both quote with `"` and escape `"` and `\`, but they

@@ -168,10 +168,12 @@ generated out of Go, the logic hand-ported against a corpus. That is the whole m
 
 **What the permission system still needs, in order:**
 
-1. **`model/scheme.go`** (351 lines, 12 funcs) — the last model-layer piece. A scheme is what binds
-   a role set to a team or channel, and `mm-store/src/team_store.rs` already resolves scheme roles
-   one layer down, so the shape is known. This is the next file.
-2. **The `Roles` and `Schemes` stores** in `mm-store` — reads only, to begin with.
+1. ~~`model/scheme.go`~~ — **landed 2026-08-19**. The model layer of [D-094] is complete:
+   every permission, every default role, the scheme that binds them, and the functions that
+   combine them.
+2. **The `Roles` and `Schemes` stores** in `mm-store` — reads only, to begin with. This is the next
+   piece, and it is the first `mm-store` work since the vertical slice, so expect the session to be
+   as much about the store's shape as about the two tables.
 3. **The checker itself** — `channels/app/authorization.go`'s `SessionHasPermissionTo*` family,
    which is AGPL and therefore `mm-app`. That is the function the 674 api4 call sites reach, and
    until it exists anything permission-gated stays forwarded, which is correct and free.
@@ -358,6 +360,8 @@ whenever a session skips, approximates, or discovers-but-does-not-close somethin
 | model/job.go | `mm-model/src/job.rs` | DONE | 17 pass | Whole file except the YAML pair ([D-119]). The content is a **counting** result: job.go declares **42** `JobType*` constants and `AllJobTypes` lists **24**, so `IsValidJobType` rejects **eighteen declared job types** — `recap`, `push_proxy_auth`, every `*_notify_admin`, all four migration jobs ([D-120]). Enumerated from Go by Go identifier, never transcribed. Two more: **`IsValid` never calls `IsValidJobType`**, so a job carrying one of the eighteen stores fine and only the (unported) scheduler turns it away; and `IsValidStatusChange` permits **4 of 81** pairs, including `in_progress → pending`, which reads like a bug and is how a worker requeues. `Auditable` **includes the payload**, unlike `View`'s, with an upstream `// TODO` beside it. Deferred: the YAML codec ([D-119]), `Worker` (needs `*Config`). |
 | model/permission.go | `mm-model/src/permission.rs` + `permission_generated.rs` | DONE | 13 pass | **Generated, not hand-translated** — the 311 permissions and seven tables come out of `reference/dump/permission_gen.go`, which reads the literals from `initializePermissions` with `go/parser`, reads the tables from the linked package, and fails unless the two agree field-for-field. The generator needs both halves because Go has no reflection over package-level vars, so the **identifier** each permission is declared under — what all 674 `SessionHasPermission*` call sites name — is only in the source. Hand-written half: the `Permission` type, the six scope constants, `MakePermissionError`/`ForUser`, and the moderated-permission lookup. The content is a **naming** result: fourteen ids do not match their Go identifier, and six of those transpose the words (`PermissionPublicPlaybookCreate` is `playbook_public_create`), so the Rust statics are named from the **id**. Also measured: the 311 declared permissions partition exactly into `AllPermissions` (282) and `DeprecatedPermissions` (29) with no overlap and no orphans — **not** the job.go shape ([D-120]). Ten mutations run, ten caught. Deferred: nothing. |
 | model/role.go | `mm-model/src/role.rs` + `role_generated.rs` | DONE | 28 pass | Whole file except the YAML pair ([D-119]'s shape). Split the way permission.go was: the 740 data lines — 24 default roles, seven id/permission lists, the sysconsole ancillary map — are emitted by `role_gen.go`, the ~25 functions are hand-ported against `behaviour_role.json`. The content is a **nondeterminism** result: three functions build their answer by ranging a Go map, and the oracle calls each fifty times to establish that the order really does vary rather than assuming it ([D-125]). Ours sort; the two whose order Go *does* fix — `PermissionsChangedByPatch` and `MergeChannelHigherScopedPermissions` — are asserted in order. Four more findings: `CleanRoleNames` **drops** a blank entry but **rejects** `" system_user "**, and on failure returns the *original* slice; `BuiltInSchemeManagedRoleIDs` is a misnomer, 11 of its 24 are not scheme-managed; `IsValidRoleName`'s `TrimLeft` is a **cutset**, so it is an all-characters test, not a prefix one; and `AddAncillaryPermissions` ranges the original slice header while appending to it, so expansion is one level deep. Two divergences ([D-126] the `*[]string` patch state, [D-127] the two unguarded dereferences that panic in Go). Seventeen mutations run: 13 caught, 4 survived — one intended no-op control, two provably equivalent (swapping the disjoint empty/length display-name branches; trimming a name that cannot contain whitespace), and one **unobservable**: whether `AddAncillaryPermissions` expands one level or many cannot be distinguished, because no sysconsole key's ancillary permission is itself a sysconsole key. Deferred: `MarshalYAML`/`UnmarshalYAML` ([D-128]). |
+| model/scheme.go | `mm-model/src/scheme.rs` | DONE | 20 pass | Whole file except the YAML pair ([D-128]). Five wire types, `IsValid`/`IsValidForCreate`, `Patch`, `Sanitize`, four `Auditable`s, `SchemeConveyor::Scheme` and `IsValidSchemeName`. **This completes the model layer of [D-094].** The content is `IsValidForCreate`'s scope asymmetry, measured on a **203-cell grid** (7 scopes × 29 single-field mutations) rather than read off the switch: the three **channel** roles are required under *every* scope; the team, playbook and run roles are validated **only** under `team`, so a `playbook`-scoped scheme may carry an empty or malformed `default_playbook_admin_role`; and `channel` additionally requires the three team roles to be **empty** while permitting any playbook or run role. Three smaller ones: a scheme name needs **two** characters where a role name needs one (the two rules differ at exactly that input); Go's `$` is end-of-text, so `"ab\n"` is rejected and a PCRE-flavoured engine would accept it; and `SchemeRoles::Auditable` returns an **empty map**, so none of its three booleans reaches the audit log. `Scheme::Sanitize` blanks the **name** as well, where `Role::Sanitize` leaves it — asserted together so the asymmetry cannot be tidied away. Fourteen mutations run, fourteen caught. Deferred: the YAML codec ([D-128]). |
+| sqlstore/role_store.go, scheme_store.go | `mm-store/src/role_store.rs`, `scheme_store.rs` | PARTIAL | 25 pass (6 DB-backed) | **Reads only** — `Get`/`GetAll`/`GetByName`/`GetByNames` and `Get`/`GetByName`/`GetAllPage`/`CountByScope`. The content is `Roles.Permissions`: it is **one text column**, written with a leading space per entry and read back through `strings.Fields`, so the write and read shapes are not symmetric and an empty column reads as `[]` rather than `null`. **None of the four role read paths filters `DeleteAt`** — `Delete` only stamps it and a permission check still has to resolve the role — while the scheme paths disagree with each other: `Get`/`GetByName` return a deleted scheme, `GetAllPage`/`CountByScope` do not. `GetAllPage` treats an empty scope as a wildcard; `CountByScope` treats it as a literal, so it counts nothing. Thirteen mutations run, twelve caught, one behaviourally equivalent (`GetByNames`' empty short circuit saves a round trip, nothing else). `ChannelHigherScopedPermissions` landed too — three UNIONed branches, exercised by a DB fixture that builds the whole graph (team scheme, two channel schemes, two teams, two channels), since none of the three fires against an empty `Schemes` table. Its `IN` list is **parameterised**, where Go interpolates it into the SQL text ([D-133]), and both of its upstream quirks are reproduced: it splits the permission column with `Split(" ")` where every other read uses `Fields`, so the list begins with an empty string, and the result map gains a `""` key ([D-132]). Seven more mutations, seven caught. Found [D-130]: the container runs **11.10.0** while the reference tree is **11.11.0**. Deferred: every write path, `AllChannelSchemeRoles`, `ChannelRolesUnderTeamRole`, `CountWithoutPermission` ([D-131]). |
 | utils/timeutils/time.go | `mm-model/src/timeutils.rs` | DONE | 10 pass | 29 lines, ported alongside `job.go` because `Job`'s YAML codec is its only model-package consumer. Two traps, both measured: `time.UnixMilli` attaches `time.Local`, so **the offset in the output is the server's** — [D-008] in a second place; and Go's `.999` **elides trailing zeros and the decimal point**, so a whole second formats with no fraction at all (`.1`, `.01`, and nothing for `.000`). Neither `%.3f` nor `%.f` is substitutable. The round trip is **not total**: a five-digit year formats and will not parse back, though only at a non-zero offset. Error *text* not reproduced ([D-118]); verdict and value are exact. |
 | — (tooling) | `reference/dump/behaviour_job.go` → `fixtures/behaviour_job.json` | DONE | 12 diff tests | All 42 job-type constants and all 7 statuses paired with their **Go identifiers**, so a swapped pair cannot pass a set comparison; `AllJobTypes` in order; 18 `IsValid` cases; the full **9×9** status-transition matrix, including statuses the switch never names; `Auditable` with and without a payload; and 14 millis rendered **twice** — once in the generator's zone and once at UTC. Plus `fixtures/job.json`. |
 | — (tooling) | `reference/dump/timezones_gen.go` → `fixtures/behaviour_timezones.json` | DONE | 5 diff tests | The default map recorded three ways — value, Go's marshalled bytes, and the insertion order it does *not* marshal in — plus a two-call freshness probe, the three starting states of `PreSave`'s guard, and an order-sensitive digest over all 592 zones so the generated table is one assertion rather than 592. |
@@ -2782,3 +2786,103 @@ The first type in the tree with a Go **anonymous field**. Everything below is an
    that cannot remove a permission Go would have kept ([D-127]). And `RolePatch.Permissions` is
    `*[]string`, whose pointer-to-nil-slice state `Option<Vec<String>>` collapses — unreachable from
    the wire, since JSON `null` unmarshals to a nil pointer ([D-126]).
+
+## Notes — model/scheme.go
+
+1. **`IsValidForCreate`'s scope branches are not symmetric, and the asymmetry is the opposite of
+   what the field names suggest.** Measured on a 203-cell grid — seven scopes against twenty-nine
+   single-field mutations — rather than read off the switch:
+
+   | | `team` | `channel` | `playbook` | `run` |
+   |---|---|---|---|---|
+   | empty channel role | reject | reject | reject | reject |
+   | empty team role | reject | accept | accept | accept |
+   | team role **set** | accept | **reject** | accept | accept |
+   | empty/invalid playbook role | reject | accept | **accept** | accept |
+
+   So the three **channel** roles are required under every scope, including `run`; the team,
+   playbook and run roles are validated **only** under `team`; and `channel` is the only scope that
+   forbids anything, requiring the three team roles to be empty while permitting any playbook or
+   run role. A `playbook`-scoped scheme with a malformed `default_playbook_admin_role` is valid.
+
+   A mutation making the playbook scope validate its own roles is caught by exactly one cell, which
+   is the argument for enumerating the grid rather than picking cases.
+
+2. **A scheme name needs two characters; a role name needs one.** `IsValidSchemeName` is
+   `^[a-z0-9_]{2,64}$` — recompiled on every call, which is a performance quirk, not a semantic
+   one — while `IsValidRoleName` accepts a single character. The two "name" rules differ at exactly
+   that input, and a test asserts both sides of it.
+
+3. **Go's `$` is end-of-text.** Unlike PCRE it does not also match before a trailing newline, so
+   `"ab\n"` is rejected. Our predicate rejects it because the character class excludes `\n` at all —
+   equivalent, but only provably so with the corpus, which probes `"ab\n"`, `"\nab"`, `"ab\ncd"` and
+   `"ab\r"`.
+
+4. **`SchemeRoles::Auditable` returns an empty map.** All three of `scheme_admin`, `scheme_user` and
+   `scheme_guest` are dropped, so a membership's scheme roles never reach the audit log. Reproduced
+   rather than corrected: an audit record that silently gained three fields is a divergence in the
+   one stream where a difference is hardest to notice.
+
+5. **`Scheme::Sanitize` blanks the name; `Role::Sanitize` does not.** Both blank display name and
+   description. The two are asserted in a single test so the inconsistency cannot be tidied into
+   consistency by someone reading only one of them.
+
+6. **`SchemeConveyor` renames ten fields and only the `json:` tags line them up.** `TeamAdmin`
+   carries what `Scheme` calls `DefaultTeamAdminRole`. The port matches the tags, and a test
+   serialises both types to compare all fourteen shared keys — a swapped pair inside `Scheme()`
+   would otherwise round-trip an export into the wrong slots and only surface as roles quietly
+   landing on the wrong scope.
+
+## Notes — sqlstore/role_store.go, scheme_store.go
+
+1. **`Roles.Permissions` is one text column, and the write and read shapes are not symmetric.** Go
+   writes `fmt.Sprintf(" %v", permission)` per entry (role_store.go:52), so the stored value starts
+   with a space and every entry is space-prefixed; it reads back through `strings.Fields`, which
+   collapses any whitespace run and drops empties. Two consequences the port has to carry: an empty
+   column reads as an **empty list, not a missing one** (`strings.Fields("")` is `[]string{}`), so
+   every row yields `Some(vec![])`; and the writer deduplicates while the reader does not, so a
+   column containing a repeat returns the repeat. `split_whitespace` is `Fields`' rule exactly —
+   `split(' ')` would return an empty first element on every real row, which is the mutation that
+   proves the test corpus touches real data.
+
+2. **No role read path filters `DeleteAt`, and the scheme paths disagree with each other.**
+   `Delete` only stamps the column, and a permission check still has to resolve whatever a member's
+   `Roles` column names, so all four role reads return deleted rows. For schemes, `Get` and
+   `GetByName` return a deleted scheme while `GetAllPage` and `CountByScope` filter it out. Both
+   reproduced; the DB test inserts a deleted role and a deleted scheme, because the Go server
+   leaves none behind and without them `WHERE deleteat = 0` passes the whole suite.
+
+3. **An empty `scope` means opposite things to the two scheme queries.** `GetAllPage` adds its
+   predicate only when the argument is non-empty, so `""` is a **wildcard**. `CountByScope` has a
+   bare `WHERE Scope = ?`, so `""` counts the schemes whose scope is the empty string — none of
+   them. Asserted in both directions.
+
+4. **The database is real data from the reference implementation, and that is exactly how [D-130]
+   surfaced.** `Roles` holds 24 rows the Go server wrote at startup, which looked like the perfect
+   oracle for the generated default-role table — until the diff showed 13 of 24 disagreeing in both
+   directions. The container runs `:latest`, which is **11.10.0**; the reference tree is pinned at
+   **11.11.0**. So the live database verifies *store* behaviour, not *model* content — and every
+   `mm-api` parity claim in this repo has been measured against a server one minor out of step.
+   That second consequence is the one worth acting on.
+
+5. **`Schemes` is empty on Team Edition**, so the tests build their own graph — a team scheme, two
+   channel schemes, two teams and two channels — because none of `ChannelHigherScopedPermissions`'
+   three branches fires without one. Every id is `mmrs`-prefixed and the table is back to zero rows
+   afterwards, checked rather than assumed.
+
+   **Cleanup that only runs on the happy path is not cleanup.** The first version deleted its rows
+   at the end of the test; a failing assertion panics and unwinds straight past that, which is not
+   hypothetical — a mutation-testing run left three schemes behind and the *next* test failed for a
+   reason unrelated to the code under test, which is precisely the failure that gets diagnosed as a
+   store bug. Each test now purges by prefix at the **start**. Verified by re-running the no-op
+   control immediately after a deliberately failing mutation: it survives, where before it did not.
+
+   The tests also take a lock. They share one mutable database and two of them assert on counts and
+   listings, so running in parallel makes them fail on each other's rows.
+
+6. **`ChannelHigherScopedPermissions` is where the two servers' SQL deliberately differs.** Go
+   interpolates the role-name list into the statement text with `strings.Join(roleNames, "', '")`;
+   this binds a `text[]`. `IsValidRoleName` makes the hole unreachable from the API, but not from a
+   row written by anything that skipped validation, and "our SQL injection matches theirs" is not a
+   parity goal ([D-133]). For every legal role name the results are identical, which is what the DB
+   test measures.

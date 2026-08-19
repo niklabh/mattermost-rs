@@ -65,6 +65,7 @@ pub mod role;
 mod role_generated;
 pub mod scheduled_post;
 pub mod scheduled_post_recurrence;
+pub mod scheme;
 pub mod search_params;
 pub mod search_requests;
 pub mod session;

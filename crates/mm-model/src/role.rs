@@ -24,7 +24,7 @@ use crate::permission::{
     PERMISSION_MANAGE_PRIVATE_CHANNEL_MEMBERS, PERMISSION_MANAGE_PUBLIC_CHANNEL_MEMBERS,
     PERMISSION_SCOPE_CHANNEL, Permission, channel_moderated_permission_for,
 };
-use crate::utils::{StringInterface, go_quote, is_valid_id};
+use crate::utils::{FAKE_SETTING, StringInterface, go_quote, is_valid_id};
 
 pub use crate::role_generated::*;
 
@@ -74,12 +74,6 @@ pub const ROLE_SCOPE_GROUP: &str = "Group";
 pub const ROLE_TYPE_GUEST: &str = "Guest";
 pub const ROLE_TYPE_USER: &str = "User";
 pub const ROLE_TYPE_ADMIN: &str = "Admin";
-
-/// Port of `model.FakeSetting` (config.go:92) — thirty-two asterisks.
-///
-/// It belongs to config.go, which `MIGRATION.md` translates lazily, section by section; role.go's
-/// `Sanitize` is its first user here. Move it when the config section that owns it lands.
-pub const FAKE_SETTING: &str = "********************************";
 
 /// The characters `IsValidRoleName` accepts, as Go's `TrimLeft` cutset (role.go:869).
 const ROLE_NAME_CUTSET: &str = "abcdefghijklmnopqrstuvwxyz0123456789_";

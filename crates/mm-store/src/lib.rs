@@ -15,12 +15,16 @@
 
 pub mod error;
 pub mod preference_store;
+pub mod role_store;
+pub mod scheme_store;
 pub mod session_store;
 pub mod team_store;
 pub mod user_store;
 
 pub use error::StoreError;
 pub use preference_store::{PreferenceStore, SqlPreferenceStore};
+pub use role_store::{RoleStore, SqlRoleStore};
+pub use scheme_store::{SchemeStore, SqlSchemeStore};
 pub use session_store::{SessionStore, SqlSessionStore};
 pub use team_store::{SqlTeamStore, TeamStore};
 pub use user_store::{SqlUserStore, UserStore};
@@ -36,6 +40,8 @@ use sqlx::postgres::PgPoolOptions;
 #[derive(Debug, Clone)]
 pub struct SqlStore {
     preference: SqlPreferenceStore,
+    role: SqlRoleStore,
+    scheme: SqlSchemeStore,
     session: SqlSessionStore,
     team: SqlTeamStore,
     user: SqlUserStore,
@@ -64,6 +70,8 @@ impl SqlStore {
     pub fn from_pool(pool: PgPool) -> Self {
         Self {
             preference: SqlPreferenceStore::new(pool.clone()),
+            role: SqlRoleStore::new(pool.clone()),
+            scheme: SqlSchemeStore::new(pool.clone()),
             session: SqlSessionStore::new(pool.clone()),
             team: SqlTeamStore::new(pool.clone()),
             user: SqlUserStore::new(pool),
@@ -78,6 +86,16 @@ impl SqlStore {
     /// Port of `store.Store.Preference()`.
     pub fn preference(&self) -> &SqlPreferenceStore {
         &self.preference
+    }
+
+    /// Port of `store.Store.Role()`.
+    pub fn role(&self) -> &SqlRoleStore {
+        &self.role
+    }
+
+    /// Port of `store.Store.Scheme()`.
+    pub fn scheme(&self) -> &SqlSchemeStore {
+        &self.scheme
     }
 
     /// Port of `store.Store.Team()`.

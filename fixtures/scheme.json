@@ -1,0 +1,20 @@
+{
+    "id": "fm6y6aeyhy8kxzx7b7oobaeqwh",
+    "name": "custom_scheme",
+    "display_name": "displayname-ba50b4",
+    "description": "description-39a602",
+    "create_at": 1702486453000,
+    "update_at": 1706108552000,
+    "delete_at": 1702361658000,
+    "scope": "team",
+    "default_team_admin_role": "custom_team_admin",
+    "default_team_user_role": "custom_team_user",
+    "default_channel_admin_role": "custom_channel_admin",
+    "default_channel_user_role": "custom_channel_user",
+    "default_team_guest_role": "custom_team_guest",
+    "default_channel_guest_role": "custom_channel_guest",
+    "default_playbook_admin_role": "custom_playbook_admin",
+    "default_playbook_member_role": "custom_playbook_member",
+    "default_run_admin_role": "custom_run_admin",
+    "default_run_member_role": "custom_run_member"
+}
