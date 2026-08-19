@@ -1,0 +1,82 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id,\n                   name,\n                   displayname   AS display_name,\n                   description,\n                   createat      AS create_at,\n                   updateat      AS update_at,\n                   deleteat      AS delete_at,\n                   permissions,\n                   schememanaged AS scheme_managed,\n                   builtin       AS built_in,\n                   schemeid      AS scheme_id\n              FROM roles\n             WHERE name = ANY($1)\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "display_name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "description",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "create_at",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "update_at",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "delete_at",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 7,
+        "name": "permissions",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "scheme_managed",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 9,
+        "name": "built_in",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 10,
+        "name": "scheme_id",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "fe41474f0b0ec7fad7a7fa98be8206c1f168bb2079053fca5b311a9bb76600de"
+}

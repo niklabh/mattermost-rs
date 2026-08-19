@@ -1,0 +1,34 @@
+{
+    "name": "name-414a50",
+    "display_name": "displayname-1828a8",
+    "description": "description-8065ca",
+    "scope": "scope-eac25a",
+    "default_team_admin_role": "teamadmin-e764fc",
+    "default_team_user_role": "teamuser-b8448f",
+    "default_team_guest_role": "teamguest-576777",
+    "default_channel_admin_role": "channeladmin-a280e6",
+    "default_channel_user_role": "channeluser-439a48",
+    "default_channel_guest_role": "channelguest-128361",
+    "default_playbook_admin_role": "playbookadmin-3b9c23",
+    "default_playbook_member_role": "playbookmember-1e4bac",
+    "default_run_admin_role": "runadmin-269d7a",
+    "default_run_member_role": "runmember-23570e",
+    "roles": [
+        {
+            "id": "x5o9z56g1n71scxd9xzhprp5fc",
+            "name": "name-2b7774",
+            "display_name": "displayname-f1c6b2",
+            "description": "description-26eef8",
+            "create_at": 1705190257000,
+            "update_at": 1703237404000,
+            "delete_at": 1707120366000,
+            "permissions": [
+                "permissions-0d5749",
+                "permissions-071aa3"
+            ],
+            "scheme_managed": true,
+            "built_in": true,
+            "scheme_id": "yruk4c8heboayutriwaxax5boy"
+        }
+    ]
+}

@@ -15,3 +15,7 @@ serde_json.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 chrono.workspace = true
+
+[dev-dependencies]
+# The DB-backed tests in tests/ need a runtime; they skip themselves unless MM_STORE_DB=1.
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

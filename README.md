@@ -133,6 +133,14 @@ machine with no Docker:
 MM_PARITY_STACK=1 cargo test -p mm-api --test parity_users_me
 ```
 
+The store tests need only Postgres, not the Go server, and are gated separately. They read the
+roles the Go server wrote at startup and insert their own scheme rows, cleaning up after
+themselves:
+
+```sh
+MM_STORE_DB=1 cargo test -p mm-store --test db_roles_schemes
+```
+
 `.sqlx/` is committed, so `SQLX_OFFLINE=true cargo check --workspace` builds the compile-time
 checked queries with no database at all. Re-run `cargo sqlx prepare --workspace` after changing
 one.

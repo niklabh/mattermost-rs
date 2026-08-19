@@ -1,0 +1,124 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id,\n                   name,\n                   displayname               AS display_name,\n                   description,\n                   createat                  AS create_at,\n                   updateat                  AS update_at,\n                   deleteat                  AS delete_at,\n                   scope,\n                   defaultteamadminrole      AS default_team_admin_role,\n                   defaultteamuserrole       AS default_team_user_role,\n                   defaultteamguestrole      AS default_team_guest_role,\n                   defaultchanneladminrole   AS default_channel_admin_role,\n                   defaultchanneluserrole    AS default_channel_user_role,\n                   defaultchannelguestrole   AS default_channel_guest_role,\n                   defaultplaybookadminrole  AS default_playbook_admin_role,\n                   defaultplaybookmemberrole AS default_playbook_member_role,\n                   defaultrunadminrole       AS default_run_admin_role,\n                   defaultrunmemberrole      AS default_run_member_role\n              FROM schemes\n             WHERE id = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "display_name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "description",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "create_at",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "update_at",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "delete_at",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 7,
+        "name": "scope",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 8,
+        "name": "default_team_admin_role",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 9,
+        "name": "default_team_user_role",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 10,
+        "name": "default_team_guest_role",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 11,
+        "name": "default_channel_admin_role",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 12,
+        "name": "default_channel_user_role",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 13,
+        "name": "default_channel_guest_role",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 14,
+        "name": "default_playbook_admin_role",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 15,
+        "name": "default_playbook_member_role",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 16,
+        "name": "default_run_admin_role",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 17,
+        "name": "default_run_member_role",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "bed860c007289208213c070132e936e2d05932f86eaae6f0859f06e9ada91c87"
+}

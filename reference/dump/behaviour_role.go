@@ -263,7 +263,13 @@ func unknownPermissionsAll() []map[string]any {
 }
 
 func roleIsValidAll() []map[string]any {
-	validID := model.NewId()
+	// A FIXED id, not model.NewId(): a random one rewrites twenty lines of a committed fixture on
+	// every generator run and destroys the "a clean run touches only new files" signal — the same
+	// defect as [D-032]. Validated below rather than trusted, so a mistyped literal fails here.
+	const validID = "mxry3atgeme67kggbutncoqt7a"
+	if !model.IsValidId(validID) {
+		panic("behaviour_role: the pinned role id is not a valid id")
+	}
 	base := func() *model.Role {
 		return &model.Role{
 			Id:          validID,
