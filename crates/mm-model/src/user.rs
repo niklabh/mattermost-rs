@@ -12,7 +12,6 @@
 //!
 //! # Deliberately not translated here
 //!
-//! - `IsValidUserRoles` needs `IsValidRoleName` from `role.go`.
 //! - `CleanUsername` takes an mlog logger; it belongs with the logging layer.
 //! - `GetTimezoneLocation` needs a tz database lookup (`chrono-tz`).
 //! - `Auditable`/`LogClone` are audit-log projections, not wire types; they follow the audit
@@ -2720,6 +2719,29 @@ mod custom_status_go_parity {
 ///
 /// Go tests `locale != ""` before anything else, so an unset locale passes. That is not an
 /// oversight to tidy: a user with no locale is normal.
+/// Port of `model.IsValidUserRoles` (user.go:874).
+///
+/// Deferred when user.go was ported because it needs `IsValidRoleName`, which lives in role.go;
+/// that file has now landed, so this closes the deferral rather than adding to it.
+///
+/// Two behaviours worth naming. The split is `strings.Fields`, so **any** run of whitespace
+/// separates and an empty or all-whitespace string yields no roles at all — which validates,
+/// because the loop never runs. And `system_admin` is rejected *only when it is the entire list*:
+/// Go's comment says "to prevent mistakes", so `"system_admin system_user"` is accepted.
+#[must_use]
+pub fn is_valid_user_roles(user_roles: &str) -> bool {
+    let roles: Vec<&str> = user_roles.split_whitespace().collect();
+
+    if roles
+        .iter()
+        .any(|role| !crate::role::is_valid_role_name(role))
+    {
+        return false;
+    }
+
+    !(roles.len() == 1 && roles[0] == "system_admin")
+}
+
 pub fn is_valid_locale(locale: &str) -> bool {
     use crate::locale_generated::{EXCEPTIONS, LANGUAGES_2, LANGUAGES_3, REGIONS_2};
 

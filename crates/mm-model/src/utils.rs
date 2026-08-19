@@ -487,20 +487,35 @@ fn zbase32_encode(input: &[u8]) -> String {
 /// `Other_Alphabetic` (combining marks such as U+0345), so it accepts identifiers Go
 /// rejects. The behavioural oracle caught this; see `is_valid_id_matches_go`.
 fn is_go_letter(c: char) -> bool {
-    use unicode_general_category::GeneralCategory::*;
-    matches!(
-        unicode_general_category::get_general_category(c),
-        UppercaseLetter | LowercaseLetter | TitlecaseLetter | ModifierLetter | OtherLetter
-    )
+    in_ranges(crate::go_unicode_generated::IS_LETTER_RANGES, c)
 }
 
 /// Port of `unicode.IsNumber` — Unicode general category `N`.
 fn is_go_number(c: char) -> bool {
-    use unicode_general_category::GeneralCategory::*;
-    matches!(
-        unicode_general_category::get_general_category(c),
-        DecimalNumber | LetterNumber | OtherNumber
-    )
+    in_ranges(crate::go_unicode_generated::IS_NUMBER_RANGES, c)
+}
+
+/// Binary search over one of the category tables emitted from the Go toolchain.
+///
+/// The three predicates above used to evaluate their category through the
+/// `unicode-general-category` crate, which answers from **that crate's** Unicode version rather
+/// than Go's. Measured before the swap, over the whole code-point space: the crate and the Go
+/// toolchain disagree on **5,812** code points for `IsPrint` alone — U+0897 among them, assigned
+/// in Unicode 16.0 and unknown to Go here — and every one of those is a character `go_quote`
+/// would have written literally where Go writes an escape. Same class as [D-070].
+fn in_ranges(ranges: &[(u32, u32)], c: char) -> bool {
+    let code = c as u32;
+    ranges
+        .binary_search_by(|&(lo, hi)| {
+            if code < lo {
+                std::cmp::Ordering::Greater
+            } else if code > hi {
+                std::cmp::Ordering::Less
+            } else {
+                std::cmp::Ordering::Equal
+            }
+        })
+        .is_ok()
 }
 
 /// Port of `model.IsValidHTTPURL` (utils.go:790).
@@ -1168,7 +1183,11 @@ fn is_zero_i32(n: &i32) -> bool {
 /// `where_` and `skip_translation` carry `json:"-"` in Go and are `#[serde(skip)]` here.
 /// `request_id` and `status_code` carry `omitempty`; per CLAUDE.md they stay concrete types
 /// with a skip predicate rather than becoming `Option`.
-#[derive(Debug, Default, Serialize, Deserialize)]
+///
+/// Serialisation goes through [`AppErrorWire`] rather than a derive, so that [`AppError::to_json`]
+/// — which has to substitute one field's value — can emit Go's field order instead of the
+/// alphabetical order a `serde_json::Value` would impose. One definition of the order, two callers.
+#[derive(Debug, Default, Deserialize)]
 pub struct AppError {
     #[serde(rename = "id")]
     pub id: String,
@@ -1263,16 +1282,51 @@ impl AppError {
     /// The wrapped error is folded into `detailed_error` for the wire, exactly as Go does
     /// before marshalling. Built from this type's own `Serialize` so the two cannot drift.
     pub fn to_json(&self) -> Result<String, serde_json::Error> {
-        let mut value = serde_json::to_value(self)?;
-        if let (Some(object), Some(detailed)) =
-            (value.as_object_mut(), self.detailed_with_wrapped())
-        {
-            object.insert(
-                "detailed_error".to_string(),
-                serde_json::Value::String(detailed),
-            );
+        let folded = self.detailed_with_wrapped();
+        go_json_marshal(&AppErrorWire::from_parts(
+            self,
+            folded.as_deref().unwrap_or(&self.detailed_error),
+        ))
+    }
+}
+
+/// The wire projection of an [`AppError`], and the single definition of its field order.
+///
+/// Go marshals a struct in declaration order. Routing `to_json` through `serde_json::Value` —
+/// which is what it used to do, in order to substitute the folded `detailed_error` — sorts the
+/// keys alphabetically instead, so every error body came out as
+/// `detailed_error, id, message, status_code` where Go emits `id, message, detailed_error,
+/// status_code`. The old parity test compared parsed value graphs and could not see it.
+#[derive(Serialize)]
+struct AppErrorWire<'a> {
+    id: &'a str,
+    message: &'a str,
+    detailed_error: &'a str,
+    #[serde(skip_serializing_if = "str_ref_is_empty")]
+    request_id: &'a str,
+    #[serde(skip_serializing_if = "is_zero_i32")]
+    status_code: i32,
+}
+
+impl<'a> AppErrorWire<'a> {
+    fn from_parts(err: &'a AppError, detailed_error: &'a str) -> Self {
+        Self {
+            id: &err.id,
+            message: &err.message,
+            detailed_error,
+            request_id: &err.request_id,
+            status_code: err.status_code,
         }
-        serde_json::to_string(&value)
+    }
+}
+
+fn str_ref_is_empty(s: &&str) -> bool {
+    s.is_empty()
+}
+
+impl Serialize for AppError {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        AppErrorWire::from_parts(self, &self.detailed_error).serialize(serializer)
     }
 }
 
@@ -2314,10 +2368,15 @@ mod go_parity {
                 "AppError::Error() for {case:?}"
             );
 
-            // Compare JSON as value graphs, not strings — key order is not part of the contract.
-            let ours: Value = serde_json::from_str(&err.to_json().unwrap()).unwrap();
-            let theirs: Value = serde_json::from_str(case["to_json"].as_str().unwrap()).unwrap();
-            assert_eq!(ours, theirs, "AppError::ToJSON() for {case:?}");
+            // Byte-for-byte, key order included. An earlier version of this compared parsed
+            // value graphs with the note "key order is not part of the contract", and that is
+            // what hid `to_json` emitting its keys alphabetically instead of in Go's struct
+            // order — the one thing a value-graph comparison is blind to.
+            assert_eq!(
+                err.to_json().unwrap(),
+                case["to_json"].as_str().unwrap(),
+                "AppError::ToJSON() for {case:?}"
+            );
         }
     }
 }
@@ -2546,46 +2605,85 @@ pub fn go_quote(s: &str) -> String {
     out
 }
 
-/// Port of `unicode.IsPrint` — general categories `L`, `M`, `N`, `P`, `S`, plus the ASCII space.
+/// Port of `unicode.IsPrint`, read from the **Go toolchain's own table**.
 ///
-/// Note what this excludes: every other space (NBSP, U+3000, U+1680), the format characters
-/// (U+200B, U+FEFF, U+0085) and the control characters. `char::is_control` alone would keep all
-/// of those literal and diverge from Go.
+/// Go's rule is the general categories `L`, `M`, `N`, `P`, `S` plus the ASCII space, which excludes
+/// every other space (NBSP, U+1680, U+3000), the format characters (U+200B, U+FEFF, U+0085) and the
+/// controls. This used to evaluate that rule through the `unicode-general-category` crate, which
+/// answers from *its* Unicode version rather than Go's — the same mismatch [D-070] records for the
+/// CJK ranges, and a claim that had been checked over 29 inputs. It is now a lookup into the 711
+/// ranges `reference/dump/quote_gen.go` emits from the linked Go toolchain, and the corpus probes
+/// **both sides of every one of those boundaries**, so a range that moves fails at the code point
+/// that moved.
 fn go_is_print(c: char) -> bool {
-    use unicode_general_category::GeneralCategory::*;
-    if c == ' ' {
-        return true;
-    }
-    matches!(
-        unicode_general_category::get_general_category(c),
-        UppercaseLetter
-            | LowercaseLetter
-            | TitlecaseLetter
-            | ModifierLetter
-            | OtherLetter
-            | NonspacingMark
-            | SpacingMark
-            | EnclosingMark
-            | DecimalNumber
-            | LetterNumber
-            | OtherNumber
-            | ConnectorPunctuation
-            | DashPunctuation
-            | OpenPunctuation
-            | ClosePunctuation
-            | InitialPunctuation
-            | FinalPunctuation
-            | OtherPunctuation
-            | MathSymbol
-            | CurrencySymbol
-            | ModifierSymbol
-            | OtherSymbol
-    )
+    in_ranges(crate::go_unicode_generated::IS_PRINT_RANGES, c)
 }
 
 #[cfg(test)]
 mod go_quote_go_parity {
     use super::*;
+
+    /// The boundary corpus: every ASCII byte and both sides of all 711 `IsPrint` range edges,
+    /// quoted by Go. This is what makes the emitted table verifiable rather than merely present —
+    /// the 29-input check that preceded it could not have caught a range off by one.
+    #[test]
+    fn go_quote_matches_go_at_every_is_print_boundary() {
+        let oracle: serde_json::Value =
+            serde_json::from_str(include_str!("../../../fixtures/behaviour_quote.json")).unwrap();
+
+        assert_eq!(
+            oracle["range_count"].as_u64(),
+            Some(crate::go_unicode_generated::IS_PRINT_RANGES.len() as u64)
+        );
+        assert_eq!(
+            oracle["letter_range_count"].as_u64(),
+            Some(crate::go_unicode_generated::IS_LETTER_RANGES.len() as u64)
+        );
+        assert_eq!(
+            oracle["number_range_count"].as_u64(),
+            Some(crate::go_unicode_generated::IS_NUMBER_RANGES.len() as u64)
+        );
+
+        let runes = oracle["runes"].as_array().expect("an array");
+        assert!(
+            runes.len() > 2_000,
+            "the corpus shrank: {} probes",
+            runes.len()
+        );
+        for case in runes {
+            let code = u32::try_from(case["code_point"].as_u64().expect("a code point")).unwrap();
+            let c = char::from_u32(code).expect("the corpus skips surrogates");
+            assert_eq!(
+                go_is_print(c),
+                case["is_print"].as_bool().expect("a bool"),
+                "IsPrint(U+{code:04X})"
+            );
+            assert_eq!(
+                is_go_letter(c),
+                case["is_letter"].as_bool().expect("a bool"),
+                "IsLetter(U+{code:04X})"
+            );
+            assert_eq!(
+                is_go_number(c),
+                case["is_number"].as_bool().expect("a bool"),
+                "IsNumber(U+{code:04X})"
+            );
+            assert_eq!(
+                go_quote(&c.to_string()),
+                case["quoted"].as_str().expect("a quoted string"),
+                "Quote(U+{code:04X})"
+            );
+        }
+
+        for case in oracle["strings"].as_array().expect("an array") {
+            let input = case["in"].as_str().expect("an input");
+            assert_eq!(
+                go_quote(input),
+                case["quoted"].as_str().expect("a quoted string"),
+                "Quote({input:?})"
+            );
+        }
+    }
 
     #[test]
     fn go_quote_matches_go() {

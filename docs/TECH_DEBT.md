@@ -3290,7 +3290,10 @@ forwarded.
 
 **So the next substantial step is the permission system itself, not another route.** What it needs:
 - `model/permission.go` (2,789 lines) — already out of scope for hand-translation; **generate** it.
-- `model/role.go` (1,311 lines) — the role definitions and their permission sets.
+  **Done 2026-08-19**: `reference/dump/permission_gen.go` emits all 311 permissions and the seven
+  tables, cross-checked between the AST and the linked package.
+- `model/role.go` (1,311 lines) — the role definitions and their permission sets. **This is now the
+  next file**, and the only remaining model-layer prerequisite.
 - The scheme-roles resolution already ported in `mm-store/src/team_store.rs` is the same shape one
   layer down, so the groundwork is not zero.
 
@@ -4304,3 +4307,184 @@ Pinned by `job::go_parity::eighteen_declared_job_types_are_rejected`, which asse
 both sides (42 declared, 24 accepted, 18 rejected) and every individual verdict, and by
 `all_job_types_matches_go`, which asserts the array in **Go's order**. If upstream adds a missing
 type, both fail.
+
+---
+
+## D-121 · No response body applies Go's JSON escaping
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-08-19 (phase 1, permission.go)
+
+`mm-model` has had `go_json_escape` and `go_json_marshal` since utils.go was ported: serde_json and
+Go's `encoding/json` differ on exactly five characters — `<`, `>`, `&`, U+2028 and U+2029 — which Go
+escapes as `\u003c`, `\u003e`, `\u0026`, `\u2028`, `\u2029` by default, in both `json.Marshal` and
+`json.Encoder`.
+
+**Nothing in `mm-api` uses them.** Every route serialises with plain `serde_json::to_vec`:
+`users.rs:77`, `teams.rs:64`, `sessions.rs:49`, and the error path at `error.rs:83`. So any payload
+carrying one of the five characters — a nickname or channel purpose containing `&`, a message with
+`<`, a URL query in an error detail — comes off our server with different bytes than Go's, on a
+route a client may already be hitting.
+
+The vertical slice's byte-identical `/users/me` is not evidence against this: that payload contains
+none of the five. Found while porting permission.go, when tightening `AppError::to_json`'s parity
+assertion to compare bytes exposed the same gap one layer down ([D-122]).
+
+**Not fixed here**, because the fix needs its own oracle before it can be verified rather than
+assumed: a Go-marshalled payload for each ported wire type containing all five characters, which is
+a `reference/dump` change plus a per-route assertion, not a `to_vec` → `go_json_marshal` sweep. The
+sweep without the oracle would be the "confident, wrong translation" the fixture discipline exists
+to prevent — `go_json_marshal`'s own doc warns it must not be handed a `HashMap`, so applying it
+blindly to every response type is not obviously safe either.
+
+**Related** [D-122] (the same gap in `to_json`, closed), [D-027] (map key ordering).
+
+---
+
+## D-122 · `AppError::to_json` sorted its keys, and a value-graph assertion hid it
+
+**Status** CLOSED · **Severity** divergence · **Raised and closed** 2026-08-19 (phase 1, permission.go)
+
+`to_json` built a `serde_json::Value` so it could substitute the folded `detailed_error`, and
+`serde_json::Map` is a `BTreeMap`. Every error body therefore came out as
+`detailed_error, id, message, status_code`; Go marshals a struct in declaration order,
+`id, message, detailed_error, status_code`.
+
+**The interesting half is why it survived a parity test.** `utils::go_parity::app_error_rendering_matches_go`
+compared `to_json`'s output with Go's after parsing both into `serde_json::Value`, under the comment
+*"key order is not part of the contract"* — the one comparison that cannot see a key-order defect.
+Measured rather than argued: restoring that assertion and deliberately swapping two fields in the
+wire struct leaves all 76 `utils::` tests passing.
+
+Fixed by routing both `Serialize for AppError` and `to_json` through one `AppErrorWire<'a>`
+projection, so the field order is defined once, and by marshalling through the existing
+`go_json_marshal` — which caught a **second** divergence in the same function: `to_json` was not
+applying Go's five-character escaping either. The parity assertion now compares bytes.
+
+`mm-api`'s response path was never affected by the ordering half — it serialises `AppError` through
+the derive, which was already in declaration order — but it *is* affected by the escaping half,
+which is [D-121].
+
+**The transferable rule:** where the goal is byte-identical output, assert bytes. A parity test that
+parses both sides before comparing is testing the data, not the encoding.
+
+---
+
+## D-123 · `unicode-general-category` disagreed with Go on 5,812 code points
+
+**Status** CLOSED · **Severity** divergence · **Raised and closed** 2026-08-19 (phase 1, role.go)
+
+`go_quote`, `is_go_letter` and `is_go_number` evaluated their Unicode category through the
+`unicode-general-category` crate, which answers from **that crate's** Unicode version. Go answers
+from the toolchain's. Measured over the whole code-point space before the swap: **5,812**
+disagreements for `IsPrint` alone, 23 of them landing on the boundary corpus. U+0897 is the shape of
+all of them — ARABIC PEPET, assigned in Unicode 16.0, a nonspacing mark to the crate and unassigned
+to Go — so `go_quote("\u{897}")` wrote the character literally where Go writes `\u0897`.
+
+Same class as [D-070], which recorded the identical hazard for the CJK script ranges and solved it
+the same way. Now `reference/dump/go_unicode_gen.go` emits `IsPrint` (711 ranges), `IsLetter` (659)
+and `IsNumber` (137) from the linked Go toolchain, and the corpus probes **both sides of every one
+of the 1,507 boundaries** plus every ASCII byte — 3,703 rune probes.
+
+The dependency is gone from the workspace; nothing else used it.
+
+**Reachable how:** `IsPrint` through role.go's two `%q` error messages, which quote a role name
+taken off the wire. `IsLetter`/`IsNumber` through `IsValidId`. No behaviour changed for any input
+the existing corpora cover — every test passed before and after — which is the point: the
+divergence lived exactly where nothing was looking.
+
+---
+
+## D-124 · `FakeSetting` is defined in role.rs, but it belongs to config.go
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-08-19 (phase 1, role.go)
+
+`Role.Sanitize` writes `model.FakeSetting` (config.go:92), thirty-two asterisks, into both display
+fields. config.go is 5,795 lines and `MIGRATION.md` translates it lazily, section by section, so
+the constant has no home yet and currently sits in `role.rs` with a comment saying so.
+
+Cheap to pay, and it should be paid by whichever session lands the config section that owns it —
+several other `Sanitize` methods in the tree use the same constant, and two definitions of it would
+be worse than one in the wrong file. The value is pinned against Go by
+`role::go_parity::constants_match_go`, so a drifted copy fails rather than diverging quietly.
+
+---
+
+## D-125 · Three role.go functions have no defined output order, and it is Go's map iteration
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-19 (phase 1, role.go)
+
+`ChannelModeratedPermissionsChangedByPatch` and `RolePatchFromChannelModerationsPatch` build their
+returned slice by ranging a `map`, and Go randomises map iteration per range. So Go has no order to
+reproduce: **the same call returns a differently-ordered slice on consecutive invocations.**
+
+Measured rather than inferred. The oracle calls each fifty times per case and records whether the
+order ever varied; it varies for every case with two or more results and is stable (trivially) for
+the rest. Fifty runs make a false "stable" a 2^-49 event.
+
+Ours return the results **sorted**, and the parity tests compare sorted sets. The test asserts that
+at least one corpus case observed Go varying, so if upstream ever makes the order deterministic the
+set comparison stops silently over-accepting.
+
+`GetChannelModeratedPermissions` also ranges the map but returns a **map**, and each iteration
+writes at most one key, so no answer depends on the order — that one is faithful, not accepted.
+
+**Why accepted rather than owed:** there is no Go behaviour to match. A caller that depended on the
+order would already be broken against Go. Sorting is the only stable choice, and it is strictly more
+useful than reproducing one arbitrary run.
+
+---
+
+## D-126 · `RolePatch` cannot express a pointer to a nil slice
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-19 (phase 1, role.go)
+
+Go's `RolePatch.Permissions` is `*[]string`, which has three states: nil pointer, pointer to a nil
+slice, and pointer to a slice. `Role.Patch` writes through the pointer, so the middle state sets
+`Permissions` to **nil**, while `Option<Vec<String>>` collapses it into `Some(vec![])`, which sets
+an empty slice. Those two serialise differently — `null` versus `[]`.
+
+**Unreachable from the wire**, which is why this is accepted rather than owed: `encoding/json`
+unmarshals a JSON `null` into a nil *pointer*, never a pointer-to-nil-slice, and there is no JSON
+that produces the middle state. Only Go code constructing the patch by hand can reach it, and no
+such construction exists in the pinned tree.
+
+Same shape as [D-095]: the difference is a consequence of the type system, and reproducing it would
+mean modelling a state the wire cannot carry.
+
+---
+
+## D-127 · `RolePatchFromChannelModerationsPatch` panics on a partial patch; ours cannot
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-19 (phase 1, role.go)
+
+Go dereferences `*channelModerationPatch.Name` (role.go:762) and `channelModerationPatch.Roles.Members`
+(role.go:765) without a nil check. A `ChannelModerationPatch` missing either field therefore panics,
+which the oracle records under `recover`: `nil_name_panics: true`, `nil_roles_panics: true`.
+
+Both fields are `Option` on our side, and the port treats a missing `name` as matching no control and
+a missing `roles` as disabling nothing. That is the conservative direction: the alternative reading
+would *remove* permissions the Go server would not have removed. It cannot grant one either — the
+enable branch requires `Some(true)`.
+
+Reachable from the API: `ChannelModerationPatch` is a wire type, so a client sending
+`{"name": "create_post"}` with no `roles` crashes the Go handler. Not our bug to fix, and not one we
+can reproduce without an `unwrap` that `CLAUDE.md` forbids in library code. Same reasoning as
+[D-095] and [D-052].
+
+---
+
+## D-128 · `Role`'s YAML codec is unported
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-08-19 (phase 1, role.go)
+
+`(*Role).MarshalYAML` and `UnmarshalYAML` (role.go:471, 499) are not ported, the same call as
+[D-119] made for `Job`. They round-trip the three timestamps through
+`timeutils.FormatMillis`/`ParseFormatedMillis` — both of which **are** ported — so the missing piece
+is only the YAML codec itself and a decision about which crate provides it.
+
+Where it matters: the config export/import path, which is `server/channels/` and unported. Nothing
+in `mm-model` needs it today.
+
+Two things to carry into that session: the YAML struct is a *different shape* from the JSON one —
+the timestamps are **strings** in YAML and numbers in JSON — and `ParseFormatedMillis`'s error text
+is [D-118], still unreproduced.

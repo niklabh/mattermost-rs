@@ -162,15 +162,23 @@ to `i64` before multiplying, changing `expires_in == 0` to `<= 0`, padding the b
 tightening the public-client branch, and testing the fragment by substring instead of by parse.
 Every one failed the suite. That is the evidence the corpus bites; a first-run pass is not.
 
-Two seams, both open, neither blocked:
+**`permission.go` and `role.go` both landed 2026-08-19**, each split the same way: the data
+generated out of Go, the logic hand-ported against a corpus. That is the whole model layer of
+[D-094] — every permission, every default role, and the functions that combine them.
 
-- **More `mm-model` files** — 134 in scope. Every one of the last six turned up an upstream bug or
-  an inverted rule, so the oracle discipline is still paying. By logic density the next candidates
-  are `authorize.go` (300 lines, 10 funcs), `view.go` (267/10) and `job.go` (254/8).
-- **The permission system** ([D-094]) — 687 api4 handlers, **674** `SessionHasPermission*` call
-  sites across 59 files. The four migrated routes are the exception, not a sample: each is
-  `me`-scoped, and Go's checks short-circuit for self. Until this lands, anything permission-gated
-  is forwarded, which is correct and free.
+**What the permission system still needs, in order:**
+
+1. **`model/scheme.go`** (351 lines, 12 funcs) — the last model-layer piece. A scheme is what binds
+   a role set to a team or channel, and `mm-store/src/team_store.rs` already resolves scheme roles
+   one layer down, so the shape is known. This is the next file.
+2. **The `Roles` and `Schemes` stores** in `mm-store` — reads only, to begin with.
+3. **The checker itself** — `channels/app/authorization.go`'s `SessionHasPermissionTo*` family,
+   which is AGPL and therefore `mm-app`. That is the function the 674 api4 call sites reach, and
+   until it exists anything permission-gated stays forwarded, which is correct and free.
+
+**More `mm-model` files** — 125 in scope, if a break from the permission seam is wanted. By logic
+density: `auditconv.go` (776 lines, 62 funcs), `access_policy.go` (755/18), `property_field.go`
+(735/27).
 
 [D-094] records the distinction that decides whether a given route is portable *without* the
 permission system, and it is the useful part:
@@ -239,7 +247,7 @@ git -C reference/mattermost checkout FETCH_HEAD
 | Path | Reason |
 |---|---|
 | model/client4.go (8,526 ln) | Go REST client, not server code |
-| model/permission.go (2,789 ln) | Generate from Go, do not hand-translate |
+| model/permission.go (2,789 ln) | Generate from Go, do not hand-translate — **done 2026-08-19**, see the progress row |
 | model/config.go (5,795 ln) | Translate lazily, section by section |
 | enterprise/ | Separate license; proxy to Go permanently |
 | plugin host (hashicorp/go-plugin) | Keep Go process alive indefinitely |
@@ -348,6 +356,8 @@ whenever a session skips, approximates, or discovers-but-does-not-close somethin
 | model/view.go | `mm-model/src/view.rs` | DONE | 28 pass | **Whole file** — seven wire types, `IsValid`, `PreSave`, `PreUpdate`, `Patch`, `Clone`, `Auditable`, the kanban props codec and both unexported validators. **Not** a rename of `channel_view.go`, which is the mark-channel-read request. The content is `KanbanPropsFromProps`: it round-trips through JSON, so a malformed props map fails with **`encoding/json`'s own error text**, which lands in `detailed_error` on the wire and names **Go type names** (`KanbanGroupBy.group_by.columns of type []model.KanbanColumn`). Reproduced with a hand-written decoder rather than serde, because serde's text is entirely different — 14 message shapes pinned. Four more findings: a kanban view can **never** validate without props; nil and empty props give **different error ids** that the wire cannot distinguish ([D-117]); the title's length is counted **before** trimming and its emptiness **after**; and the three per-column errors carry `{"Index": i}` in `AppError.params`, which is **unexported in Go** and only a reflective read can check. One divergence ([D-116], the shallow clone). Eight mutations run against the finished port, eight caught. Deferred: nothing. |
 | — (tooling) | `reference/dump/behaviour_view.go` → `fixtures/behaviour_view.json` | DONE | 11 diff tests | 45 `IsValid` cases recording id, `Where`, status, detail **and the unexported params**; 27 props documents through `KanbanPropsFromProps` with Go's exact error string; 5 `ToProps` shapes; `PreSave`/`Patch`/`Clone`/`Auditable`; a 140-codepoint `TrimSpace` sweep; and 13 wire probes. The params are recovered with `reflect` + `unsafe` — `AppError.params` is unexported, so nothing outside Go's model package can see it, and without that read nothing would catch the port using the wrong column index. Plus six wire fixtures from the reflection populator. |
 | model/job.go | `mm-model/src/job.rs` | DONE | 17 pass | Whole file except the YAML pair ([D-119]). The content is a **counting** result: job.go declares **42** `JobType*` constants and `AllJobTypes` lists **24**, so `IsValidJobType` rejects **eighteen declared job types** — `recap`, `push_proxy_auth`, every `*_notify_admin`, all four migration jobs ([D-120]). Enumerated from Go by Go identifier, never transcribed. Two more: **`IsValid` never calls `IsValidJobType`**, so a job carrying one of the eighteen stores fine and only the (unported) scheduler turns it away; and `IsValidStatusChange` permits **4 of 81** pairs, including `in_progress → pending`, which reads like a bug and is how a worker requeues. `Auditable` **includes the payload**, unlike `View`'s, with an upstream `// TODO` beside it. Deferred: the YAML codec ([D-119]), `Worker` (needs `*Config`). |
+| model/permission.go | `mm-model/src/permission.rs` + `permission_generated.rs` | DONE | 13 pass | **Generated, not hand-translated** — the 311 permissions and seven tables come out of `reference/dump/permission_gen.go`, which reads the literals from `initializePermissions` with `go/parser`, reads the tables from the linked package, and fails unless the two agree field-for-field. The generator needs both halves because Go has no reflection over package-level vars, so the **identifier** each permission is declared under — what all 674 `SessionHasPermission*` call sites name — is only in the source. Hand-written half: the `Permission` type, the six scope constants, `MakePermissionError`/`ForUser`, and the moderated-permission lookup. The content is a **naming** result: fourteen ids do not match their Go identifier, and six of those transpose the words (`PermissionPublicPlaybookCreate` is `playbook_public_create`), so the Rust statics are named from the **id**. Also measured: the 311 declared permissions partition exactly into `AllPermissions` (282) and `DeprecatedPermissions` (29) with no overlap and no orphans — **not** the job.go shape ([D-120]). Ten mutations run, ten caught. Deferred: nothing. |
+| model/role.go | `mm-model/src/role.rs` + `role_generated.rs` | DONE | 28 pass | Whole file except the YAML pair ([D-119]'s shape). Split the way permission.go was: the 740 data lines — 24 default roles, seven id/permission lists, the sysconsole ancillary map — are emitted by `role_gen.go`, the ~25 functions are hand-ported against `behaviour_role.json`. The content is a **nondeterminism** result: three functions build their answer by ranging a Go map, and the oracle calls each fifty times to establish that the order really does vary rather than assuming it ([D-125]). Ours sort; the two whose order Go *does* fix — `PermissionsChangedByPatch` and `MergeChannelHigherScopedPermissions` — are asserted in order. Four more findings: `CleanRoleNames` **drops** a blank entry but **rejects** `" system_user "**, and on failure returns the *original* slice; `BuiltInSchemeManagedRoleIDs` is a misnomer, 11 of its 24 are not scheme-managed; `IsValidRoleName`'s `TrimLeft` is a **cutset**, so it is an all-characters test, not a prefix one; and `AddAncillaryPermissions` ranges the original slice header while appending to it, so expansion is one level deep. Two divergences ([D-126] the `*[]string` patch state, [D-127] the two unguarded dereferences that panic in Go). Seventeen mutations run: 13 caught, 4 survived — one intended no-op control, two provably equivalent (swapping the disjoint empty/length display-name branches; trimming a name that cannot contain whitespace), and one **unobservable**: whether `AddAncillaryPermissions` expands one level or many cannot be distinguished, because no sysconsole key's ancillary permission is itself a sysconsole key. Deferred: `MarshalYAML`/`UnmarshalYAML` ([D-128]). |
 | utils/timeutils/time.go | `mm-model/src/timeutils.rs` | DONE | 10 pass | 29 lines, ported alongside `job.go` because `Job`'s YAML codec is its only model-package consumer. Two traps, both measured: `time.UnixMilli` attaches `time.Local`, so **the offset in the output is the server's** — [D-008] in a second place; and Go's `.999` **elides trailing zeros and the decimal point**, so a whole second formats with no fraction at all (`.1`, `.01`, and nothing for `.000`). Neither `%.3f` nor `%.f` is substitutable. The round trip is **not total**: a five-digit year formats and will not parse back, though only at a non-zero offset. Error *text* not reproduced ([D-118]); verdict and value are exact. |
 | — (tooling) | `reference/dump/behaviour_job.go` → `fixtures/behaviour_job.json` | DONE | 12 diff tests | All 42 job-type constants and all 7 statuses paired with their **Go identifiers**, so a swapped pair cannot pass a set comparison; `AllJobTypes` in order; 18 `IsValid` cases; the full **9×9** status-transition matrix, including statuses the switch never names; `Auditable` with and without a payload; and 14 millis rendered **twice** — once in the generator's zone and once at UTC. Plus `fixtures/job.json`. |
 | — (tooling) | `reference/dump/timezones_gen.go` → `fixtures/behaviour_timezones.json` | DONE | 5 diff tests | The default map recorded three ways — value, Go's marshalled bytes, and the insertion order it does *not* marshal in — plus a two-call freshness probe, the three starting states of `PreSave`'s guard, and an order-sensitive digest over all 592 zones so the generated table is one assertion rather than 592. |
@@ -2651,3 +2661,124 @@ The first type in the tree with a Go **anonymous field**. Everything below is an
 
 15. **`SanitizeInput` never allocates a metadata.** It zeroes `create_at` and clears `embeds` on
     an *existing* metadata; a nil one stays nil.
+
+## Notes — model/permission.go, `AppError::to_json`
+
+1. **Fourteen permissions have an id their Go identifier would not produce, and six transpose the
+   words.** `PermissionPublicPlaybookCreate` is `playbook_public_create`; `PermissionPrivatePlaybookView`
+   is `playbook_private_view`; `PermissionSysconsoleReadIPFilters` is
+   `sysconsole_read_site_ip_filters`, with a `site` segment the identifier does not mention. Every
+   one of the fourteen is a plausible hand-translation error that **fails open**: a wrong id matches
+   no role, so the check it guards answers the same way forever and nothing logs anything. This is
+   why the Rust statics are named from the id rather than the identifier — a name derived from the
+   value cannot disagree with it — and why `permissions_whose_id_disagrees_with_their_go_identifier`
+   asserts both halves: Go's id resolves, and the plausible one does not exist.
+
+2. **The 311 declared permissions partition exactly into the two tables.** `AllPermissions` has 282,
+   `DeprecatedPermissions` 29, the intersection is empty, `AllPermissions` has no repeats, and
+   nothing declared sits outside both. That is the *opposite* of [D-120]'s job types (42 declared,
+   24 reachable), which is precisely why it is measured rather than assumed — the two files look
+   alike and behave differently. The Rust tests treat `ALL ∪ DEPRECATED` as the declared set, and
+   `declared_partitions_into_all_and_deprecated` is what licenses that.
+
+3. **`ChannelModeratedPermissions` is not a list of permission ids.** Three of its five entries —
+   `create_reactions`, `manage_members`, `manage_bookmarks` — name no permission at all; they are
+   moderation *controls*. The map collapses fourteen permission ids onto them, and two ids
+   (`create_post`, `use_channel_mentions`) map to themselves, which makes the distinction easy to
+   miss. Go's value is a map, so it has no order; the generated table is sorted by key and the test
+   asserts the sort, because the lookup is a binary search. One caller **does** range it —
+   `Role.GetChannelModeratedPermissions` (role.go:713), which the next session ports — but only to
+   find a key it already holds, writing into a map, so no result depends on the order. Checked
+   rather than assumed: the first draft of this note claimed nothing iterated it, and that was
+   wrong.
+
+4. **`MakePermissionErrorForUser` writes `permission=` before the loop.** An empty permission list
+   therefore yields a detail ending in a bare `permission=`, not one with the clause omitted. A
+   port that joined the ids instead would drop eleven bytes from a string that reaches the server
+   log. Both empty shapes — nil and empty slice — are in the corpus and produce the same bytes.
+
+5. **`AppError::to_json` emitted its keys in alphabetical order, and the parity test could not see
+   it.** The port built a `serde_json::Value` in order to substitute the folded `detailed_error`,
+   and `serde_json::Map` is a `BTreeMap`, so every error body came out as
+   `detailed_error, id, message, status_code` where Go marshals a struct in declaration order:
+   `id, message, detailed_error, status_code`. The existing `utils::go_parity` test compared
+   *parsed value graphs* with the comment "key order is not part of the contract" — the one
+   comparison that is blind to exactly this. Measured, not argued: with the old assertion restored
+   and the field order deliberately swapped, all 76 `utils::` tests still pass.
+
+   Fixed by giving `AppError` a single wire projection (`AppErrorWire`) that both its `Serialize`
+   impl and `to_json` go through, so field order is defined once, and by routing `to_json` through
+   the existing `go_json_marshal` — which surfaced a **second** divergence in the same function:
+   `to_json` was not applying Go's `<`, `>`, `&`, U+2028, U+2029 escaping either. The parity
+   assertion is now byte-for-byte.
+
+   **The transferable part:** a parity test that compares parsed JSON is testing the data, not the
+   encoding. Where the goal is byte-identical output, assert the bytes — the value-graph comparison
+   is the right tool only for a corpus whose key order genuinely varies.
+
+6. **Nothing else in the tree applies Go's JSON escaping either** — `mm-api` serialises every
+   response body with plain `serde_json::to_vec`. That is [D-121], and it is a live divergence on
+   any payload containing one of the five characters; the vertical slice's byte-identical
+   `/users/me` held because that payload contains none of them.
+
+## Notes — model/role.go, `strconv.Quote`, `unicode.IsPrint`
+
+1. **Three functions have no output order at all, and that is measured.**
+   `ChannelModeratedPermissionsChangedByPatch` and `RolePatchFromChannelModerationsPatch` build
+   their result by ranging a Go map, so consecutive calls with the same arguments return
+   differently-ordered slices. The oracle calls each fifty times per case and records whether the
+   order varied — it does, for every case with two or more results. Ours sort, the tests compare
+   sets, and one assertion checks that at least one case *did* observe Go varying, so the set
+   comparison cannot silently start over-accepting if upstream makes it deterministic. [D-125].
+
+   The two functions whose order Go **does** fix are asserted in order:
+   `PermissionsChangedByPatch` (it ranges the two slices) and
+   `MergeChannelHigherScopedPermissions` — whose order is `AllPermissions` filtered to channel
+   scope, not the role's own order and not the higher scope's. A port that rebuilt the merged list
+   from the role's order passes every membership test and fails that one.
+
+2. **`CleanRoleNames` drops a blank name but rejects a padded one.** `strings.TrimSpace` is used
+   only for the emptiness test; the name that gets kept is the **untrimmed** one, so `"   "` is
+   silently dropped while `" system_user "` fails validation and takes the whole call down with it.
+   And on failure Go returns the **original** slice alongside `false`, not the partially cleaned
+   one — so a caller that ignores the bool gets its input back rather than a truncated list.
+
+3. **`BuiltInSchemeManagedRoleIDs` is a misnomer, and Go says so.** Eleven of its twenty-four
+   entries carry `SchemeManaged: false` (`system_post_all`, `custom_group_user`, the four
+   system-console roles, …). It is nonetheless the single source of truth for `IsBuiltInRole`,
+   which is why the port keeps the name. The 24 ids and the 24 default roles are in bijection —
+   measured, not assumed.
+
+4. **`IsValidRoleName`'s `TrimLeft` takes a cutset, not a prefix.** `strings.TrimLeft(name, "a-z0-9_")`
+   removes every leading character in the set and the check is that *nothing remains*, which makes
+   it an all-characters test. The corpus enumerates all 128 ASCII bytes in second position rather
+   than sampling, so the prefix misreading fails immediately.
+
+5. **`AddAncillaryPermissions` expands exactly one level — and nothing can currently tell.** Go
+   ranges the original slice header while appending to it, so an ancillary permission that is
+   itself a sysconsole key would never be expanded. **No such key exists in the table**, which the
+   mutation pass established rather than the reading: rewriting the port to expand recursively
+   passes the entire suite. The one-level rule is therefore reproduced on the strength of the Go
+   source alone, and the test that would catch a regression only arms itself if upstream adds a
+   two-level key. Worth knowing before someone "simplifies" the loop.
+
+6. **Go's `%q` is not Rust's `{:?}`, and the crate that stood in for `unicode.IsPrint` was wrong on
+   5,812 code points.** role.go quotes a role name into two error messages. `go_quote` already
+   existed and was right about the syntax — `\x7f` where Rust writes `\u{7f}` — but decided
+   printability through the `unicode-general-category` crate, i.e. *that crate's* Unicode version.
+   Measured across the whole code-point space: 5,812 disagreements with the Go toolchain for
+   `IsPrint`, U+0897 among them. `IsLetter` and `IsNumber` — which `IsValidId` uses — had the same
+   exposure.
+
+   All three now come from tables emitted out of the Go toolchain, the corpus probes both sides of
+   all 1,507 range boundaries, and the dependency is gone. No test changed its answer, which is the
+   point: the divergence lived exactly where nothing was looking. [D-123], and the same shape as
+   [D-070].
+
+7. **Two panics we cannot reproduce, and one Go state we cannot represent.**
+   `RolePatchFromChannelModerationsPatch` dereferences both `Name` and `Roles` unguarded, so a
+   partial `ChannelModerationPatch` — a wire type — panics the Go handler; ours treats a missing
+   `name` as matching nothing and a missing `roles` as disabling nothing, which is the direction
+   that cannot remove a permission Go would have kept ([D-127]). And `RolePatch.Permissions` is
+   `*[]string`, whose pointer-to-nil-slice state `Option<Vec<String>>` collapses — unreachable from
+   the wire, since JSON `null` unmarshals to a nil pointer ([D-126]).
