@@ -10,10 +10,9 @@
 
 mod common;
 
-use common::{GO, RUST, client, go_minted_token, stack_enabled};
+use common::{GO, RUST, client, go_minted_token, logged_in_user_id, stack_enabled};
 
 const PATH: &str = "/api/v4/users/me/preferences";
-const USER_ID: &str = "y9i4er48tt8bukijy7i3u5y9ar";
 const CATEGORY: &str = "display_settings";
 // Each test uses its OWN preference name. They run in parallel, and two tests that flip the same
 // key race each other — which is a test bug that reads exactly like a cross-server visibility
@@ -24,7 +23,7 @@ const NAME_GO_WRITE: &str = "mmrs_parity_go_write";
 
 fn body(name: &str, value: &str) -> serde_json::Value {
     serde_json::json!([{
-        "user_id": USER_ID,
+        "user_id": logged_in_user_id(),
         "category": CATEGORY,
         "name": name,
         "value": value,
@@ -250,7 +249,7 @@ async fn the_batch_bounds_match_go() {
     let too_many: Vec<serde_json::Value> = (0..101)
         .map(|i| {
             serde_json::json!({
-                "user_id": USER_ID, "category": CATEGORY,
+                "user_id": logged_in_user_id(), "category": CATEGORY,
                 "name": format!("bulk_{i}"), "value": "1",
             })
         })

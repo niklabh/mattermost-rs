@@ -25,7 +25,7 @@
 //! test-owned, and the cleanup runs even when an assertion fails.
 
 use mm_model::scheme::{SCHEME_SCOPE_CHANNEL, SCHEME_SCOPE_TEAM};
-use mm_store::{RoleStore, SchemeStore, SqlRoleStore, SqlSchemeStore};
+use mm_store::{RoleStore, SchemeStore, SqlRoleStore, SqlSchemeStore, SqlUserStore, UserStore};
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 
@@ -696,4 +696,57 @@ async fn insert_channel(pool: &PgPool, id: &str, team_id: &str, name: &str, sche
     .execute(pool)
     .await
     .expect("inserts an hsp channel");
+}
+
+/// Regression test for [D-135]: a `jsonb` column can hold the JSON value `null`, which is not SQL
+/// NULL and is not malformed. The Go server writes exactly that — four of the five users in the
+/// development database have `mfausedtimestamps = 'null'::jsonb` — and treating it as a decode
+/// failure made `GET /users/me` a 500 for every one of them.
+///
+/// Reading **every** user is the point. The bug survived because the parity suite logs in as the
+/// one user whose column holds `[]`.
+#[tokio::test]
+async fn every_user_in_the_database_decodes() {
+    if !enabled() {
+        return;
+    }
+    let _guard = DB.lock().await;
+    let pool = pool().await;
+    let store = SqlUserStore::new(pool.clone());
+
+    let ids: Vec<String> = sqlx::query_scalar("SELECT id FROM users")
+        .fetch_all(&pool)
+        .await
+        .expect("lists users");
+    assert!(
+        !ids.is_empty(),
+        "the Go server creates several users at startup"
+    );
+
+    let mut json_nulls = 0;
+    for id in &ids {
+        let user = store
+            .get(id)
+            .await
+            .unwrap_or_else(|e| panic!("user {id} must decode: {e}"));
+        assert_eq!(&user.id, id);
+
+        let raw: Option<serde_json::Value> =
+            sqlx::query_scalar("SELECT mfausedtimestamps FROM users WHERE id = $1")
+                .bind(id)
+                .fetch_one(&pool)
+                .await
+                .expect("reads the raw column");
+        if raw == Some(serde_json::Value::Null) {
+            json_nulls += 1;
+            assert!(
+                user.mfa_used_timestamps.is_none(),
+                "a JSON null column is an absent value, not an empty list"
+            );
+        }
+    }
+    assert!(
+        json_nulls > 0,
+        "no user held a JSON null, so this test proves nothing about the bug it exists for"
+    );
 }

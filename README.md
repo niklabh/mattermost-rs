@@ -116,6 +116,29 @@ export DATABASE_URL=postgres://mmuser:mmuser_password@localhost:5432/mattermost
 cargo run -p mm-api           # :8066 — serves what is migrated, forwards the rest
 ```
 
+The image tag is **pinned** to the minor the reference SHA belongs to, and must stay pinned:
+`latest` silently drifted a minor ahead of the source and every parity claim in this repo was
+measured against the wrong server for a while. See D-130.
+
+**On a fresh volume** the database has no users and no teams, and the tests need both. Two calls,
+after the server is up:
+
+```sh
+curl -X POST localhost:8065/api/v4/users -H 'Content-Type: application/json' \
+  -d '{"email":"slice@example.com","username":"sliceuser","password":"Slice-Test-1234"}'
+
+TOKEN=$(curl -si -X POST localhost:8065/api/v4/users/login -H 'Content-Type: application/json' \
+  -d '{"login_id":"slice@example.com","password":"Slice-Test-1234"}' | grep -i '^token:' | tr -d '\r' | awk '{print $2}')
+USER=$(curl -s localhost:8065/api/v4/users/me -H "Authorization: Bearer $TOKEN" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+TEAM=$(curl -s -X POST localhost:8065/api/v4/teams -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"name":"slice-team","display_name":"Slice Team","type":"O"}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+curl -X POST "localhost:8065/api/v4/teams/$TEAM/members" -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d "{\"team_id\":\"$TEAM\",\"user_id\":\"$USER\"}"
+```
+
+The first user created becomes the system admin. No id is hardcoded anywhere — the tests discover
+what they need — so the values above are the only fixture state the suites assume.
+
 The Go server owns the schema and runs the migrations. **Never point a migration tool at this
 database from the Rust side** — the two would race, and Go's migrations are the reference.
 
@@ -139,7 +162,12 @@ themselves:
 
 ```sh
 MM_STORE_DB=1 cargo test -p mm-store --test db_roles_schemes
+MM_STORE_DB=1 cargo test -p mm-app --test db_authorization
 ```
+
+The permission checks are gated the same way. They read the roles and users the Go server created,
+so what they assert is what the reference implementation would answer — subject to the version skew
+in `docs/TECH_DEBT.md` under D-130.
 
 `.sqlx/` is committed, so `SQLX_OFFLINE=true cargo check --workspace` builds the compile-time
 checked queries with no database at all. Re-run `cargo sqlx prepare --workspace` after changing

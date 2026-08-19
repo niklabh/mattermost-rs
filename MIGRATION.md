@@ -362,6 +362,7 @@ whenever a session skips, approximates, or discovers-but-does-not-close somethin
 | model/role.go | `mm-model/src/role.rs` + `role_generated.rs` | DONE | 28 pass | Whole file except the YAML pair ([D-119]'s shape). Split the way permission.go was: the 740 data lines — 24 default roles, seven id/permission lists, the sysconsole ancillary map — are emitted by `role_gen.go`, the ~25 functions are hand-ported against `behaviour_role.json`. The content is a **nondeterminism** result: three functions build their answer by ranging a Go map, and the oracle calls each fifty times to establish that the order really does vary rather than assuming it ([D-125]). Ours sort; the two whose order Go *does* fix — `PermissionsChangedByPatch` and `MergeChannelHigherScopedPermissions` — are asserted in order. Four more findings: `CleanRoleNames` **drops** a blank entry but **rejects** `" system_user "**, and on failure returns the *original* slice; `BuiltInSchemeManagedRoleIDs` is a misnomer, 11 of its 24 are not scheme-managed; `IsValidRoleName`'s `TrimLeft` is a **cutset**, so it is an all-characters test, not a prefix one; and `AddAncillaryPermissions` ranges the original slice header while appending to it, so expansion is one level deep. Two divergences ([D-126] the `*[]string` patch state, [D-127] the two unguarded dereferences that panic in Go). Seventeen mutations run: 13 caught, 4 survived — one intended no-op control, two provably equivalent (swapping the disjoint empty/length display-name branches; trimming a name that cannot contain whitespace), and one **unobservable**: whether `AddAncillaryPermissions` expands one level or many cannot be distinguished, because no sysconsole key's ancillary permission is itself a sysconsole key. Deferred: `MarshalYAML`/`UnmarshalYAML` ([D-128]). |
 | model/scheme.go | `mm-model/src/scheme.rs` | DONE | 20 pass | Whole file except the YAML pair ([D-128]). Five wire types, `IsValid`/`IsValidForCreate`, `Patch`, `Sanitize`, four `Auditable`s, `SchemeConveyor::Scheme` and `IsValidSchemeName`. **This completes the model layer of [D-094].** The content is `IsValidForCreate`'s scope asymmetry, measured on a **203-cell grid** (7 scopes × 29 single-field mutations) rather than read off the switch: the three **channel** roles are required under *every* scope; the team, playbook and run roles are validated **only** under `team`, so a `playbook`-scoped scheme may carry an empty or malformed `default_playbook_admin_role`; and `channel` additionally requires the three team roles to be **empty** while permitting any playbook or run role. Three smaller ones: a scheme name needs **two** characters where a role name needs one (the two rules differ at exactly that input); Go's `$` is end-of-text, so `"ab\n"` is rejected and a PCRE-flavoured engine would accept it; and `SchemeRoles::Auditable` returns an **empty map**, so none of its three booleans reaches the audit log. `Scheme::Sanitize` blanks the **name** as well, where `Role::Sanitize` leaves it — asserted together so the asymmetry cannot be tidied away. Fourteen mutations run, fourteen caught. Deferred: the YAML codec ([D-128]). |
 | sqlstore/role_store.go, scheme_store.go | `mm-store/src/role_store.rs`, `scheme_store.rs` | PARTIAL | 25 pass (6 DB-backed) | **Reads only** — `Get`/`GetAll`/`GetByName`/`GetByNames` and `Get`/`GetByName`/`GetAllPage`/`CountByScope`. The content is `Roles.Permissions`: it is **one text column**, written with a leading space per entry and read back through `strings.Fields`, so the write and read shapes are not symmetric and an empty column reads as `[]` rather than `null`. **None of the four role read paths filters `DeleteAt`** — `Delete` only stamps it and a permission check still has to resolve the role — while the scheme paths disagree with each other: `Get`/`GetByName` return a deleted scheme, `GetAllPage`/`CountByScope` do not. `GetAllPage` treats an empty scope as a wildcard; `CountByScope` treats it as a literal, so it counts nothing. Thirteen mutations run, twelve caught, one behaviourally equivalent (`GetByNames`' empty short circuit saves a round trip, nothing else). `ChannelHigherScopedPermissions` landed too — three UNIONed branches, exercised by a DB fixture that builds the whole graph (team scheme, two channel schemes, two teams, two channels), since none of the three fires against an empty `Schemes` table. Its `IN` list is **parameterised**, where Go interpolates it into the SQL text ([D-133]), and both of its upstream quirks are reproduced: it splits the permission column with `Split(" ")` where every other read uses `Fields`, so the list begins with an empty string, and the result map gains a `""` key ([D-132]). Seven more mutations, seven caught. Found [D-130]: the container runs **11.10.0** while the reference tree is **11.11.0**. Deferred: every write path, `AllChannelSchemeRoles`, `ChannelRolesUnderTeamRole`, `CountWithoutPermission` ([D-131]). |
+| app/authorization.go, app/role.go | `mm-app/src/authorization.rs` | PARTIAL | 11 pass (6 DB-backed) | **[D-094]'s checker, and the point of the last four sessions.** `RolesGrantPermission`, `SessionHasPermissionTo`/`ToAny`/`ToTeam`/`ToUser`, and `GetRolesByNames` with `mergeChannelHigherScopedPermissions` behind it — so model, store and app now meet. The load-bearing line is that a **lookup failure denies** (authorization.go:386): a database blip must not grant, which a test asserts by pointing the store at an unreachable database. `SessionHasPermissionToUser`'s five branches are not in intuitive order — an empty target denies even for an unrestricted session, `manage_system` grants **before** the self check, and a **system-admin target denies** even to a holder of `edit_other_users`, which no built-in role separates, so the test makes a role that does. Eleven mutations run, eleven caught — but only after the pass **found two places where the suite was asserting less than it looked like it was**, which is the reason to run one at all. `edit_other_users` could be deleted outright with nothing failing, because branch 4 is masked by branch 5 for the only case the test exercised (a permission-less session acting on an *admin*, whom branch 5 denies anyway); and the higher-scoped merge could be skipped entirely, because with an empty `Schemes` table merging and not merging are the same operation. Both are now covered — a permission-less session against an **ordinary** target, and a test that builds the scheme graph so the merge is observable. Deferred: the channel/post/group/category/bot/property variants and the `askingUserId` family ([D-134]). |
 | utils/timeutils/time.go | `mm-model/src/timeutils.rs` | DONE | 10 pass | 29 lines, ported alongside `job.go` because `Job`'s YAML codec is its only model-package consumer. Two traps, both measured: `time.UnixMilli` attaches `time.Local`, so **the offset in the output is the server's** — [D-008] in a second place; and Go's `.999` **elides trailing zeros and the decimal point**, so a whole second formats with no fraction at all (`.1`, `.01`, and nothing for `.000`). Neither `%.3f` nor `%.f` is substitutable. The round trip is **not total**: a five-digit year formats and will not parse back, though only at a non-zero offset. Error *text* not reproduced ([D-118]); verdict and value are exact. |
 | — (tooling) | `reference/dump/behaviour_job.go` → `fixtures/behaviour_job.json` | DONE | 12 diff tests | All 42 job-type constants and all 7 statuses paired with their **Go identifiers**, so a swapped pair cannot pass a set comparison; `AllJobTypes` in order; 18 `IsValid` cases; the full **9×9** status-transition matrix, including statuses the switch never names; `Auditable` with and without a payload; and 14 millis rendered **twice** — once in the generator's zone and once at UTC. Plus `fixtures/job.json`. |
 | — (tooling) | `reference/dump/timezones_gen.go` → `fixtures/behaviour_timezones.json` | DONE | 5 diff tests | The default map recorded three ways — value, Go's marshalled bytes, and the insertion order it does *not* marshal in — plus a two-call freshness probe, the three starting states of `PreSave`'s guard, and an order-sensitive digest over all 592 zones so the generated table is one assertion rather than 592. |
@@ -2886,3 +2887,75 @@ The first type in the tree with a Go **anonymous field**. Everything below is an
    row written by anything that skipped validation, and "our SQL injection matches theirs" is not a
    parity goal ([D-133]). For every legal role name the results are identical, which is what the DB
    test measures.
+
+## Notes — app/authorization.go
+
+1. **Fail closed is the whole file.** `RolesGrantPermission` logs and returns false when the role
+   lookup fails. Every plausible "tidier" port — propagating the error and letting the caller
+   `unwrap_or(true)`, or reading "no roles found" as "nothing to restrict" — turns a database blip
+   into a grant. The test points the store at `127.0.0.1:1` with a lazily-connected pool, so any
+   check that returns `true` has **proved it never touched the store**, and any check that reaches
+   it denies.
+
+2. **The store returns soft-deleted roles so that this function can skip them.** The two halves were
+   ported in different sessions and only make sense together: `role_store.rs` has no `DeleteAt`
+   filter anywhere, and `RolesGrantPermission` is where the filtering happens. The DB test soft-
+   deletes a role *after* asserting the same row grants while alive, because the Go server leaves no
+   deleted roles behind and there would otherwise be nothing to skip.
+
+3. **`SessionHasPermissionToUser`'s branch order is not the intuitive one.** An empty target denies
+   **before** the unrestricted check. `manage_system` grants **before** the self check — so the
+   self-shortcut [D-094] relies on is the third branch, not the first. And with `edit_other_users`
+   but not `manage_system`, a **system-admin target still denies**: the branch that stops an editor
+   escalating. No built-in role grants `edit_other_users` without `manage_system`, so the test
+   creates one; without it that branch is unreachable and a mutation deleting it survives.
+
+4. **The higher-scoped merge must not fire when there is nothing to merge.** `GetRolesByNames`
+   queries only when at least one returned role is scheme-managed, and merges only on a map hit. On
+   Team Edition the map is always empty — but `MergeChannelHigherScopedPermissions` **replaces** the
+   permission list with the channel-scoped subset, so a merge that fired unconditionally would strip
+   `system_admin` down to channel permissions and silently drop `manage_system`. A test reads
+   `system_admin` through the app layer and asserts it still holds all 100+ of them.
+
+5. **The bug this session actually found was not in the code it was porting.** A test needed a
+   non-admin user to act on, picked one from the database, and the check denied — because
+   `SqlUserStore.get` could not decode the row. `jsonb` distinguishes SQL NULL from the JSON value
+   `null`, the Go server writes the latter, and four of the five users then in the development
+   database had `mfausedtimestamps = 'null'::jsonb`. **`GET /users/me` was a 500 for four users out
+   of five**, and passed every test because the parity suite logs in as the fifth. [D-135].
+
+   Not an artifact of the old version, either: after [D-130] recreated the volume on 11.11.0, the
+   two users the server creates for itself still hold JSON `null` while the one created through the
+   signup API holds `[]`. The distinction is *how the row was written*, not which release wrote it.
+
+   The corpus lesson outlives the fix: a suite that always reads the same row is testing that row.
+   The store suite now reads **every** user in the database and asserts each one decodes.
+
+6. **Mutation testing has a failure mode of its own, and it is silent.** Twice now a mutation run
+   has produced a wrong verdict because cargo reused a **stale build**: the file on disk said one
+   thing and the binary under test another. The first time it showed up as a test that "failed"
+   after the mutation was reverted; this time as a no-op control reported *caught* and a real
+   mutation reported *skipped*, both of which are the opposite of the truth.
+
+   Rewriting the file updates its mtime, which is normally enough — except when the write, the
+   build and the test land inside the same fingerprint window. The reliable form, and what the
+   verdicts in this file's row were re-measured with:
+
+   - assert the **pristine tree is green** immediately before each mutation, and abort the run if it
+     is not, because every verdict after that point is meaningless;
+   - leave a clear mtime gap (a second is enough) between writing and building;
+   - restore, gap, and re-verify.
+
+   A mutation harness that can silently lie is worse than none: it produces confident evidence for
+   claims nobody checked. Any verdict in this ledger from a run without the pristine-tree check
+   should be treated as provisional if it ever matters.
+
+   The verdicts for this file were re-measured under those rules, and the re-measurement is what
+   found the two real gaps above. Worth stating plainly, because the headline number did not move:
+   the first run also said "eleven caught". The difference is that it was wrong about two of them,
+   and an all-caught run tells you nothing you did not already believe.
+
+   One more thing the re-measurement showed: **a lean harness can create the appearance of a gap.**
+   Dropping the unit suite to make the run faster turned `empty team id no longer denies` into a
+   survivor, because that assertion lives in the unit tests. A survivor means "no test covers this",
+   which is only true if the run actually executed the tests that do.
