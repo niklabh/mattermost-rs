@@ -1,0 +1,13 @@
+{
+    "client_id": "nk73ykh3jiuwttph1yi31uu8jy",
+    "user_id": "aadbo67h96pbc6eedb75ayr5na",
+    "code": "code-3c360a",
+    "expires_in": 3,
+    "create_at": 1702467710000,
+    "redirect_uri": "redirecturi-b8c94f",
+    "state": "state-9460b6",
+    "scope": "scope-a5c20a",
+    "code_challenge": "codechallenge-5bd156",
+    "code_challenge_method": "codechallengemethod-cc2db6",
+    "resource": "resource-8015a7"
+}

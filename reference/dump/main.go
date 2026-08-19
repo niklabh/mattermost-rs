@@ -128,6 +128,15 @@ var registry = map[string]any{
 	"client_registration_request":   &model.ClientRegistrationRequest{},
 	"client_registration_response":  &model.ClientRegistrationResponse{},
 	"dcr_error":                     &model.DCRError{},
+	"auth_data":                     &model.AuthData{},
+	"job":                           &model.Job{},
+	"view":                          &model.View{},
+	"view_patch":                    &model.ViewPatch{},
+	"views_with_count":              &model.ViewsWithCount{},
+	"kanban_column":                 &model.KanbanColumn{},
+	"kanban_group_by":               &model.KanbanGroupBy{},
+	"kanban_props":                  &model.KanbanProps{},
+	"authorize_request":             &model.AuthorizeRequest{},
 	"product_notice":                &model.ProductNotice{},
 	"notice_message":                &model.NoticeMessage{},
 	"product_notice_view_state":     &model.ProductNoticeViewState{},
@@ -555,6 +564,36 @@ func main() {
 
 	if err := writeLocaleGenerated(*out, *rustOut); err != nil {
 		fmt.Fprintf(os.Stderr, "FAIL: locale table: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := writeTimezonesGenerated(*out, *rustOut); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: timezones table: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := writePasswordBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: password behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := writePHCParserBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: phcparser behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := writeAuthorizeBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: authorize behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := writeViewBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: view behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := writeJobBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: job behaviour fixture: %v\n", err)
 		os.Exit(1)
 	}
 

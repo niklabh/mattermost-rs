@@ -135,7 +135,7 @@
             "where": "User.IsValid"
         },
         {
-            "detailed_error": "user_id=y9i4er48tt8bukijy7i3u5y9ar auth_data=0x452662b10900",
+            "detailed_error": "user_id=y9i4er48tt8bukijy7i3u5y9ar auth_data=\u003caddress\u003e",
             "id": "model.user.is_valid.auth_data.app_error",
             "name": "auth_data_over_cap",
             "ok": false,

@@ -3,6 +3,7 @@
 //! Depends on `mm-store`; knows nothing about HTTP. Handlers live in `mm-api` and call into here,
 //! which is what keeps the API layer free of SQL and the store layer free of request semantics.
 
+pub mod password;
 pub mod preference;
 pub mod session;
 pub mod team;

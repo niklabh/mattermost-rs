@@ -1,0 +1,1237 @@
+{
+    "all_job_types": [
+        "data_retention",
+        "message_export",
+        "elasticsearch_post_indexing",
+        "elasticsearch_post_aggregation",
+        "ldap_sync",
+        "migrations",
+        "plugins",
+        "expiry_notify",
+        "product_notices",
+        "active_users",
+        "import_process",
+        "import_delete",
+        "export_process",
+        "export_delete",
+        "cloud",
+        "extract_content",
+        "last_accessible_post",
+        "last_accessible_file",
+        "cleanup_desktop_tokens",
+        "cleanup_expired_access_tokens",
+        "notify_expiring_access_tokens",
+        "refresh_materialized_views",
+        "mobile_session_metadata",
+        "scheduled_recap"
+    ],
+    "auditable": {
+        "includes_data": true,
+        "json": "{\"create_at\":1700000000000,\"data\":{\"key\":\"value\"},\"id\":\"abcdefghijklmnopqrstuvwxyz\",\"last_activity_at\":1700000002000,\"priority\":10,\"progress\":42,\"start_at\":1700000001000,\"status\":\"pending\",\"type\":\"data_retention\"}",
+        "key_count": 9,
+        "log_clone_equals_auditable": true,
+        "log_clone_json": "{\"create_at\":1700000000000,\"data\":{\"key\":\"value\"},\"id\":\"abcdefghijklmnopqrstuvwxyz\",\"last_activity_at\":1700000002000,\"priority\":10,\"progress\":42,\"start_at\":1700000001000,\"status\":\"pending\",\"type\":\"data_retention\"}",
+        "nil_data_json": "{\"create_at\":1700000000000,\"data\":null,\"id\":\"abcdefghijklmnopqrstuvwxyz\",\"last_activity_at\":1700000002000,\"priority\":10,\"progress\":42,\"start_at\":1700000001000,\"status\":\"pending\",\"type\":\"data_retention\"}"
+    },
+    "constants": {
+        "all_job_types_length": 24,
+        "job_statuses": {
+            "JobStatusCancelRequested": "cancel_requested",
+            "JobStatusCanceled": "canceled",
+            "JobStatusError": "error",
+            "JobStatusInProgress": "in_progress",
+            "JobStatusPending": "pending",
+            "JobStatusSuccess": "success",
+            "JobStatusWarning": "warning"
+        },
+        "job_type_count": 42,
+        "job_types": {
+            "JobTypeAccessControlSync": "access_control_sync",
+            "JobTypeAccessControlTeamSync": "access_control_team_sync",
+            "JobTypeActiveUsers": "active_users",
+            "JobTypeAutoTranslationRecovery": "autotranslation_recovery",
+            "JobTypeCLIMessageExport": "cli_message_export",
+            "JobTypeCleanupDesktopTokens": "cleanup_desktop_tokens",
+            "JobTypeCleanupExpiredAccessTokens": "cleanup_expired_access_tokens",
+            "JobTypeCloud": "cloud",
+            "JobTypeDataRetention": "data_retention",
+            "JobTypeDeleteDmsPreferencesMigration": "delete_dms_preferences_migration",
+            "JobTypeDeleteEmptyDraftsMigration": "delete_empty_drafts_migration",
+            "JobTypeDeleteExpiredPosts": "delete_expired_posts",
+            "JobTypeDeleteOrphanDraftsMigration": "delete_orphan_drafts_migration",
+            "JobTypeElasticsearchPostAggregation": "elasticsearch_post_aggregation",
+            "JobTypeElasticsearchPostIndexing": "elasticsearch_post_indexing",
+            "JobTypeExpiryNotify": "expiry_notify",
+            "JobTypeExportDelete": "export_delete",
+            "JobTypeExportProcess": "export_process",
+            "JobTypeExportUsersToCSV": "export_users_to_csv",
+            "JobTypeExtractContent": "extract_content",
+            "JobTypeHostedPurchaseScreening": "hosted_purchase_screening",
+            "JobTypeImportDelete": "import_delete",
+            "JobTypeImportProcess": "import_process",
+            "JobTypeInstallPluginNotifyAdmin": "install_plugin_notify_admin",
+            "JobTypeLastAccessibleFile": "last_accessible_file",
+            "JobTypeLastAccessiblePost": "last_accessible_post",
+            "JobTypeLdapSync": "ldap_sync",
+            "JobTypeMessageExport": "message_export",
+            "JobTypeMigrations": "migrations",
+            "JobTypeMobileSessionMetadata": "mobile_session_metadata",
+            "JobTypeNotifyExpiringAccessTokens": "notify_expiring_access_tokens",
+            "JobTypePlugins": "plugins",
+            "JobTypePostPersistentNotifications": "post_persistent_notifications",
+            "JobTypeProductNotices": "product_notices",
+            "JobTypePushProxyAuth": "push_proxy_auth",
+            "JobTypeRecap": "recap",
+            "JobTypeRefreshMaterializedViews": "refresh_materialized_views",
+            "JobTypeResendInvitationEmail": "resend_invitation_email",
+            "JobTypeS3PathMigration": "s3_path_migration",
+            "JobTypeScheduledRecap": "scheduled_recap",
+            "JobTypeTrialNotifyAdmin": "trial_notify_admin",
+            "JobTypeUpgradeNotifyAdmin": "upgrade_notify_admin"
+        },
+        "rfc3339_milli_layout": "2006-01-02T15:04:05.999Z07:00"
+    },
+    "format_millis": {
+        "cases": [
+            {
+                "formatted": "1970-01-01T05:30:00+05:30",
+                "millis": 0,
+                "round_trips": true
+            },
+            {
+                "formatted": "1970-01-01T05:30:00.001+05:30",
+                "millis": 1,
+                "round_trips": true
+            },
+            {
+                "formatted": "1970-01-01T05:30:00.999+05:30",
+                "millis": 999,
+                "round_trips": true
+            },
+            {
+                "formatted": "1970-01-01T05:30:01+05:30",
+                "millis": 1000,
+                "round_trips": true
+            },
+            {
+                "formatted": "2023-11-15T03:43:20+05:30",
+                "millis": 1700000000000,
+                "round_trips": true
+            },
+            {
+                "formatted": "2023-11-15T03:43:20.001+05:30",
+                "millis": 1700000000001,
+                "round_trips": true
+            },
+            {
+                "formatted": "2023-11-15T03:43:20.01+05:30",
+                "millis": 1700000000010,
+                "round_trips": true
+            },
+            {
+                "formatted": "2023-11-15T03:43:20.1+05:30",
+                "millis": 1700000000100,
+                "round_trips": true
+            },
+            {
+                "formatted": "2023-11-15T03:43:20.123+05:30",
+                "millis": 1700000000123,
+                "round_trips": true
+            },
+            {
+                "formatted": "1970-01-01T05:29:59.999+05:30",
+                "millis": -1,
+                "round_trips": true
+            },
+            {
+                "formatted": "1970-01-01T05:29:59+05:30",
+                "millis": -1000,
+                "round_trips": true
+            },
+            {
+                "formatted": "1916-02-18T07:16:40+05:30",
+                "millis": -1700000000000,
+                "round_trips": true
+            },
+            {
+                "formatted": "10000-01-01T05:29:59.999+05:30",
+                "millis": 253402300799999,
+                "round_trips": false
+            },
+            {
+                "formatted": "2009-02-14T05:01:30.123+05:30",
+                "millis": 1234567890123,
+                "round_trips": true
+            }
+        ],
+        "layout": "2006-01-02T15:04:05.999Z07:00",
+        "offset_seconds": 19800,
+        "utc_cases": [
+            {
+                "formatted": "1970-01-01T00:00:00Z",
+                "millis": 0
+            },
+            {
+                "formatted": "1970-01-01T00:00:00.001Z",
+                "millis": 1
+            },
+            {
+                "formatted": "1970-01-01T00:00:00.999Z",
+                "millis": 999
+            },
+            {
+                "formatted": "1970-01-01T00:00:01Z",
+                "millis": 1000
+            },
+            {
+                "formatted": "2023-11-14T22:13:20Z",
+                "millis": 1700000000000
+            },
+            {
+                "formatted": "2023-11-14T22:13:20.001Z",
+                "millis": 1700000000001
+            },
+            {
+                "formatted": "2023-11-14T22:13:20.01Z",
+                "millis": 1700000000010
+            },
+            {
+                "formatted": "2023-11-14T22:13:20.1Z",
+                "millis": 1700000000100
+            },
+            {
+                "formatted": "2023-11-14T22:13:20.123Z",
+                "millis": 1700000000123
+            },
+            {
+                "formatted": "1969-12-31T23:59:59.999Z",
+                "millis": -1
+            },
+            {
+                "formatted": "1969-12-31T23:59:59Z",
+                "millis": -1000
+            },
+            {
+                "formatted": "1916-02-18T01:46:40Z",
+                "millis": -1700000000000
+            },
+            {
+                "formatted": "9999-12-31T23:59:59.999Z",
+                "millis": 253402300799999
+            },
+            {
+                "formatted": "2009-02-13T23:31:30.123Z",
+                "millis": 1234567890123
+            }
+        ],
+        "zone_name": "IST"
+    },
+    "is_valid": [
+        {
+            "name": "valid",
+            "ok": true
+        },
+        {
+            "detailed_error": "id=nope",
+            "id": "model.job.is_valid.id.app_error",
+            "name": "bad_id",
+            "ok": false,
+            "status": 400,
+            "where": "Job.IsValid"
+        },
+        {
+            "detailed_error": "id=",
+            "id": "model.job.is_valid.id.app_error",
+            "name": "empty_id",
+            "ok": false,
+            "status": 400,
+            "where": "Job.IsValid"
+        },
+        {
+            "detailed_error": "id=abcdefghijklmnopqrstuvwxyz",
+            "id": "model.job.is_valid.create_at.app_error",
+            "name": "zero_create_at",
+            "ok": false,
+            "status": 400,
+            "where": "Job.IsValid"
+        },
+        {
+            "name": "negative_create_at",
+            "ok": true
+        },
+        {
+            "detailed_error": "id=abcdefghijklmnopqrstuvwxyz",
+            "id": "model.job.is_valid.status.app_error",
+            "name": "empty_status",
+            "ok": false,
+            "status": 400,
+            "where": "Job.IsValid"
+        },
+        {
+            "detailed_error": "id=abcdefghijklmnopqrstuvwxyz",
+            "id": "model.job.is_valid.status.app_error",
+            "name": "unknown_status",
+            "ok": false,
+            "status": 400,
+            "where": "Job.IsValid"
+        },
+        {
+            "detailed_error": "id=abcdefghijklmnopqrstuvwxyz",
+            "id": "model.job.is_valid.status.app_error",
+            "name": "uppercase_status",
+            "ok": false,
+            "status": 400,
+            "where": "Job.IsValid"
+        },
+        {
+            "name": "empty_type",
+            "ok": true
+        },
+        {
+            "name": "unknown_type",
+            "ok": true
+        },
+        {
+            "name": "declared_but_unlisted_type",
+            "ok": true
+        },
+        {
+            "name": "negative_priority",
+            "ok": true
+        },
+        {
+            "name": "negative_progress",
+            "ok": true
+        },
+        {
+            "name": "progress_over_100",
+            "ok": true
+        },
+        {
+            "name": "nil_data",
+            "ok": true
+        },
+        {
+            "name": "zero_start_at",
+            "ok": true
+        },
+        {
+            "detailed_error": "id=nope",
+            "id": "model.job.is_valid.id.app_error",
+            "name": "bad_id_and_zero_create_at",
+            "ok": false,
+            "status": 400,
+            "where": "Job.IsValid"
+        },
+        {
+            "detailed_error": "id=abcdefghijklmnopqrstuvwxyz",
+            "id": "model.job.is_valid.create_at.app_error",
+            "name": "zero_create_at_and_bad_status",
+            "ok": false,
+            "status": 400,
+            "where": "Job.IsValid"
+        }
+    ],
+    "is_valid_job_status": [
+        {
+            "go_name": "JobStatusPending",
+            "valid": true,
+            "value": "pending"
+        },
+        {
+            "go_name": "JobStatusInProgress",
+            "valid": true,
+            "value": "in_progress"
+        },
+        {
+            "go_name": "JobStatusSuccess",
+            "valid": true,
+            "value": "success"
+        },
+        {
+            "go_name": "JobStatusError",
+            "valid": true,
+            "value": "error"
+        },
+        {
+            "go_name": "JobStatusCancelRequested",
+            "valid": true,
+            "value": "cancel_requested"
+        },
+        {
+            "go_name": "JobStatusCanceled",
+            "valid": true,
+            "value": "canceled"
+        },
+        {
+            "go_name": "JobStatusWarning",
+            "valid": true,
+            "value": "warning"
+        },
+        {
+            "go_name": "",
+            "valid": false,
+            "value": ""
+        },
+        {
+            "go_name": "",
+            "valid": false,
+            "value": "PENDING"
+        },
+        {
+            "go_name": "",
+            "valid": false,
+            "value": "in progress"
+        },
+        {
+            "go_name": "",
+            "valid": false,
+            "value": "done"
+        },
+        {
+            "go_name": "",
+            "valid": false,
+            "value": "cancelled"
+        }
+    ],
+    "is_valid_job_type": [
+        {
+            "declared_constant": true,
+            "go_name": "JobTypeDataRetention",
+            "valid": true,
+            "value": "data_retention"
+        },
+        {
+            "declared_constant": true,
+            "go_name": "JobTypeMessageExport",
+            "valid": true,
+            "value": "message_export"
+        },
+        {
+            "declared_constant": true,
+            "go_name": "JobTypeCLIMessageExport",
+            "valid": false,
+            "value": "cli_message_export"
+        },
+        {
+            "declared_constant": true,
+            "go_name": "JobTypeElasticsearchPostIndexing",
+            "valid": true,
+            "value": "elasticsearch_post_indexing"
+        },
+        {
+            "declared_constant": true,
+            "go_name": "JobTypeElasticsearchPostAggregation",
+            "valid": true,
+            "value": "elasticsearch_post_aggregation"
+        },
+        {
+            "declared_constant": true,
+            "go_name": "JobTypeLdapSync",
+            "valid": true,
+            "value": "ldap_sync"
+        },
+        {
+            "declared_constant": true,
+            "go_name": "JobTypeMigrations",
+            "valid": true,
+            "value": "migrations"
+        },
+        {
+            "declared_constant": true,
+            "go_name": "JobTypePlugins",
+            "valid": true,
+            "value": "plugins"
+        },
+        {
+            "declared_constant": true,
+            "go_name": "JobTypeExpiryNotify",
+            "valid": true,
+            "value": "expiry_notify"
+        },
+        {
+            "declared_constant": true,
+            "go_name": "JobTypeProductNotices",
+            "valid": true,
+            "value": "product_notices"
+        },
+        {
+            "declared_constant": true,
+            "go_name": "JobTypeActiveUsers",
+            "valid": true,
+            "value": "active_users"
+        },
+        {
+            "declared_constant": true,
+            "go_name": "JobTypeImportProcess",
+            "valid": true,
+            "value": "import_process"
+        },
+        {
+            "declared_constant": true,
+            "go_name": "JobTypeImportDelete",
+            "valid": true,
+            "value": "import_delete"
+        },
+        {
+            "declared_constant": true,
+            "go_name": "JobTypeExportProcess",
+            "valid": true,
+            "value": "export_process"
+        },
+        {
+            "declared_constant": true,
+            "go_name": "JobTypeExportDelete",
+            "valid": true,
+            "value": "export_delete"
+        },
+        {
+            "declared_constant": true,
+            "go_name": "JobTypeCloud",
+            "valid": true,
+            "value": "cloud"
+        },
+        {
+            "declared_constant": true,
+            "go_name": "JobTypeResendInvitationEmail",
+            "valid": false,
+            "value": "resend_invitation_email"
+        },
+        {
+            "declared_constant": true,
+            "go_name": "JobTypeExtractContent",
+            "valid": true,
+            "value": "extract_content"
+        },
+        {
+            "declared_constant": true,
+            "go_name": "JobTypeLastAccessiblePost",
+            "valid": true,
+            "value": "last_accessible_post"
+        },
+        {
+            "declared_constant": true,
+            "go_name": "JobTypeLastAccessibleFile",
+            "valid": true,
+            "value": "last_accessible_file"
+        },
+        {
+            "declared_constant": true,
+            "go_name": "JobTypeUpgradeNotifyAdmin",
+            "valid": false,
+            "value": "upgrade_notify_admin"
+        },
+        {
+            "declared_constant": true,
+            "go_name": "JobTypeTrialNotifyAdmin",
+            "valid": false,
+            "value": "trial_notify_admin"
+        },
+        {
+            "declared_constant": true,
+            "go_name": "JobTypePostPersistentNotifications",
+            "valid": false,
+            "value": "post_persistent_notifications"
+        },
+        {
+            "declared_constant": true,
+            "go_name": "JobTypeInstallPluginNotifyAdmin",
+            "valid": false,
+            "value": "install_plugin_notify_admin"
+        },
+        {
+            "declared_constant": true,
+            "go_name": "JobTypeHostedPurchaseScreening",
+            "valid": false,
+            "value": "hosted_purchase_screening"
+        },
+        {
+            "declared_constant": true,
+            "go_name": "JobTypeS3PathMigration",
+            "valid": false,
+            "value": "s3_path_migration"
+        },
+        {
+            "declared_constant": true,
+            "go_name": "JobTypeCleanupDesktopTokens",
+            "valid": true,
+            "value": "cleanup_desktop_tokens"
+        },
+        {
+            "declared_constant": true,
+            "go_name": "JobTypeDeleteEmptyDraftsMigration",
+            "valid": false,
+            "value": "delete_empty_drafts_migration"
+        },
+        {
+            "declared_constant": true,
+            "go_name": "JobTypeRefreshMaterializedViews",
+            "valid": true,
+            "value": "refresh_materialized_views"
+        },
+        {
+            "declared_constant": true,
+            "go_name": "JobTypeDeleteOrphanDraftsMigration",
+            "valid": false,
+            "value": "delete_orphan_drafts_migration"
+        },
+        {
+            "declared_constant": true,
+            "go_name": "JobTypeExportUsersToCSV",
+            "valid": false,
+            "value": "export_users_to_csv"
+        },
+        {
+            "declared_constant": true,
+            "go_name": "JobTypeDeleteDmsPreferencesMigration",
+            "valid": false,
+            "value": "delete_dms_preferences_migration"
+        },
+        {
+            "declared_constant": true,
+            "go_name": "JobTypeMobileSessionMetadata",
+            "valid": true,
+            "value": "mobile_session_metadata"
+        },
+        {
+            "declared_constant": true,
+            "go_name": "JobTypeAccessControlSync",
+            "valid": false,
+            "value": "access_control_sync"
+        },
+        {
+            "declared_constant": true,
+            "go_name": "JobTypeAccessControlTeamSync",
+            "valid": false,
+            "value": "access_control_team_sync"
+        },
+        {
+            "declared_constant": true,
+            "go_name": "JobTypePushProxyAuth",
+            "valid": false,
+            "value": "push_proxy_auth"
+        },
+        {
+            "declared_constant": true,
+            "go_name": "JobTypeRecap",
+            "valid": false,
+            "value": "recap"
+        },
+        {
+            "declared_constant": true,
+            "go_name": "JobTypeScheduledRecap",
+            "valid": true,
+            "value": "scheduled_recap"
+        },
+        {
+            "declared_constant": true,
+            "go_name": "JobTypeDeleteExpiredPosts",
+            "valid": false,
+            "value": "delete_expired_posts"
+        },
+        {
+            "declared_constant": true,
+            "go_name": "JobTypeAutoTranslationRecovery",
+            "valid": false,
+            "value": "autotranslation_recovery"
+        },
+        {
+            "declared_constant": true,
+            "go_name": "JobTypeCleanupExpiredAccessTokens",
+            "valid": true,
+            "value": "cleanup_expired_access_tokens"
+        },
+        {
+            "declared_constant": true,
+            "go_name": "JobTypeNotifyExpiringAccessTokens",
+            "valid": true,
+            "value": "notify_expiring_access_tokens"
+        },
+        {
+            "declared_constant": false,
+            "go_name": "",
+            "valid": false,
+            "value": ""
+        },
+        {
+            "declared_constant": false,
+            "go_name": "",
+            "valid": false,
+            "value": "DATA_RETENTION"
+        },
+        {
+            "declared_constant": false,
+            "go_name": "",
+            "valid": false,
+            "value": "data retention"
+        },
+        {
+            "declared_constant": false,
+            "go_name": "",
+            "valid": false,
+            "value": "unknown_job"
+        },
+        {
+            "declared_constant": false,
+            "go_name": "",
+            "valid": false,
+            "value": "recap "
+        }
+    ],
+    "is_valid_status_change": [
+        {
+            "allowed": false,
+            "current": "pending",
+            "new": "pending"
+        },
+        {
+            "allowed": false,
+            "current": "pending",
+            "new": "in_progress"
+        },
+        {
+            "allowed": false,
+            "current": "pending",
+            "new": "success"
+        },
+        {
+            "allowed": false,
+            "current": "pending",
+            "new": "error"
+        },
+        {
+            "allowed": true,
+            "current": "pending",
+            "new": "cancel_requested"
+        },
+        {
+            "allowed": false,
+            "current": "pending",
+            "new": "canceled"
+        },
+        {
+            "allowed": false,
+            "current": "pending",
+            "new": "warning"
+        },
+        {
+            "allowed": false,
+            "current": "pending",
+            "new": ""
+        },
+        {
+            "allowed": false,
+            "current": "pending",
+            "new": "unknown"
+        },
+        {
+            "allowed": true,
+            "current": "in_progress",
+            "new": "pending"
+        },
+        {
+            "allowed": false,
+            "current": "in_progress",
+            "new": "in_progress"
+        },
+        {
+            "allowed": false,
+            "current": "in_progress",
+            "new": "success"
+        },
+        {
+            "allowed": false,
+            "current": "in_progress",
+            "new": "error"
+        },
+        {
+            "allowed": true,
+            "current": "in_progress",
+            "new": "cancel_requested"
+        },
+        {
+            "allowed": false,
+            "current": "in_progress",
+            "new": "canceled"
+        },
+        {
+            "allowed": false,
+            "current": "in_progress",
+            "new": "warning"
+        },
+        {
+            "allowed": false,
+            "current": "in_progress",
+            "new": ""
+        },
+        {
+            "allowed": false,
+            "current": "in_progress",
+            "new": "unknown"
+        },
+        {
+            "allowed": false,
+            "current": "success",
+            "new": "pending"
+        },
+        {
+            "allowed": false,
+            "current": "success",
+            "new": "in_progress"
+        },
+        {
+            "allowed": false,
+            "current": "success",
+            "new": "success"
+        },
+        {
+            "allowed": false,
+            "current": "success",
+            "new": "error"
+        },
+        {
+            "allowed": false,
+            "current": "success",
+            "new": "cancel_requested"
+        },
+        {
+            "allowed": false,
+            "current": "success",
+            "new": "canceled"
+        },
+        {
+            "allowed": false,
+            "current": "success",
+            "new": "warning"
+        },
+        {
+            "allowed": false,
+            "current": "success",
+            "new": ""
+        },
+        {
+            "allowed": false,
+            "current": "success",
+            "new": "unknown"
+        },
+        {
+            "allowed": false,
+            "current": "error",
+            "new": "pending"
+        },
+        {
+            "allowed": false,
+            "current": "error",
+            "new": "in_progress"
+        },
+        {
+            "allowed": false,
+            "current": "error",
+            "new": "success"
+        },
+        {
+            "allowed": false,
+            "current": "error",
+            "new": "error"
+        },
+        {
+            "allowed": false,
+            "current": "error",
+            "new": "cancel_requested"
+        },
+        {
+            "allowed": false,
+            "current": "error",
+            "new": "canceled"
+        },
+        {
+            "allowed": false,
+            "current": "error",
+            "new": "warning"
+        },
+        {
+            "allowed": false,
+            "current": "error",
+            "new": ""
+        },
+        {
+            "allowed": false,
+            "current": "error",
+            "new": "unknown"
+        },
+        {
+            "allowed": false,
+            "current": "cancel_requested",
+            "new": "pending"
+        },
+        {
+            "allowed": false,
+            "current": "cancel_requested",
+            "new": "in_progress"
+        },
+        {
+            "allowed": false,
+            "current": "cancel_requested",
+            "new": "success"
+        },
+        {
+            "allowed": false,
+            "current": "cancel_requested",
+            "new": "error"
+        },
+        {
+            "allowed": false,
+            "current": "cancel_requested",
+            "new": "cancel_requested"
+        },
+        {
+            "allowed": true,
+            "current": "cancel_requested",
+            "new": "canceled"
+        },
+        {
+            "allowed": false,
+            "current": "cancel_requested",
+            "new": "warning"
+        },
+        {
+            "allowed": false,
+            "current": "cancel_requested",
+            "new": ""
+        },
+        {
+            "allowed": false,
+            "current": "cancel_requested",
+            "new": "unknown"
+        },
+        {
+            "allowed": false,
+            "current": "canceled",
+            "new": "pending"
+        },
+        {
+            "allowed": false,
+            "current": "canceled",
+            "new": "in_progress"
+        },
+        {
+            "allowed": false,
+            "current": "canceled",
+            "new": "success"
+        },
+        {
+            "allowed": false,
+            "current": "canceled",
+            "new": "error"
+        },
+        {
+            "allowed": false,
+            "current": "canceled",
+            "new": "cancel_requested"
+        },
+        {
+            "allowed": false,
+            "current": "canceled",
+            "new": "canceled"
+        },
+        {
+            "allowed": false,
+            "current": "canceled",
+            "new": "warning"
+        },
+        {
+            "allowed": false,
+            "current": "canceled",
+            "new": ""
+        },
+        {
+            "allowed": false,
+            "current": "canceled",
+            "new": "unknown"
+        },
+        {
+            "allowed": false,
+            "current": "warning",
+            "new": "pending"
+        },
+        {
+            "allowed": false,
+            "current": "warning",
+            "new": "in_progress"
+        },
+        {
+            "allowed": false,
+            "current": "warning",
+            "new": "success"
+        },
+        {
+            "allowed": false,
+            "current": "warning",
+            "new": "error"
+        },
+        {
+            "allowed": false,
+            "current": "warning",
+            "new": "cancel_requested"
+        },
+        {
+            "allowed": false,
+            "current": "warning",
+            "new": "canceled"
+        },
+        {
+            "allowed": false,
+            "current": "warning",
+            "new": "warning"
+        },
+        {
+            "allowed": false,
+            "current": "warning",
+            "new": ""
+        },
+        {
+            "allowed": false,
+            "current": "warning",
+            "new": "unknown"
+        },
+        {
+            "allowed": false,
+            "current": "",
+            "new": "pending"
+        },
+        {
+            "allowed": false,
+            "current": "",
+            "new": "in_progress"
+        },
+        {
+            "allowed": false,
+            "current": "",
+            "new": "success"
+        },
+        {
+            "allowed": false,
+            "current": "",
+            "new": "error"
+        },
+        {
+            "allowed": false,
+            "current": "",
+            "new": "cancel_requested"
+        },
+        {
+            "allowed": false,
+            "current": "",
+            "new": "canceled"
+        },
+        {
+            "allowed": false,
+            "current": "",
+            "new": "warning"
+        },
+        {
+            "allowed": false,
+            "current": "",
+            "new": ""
+        },
+        {
+            "allowed": false,
+            "current": "",
+            "new": "unknown"
+        },
+        {
+            "allowed": false,
+            "current": "unknown",
+            "new": "pending"
+        },
+        {
+            "allowed": false,
+            "current": "unknown",
+            "new": "in_progress"
+        },
+        {
+            "allowed": false,
+            "current": "unknown",
+            "new": "success"
+        },
+        {
+            "allowed": false,
+            "current": "unknown",
+            "new": "error"
+        },
+        {
+            "allowed": false,
+            "current": "unknown",
+            "new": "cancel_requested"
+        },
+        {
+            "allowed": false,
+            "current": "unknown",
+            "new": "canceled"
+        },
+        {
+            "allowed": false,
+            "current": "unknown",
+            "new": "warning"
+        },
+        {
+            "allowed": false,
+            "current": "unknown",
+            "new": ""
+        },
+        {
+            "allowed": false,
+            "current": "unknown",
+            "new": "unknown"
+        }
+    ],
+    "parse_formated_millis": [
+        {
+            "input": "",
+            "millis": 0,
+            "ok": true
+        },
+        {
+            "input": "2023-11-14T22:13:20+05:30",
+            "millis": 1699980200000,
+            "ok": true
+        },
+        {
+            "input": "2023-11-14T22:13:20.123+05:30",
+            "millis": 1699980200123,
+            "ok": true
+        },
+        {
+            "input": "2023-11-14T16:43:20Z",
+            "millis": 1699980200000,
+            "ok": true
+        },
+        {
+            "input": "2023-11-14T16:43:20.5Z",
+            "millis": 1699980200500,
+            "ok": true
+        },
+        {
+            "input": "2023-11-14T16:43:20.999Z",
+            "millis": 1699980200999,
+            "ok": true
+        },
+        {
+            "input": "2023-11-14T16:43:20.9999Z",
+            "millis": 1699980200999,
+            "ok": true
+        },
+        {
+            "error": "parsing time \"2023-11-14T16:43:20\" as \"2006-01-02T15:04:05.999Z07:00\": cannot parse \"\" as \"Z07:00\"",
+            "input": "2023-11-14T16:43:20",
+            "ok": false
+        },
+        {
+            "error": "parsing time \"2023-11-14\" as \"2006-01-02T15:04:05.999Z07:00\": cannot parse \"\" as \"T\"",
+            "input": "2023-11-14",
+            "ok": false
+        },
+        {
+            "error": "parsing time \"not a timestamp\" as \"2006-01-02T15:04:05.999Z07:00\": cannot parse \"not a timestamp\" as \"2006\"",
+            "input": "not a timestamp",
+            "ok": false
+        },
+        {
+            "error": "parsing time \"2023-13-45T99:99:99Z\": month out of range",
+            "input": "2023-13-45T99:99:99Z",
+            "ok": false
+        }
+    ],
+    "wire": [
+        {
+            "json": "{\"id\":\"\",\"type\":\"\",\"priority\":0,\"create_at\":0,\"start_at\":0,\"last_activity_at\":0,\"status\":\"\",\"progress\":0,\"data\":null}",
+            "keys": [
+                "create_at",
+                "data",
+                "id",
+                "last_activity_at",
+                "priority",
+                "progress",
+                "start_at",
+                "status",
+                "type"
+            ],
+            "name": "zero"
+        },
+        {
+            "json": "{\"id\":\"abcdefghijklmnopqrstuvwxyz\",\"type\":\"data_retention\",\"priority\":10,\"create_at\":1700000000000,\"start_at\":1700000001000,\"last_activity_at\":1700000002000,\"status\":\"pending\",\"progress\":42,\"data\":{\"key\":\"value\"}}",
+            "keys": [
+                "create_at",
+                "data",
+                "id",
+                "last_activity_at",
+                "priority",
+                "progress",
+                "start_at",
+                "status",
+                "type"
+            ],
+            "name": "full"
+        },
+        {
+            "json": "{\"id\":\"abcdefghijklmnopqrstuvwxyz\",\"type\":\"data_retention\",\"priority\":10,\"create_at\":1700000000000,\"start_at\":1700000001000,\"last_activity_at\":1700000002000,\"status\":\"pending\",\"progress\":42,\"data\":null}",
+            "keys": [
+                "create_at",
+                "data",
+                "id",
+                "last_activity_at",
+                "priority",
+                "progress",
+                "start_at",
+                "status",
+                "type"
+            ],
+            "name": "nil_data"
+        },
+        {
+            "json": "{\"id\":\"abcdefghijklmnopqrstuvwxyz\",\"type\":\"data_retention\",\"priority\":10,\"create_at\":1700000000000,\"start_at\":1700000001000,\"last_activity_at\":1700000002000,\"status\":\"pending\",\"progress\":42,\"data\":{}}",
+            "keys": [
+                "create_at",
+                "data",
+                "id",
+                "last_activity_at",
+                "priority",
+                "progress",
+                "start_at",
+                "status",
+                "type"
+            ],
+            "name": "empty_data"
+        },
+        {
+            "json": "{\"id\":\"abcdefghijklmnopqrstuvwxyz\",\"type\":\"data_retention\",\"priority\":-1,\"create_at\":-1,\"start_at\":1700000001000,\"last_activity_at\":1700000002000,\"status\":\"pending\",\"progress\":-100,\"data\":{\"key\":\"value\"}}",
+            "keys": [
+                "create_at",
+                "data",
+                "id",
+                "last_activity_at",
+                "priority",
+                "progress",
+                "start_at",
+                "status",
+                "type"
+            ],
+            "name": "negative_numbers"
+        },
+        {
+            "json": "{\"id\":\"abcdefghijklmnopqrstuvwxyz\",\"type\":\"data_retention\",\"priority\":10,\"create_at\":1700000000000,\"start_at\":1700000001000,\"last_activity_at\":1700000002000,\"status\":\"pending\",\"progress\":42,\"data\":{\"html\":\"\\u003cb\\u003e\\u0026\\u003c/b\\u003e\",\"path\":\"a/b\"}}",
+            "keys": [
+                "create_at",
+                "data",
+                "id",
+                "last_activity_at",
+                "priority",
+                "progress",
+                "start_at",
+                "status",
+                "type"
+            ],
+            "name": "escapable_data"
+        }
+    ]
+}

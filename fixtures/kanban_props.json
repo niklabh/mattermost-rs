@@ -1,0 +1,15 @@
+{
+    "group_by": {
+        "field_id": "wd6wqy61ww6enw99ehb7fjthor",
+        "columns": [
+            {
+                "id": "i733xgmqe5psf9dt16cshtq5ce",
+                "name": "name-e0d5ec",
+                "option_ids": [
+                    "optionids-0e46e3",
+                    "optionids-0e64d4"
+                ]
+            }
+        ]
+    }
+}
