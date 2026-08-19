@@ -22,6 +22,5 @@ subtle.workspace = true
 # PKCE's S256 challenge is BASE64URL(SHA256(verifier)) — authorize.go:232.
 sha2.workspace = true
 sha1.workspace = true
-unicode-general-category.workspace = true
 base64.workspace = true
 unicode-normalization.workspace = true

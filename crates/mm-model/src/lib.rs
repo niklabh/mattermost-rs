@@ -25,6 +25,11 @@ pub mod file;
 pub mod file_info;
 pub mod file_info_list;
 pub mod file_info_search_results;
+/// Go's `unicode.IsPrint`, `IsLetter` and `IsNumber` as range tables, emitted from the Go
+/// toolchain. Private: `utils` wraps them, and they are Go's `unicode` package rather than a
+/// Mattermost source file. Not to be confused with `unicode_generated`, which is the four CJK
+/// script tables `model.ContainsCJK` needs.
+mod go_unicode_generated;
 pub mod go_url;
 pub mod integration_action;
 pub mod job;
@@ -36,6 +41,10 @@ pub mod message_attachment;
 pub mod mm_blocks_actions;
 pub mod oauth;
 pub mod oauth_dcr;
+pub mod permission;
+/// The 311 permissions and the seven tables grouping them, emitted from Go by `reference/dump`.
+/// Private: `permission` re-exports it, so a caller never has to know which half a name came from.
+mod permission_generated;
 pub mod post;
 pub mod post_acknowledgement;
 pub mod post_attributes;
@@ -50,6 +59,10 @@ pub mod post_search_results;
 pub mod preference;
 pub mod product_notices;
 pub mod reaction;
+pub mod role;
+/// The 24 default roles and the seven permission/id lists role.go builds in `init()`, emitted
+/// from Go by `reference/dump`. Private: `role` re-exports it.
+mod role_generated;
 pub mod scheduled_post;
 pub mod scheduled_post_recurrence;
 pub mod search_params;

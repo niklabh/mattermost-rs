@@ -1,0 +1,4083 @@
+{
+    "add_ancillary_permissions": [
+        {
+            "in": [
+                "sysconsole_read_about_edition_and_license"
+            ],
+            "out": [
+                "sysconsole_read_about_edition_and_license",
+                "read_license_information"
+            ]
+        },
+        {
+            "in": [
+                "sysconsole_read_authentication_ldap"
+            ],
+            "out": [
+                "sysconsole_read_authentication_ldap",
+                "test_ldap",
+                "read_ldap_sync_job"
+            ]
+        },
+        {
+            "in": [
+                "sysconsole_read_compliance_compliance_export"
+            ],
+            "out": [
+                "sysconsole_read_compliance_compliance_export",
+                "read_compliance_export_job",
+                "download_compliance_export_result"
+            ]
+        },
+        {
+            "in": [
+                "sysconsole_read_compliance_compliance_monitoring"
+            ],
+            "out": [
+                "sysconsole_read_compliance_compliance_monitoring",
+                "read_audits"
+            ]
+        },
+        {
+            "in": [
+                "sysconsole_read_compliance_data_retention_policy"
+            ],
+            "out": [
+                "sysconsole_read_compliance_data_retention_policy",
+                "read_data_retention_job"
+            ]
+        },
+        {
+            "in": [
+                "sysconsole_read_environment_elasticsearch"
+            ],
+            "out": [
+                "sysconsole_read_environment_elasticsearch",
+                "read_elasticsearch_post_indexing_job",
+                "read_elasticsearch_post_aggregation_job"
+            ]
+        },
+        {
+            "in": [
+                "sysconsole_read_reporting_server_logs"
+            ],
+            "out": [
+                "sysconsole_read_reporting_server_logs",
+                "get_logs"
+            ]
+        },
+        {
+            "in": [
+                "sysconsole_read_reporting_site_statistics"
+            ],
+            "out": [
+                "sysconsole_read_reporting_site_statistics",
+                "get_analytics"
+            ]
+        },
+        {
+            "in": [
+                "sysconsole_read_reporting_team_statistics"
+            ],
+            "out": [
+                "sysconsole_read_reporting_team_statistics",
+                "get_analytics"
+            ]
+        },
+        {
+            "in": [
+                "sysconsole_read_user_management_channels"
+            ],
+            "out": [
+                "sysconsole_read_user_management_channels",
+                "read_public_channel",
+                "read_channel",
+                "read_public_channel_groups",
+                "read_private_channel_groups"
+            ]
+        },
+        {
+            "in": [
+                "sysconsole_read_user_management_teams"
+            ],
+            "out": [
+                "sysconsole_read_user_management_teams",
+                "list_private_teams",
+                "list_public_teams",
+                "view_team"
+            ]
+        },
+        {
+            "in": [
+                "sysconsole_read_user_management_users"
+            ],
+            "out": [
+                "sysconsole_read_user_management_users",
+                "read_other_users_teams"
+            ]
+        },
+        {
+            "in": [
+                "sysconsole_write_about_edition_and_license"
+            ],
+            "out": [
+                "sysconsole_write_about_edition_and_license",
+                "manage_license_information"
+            ]
+        },
+        {
+            "in": [
+                "sysconsole_write_authentication_email"
+            ],
+            "out": [
+                "sysconsole_write_authentication_email",
+                "invalidate_email_invite"
+            ]
+        },
+        {
+            "in": [
+                "sysconsole_write_authentication_ldap"
+            ],
+            "out": [
+                "sysconsole_write_authentication_ldap",
+                "create_ldap_sync_job",
+                "manage_ldap_sync_job",
+                "add_ldap_public_cert",
+                "remove_ldap_public_cert",
+                "add_ldap_private_cert",
+                "remove_ldap_private_cert"
+            ]
+        },
+        {
+            "in": [
+                "sysconsole_write_authentication_saml"
+            ],
+            "out": [
+                "sysconsole_write_authentication_saml",
+                "get_saml_metadata_from_idp",
+                "add_saml_public_cert",
+                "add_saml_private_cert",
+                "add_saml_idp_cert",
+                "remove_saml_public_cert",
+                "remove_saml_private_cert",
+                "remove_saml_idp_cert",
+                "get_saml_cert_status"
+            ]
+        },
+        {
+            "in": [
+                "sysconsole_write_compliance_compliance_export"
+            ],
+            "out": [
+                "sysconsole_write_compliance_compliance_export",
+                "create_compliance_export_job",
+                "manage_compliance_export_job",
+                "download_compliance_export_result"
+            ]
+        },
+        {
+            "in": [
+                "sysconsole_write_compliance_data_retention_policy"
+            ],
+            "out": [
+                "sysconsole_write_compliance_data_retention_policy",
+                "create_data_retention_job",
+                "manage_data_retention_job"
+            ]
+        },
+        {
+            "in": [
+                "sysconsole_write_environment_database"
+            ],
+            "out": [
+                "sysconsole_write_environment_database",
+                "recycle_database_connections"
+            ]
+        },
+        {
+            "in": [
+                "sysconsole_write_environment_elasticsearch"
+            ],
+            "out": [
+                "sysconsole_write_environment_elasticsearch",
+                "test_elasticsearch",
+                "create_elasticsearch_post_indexing_job",
+                "manage_elasticsearch_post_indexing_job",
+                "create_elasticsearch_post_aggregation_job",
+                "manage_elasticsearch_post_aggregation_job",
+                "purge_elasticsearch_indexes"
+            ]
+        },
+        {
+            "in": [
+                "sysconsole_write_environment_file_storage"
+            ],
+            "out": [
+                "sysconsole_write_environment_file_storage",
+                "test_s3"
+            ]
+        },
+        {
+            "in": [
+                "sysconsole_write_environment_smtp"
+            ],
+            "out": [
+                "sysconsole_write_environment_smtp",
+                "test_email"
+            ]
+        },
+        {
+            "in": [
+                "sysconsole_write_environment_web_server"
+            ],
+            "out": [
+                "sysconsole_write_environment_web_server",
+                "test_site_url",
+                "reload_config",
+                "invalidate_caches"
+            ]
+        },
+        {
+            "in": [
+                "sysconsole_write_site_customization"
+            ],
+            "out": [
+                "sysconsole_write_site_customization",
+                "edit_brand"
+            ]
+        },
+        {
+            "in": [
+                "sysconsole_write_user_management_channels"
+            ],
+            "out": [
+                "sysconsole_write_user_management_channels",
+                "manage_public_channel_properties",
+                "manage_private_channel_properties",
+                "manage_public_channel_auto_translation",
+                "manage_private_channel_auto_translation",
+                "manage_private_channel_members",
+                "manage_public_channel_members",
+                "delete_private_channel",
+                "delete_public_channel",
+                "manage_channel_roles",
+                "convert_public_channel_to_private",
+                "convert_private_channel_to_public"
+            ]
+        },
+        {
+            "in": [
+                "sysconsole_write_user_management_groups"
+            ],
+            "out": [
+                "sysconsole_write_user_management_groups",
+                "manage_private_channel_members",
+                "manage_public_channel_members",
+                "convert_public_channel_to_private",
+                "convert_private_channel_to_public"
+            ]
+        },
+        {
+            "in": [
+                "sysconsole_write_user_management_teams"
+            ],
+            "out": [
+                "sysconsole_write_user_management_teams",
+                "manage_team",
+                "manage_team_roles",
+                "remove_user_from_team",
+                "join_private_teams",
+                "join_public_teams",
+                "add_user_to_team"
+            ]
+        },
+        {
+            "in": [
+                "sysconsole_write_user_management_users"
+            ],
+            "out": [
+                "sysconsole_write_user_management_users",
+                "edit_other_users",
+                "demote_to_guest",
+                "promote_guest"
+            ]
+        },
+        {
+            "in": null,
+            "out": null,
+            "out_nil": true
+        },
+        {
+            "in": [],
+            "out": null,
+            "out_nil": true
+        },
+        {
+            "in": [
+                "not_a_sysconsole_permission"
+            ],
+            "out": [
+                "not_a_sysconsole_permission"
+            ],
+            "out_nil": false
+        },
+        {
+            "in": [
+                "create_post"
+            ],
+            "out": [
+                "create_post"
+            ],
+            "out_nil": false
+        },
+        {
+            "in": [
+                "sysconsole_read_about_edition_and_license",
+                "sysconsole_read_authentication_ldap"
+            ],
+            "out": [
+                "sysconsole_read_about_edition_and_license",
+                "sysconsole_read_authentication_ldap",
+                "read_license_information",
+                "test_ldap",
+                "read_ldap_sync_job"
+            ],
+            "out_nil": false
+        },
+        {
+            "in": [
+                "sysconsole_read_about_edition_and_license",
+                "sysconsole_read_about_edition_and_license"
+            ],
+            "out": [
+                "sysconsole_read_about_edition_and_license",
+                "sysconsole_read_about_edition_and_license",
+                "read_license_information",
+                "read_license_information"
+            ],
+            "out_nil": false
+        },
+        {
+            "in": [
+                "create_post",
+                "sysconsole_read_about_edition_and_license",
+                "manage_team"
+            ],
+            "out": [
+                "create_post",
+                "sysconsole_read_about_edition_and_license",
+                "manage_team",
+                "read_license_information"
+            ],
+            "out_nil": false
+        }
+    ],
+    "auditable": [
+        {
+            "auditable": {
+                "built_in": true,
+                "create_at": 1,
+                "delete_at": 3,
+                "description": "d",
+                "display_name": "Custom",
+                "id": "role1jbyqbtxbtqcgy3wa9tjhyc",
+                "name": "custom_role",
+                "permissions": [
+                    "create_post"
+                ],
+                "scheme_id": "scheme1jbyqbtxbtqcgy3wa9tjhy",
+                "scheme_managed": true,
+                "update_at": 2
+            },
+            "case": 0,
+            "keys": [
+                "built_in",
+                "create_at",
+                "delete_at",
+                "description",
+                "display_name",
+                "id",
+                "name",
+                "permissions",
+                "scheme_id",
+                "scheme_managed",
+                "update_at"
+            ],
+            "role": {
+                "id": "role1jbyqbtxbtqcgy3wa9tjhyc",
+                "name": "custom_role",
+                "display_name": "Custom",
+                "description": "d",
+                "create_at": 1,
+                "update_at": 2,
+                "delete_at": 3,
+                "permissions": [
+                    "create_post"
+                ],
+                "scheme_managed": true,
+                "built_in": true,
+                "scheme_id": "scheme1jbyqbtxbtqcgy3wa9tjhy"
+            }
+        },
+        {
+            "auditable": {
+                "built_in": false,
+                "create_at": 0,
+                "delete_at": 0,
+                "description": "",
+                "display_name": "",
+                "id": "",
+                "name": "custom_role",
+                "permissions": null,
+                "scheme_id": null,
+                "scheme_managed": false,
+                "update_at": 0
+            },
+            "case": 1,
+            "keys": [
+                "built_in",
+                "create_at",
+                "delete_at",
+                "description",
+                "display_name",
+                "id",
+                "name",
+                "permissions",
+                "scheme_id",
+                "scheme_managed",
+                "update_at"
+            ],
+            "role": {
+                "id": "",
+                "name": "custom_role",
+                "display_name": "",
+                "description": "",
+                "create_at": 0,
+                "update_at": 0,
+                "delete_at": 0,
+                "permissions": null,
+                "scheme_managed": false,
+                "built_in": false,
+                "scheme_id": null
+            }
+        }
+    ],
+    "channel_moderated_permissions_changed": [
+        {
+            "changed": null,
+            "changed_nil": true,
+            "name": "nil_role",
+            "order_varied": false,
+            "patch": [
+                "create_post"
+            ],
+            "role": null,
+            "role_nil": true
+        },
+        {
+            "changed": null,
+            "changed_nil": true,
+            "name": "nil_patch",
+            "order_varied": false,
+            "patch": null,
+            "role": [
+                "create_post"
+            ],
+            "role_nil": false
+        },
+        {
+            "changed": null,
+            "changed_nil": true,
+            "name": "identical",
+            "order_varied": false,
+            "patch": [
+                "create_post"
+            ],
+            "role": [
+                "create_post"
+            ],
+            "role_nil": false
+        },
+        {
+            "changed": [
+                "create_post"
+            ],
+            "changed_nil": false,
+            "name": "one_removed",
+            "order_varied": false,
+            "patch": [],
+            "role": [
+                "create_post"
+            ],
+            "role_nil": false
+        },
+        {
+            "changed": [
+                "create_post"
+            ],
+            "changed_nil": false,
+            "name": "one_added",
+            "order_varied": false,
+            "patch": [
+                "create_post"
+            ],
+            "role": [],
+            "role_nil": false
+        },
+        {
+            "changed": [
+                "create_post",
+                "create_reactions",
+                "use_channel_mentions"
+            ],
+            "changed_nil": false,
+            "name": "two_changed",
+            "order_varied": true,
+            "patch": [
+                "use_channel_mentions"
+            ],
+            "role": [
+                "create_post",
+                "add_reaction"
+            ],
+            "role_nil": false
+        },
+        {
+            "changed": [
+                "create_post",
+                "create_reactions",
+                "manage_bookmarks",
+                "manage_members",
+                "use_channel_mentions"
+            ],
+            "changed_nil": false,
+            "name": "three_changed",
+            "order_varied": true,
+            "patch": [
+                "use_channel_mentions",
+                "add_bookmark_public_channel"
+            ],
+            "role": [
+                "create_post",
+                "add_reaction",
+                "manage_public_channel_members"
+            ],
+            "role_nil": false
+        },
+        {
+            "changed": null,
+            "changed_nil": true,
+            "name": "reaction_pair_is_one_control",
+            "order_varied": false,
+            "patch": [
+                "remove_reaction"
+            ],
+            "role": [
+                "add_reaction"
+            ],
+            "role_nil": false
+        },
+        {
+            "changed": null,
+            "changed_nil": true,
+            "name": "unmoderated_permissions_ignored",
+            "order_varied": false,
+            "patch": [
+                "manage_system"
+            ],
+            "role": [
+                "manage_team"
+            ],
+            "role_nil": false
+        },
+        {
+            "changed": null,
+            "changed_nil": true,
+            "name": "bookmarks_collapse",
+            "order_varied": false,
+            "patch": [
+                "edit_bookmark_private_channel"
+            ],
+            "role": [
+                "add_bookmark_public_channel"
+            ],
+            "role_nil": false
+        }
+    ],
+    "clean_role_names": [
+        {
+            "cleaned": null,
+            "cleaned_nil": true,
+            "in": null,
+            "in_nil": true,
+            "ok": true,
+            "returned_input": false
+        },
+        {
+            "cleaned": null,
+            "cleaned_nil": true,
+            "in": [],
+            "in_nil": false,
+            "ok": true,
+            "returned_input": false
+        },
+        {
+            "cleaned": [
+                "system_user"
+            ],
+            "cleaned_nil": false,
+            "in": [
+                "system_user"
+            ],
+            "in_nil": false,
+            "ok": true,
+            "returned_input": false
+        },
+        {
+            "cleaned": [
+                "system_user",
+                "channel_admin"
+            ],
+            "cleaned_nil": false,
+            "in": [
+                "system_user",
+                "channel_admin"
+            ],
+            "in_nil": false,
+            "ok": true,
+            "returned_input": false
+        },
+        {
+            "cleaned": [
+                "system_user"
+            ],
+            "cleaned_nil": false,
+            "in": [
+                "",
+                "system_user"
+            ],
+            "in_nil": false,
+            "ok": true,
+            "returned_input": false
+        },
+        {
+            "cleaned": [
+                "system_user"
+            ],
+            "cleaned_nil": false,
+            "in": [
+                "   ",
+                "system_user"
+            ],
+            "in_nil": false,
+            "ok": true,
+            "returned_input": false
+        },
+        {
+            "cleaned": [
+                "system_user"
+            ],
+            "cleaned_nil": false,
+            "in": [
+                "\t\n",
+                "system_user"
+            ],
+            "in_nil": false,
+            "ok": true,
+            "returned_input": false
+        },
+        {
+            "cleaned": [
+                "system_user"
+            ],
+            "cleaned_nil": false,
+            "in": [
+                "system_user",
+                ""
+            ],
+            "in_nil": false,
+            "ok": true,
+            "returned_input": false
+        },
+        {
+            "cleaned": [
+                "system_user",
+                "BAD"
+            ],
+            "cleaned_nil": false,
+            "in": [
+                "system_user",
+                "BAD"
+            ],
+            "in_nil": false,
+            "ok": false,
+            "returned_input": true
+        },
+        {
+            "cleaned": [
+                "BAD",
+                "system_user"
+            ],
+            "cleaned_nil": false,
+            "in": [
+                "BAD",
+                "system_user"
+            ],
+            "in_nil": false,
+            "ok": false,
+            "returned_input": true
+        },
+        {
+            "cleaned": [
+                " system_user "
+            ],
+            "cleaned_nil": false,
+            "in": [
+                " system_user "
+            ],
+            "in_nil": false,
+            "ok": false,
+            "returned_input": true
+        },
+        {
+            "cleaned": [
+                "role-with-hyphen"
+            ],
+            "cleaned_nil": false,
+            "in": [
+                "role-with-hyphen"
+            ],
+            "in_nil": false,
+            "ok": false,
+            "returned_input": true
+        }
+    ],
+    "clone": [
+        {
+            "clone": {
+                "id": "role1jbyqbtxbtqcgy3wa9tjhyc",
+                "name": "custom_role",
+                "display_name": "Custom",
+                "description": "d",
+                "create_at": 1755000000000,
+                "update_at": 1755000000001,
+                "delete_at": 0,
+                "permissions": [
+                    "create_post",
+                    "edit_post"
+                ],
+                "scheme_managed": true,
+                "built_in": true,
+                "scheme_id": "scheme1jbyqbtxbtqcgy3wa9tjhy"
+            },
+            "equal": true,
+            "name": "full",
+            "permissions_aliased": false,
+            "permissions_nil": false,
+            "scheme_id_aliased": false,
+            "scheme_id_nil": false
+        },
+        {
+            "clone": {
+                "id": "",
+                "name": "custom_role",
+                "display_name": "",
+                "description": "",
+                "create_at": 0,
+                "update_at": 0,
+                "delete_at": 0,
+                "permissions": null,
+                "scheme_managed": false,
+                "built_in": false,
+                "scheme_id": null
+            },
+            "equal": true,
+            "name": "nil_permissions",
+            "permissions_aliased": false,
+            "permissions_nil": true,
+            "scheme_id_aliased": false,
+            "scheme_id_nil": true
+        },
+        {
+            "clone": {
+                "id": "",
+                "name": "custom_role",
+                "display_name": "",
+                "description": "",
+                "create_at": 0,
+                "update_at": 0,
+                "delete_at": 0,
+                "permissions": [],
+                "scheme_managed": false,
+                "built_in": false,
+                "scheme_id": null
+            },
+            "equal": true,
+            "name": "empty_permissions",
+            "permissions_aliased": false,
+            "permissions_nil": false,
+            "scheme_id_aliased": false,
+            "scheme_id_nil": true
+        },
+        {
+            "clone": {
+                "id": "",
+                "name": "custom_role",
+                "display_name": "",
+                "description": "",
+                "create_at": 0,
+                "update_at": 0,
+                "delete_at": 0,
+                "permissions": null,
+                "scheme_managed": false,
+                "built_in": false,
+                "scheme_id": null
+            },
+            "equal": true,
+            "name": "nil_scheme_id",
+            "permissions_aliased": false,
+            "permissions_nil": true,
+            "scheme_id_aliased": false,
+            "scheme_id_nil": true
+        }
+    ],
+    "constants": {
+        "fake_setting": "********************************",
+        "role_description_max_length": 1024,
+        "role_display_name_max_length": 128,
+        "role_name_max_length": 64,
+        "role_scope_channel": "Channel",
+        "role_scope_group": "Group",
+        "role_scope_system": "System",
+        "role_scope_team": "Team",
+        "role_type_admin": "Admin",
+        "role_type_guest": "Guest",
+        "role_type_user": "User"
+    },
+    "float_accessors": [
+        {
+            "create_at": 0,
+            "delete_at": 0,
+            "in": 0,
+            "update_at": 0
+        },
+        {
+            "create_at": 1,
+            "delete_at": 1,
+            "in": 1,
+            "update_at": 1
+        },
+        {
+            "create_at": -1,
+            "delete_at": -1,
+            "in": -1,
+            "update_at": -1
+        },
+        {
+            "create_at": 1755000000000,
+            "delete_at": 1755000000000,
+            "in": 1755000000000,
+            "update_at": 1755000000000
+        },
+        {
+            "create_at": 9007199254740992,
+            "delete_at": 9007199254740992,
+            "in": 9007199254740993,
+            "update_at": 9007199254740992
+        },
+        {
+            "create_at": -9007199254740992,
+            "delete_at": -9007199254740992,
+            "in": -9007199254740993,
+            "update_at": -9007199254740992
+        }
+    ],
+    "get_channel_moderated_permissions": [
+        {
+            "channel_type": "O",
+            "permissions": [
+                "add_bookmark_private_channel"
+            ],
+            "result": {
+                "manage_bookmarks": false
+            }
+        },
+        {
+            "channel_type": "P",
+            "permissions": [
+                "add_bookmark_private_channel"
+            ],
+            "result": {
+                "manage_bookmarks": true
+            }
+        },
+        {
+            "channel_type": "D",
+            "permissions": [
+                "add_bookmark_private_channel"
+            ],
+            "result": {
+                "manage_bookmarks": false
+            }
+        },
+        {
+            "channel_type": "G",
+            "permissions": [
+                "add_bookmark_private_channel"
+            ],
+            "result": {
+                "manage_bookmarks": false
+            }
+        },
+        {
+            "channel_type": "O",
+            "permissions": [
+                "add_bookmark_public_channel"
+            ],
+            "result": {
+                "manage_bookmarks": true
+            }
+        },
+        {
+            "channel_type": "P",
+            "permissions": [
+                "add_bookmark_public_channel"
+            ],
+            "result": {
+                "manage_bookmarks": false
+            }
+        },
+        {
+            "channel_type": "D",
+            "permissions": [
+                "add_bookmark_public_channel"
+            ],
+            "result": {
+                "manage_bookmarks": false
+            }
+        },
+        {
+            "channel_type": "G",
+            "permissions": [
+                "add_bookmark_public_channel"
+            ],
+            "result": {
+                "manage_bookmarks": false
+            }
+        },
+        {
+            "channel_type": "O",
+            "permissions": [
+                "add_reaction"
+            ],
+            "result": {
+                "create_reactions": true
+            }
+        },
+        {
+            "channel_type": "P",
+            "permissions": [
+                "add_reaction"
+            ],
+            "result": {
+                "create_reactions": true
+            }
+        },
+        {
+            "channel_type": "D",
+            "permissions": [
+                "add_reaction"
+            ],
+            "result": {
+                "create_reactions": true
+            }
+        },
+        {
+            "channel_type": "G",
+            "permissions": [
+                "add_reaction"
+            ],
+            "result": {
+                "create_reactions": true
+            }
+        },
+        {
+            "channel_type": "O",
+            "permissions": [
+                "create_post"
+            ],
+            "result": {
+                "create_post": true
+            }
+        },
+        {
+            "channel_type": "P",
+            "permissions": [
+                "create_post"
+            ],
+            "result": {
+                "create_post": true
+            }
+        },
+        {
+            "channel_type": "D",
+            "permissions": [
+                "create_post"
+            ],
+            "result": {
+                "create_post": true
+            }
+        },
+        {
+            "channel_type": "G",
+            "permissions": [
+                "create_post"
+            ],
+            "result": {
+                "create_post": true
+            }
+        },
+        {
+            "channel_type": "O",
+            "permissions": [
+                "delete_bookmark_private_channel"
+            ],
+            "result": {
+                "manage_bookmarks": false
+            }
+        },
+        {
+            "channel_type": "P",
+            "permissions": [
+                "delete_bookmark_private_channel"
+            ],
+            "result": {
+                "manage_bookmarks": false
+            }
+        },
+        {
+            "channel_type": "D",
+            "permissions": [
+                "delete_bookmark_private_channel"
+            ],
+            "result": {
+                "manage_bookmarks": false
+            }
+        },
+        {
+            "channel_type": "G",
+            "permissions": [
+                "delete_bookmark_private_channel"
+            ],
+            "result": {
+                "manage_bookmarks": false
+            }
+        },
+        {
+            "channel_type": "O",
+            "permissions": [
+                "delete_bookmark_public_channel"
+            ],
+            "result": {
+                "manage_bookmarks": false
+            }
+        },
+        {
+            "channel_type": "P",
+            "permissions": [
+                "delete_bookmark_public_channel"
+            ],
+            "result": {
+                "manage_bookmarks": false
+            }
+        },
+        {
+            "channel_type": "D",
+            "permissions": [
+                "delete_bookmark_public_channel"
+            ],
+            "result": {
+                "manage_bookmarks": false
+            }
+        },
+        {
+            "channel_type": "G",
+            "permissions": [
+                "delete_bookmark_public_channel"
+            ],
+            "result": {
+                "manage_bookmarks": false
+            }
+        },
+        {
+            "channel_type": "O",
+            "permissions": [
+                "edit_bookmark_private_channel"
+            ],
+            "result": {
+                "manage_bookmarks": false
+            }
+        },
+        {
+            "channel_type": "P",
+            "permissions": [
+                "edit_bookmark_private_channel"
+            ],
+            "result": {
+                "manage_bookmarks": false
+            }
+        },
+        {
+            "channel_type": "D",
+            "permissions": [
+                "edit_bookmark_private_channel"
+            ],
+            "result": {
+                "manage_bookmarks": false
+            }
+        },
+        {
+            "channel_type": "G",
+            "permissions": [
+                "edit_bookmark_private_channel"
+            ],
+            "result": {
+                "manage_bookmarks": false
+            }
+        },
+        {
+            "channel_type": "O",
+            "permissions": [
+                "edit_bookmark_public_channel"
+            ],
+            "result": {
+                "manage_bookmarks": false
+            }
+        },
+        {
+            "channel_type": "P",
+            "permissions": [
+                "edit_bookmark_public_channel"
+            ],
+            "result": {
+                "manage_bookmarks": false
+            }
+        },
+        {
+            "channel_type": "D",
+            "permissions": [
+                "edit_bookmark_public_channel"
+            ],
+            "result": {
+                "manage_bookmarks": false
+            }
+        },
+        {
+            "channel_type": "G",
+            "permissions": [
+                "edit_bookmark_public_channel"
+            ],
+            "result": {
+                "manage_bookmarks": false
+            }
+        },
+        {
+            "channel_type": "O",
+            "permissions": [
+                "manage_private_channel_members"
+            ],
+            "result": {
+                "manage_members": false
+            }
+        },
+        {
+            "channel_type": "P",
+            "permissions": [
+                "manage_private_channel_members"
+            ],
+            "result": {
+                "manage_members": true
+            }
+        },
+        {
+            "channel_type": "D",
+            "permissions": [
+                "manage_private_channel_members"
+            ],
+            "result": {
+                "manage_members": false
+            }
+        },
+        {
+            "channel_type": "G",
+            "permissions": [
+                "manage_private_channel_members"
+            ],
+            "result": {
+                "manage_members": false
+            }
+        },
+        {
+            "channel_type": "O",
+            "permissions": [
+                "manage_public_channel_members"
+            ],
+            "result": {
+                "manage_members": true
+            }
+        },
+        {
+            "channel_type": "P",
+            "permissions": [
+                "manage_public_channel_members"
+            ],
+            "result": {
+                "manage_members": false
+            }
+        },
+        {
+            "channel_type": "D",
+            "permissions": [
+                "manage_public_channel_members"
+            ],
+            "result": {
+                "manage_members": false
+            }
+        },
+        {
+            "channel_type": "G",
+            "permissions": [
+                "manage_public_channel_members"
+            ],
+            "result": {
+                "manage_members": false
+            }
+        },
+        {
+            "channel_type": "O",
+            "permissions": [
+                "order_bookmark_private_channel"
+            ],
+            "result": {
+                "manage_bookmarks": false
+            }
+        },
+        {
+            "channel_type": "P",
+            "permissions": [
+                "order_bookmark_private_channel"
+            ],
+            "result": {
+                "manage_bookmarks": false
+            }
+        },
+        {
+            "channel_type": "D",
+            "permissions": [
+                "order_bookmark_private_channel"
+            ],
+            "result": {
+                "manage_bookmarks": false
+            }
+        },
+        {
+            "channel_type": "G",
+            "permissions": [
+                "order_bookmark_private_channel"
+            ],
+            "result": {
+                "manage_bookmarks": false
+            }
+        },
+        {
+            "channel_type": "O",
+            "permissions": [
+                "order_bookmark_public_channel"
+            ],
+            "result": {
+                "manage_bookmarks": false
+            }
+        },
+        {
+            "channel_type": "P",
+            "permissions": [
+                "order_bookmark_public_channel"
+            ],
+            "result": {
+                "manage_bookmarks": false
+            }
+        },
+        {
+            "channel_type": "D",
+            "permissions": [
+                "order_bookmark_public_channel"
+            ],
+            "result": {
+                "manage_bookmarks": false
+            }
+        },
+        {
+            "channel_type": "G",
+            "permissions": [
+                "order_bookmark_public_channel"
+            ],
+            "result": {
+                "manage_bookmarks": false
+            }
+        },
+        {
+            "channel_type": "O",
+            "permissions": [
+                "remove_reaction"
+            ],
+            "result": {
+                "create_reactions": true
+            }
+        },
+        {
+            "channel_type": "P",
+            "permissions": [
+                "remove_reaction"
+            ],
+            "result": {
+                "create_reactions": true
+            }
+        },
+        {
+            "channel_type": "D",
+            "permissions": [
+                "remove_reaction"
+            ],
+            "result": {
+                "create_reactions": true
+            }
+        },
+        {
+            "channel_type": "G",
+            "permissions": [
+                "remove_reaction"
+            ],
+            "result": {
+                "create_reactions": true
+            }
+        },
+        {
+            "channel_type": "O",
+            "permissions": [
+                "use_channel_mentions"
+            ],
+            "result": {
+                "use_channel_mentions": true
+            }
+        },
+        {
+            "channel_type": "P",
+            "permissions": [
+                "use_channel_mentions"
+            ],
+            "result": {
+                "use_channel_mentions": true
+            }
+        },
+        {
+            "channel_type": "D",
+            "permissions": [
+                "use_channel_mentions"
+            ],
+            "result": {
+                "use_channel_mentions": true
+            }
+        },
+        {
+            "channel_type": "G",
+            "permissions": [
+                "use_channel_mentions"
+            ],
+            "result": {
+                "use_channel_mentions": true
+            }
+        },
+        {
+            "channel_type": "O",
+            "permissions": [],
+            "result": {}
+        },
+        {
+            "channel_type": "P",
+            "permissions": [],
+            "result": {}
+        },
+        {
+            "channel_type": "D",
+            "permissions": [],
+            "result": {}
+        },
+        {
+            "channel_type": "G",
+            "permissions": [],
+            "result": {}
+        },
+        {
+            "channel_type": "O",
+            "permissions": [
+                "manage_team"
+            ],
+            "result": {}
+        },
+        {
+            "channel_type": "P",
+            "permissions": [
+                "manage_team"
+            ],
+            "result": {}
+        },
+        {
+            "channel_type": "D",
+            "permissions": [
+                "manage_team"
+            ],
+            "result": {}
+        },
+        {
+            "channel_type": "G",
+            "permissions": [
+                "manage_team"
+            ],
+            "result": {}
+        },
+        {
+            "channel_type": "O",
+            "permissions": [
+                "manage_public_channel_members",
+                "manage_private_channel_members"
+            ],
+            "result": {
+                "manage_members": true
+            }
+        },
+        {
+            "channel_type": "P",
+            "permissions": [
+                "manage_public_channel_members",
+                "manage_private_channel_members"
+            ],
+            "result": {
+                "manage_members": true
+            }
+        },
+        {
+            "channel_type": "D",
+            "permissions": [
+                "manage_public_channel_members",
+                "manage_private_channel_members"
+            ],
+            "result": {
+                "manage_members": false
+            }
+        },
+        {
+            "channel_type": "G",
+            "permissions": [
+                "manage_public_channel_members",
+                "manage_private_channel_members"
+            ],
+            "result": {
+                "manage_members": false
+            }
+        },
+        {
+            "channel_type": "O",
+            "permissions": [
+                "add_bookmark_public_channel",
+                "add_bookmark_private_channel"
+            ],
+            "result": {
+                "manage_bookmarks": true
+            }
+        },
+        {
+            "channel_type": "P",
+            "permissions": [
+                "add_bookmark_public_channel",
+                "add_bookmark_private_channel"
+            ],
+            "result": {
+                "manage_bookmarks": true
+            }
+        },
+        {
+            "channel_type": "D",
+            "permissions": [
+                "add_bookmark_public_channel",
+                "add_bookmark_private_channel"
+            ],
+            "result": {
+                "manage_bookmarks": false
+            }
+        },
+        {
+            "channel_type": "G",
+            "permissions": [
+                "add_bookmark_public_channel",
+                "add_bookmark_private_channel"
+            ],
+            "result": {
+                "manage_bookmarks": false
+            }
+        },
+        {
+            "channel_type": "O",
+            "permissions": [
+                "delete_bookmark_public_channel"
+            ],
+            "result": {
+                "manage_bookmarks": false
+            }
+        },
+        {
+            "channel_type": "P",
+            "permissions": [
+                "delete_bookmark_public_channel"
+            ],
+            "result": {
+                "manage_bookmarks": false
+            }
+        },
+        {
+            "channel_type": "D",
+            "permissions": [
+                "delete_bookmark_public_channel"
+            ],
+            "result": {
+                "manage_bookmarks": false
+            }
+        },
+        {
+            "channel_type": "G",
+            "permissions": [
+                "delete_bookmark_public_channel"
+            ],
+            "result": {
+                "manage_bookmarks": false
+            }
+        },
+        {
+            "channel_type": "O",
+            "permissions": [
+                "create_post",
+                "add_reaction",
+                "remove_reaction",
+                "use_channel_mentions"
+            ],
+            "result": {
+                "create_post": true,
+                "create_reactions": true,
+                "use_channel_mentions": true
+            }
+        },
+        {
+            "channel_type": "P",
+            "permissions": [
+                "create_post",
+                "add_reaction",
+                "remove_reaction",
+                "use_channel_mentions"
+            ],
+            "result": {
+                "create_post": true,
+                "create_reactions": true,
+                "use_channel_mentions": true
+            }
+        },
+        {
+            "channel_type": "D",
+            "permissions": [
+                "create_post",
+                "add_reaction",
+                "remove_reaction",
+                "use_channel_mentions"
+            ],
+            "result": {
+                "create_post": true,
+                "create_reactions": true,
+                "use_channel_mentions": true
+            }
+        },
+        {
+            "channel_type": "G",
+            "permissions": [
+                "create_post",
+                "add_reaction",
+                "remove_reaction",
+                "use_channel_mentions"
+            ],
+            "result": {
+                "create_post": true,
+                "create_reactions": true,
+                "use_channel_mentions": true
+            }
+        }
+    ],
+    "is_built_in_role": [
+        {
+            "built_in": false,
+            "in": ""
+        },
+        {
+            "built_in": false,
+            "in": "System_Admin"
+        },
+        {
+            "built_in": true,
+            "in": "channel_admin"
+        },
+        {
+            "built_in": true,
+            "in": "channel_guest"
+        },
+        {
+            "built_in": true,
+            "in": "channel_user"
+        },
+        {
+            "built_in": true,
+            "in": "custom_group_user"
+        },
+        {
+            "built_in": false,
+            "in": "custom_role"
+        },
+        {
+            "built_in": true,
+            "in": "playbook_admin"
+        },
+        {
+            "built_in": true,
+            "in": "playbook_member"
+        },
+        {
+            "built_in": true,
+            "in": "run_admin"
+        },
+        {
+            "built_in": true,
+            "in": "run_member"
+        },
+        {
+            "built_in": true,
+            "in": "system_admin"
+        },
+        {
+            "built_in": false,
+            "in": "system_admin "
+        },
+        {
+            "built_in": true,
+            "in": "system_custom_group_admin"
+        },
+        {
+            "built_in": true,
+            "in": "system_guest"
+        },
+        {
+            "built_in": true,
+            "in": "system_manager"
+        },
+        {
+            "built_in": true,
+            "in": "system_post_all"
+        },
+        {
+            "built_in": true,
+            "in": "system_post_all_public"
+        },
+        {
+            "built_in": true,
+            "in": "system_read_only_admin"
+        },
+        {
+            "built_in": true,
+            "in": "system_shared_channel_manager"
+        },
+        {
+            "built_in": true,
+            "in": "system_user"
+        },
+        {
+            "built_in": true,
+            "in": "system_user_access_token"
+        },
+        {
+            "built_in": true,
+            "in": "system_user_manager"
+        },
+        {
+            "built_in": true,
+            "in": "team_admin"
+        },
+        {
+            "built_in": true,
+            "in": "team_guest"
+        },
+        {
+            "built_in": true,
+            "in": "team_post_all"
+        },
+        {
+            "built_in": true,
+            "in": "team_post_all_public"
+        },
+        {
+            "built_in": true,
+            "in": "team_user"
+        }
+    ],
+    "is_channel_scoped_built_in_role": [
+        {
+            "channel_scoped": false,
+            "in": "system_guest"
+        },
+        {
+            "channel_scoped": false,
+            "in": "system_user"
+        },
+        {
+            "channel_scoped": false,
+            "in": "system_admin"
+        },
+        {
+            "channel_scoped": false,
+            "in": "system_post_all"
+        },
+        {
+            "channel_scoped": false,
+            "in": "system_post_all_public"
+        },
+        {
+            "channel_scoped": false,
+            "in": "system_user_access_token"
+        },
+        {
+            "channel_scoped": false,
+            "in": "team_guest"
+        },
+        {
+            "channel_scoped": false,
+            "in": "team_user"
+        },
+        {
+            "channel_scoped": false,
+            "in": "team_admin"
+        },
+        {
+            "channel_scoped": false,
+            "in": "team_post_all"
+        },
+        {
+            "channel_scoped": false,
+            "in": "team_post_all_public"
+        },
+        {
+            "channel_scoped": true,
+            "in": "channel_guest"
+        },
+        {
+            "channel_scoped": true,
+            "in": "channel_user"
+        },
+        {
+            "channel_scoped": true,
+            "in": "channel_admin"
+        },
+        {
+            "channel_scoped": false,
+            "in": "custom_group_user"
+        },
+        {
+            "channel_scoped": false,
+            "in": "system_custom_group_admin"
+        },
+        {
+            "channel_scoped": false,
+            "in": "playbook_admin"
+        },
+        {
+            "channel_scoped": false,
+            "in": "playbook_member"
+        },
+        {
+            "channel_scoped": false,
+            "in": "run_admin"
+        },
+        {
+            "channel_scoped": false,
+            "in": "run_member"
+        },
+        {
+            "channel_scoped": false,
+            "in": "system_user_manager"
+        },
+        {
+            "channel_scoped": false,
+            "in": "system_read_only_admin"
+        },
+        {
+            "channel_scoped": false,
+            "in": "system_manager"
+        },
+        {
+            "channel_scoped": false,
+            "in": "system_shared_channel_manager"
+        },
+        {
+            "channel_scoped": false,
+            "in": ""
+        },
+        {
+            "channel_scoped": false,
+            "in": "custom_role"
+        }
+    ],
+    "is_valid": [
+        {
+            "is_valid_err": "",
+            "is_valid_ok": true,
+            "name": "valid",
+            "role": {
+                "id": "zeorgzsgopy5tjwm8ocge7ge3c",
+                "name": "custom_role",
+                "display_name": "Custom Role",
+                "description": "a description",
+                "create_at": 0,
+                "update_at": 0,
+                "delete_at": 0,
+                "permissions": [
+                    "create_post"
+                ],
+                "scheme_managed": false,
+                "built_in": false,
+                "scheme_id": null
+            },
+            "without_id_err": "",
+            "without_id_ok": true
+        },
+        {
+            "is_valid_err": "invalid role id \"nope\"",
+            "is_valid_ok": false,
+            "name": "bad_id",
+            "role": {
+                "id": "nope",
+                "name": "custom_role",
+                "display_name": "Custom Role",
+                "description": "a description",
+                "create_at": 0,
+                "update_at": 0,
+                "delete_at": 0,
+                "permissions": [
+                    "create_post"
+                ],
+                "scheme_managed": false,
+                "built_in": false,
+                "scheme_id": null
+            },
+            "without_id_err": "",
+            "without_id_ok": true
+        },
+        {
+            "is_valid_err": "invalid role id \"\"",
+            "is_valid_ok": false,
+            "name": "empty_id",
+            "role": {
+                "id": "",
+                "name": "custom_role",
+                "display_name": "Custom Role",
+                "description": "a description",
+                "create_at": 0,
+                "update_at": 0,
+                "delete_at": 0,
+                "permissions": [
+                    "create_post"
+                ],
+                "scheme_managed": false,
+                "built_in": false,
+                "scheme_id": null
+            },
+            "without_id_err": "",
+            "without_id_ok": true
+        },
+        {
+            "is_valid_err": "invalid role name \"Bad Name\"",
+            "is_valid_ok": false,
+            "name": "bad_name",
+            "role": {
+                "id": "zeorgzsgopy5tjwm8ocge7ge3c",
+                "name": "Bad Name",
+                "display_name": "Custom Role",
+                "description": "a description",
+                "create_at": 0,
+                "update_at": 0,
+                "delete_at": 0,
+                "permissions": [
+                    "create_post"
+                ],
+                "scheme_managed": false,
+                "built_in": false,
+                "scheme_id": null
+            },
+            "without_id_err": "invalid role name \"Bad Name\"",
+            "without_id_ok": false
+        },
+        {
+            "is_valid_err": "invalid role name \"\"",
+            "is_valid_ok": false,
+            "name": "empty_name",
+            "role": {
+                "id": "zeorgzsgopy5tjwm8ocge7ge3c",
+                "name": "",
+                "display_name": "Custom Role",
+                "description": "a description",
+                "create_at": 0,
+                "update_at": 0,
+                "delete_at": 0,
+                "permissions": [
+                    "create_post"
+                ],
+                "scheme_managed": false,
+                "built_in": false,
+                "scheme_id": null
+            },
+            "without_id_err": "invalid role name \"\"",
+            "without_id_ok": false
+        },
+        {
+            "is_valid_err": "invalid role name \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"",
+            "is_valid_ok": false,
+            "name": "name_too_long",
+            "role": {
+                "id": "zeorgzsgopy5tjwm8ocge7ge3c",
+                "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "display_name": "Custom Role",
+                "description": "a description",
+                "create_at": 0,
+                "update_at": 0,
+                "delete_at": 0,
+                "permissions": [
+                    "create_post"
+                ],
+                "scheme_managed": false,
+                "built_in": false,
+                "scheme_id": null
+            },
+            "without_id_err": "invalid role name \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"",
+            "without_id_ok": false
+        },
+        {
+            "is_valid_err": "",
+            "is_valid_ok": true,
+            "name": "name_at_cap",
+            "role": {
+                "id": "zeorgzsgopy5tjwm8ocge7ge3c",
+                "name": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "display_name": "Custom Role",
+                "description": "a description",
+                "create_at": 0,
+                "update_at": 0,
+                "delete_at": 0,
+                "permissions": [
+                    "create_post"
+                ],
+                "scheme_managed": false,
+                "built_in": false,
+                "scheme_id": null
+            },
+            "without_id_err": "",
+            "without_id_ok": true
+        },
+        {
+            "is_valid_err": "role display name must not be empty",
+            "is_valid_ok": false,
+            "name": "empty_display_name",
+            "role": {
+                "id": "zeorgzsgopy5tjwm8ocge7ge3c",
+                "name": "custom_role",
+                "display_name": "",
+                "description": "a description",
+                "create_at": 0,
+                "update_at": 0,
+                "delete_at": 0,
+                "permissions": [
+                    "create_post"
+                ],
+                "scheme_managed": false,
+                "built_in": false,
+                "scheme_id": null
+            },
+            "without_id_err": "role display name must not be empty",
+            "without_id_ok": false
+        },
+        {
+            "is_valid_err": "",
+            "is_valid_ok": true,
+            "name": "display_name_at_cap",
+            "role": {
+                "id": "zeorgzsgopy5tjwm8ocge7ge3c",
+                "name": "custom_role",
+                "display_name": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+                "description": "a description",
+                "create_at": 0,
+                "update_at": 0,
+                "delete_at": 0,
+                "permissions": [
+                    "create_post"
+                ],
+                "scheme_managed": false,
+                "built_in": false,
+                "scheme_id": null
+            },
+            "without_id_err": "",
+            "without_id_ok": true
+        },
+        {
+            "is_valid_err": "role display name \"ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\" exceeds maximum length of 128",
+            "is_valid_ok": false,
+            "name": "display_name_over_cap",
+            "role": {
+                "id": "zeorgzsgopy5tjwm8ocge7ge3c",
+                "name": "custom_role",
+                "display_name": "ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+                "description": "a description",
+                "create_at": 0,
+                "update_at": 0,
+                "delete_at": 0,
+                "permissions": [
+                    "create_post"
+                ],
+                "scheme_managed": false,
+                "built_in": false,
+                "scheme_id": null
+            },
+            "without_id_err": "role display name \"ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\" exceeds maximum length of 128",
+            "without_id_ok": false
+        },
+        {
+            "is_valid_err": "role display name \"ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé\" exceeds maximum length of 128",
+            "is_valid_ok": false,
+            "name": "display_name_multibyte_over_byte_cap",
+            "role": {
+                "id": "zeorgzsgopy5tjwm8ocge7ge3c",
+                "name": "custom_role",
+                "display_name": "ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+                "description": "a description",
+                "create_at": 0,
+                "update_at": 0,
+                "delete_at": 0,
+                "permissions": [
+                    "create_post"
+                ],
+                "scheme_managed": false,
+                "built_in": false,
+                "scheme_id": null
+            },
+            "without_id_err": "role display name \"ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé\" exceeds maximum length of 128",
+            "without_id_ok": false
+        },
+        {
+            "is_valid_err": "",
+            "is_valid_ok": true,
+            "name": "description_at_cap",
+            "role": {
+                "id": "zeorgzsgopy5tjwm8ocge7ge3c",
+                "name": "custom_role",
+                "display_name": "Custom Role",
+                "description": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                "create_at": 0,
+                "update_at": 0,
+                "delete_at": 0,
+                "permissions": [
+                    "create_post"
+                ],
+                "scheme_managed": false,
+                "built_in": false,
+                "scheme_id": null
+            },
+            "without_id_err": "",
+            "without_id_ok": true
+        },
+        {
+            "is_valid_err": "role description exceeds maximum length of 1024",
+            "is_valid_ok": false,
+            "name": "description_over_cap",
+            "role": {
+                "id": "zeorgzsgopy5tjwm8ocge7ge3c",
+                "name": "custom_role",
+                "display_name": "Custom Role",
+                "description": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+                "create_at": 0,
+                "update_at": 0,
+                "delete_at": 0,
+                "permissions": [
+                    "create_post"
+                ],
+                "scheme_managed": false,
+                "built_in": false,
+                "scheme_id": null
+            },
+            "without_id_err": "role description exceeds maximum length of 1024",
+            "without_id_ok": false
+        },
+        {
+            "is_valid_err": "",
+            "is_valid_ok": true,
+            "name": "empty_description",
+            "role": {
+                "id": "zeorgzsgopy5tjwm8ocge7ge3c",
+                "name": "custom_role",
+                "display_name": "Custom Role",
+                "description": "",
+                "create_at": 0,
+                "update_at": 0,
+                "delete_at": 0,
+                "permissions": [
+                    "create_post"
+                ],
+                "scheme_managed": false,
+                "built_in": false,
+                "scheme_id": null
+            },
+            "without_id_err": "",
+            "without_id_ok": true
+        },
+        {
+            "is_valid_err": "",
+            "is_valid_ok": true,
+            "name": "nil_permissions",
+            "role": {
+                "id": "zeorgzsgopy5tjwm8ocge7ge3c",
+                "name": "custom_role",
+                "display_name": "Custom Role",
+                "description": "a description",
+                "create_at": 0,
+                "update_at": 0,
+                "delete_at": 0,
+                "permissions": null,
+                "scheme_managed": false,
+                "built_in": false,
+                "scheme_id": null
+            },
+            "without_id_err": "",
+            "without_id_ok": true
+        },
+        {
+            "is_valid_err": "unknown permissions: nope",
+            "is_valid_ok": false,
+            "name": "unknown_permission",
+            "role": {
+                "id": "zeorgzsgopy5tjwm8ocge7ge3c",
+                "name": "custom_role",
+                "display_name": "Custom Role",
+                "description": "a description",
+                "create_at": 0,
+                "update_at": 0,
+                "delete_at": 0,
+                "permissions": [
+                    "nope"
+                ],
+                "scheme_managed": false,
+                "built_in": false,
+                "scheme_id": null
+            },
+            "without_id_err": "unknown permissions: nope",
+            "without_id_ok": false
+        },
+        {
+            "is_valid_err": "unknown permissions: nope, also_nope",
+            "is_valid_ok": false,
+            "name": "two_unknown_permissions",
+            "role": {
+                "id": "zeorgzsgopy5tjwm8ocge7ge3c",
+                "name": "custom_role",
+                "display_name": "Custom Role",
+                "description": "a description",
+                "create_at": 0,
+                "update_at": 0,
+                "delete_at": 0,
+                "permissions": [
+                    "nope",
+                    "also_nope"
+                ],
+                "scheme_managed": false,
+                "built_in": false,
+                "scheme_id": null
+            },
+            "without_id_err": "unknown permissions: nope, also_nope",
+            "without_id_ok": false
+        },
+        {
+            "is_valid_err": "",
+            "is_valid_ok": true,
+            "name": "deprecated_permission",
+            "role": {
+                "id": "zeorgzsgopy5tjwm8ocge7ge3c",
+                "name": "custom_role",
+                "display_name": "Custom Role",
+                "description": "a description",
+                "create_at": 0,
+                "update_at": 0,
+                "delete_at": 0,
+                "permissions": [
+                    "permanent_delete_user"
+                ],
+                "scheme_managed": false,
+                "built_in": false,
+                "scheme_id": null
+            },
+            "without_id_err": "",
+            "without_id_ok": true
+        },
+        {
+            "is_valid_err": "invalid role name \"bad\\\"name\"",
+            "is_valid_ok": false,
+            "name": "quote_in_name",
+            "role": {
+                "id": "zeorgzsgopy5tjwm8ocge7ge3c",
+                "name": "bad\"name",
+                "display_name": "Custom Role",
+                "description": "a description",
+                "create_at": 0,
+                "update_at": 0,
+                "delete_at": 0,
+                "permissions": [
+                    "create_post"
+                ],
+                "scheme_managed": false,
+                "built_in": false,
+                "scheme_id": null
+            },
+            "without_id_err": "invalid role name \"bad\\\"name\"",
+            "without_id_ok": false
+        },
+        {
+            "is_valid_err": "invalid role name \"rôle\"",
+            "is_valid_ok": false,
+            "name": "unicode_name",
+            "role": {
+                "id": "zeorgzsgopy5tjwm8ocge7ge3c",
+                "name": "rôle",
+                "display_name": "Custom Role",
+                "description": "a description",
+                "create_at": 0,
+                "update_at": 0,
+                "delete_at": 0,
+                "permissions": [
+                    "create_post"
+                ],
+                "scheme_managed": false,
+                "built_in": false,
+                "scheme_id": null
+            },
+            "without_id_err": "invalid role name \"rôle\"",
+            "without_id_ok": false
+        },
+        {
+            "is_valid_err": "invalid role name \"a\\x7fb\"",
+            "is_valid_ok": false,
+            "name": "control_char_name",
+            "role": {
+                "id": "zeorgzsgopy5tjwm8ocge7ge3c",
+                "name": "ab",
+                "display_name": "Custom Role",
+                "description": "a description",
+                "create_at": 0,
+                "update_at": 0,
+                "delete_at": 0,
+                "permissions": [
+                    "create_post"
+                ],
+                "scheme_managed": false,
+                "built_in": false,
+                "scheme_id": null
+            },
+            "without_id_err": "invalid role name \"a\\x7fb\"",
+            "without_id_ok": false
+        },
+        {
+            "is_valid_err": "invalid role name \"role😀\"",
+            "is_valid_ok": false,
+            "name": "emoji_name",
+            "role": {
+                "id": "zeorgzsgopy5tjwm8ocge7ge3c",
+                "name": "role😀",
+                "display_name": "Custom Role",
+                "description": "a description",
+                "create_at": 0,
+                "update_at": 0,
+                "delete_at": 0,
+                "permissions": [
+                    "create_post"
+                ],
+                "scheme_managed": false,
+                "built_in": false,
+                "scheme_id": null
+            },
+            "without_id_err": "invalid role name \"role😀\"",
+            "without_id_ok": false
+        }
+    ],
+    "is_valid_channel_member_roles": [
+        {
+            "in": "system_guest",
+            "valid": false,
+            "valid_as_user": true
+        },
+        {
+            "in": "system_guest channel_user",
+            "valid": false,
+            "valid_as_user": true
+        },
+        {
+            "in": "system_user",
+            "valid": false,
+            "valid_as_user": true
+        },
+        {
+            "in": "system_user channel_user",
+            "valid": false,
+            "valid_as_user": true
+        },
+        {
+            "in": "system_admin",
+            "valid": false,
+            "valid_as_user": false
+        },
+        {
+            "in": "system_admin channel_user",
+            "valid": false,
+            "valid_as_user": true
+        },
+        {
+            "in": "system_post_all",
+            "valid": false,
+            "valid_as_user": true
+        },
+        {
+            "in": "system_post_all channel_user",
+            "valid": false,
+            "valid_as_user": true
+        },
+        {
+            "in": "system_post_all_public",
+            "valid": false,
+            "valid_as_user": true
+        },
+        {
+            "in": "system_post_all_public channel_user",
+            "valid": false,
+            "valid_as_user": true
+        },
+        {
+            "in": "system_user_access_token",
+            "valid": false,
+            "valid_as_user": true
+        },
+        {
+            "in": "system_user_access_token channel_user",
+            "valid": false,
+            "valid_as_user": true
+        },
+        {
+            "in": "team_guest",
+            "valid": false,
+            "valid_as_user": true
+        },
+        {
+            "in": "team_guest channel_user",
+            "valid": false,
+            "valid_as_user": true
+        },
+        {
+            "in": "team_user",
+            "valid": false,
+            "valid_as_user": true
+        },
+        {
+            "in": "team_user channel_user",
+            "valid": false,
+            "valid_as_user": true
+        },
+        {
+            "in": "team_admin",
+            "valid": false,
+            "valid_as_user": true
+        },
+        {
+            "in": "team_admin channel_user",
+            "valid": false,
+            "valid_as_user": true
+        },
+        {
+            "in": "team_post_all",
+            "valid": false,
+            "valid_as_user": true
+        },
+        {
+            "in": "team_post_all channel_user",
+            "valid": false,
+            "valid_as_user": true
+        },
+        {
+            "in": "team_post_all_public",
+            "valid": false,
+            "valid_as_user": true
+        },
+        {
+            "in": "team_post_all_public channel_user",
+            "valid": false,
+            "valid_as_user": true
+        },
+        {
+            "in": "channel_guest",
+            "valid": true,
+            "valid_as_user": true
+        },
+        {
+            "in": "channel_guest channel_user",
+            "valid": true,
+            "valid_as_user": true
+        },
+        {
+            "in": "channel_user",
+            "valid": true,
+            "valid_as_user": true
+        },
+        {
+            "in": "channel_user channel_user",
+            "valid": true,
+            "valid_as_user": true
+        },
+        {
+            "in": "channel_admin",
+            "valid": true,
+            "valid_as_user": true
+        },
+        {
+            "in": "channel_admin channel_user",
+            "valid": true,
+            "valid_as_user": true
+        },
+        {
+            "in": "custom_group_user",
+            "valid": false,
+            "valid_as_user": true
+        },
+        {
+            "in": "custom_group_user channel_user",
+            "valid": false,
+            "valid_as_user": true
+        },
+        {
+            "in": "system_custom_group_admin",
+            "valid": false,
+            "valid_as_user": true
+        },
+        {
+            "in": "system_custom_group_admin channel_user",
+            "valid": false,
+            "valid_as_user": true
+        },
+        {
+            "in": "playbook_admin",
+            "valid": false,
+            "valid_as_user": true
+        },
+        {
+            "in": "playbook_admin channel_user",
+            "valid": false,
+            "valid_as_user": true
+        },
+        {
+            "in": "playbook_member",
+            "valid": false,
+            "valid_as_user": true
+        },
+        {
+            "in": "playbook_member channel_user",
+            "valid": false,
+            "valid_as_user": true
+        },
+        {
+            "in": "run_admin",
+            "valid": false,
+            "valid_as_user": true
+        },
+        {
+            "in": "run_admin channel_user",
+            "valid": false,
+            "valid_as_user": true
+        },
+        {
+            "in": "run_member",
+            "valid": false,
+            "valid_as_user": true
+        },
+        {
+            "in": "run_member channel_user",
+            "valid": false,
+            "valid_as_user": true
+        },
+        {
+            "in": "system_user_manager",
+            "valid": false,
+            "valid_as_user": true
+        },
+        {
+            "in": "system_user_manager channel_user",
+            "valid": false,
+            "valid_as_user": true
+        },
+        {
+            "in": "system_read_only_admin",
+            "valid": false,
+            "valid_as_user": true
+        },
+        {
+            "in": "system_read_only_admin channel_user",
+            "valid": false,
+            "valid_as_user": true
+        },
+        {
+            "in": "system_manager",
+            "valid": false,
+            "valid_as_user": true
+        },
+        {
+            "in": "system_manager channel_user",
+            "valid": false,
+            "valid_as_user": true
+        },
+        {
+            "in": "system_shared_channel_manager",
+            "valid": false,
+            "valid_as_user": true
+        },
+        {
+            "in": "system_shared_channel_manager channel_user",
+            "valid": false,
+            "valid_as_user": true
+        },
+        {
+            "in": "",
+            "valid": true,
+            "valid_as_user": true
+        },
+        {
+            "in": " ",
+            "valid": true,
+            "valid_as_user": true
+        },
+        {
+            "in": "channel_user channel_admin",
+            "valid": true,
+            "valid_as_user": true
+        },
+        {
+            "in": "channel_guest",
+            "valid": true,
+            "valid_as_user": true
+        },
+        {
+            "in": "custom_role",
+            "valid": true,
+            "valid_as_user": true
+        },
+        {
+            "in": "custom_role channel_user",
+            "valid": true,
+            "valid_as_user": true
+        },
+        {
+            "in": "system_admin",
+            "valid": false,
+            "valid_as_user": false
+        }
+    ],
+    "is_valid_role_name": [
+        {
+            "bytes": 2,
+            "in": "a\u0000",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a\u0001",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a\u0002",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a\u0003",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a\u0004",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a\u0005",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a\u0006",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a\u0007",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a\b",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a\t",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a\n",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a\u000b",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a\f",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a\r",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a\u000e",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a\u000f",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a\u0010",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a\u0011",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a\u0012",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a\u0013",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a\u0014",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a\u0015",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a\u0016",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a\u0017",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a\u0018",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a\u0019",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a\u001a",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a\u001b",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a\u001c",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a\u001d",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a\u001e",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a\u001f",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a ",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a!",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a\"",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a#",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a$",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a%",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a\u0026",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a'",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a(",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a)",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a*",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a+",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a,",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a-",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a.",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a/",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a0",
+            "valid": true
+        },
+        {
+            "bytes": 2,
+            "in": "a1",
+            "valid": true
+        },
+        {
+            "bytes": 2,
+            "in": "a2",
+            "valid": true
+        },
+        {
+            "bytes": 2,
+            "in": "a3",
+            "valid": true
+        },
+        {
+            "bytes": 2,
+            "in": "a4",
+            "valid": true
+        },
+        {
+            "bytes": 2,
+            "in": "a5",
+            "valid": true
+        },
+        {
+            "bytes": 2,
+            "in": "a6",
+            "valid": true
+        },
+        {
+            "bytes": 2,
+            "in": "a7",
+            "valid": true
+        },
+        {
+            "bytes": 2,
+            "in": "a8",
+            "valid": true
+        },
+        {
+            "bytes": 2,
+            "in": "a9",
+            "valid": true
+        },
+        {
+            "bytes": 2,
+            "in": "a:",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a;",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a\u003c",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a=",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a\u003e",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a?",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a@",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "aA",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "aB",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "aC",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "aD",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "aE",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "aF",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "aG",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "aH",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "aI",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "aJ",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "aK",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "aL",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "aM",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "aN",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "aO",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "aP",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "aQ",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "aR",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "aS",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "aT",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "aU",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "aV",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "aW",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "aX",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "aY",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "aZ",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a[",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a\\",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a]",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a^",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a_",
+            "valid": true
+        },
+        {
+            "bytes": 2,
+            "in": "a`",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "aa",
+            "valid": true
+        },
+        {
+            "bytes": 2,
+            "in": "ab",
+            "valid": true
+        },
+        {
+            "bytes": 2,
+            "in": "ac",
+            "valid": true
+        },
+        {
+            "bytes": 2,
+            "in": "ad",
+            "valid": true
+        },
+        {
+            "bytes": 2,
+            "in": "ae",
+            "valid": true
+        },
+        {
+            "bytes": 2,
+            "in": "af",
+            "valid": true
+        },
+        {
+            "bytes": 2,
+            "in": "ag",
+            "valid": true
+        },
+        {
+            "bytes": 2,
+            "in": "ah",
+            "valid": true
+        },
+        {
+            "bytes": 2,
+            "in": "ai",
+            "valid": true
+        },
+        {
+            "bytes": 2,
+            "in": "aj",
+            "valid": true
+        },
+        {
+            "bytes": 2,
+            "in": "ak",
+            "valid": true
+        },
+        {
+            "bytes": 2,
+            "in": "al",
+            "valid": true
+        },
+        {
+            "bytes": 2,
+            "in": "am",
+            "valid": true
+        },
+        {
+            "bytes": 2,
+            "in": "an",
+            "valid": true
+        },
+        {
+            "bytes": 2,
+            "in": "ao",
+            "valid": true
+        },
+        {
+            "bytes": 2,
+            "in": "ap",
+            "valid": true
+        },
+        {
+            "bytes": 2,
+            "in": "aq",
+            "valid": true
+        },
+        {
+            "bytes": 2,
+            "in": "ar",
+            "valid": true
+        },
+        {
+            "bytes": 2,
+            "in": "as",
+            "valid": true
+        },
+        {
+            "bytes": 2,
+            "in": "at",
+            "valid": true
+        },
+        {
+            "bytes": 2,
+            "in": "au",
+            "valid": true
+        },
+        {
+            "bytes": 2,
+            "in": "av",
+            "valid": true
+        },
+        {
+            "bytes": 2,
+            "in": "aw",
+            "valid": true
+        },
+        {
+            "bytes": 2,
+            "in": "ax",
+            "valid": true
+        },
+        {
+            "bytes": 2,
+            "in": "ay",
+            "valid": true
+        },
+        {
+            "bytes": 2,
+            "in": "az",
+            "valid": true
+        },
+        {
+            "bytes": 2,
+            "in": "a{",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a|",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a}",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a~",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "a",
+            "valid": false
+        },
+        {
+            "bytes": 0,
+            "in": "",
+            "valid": false
+        },
+        {
+            "bytes": 1,
+            "in": "a",
+            "valid": true
+        },
+        {
+            "bytes": 1,
+            "in": "_",
+            "valid": true
+        },
+        {
+            "bytes": 1,
+            "in": "0",
+            "valid": true
+        },
+        {
+            "bytes": 12,
+            "in": "system_admin",
+            "valid": true
+        },
+        {
+            "bytes": 12,
+            "in": "channel_user",
+            "valid": true
+        },
+        {
+            "bytes": 64,
+            "in": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "valid": true
+        },
+        {
+            "bytes": 65,
+            "in": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "valid": false
+        },
+        {
+            "bytes": 64,
+            "in": "éééééééééééééééééééééééééééééééé",
+            "valid": false
+        },
+        {
+            "bytes": 66,
+            "in": "ééééééééééééééééééééééééééééééééé",
+            "valid": false
+        },
+        {
+            "bytes": 2,
+            "in": "é",
+            "valid": false
+        },
+        {
+            "bytes": 5,
+            "in": "rôle",
+            "valid": false
+        },
+        {
+            "bytes": 4,
+            "in": "ROLE",
+            "valid": false
+        },
+        {
+            "bytes": 4,
+            "in": "Role",
+            "valid": false
+        },
+        {
+            "bytes": 9,
+            "in": "role-name",
+            "valid": false
+        },
+        {
+            "bytes": 9,
+            "in": "role name",
+            "valid": false
+        },
+        {
+            "bytes": 5,
+            "in": " role",
+            "valid": false
+        },
+        {
+            "bytes": 5,
+            "in": "role ",
+            "valid": false
+        }
+    ],
+    "is_valid_user_roles": [
+        {
+            "fields": [],
+            "in": "",
+            "valid": true
+        },
+        {
+            "fields": [],
+            "in": " ",
+            "valid": true
+        },
+        {
+            "fields": [],
+            "in": "\t",
+            "valid": true
+        },
+        {
+            "fields": [],
+            "in": "\n",
+            "valid": true
+        },
+        {
+            "fields": [
+                "system_admin"
+            ],
+            "in": "system_admin",
+            "valid": false
+        },
+        {
+            "fields": [
+                "system_admin"
+            ],
+            "in": "system_admin ",
+            "valid": false
+        },
+        {
+            "fields": [
+                "system_admin"
+            ],
+            "in": " system_admin",
+            "valid": false
+        },
+        {
+            "fields": [
+                "system_admin",
+                "system_user"
+            ],
+            "in": "system_admin system_user",
+            "valid": true
+        },
+        {
+            "fields": [
+                "system_user",
+                "system_admin"
+            ],
+            "in": "system_user system_admin",
+            "valid": true
+        },
+        {
+            "fields": [
+                "system_user"
+            ],
+            "in": "system_user",
+            "valid": true
+        },
+        {
+            "fields": [
+                "system_user",
+                "system_admin"
+            ],
+            "in": "system_user  system_admin",
+            "valid": true
+        },
+        {
+            "fields": [
+                "system_user",
+                "system_admin"
+            ],
+            "in": "system_user\tsystem_admin",
+            "valid": true
+        },
+        {
+            "fields": [
+                "system_admin",
+                "system_admin"
+            ],
+            "in": "system_admin system_admin",
+            "valid": true
+        },
+        {
+            "fields": [
+                "System_Admin"
+            ],
+            "in": "System_Admin",
+            "valid": false
+        },
+        {
+            "fields": [
+                "not_a_role"
+            ],
+            "in": "not_a_role",
+            "valid": true
+        },
+        {
+            "fields": [
+                "role-with-hyphen"
+            ],
+            "in": "role-with-hyphen",
+            "valid": false
+        },
+        {
+            "fields": [
+                "system_user",
+                "role-with-hyphen"
+            ],
+            "in": "system_user role-with-hyphen",
+            "valid": false
+        }
+    ],
+    "merge_channel_higher_scoped_permissions": [
+        {
+            "higher": [
+                "read_channel",
+                "read_channel_content",
+                "add_reaction",
+                "remove_reaction",
+                "manage_public_channel_members",
+                "upload_file",
+                "get_public_link",
+                "create_post",
+                "use_channel_mentions",
+                "manage_public_channel_properties",
+                "delete_public_channel",
+                "manage_private_channel_properties",
+                "delete_private_channel",
+                "manage_private_channel_members",
+                "delete_post",
+                "edit_post",
+                "edit_file_attachment",
+                "add_bookmark_public_channel",
+                "edit_bookmark_public_channel",
+                "delete_bookmark_public_channel",
+                "order_bookmark_public_channel",
+                "add_bookmark_private_channel",
+                "edit_bookmark_private_channel",
+                "delete_bookmark_private_channel",
+                "order_bookmark_private_channel"
+            ],
+            "higher_role_id": "channel_admin",
+            "merged": [
+                "manage_public_channel_members",
+                "manage_private_channel_members",
+                "manage_public_channel_properties",
+                "manage_private_channel_properties",
+                "delete_public_channel",
+                "delete_private_channel",
+                "read_channel",
+                "read_channel_content",
+                "add_reaction",
+                "remove_reaction",
+                "upload_file",
+                "create_post",
+                "edit_post",
+                "delete_post",
+                "use_channel_mentions",
+                "add_bookmark_public_channel",
+                "edit_bookmark_public_channel",
+                "delete_bookmark_public_channel",
+                "order_bookmark_public_channel",
+                "add_bookmark_private_channel",
+                "edit_bookmark_private_channel",
+                "delete_bookmark_private_channel",
+                "order_bookmark_private_channel",
+                "edit_file_attachment"
+            ],
+            "merged_nil": false,
+            "name": "channel_admin_takes_higher_scope",
+            "role": []
+        },
+        {
+            "higher": [
+                "edit_post"
+            ],
+            "higher_role_id": "channel_admin",
+            "merged": [
+                "edit_post"
+            ],
+            "merged_nil": false,
+            "name": "channel_admin_ignores_role",
+            "role": [
+                "create_post"
+            ]
+        },
+        {
+            "higher": [
+                "create_post"
+            ],
+            "higher_role_id": "channel_user",
+            "merged": [
+                "create_post"
+            ],
+            "merged_nil": false,
+            "name": "member_moderated_needs_both",
+            "role": [
+                "create_post"
+            ]
+        },
+        {
+            "higher": [],
+            "higher_role_id": "channel_user",
+            "merged": [],
+            "merged_nil": false,
+            "name": "member_moderated_role_only",
+            "role": [
+                "create_post"
+            ]
+        },
+        {
+            "higher": [
+                "create_post"
+            ],
+            "higher_role_id": "channel_user",
+            "merged": [],
+            "merged_nil": false,
+            "name": "member_moderated_higher_only",
+            "role": []
+        },
+        {
+            "higher": [
+                "upload_file"
+            ],
+            "higher_role_id": "channel_user",
+            "merged": [
+                "upload_file"
+            ],
+            "merged_nil": false,
+            "name": "member_unmoderated_higher_only",
+            "role": []
+        },
+        {
+            "higher": [],
+            "higher_role_id": "channel_user",
+            "merged": [],
+            "merged_nil": false,
+            "name": "member_unmoderated_role_only",
+            "role": [
+                "upload_file"
+            ]
+        },
+        {
+            "higher": [
+                "manage_team"
+            ],
+            "higher_role_id": "channel_user",
+            "merged": [],
+            "merged_nil": false,
+            "name": "non_channel_scope_dropped",
+            "role": [
+                "manage_team"
+            ]
+        },
+        {
+            "higher": [
+                "read_channel",
+                "read_channel_content",
+                "add_reaction",
+                "remove_reaction",
+                "manage_public_channel_members",
+                "upload_file",
+                "get_public_link",
+                "create_post",
+                "use_channel_mentions",
+                "manage_public_channel_properties",
+                "delete_public_channel",
+                "manage_private_channel_properties",
+                "delete_private_channel",
+                "manage_private_channel_members",
+                "delete_post",
+                "edit_post",
+                "edit_file_attachment",
+                "add_bookmark_public_channel",
+                "edit_bookmark_public_channel",
+                "delete_bookmark_public_channel",
+                "order_bookmark_public_channel",
+                "add_bookmark_private_channel",
+                "edit_bookmark_private_channel",
+                "delete_bookmark_private_channel",
+                "order_bookmark_private_channel"
+            ],
+            "higher_role_id": "channel_user",
+            "merged": [
+                "manage_public_channel_members",
+                "manage_private_channel_members",
+                "manage_public_channel_properties",
+                "manage_private_channel_properties",
+                "delete_public_channel",
+                "delete_private_channel",
+                "read_channel",
+                "read_channel_content",
+                "add_reaction",
+                "remove_reaction",
+                "upload_file",
+                "create_post",
+                "edit_post",
+                "delete_post",
+                "use_channel_mentions",
+                "add_bookmark_public_channel",
+                "edit_bookmark_public_channel",
+                "delete_bookmark_public_channel",
+                "order_bookmark_public_channel",
+                "add_bookmark_private_channel",
+                "edit_bookmark_private_channel",
+                "delete_bookmark_private_channel",
+                "order_bookmark_private_channel",
+                "edit_file_attachment"
+            ],
+            "merged_nil": false,
+            "name": "full_channel_user",
+            "role": [
+                "read_channel",
+                "read_channel_content",
+                "add_reaction",
+                "remove_reaction",
+                "manage_public_channel_members",
+                "upload_file",
+                "get_public_link",
+                "create_post",
+                "use_channel_mentions",
+                "manage_public_channel_properties",
+                "delete_public_channel",
+                "manage_private_channel_properties",
+                "delete_private_channel",
+                "manage_private_channel_members",
+                "delete_post",
+                "edit_post",
+                "edit_file_attachment",
+                "add_bookmark_public_channel",
+                "edit_bookmark_public_channel",
+                "delete_bookmark_public_channel",
+                "order_bookmark_public_channel",
+                "add_bookmark_private_channel",
+                "edit_bookmark_private_channel",
+                "delete_bookmark_private_channel",
+                "order_bookmark_private_channel"
+            ]
+        },
+        {
+            "higher": [
+                "create_post"
+            ],
+            "higher_role_id": "channel_guest",
+            "merged": [
+                "create_post"
+            ],
+            "merged_nil": false,
+            "name": "guest_role_id",
+            "role": [
+                "create_post"
+            ]
+        }
+    ],
+    "patch": [
+        {
+            "auditable": {
+                "permissions": null
+            },
+            "name": "nil_permissions",
+            "permissions": [
+                "create_post"
+            ],
+            "permissions_nil": false
+        },
+        {
+            "auditable": {
+                "permissions": []
+            },
+            "name": "empty_permissions",
+            "permissions": [],
+            "permissions_nil": false
+        },
+        {
+            "auditable": {
+                "permissions": [
+                    "edit_post"
+                ]
+            },
+            "name": "replacement",
+            "permissions": [
+                "edit_post"
+            ],
+            "permissions_nil": false
+        }
+    ],
+    "permissions_changed_by_patch": [
+        {
+            "changed": null,
+            "changed_nil": true,
+            "name": "nil_patch",
+            "patch": null,
+            "role": [
+                "create_post"
+            ]
+        },
+        {
+            "changed": null,
+            "changed_nil": true,
+            "name": "identical",
+            "patch": [
+                "create_post",
+                "edit_post"
+            ],
+            "role": [
+                "create_post",
+                "edit_post"
+            ]
+        },
+        {
+            "changed": null,
+            "changed_nil": true,
+            "name": "reordered",
+            "patch": [
+                "edit_post",
+                "create_post"
+            ],
+            "role": [
+                "create_post",
+                "edit_post"
+            ]
+        },
+        {
+            "changed": [
+                "edit_post"
+            ],
+            "changed_nil": false,
+            "name": "added",
+            "patch": [
+                "create_post",
+                "edit_post"
+            ],
+            "role": [
+                "create_post"
+            ]
+        },
+        {
+            "changed": [
+                "edit_post"
+            ],
+            "changed_nil": false,
+            "name": "removed",
+            "patch": [
+                "create_post"
+            ],
+            "role": [
+                "create_post",
+                "edit_post"
+            ]
+        },
+        {
+            "changed": [
+                "create_post",
+                "edit_post"
+            ],
+            "changed_nil": false,
+            "name": "disjoint",
+            "patch": [
+                "edit_post"
+            ],
+            "role": [
+                "create_post"
+            ]
+        },
+        {
+            "changed": [
+                "create_post"
+            ],
+            "changed_nil": false,
+            "name": "empty_patch",
+            "patch": [],
+            "role": [
+                "create_post"
+            ]
+        },
+        {
+            "changed": [
+                "create_post"
+            ],
+            "changed_nil": false,
+            "name": "empty_role",
+            "patch": [
+                "create_post"
+            ],
+            "role": null
+        },
+        {
+            "changed": null,
+            "changed_nil": true,
+            "name": "both_empty",
+            "patch": [],
+            "role": null
+        },
+        {
+            "changed": [
+                "create_post",
+                "create_post",
+                "edit_post"
+            ],
+            "changed_nil": false,
+            "name": "duplicates_in_role",
+            "patch": [
+                "edit_post"
+            ],
+            "role": [
+                "create_post",
+                "create_post"
+            ]
+        },
+        {
+            "changed": [
+                "edit_post",
+                "create_post",
+                "create_post"
+            ],
+            "changed_nil": false,
+            "name": "duplicates_in_patch",
+            "patch": [
+                "create_post",
+                "create_post"
+            ],
+            "role": [
+                "edit_post"
+            ]
+        }
+    ],
+    "role_patch_from_channel_moderations_patch": [
+        {
+            "name": "empty_patch_keeps_moderated",
+            "order_varied": false,
+            "patch_count": 0,
+            "permissions": [
+                "create_post"
+            ],
+            "permissions_nil": false,
+            "role": [
+                "create_post",
+                "manage_team"
+            ],
+            "role_name": "members"
+        },
+        {
+            "name": "disable_members",
+            "order_varied": false,
+            "patch_count": 1,
+            "permissions": null,
+            "permissions_nil": false,
+            "role": [
+                "create_post"
+            ],
+            "role_name": "members"
+        },
+        {
+            "name": "disable_guests_leaves_members",
+            "order_varied": false,
+            "patch_count": 1,
+            "permissions": [
+                "create_post"
+            ],
+            "permissions_nil": false,
+            "role": [
+                "create_post"
+            ],
+            "role_name": "members"
+        },
+        {
+            "name": "enable_adds_permission",
+            "order_varied": true,
+            "patch_count": 1,
+            "permissions": [
+                "add_reaction",
+                "remove_reaction"
+            ],
+            "permissions_nil": false,
+            "role": [],
+            "role_name": "members"
+        },
+        {
+            "name": "enable_for_guests",
+            "order_varied": true,
+            "patch_count": 1,
+            "permissions": [
+                "add_reaction",
+                "remove_reaction"
+            ],
+            "permissions_nil": false,
+            "role": [],
+            "role_name": "guests"
+        },
+        {
+            "name": "enable_bookmarks_adds_all_eight",
+            "order_varied": true,
+            "patch_count": 1,
+            "permissions": [
+                "add_bookmark_private_channel",
+                "add_bookmark_public_channel",
+                "delete_bookmark_private_channel",
+                "delete_bookmark_public_channel",
+                "edit_bookmark_private_channel",
+                "edit_bookmark_public_channel",
+                "order_bookmark_private_channel",
+                "order_bookmark_public_channel"
+            ],
+            "permissions_nil": false,
+            "role": [],
+            "role_name": "members"
+        },
+        {
+            "name": "unknown_role_name",
+            "order_varied": false,
+            "patch_count": 1,
+            "permissions": [
+                "create_post"
+            ],
+            "permissions_nil": false,
+            "role": [
+                "create_post"
+            ],
+            "role_name": "admins"
+        },
+        {
+            "name": "nil_bool_is_not_false",
+            "order_varied": false,
+            "patch_count": 1,
+            "permissions": [
+                "create_post"
+            ],
+            "permissions_nil": false,
+            "role": [
+                "create_post"
+            ],
+            "role_name": "members"
+        },
+        {
+            "name": "nil_name_panics",
+            "panics": true
+        },
+        {
+            "name": "nil_roles_panics",
+            "panics": true
+        }
+    ],
+    "sanitize": [
+        {
+            "case": 0,
+            "description_after": "********************************",
+            "description_before": "a description",
+            "display_name_after": "********************************",
+            "display_name_before": "Custom",
+            "other_fields_touched": false
+        },
+        {
+            "case": 1,
+            "description_after": "********************************",
+            "description_before": "",
+            "display_name_after": "********************************",
+            "display_name_before": "",
+            "other_fields_touched": false
+        }
+    ],
+    "unknown_permissions": [
+        {
+            "permissions": null,
+            "unknown": null,
+            "unknown_nil": true
+        },
+        {
+            "permissions": [],
+            "unknown": null,
+            "unknown_nil": true
+        },
+        {
+            "permissions": [
+                "create_post"
+            ],
+            "unknown": null,
+            "unknown_nil": true
+        },
+        {
+            "permissions": [
+                "permanent_delete_user"
+            ],
+            "unknown": null,
+            "unknown_nil": true
+        },
+        {
+            "permissions": [
+                "create_post",
+                "permanent_delete_user"
+            ],
+            "unknown": null,
+            "unknown_nil": true
+        },
+        {
+            "permissions": [
+                "nope"
+            ],
+            "unknown": [
+                "nope"
+            ],
+            "unknown_nil": false
+        },
+        {
+            "permissions": [
+                "nope",
+                "create_post",
+                "also_nope"
+            ],
+            "unknown": [
+                "nope",
+                "also_nope"
+            ],
+            "unknown_nil": false
+        },
+        {
+            "permissions": [
+                ""
+            ],
+            "unknown": [
+                ""
+            ],
+            "unknown_nil": false
+        },
+        {
+            "permissions": [
+                "CREATE_POST"
+            ],
+            "unknown": [
+                "CREATE_POST"
+            ],
+            "unknown_nil": false
+        },
+        {
+            "permissions": [
+                "create_post",
+                "create_post"
+            ],
+            "unknown": null,
+            "unknown_nil": true
+        }
+    ]
+}

@@ -141,6 +141,9 @@ var registry = map[string]any{
 	"notice_message":                &model.NoticeMessage{},
 	"product_notice_view_state":     &model.ProductNoticeViewState{},
 	"external_dependency":           &model.ExternalDependency{},
+	"permission":                    &model.Permission{},
+	"role":                          &model.Role{},
+	"role_patch":                    &model.RolePatch{},
 }
 
 // overrides pins specific fields to semantically valid values, keyed by the
@@ -167,6 +170,9 @@ var overrides = map[string]any{
 	// Must satisfy channelHexColorRegex or the fixture is not a valid channel.
 	"channel.bannerinfo.backgroundcolor": "#1153ab",
 	"post.type":                          "",
+	"permission.scope":                   model.PermissionScopeChannel,
+	"role.name":                          "custom_role",
+	"role.permissions":                   []string{"create_post", "edit_post"},
 	"status.status":                      "online",
 	"team.type":                          "O",
 	"team.name":                          "core-team",
@@ -569,6 +575,26 @@ func main() {
 
 	if err := writeTimezonesGenerated(*out, *rustOut); err != nil {
 		fmt.Fprintf(os.Stderr, "FAIL: timezones table: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := writePermissionGenerated(*out, *rustOut); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: permission table: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := writeRoleGenerated(*out, *rustOut); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: role tables: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := writeRoleBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: role behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := writeQuoteGenerated(*out, *rustOut); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: quote table: %v\n", err)
 		os.Exit(1)
 	}
 

@@ -103,7 +103,6 @@ sha1 = "0.10"
 # Alphabetic *property*, which also covers Other_Alphabetic — so it accepts combining marks
 # (U+0345 and friends) that Go rejects. The behavioural oracle caught this in IsValidId.
 # std cannot express general categories, hence this data-only crate.
-unicode-general-category = "1"
 
 # Go's encoding/json special-cases []byte and emits base64 (StdEncoding, padded); serde_json
 # emits an array of numbers. FileInfo.MiniPreview is a *[]byte on the wire, so the difference is

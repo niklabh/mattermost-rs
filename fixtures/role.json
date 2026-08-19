@@ -1,0 +1,16 @@
+{
+    "id": "mxry3atgeme67kggbutncoqt7a",
+    "name": "custom_role",
+    "display_name": "displayname-882aa8",
+    "description": "description-be0645",
+    "create_at": 1705190000000,
+    "update_at": 1706343281000,
+    "delete_at": 1703283151000,
+    "permissions": [
+        "create_post",
+        "edit_post"
+    ],
+    "scheme_managed": true,
+    "built_in": true,
+    "scheme_id": "jta4cfcnytwau951wakarbmjtr"
+}
