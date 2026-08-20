@@ -1,0 +1,65 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT channels.teamid AS \"teamid!\",\n               channels.id AS \"channelid!\",\n               (channels.totalmsgcount - channelmembers.msgcount) AS \"msgcount!\",\n               (channels.totalmsgcountroot - channelmembers.msgcountroot) AS \"msgcountroot!\",\n               channelmembers.mentioncount AS \"mentioncount!\",\n               channelmembers.mentioncountroot AS \"mentioncountroot!\",\n               COALESCE(channelmembers.urgentmentioncount, 0) AS \"urgentmentioncount!\",\n               channelmembers.notifyprops\n          FROM channels, channelmembers\n         WHERE channels.id = channelmembers.channelid\n           AND channels.id = $1\n           AND channelmembers.userid = $2\n           AND channels.deleteat = 0\n           AND channels.type IN ('O', 'P', 'D', 'G')\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "teamid!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "channelid!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "msgcount!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "msgcountroot!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "mentioncount!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "mentioncountroot!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "urgentmentioncount!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 7,
+        "name": "notifyprops",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      true,
+      false,
+      null,
+      null,
+      true,
+      true,
+      null,
+      true
+    ]
+  },
+  "hash": "6a975e32cc13a5c3ba4cf87cc79f1ab7ff8390e89bb23af00e027fce609347c2"
+}

@@ -15,7 +15,9 @@ pub mod channel_member;
 pub mod channel_member_history;
 pub mod channel_mentions;
 pub mod channel_search;
+pub mod channel_stats;
 pub mod channel_view;
+pub mod cluster_info;
 pub mod custom_status;
 pub mod draft;
 pub mod emoji;
@@ -41,6 +43,7 @@ pub mod message_attachment;
 pub mod mm_blocks_actions;
 pub mod oauth;
 pub mod oauth_dcr;
+pub mod permalink;
 pub mod permission;
 /// The 311 permissions and the seven tables grouping them, emitted from Go by `reference/dump`.
 /// Private: `permission` re-exports it, so a caller never has to know which half a name came from.
@@ -58,7 +61,9 @@ pub mod post_metadata;
 pub mod post_search_results;
 pub mod preference;
 pub mod product_notices;
+pub mod push_response;
 pub mod reaction;
+pub mod read_receipt;
 pub mod role;
 /// The 24 default roles and the seven permission/id lists role.go builds in `init()`, emitted
 /// from Go by `reference/dump`. Private: `role` re-exports it.
@@ -74,6 +79,7 @@ pub mod stats;
 pub mod status;
 pub mod team;
 pub mod team_member;
+pub mod team_search;
 pub mod timeutils;
 pub mod timezones;
 /// The supported-zone table, emitted from Go by `reference/dump`. Private: `timezones` re-exports it.

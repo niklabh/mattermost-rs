@@ -4690,6 +4690,14 @@ What is left, grouped by what each is actually waiting for:
   `HasPermissionToChannelMemberCount`. This is the largest group and the most valuable: channel
   membership is what most api4 handlers gate on. It needs `ChannelStore.GetMember` and the channel
   scheme resolution, which is the same shape `team_store.rs` already does for teams.
+  **Corrected 2026-08-19 (same day, next session).** The claim above — repeated from this entry's
+  own original text — that `SessionHasPermissionToChannel` needs `ChannelStore.GetMember` **is
+  wrong**. It calls `GetAllChannelMembersForUser` and `ChannelStore.Get`, and never touches
+  `GetMember` (authorization.go:119, :106). `GetMember` landed first on the strength of that
+  misreading; it is a correct port of a method the api4 handlers do need, but it did not unblock
+  this check. **Both real prerequisites landed 2026-08-19** and
+  `SessionHasPermissionToChannel` is now ported and verified against the running Go server.
+  `…ToChannelByPost` and `…ToChannels` are still blocked; see [D-137] for which method each wants.
 - **`Config`** — `SessionHasPermissionToAndNotRestrictedAdmin` reads
   `ExperimentalSettings.RestrictSystemAdmin`. config.go is translated lazily; this is one bool.
 - **Other stores** — `…ToGroup` (group store), `…ToCategory` (channel category store),
@@ -4770,3 +4778,479 @@ bearing: answering from the table would deny `create_post` to every channel admi
 The migrations themselves live in `channels/app/` and are a phase-3 concern — they only matter for
 standing up a *new* database, which this project never does. Recorded so the next person to compare
 the two does not conclude the generator is broken.
+
+---
+
+## D-137 · The channel store is one method out of ninety
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-08-19 (phase 2, channel store)
+
+Ported: `ChannelStore.Get`, `GetMember`, `GetAllChannelMembersForUser`, and the two separate role
+resolvers behind them (`getChannelRoles` and `allChannelMember.Process` — see [D-142]).
+`store.ChannelStore` (store/store.go:200-386) declares roughly ninety methods; these are three.
+
+`GetMember` was ported first on the belief that it was what `SessionHasPermissionToChannel` needed.
+It is not — that check uses the plural read — but it is what the api4 channel-member handlers use,
+so the work stands. The corrected dependency is recorded in [D-134].
+
+What the next channel-scoped work will actually reach for, in the order it will need it:
+
+- **`GetMemberForPost`** (channel_store.go:2479) — `SessionHasPermissionToChannelByPost` and
+  `…ToReadPost` both go through it. It is the same `channelMemberWithSchemeRoles` shape with a join
+  through `Posts`, so `get_channel_roles` is already the whole hard part.
+- **`GetAllChannelMembersForUser`** (:2554) — `…ToChannels` resolves many channels at once and Go
+  answers it from a cache keyed on the user. The cache is the interesting part, not the query, and
+  the standing "Rust reads through, never caches" decision from the vertical slice applies.
+- **`Get` / `GetMany`** — the `Channels` row itself, which nothing ported yet needs but every
+  channel *route* will.
+- **`GetMemberCount`**, **`GetMemberCountsByGroup`** — `HasPermissionToChannelMemberCount`.
+
+Nothing here is blocked on a decision, and unlike [D-131] there is no write-path question yet:
+every one of the above is a read.
+
+**Related** [D-134] (what in `authorization.go` this unblocks and what it does not).
+
+---
+
+## D-138 · `getChannelRoles` has no fixture oracle, and cannot have one
+
+**Status** ACCEPTED · **Severity** verification gap · **Raised** 2026-08-19 (phase 2, channel store)
+
+`CLAUDE.md` requires a behavioural corpus in `reference/dump/` for anything with branching logic.
+`getChannelRoles` (channel_store.go:248) and `channelMemberWithSchemeRoles.ToModel` (:313) are
+**unexported**, so the oracle program cannot call them — the same wall `getTeamRoles` hit in
+[D-077], and the reason that port has no fixture either.
+
+The three ways out, and why the chosen one is the chosen one:
+
+- **Transcribe the Go source into the corpus.** This is what the fixture rule exists to prevent: the
+  oracle would assert what the reading already believed.
+- **Read it with `go/parser`**, as `behaviour_version.go` does for the unexported `versions` table.
+  That works for *data*. `getChannelRoles` is a function with branches, so an AST read recovers the
+  source text and not the behaviour.
+- **Ask the running Go server.** `GET /api/v4/channels/{id}/members/{id}` returns the exact struct
+  `ToModel` builds, and the server reads through — a `Roles` column changed underneath it is
+  reflected on the next request, verified before the suite was written. Chosen.
+
+`crates/mm-store/tests/db_channel_members.rs` is that oracle: fourteen role shapes, each written
+into the shared membership row, asked of both servers, and compared as **whole serialised
+`ChannelMember` documents** rather than just the role strings. The measured answers are transcribed
+into unit tests in `channel_store.rs` so a regression still fails without Docker.
+
+**What this costs.** The oracle needs `docker compose up`, a fixture user, and write access to rows
+the Go server owns; it is skipped unless `MM_STORE_DB=1` **and** `MM_PARITY_STACK=1`. So the
+default `cargo test` run checks the transcriptions, not Go. Three mutations were run against the
+full suite to confirm the difference is real: swapping the channel/team scheme precedence, widening
+the `Channels` join from INNER to LEFT, and reading `TeamScheme.DefaultTeam*Role` instead of
+`DefaultChannel*Role`. **All three passed the unit tests and were caught only by the live oracle** —
+which is the honest measure of what this entry is admitting.
+
+**Related** [D-077], [D-130] (the environment is part of the oracle).
+
+---
+
+## D-139 · Test users persist between runs, by design, and one is now an input to another suite
+
+**Status** ACCEPTED · **Severity** hygiene · **Raised** 2026-08-19 (phase 2, channel store) ·
+**Corrected** 2026-08-19 (same day, next session)
+
+The development database holds `mmrs_auth_plain` (`mmrsauthplainuserxxxxxxxxx`) after any run of
+`db_authorization.rs`.
+
+**The original entry said no purge covers `users`. That was wrong** — `db_authorization.rs:64`
+deletes `WHERE id LIKE 'mmrsauth%'`, users included. The row survives because that suite purges at
+the **start** of each test rather than the end, which is deliberate and documented in the file: a
+failing assertion panics past any trailing cleanup, so start-of-test is the only purge that runs
+unconditionally. The cost is that the last test of a run leaves its rows behind.
+
+What remains true, and is why this entry stays open rather than being deleted: after [D-135], the
+user-store suite reads **every** user in the database and asserts each decodes. A row left behind
+by one suite is therefore an input to another. It is currently a *useful* input — an extra user
+shaped differently from the ones the Go server creates for itself — but it arrived as a side effect
+rather than as a fixture, and nothing states that the second suite depends on the first having run.
+
+**What to do**: either give the user-store suite its own deliberately-shaped rows so it does not
+depend on leftovers, or add a purge to the end *as well as* the start and accept that a panicking
+test leaves rows behind until the next run cleans them. Not neither.
+
+---
+
+## D-140 · Every ported store read goes to the master; Go chooses master or replica per request
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-19 (phase 2, channel store)
+
+`SqlChannelStore.GetMember` takes an `rctx request.CTX` and issues its query through
+`s.DBXFromContext(rctx.Context())`, which is (context.go:31):
+
+```go
+if HasMaster(ctx) { return ss.GetMaster() }
+return ss.GetReplica()
+```
+
+So Go reads from a **replica** unless the caller marked the request with
+`RequestContextWithMaster` — which handlers do after a write, to get read-after-write consistency.
+This port has one `PgPool` pointed at one database, so every read is a master read. `get_member`
+does not take a context parameter at all, which is why the divergence is invisible at the call
+site rather than merely unimplemented.
+
+**Not specific to this file.** It is true of `session_store`, `user_store`, `team_store`,
+`role_store`, `scheme_store` and `preference_store` equally; it is recorded here because
+`GetMember` is the first ported method whose Go signature carries the `rctx` that selects the
+handle, making the choice explicit rather than absent.
+
+**Why this is accepted rather than owed.** The divergence is strictly in the safe direction: a
+master read is never staler than a replica read, so nothing this port serves can lag something Go
+serves. The failure mode is capacity, not correctness — we send read traffic to the primary that
+Go would have spread. The development stack has one Postgres and no replica, so the two are
+currently the same database and the divergence is unobservable.
+
+**What would change this.** A deployment with real read replicas, at which point the store layer
+needs a context parameter carrying the master/replica choice, and every ported method needs its Go
+call sites checked for `RequestContextWithMaster`. Doing it now would be threading a parameter
+through six stores to select between two names for one pool.
+
+**Related** [D-087] (the other read-consistency finding, and the reason "Rust reads through, never
+caches" is the standing decision).
+
+---
+
+## D-141 · `HydrateChannelPolicyActions` is unported, so `Channel.policy_actions` is always absent
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-08-19 (phase 2, channel store)
+
+`App.GetChannel` calls `HydrateChannelPolicyActions` after the store read and **only logs** if it
+fails (channel.go:2234), returning the channel either way. This port skips the call entirely, so
+`policy_actions` is always `None`.
+
+Go's own comment says it is "a no-op on channels with `PolicyEnforced=false`, keeping the cost on
+the common no-policy path at zero" — and `PolicyEnforced` is an `AccessControlPolicies` row, which
+is an **enterprise** feature and whose table is empty on the Team Edition stack. So on everything
+this project can currently run, Go's hydration is also a no-op and the two agree.
+
+**Why it is still owed.** The agreement is environmental, not structural: point this at a licensed
+server with a channel policy and `policy_actions` silently differs. Any route that serialises a
+`Channel` inherits the gap, which is why it is logged before such a route exists rather than after.
+
+**Related** [D-136] (the other "Team Edition makes the divergence invisible" finding).
+
+---
+
+## D-142 · Go resolves channel-member roles two different ways, and both are on the wire
+
+**Status** ACCEPTED · **Severity** divergence (upstream) · **Raised** 2026-08-19 (phase 2, channel store)
+
+`getChannelRoles` (channel_store.go:248, behind `GetMember`) and `allChannelMember.Process`
+(channel_store.go:480, behind `GetAllChannelMembersForUser`) both answer "what roles does this
+channel member effectively hold". **They disagree**, and the disagreement is not cosmetic.
+
+A scheme role id sitting literally in the `Roles` column — the un-migrated case Go's own comment
+describes — is treated oppositely:
+
+| | `getChannelRoles` | `Process` |
+|---|---|---|
+| `channel_user` in `Roles`, `SchemeUser` false | sets the flag, drops the literal, appends the **scheme's** user role | leaves `channel_user` in place, appends nothing |
+| position of scheme-implied roles | always last | wherever the column put them |
+
+**Measured, not deduced.** A channel was pointed at a scheme whose `DefaultChannelUserRole` was
+`mmrs_dv2_channel_user` — a copy of `channel_user` with `read_channel` removed — and a member's
+`Roles` column set to the literal `channel_user` with every scheme flag false. One request to the
+running Go server, `GET /api/v4/channels/{id}/members/{uid}`, produced **both** answers at once:
+
+- the response **body** reported `"roles": "mmrs_dv2_channel_user"` — a role that does not grant
+  `read_channel`;
+- the request **succeeded with 200**, which its gate (`SessionHasPermissionToChannel`, the only
+  check on that handler) could only do by resolving the same member's roles to `channel_user`.
+
+So Go told the client the member holds a role it was simultaneously not using, and granted on a
+role it did not report. Neither answer is "the" answer.
+
+**What this means for the port, and it is the opposite of the tempting fix.** Both functions are
+ported, separately, as `get_channel_roles` and `process_all_channel_member_roles`. Unifying them —
+which is exactly what a tidy-minded port does, since they are ninety percent identical — would
+change one of the two observable behaviours. Sharing the implementation would be a **wire change**
+in one direction and a **permission change** in the other, and the permission direction can
+over-grant. A unit test asserts the two disagree on the measured input, so a future refactor that
+merges them fails rather than silently drifting.
+
+**Note the blast radius is narrow**: the two agree whenever the `Roles` column contains no literal
+scheme id, which is every row in a database that has completed the scheme migration. That is why
+this survives upstream, and why the test pins the agreement case as well as the disagreement.
+
+---
+
+## D-143 · Every channel permission check scans all of the user's memberships
+
+**Status** ACCEPTED · **Severity** performance · **Raised** 2026-08-19 (phase 2, channel authorization)
+
+`SessionHasPermissionToChannel` asks for **every** channel membership the user has and then looks
+one up in the map. Go's comment at the call site is explicit that this is a cache decision, not a
+query decision (authorization.go:333):
+
+> We call GetAllChannelMembersForUser instead of just getting a single member from the DB, because
+> it's cache backed and this is a very frequent call.
+
+This port has no cache — the standing "Rust reads through, never caches" decision from the vertical
+slice ([D-087]) — so it pays the full scan on **every** check. For a user in 500 channels that is
+500 rows joined against `Channels`, `Teams` and `Schemes` twice, to answer a question about one.
+
+**Why not just use `GetMember`.** Because the two resolve roles differently ([D-142]), so the
+substitution is not behaviour-preserving. The correct narrowing is `GetAllChannelMembersForUser`'s
+own query with `AND cm.channelid = $2` appended — same resolver, one row — which is a change worth
+making deliberately with the oracle in place rather than as a side effect of this session.
+
+**Not fixed now** because it is invisible on a development stack, and guessing at a performance
+shape without a measurement is how the wrong thing gets optimised. Recorded so the first slow
+channel route has somewhere to start.
+
+---
+
+## D-144 · The swallowed store error in `session_has_permission_to_channel` is untested
+
+**Status** OPEN · **Severity** verification gap · **Raised** 2026-08-19 (phase 2, channel authorization)
+
+Go wraps the membership read in `if err == nil` (authorization.go:121) and carries on to the
+`manage_system` and team branches when it fails. That is the **one place in `authorization.rs`
+where a database failure does not immediately deny**, and it is reproduced faithfully — but nothing
+exercises it.
+
+A mutation proves the gap rather than asserting it: replacing the fall-through with
+`if read.is_err() { return (false, false) }` compiles, changes the semantics, and **passes the
+entire suite**, cross-server oracle included. The test database always works, so the branch is
+never taken.
+
+**Why it was not closed.** Injecting a store failure needs `App` to be generic over its store, or
+the store traits behind a trait object. Both are real design changes to a struct that currently
+holds a concrete `SqlStore`, and doing that as a side effect of a porting session is how a
+test-shaped tail starts wagging the dog. The unreachable-pool idiom the rest of the suite uses
+cannot help here: it fails *every* store call, including the role lookups the fall-through then
+depends on, so the check denies for the wrong reason and the test would pass vacuously.
+
+**The risk if it is wrong** is bounded and in the safe direction — denying where Go grants is an
+outage, not a breach — which is why this is logged rather than blocking.
+
+**Related** [D-142] (the other finding from the same mutation run), and the mutation-harness rules
+in `MIGRATION.md`'s `app/authorization.go` notes, which are what caught the bogus verdict from a
+mutation that did not compile.
+
+---
+
+## D-145 · A parity suite passed while every request was being forwarded to Go
+
+**Status** CLOSED · **Severity** blocking (test validity) · **Raised and closed** 2026-08-20 (phase 2, first gated route)
+
+The channel-member route's five parity tests passed on their first run. All five were comparing
+**Go against Go**: a stale `mm-api` process from an earlier session still held port 8066, the
+freshly built binary logged `Address already in use` and exited, and every request to :8066 was
+answered by the old binary — which had no channel route and therefore proxied.
+
+Found by eye, not by a test: the response carried `x-mmrs-served-by: go`.
+
+**What made it possible.** The marker header existed and nothing read it. `fetch_both` asserted a
+200 from each server and compared bodies; a forwarded response satisfies both.
+
+**Closed** by asserting in `fetch_both`/`fetch_both_raw` that the Rust side answered with
+`x-mmrs-served-by: rust`, which immediately exposed a second gap: **error responses carried no
+marker at all**, because only the success paths set it. So a 403 from a migrated route and a 403
+forwarded to Go were indistinguishable to an operator mid-cutover as well as to the suite. Fixed
+in `ApiError::into_response`.
+
+**The general lesson, and it is the third instance of the same shape.** A test harness that cannot
+tell whether it exercised the code under test will report success for anything: a stale *build*
+([D-129] and the `app/authorization.go` notes), a mutation that failed to *compile* (same notes),
+and now a stale *process*. Each was found by looking at something other than the pass/fail line.
+Every harness in this project should be able to answer "did this actually run the thing" and fail
+loudly when it cannot.
+
+---
+
+## D-146 · `ApiError` is 192 bytes by value and every API `Result` pays for it
+
+**Status** OPEN · **Severity** cosmetic · **Raised** 2026-08-20 (phase 2, first gated route)
+
+`ApiError` wraps `AppError` by value, and `AppError` is large because it *is* the wire format —
+seven fields a client parses. Every handler returns `Result<Response, ApiError>`, so every one
+moves 192 bytes on the error path.
+
+Clippy's `result_large_err` only fires where the `Ok` side is small, which so far is two helpers in
+`channels.rs`; both carry a local `#[allow]` with the reasoning. Boxing there alone would buy
+nothing and would make those two signatures differ from every other in the crate.
+
+**The real fix** is `ApiError(Box<AppError>)` crate-wide: `From<AppError>` boxes, `?` keeps
+working, and field access still auto-derefs. It touches roughly ten construction sites across five
+files. Deliberately not done as a side effect of migrating a route — it is a mechanical change
+that deserves its own diff, and `mm-store`'s `StoreError::Invalid` already boxes its `AppError`
+for exactly this reason, so the precedent is set.
+
+---
+
+## D-147 · The parity suite could only ask questions as a system admin, and one mutation still escapes
+
+**Status** OPEN · **Severity** verification gap · **Raised** 2026-08-20 (phase 2, first gated route)
+
+Every cross-server parity test authenticates as `sliceuser`, a `system_admin`. Branch 5 of
+`SessionHasPermissionToChannel` grants on `manage_system` **regardless of which permission was
+asked for**, so for that actor the handler could name any permission and every test would still
+pass. A mutation replacing `PermissionReadChannel` with `PermissionManageSystem` survived the whole
+suite.
+
+**Mostly closed** by `a_non_admin_is_granted_by_membership_and_refused_without_it`, which creates a
+real non-admin through Go's API, joins it to one of two fresh channels, and compares both the grant
+and the refusal. That mutation is now caught.
+
+**What still escapes**: swapping `read_channel` for another permission that `channel_user` *also*
+holds — `create_post`, for instance — is invisible, because no actor in the suite distinguishes
+them. Catching it needs a role granting one and not the other, i.e. a custom role written to the
+`Roles` table, which Go caches by name and which the parity tests deliberately do not touch.
+
+The undetected direction is the benign one: asking for a permission the member also has still
+refuses everyone who should be refused. The dangerous direction — asking for something weaker or
+unrelated that a non-member holds — is covered. Recorded rather than closed because "mostly" is
+not "entirely".
+
+---
+
+## D-148 · A parity run silently removed a fixture user from a channel
+
+**Status** CLOSED · **Severity** hygiene · **Raised and closed** 2026-08-20 (phase 2, first gated route)
+
+Between two checks a session apart, `sliceuser` stopped being a member of `off-topic` — one of the
+development database's two channels. Nothing failed; it was noticed only because an unrelated test
+then needed two channels and found one.
+
+**Reproduced but never attributed.** Running the parity file end to end removes the membership;
+running any single test in it does not, restoring in between each time. The cause is an
+interaction, and the most likely one is an earlier version of the sanitiser test that picked "the
+first user who is not me" out of `GET /users`, added them to the **team**, and removed them at
+teardown — and removing someone from a team removes them from every channel on it.
+
+**Closed by removing the dependency rather than by finding the culprit.** Every fixture the suite
+needs — channels, second users — is now created by it and unwound by it, and
+`purge_api_fixtures` clears what a panicking run leaves. Two consecutive full runs now leave
+byte-identical database state, and the two development channels survive both.
+
+Two smaller findings fell out of the fix and are worth keeping:
+
+- **Go archives rather than deletes.** `DELETE /api/v4/channels/{id}` sets `DeleteAt` and the name
+  stays taken, so a second run's create fails with `save_channel.exists`. The same is true of a
+  soft-deleted user's username. Neither can be undone through the API, which is why the purge
+  reaches for the shared database.
+- **`PublicChannels` is a shadow table** Go keeps in step with `Channels`, with its own
+  `(Name, TeamId)` uniqueness. Purging `Channels` alone leaves it behind, and the next create fails
+  with a **500** rather than the 400 a leftover `Channels` row gives. Two symptoms, one cause, and
+  only the second names the table.
+
+**The rule this settles**: a test that mutates rows it did not create has no business asserting
+anything about them.
+
+---
+
+## D-149 · Our 400s carry less information than Go's, and it hides the validation order
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-08-20 (phase 2, first gated route)
+
+A consequence of [D-092] sharper than "prose versus id". `AppError` serialises `id`, `message`,
+`detailed_error`, `request_id` and `status_code` — **not `params`**. So for an invalid path
+segment, the name of the offending parameter reaches a client *only* through the translated
+message:
+
+```
+go:   "message": "Invalid or missing channel_id parameter in request URL."
+ours: "message": "api.context.invalid_url_param.app_error"
+```
+
+Go's client is told **which** parameter to fix; ours is told only that one of them is wrong. Both
+carry the same `id`, so code branching on `id` is unaffected — but a human, or any client
+surfacing `message`, gets strictly less from us.
+
+**It also makes a behaviour untestable over HTTP.** Go validates the channel id before the user id
+(`RequireChannelId().RequireUserId()`, each returning early once an error is set), so a request
+with both malformed reports `channel_id`. A mutation swapping the two survived every cross-server
+test, because the ordering is invisible in a body that never names the parameter. It is pinned
+instead by a unit test on `validate_ids` in `mm-api/src/channels.rs`.
+
+**Paying off [D-092] closes this too**, and this is the concrete argument for doing so: it is the
+first place where the missing translation costs a client information rather than only polish.
+
+## D-150 · Go's router rejects path segments outside `[A-Za-z0-9]+` before any handler runs
+
+**Status** CLOSED (2026-08-20) · **Severity** divergence · **Raised** 2026-08-20 (phase 2,
+`getChannelUnread`)
+
+Every id-shaped path parameter in api4 is registered with an explicit charset —
+`{channel_id:[A-Za-z0-9]+}` (api.go:203, :223, and 91 occurrences in that file). gorilla/mux
+treats it as part of the *route*, not as validation, so a segment containing anything else matches
+no route at all and falls to the mux `NotFoundHandler`:
+
+```
+GET /api/v4/users/me/channels/no-pe/unread
+go:   404 {"id":"api.context.404.app_error", ... ,"status_code":404}   ← and no request_id
+ours: 400 {"id":"api.context.invalid_url_param.app_error", ... }       ← before the fix
+```
+
+axum's `{name}` matches a whole segment, so the request reached our handler and `IsValidId`
+answered 400. **Different status, different id, different body, on a request Go never routed.**
+
+Closed by a middleware layer (`mux_segments_or_forward`, `mm-api/src/lib.rs`) on the parameterised
+routes: any `*_id` parameter outside the charset is **forwarded to Go** rather than handled.
+Forwarding beats reproducing Go's 404 body — that body interpolates the request URL into
+`detailed_error` and carries no `request_id`, and neither detail has to be kept in step if Go
+writes it.
+
+**One exception is real and is named in the code:** `plugin_id` is
+`[A-Za-z0-9\_\-\.]+`. Every other `_id` parameter across all 21 distinct patterns in api.go is the
+narrow class. Nothing here registers a plugin route yet; the exception exists so that adding one
+does not silently inherit the wrong rule.
+
+**The finding that outlives the entry.** This was invisible until a test asked for it, and it will
+apply to *every* parameterised route added from here on — the two migrated ones shared the bug.
+A route's path is wire format too: matching a request Go would not have routed is a divergence
+before the handler writes a byte.
+
+## D-151 · `messageChannelTypes` in `GetChannelUnread` is unreachable through its own route
+
+**Status** OPEN · **Severity** untested-by-the-oracle · **Raised** 2026-08-20 (phase 2,
+`getChannelUnread`)
+
+`SqlChannelStore.GetChannelUnread` filters `Channels.Type IN (O, P, D, G)` (channel_store.go:937).
+Deleting that predicate **passed the entire cross-server parity suite**, for two compounding
+reasons:
+
+1. A board (`BO`/`BP`) or space (`S`) channel cannot be created through the REST API on Team
+   Edition, so no fixture the parity suite can build has one.
+2. Even given one, `getChannelUnread`'s permission check calls `SqlChannelStore::Get` first, which
+   applies the **same** filter, misses, and denies with a 403 — so the predicate in this query is
+   dead code as long as the one in `Get` is correct.
+
+Closed *at the store level* by `crates/mm-store/tests/db_channel_unread.rs`, which inserts a `BO`
+channel with a membership row directly and asserts the miss, with an identically-shaped `O` row as
+the control. That test is **transcribed from Go's SQL, not measured against Go** — `SqlChannelStore`
+is not reachable from a test, and the route in front of it cannot express the input. If upstream
+widens `messageChannelTypes`, the test keeps passing while the port drifts.
+
+**What is still owed:** an oracle for `messageChannelTypes` itself. The list appears in at least
+`Get`, `GetChannelUnread` and the search paths, and today each port transcribes it independently.
+One shared constant plus one generated fixture would make a widening upstream a compile-time or
+test-time event rather than a silent divergence. Cheap, and worth doing before the third
+transcription.
+
+## D-152 · `new_preview_post` cannot reproduce Go's two nil panics, by construction
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-20 (permalink.go)
+
+`model.NewPreviewPost(post, team, channel)` guards `post == nil` and returns nil, then
+dereferences `team` and `channel` with no check at all. Measured, not read: a nil team panics, a
+nil channel panics, `(nil, nil, nil)` returns nil because the post is tested first.
+
+The Rust port takes `team: &Team` and `channel: &Channel`, so there is no nil to pass and the two
+panics are unrepresentable. `post` stays `Option<&Post>` because its guard is behaviour a caller
+depends on.
+
+**Why this is accepted rather than reproduced.** Reproducing it needs `panic!` in library code,
+which this project forbids, and the alternative — returning an error — would invent an API Go does
+not have. On every input Go survives, the two implementations agree exactly; the divergence is
+only that a caller who would have crashed the Go server now fails to compile.
+
+**What would reopen it:** a Go call site that *relies* on the panic (recovering it as control
+flow), or upstream adding real nil handling — in which case the signature should follow. The
+parity test asserts the panicking rows still panic, so an upstream change fails a test rather than
+passing silently.

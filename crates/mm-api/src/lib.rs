@@ -6,6 +6,7 @@
 //! the proxy is the fallback.
 
 pub mod auth;
+pub mod channels;
 pub mod error;
 pub mod preferences;
 pub mod proxy;
@@ -14,6 +15,9 @@ pub mod teams;
 pub mod users;
 
 use axum::Router;
+use axum::extract::{RawPathParams, Request, State};
+use axum::middleware::Next;
+use axum::response::Response;
 use axum::routing::{MethodRouter, get, put};
 use mm_app::App;
 
@@ -73,6 +77,64 @@ fn partially_migrated(methods: MethodRouter<AppState>) -> MethodRouter<AppState>
     methods.fallback(proxy::forward_to_go)
 }
 
+/// Go's path-parameter charset: `{channel_id:[A-Za-z0-9]+}` (api4/api.go, 91 occurrences).
+///
+/// A segment outside that class never matches the route, so gorilla/mux answers its own 404 —
+/// `api.context.404.app_error`, from the mux `NotFoundHandler` — before any handler runs. axum's
+/// `{name}` matches the whole segment, so without this the same request reaches our handler and
+/// gets a 400 from `IsValidId`: a different status, a different error id and a different body,
+/// on a request Go never routed. See [D-150].
+fn segment_matches_go_mux(value: &str) -> bool {
+    !value.is_empty() && value.bytes().all(|b| b.is_ascii_alphanumeric())
+}
+
+/// Which path parameters that charset applies to.
+///
+/// Every `*_id` parameter in api4 is `[A-Za-z0-9]+` **except `plugin_id`**, which additionally
+/// allows `_`, `-` and `.` — checked across all 21 distinct `_id` patterns, not assumed. Nothing
+/// here registers a plugin route yet; the exception is named so that adding one does not silently
+/// inherit the wrong rule.
+fn parameter_is_id_shaped(name: &str) -> bool {
+    name.ends_with("_id") && name != "plugin_id"
+}
+
+/// Forward to Go any request whose id-shaped path segments Go's router would not have matched.
+///
+/// Layered on the parameterised routes rather than folded into each handler, because the decision
+/// is "would Go have routed this at all" — which is a router question, and because forwarding
+/// needs the whole `Request`, which a handler has already had extracted out from under it.
+///
+/// Forwarding rather than reproducing Go's 404 body is deliberate: it makes the answer Go's own,
+/// including the `detailed_error` that interpolates the request URL, with nothing to keep in step.
+async fn mux_segments_or_forward(
+    State(state): State<AppState>,
+    params: RawPathParams,
+    request: Request,
+    next: Next,
+) -> Response {
+    for (name, value) in &params {
+        if parameter_is_id_shaped(name) && !segment_matches_go_mux(value) {
+            tracing::debug!(
+                parameter = name,
+                "path segment is outside Go's mux charset; forwarding so Go answers its own 404"
+            );
+            return proxy::forward_to_go(State(state), request).await;
+        }
+    }
+    next.run(request).await
+}
+
+/// [`partially_migrated`], plus the segment charset check for a route with path parameters.
+fn partially_migrated_with_ids(
+    state: &AppState,
+    methods: MethodRouter<AppState>,
+) -> MethodRouter<AppState> {
+    partially_migrated(methods).layer(axum::middleware::from_fn_with_state(
+        state.clone(),
+        mux_segments_or_forward,
+    ))
+}
+
 /// Build the router.
 ///
 /// The migrated routes are listed explicitly and everything else falls through to the proxy —
@@ -95,6 +157,19 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/users/me/teams/members",
             partially_migrated(get(teams::get_team_members_for_user_me)),
+        )
+        // The first migrated path with parameters. axum's `{name}` segments bind by position in
+        // the handler's `Path` tuple, so the order here is the order there.
+        .route(
+            "/api/v4/channels/{channel_id}/members/{user_id}",
+            partially_migrated_with_ids(&state, get(channels::get_channel_member)),
+        )
+        // Note the segment order: the **user** comes first here and second above, because Go
+        // hangs this one off `BaseRoutes.ChannelForUser` (api4/api.go:223). The handler's `Path`
+        // tuple has to match this, not the other route's.
+        .route(
+            "/api/v4/users/{user_id}/channels/{channel_id}/unread",
+            partially_migrated_with_ids(&state, get(channels::get_channel_unread)),
         )
         .fallback(proxy::forward_to_go)
         .with_state(state)

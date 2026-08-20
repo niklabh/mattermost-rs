@@ -4,6 +4,7 @@
 //! which is what keeps the API layer free of SQL and the store layer free of request semantics.
 
 pub mod authorization;
+pub mod channel;
 pub mod password;
 pub mod preference;
 pub mod session;

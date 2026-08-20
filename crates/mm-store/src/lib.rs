@@ -13,6 +13,7 @@
 //! folds unquoted identifiers to lower case, so `CreateAt` is `createat` on the wire to the
 //! driver. Queries here spell them the way the database does.
 
+pub mod channel_store;
 pub mod error;
 pub mod preference_store;
 pub mod role_store;
@@ -21,6 +22,7 @@ pub mod session_store;
 pub mod team_store;
 pub mod user_store;
 
+pub use channel_store::{ChannelStore, SqlChannelStore};
 pub use error::StoreError;
 pub use preference_store::{PreferenceStore, SqlPreferenceStore};
 pub use role_store::{RoleStore, SqlRoleStore};
@@ -39,6 +41,7 @@ use sqlx::postgres::PgPoolOptions;
 /// map obvious, while the stores stay independently constructible for tests.
 #[derive(Debug, Clone)]
 pub struct SqlStore {
+    channel: SqlChannelStore,
     preference: SqlPreferenceStore,
     role: SqlRoleStore,
     scheme: SqlSchemeStore,
@@ -69,6 +72,7 @@ impl SqlStore {
     /// Build the store set over an existing pool.
     pub fn from_pool(pool: PgPool) -> Self {
         Self {
+            channel: SqlChannelStore::new(pool.clone()),
             preference: SqlPreferenceStore::new(pool.clone()),
             role: SqlRoleStore::new(pool.clone()),
             scheme: SqlSchemeStore::new(pool.clone()),
@@ -76,6 +80,11 @@ impl SqlStore {
             team: SqlTeamStore::new(pool.clone()),
             user: SqlUserStore::new(pool),
         }
+    }
+
+    /// Port of `store.Store.Channel()`.
+    pub fn channel(&self) -> &SqlChannelStore {
+        &self.channel
     }
 
     /// Port of `store.Store.Session()`.

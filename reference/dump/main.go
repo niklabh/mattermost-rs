@@ -52,6 +52,15 @@ var registry = map[string]any{
 	"channel":        &model.Channel{},
 	"channel_member": &model.ChannelMember{},
 
+	// Six small files ported together 2026-08-20; the logic they do have is in
+	// behaviour_small_types.go.
+	"channel_stats": &model.ChannelStats{},
+	"team_search":   &model.TeamSearch{},
+	"permalink":     &model.Permalink{},
+	"preview_post":  &model.PreviewPost{},
+	"cluster_info":  &model.ClusterInfo{},
+	"read_receipt":  &model.ReadReceipt{},
+
 	// channel.go's other wire types.
 	"channel_banner_info":                   &model.ChannelBannerInfo{},
 	"channel_with_team_data":                &model.ChannelWithTeamData{},
@@ -490,6 +499,12 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_post_info.json"))
+
+	if err := writeSmallTypesBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: small types behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_small_types.json"))
 
 	if err := writeFileInfoListBehaviourFixture(*out); err != nil {
 		fmt.Fprintf(os.Stderr, "FAIL: file info list behaviour fixture: %v\n", err)

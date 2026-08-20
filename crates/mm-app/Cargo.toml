@@ -30,3 +30,6 @@ subtle.workspace = true
 # itself never touches sqlx — that is mm-store's business.
 sqlx.workspace = true
 tokio.workspace = true
+# `db_channel_authorization.rs` puts each permission case to the running Go server as well as
+# to this crate, and compares. Dev-only: nothing in the library speaks HTTP.
+reqwest = { workspace = true, features = ["json"] }
