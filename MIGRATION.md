@@ -463,6 +463,9 @@ whenever a session skips, approximates, or discovers-but-does-not-close somethin
 | store/sqlstore/preference_store.go (`Save`) | `mm-store/src/preference_store.rs` | PARTIAL | 2 pass | **The first write in the port.** Go's exact upsert, `ON CONFLICT (userid, category, name) DO UPDATE`, inside a transaction — Go's comment is explicit that "if one fails, everything fails", and validation runs *inside* the loop, so a batch whose third entry is invalid must leave the first two unwritten. `save` (:65) and `saveTx` (:89) are byte-identical duplicates in the Go source; ported once. One divergence ([D-090], the clone). |
 | app/preference.go (`UpdatePreferences`) | `mm-app/src/preference.rs` | PARTIAL | 4 pass | The ownership guard is the security boundary: any entry whose `user_id` differs from the path's is a **403 for the whole batch**, checked before the store is touched — without it, the upsert's `(UserId, Category, Name)` key would happily write preferences onto another account. Deferred: the sidebar sync ([D-091]) and the two WebSocket events ([D-089]). |
 | api4/preference.go (`updatePreferences`, `me`) | `mm-api/src/preferences.rs` | PARTIAL | 4 pass | **The first write route.** Success body is `ReturnStatusOK` — `{"status":"OK"}` via `w.Write`, no newline. A batch containing any `flagged_post` entry is **forwarded to Go** rather than served, because that category needs a post lookup and a channel-read permission check we have not ported — the Strangler Fig applied *inside* a route. Both of Go's batch bounds reproduced, including that an empty batch is an error rather than a no-op. |
+| store/sqlstore/preference_store.go (`GetAll`, `GetCategory`, `Get`) | `mm-store/src/preference_store.rs` | DONE | 2 DB tests | Go's `preferenceSelectQuery` with **no `ORDER BY`**, kept that way so both servers hand back the same order. `Value` is nullable in the schema but scanned as `string` in Go, so a NULL row fails the whole read — `"value!"` reproduces it. |
+| app/preference.go (`GetPreferencesForUser`, `GetPreferenceByCategoryForUser`, `GetPreferenceByCategoryAndNameForUser`) | `mm-app/src/preference.rs` | DONE | 1 pass | The three reads answer "nothing there" three ways: `GetAll` empty is a 200 `null`, an empty category is the app layer's **404**, and a missing name is a **400** (`sql.ErrNoRows` wrapped as a plain error, not `ErrNotFound`). |
+| api4/preference.go (`getPreferences`, `getPreferencesByCategory`, `getPreferenceByCategoryAndName`) | `mm-api/src/preferences.rs` | DONE | 5 pass + 5 parity | `{category}`/`{preference_name}` mux class is `[A-Za-z0-9_]+` (no hyphen) while `RequireCategory` is the format-strict lowercase pattern that *allows* a hyphen — so a hyphen is forwarded for Go's mux 404 and `Display_Settings` is our 400. `me` resolves before `RequireUserId`; `edit_other_users` gates before any read. |
 | — (fix) | `mm-api/src/lib.rs::partially_migrated` | DONE | 1 pass | **Closes [D-093].** axum matches the path before the method, so registering `PUT` on `/users/me/preferences` made `GET` return 405 from our own router instead of reaching the proxy — silently breaking a working route by migrating a *different* method beside it. Every migrated path now carries `MethodRouter::fallback(forward_to_go)`. |
 | — (fix) | `mm-api/src/error.rs::into_response` | DONE | — | Two thirds of [D-092] closed the moment error bodies were compared side by side. Go's response pipeline (`web/handlers.go:424-455`) sets `RequestId` and calls `WipeDetailed` unless developer mode is on — which **defaults to off**, so ours had been leaking `detailed_error` content Go withholds, and omitting `request_id` entirely. Only the i18n `Translate` step remains. |
 | store/sqlstore/team_store.go (`GetTeamsForUser`) | `mm-store/src/team_store.rs` | PARTIAL | 9 pass | **Closes [D-077].** The wrapper is three lines; the content is `getTeamRoles` (team_store.go:100), which computes a member's **effective** roles from three booleans, three nullable scheme role names and whatever is already in the `Roles` column. The branch a reading would have missed: a scheme role id **in the `Roles` column sets its flag even when the column says false**, and is then excluded from `ExplicitRoles` — invisible in fresh data, where every `Roles` column is empty. `getTeamRoles` is unexported so `reference/dump` cannot reach it; verified instead by mutating the shared row and asking **both servers** the same question across six role shapes, all matching. The scheme-*derived* names stay provisional — `Schemes` is enterprise and the table is empty on Team Edition. |
@@ -3454,3 +3457,30 @@ set aside. Three Rust files and one correction to the previous session's ledger 
    the system when the thing under test is a server: one run reported a genuine-looking 500 that
    was the *previous* mutation still bound to :8066. Third instance of [D-145]'s shape — the
    harness could not tell whether it had run the thing it claimed to.
+
+## Notes — api4/preference.go (the three reads)
+
+1. **A mux class and its validator can disagree in both directions.** The route is
+   `{category:[A-Za-z0-9_]+}` but `RequireCategory` is `IsValidAlphaNumHyphenUnderscore(_, true)` —
+   lowercase, two-plus characters, no edge `_`, hyphen *allowed*. So `display-settings` is a mux
+   404 (forwarded, [D-150]) and `Display_Settings` routes and 400s. The orchestrating note for this
+   session quoted the class with a hyphen; the pinned source has none — read, don't relay.
+
+2. **Zero rows from `GetAll` is `null`, not `[]`.** sqlx's `scanAll` only `SetLen(0)`s the nil
+   `model.Preferences`, and `json.Encode` of a nil slice is `null`. Unreachable for a living user
+   (`CreateUser` seeds three preferences); the parity test deletes them through Go's own route to
+   reach it. The empty-category 404 and the missing-name 400 sit one layer apart, so the same
+   "nothing there" has three spellings across three routes.
+
+3. **Two mutation verdicts were discarded before counting.** Dropping a `$n` from a `query_as!`
+   fails to *compile*, which the harness reports as CAUGHT with no test name — a verdict about
+   sqlx, not the tests. And `userid LIKE $1 || '%'` is equivalent to `=` for a full 26-char id, so
+   its SURVIVED was a bad mutant. Both were re-run as compiling, genuinely wrong predicates
+   (`left(userid, 25)`, `length(category) = length($2)`), which the seeded-columns store test
+   caught. A harness line that reads "CAUGHT ()" should be treated as "did not run".
+
+4. **Which permission the 403 names is not on the wire.** `make_permission_error` puts the
+   permission id in `detailed_error`, which is wiped; swapping `edit_other_users` for any other
+   permission survives every cross-server test and was not run for that reason. Same shape as
+   `getChannelUnread`'s gate order — pinned in-process there, not yet here.
+

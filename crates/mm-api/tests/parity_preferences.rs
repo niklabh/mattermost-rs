@@ -289,11 +289,13 @@ async fn ordinary_categories_are_served_by_rust() {
     );
 }
 
-/// A path with one migrated method must still forward the others.
+/// A path with a migrated method must still forward the others.
 ///
-/// axum matches the path before the method, so registering `PUT` here made `GET` return 405 from
-/// our own router instead of reaching the proxy — breaking a route that had been working. This is
-/// the regression test for that, and it belongs on every partially migrated path.
+/// axum matches the path before the method, so registering `PUT` here once made `GET` return 405
+/// from our own router instead of reaching the proxy — breaking a route that had been working.
+/// `GET` is migrated now, so the probe is `POST .../preferences/delete`: its path matches the
+/// migrated `GET /users/{user_id}/preferences/{category}` route with `delete` as the category,
+/// and only the method fallback keeps the `POST` reaching Go. Same regression, next method over.
 #[tokio::test]
 async fn an_unmigrated_method_on_a_migrated_path_still_reaches_go() {
     if !stack_enabled() {
@@ -305,8 +307,9 @@ async fn an_unmigrated_method_on_a_migrated_path_still_reaches_go() {
     let token = go_minted_token(&client).await;
 
     let response = client
-        .get(format!("{RUST}{PATH}"))
+        .post(format!("{RUST}{PATH}/delete"))
         .header("Authorization", format!("Bearer {token}"))
+        .json(&body("mmrs_parity_delete_probe", ""))
         .send()
         .await
         .expect("reachable");
@@ -314,7 +317,7 @@ async fn an_unmigrated_method_on_a_migrated_path_still_reaches_go() {
     assert_eq!(
         response.status(),
         200,
-        "GET is not migrated, so it must be proxied — 405 here means the method fallback is gone"
+        "POST is not migrated, so it must be proxied — 405 here means the method fallback is gone"
     );
     assert_eq!(
         response
