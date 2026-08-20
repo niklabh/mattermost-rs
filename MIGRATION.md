@@ -303,6 +303,10 @@ whenever a session skips, approximates, or discovers-but-does-not-close somethin
 | store/sqlstore/team_store.go (`GetByName`, `GetMember`, `GetMembers`) | `mm-store/src/team_store.rs` | PARTIAL | 1 DB (8 branches) | **`GetMembers` emits `LIMIT`/`OFFSET` unguarded, so `per_page=0` is an empty list — the opposite of the channel store.** Sort is a three-way branch on the raw string (`""` → `UserId`, `"Username"` → `Username`, anything else → no `ORDER BY`); `GetMember` has no `DeleteAt` filter where `GetMembers` does; `GetByName` is exact-match, no folding, and serves archived teams. Restrictions dropped (forwarded). |
 | app/team.go (`GetTeamByName`, `GetTeamMember`, `GetTeamMembers`) | `mm-app/src/team.rs` | PARTIAL | 3 pass | **`GetTeamByName`'s fallback branch is a 404, not a 500** (team.go:979) — the only sibling that does this. `GetTeamMembers` shares `get_members.app_error` with `GetTeamMembersForUser`. |
 | api4/team.go (`getTeamByName`, `getTeamMember`, `getTeamMembers`) | `mm-api/src/teams.rs` | PARTIAL | 10 pass + 13 parity | By-name gate is `&&`-short-circuited — a public team is admitted with **no** permission query, no `list_public_teams` fallback (unlike `getTeam`). gorilla registers `{team_id}` before `/name/`, so `GET /teams/name/{image,stats,members}` is Go's 400 on `team_id`; axum resolves the other way, so those three forward (see `TEAM_BY_NAME_SHADOWED_LITERALS`). `SanitizeRoleData` gated on `manage_team_roles` — the guard `getTeamMembersForUser` could skip is live here. 17 mutations, 17 caught, 2 controls survived. |
+| store/sqlstore/channel_store.go (`getByName`, `GetChannels`) | `mm-store/src/channel_store.rs` | PARTIAL | 4 DB | `getByName`'s team filter is a literal `TeamId = ? OR TeamId = ''` — **not** `getByNames`'s omitted-predicate wildcard — so a DM answers under any team and an empty team id finds only teamless rows. `GetChannels` orders by `DisplayName`, includes teamless channels in every team's list, and answers **`ErrNotFound` for zero rows**. |
+| app/channel.go (`GetChannelByName`, `GetChannelsForTeamForUser`, `FillInChannelsProps`) | `mm-app/src/channel.rs` | PARTIAL | — | The list's error `where` is `GetChannelsForUser` (copied from the sibling in Go, on the wire). `FillInChannelProps` is now the one-element case of the list version, which batches mentions per team; `HydrateChannelsPolicyActions` stays unported ([D-141]). |
+| api4/channel.go (`getChannelByName`) | `mm-api/src/channels.rs` | PARTIAL | 6 pass + 8 parity | Name lower-cased **before** `RequireChannelName`; non-open non-member is a **404** with the store's `missing` id (not `getChannel`'s 403), `manage_team` admits a team admin to a private channel, and the open-branch 403 names `read_public_channel`. Mux class `[A-Za-z0-9_-]+` forwards a dotted segment. Encoder newline. |
+| api4/channel.go (`getChannelsForTeamForUser`) | `mm-api/src/channels.rs` | PARTIAL | 6 pass + 7 parity | Mutations across the two routes: 17 run, 17 caught, 2 controls survived per suite.  `RequireUserId().RequireTeamId()` (user first), gates `edit_other_users` then `view_team` **before** query parsing; `last_delete_at < 0` is the one 400 (`+` in a query is a space, so only `%2B` is a sign). Etag computed before `FillInChannelsProps`, exact `If-None-Match` → 304 with `ETag`; zero channels is a 404. Encoder newline. |
 | model/session.go | `mm-model/src/session.rs` | DONE | 20 pass | Strangler Fig critical path. Complete `IsValid`, `PreSave`, device-id validators. |
 | model/team_member.go | `mm-model/src/team_member.rs` | DONE | 6 pass | Pulled ahead of its turn: `Session.TeamMembers` is on the wire, so session.rs cannot round-trip without it. `TeamMemberWithError`/`EmailInviteWithError` deferred. |
 | model/team.go | `mm-model/src/team.rs` | DONE | 37 pass | First **complete** `IsValid` — every branch, all error ids. `Etag` landed with `channel_list.go`. |
@@ -3539,3 +3543,23 @@ set aside. Three Rust files and one correction to the previous session's ledger 
    connections: the `query_as!` macro failed to *compile*, which the harness counts as a
    failure. Re-run once the database answered: three caught, control survived. An empty
    parenthesis after `CAUGHT` is a compile error until proven otherwise.
+## Notes — api4/channel.go (`getChannelByName`, `getChannelsForTeamForUser`)
+
+1. **Two store functions one line apart, two team rules.** `getByNames` omits its team predicate
+   when the team id is empty; `getByName` always writes `TeamId = ? OR TeamId = ''`. The by-name
+   route therefore serves a DM under any team's path (measured), and an empty team id there is not
+   a wildcard (DB test). Copying `get_by_names`'s `$2 = '' OR` into `get_by_name` would have
+   passed every cross-server test.
+2. **The by-name refusal is a 404, and `getChannel`'s is a 403, for the same caller on the same
+   channel.** Both measured. The enum `ByNameRefusal` exists so the unit suite can see the split;
+   over HTTP only the status shows, and the 404's id is the store's `missing` one, so a
+   non-member cannot distinguish a private channel from none.
+3. **`last_delete_at=+7` is zero on both servers.** `url.ParseQuery` turns `+` into a space before
+   `Atoi` sees it; the first draft of the unit test expected 7 and the code was right.
+4. **A list moves under a test from outside the test.** DMs are teamless and appear in every
+   team's list, so another suite (or another worktree) opening a DM with the fixture user changes
+   this route's body and etag mid-assertion. The suite uses a fresh team per test and reads
+   Go-ours-Go with retry for both bodies and etags.
+5. **The 304 carries `x-mmrs-served-by`.** The first stack run failed on the test helper, not the
+   route: the Rust 304 answered `ETag` only. Added for diagnostics; Go's 304 is `ETag` only too
+   and the extra header is ours on every served response.

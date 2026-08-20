@@ -1,9 +1,11 @@
 //! Port of the channel app-layer surface (channels/app/channel.go): `GetChannel`,
-//! `GetChannelMember` and `GetChannelUnread`.
+//! `GetChannelByName`, `GetChannelsForTeamForUser`, `GetChannelMember`, `GetChannelUnread` and
+//! `FillInChannelsProps`.
 
 use std::collections::HashMap;
 
-use mm_model::channel::Channel;
+use mm_model::channel::{Channel, ChannelSearchOpts};
+use mm_model::channel_list::ChannelList;
 use mm_model::channel_member::{CHANNEL_MARK_UNREAD_MENTION, ChannelMember, ChannelUnread};
 use mm_model::user::MARK_UNREAD_NOTIFY_PROP;
 use mm_model::utils::AppError;
@@ -307,11 +309,103 @@ impl App {
             })
     }
 
-    /// Port of `app.App.FillInChannelProps` (channel.go:4091) through the
-    /// `FillInChannelsProps` (:4095) it delegates to, specialised to the one-element list every
-    /// call is: the by-team grouping and the cross-channel mention batching are query
-    /// optimisations for the list case, not behaviour, and none of them changes what a single
-    /// channel's props end up holding.
+    /// Port of `app.App.GetChannelByName` (channel.go:2327).
+    ///
+    /// `includeDeleted` picks between two store methods in Go; here it is the flag the store's
+    /// single `get_by_name` takes. The two error branches are the by-name ids — `missing` for a
+    /// 404 and `existing` for a 500 — and, unlike `GetChannel`, neither carries `params`.
+    ///
+    /// **Not ported:** `HydrateChannelPolicyActions`, which follows the fetch and whose failure
+    /// Go only logs. See [D-141].
+    #[tracing::instrument(skip_all, fields(team_id = %team_id, name = %channel_name, include_deleted))]
+    pub async fn get_channel_by_name(
+        &self,
+        channel_name: &str,
+        team_id: &str,
+        include_deleted: bool,
+    ) -> Result<Channel, AppError> {
+        self.store()
+            .channel()
+            .get_by_name(team_id, channel_name, include_deleted)
+            .await
+            .map_err(|err| {
+                if err.is_not_found() {
+                    AppError::new(
+                        "GetChannelByName",
+                        "app.channel.get_by_name.missing.app_error",
+                        None,
+                        String::new(),
+                        404,
+                    )
+                } else {
+                    tracing::error!(error = %err, "channel-by-name lookup failed");
+                    AppError::new(
+                        "GetChannelByName",
+                        "app.channel.get_by_name.existing.app_error",
+                        None,
+                        String::new(),
+                        500,
+                    )
+                }
+            })
+    }
+
+    /// Port of `app.App.GetChannelsForTeamForUser` (channel.go:2409) through the
+    /// `Server.getChannelsForTeamForUser` (:2394) it delegates to.
+    ///
+    /// The 404 here is **reachable**: the store answers `ErrNotFound` for zero rows, so a user who
+    /// is a member of no channel in the team — or a caller with `manage_system` asking about a
+    /// team the target never joined — gets `app.channel.get_channels.not_found.app_error`, not an
+    /// empty array. Note the Go `Where` is `GetChannelsForUser` in both branches, copied from the
+    /// sibling function: reproduced, since `where` is on the wire as the error's first field.
+    ///
+    /// **Not ported:** `HydrateChannelsPolicyActions`, a no-op unless some channel in the list is
+    /// policy-enforced, and whose failure Go only logs — see [D-141].
+    #[tracing::instrument(skip_all, fields(team_id = %team_id, user_id = %user_id, count))]
+    pub async fn get_channels_for_team_for_user(
+        &self,
+        team_id: &str,
+        user_id: &str,
+        opts: &ChannelSearchOpts,
+    ) -> Result<ChannelList, AppError> {
+        let channels = self
+            .store()
+            .channel()
+            .get_channels(team_id, user_id, opts)
+            .await
+            .map_err(|err| {
+                if err.is_not_found() {
+                    AppError::new(
+                        "GetChannelsForUser",
+                        "app.channel.get_channels.not_found.app_error",
+                        None,
+                        String::new(),
+                        404,
+                    )
+                } else {
+                    tracing::error!(error = %err, "channels-for-team-for-user lookup failed");
+                    AppError::new(
+                        "GetChannelsForUser",
+                        "app.channel.get_channels.get.app_error",
+                        None,
+                        String::new(),
+                        500,
+                    )
+                }
+            })?;
+        tracing::Span::current().record("count", channels.0.len());
+        Ok(channels)
+    }
+
+    /// Port of `app.App.FillInChannelProps` (channel.go:4091): the one-element case of
+    /// [`App::fill_in_channels_props`], which is exactly how Go defines it.
+    #[tracing::instrument(skip_all, fields(channel_id = %channel.id))]
+    pub async fn fill_in_channel_props(&self, channel: &mut Channel) -> Result<(), AppError> {
+        self.fill_in_channels_props(std::slice::from_mut(channel))
+            .await
+    }
+
+    /// Port of `app.App.FillInChannelsProps` (channel.go:4095).
     ///
     /// The prop is **written or deleted, never left stale**, and the delete has a guard:
     ///
@@ -320,30 +414,62 @@ impl App {
     /// - A header whose mentions all miss (no such channel, archived, private, wrong team) does
     ///   not merely skip the write — it **removes** a `channel_mentions` prop that is already
     ///   there, because the header may have changed since the prop was computed.
-    /// - A header with no `~mention` at all skips *everything*, the delete included
-    ///   (channel.go:4109's `len > 0` guard sits above both branches). A stale prop survives an
-    ///   emptied header; that is Go's behaviour, not an oversight here.
+    /// - A header with no `~mention` at all skips *everything*, the delete included — **provided
+    ///   no other channel of the same team has one.** Go's `len(allChannelMentionNames) > 0`
+    ///   guard (channel.go:4109) is per *team group*, not per channel: one mention anywhere in
+    ///   the team's group runs the write-or-delete loop over every channel in it, and a channel
+    ///   with an empty header then takes the delete branch. Through these routes that branch is a
+    ///   no-op (the store never selects `Props`), so the distinction is not on the wire today.
     ///
-    /// The lookup is scoped to the channel's own team — and a DM or GM has `TeamId == ""`, which
-    /// [`mm_store::channel_store::get_by_names`] turns into "every team", exactly as Go's omitted
-    /// predicate does. Only `Type == "O"` mentions render; a private channel's existence is not
-    /// leaked into a prop anyone in the channel can read.
-    #[tracing::instrument(skip_all, fields(channel_id = %channel.id))]
-    pub async fn fill_in_channel_props(&self, channel: &mut Channel) -> Result<(), AppError> {
-        // Go's `len(allChannelMentionNames) > 0` guard (channel.go:4109) sits above the query
-        // *and* the prop write/delete, so a header with no `~` touches nothing — including a
-        // stale `channel_mentions` prop, which survives. The guard is load-bearing:
-        // without it an empty header would fall into `apply_channel_mentions_prop`'s
-        // delete branch.
-        let mentions = mm_model::channel_mentions::channel_mentions(&channel.header);
-        if mentions.is_empty() {
-            return Ok(());
+    /// Channels are grouped by team and each team's mentions are looked up **once**; a DM or GM
+    /// has `TeamId == ""`, which [`mm_store::channel_store::get_by_names`] turns into "every
+    /// team", exactly as Go's omitted predicate does. Only `Type == "O"` mentions render; a
+    /// private channel's existence is not leaked into a prop anyone in the channel can read.
+    #[tracing::instrument(skip_all, fields(channels = channels.len()))]
+    pub async fn fill_in_channels_props(&self, channels: &mut [Channel]) -> Result<(), AppError> {
+        // Go groups with a map keyed by team; iteration order over a map is unspecified there
+        // and irrelevant here, since each group is independent. A `BTreeMap` keeps the lookups
+        // in a stable order for the logs.
+        let mut indices_by_team: std::collections::BTreeMap<&str, Vec<usize>> =
+            std::collections::BTreeMap::new();
+        let mentions_by_index: Vec<Vec<String>> = channels
+            .iter()
+            .map(|c| mm_model::channel_mentions::channel_mentions(&c.header))
+            .collect();
+        for (index, channel) in channels.iter().enumerate() {
+            indices_by_team
+                .entry(channel.team_id.as_str())
+                .or_default()
+                .push(index);
         }
+        // The borrow of `channels` through the keys ends here; the group list is owned below.
+        let groups: Vec<(String, Vec<usize>)> = indices_by_team
+            .into_iter()
+            .map(|(team, indices)| (team.to_owned(), indices))
+            .collect();
 
-        let mentioned = self
-            .get_channels_by_names(&mentions, &channel.team_id)
-            .await?;
-        apply_channel_mentions_prop(channel, &mentions, &mentioned);
+        for (team_id, indices) in groups {
+            let mut all_mentions: Vec<String> = Vec::new();
+            for &index in &indices {
+                for mention in &mentions_by_index[index] {
+                    if !all_mentions.contains(mention) {
+                        all_mentions.push(mention.clone());
+                    }
+                }
+            }
+            if all_mentions.is_empty() {
+                continue;
+            }
+
+            let mentioned = self.get_channels_by_names(&all_mentions, &team_id).await?;
+            for &index in &indices {
+                apply_channel_mentions_prop(
+                    &mut channels[index],
+                    &mentions_by_index[index],
+                    &mentioned,
+                );
+            }
+        }
         Ok(())
     }
 }
