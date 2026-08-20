@@ -211,6 +211,23 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/teams/{team_id}/stats",
             partially_migrated_with_ids(&state, get(teams::get_team_stats)),
         )
+        // `team_name` is not id-shaped — Go's class is `[A-Za-z0-9_-]+` — so the id-charset
+        // middleware must not apply; the handler carries its own mux forward, like `username`.
+        // axum gives the static `name` precedence over `{team_id}` above, which is the *reverse*
+        // of gorilla's registration order; the handler forwards the three GET literals that
+        // order would have sent to `{team_id}` (see `teams::TEAM_BY_NAME_SHADOWED_LITERALS`).
+        .route(
+            "/api/v4/teams/name/{team_name}",
+            partially_migrated(get(teams::get_team_by_name)),
+        )
+        .route(
+            "/api/v4/teams/{team_id}/members",
+            partially_migrated_with_ids(&state, get(teams::get_team_members)),
+        )
+        .route(
+            "/api/v4/teams/{team_id}/members/{user_id}",
+            partially_migrated_with_ids(&state, get(teams::get_team_member)),
+        )
         // Sibling literal segments (`/channels/direct`, `/channels/search`, …) are all POST-only
         // in Go, and all alphanumeric. A GET to one of them matches `{channel_id}` here exactly
         // as it matches gorilla's `{channel_id:[A-Za-z0-9]+}` there, and 400s identically; a POST
