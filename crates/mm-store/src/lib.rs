@@ -19,6 +19,7 @@ pub mod preference_store;
 pub mod role_store;
 pub mod scheme_store;
 pub mod session_store;
+pub mod status_store;
 pub mod team_store;
 pub mod user_store;
 pub mod user_terms_of_service_store;
@@ -29,6 +30,7 @@ pub use preference_store::{PreferenceStore, SqlPreferenceStore};
 pub use role_store::{RoleStore, SqlRoleStore};
 pub use scheme_store::{SchemeStore, SqlSchemeStore};
 pub use session_store::{SessionStore, SqlSessionStore};
+pub use status_store::{SqlStatusStore, StatusStore};
 pub use team_store::{SqlTeamStore, TeamStore};
 pub use user_store::{SqlUserStore, UserStore};
 pub use user_terms_of_service_store::{SqlUserTermsOfServiceStore, UserTermsOfServiceStore};
@@ -48,6 +50,7 @@ pub struct SqlStore {
     role: SqlRoleStore,
     scheme: SqlSchemeStore,
     session: SqlSessionStore,
+    status: SqlStatusStore,
     team: SqlTeamStore,
     user: SqlUserStore,
     user_terms_of_service: SqlUserTermsOfServiceStore,
@@ -80,6 +83,7 @@ impl SqlStore {
             role: SqlRoleStore::new(pool.clone()),
             scheme: SqlSchemeStore::new(pool.clone()),
             session: SqlSessionStore::new(pool.clone()),
+            status: SqlStatusStore::new(pool.clone()),
             team: SqlTeamStore::new(pool.clone()),
             user_terms_of_service: SqlUserTermsOfServiceStore::new(pool.clone()),
             user: SqlUserStore::new(pool),
@@ -109,6 +113,11 @@ impl SqlStore {
     /// Port of `store.Store.Scheme()`.
     pub fn scheme(&self) -> &SqlSchemeStore {
         &self.scheme
+    }
+
+    /// Port of `store.Store.Status()`.
+    pub fn status(&self) -> &SqlStatusStore {
+        &self.status
     }
 
     /// Port of `store.Store.Team()`.

@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT COALESCE(userid, '')        AS \"userid!\",\n                   COALESCE(status, '')        AS \"status!\",\n                   COALESCE(manual, FALSE)     AS \"manual!\",\n                   COALESCE(lastactivityat, 0) AS \"lastactivityat!\",\n                   COALESCE(dndendtime, 0)     AS \"dndendtime!\",\n                   COALESCE(prevstatus, '')    AS \"prevstatus!\"\n              FROM status\n             WHERE userid = ANY($1)\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "userid!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "status!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "manual!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "lastactivityat!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "dndendtime!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "prevstatus!",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "b781bd591f88d68682ae1f9d5507e3b7ea6de34e2cc1353b42a36ed6e31c5e87"
+}
