@@ -3,6 +3,7 @@
 //! - `getChannel` — `GET /api/v4/channels/{channel_id}`
 //! - `getChannelMember` — `GET /api/v4/channels/{channel_id}/members/{user_id}`
 //! - `getChannelUnread` — `GET /api/v4/users/{user_id}/channels/{channel_id}/unread`
+//! - `getChannelStats` — `GET /api/v4/channels/{channel_id}/stats`
 //!
 //! # The first route migrated *through* a permission check
 //!
@@ -285,21 +286,65 @@ pub async fn get_channel_unread(
 /// `model.AsContentReviewerParam` (content_flagging.go:19).
 const AS_CONTENT_REVIEWER_PARAM: &str = "as_content_reviewer";
 
-/// Would Go's `getChannel` take the content-reviewer path for this query string?
-///
-/// Go reads `r.URL.Query().Get(model.AsContentReviewerParam)` — the **first** value when the key
-/// repeats — and feeds it to `strconv.ParseBool`, discarding the error. So `?as_content_reviewer`
-/// bare, `=yes`, or `=` are all false, while `=1`, `=t` and `=True` are true.
-/// `form_urlencoded::parse` decodes percent-escapes and `+`-as-space the way `url.ParseQuery`
-/// does, which matters because the *decoded* value is what `ParseBool` sees.
-fn is_content_reviewer_request(query: Option<&str>) -> bool {
+/// `getChannelStats`'s query parameter — a literal in the handler, no model constant to cite.
+const EXCLUDE_FILES_COUNT_PARAM: &str = "exclude_files_count";
+
+/// Go's boolean-query-flag idiom: `r.URL.Query().Get(key)` — the **first** value when the key
+/// repeats — fed to `strconv.ParseBool` with the error discarded. So a bare key, `=yes`, or `=`
+/// are all false, while `=1`, `=t` and `=True` are true. `form_urlencoded::parse` decodes
+/// percent-escapes and `+`-as-space the way `url.ParseQuery` does, which matters because the
+/// *decoded* value is what `ParseBool` sees.
+fn query_flag_is_true(query: Option<&str>, flag: &str) -> bool {
     let Some(query) = query else {
         return false;
     };
     form_urlencoded::parse(query.as_bytes())
-        .find(|(key, _)| key == AS_CONTENT_REVIEWER_PARAM)
+        .find(|(key, _)| key == flag)
         .and_then(|(_, value)| parse_go_bool(&value))
         .unwrap_or(false)
+}
+
+/// Would Go take the content-reviewer path for this query string? Shared with `getTeam`, which
+/// carries the same flag (api4/team.go:316) and forwards it the same way.
+pub(crate) fn is_content_reviewer_request(query: Option<&str>) -> bool {
+    query_flag_is_true(query, AS_CONTENT_REVIEWER_PARAM)
+}
+
+/// `web.PageDefault` (params.go:18).
+const PAGE_DEFAULT: i64 = 0;
+/// `web.PerPageDefault` (params.go:19).
+const PER_PAGE_DEFAULT: i64 = 60;
+/// `web.PerPageMaximum` (params.go:20).
+const PER_PAGE_MAXIMUM: i64 = 200;
+
+/// `url.Values.Get`: the first value of a repeated key, percent-decoded. `None` when absent.
+fn query_first(query: Option<&str>, key: &str) -> Option<String> {
+    form_urlencoded::parse(query?.as_bytes())
+        .find(|(k, _)| k == key)
+        .map(|(_, value)| value.into_owned())
+}
+
+/// Port of the `page` half of `web.ParamsFromRequest` (params.go:217): `strconv.Atoi` failure
+/// **or a negative value** falls to the default — there is no 400 for garbage pagination, ever.
+/// (Go's negative branch carries a carve-out for `getChannelMembersForUser`'s streaming mode;
+/// no ported route is that one, so the plain rule applies.)
+fn parse_page(query: Option<&str>) -> i64 {
+    match query_first(query, "page").and_then(|v| v.parse::<i64>().ok()) {
+        Some(val) if val >= 0 => val,
+        _ => PAGE_DEFAULT,
+    }
+}
+
+/// The `per_page` half (params.go:234): failure or negative → 60, above 200 → clamped to 200 —
+/// and **zero is neither**, so `?per_page=0` survives the parser and reaches the store, whose
+/// `Limit > 0` guard turns it into *no limit at all*. A caller can ask for everything by asking
+/// for nothing, and both servers oblige.
+fn parse_per_page(query: Option<&str>) -> i64 {
+    match query_first(query, "per_page").and_then(|v| v.parse::<i64>().ok()) {
+        Some(val) if val > PER_PAGE_MAXIMUM => PER_PAGE_MAXIMUM,
+        Some(val) if val >= 0 => val,
+        _ => PER_PAGE_DEFAULT,
+    }
 }
 
 /// Go's permission block for [`get_channel`] (api4/channel.go:877-892), with both gates lazy so
@@ -461,6 +506,199 @@ pub async fn get_channel(
         body,
     )
         .into_response()
+}
+
+/// Go's `filesCount := int64(-1)` and the guard around the fourth query
+/// (api4/channel.go:1038-1045), as one function so both are testable without a database.
+///
+/// `-1` is not a placeholder that gets fixed up later — it **is the wire value** when
+/// `exclude_files_count` is true, and `ChannelStats.FilesCount` has no `omitempty`, so the client
+/// sees the sentinel. The fetch is a closure for the same reason [`first_denied_permission`]'s
+/// gate is: when the flag is set Go never runs the `FileInfo` count, and a port that ran it
+/// anyway and then overwrote the result would issue a query the flag exists to skip — invisible
+/// over HTTP, pinned by the test asserting the closure is never polled.
+async fn files_count_unless_excluded<F, Fut>(
+    exclude_files_count: bool,
+    fetch: F,
+) -> Result<i64, mm_model::utils::AppError>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = Result<i64, mm_model::utils::AppError>>,
+{
+    if exclude_files_count {
+        return Ok(-1);
+    }
+    fetch().await
+}
+
+/// Port of `getChannelStats` (api4/channel.go:1006), reached as
+/// `GET /api/v4/channels/{channel_id}/stats`.
+///
+/// # Order of operations
+///
+/// 1. `exclude_files_count` is read first, as Go does — observably irrelevant, since parsing
+///    cannot fail, but kept in Go's order so the two read alike.
+/// 2. `RequireChannelId` — the segment charset is already checked by
+///    [`crate::partially_migrated_with_ids`].
+/// 3. One gate: `SessionHasPermissionToChannel(read_channel)`, no open-channel team fallback —
+///    unlike `getChannel`, a team member who never joined a **public** channel is refused its
+///    stats. That asymmetry is Go's, asserted against the running server.
+/// 4. Four counts, in Go's order — member, guest, pinned, files — each returning its own error,
+///    so the **first** broken query names the response. The files count is skipped entirely when
+///    excluded; see [`files_count_unless_excluded`].
+///
+/// # The handler never fetches the channel — but the gate does
+///
+/// No `GetChannel` runs here, so nothing 404s. That does **not** make a missing channel a 200 of
+/// zeroes: `SessionHasPermissionToChannel`'s own channel fetch sits above every grant branch,
+/// the admin's `manage_system` included, so a well-formed id that matches nothing is a **403**
+/// from both servers — measured, after a first draft of the parity suite asserted the
+/// 200-of-zeroes and both servers refused. The store's zero counts are reachable only from
+/// tests. The `channel_id` in a successful body is the caller's own path segment echoed back,
+/// not a row's column.
+///
+/// # Wire format
+///
+/// `json.NewEncoder(w).Encode(stats)` — trailing newline ([D-086]). Five keys, no `omitempty`,
+/// `pinnedpost_count` without its middle underscore — the fixture-pinned serialisation in
+/// `mm-model/src/channel_stats.rs`.
+#[tracing::instrument(skip_all, fields(channel_id = %channel_id))]
+pub async fn get_channel_stats(
+    State(state): State<AppState>,
+    Path(channel_id): Path<String>,
+    axum::extract::RawQuery(query): axum::extract::RawQuery,
+    session: AuthenticatedSession,
+) -> Result<Response, ApiError> {
+    let exclude_files_count = query_flag_is_true(query.as_deref(), EXCLUDE_FILES_COUNT_PARAM);
+
+    require_id(&channel_id, "channel_id")?;
+
+    let (allowed, _is_member) = state
+        .app
+        .session_has_permission_to_channel(&session.0, &channel_id, &PERMISSION_READ_CHANNEL)
+        .await;
+    if !allowed {
+        return Err(ApiError(*make_permission_error(
+            &session.0,
+            &[&PERMISSION_READ_CHANNEL],
+        )));
+    }
+
+    let member_count = state.app.get_channel_member_count(&channel_id).await?;
+    let guest_count = state.app.get_channel_guest_count(&channel_id).await?;
+    let pinned_post_count = state.app.get_channel_pinned_post_count(&channel_id).await?;
+    let files_count = files_count_unless_excluded(exclude_files_count, || async {
+        state.app.get_channel_file_count(&channel_id).await
+    })
+    .await?;
+
+    let stats = mm_model::channel_stats::ChannelStats {
+        channel_id,
+        member_count,
+        guest_count,
+        pinned_post_count,
+        files_count,
+    };
+
+    let mut body = serde_json::to_vec(&stats).map_err(|err| {
+        tracing::error!(error = %err, "failed to serialise ChannelStats");
+        ApiError(mm_model::utils::AppError::new(
+            "getChannelStats",
+            "api.marshal_error",
+            None,
+            String::new(),
+            500,
+        ))
+    })?;
+    body.push(b'\n');
+
+    Ok((
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
+    )
+        .into_response())
+}
+
+/// Port of `getChannelMembers` (api4/channel.go:1865), reached as
+/// `GET /api/v4/channels/{channel_id}/members` — the first paginated route.
+///
+/// # Order of operations
+///
+/// 1. `RequireChannelId` — charset already handled by [`crate::partially_migrated_with_ids`].
+/// 2. One gate: `SessionHasPermissionToChannel(read_channel)`, the `getChannelStats` shape —
+///    which also means a missing channel dies here as a 403 (the gate's own fetch misses), and
+///    the empty list a missing channel would produce is unreachable over REST.
+/// 3. `GetChannelMembersPage(page, per_page)` — the parser never 400s (garbage falls to
+///    defaults) and `per_page=0` means **every member**; see [`parse_per_page`].
+/// 4. `SanitizeForCurrentUser` over every element — the two timestamps blank to `-1` on
+///    everyone's row but the caller's own, which stays intact *in the middle of the list*.
+///
+/// # Wire format
+///
+/// `json.NewEncoder(w).Encode(members)` — an array plus the trailing newline ([D-086]). An
+/// empty page (offset past the end) is `[]`, never `null`. The list order is the store's heap
+/// order — Go adds no `ORDER BY` — which both servers share because they share the table; it is
+/// not a wire guarantee, and the parity suite treats it as one only because the fixtures are
+/// quiescent.
+#[tracing::instrument(skip_all, fields(channel_id = %channel_id, page, per_page))]
+pub async fn get_channel_members(
+    State(state): State<AppState>,
+    Path(channel_id): Path<String>,
+    axum::extract::RawQuery(query): axum::extract::RawQuery,
+    session: AuthenticatedSession,
+) -> Result<Response, ApiError> {
+    let page = parse_page(query.as_deref());
+    let per_page = parse_per_page(query.as_deref());
+    tracing::Span::current().record("page", page);
+    tracing::Span::current().record("per_page", per_page);
+
+    require_id(&channel_id, "channel_id")?;
+
+    let (allowed, _is_member) = state
+        .app
+        .session_has_permission_to_channel(&session.0, &channel_id, &PERMISSION_READ_CHANNEL)
+        .await;
+    if !allowed {
+        return Err(ApiError(*make_permission_error(
+            &session.0,
+            &[&PERMISSION_READ_CHANNEL],
+        )));
+    }
+
+    let mut members = state
+        .app
+        .get_channel_members_page(&channel_id, page, per_page)
+        .await?;
+
+    for member in &mut members {
+        member.sanitize_for_current_user(&session.0.user_id);
+    }
+
+    let mut body = serde_json::to_vec(&members).map_err(|err| {
+        tracing::error!(error = %err, "failed to serialise the member list");
+        ApiError(mm_model::utils::AppError::new(
+            "getChannelMembers",
+            "api.marshal_error",
+            None,
+            String::new(),
+            500,
+        ))
+    })?;
+    body.push(b'\n');
+
+    Ok((
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
+    )
+        .into_response())
 }
 
 #[cfg(test)]
@@ -730,6 +968,122 @@ mod tests {
                 "query {query:?}"
             );
         }
+    }
+
+    /// `exclude_files_count` wears the same `ParseBool` semantics as the reviewer flag — they
+    /// share [`query_flag_is_true`] — but under its own key, so a mutation hardcoding either
+    /// key into the shared helper dies here or in the reviewer table.
+    #[test]
+    fn the_exclude_files_count_flag_parses_the_query_like_go() {
+        for (query, expected) in [
+            (Some("exclude_files_count=true"), true),
+            (Some("exclude_files_count=1"), true),
+            (Some("exclude_files_count=yes"), false), // ParseBool error → false
+            (Some("exclude_files_count="), false),
+            (Some("exclude_files_count"), false),
+            (Some("as_content_reviewer=true"), false), // the *other* flag must not trip this one
+            (Some("EXCLUDE_FILES_COUNT=true"), false),
+            (
+                Some("exclude_files_count=false&exclude_files_count=true"),
+                false, // first value wins
+            ),
+            (Some(""), false),
+            (None, false),
+        ] {
+            assert_eq!(
+                query_flag_is_true(query, EXCLUDE_FILES_COUNT_PARAM),
+                expected,
+                "query {query:?}"
+            );
+        }
+    }
+
+    /// `page`: Atoi failure or a negative value falls to 0 — never a 400. Positive values pass
+    /// through unclamped; there is no page maximum.
+    #[test]
+    fn page_parses_like_gos_params_middleware() {
+        for (query, expected) in [
+            (Some("page=0"), 0),
+            (Some("page=3"), 3),
+            (Some("page=100000"), 100_000),
+            (Some("page=-1"), 0),
+            (Some("page=-999"), 0),
+            (Some("page=abc"), 0),
+            (Some("page=1.5"), 0),
+            (Some("page="), 0),
+            (Some("page=1&page=9"), 1), // first value wins
+            (Some("per_page=5"), 0),    // the other key must not bleed in
+            (Some(""), 0),
+            (None, 0),
+        ] {
+            assert_eq!(parse_page(query), expected, "query {query:?}");
+        }
+    }
+
+    /// `per_page`: failure or negative → 60, above 200 → 200 — and **zero is neither**, so it
+    /// survives to the store where `Limit > 0` turns it into "no limit". The parser must not
+    /// helpfully treat 0 as the default, or `?per_page=0` stops meaning "everything".
+    #[test]
+    fn per_page_parses_like_gos_params_middleware() {
+        for (query, expected) in [
+            (Some("per_page=60"), 60),
+            (Some("per_page=1"), 1),
+            (Some("per_page=200"), 200),
+            (Some("per_page=201"), 200),
+            (Some("per_page=99999"), 200),
+            (Some("per_page=0"), 0), // zero passes through — the store reads it as unlimited
+            (Some("per_page=-1"), 60),
+            (Some("per_page=abc"), 60),
+            (Some("per_page="), 60),
+            (Some("page=7"), 60),
+            (None, 60),
+        ] {
+            assert_eq!(parse_per_page(query), expected, "query {query:?}");
+        }
+    }
+
+    /// Excluded means `-1` **and no query**: Go initialises the sentinel and only overwrites it
+    /// inside `if !excludeFilesCountBool`, so the `FileInfo` count never runs. Both halves are
+    /// invisible over HTTP against a channel with no files — `-1` versus `0` shows, but "did a
+    /// query run" does not — hence the closure and this test.
+    #[tokio::test]
+    async fn excluding_files_answers_minus_one_and_never_polls_the_count() {
+        let count = files_count_unless_excluded(true, || async {
+            panic!("the files count must not run when excluded")
+        })
+        .await
+        .expect("the sentinel is not an error");
+        assert_eq!(count, -1, "-1 is the wire value, not a placeholder");
+    }
+
+    /// Not excluded: the fetch's answer — and its **error** — pass through untouched.
+    #[tokio::test]
+    async fn not_excluding_files_serves_the_fetched_count_and_its_error() {
+        let count = files_count_unless_excluded(false, || async { Ok(7) }).await;
+        assert_eq!(count.expect("fetch succeeded"), 7);
+
+        let err = files_count_unless_excluded(false, || async {
+            Err(mm_model::utils::AppError::new(
+                "SqlChannelStore.GetFileCount",
+                "app.channel.get_file_count.app_error",
+                None,
+                String::new(),
+                500,
+            ))
+        })
+        .await
+        .expect_err("the fetch failed");
+        assert_eq!(err.id, "app.channel.get_file_count.app_error");
+    }
+
+    /// The stats body is the fixture-pinned five keys, and this handler encodes, so it ends in a
+    /// newline ([D-086]).
+    #[test]
+    fn the_stats_body_ends_in_a_newline() {
+        let mut body = serde_json::to_vec(&mm_model::channel_stats::ChannelStats::default())
+            .expect("serialises");
+        body.push(b'\n');
+        assert_eq!(body.last(), Some(&b'\n'));
     }
 
     /// An open channel asks the team first, and a team grant means the channel gate — a database

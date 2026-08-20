@@ -170,6 +170,42 @@ pub trait ChannelStore {
         team_id: &str,
         names: &[String],
     ) -> impl std::future::Future<Output = Result<Vec<Channel>, StoreError>> + Send;
+
+    /// Port of `SqlChannelStore.GetMemberCount` (channel_store.go:2666).
+    ///
+    /// Go's `allowFromCache` is dropped like `get_by_names`'s: no cache, never staler than Go.
+    fn get_member_count(
+        &self,
+        channel_id: &str,
+    ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
+
+    /// Port of `SqlChannelStore.GetGuestCount` (channel_store.go:2752). `allowFromCache` dropped.
+    fn get_guest_count(
+        &self,
+        channel_id: &str,
+    ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
+
+    /// Port of `SqlChannelStore.GetPinnedPostCount` (channel_store.go:2731). `allowFromCache`
+    /// dropped.
+    fn get_pinned_post_count(
+        &self,
+        channel_id: &str,
+    ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
+
+    /// Port of `SqlChannelStore.GetFileCount` (channel_store.go:2646).
+    fn get_file_count(
+        &self,
+        channel_id: &str,
+    ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
+
+    /// Port of `SqlChannelStore.GetMembers` (channel_store.go:2181). Go's
+    /// `ChannelMembersGetOptions` is flattened to the three fields ported callers use.
+    fn get_members(
+        &self,
+        channel_id: &str,
+        offset: i64,
+        limit: i64,
+    ) -> impl std::future::Future<Output = Result<Vec<ChannelMember>, StoreError>> + Send;
 }
 
 /// Postgres-backed implementation.
@@ -225,6 +261,130 @@ impl ChannelStore for SqlChannelStore {
     ) -> Result<Vec<Channel>, StoreError> {
         get_by_names(&self.pool, team_id, names).await
     }
+
+    #[tracing::instrument(skip_all, fields(channel_id = %channel_id))]
+    async fn get_member_count(&self, channel_id: &str) -> Result<i64, StoreError> {
+        get_member_count(&self.pool, channel_id).await
+    }
+
+    #[tracing::instrument(skip_all, fields(channel_id = %channel_id))]
+    async fn get_guest_count(&self, channel_id: &str) -> Result<i64, StoreError> {
+        get_guest_count(&self.pool, channel_id).await
+    }
+
+    #[tracing::instrument(skip_all, fields(channel_id = %channel_id))]
+    async fn get_pinned_post_count(&self, channel_id: &str) -> Result<i64, StoreError> {
+        get_pinned_post_count(&self.pool, channel_id).await
+    }
+
+    #[tracing::instrument(skip_all, fields(channel_id = %channel_id))]
+    async fn get_file_count(&self, channel_id: &str) -> Result<i64, StoreError> {
+        get_file_count(&self.pool, channel_id).await
+    }
+
+    #[tracing::instrument(skip_all, fields(channel_id = %channel_id))]
+    async fn get_members(
+        &self,
+        channel_id: &str,
+        offset: i64,
+        limit: i64,
+    ) -> Result<Vec<ChannelMember>, StoreError> {
+        get_members(&self.pool, channel_id, offset, limit).await
+    }
+}
+
+/// One row of Go's `channelMembersForTeamWithSchemeSelectQuery` (channel_store.go:558) — the
+/// membership columns plus the two schemes' channel-role defaults. Both `GetMember` and
+/// `GetMembers` select exactly this shape, so the row-to-model mapping lives once in
+/// [`channel_member_from_row`].
+struct ChannelMemberRow {
+    channelid: String,
+    userid: String,
+    roles: Option<String>,
+    lastviewedat: Option<i64>,
+    msgcount: Option<i64>,
+    mentioncount: Option<i64>,
+    mentioncountroot: Option<i64>,
+    urgentmentioncount: i64,
+    msgcountroot: Option<i64>,
+    notifyprops: Option<serde_json::Value>,
+    lastupdateat: Option<i64>,
+    schemeuser: Option<bool>,
+    schemeadmin: Option<bool>,
+    schemeguest: Option<bool>,
+    teamschemedefaultguestrole: Option<String>,
+    teamschemedefaultuserrole: Option<String>,
+    teamschemedefaultadminrole: Option<String>,
+    channelschemedefaultguestrole: Option<String>,
+    channelschemedefaultuserrole: Option<String>,
+    channelschemedefaultadminrole: Option<String>,
+    autotranslationdisabled: bool,
+}
+
+/// Port of `channelMemberWithSchemeRoles.ToModel` (channel_store.go:313), shared by both member
+/// lookups.
+///
+/// `notifyprops` is `jsonb`, so SQL NULL and the JSON value `null` are different rows and the
+/// Go server writes both. Go's `json.Unmarshal` turns a JSON null into a nil map without
+/// complaint, so only a *type* mismatch is an error — see [D-135], where treating JSON null as
+/// a decode failure made `GET /users/me` a 500 for four users out of five.
+///
+/// Go's `sql.NullBool` and `sql.NullString` both mean "NULL is the zero value" here —
+/// `Valid && Bool` for the flags, `""` for the role names — so `unwrap_or_default` is the same
+/// rule, not a looser one.
+fn channel_member_from_row(row: ChannelMemberRow) -> Result<ChannelMember, StoreError> {
+    let notify_props = match row.notifyprops {
+        None | Some(serde_json::Value::Null) => None,
+        Some(value) => Some(
+            serde_json::from_value::<StringMap>(value).map_err(|source| StoreError::Decode {
+                entity: "ChannelMember",
+                column: "notifyprops",
+                source,
+            })?,
+        ),
+    };
+
+    let roles_result = get_channel_roles(
+        row.schemeguest.unwrap_or_default(),
+        row.schemeuser.unwrap_or_default(),
+        row.schemeadmin.unwrap_or_default(),
+        row.teamschemedefaultguestrole
+            .as_deref()
+            .unwrap_or_default(),
+        row.teamschemedefaultuserrole.as_deref().unwrap_or_default(),
+        row.teamschemedefaultadminrole
+            .as_deref()
+            .unwrap_or_default(),
+        row.channelschemedefaultguestrole
+            .as_deref()
+            .unwrap_or_default(),
+        row.channelschemedefaultuserrole
+            .as_deref()
+            .unwrap_or_default(),
+        row.channelschemedefaultadminrole
+            .as_deref()
+            .unwrap_or_default(),
+        row.roles.as_deref().unwrap_or_default(),
+    );
+
+    Ok(ChannelMember {
+        channel_id: row.channelid,
+        user_id: row.userid,
+        roles: roles_result.roles.join(" "),
+        last_viewed_at: row.lastviewedat.unwrap_or_default(),
+        msg_count: row.msgcount.unwrap_or_default(),
+        msg_count_root: row.msgcountroot.unwrap_or_default(),
+        mention_count: row.mentioncount.unwrap_or_default(),
+        mention_count_root: row.mentioncountroot.unwrap_or_default(),
+        urgent_mention_count: row.urgentmentioncount,
+        notify_props,
+        last_update_at: row.lastupdateat.unwrap_or_default(),
+        scheme_admin: roles_result.scheme_admin,
+        scheme_user: roles_result.scheme_user,
+        scheme_guest: roles_result.scheme_guest,
+        explicit_roles: roles_result.explicit_roles.join(" "),
+        auto_translation_disabled: row.autotranslationdisabled,
+    })
 }
 
 /// Free function so the app layer's permission checks can reach it without owning a
@@ -253,7 +413,8 @@ pub async fn get_member(
     //
     // `COALESCE(UrgentMentionCount, 0)` is Go's, reproduced in SQL rather than defaulted
     // Rust-side so the database answers the same question for both servers.
-    let row = sqlx::query!(
+    let row = sqlx::query_as!(
+        ChannelMemberRow,
         r#"
         SELECT cm.channelid,
                cm.userid,
@@ -305,65 +466,79 @@ pub async fn get_member(
     };
     tracing::Span::current().record("found", true);
 
-    // `notifyprops` is `jsonb`, so SQL NULL and the JSON value `null` are different rows and the
-    // Go server writes both. Go's `json.Unmarshal` turns a JSON null into a nil map without
-    // complaint, so only a *type* mismatch is an error — see [D-135], where treating JSON null as
-    // a decode failure made `GET /users/me` a 500 for four users out of five.
-    let notify_props = match row.notifyprops {
-        None | Some(serde_json::Value::Null) => None,
-        Some(value) => Some(
-            serde_json::from_value::<StringMap>(value).map_err(|source| StoreError::Decode {
-                entity: "ChannelMember",
-                column: "notifyprops",
-                source,
-            })?,
-        ),
-    };
+    channel_member_from_row(row)
+}
 
-    // Port of `channelMemberWithSchemeRoles.ToModel` (channel_store.go:313). Go's `sql.NullBool`
-    // and `sql.NullString` both mean "NULL is the zero value" here — `Valid && Bool` for the
-    // flags, `""` for the role names — so `unwrap_or_default` is the same rule, not a looser one.
-    let roles_result = get_channel_roles(
-        row.schemeguest.unwrap_or_default(),
-        row.schemeuser.unwrap_or_default(),
-        row.schemeadmin.unwrap_or_default(),
-        row.teamschemedefaultguestrole
-            .as_deref()
-            .unwrap_or_default(),
-        row.teamschemedefaultuserrole.as_deref().unwrap_or_default(),
-        row.teamschemedefaultadminrole
-            .as_deref()
-            .unwrap_or_default(),
-        row.channelschemedefaultguestrole
-            .as_deref()
-            .unwrap_or_default(),
-        row.channelschemedefaultuserrole
-            .as_deref()
-            .unwrap_or_default(),
-        row.channelschemedefaultadminrole
-            .as_deref()
-            .unwrap_or_default(),
-        row.roles.as_deref().unwrap_or_default(),
-    );
+/// Port of `SqlChannelStore.GetMembers` (channel_store.go:2181), the paginated member list.
+///
+/// Three of Go's decisions ride along and each is a trap:
+///
+/// - **`Limit > 0` and `Offset > 0` are guards, not clamps** — squirrel adds the clause only
+///   when positive, so `limit = 0` means *no limit* (the whole channel), not zero rows. The
+///   api4 route can produce exactly that: `?per_page=0` passes the parser (`0` is not negative)
+///   and Go serves every member. Expressed here as `CASE WHEN`, since Postgres treats
+///   `LIMIT NULL`/`OFFSET NULL` as absent.
+/// - **No `ORDER BY`.** Pagination over heap order — Go adds an ordering only in the
+///   `UpdatedAfter` variant, which no ported route uses. Both servers run the same query
+///   against the same table, so they page identically; that is a property of the shared
+///   database, not a wire guarantee.
+/// - `opts.UpdatedAfter` is dropped with the rest of `ChannelMembersGetOptions` — no ported
+///   caller sets it, and a parameter no caller can use is a lie at the call site (the
+///   `allowFromCache` rule).
+#[tracing::instrument(skip(pool), fields(channel_id = %channel_id, offset, limit, found))]
+pub async fn get_members(
+    pool: &PgPool,
+    channel_id: &str,
+    offset: i64,
+    limit: i64,
+) -> Result<Vec<ChannelMember>, StoreError> {
+    let rows = sqlx::query_as!(
+        ChannelMemberRow,
+        r#"
+        SELECT cm.channelid,
+               cm.userid,
+               cm.roles,
+               cm.lastviewedat,
+               cm.msgcount,
+               cm.mentioncount,
+               cm.mentioncountroot,
+               COALESCE(cm.urgentmentioncount, 0) AS "urgentmentioncount!",
+               cm.msgcountroot,
+               cm.notifyprops,
+               cm.lastupdateat,
+               cm.schemeuser,
+               cm.schemeadmin,
+               cm.schemeguest,
+               teamscheme.defaultchannelguestrole    AS teamschemedefaultguestrole,
+               teamscheme.defaultchanneluserrole     AS teamschemedefaultuserrole,
+               teamscheme.defaultchanneladminrole    AS teamschemedefaultadminrole,
+               channelscheme.defaultchannelguestrole AS channelschemedefaultguestrole,
+               channelscheme.defaultchanneluserrole  AS channelschemedefaultuserrole,
+               channelscheme.defaultchanneladminrole AS channelschemedefaultadminrole,
+               cm.autotranslationdisabled
+          FROM channelmembers cm
+          INNER JOIN channels c ON cm.channelid = c.id
+          LEFT JOIN schemes channelscheme ON c.schemeid = channelscheme.id
+          LEFT JOIN teams t ON c.teamid = t.id
+          LEFT JOIN schemes teamscheme ON t.schemeid = teamscheme.id
+         WHERE cm.channelid = $1
+         LIMIT CASE WHEN $2::bigint > 0 THEN $2::bigint END
+        OFFSET CASE WHEN $3::bigint > 0 THEN $3::bigint END
+        "#,
+        channel_id,
+        limit,
+        offset
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: format!("failed to get ChannelMembers with channelId={channel_id}"),
+        source,
+    })?;
 
-    Ok(ChannelMember {
-        channel_id: row.channelid,
-        user_id: row.userid,
-        roles: roles_result.roles.join(" "),
-        last_viewed_at: row.lastviewedat.unwrap_or_default(),
-        msg_count: row.msgcount.unwrap_or_default(),
-        msg_count_root: row.msgcountroot.unwrap_or_default(),
-        mention_count: row.mentioncount.unwrap_or_default(),
-        mention_count_root: row.mentioncountroot.unwrap_or_default(),
-        urgent_mention_count: row.urgentmentioncount,
-        notify_props,
-        last_update_at: row.lastupdateat.unwrap_or_default(),
-        scheme_admin: roles_result.scheme_admin,
-        scheme_user: roles_result.scheme_user,
-        scheme_guest: roles_result.scheme_guest,
-        explicit_roles: roles_result.explicit_roles.join(" "),
-        auto_translation_disabled: row.autotranslationdisabled,
-    })
+    tracing::Span::current().record("found", rows.len());
+
+    rows.into_iter().map(channel_member_from_row).collect()
 }
 
 /// The row shape of Go's `channelSliceColumns(true)` (channel_store.go:159): every `Channels`
@@ -869,6 +1044,111 @@ pub async fn get_channel_unread(
         mention_count_root: row.mentioncountroot,
         urgent_mention_count: row.urgentmentioncount,
         notify_props,
+    })
+}
+
+/// Port of `SqlChannelStore.GetMemberCount` (channel_store.go:2666).
+///
+/// The join with `Users` is the behaviour: `Users.DeleteAt = 0` means a **deactivated** member's
+/// row in `ChannelMembers` — which survives deactivation — does not count. A bare count over
+/// `ChannelMembers` alone would drift upward by exactly the members nobody can see any more.
+///
+/// A channel id that matches nothing is a count of `0`, not an error — `COUNT(*)` has no
+/// not-found case, and neither does Go's.
+#[tracing::instrument(skip(pool), fields(channel_id = %channel_id))]
+pub async fn get_member_count(pool: &PgPool, channel_id: &str) -> Result<i64, StoreError> {
+    sqlx::query_scalar!(
+        r#"
+        SELECT count(*) AS "count!"
+          FROM channelmembers, users
+         WHERE channelmembers.userid = users.id
+           AND channelmembers.channelid = $1
+           AND users.deleteat = 0
+        "#,
+        channel_id
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: format!("failed to count ChannelMembers with channelId={channel_id}"),
+        source,
+    })
+}
+
+/// Port of `SqlChannelStore.GetGuestCount` (channel_store.go:2752).
+///
+/// [`get_member_count`]'s query plus one predicate: `SchemeGuest = TRUE`. The column is nullable,
+/// and `NULL = TRUE` is SQL-`NULL`, so a member whose flag was never written counts as **not** a
+/// guest on both servers — the predicate, not a `COALESCE`, carries that.
+#[tracing::instrument(skip(pool), fields(channel_id = %channel_id))]
+pub async fn get_guest_count(pool: &PgPool, channel_id: &str) -> Result<i64, StoreError> {
+    sqlx::query_scalar!(
+        r#"
+        SELECT count(*) AS "count!"
+          FROM channelmembers, users
+         WHERE channelmembers.userid = users.id
+           AND channelmembers.channelid = $1
+           AND channelmembers.schemeguest = TRUE
+           AND users.deleteat = 0
+        "#,
+        channel_id
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: format!("failed to count Guests with channelId={channel_id}"),
+        source,
+    })
+}
+
+/// Port of `SqlChannelStore.GetPinnedPostCount` (channel_store.go:2731).
+///
+/// `DeleteAt = 0` here is the **post's** — a deleted post stays pinned in its row, and counting
+/// it would advertise a pin nobody can open.
+#[tracing::instrument(skip(pool), fields(channel_id = %channel_id))]
+pub async fn get_pinned_post_count(pool: &PgPool, channel_id: &str) -> Result<i64, StoreError> {
+    sqlx::query_scalar!(
+        r#"
+        SELECT count(*) AS "count!"
+          FROM posts
+         WHERE ispinned = true
+           AND channelid = $1
+           AND deleteat = 0
+        "#,
+        channel_id
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: format!("failed to count pinned Posts with channelId={channel_id}"),
+        source,
+    })
+}
+
+/// Port of `SqlChannelStore.GetFileCount` (channel_store.go:2646).
+///
+/// `PostId != ''` is the predicate a reader would drop as redundant, and it is not: a file
+/// uploaded but never attached to a post has a `FileInfo` row with an empty `PostId`, and Go does
+/// not count it. `DeleteAt = 0` is the **file's** own, not its post's — deleting a post also
+/// tombstones its `FileInfo` rows, which is the path that makes the predicate reachable over
+/// REST.
+#[tracing::instrument(skip(pool), fields(channel_id = %channel_id))]
+pub async fn get_file_count(pool: &PgPool, channel_id: &str) -> Result<i64, StoreError> {
+    sqlx::query_scalar!(
+        r#"
+        SELECT count(*) AS "count!"
+          FROM fileinfo
+         WHERE fileinfo.deleteat = 0
+           AND fileinfo.postid != ''
+           AND fileinfo.channelid = $1
+        "#,
+        channel_id
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: format!("failed to count files with channelId={channel_id}"),
+        source,
     })
 }
 

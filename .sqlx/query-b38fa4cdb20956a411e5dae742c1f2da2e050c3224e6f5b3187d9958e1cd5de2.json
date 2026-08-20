@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT count(*) AS \"count!\"\n          FROM channelmembers, users\n         WHERE channelmembers.userid = users.id\n           AND channelmembers.channelid = $1\n           AND channelmembers.schemeguest = TRUE\n           AND users.deleteat = 0\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "b38fa4cdb20956a411e5dae742c1f2da2e050c3224e6f5b3187d9958e1cd5de2"
+}

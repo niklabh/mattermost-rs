@@ -197,9 +197,340 @@ pub async fn get_teams_for_user(
         .into_response())
 }
 
+/// Go's `team.AllowOpenInvite && team.Type == model.TeamOpen` (api4/team.go:364).
+///
+/// **Both** conjuncts are load-bearing and the four cells all occur in real data: an invite-only
+/// team can carry `AllowOpenInvite = true` (the column survives a type change), and an open-type
+/// team defaults to `AllowOpenInvite = false` at creation. Either single-flag reading widens
+/// "public" to teams that are not.
+fn team_is_public(team: &mm_model::team::Team) -> bool {
+    team.allow_open_invite && team.team_type == mm_model::team::TEAM_OPEN
+}
+
+/// Go's permission block for [`get_team`] (api4/team.go:363-374), with the fallback lazy so its
+/// evaluation — invisible over HTTP, since both denials answer the same 403 — is testable
+/// in-process, exactly like `channel_read_denied`.
+///
+/// The shape differs from `getChannel`'s in both directions, and each difference is Go's:
+///
+/// - **`view_team` is computed unconditionally** — the caller evaluates it even when the team is
+///   public and the fallback alone could admit; Go assigns `hasPermissionViewTeam` before any
+///   branch, so this function takes it as a `bool`, not a closure.
+/// - **`list_public_teams` is polled only for a public team that `view_team` denied.** It is a
+///   roles-only check, but Go's `&&` short-circuit is still the observable shape: a non-public
+///   team must deny without consulting it, or a role holding only `list_public_teams` would
+///   appear to matter where it cannot.
+async fn team_view_denied<F, Fut>(
+    is_public_team: bool,
+    has_view_team: bool,
+    list_public_teams: F,
+) -> bool
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = bool>,
+{
+    if !is_public_team && !has_view_team {
+        return true;
+    }
+    if is_public_team && !has_view_team && !list_public_teams().await {
+        return true;
+    }
+    false
+}
+
+/// [`get_team`]'s one refusal: `c.SetPermissionError(model.PermissionViewTeam)` from **both**
+/// branches — Go's own comment says it: *"Fail with PermissionViewTeam, not
+/// PermissionListPublicTeams"* (api4/team.go:371). Same in-process pinning as
+/// `get_channel_denial`, and for the same reason: the permission's name reaches a client only
+/// through the wiped `detailed_error` ([D-092]).
+fn get_team_denial(session: &mm_model::session::Session) -> ApiError {
+    ApiError(*make_permission_error(
+        session,
+        &[&mm_model::permission::PERMISSION_VIEW_TEAM],
+    ))
+}
+
+/// Port of `getTeam` (api4/team.go:303), reached as `GET /api/v4/teams/{team_id}`.
+///
+/// # Order of operations
+///
+/// 1. **The content-reviewer branch is forwarded, detected first.** Go reads the flag *after*
+///    `RequireTeamId` and `GetTeam`, so on a missing team `?as_content_reviewer=true` is a 404,
+///    not the license 501 — and forwarding the whole request preserves exactly that, because Go
+///    re-runs both steps itself. Same Strangler-inside-a-route pattern as `getChannel`.
+/// 2. `RequireTeamId` — no `me` alias for teams (web/context.go:322 validates only); the segment
+///    charset is already checked by [`crate::partially_migrated_with_ids`].
+/// 3. **`GetTeam` runs before the permission block** — the block needs `AllowOpenInvite` and
+///    `Type` to choose its shape, so a missing team is a 404 here, like `getChannel` and unlike
+///    `getChannelMember`. The store applies no `DeleteAt` filter: an archived team still serves.
+/// 4. The permission block — see [`team_view_denied`].
+/// 5. `SanitizeTeam` — `manage_team` keeps `email`, `invite_user` keeps `invite_id`, both
+///    checks against **this** team ([D-094]'s pairing, already ported).
+///
+/// # Wire format
+///
+/// `json.NewEncoder(w).Encode(team)` — trailing newline ([D-086]), unlike `getTeamsForUser`'s
+/// `json.Marshal` + `Write` in this same file. The two call sites really do differ.
+#[tracing::instrument(skip_all, fields(team_id = %team_id, forwarded))]
+pub async fn get_team(
+    State(state): State<AppState>,
+    Path(team_id): Path<String>,
+    session: AuthenticatedSession,
+    request: axum::extract::Request,
+) -> Response {
+    if crate::channels::is_content_reviewer_request(request.uri().query()) {
+        tracing::Span::current().record("forwarded", true);
+        return crate::proxy::forward_to_go(State(state), request).await;
+    }
+    tracing::Span::current().record("forwarded", false);
+
+    if let Err(err) = require_id(&team_id, "team_id") {
+        return err.into_response();
+    }
+
+    let mut team = match state.app.get_team(&team_id).await {
+        Ok(team) => team,
+        Err(err) => return ApiError(err).into_response(),
+    };
+
+    // Unconditional, as Go's assignment is — even when the team is public and the fallback could
+    // decide alone. See `team_view_denied`.
+    let has_view_team = state
+        .app
+        .session_has_permission_to_team(
+            &session.0,
+            &team.id,
+            &mm_model::permission::PERMISSION_VIEW_TEAM,
+        )
+        .await;
+
+    let denied = team_view_denied(team_is_public(&team), has_view_team, || async {
+        state
+            .app
+            .session_has_permission_to(
+                &session.0,
+                &mm_model::permission::PERMISSION_LIST_PUBLIC_TEAMS,
+            )
+            .await
+    })
+    .await;
+
+    if denied {
+        return get_team_denial(&session.0).into_response();
+    }
+
+    state.app.sanitize_team(&session.0, &mut team).await;
+
+    let mut body = match serde_json::to_vec(&team) {
+        Ok(body) => body,
+        Err(err) => {
+            tracing::error!(error = %err, "failed to serialise Team");
+            return ApiError(mm_model::utils::AppError::new(
+                "getTeam",
+                "api.marshal_error",
+                None,
+                String::new(),
+                500,
+            ))
+            .into_response();
+        }
+    };
+    body.push(b'\n');
+
+    (
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
+    )
+        .into_response()
+}
+
+/// Port of `getTeamStats` (api4/team.go:1345), reached as `GET /api/v4/teams/{team_id}/stats`.
+///
+/// # Order of operations
+///
+/// 1. `RequireTeamId` — segment charset handled by [`crate::partially_migrated_with_ids`].
+/// 2. One gate: `SessionHasPermissionToTeam(view_team)`, denial via [`get_team_denial`] —
+///    the same permission and refusal as `getTeam`, but **no public-team fallback** here: Go
+///    never consults `list_public_teams` for stats, so a non-member is refused the numbers of a
+///    team whose body `getTeam` would serve. That asymmetry is Go's, measured.
+/// 3. **The team is never fetched** — the gate reads the session's memberships and roles, not
+///    the `Teams` table, so a well-formed id that matches nothing is a **200 of zeroes** for a
+///    caller the gate admits (an admin, via system roles) and a 403 for everyone else. The
+///    opposite of `getChannelStats`, whose gate's own channel lookup made the same request a
+///    403 even for the admin; the difference is which checker each handler calls, not a policy.
+/// 4. `GetViewUsersRestrictions`: Go builds view restrictions unless the caller holds
+///    system-wide `view_members`, which the default `system_user` role grants — so restrictions
+///    are nil for every caller in this deployment. **The restricted case is forwarded whole**
+///    rather than ported: it needs user-based team checks and dynamically-spliced restriction
+///    joins, and Go re-runs the id check and the gate itself, so ordering holds by construction.
+///    Same Strangler-inside-a-route pattern as the content-reviewer flags.
+/// 5. Two counts, total then active — the app layer carries Go's error precedence.
+///
+/// # Wire format
+///
+/// `json.NewEncoder(w).Encode(stats)` — trailing newline ([D-086]). Three keys, no `omitempty`,
+/// fixture-pinned in `mm-model/src/stats.rs`.
+#[tracing::instrument(skip_all, fields(team_id = %team_id, forwarded))]
+pub async fn get_team_stats(
+    State(state): State<AppState>,
+    Path(team_id): Path<String>,
+    session: AuthenticatedSession,
+    request: axum::extract::Request,
+) -> Response {
+    if let Err(err) = require_id(&team_id, "team_id") {
+        return err.into_response();
+    }
+
+    let allowed = state
+        .app
+        .session_has_permission_to_team(
+            &session.0,
+            &team_id,
+            &mm_model::permission::PERMISSION_VIEW_TEAM,
+        )
+        .await;
+    if !allowed {
+        return get_team_denial(&session.0).into_response();
+    }
+
+    // `GetViewUsersRestrictions` returns nil iff the caller holds system-wide `view_members` —
+    // the check is user-based (the row's roles, not the session's). Anything else would need
+    // the whole restrictions machinery, and Go owns that answer.
+    if !state
+        .app
+        .has_permission_to(
+            &session.0.user_id,
+            &mm_model::permission::PERMISSION_VIEW_MEMBERS,
+        )
+        .await
+    {
+        tracing::Span::current().record("forwarded", true);
+        return crate::proxy::forward_to_go(State(state), request).await;
+    }
+    tracing::Span::current().record("forwarded", false);
+
+    let stats = match state.app.get_team_stats(&team_id).await {
+        Ok(stats) => stats,
+        Err(err) => return ApiError(err).into_response(),
+    };
+
+    let mut body = match serde_json::to_vec(&stats) {
+        Ok(body) => body,
+        Err(err) => {
+            tracing::error!(error = %err, "failed to serialise TeamStats");
+            return ApiError(mm_model::utils::AppError::new(
+                "getTeamStats",
+                "api.marshal_error",
+                None,
+                String::new(),
+                500,
+            ))
+            .into_response();
+        }
+    };
+    body.push(b'\n');
+
+    (
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
+    )
+        .into_response()
+}
+
 #[cfg(test)]
 mod tests {
     use mm_model::team_member::TeamMember;
+
+    use super::{get_team_denial, team_is_public, team_view_denied};
+
+    /// All four cells of `AllowOpenInvite × Type` — either single-flag reading passes three of
+    /// them and fails the one that leaks: an invite-only team with the column still true.
+    #[test]
+    fn a_team_is_public_only_when_open_invite_and_open_type_agree() {
+        let mut team = mm_model::team::Team {
+            allow_open_invite: true,
+            team_type: mm_model::team::TEAM_OPEN.to_owned(),
+            ..Default::default()
+        };
+        assert!(team_is_public(&team));
+
+        team.allow_open_invite = false;
+        assert!(!team_is_public(&team), "open type alone is not public");
+
+        team.allow_open_invite = true;
+        team.team_type = mm_model::team::TEAM_INVITE.to_owned();
+        assert!(
+            !team_is_public(&team),
+            "a surviving AllowOpenInvite on an invite team must not open it"
+        );
+
+        team.allow_open_invite = false;
+        assert!(!team_is_public(&team));
+    }
+
+    /// A `view_team` grant admits without consulting the fallback — public or not.
+    #[tokio::test]
+    async fn a_view_team_grant_never_polls_list_public_teams() {
+        for is_public in [true, false] {
+            let denied = team_view_denied(is_public, true, || async {
+                panic!("list_public_teams must not run when view_team grants")
+            })
+            .await;
+            assert!(!denied, "is_public = {is_public}");
+        }
+    }
+
+    /// A non-public team denied `view_team` is refused **without** the fallback running: a role
+    /// holding only `list_public_teams` must not see a closed team.
+    #[tokio::test]
+    async fn a_non_public_team_denies_without_polling_the_fallback() {
+        let denied = team_view_denied(false, false, || async {
+            panic!("list_public_teams must not run for a non-public team")
+        })
+        .await;
+        assert!(denied);
+    }
+
+    /// A public team denied `view_team` falls to `list_public_teams`, in both directions.
+    #[tokio::test]
+    async fn a_public_team_falls_from_view_team_to_list_public_teams() {
+        assert!(!team_view_denied(true, false, || async { true }).await);
+        assert!(team_view_denied(true, false, || async { false }).await);
+    }
+
+    /// Both denial branches answer with `view_team` — Go's comment spells it out, and the name
+    /// only travels in the wiped `detailed_error` ([D-092]), so it is pinned here.
+    #[test]
+    fn the_get_team_denial_names_view_team() {
+        let session = mm_model::session::Session {
+            user_id: "y9i4er48tt8bukijy7i3u5y9ar".to_owned(),
+            ..Default::default()
+        };
+        let denial = get_team_denial(&session);
+        assert_eq!(denial.0.status_code, 403);
+        assert_eq!(denial.0.id, "api.context.permissions.app_error");
+        assert_eq!(
+            denial.0.detailed_error, "userId=y9i4er48tt8bukijy7i3u5y9ar, permission=view_team",
+            "list_public_teams must never be the permission an error names"
+        );
+    }
+
+    /// This handler encodes, so its body ends in a newline — its sibling `getTeamsForUser` in
+    /// the same file marshals and does not ([D-086]).
+    #[test]
+    fn the_team_body_ends_in_a_newline() {
+        let mut body = serde_json::to_vec(&mm_model::team::Team::default()).expect("serialises");
+        body.push(b'\n');
+        assert_eq!(body.last(), Some(&b'\n'));
+    }
 
     fn member(user_id: &str) -> TeamMember {
         TeamMember {

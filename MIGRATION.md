@@ -277,6 +277,26 @@ whenever a session skips, approximates, or discovers-but-does-not-close somethin
 | store/sqlstore/team_store.go (`GetTeamsByUserId`) | `mm-store/src/team_store.rs` | PARTIAL | — | The **teams**, where `get_teams_for_user` (same file) returns the memberships. Two separate `DeleteAt = 0` predicates — the membership's and the team's — each resurrect a different thing if dropped, and both are **measured** over REST rather than transcribed (`parity_teams_for_user.rs`), unlike [D-151]'s type filter. |
 | app/team.go (`GetTeamsForUser`, `SanitizeTeam`, `SanitizeTeams`) | `mm-app/src/team.rs` | PARTIAL | 3 pass | The sanitiser's **pairing** is the content: `manage_team` restores `email`, `invite_user` restores `invite_id`, and crossing them leaks an invite id — lifted into `apply_team_sanitize` so all four cells are pinned without a database. Both permission reads run unconditionally, as Go's do. |
 | api4/team.go (`getTeamsForUser`) | `mm-api/src/teams.rs` | PARTIAL | 5 pass + 7 parity | **[D-094]'s "not escapable" example, now served** — the test that kept it forwarded now asserts the opposite. Gate: self by string comparison (no permission machinery runs), anyone else needs `sysconsole_read_user_management_users`. A plain member's own list lands in the sanitiser's **mixed cell**: `team_user` grants `invite_user`, so `invite_id` survives and only `email` is stripped — measured, the first draft of the test assumed both stripped and Go said otherwise. `json.Marshal` + `w.Write`, no newline ([D-086]); a nonexistent user is `[]` for an admin, never a 404. Nine mutations, nine caught, two controls survived. |
+| store/sqlstore/channel_store.go (`GetMemberCount`, `GetGuestCount`, `GetPinnedPostCount`, `GetFileCount`) | `mm-store/src/channel_store.rs` | PARTIAL | 2 DB | Four `COUNT(*)`s with one trap each: member and guest counts join `Users` so a **deactivated** member's surviving row does not count; `SchemeGuest = TRUE` filters a NULL flag out by SQL three-valued logic, no `COALESCE`; the pinned `DeleteAt = 0` is the post's; `FileInfo.PostId != ''` drops uploaded-but-never-attached files. NULL-flag and deactivated-guest shapes are DB-test transcriptions ([D-151]'s shape); the rest is measured over REST. `allowFromCache` dropped as in `GetByNames`. |
+| app/channel.go (`GetChannelMemberCount`, `GetChannelGuestCount`, `GetChannelPinnedPostCount`, `GetChannelFileCount`) | `mm-app/src/channel.rs` | PARTIAL | 1 pass | One 500-only branch each, and three error-identity traps pinned by a single test: `GetChannelGuestCount` **reuses `app.channel.get_member_count.app_error`** (no guest id exists in Go), two of the four pass the *store* method's name as `where`, and `get_pinnedpost_count` has no middle underscore — the same missing underscore as the wire tag. |
+| api4/channel.go (`getChannelStats`) | `mm-api/src/channels.rs` | PARTIAL | 9 pass + 7 parity + 2 DB | One `read_channel` gate — **no open-channel team fallback**, so a team member who never joined a public channel is refused stats that `getChannel` would serve. A missing channel is a **403 even for the admin** (see notes; the first draft asserted 200-of-zeroes and both servers refused). `?exclude_files_count=true` puts `-1` on the wire and skips the `FileInfo` query, pinned by closure like the permission gates. Encoder newline ([D-086]). Twelve mutations, twelve caught, two controls survived. |
+| store/sqlstore/team_store.go (`Get`) | `mm-store/src/team_store.rs` | PARTIAL | — | One row by primary key, `teamSliceColumns(true)`, **no `DeleteAt` filter** — an archived team serves here while vanishing from `GetTeamsByUserId`'s list, both measured over REST (`parity_team_get.rs`). Go's `team.Id == ""` guard (team_store.go:365) is ported though unreachable by PK semantics. |
+| app/team.go (`GetTeam`) | `mm-app/src/team.rs` | PARTIAL | 2 pass | Store-error mapping with a one-gerund trap: the 404 is `app.team.get.**find**.app_error`, the 500 is `app.team.get.**finding**.app_error`. Nil params in both branches. |
+| api4/team.go (`getTeam`) | `mm-api/src/teams.rs` | PARTIAL | 6 pass + 9 parity | **The first route with a system-scope fallback gate**: `view_team` computed unconditionally, and a *public* team (`AllowOpenInvite && Type == "O"` — both conjuncts pinned) falls back to `list_public_teams`, which plain users hold — so any authenticated user reads a public team they never joined, fully sanitised. **Both denials name `view_team`** (Go's comment says so explicitly). Fetch precedes the gate, so a missing team is a 404, and `?as_content_reviewer=true` is forwarded — Go reads the flag *after* `GetTeam`, so a missing team with the flag is still a 404, held by construction. Seven mutations, seven caught, two controls survived. |
+| store/sqlstore/team_store.go (`GetTotalMemberCount`, `GetActiveMemberCount`) | `mm-store/src/team_store.rs` | PARTIAL | 2 DB | **"Total" is current memberships including deactivated users**: `TeamMembers.DeleteAt = 0` filters departures from both counts, and the single `Users.DeleteAt = 0` predicate is the whole difference between the two. Go's `ViewUsersRestrictions` parameter is dropped — the route forwards any restricted caller to Go, so no caller of this port can hold one. |
+| app/authorization.go (`HasPermissionTo`) | `mm-app/src/authorization.rs` | PARTIAL | 1 pass | The **user-based** check: the user *row's* roles, fresh from the store, with no `is_unrestricted` shortcut — and a `GetUser` failure is a quiet `false` (Go discards the error), so a broken database denies rather than 500s here. |
+| app/team.go (`GetTeamStats`) | `mm-app/src/team.rs` | PARTIAL | 2 pass | Go runs the two counts on goroutines and reads the **total**'s channel first, so its error wins when both fail — sequential awaits preserve that precedence; the concurrency is invisible on the wire. The active id inserts `active_` into the total's id, which is also the id `GetChannelGuestCount` borrows — three call sites now share it. |
+| api4/team.go (`getTeamStats`) | `mm-api/src/teams.rs` | PARTIAL | 6 parity + 2 DB | `view_team` gate with **no public-team fallback** (a non-member can read a public team's body via `getTeam` and not its stats), and **nothing fetches the team** — so a missing id is a *200 of zeroes* for an admin and a 403 for a plain user, the exact opposite split of `getChannelStats` on the same shape; both measured. The restrictions path (`view_members` not held) **forwards to Go** — unreachable in this deployment, so the forward itself is transcribed, not measured. Six mutations, six caught; one control failure exposed a harness race (see notes), fixed and re-verified before the tally was trusted. |
+| model/user_terms_of_service.go | `mm-model/src/user_terms_of_service.rs` | PARTIAL | 2 pass | Wire struct only, fixture-pinned; `IsValid`/`PreSave` land with the save route. |
+| store/sqlstore/user_terms_of_service.go (`GetByUser`) | `mm-store/src/user_terms_of_service_store.rs` | PARTIAL | 1 DB | One row by PK (a user holds at most one acceptance). The nullable columns scan to zero values, as Go's non-pointer fields do. |
+| app/user_terms_of_service.go (`GetUserTermsOfService`) | `mm-app/src/user_terms_of_service.rs` | PARTIAL | 1 pass + 1 DB | The 404 (`no_rows.` inserted into the 500's id) is a **normal outcome** at its one call site — `getUser` ignores it, so the id needed an mm-app DB test to be falsifiable at all. Closes [D-083]. |
+| app/authorization.go (`HasPermissionTo` for `getUser`), api4/user.go (`getUser`) | `mm-api/src/users.rs` | PARTIAL | 6 pass + 9 parity | **`GET /users/{user_id}` served; [D-082]'s warning heeded and closed.** The `/users/*` namespace is api4's most crowded, so the handler serves only a segment that is *exactly* a valid 26-char id and forwards everything else — Go's literal GETs (`stats`, `known`, `autocomplete`, `tokens`) keep working unported and upstream additions cannot break it. `UserCanSeeOtherUser` on its nil-restrictions fast path (self, or user-based `view_members`); the restricted remainder forwards, like `getTeamStats`. ToS lands **before the etag** (its fields are etag inputs); sanitize split: self = lax empty map, other = strict `SanitizeProfile` (admin forces 4 flags, 2 of which have no config source). `/users/me` now shares the whole tail via `respond_with_user`. **Found and fixed: the missing-user 404 id is `app.user.missing_account.const`** — `.const`, the Go keyword — where this port had shipped `.error` unverified for three days ([D-151]'s lesson at the app layer). Eight mutations, eight caught, two controls survived. |
+| store/sqlstore/user_store.go (`GetByUsername`) | `mm-store/src/user_store.rs` | PARTIAL | 1 pass + 1 DB | `usersQuery` with `Username = lower(?)` — the **parameter** is folded, never the column, and the fold is **unreachable over REST** (`IsValidUsername` rejects uppercase first; it serves Go's login paths) — DB-pinned, [D-151]'s shape. The shared row mapping moved to `user_from_row`, `query_as!` style. |
+| app/user.go (`GetUserByUsername`) | `mm-app/src/user.rs` | PARTIAL | 1 pass | **One id for both branches** (`app.user.get_by_username.app_error`, status-only split) and it is *not* `MissingAccountError` — three lines from `GetUser`'s two-id shape in the same Go file. |
+| api4/user.go (`getUserByUsername`) | `mm-api/src/users.rs` | PARTIAL | 1 pass + 5 parity | Fetch **before** visibility (the inversion of `getUser`), with the failure branch's existence-hiding 403 for restricted callers kept Go's-own via the pre-fetch `view_members` forward. `RequireUsername` answers the **body**-param 400 for a path segment; the mux class (`[A-Za-z0-9\_\-\.]+`) is wider than the validator (`[a-z0-9\.\-_]+`), so `SliceUser` routes and then 400s. Tail shared with both `getUser` variants via `respond_with_user`. Five mutations, five caught, two controls survived. |
+| store/sqlstore/channel_store.go (`GetMembers`) | `mm-store/src/channel_store.rs` | PARTIAL | — | **`Limit > 0` and `Offset > 0` are guards, not clamps**: squirrel adds the clause only when positive, so `limit = 0` is *no limit* — expressed as `LIMIT CASE WHEN … END`, since Postgres reads `LIMIT NULL` as absent. No `ORDER BY`: pagination over heap order, identical across the two servers only because they share the table. The member row mapping moved to `channel_member_from_row`, shared with `GetMember`. `ChannelMembersGetOptions` flattened to the three used fields (the `allowFromCache` rule). |
+| app/channel.go (`GetChannelMembersPage`) | `mm-app/src/channel.rs` | PARTIAL | — | `Offset = page × per_page` (wrapping, as Go's `int` product), `Limit = per_page`, one 500-only id (`app.channel.get_members.app_error`) — an empty channel is `[]`, never a miss. |
+| api4/channel.go (`getChannelMembers`) + web/params.go (`page`, `per_page`) | `mm-api/src/channels.rs` | PARTIAL | 8 pass + 5 parity | **The first paginated route.** Go's pagination contract, measured: garbage and negatives fall to defaults (0 / 60) with **no 400 ever**, `per_page` clamps at 200 — and **`per_page=0` serves the whole channel**, because zero survives the parser and the store's guard reads it as unlimited. Gate is `read_channel` (missing channel → 403 like `getChannelStats`); `SanitizeForCurrentUser` blanks every row's timestamps to `-1` except the caller's own, mid-list. Encoder newline; an empty page is `[]`. Six mutations, six caught, two controls survived. |
 | model/session.go | `mm-model/src/session.rs` | DONE | 20 pass | Strangler Fig critical path. Complete `IsValid`, `PreSave`, device-id validators. |
 | model/team_member.go | `mm-model/src/team_member.rs` | DONE | 6 pass | Pulled ahead of its turn: `Session.TeamMembers` is on the wire, so session.rs cannot round-trip without it. `TeamMemberWithError`/`EmailInviteWithError` deferred. |
 | model/team.go | `mm-model/src/team.rs` | DONE | 37 pass | First **complete** `IsValid` — every branch, all error ids. `Etag` landed with `channel_list.go`. |
@@ -3142,6 +3162,179 @@ set aside. Three Rust files and one correction to the previous session's ledger 
 7. **`me` is resolved before validation, not after.** `RequireUserId` substitutes the session's id
    for the literal `me` and *then* checks `IsValidId` (web/context.go:301). Validating first would
    400 on a request Go answers.
+
+## Notes — api4/channel.go (`getChannelMembers`), and Go's pagination contract
+
+1. **`per_page=0` means everything, and it takes two layers agreeing to get there.** The
+   params middleware (web/params.go:234) defaults *negatives* and garbage but passes zero
+   through; the store (channel_store.go:2192) adds `LIMIT` only when `Limit > 0`. Either layer
+   "fixing" its half — the parser treating 0 as the default, or the store emitting `LIMIT 0` —
+   turns "the whole channel" into 60 rows or none. Both halves are pinned: the parser by a unit
+   table, the guard by a parity test whose mutation (`LIMIT CASE WHEN` → `LIMIT $2`) died
+   against it.
+
+2. **Pagination never 400s.** `?page=-3&per_page=nope` is the default first page of 60, not an
+   error — `strconv.Atoi` failures and negatives fall to defaults silently. A port that
+   validates pagination "properly" changes the wire.
+
+3. **The list is paged over heap order.** Go's `GetMembers` adds `ORDER BY` only in its
+   `UpdatedAfter` variant, which no ported route uses. Both servers page identically because
+   they run the same query against the same table — a property of the shared database, not a
+   wire guarantee, the same standing caveat the sessions suite's `team_members` fix recorded.
+
+4. **`SanitizeForCurrentUser` inside a list keeps exactly one row intact.** The caller's own
+   membership keeps its timestamps mid-list while every other row blanks to `-1`; the mutation
+   handing the sanitiser each row's *own* id (a plausible loop transcription) un-blanks
+   everything and died against three parity tests at once.
+
+## Notes — api4/user.go (`getUserByUsername`), the sibling with everything inverted
+
+1. **Three charsets stack, and each rejects differently.** The mux class
+   (`[A-Za-z0-9\_\-\.]+`) decides *routing* — outside it is Go's 404, forwarded. The validator
+   (`[a-z0-9\.\-_]+` plus length and the restricted list) decides the *400*, and it answers
+   `invalid_body_param` — the body id, for a path segment (`SetInvalidParam`, not
+   `SetInvalidURLParam`). The store's `lower(?)` would make the lookup case-insensitive, but
+   the validator rejects uppercase first, so the fold is dead code through this route — it
+   serves Go's login paths, which share the store method; ported and DB-pinned.
+
+2. **The fetch-before-visibility inversion carries an anti-enumeration rule.** `getUser` gates
+   then fetches; this handler fetches then gates, and on a fetch *failure* re-checks the
+   caller's restrictions so a restricted caller gets a 403 rather than learning which usernames
+   exist. Both restricted halves ride the same pre-fetch `view_members` forward as `getUser`,
+   which keeps the existence-hiding answer literally Go's.
+
+3. **The miss id is the 500's id** — `app.user.get_by_username.app_error` at both statuses, not
+   `MissingAccountError` — so a client cannot correlate a missing id with a missing username
+   across the two routes. Both facts pinned after the `.const` lesson one section down.
+
+## Notes — api4/user.go (`getUser`), the route that found a three-day-old wrong guess
+
+1. **`app.user.missing_account.const` — the id ends in the Go keyword, and the port had guessed
+   `.error`.** `MissingAccountError` (app/constants.go:7) is a fossilised constant whose value
+   nobody would transcribe correctly from memory. The vertical slice shipped `.error` and no
+   test could catch it, because `/users/me` can never miss — the session's user always exists.
+   The first route able to reach the branch surfaced it in its first parity run. The general
+   lesson is [D-151]'s, now demonstrated at the app layer: an error id on an unreachable branch
+   is a guess until some route can produce it, and it should be flagged as provisional rather
+   than silently trusted.
+
+2. **The serve-only-exact-ids rule replaces a sibling list that would rot.** Go's `/users/*`
+   GET literals (`stats`, `known`, `autocomplete`, `tokens`) win over `{user_id:[A-Za-z0-9]+}`
+   on the running server — measured, after mux registration-order reasoning proved
+   inconclusive — and upstream keeps adding to them. Serving only exact 26-char ids and
+   forwarding everything else means an invalid-id 400 is Go's own answer and a new upstream
+   literal cannot be silently swallowed. [D-150]'s move, promoted from charset to whole rule.
+
+3. **D-087 reaches user bodies and their etags.** Every fixture user is freshly created and
+   logged in, so Go's user cache stably disagrees with the row on `update_at` — and
+   `User.Etag` interpolates that field, so the two servers' etags differ exactly when their
+   bodies do. The suite normalises `update_at` out of byte comparisons (as `parity_users_me`
+   already did) and asserts the 304 round-trip **per server** rather than across them; a client
+   behind the proxy only ever revalidates against whoever minted its etag.
+
+4. **One ordering is transcribed, not measured: terms-of-service before the etag.** Moving the
+   ToS branch after `HandleEtag` would change only the ETag *header* on a ToS-carrying body,
+   and D-087 already exempts cross-server etag comparison — so no test in this deployment can
+   see the difference. The doc comment on `respond_with_user` carries the constraint; a licensed
+   deployment with real ToS churn is where it would bite.
+
+## Notes — api4/team.go (`getTeamStats`), and the order of an unordered list
+
+1. **The missing-team split is the mirror of `getChannelStats`, and the difference is which
+   checker runs, not a policy.** Nothing in this handler fetches the team, and
+   `SessionHasPermissionToTeam` reads only the session's memberships and roles — so a
+   well-formed id that matches nothing is a **200 of zeroes for an admin** (system roles grant
+   `view_team`) and a 403 for a plain user. `getChannelStats` 403s the same shape for *everyone*
+   because `SessionHasPermissionToChannel` fetches the channel itself. Both splits are measured;
+   a reader who assumes either route's answer for the other is wrong in a different direction
+   each way.
+
+2. **The restrictions machinery is forwarded, not ported, and the forward is unreachable
+   here.** `GetViewUsersRestrictions` is nil whenever the caller holds system-wide
+   `view_members` — which the default `system_user` role grants, so every caller in this
+   deployment takes the fast path. The restricted case needs user-based team checks and
+   dynamically-spliced restriction joins; the handler forwards it whole instead, and Go re-runs
+   the id check and gate itself. Exercising that forward needs `view_members` stripped from
+   `system_user` — a global role mutation no shared-database test should make — so the forward
+   is transcribed, not measured, and a mutation deleting it would survive every suite. Recorded
+   here rather than papered over.
+
+3. **A no-op mutation control failed, and the finding reached two suites this session had not
+   touched.** Swapping two named struct-initializer fields — provably inert — "killed" the
+   sessions parity test. Cause: a session's `team_members` comes from a query with no
+   `ORDER BY`; Go serves the order its **session cache** hydrated at some earlier table state
+   while we re-read fresh, so after membership churn the two orders differ *stably* — which
+   `fetch_both_stable`'s Go–Rust–Go window cannot detect, since Go agrees with itself both
+   times. Two Go servers could disagree with each other the same way, so the order is not a
+   parity property. The sessions and team-members suites now fall back to a structural
+   comparison with `team_members` sorted by `team_id` — byte-exact first, order-tolerant only
+   on that one list — and the control survived three consecutive runs under load before any
+   api-suite verdict was trusted. Fourth instance of the rule: when a control fails, fix the
+   harness before reading the tally.
+
+4. **`teams[0]` of the admin's team list is a fixture landmine.** `GetTeamsByUserId` has no
+   `ORDER BY`, so the shared helper's "first team of the fixture user" can resolve to a team
+   another concurrently-running test *just created* — measured when two foreign plain users
+   joined this suite's fresh fixture team mid-test and its member counts came back 4 where 2
+   was seeded. Count-asserting tests now create their own home teams for outsiders and assert
+   relations (`total > active`) rather than absolute numbers; the byte comparison against Go
+   remains the oracle.
+
+## Notes — api4/team.go (`getTeam`), the first system-scope fallback gate
+
+1. **"Public" is a conjunction, and the surviving flag is the trap.** `AllowOpenInvite && Type ==
+   "O"` — an invite-only team keeps its `AllowOpenInvite` column when the type changes, so either
+   single-flag reading opens a team that is not public. All four cells are unit-pinned
+   (`team_is_public`), and the `&&`→`||` mutation dies there.
+
+2. **The fallback's shape is the inverse of `getChannel`'s.** There the *team* gate runs first
+   and lazily; here `view_team` is computed **unconditionally** (Go assigns it before any branch)
+   and `list_public_teams` — a roles-only, system-scope check — is polled only for a public team
+   that `view_team` denied. Both denials name `view_team`; Go's own comment ("Fail with
+   PermissionViewTeam, not PermissionListPublicTeams") is the one place upstream spells such a
+   rule out, and it is pinned in `get_team_denial`.
+
+3. **Forwarding the reviewer flag preserves an ordering it would be easy to reproduce wrongly.**
+   Go reads `as_content_reviewer` *after* `RequireTeamId` and `GetTeam`, so the flag on a missing
+   team is a 404, not the license 501. The forward hands Go the whole request and Go re-runs both
+   steps, so the 404-before-501 ordering holds by construction — asserted for both subcases
+   against the running server.
+
+4. **A pre-existing parity flake surfaced and is fixed at the harness.** The sessions and
+   team-members byte-comparisons embed `GetTeamsForUser`'s membership list, whose query has no
+   `ORDER BY`; this session's team-churning fixtures reordered two rows between Go's read and
+   ours, and the suite reported a divergence while both servers were right for the instant each
+   read. Both tests now go through `fetch_both_stable` (Go–Rust–Go, compare only when Go's two
+   reads agree) — the same fix the unread suite already wears, reaching the last two `fetch_both`
+   byte-comparisons in the tree.
+
+## Notes — api4/channel.go (`getChannelStats`), the route that never fetches its channel
+
+1. **A missing channel is a 403, not a 404 and not a 200 of zeroes — even for the system
+   admin.** The handler runs no `GetChannel`, so the intuition "nothing fetches, nothing 404s,
+   the counts are just zero for anyone the gate admits" is half right and wholly wrong on the
+   wire: `SessionHasPermissionToChannel`'s **own** channel fetch sits above every grant branch,
+   `manage_system` included (authorization.rs:246), so the gate denies first. The parity test
+   was written asserting the 200-of-zeroes and both servers refused in agreement — the wrong
+   belief is preserved in the test's doc comment. The store's zero counts are real but reachable
+   only from `db_channel_stats.rs`.
+
+2. **The four counts are pairwise distinct in every fixture — 2/1/3/4 over REST, 3/1/2/4 at the
+   store — applied from the `getChannelUnread` lesson rather than re-learned.** The
+   count-wiring-swap mutation (`member_count: guest_count, guest_count: member_count`) was
+   caught on the first run; last session the equivalent survivor cost a fixture rebuild.
+
+3. **Team Edition cannot mint a guest, so the guest row is written straight into the shared
+   database** (`SchemeGuest = TRUE`) *before either server first reads the channel* — Go's
+   member-count caches have no entry for a channel nothing has asked about, so there is no
+   stale copy to diverge on. Ordering, not luck: the same write after a first read would race
+   Go's cache exactly as [D-087] describes.
+
+4. **Go's error identities in the four app wrappers are load-bearing transcription traps:**
+   `GetChannelGuestCount` reuses the member-count id, two wrappers pass the store method's name
+   as `where`, and the pinned-post id drops the underscore its own words have. All three
+   "tidy-ups" were run as mutations against the one test that pins all four wrappers; all three
+   were caught.
 
 ## Notes — api4/team.go (`getTeamsForUser`), the route [D-094] said was not portable
 

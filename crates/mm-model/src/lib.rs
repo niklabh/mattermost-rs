@@ -90,6 +90,7 @@ pub mod unicode;
 mod unicode_generated;
 pub mod user;
 pub mod user_autocomplete;
+pub mod user_terms_of_service;
 pub mod utils;
 pub mod version;
 pub mod view;

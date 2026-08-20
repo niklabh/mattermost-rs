@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT count(DISTINCT teammembers.userid) AS \"count!\"\n          FROM teammembers, users\n         WHERE teammembers.deleteat = 0\n           AND teammembers.userid = users.id\n           AND users.deleteat = 0\n           AND teammembers.teamid = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "be9697004eb0bf061c5404687ad2cf82eacf224c1b3e180bc4698d41d3e535b3"
+}

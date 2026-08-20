@@ -2893,8 +2893,9 @@ of these gets 401 here and would be served by Go.
 
 ## D-082 · `/users/me` skips the permission check because its target is always self
 
-**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-17 (phase 2, `api4/user.go`)
-**Blocks** — read this before adding `GET /users/{user_id}`.
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-08-17 (phase 2, `api4/user.go`)
+**Closed** 2026-08-20 — `GET /users/{user_id}` landed with the check: self or user-based
+`view_members` serve locally, everything else (the restrictions machinery) forwards to Go.
 
 Go's `getUser` calls `UserCanSeeOtherUser(session.UserId, params.UserId)` before anything else.
 The migrated route resolves `me` only, so the target is the session's own user and the check is
@@ -2909,7 +2910,11 @@ so at the call site, which is where someone adding the route will be looking.
 
 ## D-083 · The terms-of-service fields are always zero
 
-**Status** OPEN · **Severity** incomplete · **Raised** 2026-08-17 (phase 2, `api4/user.go`)
+**Status** CLOSED · **Severity** incomplete · **Raised** 2026-08-17 (phase 2, `api4/user.go`)
+**Closed** 2026-08-20 — `UserTermsOfServiceStore.GetByUser` and the 404-is-not-an-error branch
+landed with `GET /users/{user_id}`; `/users/me` shares the tail, so its fields and etag are
+right too. The found case is parity-tested with a directly-planted row (Team Edition cannot
+author a ToS over REST).
 
 `getUser` fetches `GetUserTermsOfService(user.Id)` when the viewer is the user or an admin and
 copies `TermsOfServiceId` / `TermsOfServiceCreateAt` onto the response (user.go:329-337). The

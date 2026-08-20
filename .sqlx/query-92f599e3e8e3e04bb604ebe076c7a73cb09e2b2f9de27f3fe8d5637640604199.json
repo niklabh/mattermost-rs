@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT count(*) AS \"count!\"\n          FROM fileinfo\n         WHERE fileinfo.deleteat = 0\n           AND fileinfo.postid != ''\n           AND fileinfo.channelid = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "92f599e3e8e3e04bb604ebe076c7a73cb09e2b2f9de27f3fe8d5637640604199"
+}

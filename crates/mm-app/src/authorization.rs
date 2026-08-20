@@ -135,6 +135,23 @@ impl App {
         })
     }
 
+    /// Port of `app.App.HasPermissionTo` (authorization.go:295) — the **user-based** check.
+    ///
+    /// Not `SessionHasPermissionTo` with a lookup bolted on: this one reads the **user row's**
+    /// roles fresh from the store, never the session's copy, and it has no `is_unrestricted`
+    /// shortcut — a local-mode session asking through this path gets the row's answer. Any
+    /// `GetUser` failure is a quiet `false` (Go discards the error), which means a broken
+    /// database *denies* here where most checks would 500 — the caller decides what a denial
+    /// means.
+    #[tracing::instrument(skip(self), fields(user_id = %asking_user_id))]
+    pub async fn has_permission_to(&self, asking_user_id: &str, permission: &Permission) -> bool {
+        let Ok(user) = self.get_user(asking_user_id).await else {
+            return false;
+        };
+        self.roles_grant_permission(&owned(user.get_roles()), &permission.id)
+            .await
+    }
+
     /// Port of `app.App.SessionHasPermissionTo` (authorization.go:18).
     #[tracing::instrument(skip(self, session), fields(user_id = %session.user_id))]
     pub async fn session_has_permission_to(
@@ -396,6 +413,19 @@ mod tests {
             roles: roles.to_owned(),
             ..Default::default()
         }
+    }
+
+    /// `HasPermissionTo` reads the **user row**, so a broken store is a quiet `false` — Go
+    /// discards the `GetUser` error (authorization.go:298). Fail-closed, like everything here:
+    /// the caller (`getTeamStats`'s restrictions fast path) treats the denial as "forward to
+    /// Go", which is the conservative direction.
+    #[tokio::test]
+    async fn the_user_based_check_denies_when_the_user_cannot_be_loaded() {
+        let app = app_with_unreachable_store();
+        assert!(
+            !app.has_permission_to("y9i4er48tt8bukijy7i3u5y9ar", &PERMISSION_MANAGE_SYSTEM)
+                .await
+        );
     }
 
     #[tokio::test]

@@ -146,6 +146,20 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/users/me",
             partially_migrated(get(users::get_user_me)),
         )
+        // The parameterised sibling. `/users/me` above wins as a literal; every *other* literal
+        // Go owns under /users (`stats`, `known`, `autocomplete`, `tokens`, …) lands here and is
+        // forwarded by the handler's serve-only-exact-ids rule — see `users::get_user`.
+        .route(
+            "/api/v4/users/{user_id}",
+            partially_migrated_with_ids(&state, get(users::get_user)),
+        )
+        // Deeper than the `{user_id}` route, so no conflict — and the parameter is *not*
+        // id-shaped: Go's username class allows `_`, `-` and `.`, so the id-charset middleware
+        // must not apply. The handler carries its own mux-charset forward instead.
+        .route(
+            "/api/v4/users/username/{username}",
+            partially_migrated(get(users::get_user_by_username)),
+        )
         .route(
             "/api/v4/users/me/sessions",
             partially_migrated(get(sessions::get_sessions_me)),
@@ -165,6 +179,17 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/users/{user_id}/teams",
             partially_migrated_with_ids(&state, get(teams::get_teams_for_user)),
         )
+        // Sibling literal segments under /teams/ (`/teams/name/...`, `/teams/search`, …) are
+        // POST-only or deeper paths in Go; the same reasoning as the /channels/{channel_id}
+        // route below applies unchanged.
+        .route(
+            "/api/v4/teams/{team_id}",
+            partially_migrated_with_ids(&state, get(teams::get_team)),
+        )
+        .route(
+            "/api/v4/teams/{team_id}/stats",
+            partially_migrated_with_ids(&state, get(teams::get_team_stats)),
+        )
         // Sibling literal segments (`/channels/direct`, `/channels/search`, …) are all POST-only
         // in Go, and all alphanumeric. A GET to one of them matches `{channel_id}` here exactly
         // as it matches gorilla's `{channel_id:[A-Za-z0-9]+}` there, and 400s identically; a POST
@@ -173,6 +198,17 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/channels/{channel_id}",
             partially_migrated_with_ids(&state, get(channels::get_channel)),
+        )
+        // Go's sibling `POST /channels/stats/member_count` (api.go:60) never lands here: its
+        // last segment is `member_count`, not `stats`, so it falls to `Router::fallback` and is
+        // forwarded whole.
+        .route(
+            "/api/v4/channels/{channel_id}/stats",
+            partially_migrated_with_ids(&state, get(channels::get_channel_stats)),
+        )
+        .route(
+            "/api/v4/channels/{channel_id}/members",
+            partially_migrated_with_ids(&state, get(channels::get_channel_members)),
         )
         // The first migrated path with parameters. axum's `{name}` segments bind by position in
         // the handler's `Path` tuple, so the order here is the order there.
