@@ -10,6 +10,7 @@
 //! computation, and getting it wrong produces a **silent** permission difference rather than an
 //! error: a member who should be a team admin quietly is not, or vice versa.
 
+use mm_model::team::Team;
 use mm_model::team_member::TeamMember;
 use sqlx::PgPool;
 
@@ -120,6 +121,13 @@ pub trait TeamStore {
         exclude_team_id: &str,
         include_deleted: bool,
     ) -> impl std::future::Future<Output = Result<Vec<TeamMember>, StoreError>> + Send;
+
+    /// Port of `SqlTeamStore.GetTeamsByUserId` (team_store.go:705) — the **teams**, where
+    /// `get_teams_for_user` returns the memberships.
+    fn get_teams_by_user_id(
+        &self,
+        user_id: &str,
+    ) -> impl std::future::Future<Output = Result<Vec<Team>, StoreError>> + Send;
 }
 
 /// Postgres-backed implementation.
@@ -144,6 +152,100 @@ impl TeamStore for SqlTeamStore {
     ) -> Result<Vec<TeamMember>, StoreError> {
         get_teams_for_user(&self.pool, user_id, exclude_team_id, include_deleted).await
     }
+
+    #[tracing::instrument(skip_all, fields(user_id = %user_id, found))]
+    async fn get_teams_by_user_id(&self, user_id: &str) -> Result<Vec<Team>, StoreError> {
+        get_teams_by_user_id(&self.pool, user_id).await
+    }
+}
+
+/// Port of `SqlTeamStore.GetTeamsByUserId` (team_store.go:705).
+///
+/// Three predicates, all Go's (`sq.Eq{...}` over the `TeamMembers` join), and both `DeleteAt`s
+/// matter separately: **the membership's** (a user removed from a team keeps a soft-deleted row)
+/// and **the team's** (an archived team keeps its members' rows live). Dropping either
+/// resurrects a different thing — a departed member or a dead team — and both read as "the user
+/// has an extra team", so a fixture has to hold one of each to tell them apart.
+///
+/// The two `AccessControlPolicies` subqueries are `teamSliceColumns(true)`'s computed flags with
+/// the `Type = 'team'` guard whose comment Go spells out: a channel policy sharing an id with a
+/// team must not read as the team's. `Props`/`PolicyId`/`PolicyActions` are not selected by Go
+/// either; they stay zero. No `ORDER BY` — the row order is whatever Postgres returns, and Go's
+/// callers do not sort it, so neither does this port.
+#[tracing::instrument(skip(pool), fields(user_id = %user_id))]
+pub async fn get_teams_by_user_id(pool: &PgPool, user_id: &str) -> Result<Vec<Team>, StoreError> {
+    let rows = sqlx::query!(
+        r#"
+        SELECT t.id,
+               t.createat,
+               t.updateat,
+               t.deleteat,
+               t.displayname,
+               t.name,
+               t.description,
+               t.email,
+               t.type::text AS "team_type",
+               t.companyname,
+               t.alloweddomains,
+               t.inviteid,
+               t.allowopeninvite,
+               t.lastteamiconupdate,
+               t.schemeid,
+               t.groupconstrained,
+               t.cloudlimitsarchived,
+               EXISTS (
+                   SELECT 1 FROM accesscontrolpolicies acp
+                    WHERE acp.id = t.id AND acp.type = 'team'
+               ) AS "policy_enforced!",
+               COALESCE((
+                   SELECT acp.active FROM accesscontrolpolicies acp
+                    WHERE acp.id = t.id AND acp.type = 'team' AND acp.active = TRUE
+                    LIMIT 1
+               ), false) AS "policy_is_active!"
+          FROM teams t
+          JOIN teammembers tm ON tm.teamid = t.id
+         WHERE tm.userid = $1
+           AND tm.deleteat = 0
+           AND t.deleteat = 0
+        "#,
+        user_id
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: "failed to find Teams".to_owned(),
+        source,
+    })?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| Team {
+            id: row.id,
+            create_at: row.createat.unwrap_or_default(),
+            update_at: row.updateat.unwrap_or_default(),
+            delete_at: row.deleteat.unwrap_or_default(),
+            display_name: row.displayname.unwrap_or_default(),
+            name: row.name.unwrap_or_default(),
+            description: row.description.unwrap_or_default(),
+            email: row.email.unwrap_or_default(),
+            team_type: row.team_type.unwrap_or_default(),
+            company_name: row.companyname.unwrap_or_default(),
+            allowed_domains: row.alloweddomains.unwrap_or_default(),
+            invite_id: row.inviteid.unwrap_or_default(),
+            allow_open_invite: row.allowopeninvite.unwrap_or_default(),
+            last_team_icon_update: row.lastteamiconupdate.unwrap_or_default(),
+            scheme_id: row.schemeid,
+            group_constrained: row.groupconstrained,
+            cloud_limits_archived: row.cloudlimitsarchived,
+            policy_enforced: row.policy_enforced,
+            policy_is_active: row.policy_is_active,
+
+            // Not selected by Go's `teamSliceColumns`; each is filled elsewhere or left zero.
+            policy_id: None,
+            policy_actions: None,
+            recommended: false,
+        })
+        .collect())
 }
 
 /// Free function so `SqlSessionStore` can reach it without owning a `SqlTeamStore`.

@@ -158,6 +158,22 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/users/me/teams/members",
             partially_migrated(get(teams::get_team_members_for_user_me)),
         )
+        // The parameterised sibling of the literal `me` routes above. axum matches literals
+        // first, so `/users/me/teams/members` keeps hitting the route above while `me` here is
+        // an ordinary value the handler resolves — the same alias rule as everywhere else.
+        .route(
+            "/api/v4/users/{user_id}/teams",
+            partially_migrated_with_ids(&state, get(teams::get_teams_for_user)),
+        )
+        // Sibling literal segments (`/channels/direct`, `/channels/search`, …) are all POST-only
+        // in Go, and all alphanumeric. A GET to one of them matches `{channel_id}` here exactly
+        // as it matches gorilla's `{channel_id:[A-Za-z0-9]+}` there, and 400s identically; a POST
+        // falls to `partially_migrated`'s method fallback and is forwarded. A literal segment
+        // with a hyphen would land on `mux_segments_or_forward` and be forwarded too.
+        .route(
+            "/api/v4/channels/{channel_id}",
+            partially_migrated_with_ids(&state, get(channels::get_channel)),
+        )
         // The first migrated path with parameters. axum's `{name}` segments bind by position in
         // the handler's `Path` tuple, so the order here is the order there.
         .route(

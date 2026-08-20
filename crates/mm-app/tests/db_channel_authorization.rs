@@ -37,6 +37,12 @@
 use mm_app::App;
 use mm_model::permission::PERMISSION_READ_CHANNEL;
 use mm_store::{SessionStore, SqlStore};
+
+/// The three tests share one set of `mmrsca`-prefixed fixture rows and each purges before
+/// seeding, so two running interleaved delete each other's fixtures mid-assertion — measured as
+/// `teams_pkey` duplicate inserts under load. Serialised for the same reason
+/// `db_channel_unread.rs` in `mm-store` is.
+static FIXTURES: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 
@@ -336,6 +342,7 @@ async fn go_and_rust_agree_on_channel_permission_checks() {
     }
 
     let pool = pool().await;
+    let _fixtures = FIXTURES.lock().await;
     purge(&pool).await;
     create_team_and_channel(&pool).await;
     create_probe_roles(&pool).await;
@@ -549,6 +556,7 @@ async fn is_member_distinguishes_membership_from_privilege() {
     }
 
     let pool = pool().await;
+    let _fixtures = FIXTURES.lock().await;
     purge(&pool).await;
     create_team_and_channel(&pool).await;
 
@@ -623,6 +631,7 @@ async fn an_unrestricted_session_still_needs_the_channel_to_exist() {
     }
 
     let pool = pool().await;
+    let _fixtures = FIXTURES.lock().await;
     purge(&pool).await;
     create_team_and_channel(&pool).await;
 

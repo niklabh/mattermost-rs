@@ -15,7 +15,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::team_member::TeamMember;
 use crate::user::USER_ROLES_MAX_LENGTH;
-use crate::utils::{AppError, AppResult, StringMap, get_millis, is_valid_id, new_id};
+// `parse_go_bool` because session props are written by several different code paths, so
+// `strconv.ParseBool`'s wider accepted set (`1 t T TRUE True …`) is reachable in them.
+use crate::utils::{
+    AppError, AppResult, StringMap, get_millis, is_valid_id, new_id, parse_go_bool,
+};
 
 // ---------------------------------------------------------------------------
 // Constants (session.go:15-40)
@@ -163,20 +167,6 @@ pub struct LoginOptions {
     pub is_mobile: bool,
     pub is_oauth_user: bool,
     pub is_saml: bool,
-}
-
-/// Port of `strconv.ParseBool`.
-///
-/// **Not** Rust's `str::parse::<bool>()`, which accepts only `"true"` and `"false"`. Go
-/// additionally accepts `1 t T TRUE True 0 f F FALSE False` — and session props are written
-/// by several different code paths, so the wider set is reachable. Everything else is an
-/// error, which every caller here treats as `false`.
-fn parse_go_bool(s: &str) -> Option<bool> {
-    match s {
-        "1" | "t" | "T" | "TRUE" | "true" | "True" => Some(true),
-        "0" | "f" | "F" | "FALSE" | "false" | "False" => Some(false),
-        _ => None,
-    }
 }
 
 impl Session {

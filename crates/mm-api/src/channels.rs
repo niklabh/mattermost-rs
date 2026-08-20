@@ -1,5 +1,6 @@
 //! Ported handlers from `channels/api4/channel.go`:
 //!
+//! - `getChannel` — `GET /api/v4/channels/{channel_id}`
 //! - `getChannelMember` — `GET /api/v4/channels/{channel_id}/members/{user_id}`
 //! - `getChannelUnread` — `GET /api/v4/users/{user_id}/channels/{channel_id}/unread`
 //!
@@ -25,20 +26,22 @@
 //! matches the whole segment, so the same request reaches our handler and gets the 400 that
 //! `IsValidId` produces. Measured, not assumed — see [D-150].
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Request, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
+use mm_model::channel::CHANNEL_TYPE_OPEN;
 use mm_model::permission::{
-    PERMISSION_EDIT_OTHER_USERS, PERMISSION_READ_CHANNEL, make_permission_error,
+    PERMISSION_EDIT_OTHER_USERS, PERMISSION_READ_CHANNEL, PERMISSION_READ_PUBLIC_CHANNEL,
+    make_permission_error,
 };
-use mm_model::utils::is_valid_id;
+use mm_model::utils::{is_valid_id, parse_go_bool};
 
 use crate::AppState;
 use crate::auth::AuthenticatedSession;
 use crate::error::ApiError;
 
 /// `model.Me` (user.go:26) — the literal a client may send instead of its own id.
-const ME: &str = "me";
+pub(crate) const ME: &str = "me";
 
 /// Port of `Context.RequireChannelId` / `RequireUserId` (web/context.go:388, :296).
 ///
@@ -53,7 +56,7 @@ const ME: &str = "me";
 // helpers alone would buy nothing while making them differ from every other signature in the
 // crate. Boxing `AppError` inside `ApiError` crate-wide is the real answer — see [D-146].
 #[allow(clippy::result_large_err)]
-fn require_id(value: &str, parameter: &'static str) -> Result<(), ApiError> {
+pub(crate) fn require_id(value: &str, parameter: &'static str) -> Result<(), ApiError> {
     if is_valid_id(value) {
         Ok(())
     } else {
@@ -277,6 +280,187 @@ pub async fn get_channel_unread(
         body,
     )
         .into_response())
+}
+
+/// `model.AsContentReviewerParam` (content_flagging.go:19).
+const AS_CONTENT_REVIEWER_PARAM: &str = "as_content_reviewer";
+
+/// Would Go's `getChannel` take the content-reviewer path for this query string?
+///
+/// Go reads `r.URL.Query().Get(model.AsContentReviewerParam)` — the **first** value when the key
+/// repeats — and feeds it to `strconv.ParseBool`, discarding the error. So `?as_content_reviewer`
+/// bare, `=yes`, or `=` are all false, while `=1`, `=t` and `=True` are true.
+/// `form_urlencoded::parse` decodes percent-escapes and `+`-as-space the way `url.ParseQuery`
+/// does, which matters because the *decoded* value is what `ParseBool` sees.
+fn is_content_reviewer_request(query: Option<&str>) -> bool {
+    let Some(query) = query else {
+        return false;
+    };
+    form_urlencoded::parse(query.as_bytes())
+        .find(|(key, _)| key == AS_CONTENT_REVIEWER_PARAM)
+        .and_then(|(_, value)| parse_go_bool(&value))
+        .unwrap_or(false)
+}
+
+/// Go's permission block for [`get_channel`] (api4/channel.go:877-892), with both gates lazy so
+/// the evaluation *order* — which is invisible over HTTP — is testable in-process, exactly like
+/// [`first_denied_permission`].
+///
+/// Two properties carry the security, and each is a mutation someone could plausibly ship:
+///
+/// - **An open channel asks the team first** — `read_public_channel` on `channel.TeamId` — and
+///   polls the channel gate only when the team denies. A member of the team can read any public
+///   channel in it without a membership row, which is what "public" means.
+/// - **A non-open channel never consults the team gate.** `read_channel` via membership is the
+///   only way in; handing a private channel the open-channel fallback would leak it to the whole
+///   team. (The checker's own internal team fallback still runs, but for `read_channel` — a
+///   different permission that plain members do not hold team-wide.)
+///
+/// Both denials report `read_channel` — Go calls `SetPermissionError(PermissionReadChannel)` in
+/// both branches, so `read_public_channel` never appears in an error even when it was the gate
+/// that ran first.
+///
+/// Go's non-open branch then tries `serveDiscoverableNonMember` before the 403. That surface is
+/// gated on `FeatureFlags.DiscoverableChannels`, which is **false** at the pinned SHA
+/// (feature_flags.go:208) and unset in this deployment, so the whole function is
+/// `if !flag { return nil, nil }` — not served, fall through to the permission error. Pinned
+/// rather than ported: serving it needs `GetUser`, `IsDiscoverableJoinAllowed` and a feature-flag
+/// config surface this server does not have. See TECH_DEBT [D-153].
+async fn channel_read_denied<TF, TFut, CF, CFut>(
+    channel_is_open: bool,
+    team_allowed: TF,
+    channel_allowed: CF,
+) -> bool
+where
+    TF: FnOnce() -> TFut,
+    TFut: std::future::Future<Output = bool>,
+    CF: FnOnce() -> CFut,
+    CFut: std::future::Future<Output = bool>,
+{
+    if channel_is_open && team_allowed().await {
+        return false;
+    }
+    !channel_allowed().await
+}
+
+/// [`get_channel`]'s one refusal: `c.SetPermissionError(model.PermissionReadChannel)`, from
+/// **both** branches of the permission block — `read_public_channel` never appears in an error
+/// even when it was the gate that ran first (api4/channel.go:881, :890).
+///
+/// A function because the permission's name reaches a client only through `detailed_error`,
+/// which is wiped unless developer mode is on ([D-092]) — so naming the wrong permission here
+/// survived every cross-server test when it was inline. Same in-process pinning as
+/// [`validate_ids`] and [`first_denied_permission`].
+fn get_channel_denial(session: &mm_model::session::Session) -> ApiError {
+    ApiError(*make_permission_error(session, &[&PERMISSION_READ_CHANNEL]))
+}
+
+/// Port of `getChannel` (api4/channel.go:827), reached as `GET /api/v4/channels/{channel_id}`.
+///
+/// # Order of operations
+///
+/// 1. **The content-reviewer branch is forwarded, and it is detected first.** Go checks
+///    `as_content_reviewer` *after* `RequireChannelId` and `GetChannel`, but forwarding the whole
+///    request lets Go re-run those steps itself, so every subcase — bad id, missing channel, no
+///    license — is answered by the server that owns the answer. The branch is Enterprise
+///    Advanced–licensed and config-gated (`requireContentFlaggingEnabled`), which this deployment
+///    fails at the license step; reproducing the resulting 501 would pin a body we cannot oracle.
+///    Same Strangler-inside-a-route pattern as the `flagged_post` preferences.
+/// 2. `RequireChannelId` — no `me` alias here; the segment is already charset-checked by
+///    [`crate::partially_migrated_with_ids`].
+/// 3. **`GetChannel` runs before the permission check** (unlike `getChannelMember`, where the
+///    permission check's own lookup is the fetch). The handler needs `channel.Type` and
+///    `channel.TeamId` to *choose* the gate, so a missing channel is a 404 here, not a 403 —
+///    Go's shape, asserted against the running server.
+/// 4. The two-gate permission block — see [`channel_read_denied`].
+/// 5. `FillInChannelProps` — resolves `~mentions` in the header into a `channel_mentions` prop.
+///
+/// # Wire format
+///
+/// `json.NewEncoder(w).Encode(channel)` — trailing newline ([D-086]). The body is the first full
+/// `Channel` this server puts on the wire; its serialisation is fixture-pinned in `mm-model` and
+/// byte-compared against Go in `tests/parity_channel_get.rs`.
+#[tracing::instrument(skip_all, fields(channel_id = %channel_id, forwarded))]
+pub async fn get_channel(
+    State(state): State<AppState>,
+    Path(channel_id): Path<String>,
+    session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    if is_content_reviewer_request(request.uri().query()) {
+        tracing::Span::current().record("forwarded", true);
+        return crate::proxy::forward_to_go(State(state), request).await;
+    }
+    tracing::Span::current().record("forwarded", false);
+
+    if let Err(err) = require_id(&channel_id, "channel_id") {
+        return err.into_response();
+    }
+
+    let mut channel = match state.app.get_channel(&channel_id).await {
+        Ok(channel) => channel,
+        Err(err) => return ApiError(err).into_response(),
+    };
+
+    let denied = channel_read_denied(
+        channel.channel_type == CHANNEL_TYPE_OPEN,
+        || async {
+            state
+                .app
+                .session_has_permission_to_team(
+                    &session.0,
+                    &channel.team_id,
+                    &PERMISSION_READ_PUBLIC_CHANNEL,
+                )
+                .await
+        },
+        || async {
+            let (allowed, _is_member) = state
+                .app
+                .session_has_permission_to_channel(
+                    &session.0,
+                    &channel_id,
+                    &PERMISSION_READ_CHANNEL,
+                )
+                .await;
+            allowed
+        },
+    )
+    .await;
+
+    if denied {
+        return get_channel_denial(&session.0).into_response();
+    }
+
+    if let Err(err) = state.app.fill_in_channel_props(&mut channel).await {
+        return ApiError(err).into_response();
+    }
+
+    let mut body = match serde_json::to_vec(&channel) {
+        Ok(body) => body,
+        Err(err) => {
+            tracing::error!(error = %err, "failed to serialise Channel");
+            return ApiError(mm_model::utils::AppError::new(
+                "getChannel",
+                "api.marshal_error",
+                None,
+                String::new(),
+                500,
+            ))
+            .into_response();
+        }
+    };
+    body.push(b'\n');
+
+    (
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
+    )
+        .into_response()
 }
 
 #[cfg(test)]
@@ -507,5 +691,105 @@ mod tests {
             err.detailed_error,
             format!("userId={ME_ID}, permission=read_channel")
         );
+    }
+
+    /// `strconv.ParseBool`'s accepted set decides the forward, and its error case is `false` —
+    /// so `yes`, an empty value, and a bare key all serve locally, while `1`, `t` and `True`
+    /// forward. `url.Values.Get` takes the **first** value of a repeated key, and it decodes
+    /// percent-escapes before `ParseBool` sees the string.
+    #[test]
+    fn the_content_reviewer_forward_parses_the_query_like_go() {
+        for (query, expected) in [
+            (Some("as_content_reviewer=true"), true),
+            (Some("as_content_reviewer=1"), true),
+            (Some("as_content_reviewer=t"), true),
+            (Some("as_content_reviewer=True"), true),
+            (Some("as_content_reviewer=TRUE"), true),
+            (Some("as_content_reviewer=%74rue"), true), // decoded before ParseBool
+            (Some("as_content_reviewer=false"), false),
+            (Some("as_content_reviewer=0"), false),
+            (Some("as_content_reviewer=yes"), false), // ParseBool error → false
+            (Some("as_content_reviewer="), false),
+            (Some("as_content_reviewer"), false), // bare key: value is ""
+            (
+                Some("as_content_reviewer=true&as_content_reviewer=false"),
+                true,
+            ), // first wins
+            (
+                Some("as_content_reviewer=false&as_content_reviewer=true"),
+                false,
+            ),
+            (Some("other=true"), false),
+            (Some("AS_CONTENT_REVIEWER=true"), false), // keys are case-sensitive
+            (Some(""), false),
+            (None, false),
+        ] {
+            assert_eq!(
+                is_content_reviewer_request(query),
+                expected,
+                "query {query:?}"
+            );
+        }
+    }
+
+    /// An open channel asks the team first, and a team grant means the channel gate — a database
+    /// read — is never polled. Like `first_denied_permission`, the order is invisible over HTTP
+    /// (both denials answer the same 403), so it is pinned here.
+    #[tokio::test]
+    async fn an_open_channel_team_grant_never_polls_the_channel_gate() {
+        let denied = channel_read_denied(
+            true,
+            || async { true },
+            || async { panic!("the channel gate must not run when the team grants") },
+        )
+        .await;
+        assert!(!denied);
+    }
+
+    /// Team denies, channel gate decides — in both directions.
+    #[tokio::test]
+    async fn an_open_channel_falls_from_team_to_channel_gate() {
+        assert!(!channel_read_denied(true, || async { false }, || async { true }).await);
+        assert!(channel_read_denied(true, || async { false }, || async { false }).await);
+    }
+
+    /// Both denial branches answer with `read_channel` — the detail is wiped on the wire
+    /// ([D-092]), so this is only checkable here.
+    #[test]
+    fn the_get_channel_denial_names_read_channel() {
+        let session = mm_model::session::Session {
+            user_id: ME_ID.to_owned(),
+            ..Default::default()
+        };
+        let denial = get_channel_denial(&session);
+        assert_eq!(denial.0.status_code, 403);
+        assert_eq!(denial.0.id, "api.context.permissions.app_error");
+        assert_eq!(
+            denial.0.detailed_error,
+            format!("userId={ME_ID}, permission=read_channel"),
+            "read_public_channel must never be the permission an error names"
+        );
+    }
+
+    /// A non-open channel **never** consults the team gate: `read_public_channel` team-wide must
+    /// not open a private channel. This is the security-relevant mutation — swapping the branch
+    /// condition would leak every private channel to its team.
+    #[tokio::test]
+    async fn a_private_channel_never_polls_the_team_gate() {
+        let denied = channel_read_denied(
+            false,
+            || async { panic!("the team gate must not run for a non-open channel") },
+            || async { false },
+        )
+        .await;
+        assert!(denied);
+
+        let allowed = channel_read_denied(
+            false,
+            || async { panic!("still must not run when the channel gate grants") },
+            || async { true },
+        )
+        .await;
+        assert!(!allowed);
     }
 }
