@@ -39,6 +39,91 @@ impl App {
             })
     }
 
+    /// Port of `app.App.GetTeam` (team.go:897), through the `TeamService.GetTeam` pass-through
+    /// (app/teams/teams.go:30) it delegates to.
+    ///
+    /// Same two-branch shape as `App::get_channel`, with a transcription trap in the ids: the
+    /// 404 is `app.team.get.find.app_error` and the 500 is `app.team.get.finding.app_error` —
+    /// **`find` versus `finding`**, one gerund apart, where the channel pair varies the whole
+    /// last word (`existing`/`find`). Neither branch carries `params`; Go passes `nil` here,
+    /// unlike `GetChannel`'s `errCtx`.
+    #[tracing::instrument(skip_all, fields(team_id = %team_id))]
+    pub async fn get_team(&self, team_id: &str) -> Result<Team, AppError> {
+        self.store().team().get(team_id).await.map_err(|err| {
+            if err.is_not_found() {
+                AppError::new(
+                    "GetTeam",
+                    "app.team.get.find.app_error",
+                    None,
+                    String::new(),
+                    404,
+                )
+            } else {
+                tracing::error!(error = %err, "team lookup failed");
+                AppError::new(
+                    "GetTeam",
+                    "app.team.get.finding.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            }
+        })
+    }
+
+    /// Port of `app.App.GetTeamStats` (team.go:2234), restrictions-free — the caller forwards
+    /// any restricted request to Go, so this port never sees a `ViewUsersRestrictions`.
+    ///
+    /// Go launches both counts on goroutines and then reads the **total**'s channel first, so
+    /// when both fail the total's error is the one reported. Sequential awaits preserve exactly
+    /// that precedence; the concurrency itself is invisible on the wire. The two error ids
+    /// differ only by an inserted `active_` — `app.team.get_member_count.app_error` versus
+    /// `app.team.get_active_member_count.app_error` — and the first is also the id
+    /// `GetChannelGuestCount` borrows in `channel.rs`, so three call sites now share it.
+    #[tracing::instrument(skip_all, fields(team_id = %team_id))]
+    pub async fn get_team_stats(
+        &self,
+        team_id: &str,
+    ) -> Result<mm_model::stats::TeamStats, AppError> {
+        let total_member_count = self
+            .store()
+            .team()
+            .get_total_member_count(team_id)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "total member count failed");
+                AppError::new(
+                    "GetTeamStats",
+                    "app.team.get_member_count.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })?;
+
+        let active_member_count = self
+            .store()
+            .team()
+            .get_active_member_count(team_id)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "active member count failed");
+                AppError::new(
+                    "GetTeamStats",
+                    "app.team.get_active_member_count.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })?;
+
+        Ok(mm_model::stats::TeamStats {
+            team_id: team_id.to_owned(),
+            total_member_count,
+            active_member_count,
+        })
+    }
+
     /// Port of `app.App.GetTeamsForUser` (team.go:1084).
     ///
     /// Same thin-wrapper shape as [`App::get_team_members_for_user`], different store read and
@@ -204,5 +289,73 @@ mod tests {
         assert_eq!(err.status_code, 500);
         assert_eq!(err.id, "app.team.get_all.app_error");
         assert!(err.params.is_none(), "Go passes nil params");
+    }
+
+    /// `get_team`'s failure branch is the **`finding`** id; the 404 branch's `find` is asserted
+    /// separately because the two differ by one gerund and a swap is invisible until i18n runs.
+    #[tokio::test]
+    async fn a_broken_team_lookup_is_a_500_with_the_finding_id() {
+        let err = unreachable_app()
+            .get_team("tttttttttttttttttttttttttt")
+            .await
+            .expect_err("the store is unreachable");
+        assert_eq!(err.status_code, 500);
+        assert_eq!(err.id, "app.team.get.finding.app_error");
+        assert!(
+            err.params.is_none(),
+            "Go passes nil params in both branches"
+        );
+        assert_eq!(err.where_, "GetTeam");
+    }
+
+    /// With both counts failing (unreachable store), the **total**'s error id is the one
+    /// reported — Go reads that goroutine's channel first, and the sequential port preserves
+    /// the precedence. The id is the `member_count` one without `active_`.
+    #[tokio::test]
+    async fn a_broken_stats_lookup_reports_the_total_counts_error_first() {
+        let err = unreachable_app()
+            .get_team_stats("tttttttttttttttttttttttttt")
+            .await
+            .expect_err("the store is unreachable");
+        assert_eq!(err.status_code, 500);
+        assert_eq!(
+            err.id, "app.team.get_member_count.app_error",
+            "the total count is read first, so its error wins when both fail"
+        );
+        assert_eq!(err.where_, "GetTeamStats");
+        assert!(
+            err.params.is_none(),
+            "Go passes nil params in both branches"
+        );
+    }
+
+    /// The active count's id differs from the total's only by an inserted `active_`; pinned as a
+    /// literal because the unreachable-store test above can only ever see the total's.
+    #[test]
+    fn the_active_count_id_inserts_active_into_the_shared_id() {
+        let active = mm_model::utils::AppError::new(
+            "GetTeamStats",
+            "app.team.get_active_member_count.app_error",
+            None,
+            String::new(),
+            500,
+        );
+        assert_eq!(active.id, "app.team.get_active_member_count.app_error");
+        assert_ne!(active.id, "app.team.get_member_count.app_error");
+    }
+
+    /// The 404's id is `find`, not `finding` — pinned as a literal because no fixture can reach
+    /// the miss branch without a database (the parity suite covers it over REST).
+    #[test]
+    fn the_team_miss_id_is_find_not_finding() {
+        let miss = mm_model::utils::AppError::new(
+            "GetTeam",
+            "app.team.get.find.app_error",
+            None,
+            String::new(),
+            404,
+        );
+        assert_eq!(miss.id, "app.team.get.find.app_error", "team.go:903");
+        assert_ne!(miss.id, "app.team.get.finding.app_error");
     }
 }

@@ -61,6 +61,9 @@ var registry = map[string]any{
 	"cluster_info":  &model.ClusterInfo{},
 	"read_receipt":  &model.ReadReceipt{},
 
+	// user_terms_of_service.go, pulled in by getUser's terms-of-service branch.
+	"user_terms_of_service": &model.UserTermsOfService{},
+
 	// channel.go's other wire types.
 	"channel_banner_info":                   &model.ChannelBannerInfo{},
 	"channel_with_team_data":                &model.ChannelWithTeamData{},

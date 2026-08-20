@@ -151,6 +151,135 @@ impl App {
         Ok(unread)
     }
 
+    /// Port of `app.App.GetChannelMembersPage` (channel.go:2578).
+    ///
+    /// Go builds `Offset: page * perPage, Limit: perPage` and hands the store its
+    /// `ChannelMembersGetOptions`; the two `> 0` guards live **in the store**, so a
+    /// `per_page = 0` reaches it as `Limit: 0` and means *unlimited* — see the store's doc.
+    /// The multiplication wraps rather than panics, as Go's `int` product does; a wrapped
+    /// (negative) offset then fails the store's `> 0` guard and reads from the start, which is
+    /// also what Go's squirrel builder does with it.
+    ///
+    /// One branch, one id, 500-only: a channel with no members — or no channel at all — is an
+    /// empty list, not a miss.
+    #[tracing::instrument(skip_all, fields(channel_id = %channel_id, page, per_page))]
+    pub async fn get_channel_members_page(
+        &self,
+        channel_id: &str,
+        page: i64,
+        per_page: i64,
+    ) -> Result<Vec<ChannelMember>, AppError> {
+        self.store()
+            .channel()
+            .get_members(channel_id, page.wrapping_mul(per_page), per_page)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "channel members page lookup failed");
+                AppError::new(
+                    "GetChannelMembersPage",
+                    "app.channel.get_members.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })
+    }
+
+    /// Port of `app.App.GetChannelMemberCount` (channel.go:2664).
+    ///
+    /// One branch: the store's only failure mode is a broken query, so there is no 404 here — a
+    /// channel id that matches nothing is a legitimate count of zero. Over REST that zero is
+    /// unreachable: `getChannelStats`'s gate fetches the channel itself and a miss denies before
+    /// any grant branch, the admin's included — **measured**, after a first draft of the parity
+    /// suite asserted the opposite and both servers refused.
+    #[tracing::instrument(skip_all, fields(channel_id = %channel_id))]
+    pub async fn get_channel_member_count(&self, channel_id: &str) -> Result<i64, AppError> {
+        self.store()
+            .channel()
+            .get_member_count(channel_id)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "channel member count failed");
+                AppError::new(
+                    "GetChannelMemberCount",
+                    "app.channel.get_member_count.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })
+    }
+
+    /// Port of `app.App.GetChannelFileCount` (channel.go:2673).
+    ///
+    /// The `where` Go passes is **`SqlChannelStore.GetFileCount`** — the store method's name, not
+    /// this function's. A copy-paste in Go, reproduced because the string is on the wire when
+    /// `EnableDeveloper` exposes it, and because "fix" and "drift" are indistinguishable later.
+    #[tracing::instrument(skip_all, fields(channel_id = %channel_id))]
+    pub async fn get_channel_file_count(&self, channel_id: &str) -> Result<i64, AppError> {
+        self.store()
+            .channel()
+            .get_file_count(channel_id)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "channel file count failed");
+                AppError::new(
+                    "SqlChannelStore.GetFileCount",
+                    "app.channel.get_file_count.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })
+    }
+
+    /// Port of `app.App.GetChannelGuestCount` (channel.go:2682).
+    ///
+    /// Two transcription traps in one error, both Go's: the `where` is the store method's name
+    /// (`SqlChannelStore.GetGuestCount`, like [`App::get_channel_file_count`]), and the id
+    /// **reuses `app.channel.get_member_count.app_error`** — there is no `get_guest_count` id
+    /// anywhere in Go. A reader tidying either one changes the wire.
+    #[tracing::instrument(skip_all, fields(channel_id = %channel_id))]
+    pub async fn get_channel_guest_count(&self, channel_id: &str) -> Result<i64, AppError> {
+        self.store()
+            .channel()
+            .get_guest_count(channel_id)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "channel guest count failed");
+                AppError::new(
+                    "SqlChannelStore.GetGuestCount",
+                    "app.channel.get_member_count.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })
+    }
+
+    /// Port of `app.App.GetChannelPinnedPostCount` (channel.go:2691).
+    ///
+    /// The id is `app.channel.get_pinnedpost_count.app_error` — no underscore inside
+    /// `pinnedpost`, the same missing underscore as the wire tag on
+    /// [`mm_model::channel_stats::ChannelStats::pinned_post_count`].
+    #[tracing::instrument(skip_all, fields(channel_id = %channel_id))]
+    pub async fn get_channel_pinned_post_count(&self, channel_id: &str) -> Result<i64, AppError> {
+        self.store()
+            .channel()
+            .get_pinned_post_count(channel_id)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "channel pinned post count failed");
+                AppError::new(
+                    "GetChannelPinnedPostCount",
+                    "app.channel.get_pinnedpost_count.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })
+    }
+
     /// Port of `app.App.GetChannelsByNames` (channel.go:2350).
     ///
     /// One branch, one error id, no 404: a name that matches nothing is simply absent from the
@@ -445,6 +574,52 @@ mod tests {
             "app.channel.get_member.missing.app_error",
             "app/constants.go:6"
         );
+    }
+
+    /// The four count wrappers have one branch each — a broken store is a 500, and there is no
+    /// 404 anywhere in them. Each is pinned with its id **and** its `where`, because two of the
+    /// four carry the store method's name rather than their own, and one reuses another's id;
+    /// all three quirks are Go's and all three are exactly what a tidy-minded port loses.
+    #[tokio::test]
+    async fn the_count_wrappers_carry_gos_exact_error_identities() {
+        let app = unreachable_app();
+        let channel = "cccccccccccccccccccccccccc";
+
+        let member = app.get_channel_member_count(channel).await.unwrap_err();
+        assert_eq!(member.status_code, 500);
+        assert_eq!(member.id, "app.channel.get_member_count.app_error");
+        assert_eq!(member.where_, "GetChannelMemberCount");
+
+        let file = app.get_channel_file_count(channel).await.unwrap_err();
+        assert_eq!(file.status_code, 500);
+        assert_eq!(file.id, "app.channel.get_file_count.app_error");
+        assert_eq!(
+            file.where_, "SqlChannelStore.GetFileCount",
+            "Go passes the store method's name, not GetChannelFileCount (channel.go:2676)"
+        );
+
+        let guest = app.get_channel_guest_count(channel).await.unwrap_err();
+        assert_eq!(guest.status_code, 500);
+        assert_eq!(
+            guest.id, member.id,
+            "there is no get_guest_count id in Go — the member-count id is reused (channel.go:2685)"
+        );
+        assert_eq!(guest.where_, "SqlChannelStore.GetGuestCount");
+
+        let pinned = app
+            .get_channel_pinned_post_count(channel)
+            .await
+            .unwrap_err();
+        assert_eq!(pinned.status_code, 500);
+        assert_eq!(
+            pinned.id, "app.channel.get_pinnedpost_count.app_error",
+            "no underscore inside pinnedpost — the same missing underscore as the wire tag"
+        );
+        assert_eq!(pinned.where_, "GetChannelPinnedPostCount");
+
+        for err in [&member, &file, &guest, &pinned] {
+            assert!(err.params.is_none(), "Go passes nil params in all four");
+        }
     }
 
     /// The id travels in `params`, as Go's `errCtx` does — the i18n string interpolates it.

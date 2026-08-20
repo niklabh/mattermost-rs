@@ -21,6 +21,7 @@ pub mod scheme_store;
 pub mod session_store;
 pub mod team_store;
 pub mod user_store;
+pub mod user_terms_of_service_store;
 
 pub use channel_store::{ChannelStore, SqlChannelStore};
 pub use error::StoreError;
@@ -30,6 +31,7 @@ pub use scheme_store::{SchemeStore, SqlSchemeStore};
 pub use session_store::{SessionStore, SqlSessionStore};
 pub use team_store::{SqlTeamStore, TeamStore};
 pub use user_store::{SqlUserStore, UserStore};
+pub use user_terms_of_service_store::{SqlUserTermsOfServiceStore, UserTermsOfServiceStore};
 
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
@@ -48,6 +50,7 @@ pub struct SqlStore {
     session: SqlSessionStore,
     team: SqlTeamStore,
     user: SqlUserStore,
+    user_terms_of_service: SqlUserTermsOfServiceStore,
 }
 
 impl SqlStore {
@@ -78,6 +81,7 @@ impl SqlStore {
             scheme: SqlSchemeStore::new(pool.clone()),
             session: SqlSessionStore::new(pool.clone()),
             team: SqlTeamStore::new(pool.clone()),
+            user_terms_of_service: SqlUserTermsOfServiceStore::new(pool.clone()),
             user: SqlUserStore::new(pool),
         }
     }
@@ -115,5 +119,10 @@ impl SqlStore {
     /// Port of `store.Store.User()`.
     pub fn user(&self) -> &SqlUserStore {
         &self.user
+    }
+
+    /// Port of `store.Store.UserTermsOfService()`.
+    pub fn user_terms_of_service(&self) -> &SqlUserTermsOfServiceStore {
+        &self.user_terms_of_service
     }
 }

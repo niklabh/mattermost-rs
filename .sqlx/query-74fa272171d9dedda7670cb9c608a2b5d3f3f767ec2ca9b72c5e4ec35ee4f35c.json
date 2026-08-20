@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT count(*) AS \"count!\"\n          FROM posts\n         WHERE ispinned = true\n           AND channelid = $1\n           AND deleteat = 0\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "74fa272171d9dedda7670cb9c608a2b5d3f3f767ec2ca9b72c5e4ec35ee4f35c"
+}

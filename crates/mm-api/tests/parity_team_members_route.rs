@@ -12,10 +12,13 @@
 
 mod common;
 
-use common::{RUST, client, fetch_both, go_minted_token, stack_enabled};
+use common::{RUST, client, fetch_both, fetch_both_stable, go_minted_token, stack_enabled};
 
 const PATH: &str = "/api/v4/users/me/teams/members";
 
+/// Through [`fetch_both_stable`]: the membership query has no `ORDER BY`, so a concurrently
+/// running suite that churns the admin's `TeamMembers` rows can reorder the list between the two
+/// reads — the same measured flake as the sessions suite, whose body embeds this list.
 #[tokio::test]
 async fn team_members_are_byte_identical_across_both_servers() {
     if !stack_enabled() {
@@ -25,13 +28,27 @@ async fn team_members_are_byte_identical_across_both_servers() {
 
     let client = client();
     let token = go_minted_token(&client).await;
-    let (go_body, rs_body) = fetch_both(&client, &token, PATH).await;
+    let (go_body, rs_body) = fetch_both_stable(&client, &token, PATH).await;
 
-    assert_eq!(
-        String::from_utf8_lossy(&rs_body),
-        String::from_utf8_lossy(&go_body),
-        "the two servers must agree byte for byte"
-    );
+    // Byte-identical first; on a mismatch, compare with the list order normalised. This whole
+    // response *is* the unordered `GetTeamsForUser` result, so its element order is heap order —
+    // not a parity property, for the same measured reason as the sessions suite (whose bodies
+    // embed this list): Go can serve a cached hydration's order while we re-read fresh.
+    if rs_body != go_body {
+        let sort = |body: &[u8]| {
+            let mut value: serde_json::Value = serde_json::from_slice(body).expect("decodes");
+            value
+                .as_array_mut()
+                .expect("an array")
+                .sort_by_key(|m| m["team_id"].as_str().unwrap_or_default().to_owned());
+            value
+        };
+        assert_eq!(
+            sort(&go_body),
+            sort(&rs_body),
+            "the two servers differ beyond element order"
+        );
+    }
 
     // Not vacuous: two empty arrays would also be identical.
     let parsed: serde_json::Value = serde_json::from_slice(&rs_body).expect("decodes");

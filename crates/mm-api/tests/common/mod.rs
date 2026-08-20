@@ -645,6 +645,8 @@ async fn purge_api_fixtures_once() {
         "DELETE FROM channelmembers WHERE userid IN (SELECT id FROM users WHERE username LIKE 'mmrsplain%')",
         "DELETE FROM teammembers WHERE userid IN (SELECT id FROM users WHERE username LIKE 'mmrsplain%')",
         "DELETE FROM sessions WHERE userid IN (SELECT id FROM users WHERE username LIKE 'mmrsplain%')",
+        // Before the posts they attach to, while the channel subquery still resolves either way.
+        "DELETE FROM fileinfo WHERE channelid IN (SELECT id FROM channels WHERE name LIKE 'mmrs-parity-%')",
         "DELETE FROM posts WHERE channelid IN (SELECT id FROM channels WHERE name LIKE 'mmrs-parity-%')",
         // `PublicChannels` is Go's denormalised shadow of the public-channel metadata, kept in
         // step by `upsertPublicChannelT`. It has its own `(Name, TeamId)` uniqueness, so a
@@ -659,6 +661,8 @@ async fn purge_api_fixtures_once() {
         // an archived team keeps its name, so the next run's create fails without this.
         "DELETE FROM teammembers WHERE teamid IN (SELECT id FROM teams WHERE name LIKE 'mmrs-parity-%')",
         "DELETE FROM teams WHERE name LIKE 'mmrs-parity-%'",
+        // Rows the getUser suite plants directly (Team Edition cannot author a ToS over REST).
+        "DELETE FROM usertermsofservice WHERE userid IN (SELECT id FROM users WHERE username LIKE 'mmrsplain%')",
         "DELETE FROM users WHERE username LIKE 'mmrsplain%'",
     ] {
         let _ = sqlx::query(statement).execute(&pool).await;

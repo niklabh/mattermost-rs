@@ -128,6 +128,28 @@ pub trait TeamStore {
         &self,
         user_id: &str,
     ) -> impl std::future::Future<Output = Result<Vec<Team>, StoreError>> + Send;
+
+    /// Port of `SqlTeamStore.Get` (team_store.go:354).
+    fn get(&self, id: &str) -> impl std::future::Future<Output = Result<Team, StoreError>> + Send;
+
+    /// Port of `SqlTeamStore.GetTotalMemberCount` (team_store.go:1106), restrictions-free.
+    ///
+    /// Go's second parameter is a `*model.ViewUsersRestrictions` that splices extra joins into
+    /// the query. It is dropped here rather than accepted and ignored: the one route that calls
+    /// this (`getTeamStats`) **forwards to Go** whenever the caller's restrictions would be
+    /// non-nil, so no caller of this port can ever hold one — same reasoning as the dropped
+    /// `allowFromCache` parameters.
+    fn get_total_member_count(
+        &self,
+        team_id: &str,
+    ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
+
+    /// Port of `SqlTeamStore.GetActiveMemberCount` (team_store.go:1130), restrictions-free —
+    /// see [`TeamStore::get_total_member_count`].
+    fn get_active_member_count(
+        &self,
+        team_id: &str,
+    ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
 }
 
 /// Postgres-backed implementation.
@@ -157,6 +179,177 @@ impl TeamStore for SqlTeamStore {
     async fn get_teams_by_user_id(&self, user_id: &str) -> Result<Vec<Team>, StoreError> {
         get_teams_by_user_id(&self.pool, user_id).await
     }
+
+    #[tracing::instrument(skip_all, fields(team_id = %id, found))]
+    async fn get(&self, id: &str) -> Result<Team, StoreError> {
+        get(&self.pool, id).await
+    }
+
+    #[tracing::instrument(skip_all, fields(team_id = %team_id))]
+    async fn get_total_member_count(&self, team_id: &str) -> Result<i64, StoreError> {
+        get_total_member_count(&self.pool, team_id).await
+    }
+
+    #[tracing::instrument(skip_all, fields(team_id = %team_id))]
+    async fn get_active_member_count(&self, team_id: &str) -> Result<i64, StoreError> {
+        get_active_member_count(&self.pool, team_id).await
+    }
+}
+
+/// Port of `SqlTeamStore.GetTotalMemberCount` (team_store.go:1106), restrictions-free — see the
+/// trait method for why the parameter is dropped.
+///
+/// "Total" is **current memberships including deactivated users**: the membership's own
+/// `DeleteAt = 0` filters departures, and there is deliberately no `Users.DeleteAt` predicate —
+/// that one extra predicate is the entire difference from [`get_active_member_count`]. A
+/// soft-deleted membership row therefore counts in *neither* number, while a deactivated user's
+/// surviving row counts in this one only.
+#[tracing::instrument(skip(pool), fields(team_id = %team_id))]
+pub async fn get_total_member_count(pool: &PgPool, team_id: &str) -> Result<i64, StoreError> {
+    sqlx::query_scalar!(
+        r#"
+        SELECT count(DISTINCT teammembers.userid) AS "count!"
+          FROM teammembers, users
+         WHERE teammembers.deleteat = 0
+           AND teammembers.userid = users.id
+           AND teammembers.teamid = $1
+        "#,
+        team_id
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: "failed to count TeamMembers".to_owned(),
+        source,
+    })
+}
+
+/// Port of `SqlTeamStore.GetActiveMemberCount` (team_store.go:1130), restrictions-free.
+///
+/// [`get_total_member_count`]'s query plus `Users.DeleteAt = 0`. Go's error context is the same
+/// string in both functions ("failed to count TeamMembers"), reproduced rather than improved.
+#[tracing::instrument(skip(pool), fields(team_id = %team_id))]
+pub async fn get_active_member_count(pool: &PgPool, team_id: &str) -> Result<i64, StoreError> {
+    sqlx::query_scalar!(
+        r#"
+        SELECT count(DISTINCT teammembers.userid) AS "count!"
+          FROM teammembers, users
+         WHERE teammembers.deleteat = 0
+           AND teammembers.userid = users.id
+           AND users.deleteat = 0
+           AND teammembers.teamid = $1
+        "#,
+        team_id
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: "failed to count TeamMembers".to_owned(),
+        source,
+    })
+}
+
+/// Port of `SqlTeamStore.Get` (team_store.go:354).
+///
+/// The one row by primary key, with **no `DeleteAt` filter** — an archived team still answers,
+/// exactly like `SqlChannelStore.Get`, and unlike `GetTeamsByUserId` above whose team-side
+/// `DeleteAt = 0` removes archived teams from a user's list. The same team can therefore be
+/// missing from `GET /users/{id}/teams` and served by `GET /teams/{id}`, and both answers are
+/// Go's — the same asymmetry the channel routes already pinned.
+///
+/// The columns are `teamSliceColumns(true)` — identical to [`get_teams_by_user_id`]'s SELECT,
+/// including the two computed `AccessControlPolicies` flags with their `Type = 'team'` guard.
+///
+/// Go follows the fetch with `if team.Id == "" { return ErrNotFound }` (team_store.go:365). By
+/// primary-key semantics a found row's `Id` equals the parameter, so that guard can only fire
+/// for `id = ""` — which the fetch already misses. Ported anyway: it is two lines, and dropping
+/// a branch because *we* reasoned it dead is how [D-151]-class drift starts.
+#[tracing::instrument(skip(pool), fields(team_id = %id))]
+pub async fn get(pool: &PgPool, id: &str) -> Result<Team, StoreError> {
+    let row = sqlx::query!(
+        r#"
+        SELECT t.id,
+               t.createat,
+               t.updateat,
+               t.deleteat,
+               t.displayname,
+               t.name,
+               t.description,
+               t.email,
+               t.type::text AS "team_type",
+               t.companyname,
+               t.alloweddomains,
+               t.inviteid,
+               t.allowopeninvite,
+               t.lastteamiconupdate,
+               t.schemeid,
+               t.groupconstrained,
+               t.cloudlimitsarchived,
+               EXISTS (
+                   SELECT 1 FROM accesscontrolpolicies acp
+                    WHERE acp.id = t.id AND acp.type = 'team'
+               ) AS "policy_enforced!",
+               COALESCE((
+                   SELECT acp.active FROM accesscontrolpolicies acp
+                    WHERE acp.id = t.id AND acp.type = 'team' AND acp.active = TRUE
+                    LIMIT 1
+               ), false) AS "policy_is_active!"
+          FROM teams t
+         WHERE t.id = $1
+        "#,
+        id
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: format!("failed to get Team with id={id}"),
+        source,
+    })?;
+
+    let Some(row) = row else {
+        tracing::Span::current().record("found", false);
+        return Err(StoreError::NotFound {
+            entity: "Team",
+            criteria: id.to_owned(),
+        });
+    };
+
+    // Go's `team.Id == ""` guard (team_store.go:365) — see the doc comment.
+    if row.id.is_empty() {
+        tracing::Span::current().record("found", false);
+        return Err(StoreError::NotFound {
+            entity: "Team",
+            criteria: id.to_owned(),
+        });
+    }
+    tracing::Span::current().record("found", true);
+
+    Ok(Team {
+        id: row.id,
+        create_at: row.createat.unwrap_or_default(),
+        update_at: row.updateat.unwrap_or_default(),
+        delete_at: row.deleteat.unwrap_or_default(),
+        display_name: row.displayname.unwrap_or_default(),
+        name: row.name.unwrap_or_default(),
+        description: row.description.unwrap_or_default(),
+        email: row.email.unwrap_or_default(),
+        team_type: row.team_type.unwrap_or_default(),
+        company_name: row.companyname.unwrap_or_default(),
+        allowed_domains: row.alloweddomains.unwrap_or_default(),
+        invite_id: row.inviteid.unwrap_or_default(),
+        allow_open_invite: row.allowopeninvite.unwrap_or_default(),
+        last_team_icon_update: row.lastteamiconupdate.unwrap_or_default(),
+        scheme_id: row.schemeid,
+        group_constrained: row.groupconstrained,
+        cloud_limits_archived: row.cloudlimitsarchived,
+        policy_enforced: row.policy_enforced,
+        policy_is_active: row.policy_is_active,
+
+        // Not selected by Go's `teamSliceColumns`; each is filled elsewhere or left zero.
+        policy_id: None,
+        policy_actions: None,
+        recommended: false,
+    })
 }
 
 /// Port of `SqlTeamStore.GetTeamsByUserId` (team_store.go:705).
