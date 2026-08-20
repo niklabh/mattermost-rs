@@ -1,6 +1,10 @@
-//! Port of `SqlPreferenceStore` (channels/store/sqlstore/preference_store.go), `Save` only.
+//! Port of `SqlPreferenceStore` (channels/store/sqlstore/preference_store.go): `Save`, `GetAll`,
+//! `GetCategory` and `Get`.
 //!
-//! **The first write in this port.** Everything before it read.
+//! `Save` was **the first write in this port.** The three reads share Go's
+//! `preferenceSelectQuery` — `SELECT UserId, Category, Name, Value FROM Preferences` — and,
+//! like it, carry **no `ORDER BY`**. Go's row order is whatever Postgres hands back; adding one
+//! here would be tidier and would put the two servers' bodies in different orders.
 
 use mm_model::preference::{Preference, Preferences};
 use sqlx::PgPool;
@@ -14,6 +18,51 @@ pub trait PreferenceStore {
         &self,
         preferences: &Preferences,
     ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlPreferenceStore.GetAll` (preference_store.go:151).
+    fn get_all(
+        &self,
+        user_id: &str,
+    ) -> impl std::future::Future<Output = Result<Preferences, StoreError>> + Send;
+
+    /// Port of `SqlPreferenceStore.GetCategory` (preference_store.go:139).
+    fn get_category(
+        &self,
+        user_id: &str,
+        category: &str,
+    ) -> impl std::future::Future<Output = Result<Preferences, StoreError>> + Send;
+
+    /// Port of `SqlPreferenceStore.Get` (preference_store.go:113).
+    fn get(
+        &self,
+        user_id: &str,
+        category: &str,
+        name: &str,
+    ) -> impl std::future::Future<Output = Result<Preference, StoreError>> + Send;
+}
+
+/// One row of Go's `preferenceSelectQuery`, in its column order.
+///
+/// `Value` is nullable in the schema but Go scans it into a plain `string`, and `database/sql`
+/// refuses to convert NULL into one — so a NULL row fails the **whole** query, and the app layer
+/// answers 400. The `"value!"` override makes sqlx fail the decode the same way rather than
+/// inventing a `None` Go never produces. `Save` cannot write a NULL, so no ported path creates one.
+struct PreferenceRow {
+    userid: String,
+    category: String,
+    name: String,
+    value: String,
+}
+
+impl From<PreferenceRow> for Preference {
+    fn from(row: PreferenceRow) -> Self {
+        Preference {
+            user_id: row.userid,
+            category: row.category,
+            name: row.name,
+            value: row.value,
+        }
+    }
 }
 
 /// Postgres-backed implementation.
@@ -91,6 +140,118 @@ impl PreferenceStore for SqlPreferenceStore {
         })?;
 
         Ok(())
+    }
+
+    /// Port of `GetAll` (preference_store.go:151): `WHERE UserId = ?`, no ordering.
+    ///
+    /// # Zero rows is `null` on the wire, not `[]`
+    ///
+    /// Go scans into a `var preferences model.Preferences` — a nil slice — and sqlx's `scanAll`
+    /// only `SetLen(0)`s it, which leaves a nil slice nil. `json.Encode` of that is `null`. The
+    /// caller is responsible for that distinction; this returns an empty `Preferences` and the
+    /// API layer encodes it as Go would. Unreachable through the API for a living user, since
+    /// `CreateUser` writes default preferences — reachable after `POST .../preferences/delete`.
+    #[tracing::instrument(skip_all, fields(user_id = %user_id, count))]
+    async fn get_all(&self, user_id: &str) -> Result<Preferences, StoreError> {
+        let rows = sqlx::query_as!(
+            PreferenceRow,
+            r#"
+            SELECT userid, category, name, value AS "value!"
+            FROM preferences
+            WHERE userid = $1
+            "#,
+            user_id
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to find Preferences with userId={user_id}"),
+            source,
+        })?;
+        tracing::Span::current().record("count", rows.len());
+
+        Ok(rows
+            .into_iter()
+            .map(Preference::from)
+            .collect::<Vec<_>>()
+            .into())
+    }
+
+    /// Port of `GetCategory` (preference_store.go:139): `WHERE UserId = ? AND Category = ?`, no
+    /// ordering. An empty result is **not** an error here — the app layer turns it into a 404
+    /// (app/preference.go:31), which is the only place that decision is made.
+    #[tracing::instrument(skip_all, fields(user_id = %user_id, category = %category, count))]
+    async fn get_category(&self, user_id: &str, category: &str) -> Result<Preferences, StoreError> {
+        let rows = sqlx::query_as!(
+            PreferenceRow,
+            r#"
+            SELECT userid, category, name, value AS "value!"
+            FROM preferences
+            WHERE userid = $1 AND category = $2
+            "#,
+            user_id,
+            category
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!(
+                "failed to find Preferences with userId={user_id}, category={category}"
+            ),
+            source,
+        })?;
+        tracing::Span::current().record("count", rows.len());
+
+        Ok(rows
+            .into_iter()
+            .map(Preference::from)
+            .collect::<Vec<_>>()
+            .into())
+    }
+
+    /// Port of `Get` (preference_store.go:113): `WHERE UserId = ? AND Category = ? AND Name = ?`
+    /// against the primary key, so at most one row.
+    ///
+    /// A miss is `sql.ErrNoRows` wrapped with `errors.Wrapf` — **not** `store.ErrNotFound` — and
+    /// the app layer does not distinguish it from a broken query: both are the same 400
+    /// (app/preference.go:39). `NotFound` is still returned here so a future caller that cares
+    /// can tell; today nothing on the wire depends on the variant.
+    #[tracing::instrument(skip_all, fields(user_id = %user_id, category = %category, name = %name, found))]
+    async fn get(
+        &self,
+        user_id: &str,
+        category: &str,
+        name: &str,
+    ) -> Result<Preference, StoreError> {
+        let row = sqlx::query_as!(
+            PreferenceRow,
+            r#"
+            SELECT userid, category, name, value AS "value!"
+            FROM preferences
+            WHERE userid = $1 AND category = $2 AND name = $3
+            "#,
+            user_id,
+            category,
+            name
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!(
+                "failed to find Preference with userId={user_id}, category={category}, name={name}"
+            ),
+            source,
+        })?;
+
+        let Some(row) = row else {
+            tracing::Span::current().record("found", false);
+            return Err(StoreError::NotFound {
+                entity: "Preference",
+                criteria: format!("userId={user_id}, category={category}, name={name}"),
+            });
+        };
+        tracing::Span::current().record("found", true);
+        Ok(row.into())
     }
 }
 

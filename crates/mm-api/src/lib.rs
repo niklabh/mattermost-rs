@@ -18,7 +18,7 @@ use axum::Router;
 use axum::extract::{RawPathParams, Request, State};
 use axum::middleware::Next;
 use axum::response::Response;
-use axum::routing::{MethodRouter, get, put};
+use axum::routing::{MethodRouter, get};
 use mm_app::App;
 
 /// Go's `PrivacySettings.ShowFullName` default (model/config.go).
@@ -166,7 +166,28 @@ pub fn router(state: AppState) -> Router {
         )
         .route(
             "/api/v4/users/me/preferences",
-            partially_migrated(put(preferences::update_preferences_me)),
+            partially_migrated(
+                get(preferences::get_preferences_me).put(preferences::update_preferences_me),
+            ),
+        )
+        // The parameterised sibling of the literal above; `me` under the two deeper paths has no
+        // literal route, so it arrives here as a value the handler resolves.
+        .route(
+            "/api/v4/users/{user_id}/preferences",
+            partially_migrated_with_ids(&state, get(preferences::get_preferences)),
+        )
+        // `{category}` and `{preference_name}` are not id-shaped, so the id-charset middleware
+        // leaves them alone; the handlers carry Go's own `[A-Za-z0-9_]+` mux class instead.
+        .route(
+            "/api/v4/users/{user_id}/preferences/{category}",
+            partially_migrated_with_ids(&state, get(preferences::get_preferences_by_category)),
+        )
+        .route(
+            "/api/v4/users/{user_id}/preferences/{category}/name/{preference_name}",
+            partially_migrated_with_ids(
+                &state,
+                get(preferences::get_preference_by_category_and_name),
+            ),
         )
         .route(
             "/api/v4/users/me/teams/members",
