@@ -4,6 +4,9 @@
 //! - `getChannelMember` — `GET /api/v4/channels/{channel_id}/members/{user_id}`
 //! - `getChannelUnread` — `GET /api/v4/users/{user_id}/channels/{channel_id}/unread`
 //! - `getChannelStats` — `GET /api/v4/channels/{channel_id}/stats`
+//! - `getChannelMembers` — `GET /api/v4/channels/{channel_id}/members`
+//! - `getChannelByName` — `GET /api/v4/teams/{team_id}/channels/name/{channel_name}`
+//! - `getChannelsForTeamForUser` — `GET /api/v4/users/{user_id}/teams/{team_id}/channels`
 //!
 //! # The first route migrated *through* a permission check
 //!
@@ -28,12 +31,13 @@
 //! `IsValidId` produces. Measured, not assumed — see [D-150].
 
 use axum::extract::{Path, Request, State};
-use axum::http::StatusCode;
+use axum::http::header::IF_NONE_MATCH;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use mm_model::channel::CHANNEL_TYPE_OPEN;
+use mm_model::channel::{CHANNEL_TYPE_OPEN, ChannelSearchOpts, is_valid_channel_identifier};
 use mm_model::permission::{
-    PERMISSION_EDIT_OTHER_USERS, PERMISSION_READ_CHANNEL, PERMISSION_READ_PUBLIC_CHANNEL,
-    make_permission_error,
+    PERMISSION_EDIT_OTHER_USERS, PERMISSION_MANAGE_TEAM, PERMISSION_READ_CHANNEL,
+    PERMISSION_READ_PUBLIC_CHANNEL, PERMISSION_VIEW_TEAM, Permission, make_permission_error,
 };
 use mm_model::utils::{is_valid_id, parse_go_bool};
 
@@ -701,6 +705,381 @@ pub async fn get_channel_members(
         .into_response())
 }
 
+/// Go's channel-name path class: `{channel_name:[A-Za-z0-9_-]+}` (api.go:224) — the id class
+/// plus `_` and `-`, **without** the `.` the username class allows. A segment outside it never
+/// matches Go's route and falls to the mux 404, so it is forwarded rather than answered
+/// ([D-150] under a third alphabet).
+fn segment_matches_channel_name_mux(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+}
+
+/// `include_deleted`, read by `web.ParamsFromRequest` (params.go:304) with the same
+/// `strconv.ParseBool`-error-is-false idiom as the other flags.
+const INCLUDE_DELETED_PARAM: &str = "include_deleted";
+
+/// How [`get_channel_by_name`] refuses — and the two branches refuse **differently**, which is
+/// the reason this is an enum rather than a bool like [`channel_read_denied`].
+#[derive(Debug, PartialEq, Eq)]
+enum ByNameRefusal {
+    /// The open-channel branch: `SetPermissionError(PermissionReadPublicChannel)` — note the
+    /// permission **named** is `read_public_channel`, where `getChannel`'s same branch names
+    /// `read_channel`. Two handlers, same gates, different error detail.
+    Forbidden,
+    /// The non-open branch: a **404** wearing the store's `get_by_name.missing` id, so a
+    /// non-member cannot tell a private channel from one that does not exist. Go builds it
+    /// inline in the handler (`where = "getChannelByName"`), not in the app layer.
+    NotFound,
+}
+
+/// Go's permission block for [`get_channel_by_name`] (api4/channel.go:1792-1811), both gates
+/// lazy so the order — invisible over HTTP — is testable in-process.
+///
+/// Both branches have the same shape, *team gate then channel gate*, and differ in two things a
+/// reader could plausibly swap:
+///
+/// - **Which team permission admits.** An open channel asks `read_public_channel`; a non-open
+///   one asks **`manage_team`** — the comment in Go says why: "allows team admins to access
+///   private channel". That is wider than `getChannel`, which never consults the team for a
+///   private channel at all. The closure receives the permission so a test can see which was
+///   asked.
+/// - **How a refusal reads.** Open → 403; non-open → 404 (see [`ByNameRefusal`]).
+///
+/// Go's non-open branch then tries `serveDiscoverableNonMember` before the 404. Pinned off as in
+/// `getChannel` — the `DiscoverableChannels` flag is false at the pinned SHA, [D-153].
+async fn channel_by_name_refusal<TF, TFut, CF, CFut>(
+    channel_is_open: bool,
+    team_allowed: TF,
+    channel_allowed: CF,
+) -> Option<ByNameRefusal>
+where
+    TF: FnOnce(&'static Permission) -> TFut,
+    TFut: std::future::Future<Output = bool>,
+    CF: FnOnce() -> CFut,
+    CFut: std::future::Future<Output = bool>,
+{
+    let team_permission = if channel_is_open {
+        &PERMISSION_READ_PUBLIC_CHANNEL
+    } else {
+        &PERMISSION_MANAGE_TEAM
+    };
+    if team_allowed(team_permission).await {
+        return None;
+    }
+    if channel_allowed().await {
+        return None;
+    }
+    Some(if channel_is_open {
+        ByNameRefusal::Forbidden
+    } else {
+        ByNameRefusal::NotFound
+    })
+}
+
+/// The response for a [`ByNameRefusal`], split out so the permission and error ids are pinned
+/// where a unit test can read them ([D-092]: neither reaches the wire).
+fn channel_by_name_denial(
+    refusal: ByNameRefusal,
+    session: &mm_model::session::Session,
+    channel: &mm_model::channel::Channel,
+) -> ApiError {
+    match refusal {
+        ByNameRefusal::Forbidden => ApiError(*make_permission_error(
+            session,
+            &[&PERMISSION_READ_PUBLIC_CHANNEL],
+        )),
+        ByNameRefusal::NotFound => ApiError(mm_model::utils::AppError::new(
+            "getChannelByName",
+            "app.channel.get_by_name.missing.app_error",
+            None,
+            format!("teamId={}, name={}", channel.team_id, channel.name),
+            404,
+        )),
+    }
+}
+
+/// Port of `getChannelByName` (api4/channel.go:1779), reached as
+/// `GET /api/v4/teams/{team_id}/channels/name/{channel_name}`.
+///
+/// # Order of operations
+///
+/// 1. **The name segment's mux charset**, `[A-Za-z0-9_-]+` — not id-shaped, so
+///    [`crate::partially_migrated_with_ids`] does not cover it; a miss is forwarded. The
+///    `team_id` segment *is* covered there.
+/// 2. **The name is lower-cased before anything looks at it** — `params.ChannelName =
+///    strings.ToLower(...)` (params.go:179). So `/channels/name/Town-Square` is `town-square`
+///    and answers 200, and the validator below never sees an uppercase letter.
+/// 3. `RequireTeamId().RequireChannelName()` — team first. `RequireChannelName` is
+///    `IsValidChannelIdentifier`, and like every `Require*` it answers `invalid_url_param`.
+/// 4. `?include_deleted` chooses the store variant; it is read **after** validation in Go, but
+///    parsing cannot fail so the order is unobservable.
+/// 5. The fetch, then the two-branch permission block — see [`channel_by_name_refusal`].
+/// 6. `FillInChannelProps`, then `json.NewEncoder(w).Encode` — trailing newline ([D-086]).
+///
+/// # The team in the path is not necessarily the team in the body
+///
+/// The store's filter is `TeamId = ? OR TeamId = ''`, so a DM or GM answers under any team's
+/// path. The permission block then asks about `channel.TeamId` — the empty string — and
+/// `SessionHasPermissionToTeam` on `""` denies for everyone but a system admin, so a DM falls
+/// through to its membership gate. Correct, and Go's.
+#[tracing::instrument(skip_all, fields(team_id = %team_id, channel_name = %channel_name, forwarded))]
+pub async fn get_channel_by_name(
+    State(state): State<AppState>,
+    Path((team_id, channel_name)): Path<(String, String)>,
+    axum::extract::RawQuery(query): axum::extract::RawQuery,
+    session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    if !segment_matches_channel_name_mux(&channel_name) {
+        tracing::Span::current().record("forwarded", true);
+        return crate::proxy::forward_to_go(State(state), request).await;
+    }
+    tracing::Span::current().record("forwarded", false);
+
+    let channel_name = channel_name.to_lowercase();
+
+    if let Err(err) = require_id(&team_id, "team_id") {
+        return err.into_response();
+    }
+    if !is_valid_channel_identifier(&channel_name) {
+        return ApiError::invalid_url_param("channel_name").into_response();
+    }
+
+    let include_deleted = query_flag_is_true(query.as_deref(), INCLUDE_DELETED_PARAM);
+
+    let mut channel = match state
+        .app
+        .get_channel_by_name(&channel_name, &team_id, include_deleted)
+        .await
+    {
+        Ok(channel) => channel,
+        Err(err) => return ApiError(err).into_response(),
+    };
+
+    let refusal = channel_by_name_refusal(
+        channel.channel_type == CHANNEL_TYPE_OPEN,
+        |permission| async {
+            state
+                .app
+                .session_has_permission_to_team(&session.0, &channel.team_id, permission)
+                .await
+        },
+        || async {
+            let (allowed, _is_member) = state
+                .app
+                .session_has_permission_to_channel(
+                    &session.0,
+                    &channel.id,
+                    &PERMISSION_READ_CHANNEL,
+                )
+                .await;
+            allowed
+        },
+    )
+    .await;
+
+    if let Some(refusal) = refusal {
+        return channel_by_name_denial(refusal, &session.0, &channel).into_response();
+    }
+
+    if let Err(err) = state.app.fill_in_channel_props(&mut channel).await {
+        return ApiError(err).into_response();
+    }
+
+    let mut body = match serde_json::to_vec(&channel) {
+        Ok(body) => body,
+        Err(err) => {
+            tracing::error!(error = %err, "failed to serialise Channel");
+            return ApiError(mm_model::utils::AppError::new(
+                "getChannelByName",
+                "api.marshal_error",
+                None,
+                String::new(),
+                500,
+            ))
+            .into_response();
+        }
+    };
+    body.push(b'\n');
+
+    (
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
+    )
+        .into_response()
+}
+
+/// Go's `c.RequireUserId().RequireTeamId()` for [`get_channels_for_team_for_user`] — **user
+/// first**, the opposite of [`validate_ids`]'s channel-first chain, and pinned for the same
+/// reason: the parameter name is not on the wire ([D-092]).
+#[allow(clippy::result_large_err)]
+fn validate_user_then_team(user_id: &str, team_id: &str) -> Result<(), ApiError> {
+    require_id(user_id, "user_id")?;
+    require_id(team_id, "team_id")?;
+    Ok(())
+}
+
+/// The two gates of [`get_channels_for_team_for_user`] (api4/channel.go:1390-1398), in order
+/// and with the short circuit — [`first_denied_permission`]'s shape with a **team** gate second:
+/// `SessionHasPermissionToUser` names `edit_other_users`, then `SessionHasPermissionToTeam`
+/// with `view_team` names `view_team`. Both answer the same 403 over HTTP.
+async fn channels_for_team_denied<F, Fut>(
+    user_allowed: bool,
+    team_allowed: F,
+) -> Option<&'static Permission>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = bool>,
+{
+    if !user_allowed {
+        return Some(&PERMISSION_EDIT_OTHER_USERS);
+    }
+    if !team_allowed().await {
+        return Some(&PERMISSION_VIEW_TEAM);
+    }
+    None
+}
+
+/// Go's `last_delete_at` parsing (api4/channel.go:1401-1408): `strconv.Atoi` with the error
+/// swallowed to `0` — so absent, empty and garbage are all zero — and then **a negative value is
+/// a 400** (`invalid_url_param`, `last_delete_at`). The one pagination-style parameter in the
+/// ported routes that can fail a request; `page` and `per_page` never do.
+///
+/// `Atoi` accepts a leading `+` or `-` and nothing else: no whitespace, no underscores, and an
+/// out-of-range value is an error (→ 0), all of which `i64::from_str` matches.
+#[allow(clippy::result_large_err)]
+fn parse_last_delete_at(query: Option<&str>) -> Result<i64, ApiError> {
+    let last_delete_at = query_first(query, "last_delete_at")
+        .and_then(|v| v.parse::<i64>().ok())
+        .unwrap_or(0);
+    if last_delete_at < 0 {
+        return Err(ApiError::invalid_url_param("last_delete_at"));
+    }
+    Ok(last_delete_at)
+}
+
+/// Port of `Context.HandleEtag` (web/context.go:230): an exact string comparison of the raw
+/// `If-None-Match` header against the computed etag — no weak comparison, no candidate list —
+/// and only when the etag is non-empty, which a list etag always is.
+fn etag_matches(headers: &HeaderMap, etag: &str) -> bool {
+    !etag.is_empty()
+        && headers
+            .get(IF_NONE_MATCH)
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|sent| sent == etag)
+}
+
+/// Port of `getChannelsForTeamForUser` (api4/channel.go:1384), reached as
+/// `GET /api/v4/users/{user_id}/teams/{team_id}/channels` — the route the webapp calls on
+/// every team load, so its order is the sidebar's order.
+///
+/// # Order of operations
+///
+/// 1. `me` resolves before validation (web/context.go:301).
+/// 2. `RequireUserId().RequireTeamId()` — **user first**, see [`validate_user_then_team`].
+/// 3. Two gates, user then team — see [`channels_for_team_denied`]. Both run **before** the
+///    query string is parsed, so a refused caller sending `last_delete_at=-1` gets the 403, not
+///    the 400.
+/// 4. `last_delete_at` ([`parse_last_delete_at`]) and `include_deleted` (`ParseBool`, error is
+///    false). Together they select the store's three deletion filters.
+/// 5. `GetChannelsForTeamForUser` — and **zero channels is a 404**, not `[]`: the store answers
+///    `ErrNotFound` for an empty result.
+/// 6. **The etag is computed before `FillInChannelsProps`**, from the list as fetched, and a
+///    matching `If-None-Match` is a 304 with the `ETag` header and no body. The props fill runs
+///    only on a miss. `ChannelList.Etag` is the max over `LastPostAt`/`UpdateAt` plus the length
+///    (`mm-model/src/channel_list.rs`), so a new post in any listed channel invalidates it.
+/// 7. `ETag` header, then `json.NewEncoder(w).Encode` — trailing newline ([D-086]).
+///
+/// # Not ported
+///
+/// `HydrateChannelsPolicyActions` — a no-op for a list with no policy-enforced channel, which
+/// is every list this deployment can produce ([D-141]).
+#[tracing::instrument(skip_all, fields(user_id = %user_id, team_id = %team_id, count))]
+pub async fn get_channels_for_team_for_user(
+    State(state): State<AppState>,
+    Path((user_id, team_id)): Path<(String, String)>,
+    axum::extract::RawQuery(query): axum::extract::RawQuery,
+    headers: HeaderMap,
+    session: AuthenticatedSession,
+) -> Result<Response, ApiError> {
+    let user_id = if user_id == ME {
+        session.0.user_id.clone()
+    } else {
+        user_id
+    };
+
+    validate_user_then_team(&user_id, &team_id)?;
+
+    let user_allowed = state
+        .app
+        .session_has_permission_to_user(&session.0, &user_id)
+        .await;
+    let denied = channels_for_team_denied(user_allowed, || async {
+        state
+            .app
+            .session_has_permission_to_team(&session.0, &team_id, &PERMISSION_VIEW_TEAM)
+            .await
+    })
+    .await;
+    if let Some(permission) = denied {
+        return Err(ApiError(*make_permission_error(&session.0, &[permission])));
+    }
+
+    let last_delete_at = parse_last_delete_at(query.as_deref())?;
+    let include_deleted = query_flag_is_true(query.as_deref(), INCLUDE_DELETED_PARAM);
+
+    let opts = ChannelSearchOpts {
+        include_deleted,
+        last_delete_at,
+        ..Default::default()
+    };
+    let mut channels = state
+        .app
+        .get_channels_for_team_for_user(&team_id, &user_id, &opts)
+        .await?;
+    tracing::Span::current().record("count", channels.0.len());
+
+    let etag = channels.etag();
+    if etag_matches(&headers, &etag) {
+        return Ok((
+            StatusCode::NOT_MODIFIED,
+            [("ETag", etag.as_str()), ("x-mmrs-served-by", "rust")],
+        )
+            .into_response());
+    }
+
+    state.app.fill_in_channels_props(&mut channels.0).await?;
+
+    let mut body = serde_json::to_vec(&channels).map_err(|err| {
+        tracing::error!(error = %err, "failed to serialise the channel list");
+        ApiError(mm_model::utils::AppError::new(
+            "getChannelsForTeamForUser",
+            "api.marshal_error",
+            None,
+            String::new(),
+            500,
+        ))
+    })?;
+    body.push(b'\n');
+
+    Ok((
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+            ("ETag", etag.as_str()),
+        ],
+        body,
+    )
+        .into_response())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1123,6 +1502,248 @@ mod tests {
             format!("userId={ME_ID}, permission=read_channel"),
             "read_public_channel must never be the permission an error names"
         );
+    }
+
+    /// Go's channel-name class is the id class plus `_` and `-` — and **not** `.`, which the
+    /// username class has. A dot, a space, `%` or an empty segment fall to the mux 404 forward.
+    #[test]
+    fn the_channel_name_charset_is_gos_mux_class() {
+        for ok in ["town-square", "off_topic", "ABC123", "a", "-", "_"] {
+            assert!(segment_matches_channel_name_mux(ok), "{ok:?} matches");
+        }
+        for bad in ["", "a.b", "a b", "a%20b", "ä", "a/b", "a~b"] {
+            assert!(
+                !segment_matches_channel_name_mux(bad),
+                "{bad:?} must forward"
+            );
+        }
+    }
+
+    /// `RequireChannelName` is `IsValidChannelIdentifier` — and the handler lower-cases first,
+    /// so a mixed-case segment is valid *after* folding even though the validator is
+    /// lowercase-only. `_` alone and `-` alone pass the mux class and fail here with
+    /// `invalid_url_param`.
+    #[test]
+    fn channel_name_validation_runs_on_the_lowercased_segment() {
+        assert!(is_valid_channel_identifier(&"Town-Square".to_lowercase()));
+        assert!(!is_valid_channel_identifier("Town-Square"));
+        for bad in ["-", "_", "-leading"] {
+            assert!(
+                !is_valid_channel_identifier(bad),
+                "{bad:?} is not a channel name"
+            );
+        }
+        // The regex's tail is `[a-z0-9]*` — a trailing hyphen is *valid*. Transcribed from Go's
+        // `validSimpleAlphaNum` and pinned so a "tidier" regex cannot land.
+        assert!(is_valid_channel_identifier("trailing-"));
+        let err = ApiError::invalid_url_param("channel_name");
+        assert_eq!(err.0.id, "api.context.invalid_url_param.app_error");
+        assert_eq!(err.0.status_code, 400);
+    }
+
+    /// An open channel asks the team for **`read_public_channel`**; a team grant never polls the
+    /// channel gate.
+    #[tokio::test]
+    async fn by_name_open_channel_asks_read_public_channel_first() {
+        let asked = std::cell::RefCell::new(None);
+        let refusal = channel_by_name_refusal(
+            true,
+            |permission| {
+                *asked.borrow_mut() = Some(permission.id.to_string());
+                async { true }
+            },
+            || async { panic!("the channel gate must not run when the team grants") },
+        )
+        .await;
+        assert_eq!(refusal, None);
+        assert_eq!(asked.borrow().as_deref(), Some("read_public_channel"));
+    }
+
+    /// A non-open channel asks the team for **`manage_team`** — "allows team admins to access
+    /// private channel" — which `getChannel` never does. Swapping the two permissions, or
+    /// skipping the team gate for private channels as `getChannel` does, dies here.
+    #[tokio::test]
+    async fn by_name_private_channel_asks_manage_team_first() {
+        let asked = std::cell::RefCell::new(None);
+        let refusal = channel_by_name_refusal(
+            false,
+            |permission| {
+                *asked.borrow_mut() = Some(permission.id.to_string());
+                async { true }
+            },
+            || async { panic!("a team admin is admitted without the channel gate") },
+        )
+        .await;
+        assert_eq!(refusal, None);
+        assert_eq!(asked.borrow().as_deref(), Some("manage_team"));
+    }
+
+    /// Team denies, channel decides — and the refusal **shape** follows the channel type: 403
+    /// for open, 404 for everything else.
+    #[tokio::test]
+    async fn by_name_refusals_differ_by_channel_type() {
+        assert_eq!(
+            channel_by_name_refusal(true, |_| async { false }, || async { true }).await,
+            None
+        );
+        assert_eq!(
+            channel_by_name_refusal(true, |_| async { false }, || async { false }).await,
+            Some(ByNameRefusal::Forbidden)
+        );
+        assert_eq!(
+            channel_by_name_refusal(false, |_| async { false }, || async { true }).await,
+            None
+        );
+        assert_eq!(
+            channel_by_name_refusal(false, |_| async { false }, || async { false }).await,
+            Some(ByNameRefusal::NotFound)
+        );
+    }
+
+    /// The 403 names `read_public_channel` (unlike `getChannel`'s `read_channel`), and the 404
+    /// wears the store's `missing` id with `where = getChannelByName` and the team/name detail.
+    #[test]
+    fn by_name_denials_carry_gos_ids() {
+        let session = mm_model::session::Session {
+            user_id: ME_ID.to_owned(),
+            ..Default::default()
+        };
+        let channel = mm_model::channel::Channel {
+            team_id: "tttttttttttttttttttttttttt".to_owned(),
+            name: "secret".to_owned(),
+            ..Default::default()
+        };
+
+        let forbidden = channel_by_name_denial(ByNameRefusal::Forbidden, &session, &channel);
+        assert_eq!(forbidden.0.status_code, 403);
+        assert_eq!(forbidden.0.id, "api.context.permissions.app_error");
+        assert_eq!(
+            forbidden.0.detailed_error,
+            format!("userId={ME_ID}, permission=read_public_channel")
+        );
+
+        let missing = channel_by_name_denial(ByNameRefusal::NotFound, &session, &channel);
+        assert_eq!(missing.0.status_code, 404);
+        assert_eq!(missing.0.id, "app.channel.get_by_name.missing.app_error");
+        assert_eq!(missing.0.where_, "getChannelByName");
+        assert_eq!(
+            missing.0.detailed_error,
+            "teamId=tttttttttttttttttttttttttt, name=secret"
+        );
+    }
+
+    /// `RequireUserId().RequireTeamId()` — the user is checked first here, the reverse of the
+    /// channel routes' chain.
+    #[test]
+    fn the_user_id_is_validated_before_the_team_id() {
+        let name = |err: ApiError| {
+            err.0
+                .params
+                .as_ref()
+                .and_then(|p| p.get("Name"))
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+        };
+        assert_eq!(
+            name(validate_user_then_team("nope", "alsonope").expect_err("both invalid")),
+            Some("user_id".to_owned())
+        );
+        assert_eq!(
+            name(validate_user_then_team(ME_ID, "alsonope").expect_err("team invalid")),
+            Some("team_id".to_owned())
+        );
+        assert!(validate_user_then_team(ME_ID, OTHER).is_ok());
+    }
+
+    /// The user gate runs first and names `edit_other_users`; the team gate is never polled when
+    /// it denies, and names `view_team` when it does.
+    #[tokio::test]
+    async fn the_channels_for_team_gates_run_user_then_team() {
+        let denied = channels_for_team_denied(false, || async {
+            panic!("the team gate must not run when the user gate denies")
+        })
+        .await;
+        assert_eq!(denied.map(|p| p.id.as_ref()), Some("edit_other_users"));
+
+        let denied = channels_for_team_denied(true, || async { false }).await;
+        assert_eq!(denied.map(|p| p.id.as_ref()), Some("view_team"));
+
+        assert!(
+            channels_for_team_denied(true, || async { true })
+                .await
+                .is_none()
+        );
+    }
+
+    /// `last_delete_at`: `Atoi` failure is `0`, a negative value is the only 400 in the ported
+    /// pagination-style parameters, and `+` is the one decoration `Atoi` accepts — but a literal
+    /// `+` in a query string is a **space** to `url.ParseQuery` before `Atoi` ever sees it, so
+    /// only the escaped `%2B` reaches the parser as a sign.
+    #[test]
+    fn last_delete_at_parses_like_atoi_and_rejects_negatives() {
+        for (query, expected) in [
+            (None, 0),
+            (Some(""), 0),
+            (Some("last_delete_at="), 0),
+            (Some("last_delete_at=abc"), 0),
+            (Some("last_delete_at=1.5"), 0),
+            (Some("last_delete_at= 5"), 0),
+            (Some("last_delete_at=99999999999999999999999"), 0), // out of range → Atoi error
+            (Some("last_delete_at=0"), 0),
+            (Some("last_delete_at=+7"), 0), // `+` decodes to a space → Atoi error
+            (Some("last_delete_at=%2B7"), 7),
+            (Some("last_delete_at=007"), 7),
+            (Some("last_delete_at=1700000000000"), 1_700_000_000_000),
+            (Some("last_delete_at=3&last_delete_at=-1"), 3), // first value wins
+            (Some("include_deleted=true"), 0),
+        ] {
+            assert_eq!(
+                parse_last_delete_at(query).expect("not negative"),
+                expected,
+                "query {query:?}"
+            );
+        }
+        for query in ["last_delete_at=-1", "last_delete_at=-9999999"] {
+            let err = parse_last_delete_at(Some(query)).expect_err("negative is a 400");
+            assert_eq!(err.0.status_code, 400, "{query}");
+            assert_eq!(err.0.id, "api.context.invalid_url_param.app_error");
+            assert_eq!(
+                err.0
+                    .params
+                    .as_ref()
+                    .and_then(|p| p.get("Name"))
+                    .and_then(serde_json::Value::as_str),
+                Some("last_delete_at")
+            );
+        }
+    }
+
+    /// `HandleEtag` is an exact comparison of the raw header: no `W/`, no quoting, no list.
+    #[test]
+    fn the_etag_comparison_is_exact() {
+        let etag = "10.0.0.zzzz.1700000000000.0.3";
+        let with = |value: &str| {
+            let mut headers = HeaderMap::new();
+            headers.insert(IF_NONE_MATCH, value.parse().unwrap());
+            headers
+        };
+        assert!(etag_matches(&with(etag), etag));
+        assert!(!etag_matches(&with(&format!("W/{etag}")), etag));
+        assert!(!etag_matches(&with(&format!("\"{etag}\"")), etag));
+        assert!(!etag_matches(&with(&format!("{etag}, other")), etag));
+        assert!(!etag_matches(&HeaderMap::new(), etag));
+        assert!(!etag_matches(&with(""), ""), "an empty etag never matches");
+    }
+
+    /// The list body is a bare array (`ChannelList` is `#[serde(transparent)]`) with the encoder
+    /// newline, and an empty list would be `[]` — though the route 404s before it could be.
+    #[test]
+    fn the_channel_list_body_is_a_bare_array_with_a_newline() {
+        let list = mm_model::channel_list::ChannelList(vec![mm_model::channel::Channel::default()]);
+        let mut body = serde_json::to_vec(&list).expect("serialises");
+        body.push(b'\n');
+        assert_eq!(body.first(), Some(&b'['));
+        assert_eq!(&body[body.len() - 2..], b"]\n");
     }
 
     /// A non-open channel **never** consults the team gate: `read_public_channel` team-wide must

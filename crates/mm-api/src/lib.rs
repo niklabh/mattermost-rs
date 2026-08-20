@@ -190,6 +190,20 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/teams/{team_id}/stats",
             partially_migrated_with_ids(&state, get(teams::get_team_stats)),
         )
+        // `team_id` gets the id-charset middleware; `channel_name` is not id-shaped and Go's
+        // class for it is `[A-Za-z0-9_-]+`, so the handler carries its own mux forward. Go's
+        // `/teams/name/{team_name}/channels/name/{channel_name}` sibling has one more segment
+        // and never lands here.
+        .route(
+            "/api/v4/teams/{team_id}/channels/name/{channel_name}",
+            partially_migrated_with_ids(&state, get(channels::get_channel_by_name)),
+        )
+        // `BaseRoutes.TeamForUser` (api.go:34). Go's deeper siblings (`…/channels/members`,
+        // `…/channels/categories`) fall to `Router::fallback` whole.
+        .route(
+            "/api/v4/users/{user_id}/teams/{team_id}/channels",
+            partially_migrated_with_ids(&state, get(channels::get_channels_for_team_for_user)),
+        )
         // Sibling literal segments (`/channels/direct`, `/channels/search`, …) are all POST-only
         // in Go, and all alphanumeric. A GET to one of them matches `{channel_id}` here exactly
         // as it matches gorilla's `{channel_id:[A-Za-z0-9]+}` there, and 400s identically; a POST

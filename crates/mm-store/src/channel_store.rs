@@ -28,7 +28,8 @@
 
 use std::collections::HashMap;
 
-use mm_model::channel::{Channel, ChannelBannerInfo};
+use mm_model::channel::{Channel, ChannelBannerInfo, ChannelSearchOpts};
+use mm_model::channel_list::ChannelList;
 use mm_model::channel_member::{ChannelMember, ChannelUnread};
 use mm_model::role::{CHANNEL_ADMIN_ROLE_ID, CHANNEL_GUEST_ROLE_ID, CHANNEL_USER_ROLE_ID};
 use mm_model::utils::StringMap;
@@ -171,6 +172,25 @@ pub trait ChannelStore {
         names: &[String],
     ) -> impl std::future::Future<Output = Result<Vec<Channel>, StoreError>> + Send;
 
+    /// Port of `SqlChannelStore.GetByName` / `GetByNameIncludeDeleted` (channel_store.go:1676,
+    /// :1680) — Go's two one-line wrappers over `getByName`, folded into the flag they differ by.
+    /// `allowFromCache` dropped as in [`ChannelStore::get_by_names`].
+    fn get_by_name(
+        &self,
+        team_id: &str,
+        name: &str,
+        include_deleted: bool,
+    ) -> impl std::future::Future<Output = Result<Channel, StoreError>> + Send;
+
+    /// Port of `SqlChannelStore.GetChannels` (channel_store.go:1208): the channels of one user
+    /// in one team, display-name order, `ErrNotFound` when there are none.
+    fn get_channels(
+        &self,
+        team_id: &str,
+        user_id: &str,
+        opts: &ChannelSearchOpts,
+    ) -> impl std::future::Future<Output = Result<ChannelList, StoreError>> + Send;
+
     /// Port of `SqlChannelStore.GetMemberCount` (channel_store.go:2666).
     ///
     /// Go's `allowFromCache` is dropped like `get_by_names`'s: no cache, never staler than Go.
@@ -260,6 +280,26 @@ impl ChannelStore for SqlChannelStore {
         names: &[String],
     ) -> Result<Vec<Channel>, StoreError> {
         get_by_names(&self.pool, team_id, names).await
+    }
+
+    #[tracing::instrument(skip_all, fields(team_id = %team_id, name = %name, include_deleted, found))]
+    async fn get_by_name(
+        &self,
+        team_id: &str,
+        name: &str,
+        include_deleted: bool,
+    ) -> Result<Channel, StoreError> {
+        get_by_name(&self.pool, team_id, name, include_deleted).await
+    }
+
+    #[tracing::instrument(skip_all, fields(team_id = %team_id, user_id = %user_id, count))]
+    async fn get_channels(
+        &self,
+        team_id: &str,
+        user_id: &str,
+        opts: &ChannelSearchOpts,
+    ) -> Result<ChannelList, StoreError> {
+        get_channels(&self.pool, team_id, user_id, opts).await
     }
 
     #[tracing::instrument(skip_all, fields(channel_id = %channel_id))]
@@ -783,6 +823,193 @@ pub async fn get_by_names(
     })?;
 
     rows.into_iter().map(channel_from_row).collect()
+}
+
+/// Port of `SqlChannelStore.getByName` (channel_store.go:1684), behind the exported `GetByName`
+/// (`includeDeleted = false`) and `GetByNameIncludeDeleted` (`true`).
+///
+/// Same three predicates as [`get_by_names`] — `messageChannelTypes`, the `DeleteAt = 0` that
+/// only the non-deleted variant applies, and the team filter — but **the team filter here is not
+/// the wildcard.** `getByNames` omits its predicate for an empty team id; `getByName` always
+/// writes `TeamId = ? OR TeamId = ''`, so a DM or GM (whose `TeamId` is `""`) is reachable under
+/// *any* team's route by name, and an empty team id finds only teamless channels. Two functions
+/// one line apart in Go, two different rules, and the difference is on the wire: a DM answers
+/// `/teams/{any}/channels/name/{dm-name}` with a 200.
+///
+/// No `ORDER BY` and `Get` takes the first row — `Name` is unique per team, and a DM name is
+/// unique outright, so there is never a second row to pick from.
+#[tracing::instrument(skip(pool), fields(team_id = %team_id, name = %name, include_deleted))]
+pub async fn get_by_name(
+    pool: &PgPool,
+    team_id: &str,
+    name: &str,
+    include_deleted: bool,
+) -> Result<Channel, StoreError> {
+    let row = sqlx::query_as!(
+        ChannelRow,
+        r#"
+        SELECT c.id,
+               c.createat,
+               c.updateat,
+               c.deleteat,
+               c.teamid,
+               c.type::text AS "channel_type!",
+               c.displayname,
+               c.name,
+               c.header,
+               c.purpose,
+               c.lastpostat,
+               c.totalmsgcount,
+               c.extraupdateat,
+               c.creatorid,
+               c.schemeid,
+               c.groupconstrained,
+               c.autotranslation,
+               c.shared,
+               c.totalmsgcountroot,
+               c.lastrootpostat,
+               c.bannerinfo,
+               c.defaultcategoryname,
+               c.discoverable,
+               EXISTS (
+                   SELECT 1 FROM accesscontrolpolicies acp
+                    WHERE acp.id = c.id AND acp.type = 'channel'
+               ) AS "policy_enforced!",
+               COALESCE((
+                   SELECT acp.active FROM accesscontrolpolicies acp
+                    WHERE acp.id = c.id AND acp.type = 'channel' AND acp.active = TRUE
+                    LIMIT 1
+               ), false) AS "policy_is_active!"
+          FROM channels c
+         WHERE c.name = $1
+           AND c.type IN ('O', 'P', 'D', 'G')
+           AND (c.teamid = $2 OR c.teamid = '')
+           AND ($3::boolean OR c.deleteat = 0)
+         LIMIT 1
+        "#,
+        name,
+        team_id,
+        include_deleted
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: format!("failed to find channel with TeamId={team_id} and Name={name}"),
+        source,
+    })?;
+
+    let Some(row) = row else {
+        tracing::Span::current().record("found", false);
+        return Err(StoreError::NotFound {
+            entity: "Channel",
+            criteria: format!("TeamId={team_id}&Name={name}"),
+        });
+    };
+    tracing::Span::current().record("found", true);
+
+    channel_from_row(row)
+}
+
+/// Port of `SqlChannelStore.GetChannels` (channel_store.go:1208) — every message channel the
+/// user is a member of, scoped to a team, in **`ORDER BY ch.DisplayName`**. That ordering is on
+/// the wire: the webapp renders the list in the order it arrives.
+///
+/// Go builds the `WHERE` incrementally; here each optional predicate is one parameter-guarded
+/// disjunct, so there is a single prepared statement to check at compile time. The branches:
+///
+/// - **The team filter includes `TeamId = ''`.** A DM or GM belongs to no team and appears in
+///   *every* team's channel list — that is why the sidebar shows DMs whichever team is open. The
+///   predicate is omitted only when `teamId` is empty, which no ported caller passes.
+/// - **`IncludeDeleted` without `LastDeleteAt` is no filter at all**; with it, archived channels
+///   are kept only if archived at or after that instant (`DeleteAt >= last_delete_at`), living
+///   ones always. Without `IncludeDeleted`, `DeleteAt = 0` — and `LastDeleteAt` is ignored.
+/// - **`LastUpdateAt > 0`** adds `UpdateAt >= ?`. Not reachable from `getChannelsForTeamForUser`,
+///   which never sets it, but it is the same struct and the same statement.
+/// - **`Type IN (O, P, D, G)`** — `messageChannelTypes` again.
+///
+/// **Zero rows is `ErrNotFound`**, not an empty list (channel_store.go:1254). The app layer turns
+/// that into a 404 — a member of no channel in the team gets `app.channel.get_channels.not_found`,
+/// not `[]`. The `ChannelMembers` join is an inner join written as `FROM Channels ch,
+/// ChannelMembers cm` in Go; the same rows either way.
+#[tracing::instrument(skip(pool, opts), fields(team_id = %team_id, user_id = %user_id))]
+pub async fn get_channels(
+    pool: &PgPool,
+    team_id: &str,
+    user_id: &str,
+    opts: &ChannelSearchOpts,
+) -> Result<ChannelList, StoreError> {
+    let rows = sqlx::query_as!(
+        ChannelRow,
+        r#"
+        SELECT ch.id,
+               ch.createat,
+               ch.updateat,
+               ch.deleteat,
+               ch.teamid,
+               ch.type::text AS "channel_type!",
+               ch.displayname,
+               ch.name,
+               ch.header,
+               ch.purpose,
+               ch.lastpostat,
+               ch.totalmsgcount,
+               ch.extraupdateat,
+               ch.creatorid,
+               ch.schemeid,
+               ch.groupconstrained,
+               ch.autotranslation,
+               ch.shared,
+               ch.totalmsgcountroot,
+               ch.lastrootpostat,
+               ch.bannerinfo,
+               ch.defaultcategoryname,
+               ch.discoverable,
+               EXISTS (
+                   SELECT 1 FROM accesscontrolpolicies acp
+                    WHERE acp.id = ch.id AND acp.type = 'channel'
+               ) AS "policy_enforced!",
+               COALESCE((
+                   SELECT acp.active FROM accesscontrolpolicies acp
+                    WHERE acp.id = ch.id AND acp.type = 'channel' AND acp.active = TRUE
+                    LIMIT 1
+               ), false) AS "policy_is_active!"
+          FROM channels ch
+          JOIN channelmembers cm ON ch.id = cm.channelid
+         WHERE cm.userid = $1
+           AND ch.type IN ('O', 'P', 'D', 'G')
+           AND ($2::text = '' OR ch.teamid = $2 OR ch.teamid = '')
+           AND CASE
+                 WHEN $3::boolean THEN ($4::bigint = 0 OR ch.deleteat = 0 OR ch.deleteat >= $4)
+                 ELSE ch.deleteat = 0
+               END
+           AND ($5::bigint <= 0 OR ch.updateat >= $5)
+         ORDER BY ch.displayname
+        "#,
+        user_id,
+        team_id,
+        opts.include_deleted,
+        opts.last_delete_at,
+        opts.last_update_at
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: format!("failed to get channels with TeamId={team_id} and UserId={user_id}"),
+        source,
+    })?;
+
+    if rows.is_empty() {
+        return Err(StoreError::NotFound {
+            entity: "Channel",
+            criteria: format!("userId={user_id}"),
+        });
+    }
+
+    let channels = rows
+        .into_iter()
+        .map(channel_from_row)
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(ChannelList(channels))
 }
 
 /// Port of `allChannelMember.Process` (channel_store.go:480).
