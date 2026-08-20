@@ -1,21 +1,33 @@
 //! Port of `getSessions` (channels/api4/user.go:2570), reached as
-//! `GET /api/v4/users/me/sessions`.
+//! `GET /api/v4/users/{user_id}/sessions`.
 
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
+use mm_model::permission::{PERMISSION_EDIT_OTHER_USERS, make_permission_error};
 
 use crate::AppState;
 use crate::auth::AuthenticatedSession;
+use crate::channels::{ME, require_id};
 use crate::error::ApiError;
 
-/// Port of `getSessions` for the `me` case only.
+/// Port of `getSessions` (user.go:2570).
+///
+/// # The gate is `SessionHasPermissionToUser`, answered as `edit_other_users`
+///
+/// `me` — and an explicit own id — pass on the self branch, which is why this route shipped
+/// first as `me`-only with the check elided ([D-082]). Widened to any `{user_id}`, the check is
+/// real: a caller without `edit_other_users` gets a 403 naming that permission, and even with it
+/// a **system-admin target denies** (authorization.go:250, the fifth branch). The gate runs
+/// **before** the fetch, so a refused caller costs no `Sessions` read and learns nothing about
+/// whether the user exists — an unknown id is also a 403 for a plain caller, and an empty `[]`
+/// for an admin. Both are Go's.
 ///
 /// # The two things that matter
 ///
 /// **`Sanitize` is not optional.** Every session in this list carries the bearer token that
 /// authenticates it. Go calls `session.Sanitize()` on each one (user.go:2588), which clears
-/// `Token` and nothing else. Skipping it would hand a caller every one of their own live
+/// `Token` and nothing else. Skipping it would hand a caller every one of the target's live
 /// credentials in plaintext — and, worse, would do so through an endpoint whose whole purpose is
 /// to be shown in a UI. There is a test below that fails if the call is removed.
 ///
@@ -23,19 +35,32 @@ use crate::error::ApiError;
 /// unlike `/users/me` — the body carries **no trailing newline**. Same wire type, same server,
 /// different call site, different bytes. See [D-086]; this is the second instance and the first
 /// where the answer goes the other way.
-///
-/// # Not reproduced
-///
-/// Go checks `SessionHasPermissionToUser(session, userId)` before anything else. This route
-/// resolves `me` only, so the target is the session's own user and the check is `true` by
-/// construction — the same reasoning, and the same caveat, as [D-082]. Serving another user's id
-/// through this handler needs the check first.
-#[tracing::instrument(skip_all, fields(user_id = %session.0.user_id, count))]
-pub async fn get_sessions_me(
+#[tracing::instrument(skip_all, fields(user_id = %user_id, count))]
+pub async fn get_sessions(
     State(state): State<AppState>,
+    Path(user_id): Path<String>,
     session: AuthenticatedSession,
 ) -> Result<Response, ApiError> {
-    let mut sessions = state.app.get_sessions(&session.0.user_id).await?;
+    // `RequireUserId` resolves `me` before it validates (web/context.go:301).
+    let user_id = if user_id == ME {
+        session.0.user_id.clone()
+    } else {
+        user_id
+    };
+    require_id(&user_id, "user_id")?;
+
+    if !state
+        .app
+        .session_has_permission_to_user(&session.0, &user_id)
+        .await
+    {
+        return Err(ApiError(*make_permission_error(
+            &session.0,
+            &[&PERMISSION_EDIT_OTHER_USERS],
+        )));
+    }
+
+    let mut sessions = state.app.get_sessions(&user_id).await?;
 
     // `for _, session := range sessions { session.Sanitize() }` — clears the token, leaving
     // everything else, including `props`, which may still hold the CSRF value.

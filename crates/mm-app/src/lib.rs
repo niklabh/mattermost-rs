@@ -8,6 +8,7 @@ pub mod channel;
 pub mod password;
 pub mod preference;
 pub mod session;
+pub mod status;
 pub mod team;
 pub mod user;
 pub mod user_terms_of_service;

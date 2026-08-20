@@ -668,3 +668,65 @@ async fn purge_api_fixtures_once() {
         let _ = sqlx::query(statement).execute(&pool).await;
     }
 }
+
+/// POST `body` (raw bytes, `Content-Type: application/json`) to a path on both servers with the
+/// same token, returning `(status, body)` from each — the POST counterpart of [`fetch_both_raw`].
+///
+/// Raw bytes rather than a `serde_json::Value` on purpose: the status-ids route's parse branches
+/// are about bodies that are *not* well-formed JSON, and a typed body could not express them.
+pub async fn post_both_raw(
+    client: &reqwest::Client,
+    token: &str,
+    path: &str,
+    body: &[u8],
+) -> ((u16, Vec<u8>), (u16, Vec<u8>)) {
+    let post = async |base: &str| {
+        let response = client
+            .post(format!("{base}{path}"))
+            .header("Authorization", format!("Bearer {token}"))
+            .header("Content-Type", "application/json")
+            .body(body.to_vec())
+            .send()
+            .await
+            .unwrap_or_else(|e| panic!("{base}{path} is unreachable: {e}"));
+        let status = response.status().as_u16();
+        if base == RUST {
+            assert_served_by_rust(response.headers(), path);
+        }
+        (status, response.bytes().await.expect("body reads").to_vec())
+    };
+
+    (post(GO).await, post(RUST).await)
+}
+
+/// Set a user's status through Go's `PUT /users/{id}/status`, returning Go's response body.
+///
+/// This is the one REST write that lands in **both** Go's status cache and the `Status` table
+/// (`SaveAndBroadcastStatus`), which is what makes a status fixture comparable: the ported
+/// routes read the table, Go reads the cache first, and they agree only where both were written.
+/// Go answers the PUT with `getUserStatus`'s own body, so the return value doubles as an oracle.
+pub async fn set_user_status(
+    client: &reqwest::Client,
+    token: &str,
+    user_id: &str,
+    status: &str,
+    dnd_end_time: i64,
+) -> Vec<u8> {
+    let response = client
+        .put(format!("{GO}/api/v4/users/{user_id}/status"))
+        .header("Authorization", format!("Bearer {token}"))
+        .json(&serde_json::json!({
+            "user_id": user_id,
+            "status": status,
+            "dnd_end_time": dnd_end_time,
+        }))
+        .send()
+        .await
+        .expect("Go answers");
+    assert!(
+        response.status().is_success(),
+        "setting {user_id} to {status} failed: {}",
+        response.text().await.unwrap_or_default()
+    );
+    response.bytes().await.expect("body reads").to_vec()
+}

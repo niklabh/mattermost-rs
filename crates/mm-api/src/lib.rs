@@ -11,6 +11,7 @@ pub mod error;
 pub mod preferences;
 pub mod proxy;
 pub mod sessions;
+pub mod status;
 pub mod teams;
 pub mod users;
 
@@ -18,7 +19,7 @@ use axum::Router;
 use axum::extract::{RawPathParams, Request, State};
 use axum::middleware::Next;
 use axum::response::Response;
-use axum::routing::{MethodRouter, get};
+use axum::routing::{MethodRouter, get, post};
 use mm_app::App;
 
 /// Go's `PrivacySettings.ShowFullName` default (model/config.go).
@@ -160,9 +161,24 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/users/username/{username}",
             partially_migrated(get(users::get_user_by_username)),
         )
+        // Was the literal `/users/me/sessions`; now the parameterised route, with `me` resolved
+        // in the handler like every other alias. The `me` bytes are unchanged — pinned by the
+        // parity suite — and the gate that was `true` by construction is now evaluated.
         .route(
-            "/api/v4/users/me/sessions",
-            partially_migrated(get(sessions::get_sessions_me)),
+            "/api/v4/users/{user_id}/sessions",
+            partially_migrated_with_ids(&state, get(sessions::get_sessions)),
+        )
+        .route(
+            "/api/v4/users/{user_id}/status",
+            partially_migrated_with_ids(&state, get(status::get_user_status)),
+        )
+        // A literal under `/users/` whose *second* segment is `status` — it cannot collide with
+        // `/users/{user_id}/status` above (third segment `ids` vs `status`), and axum prefers
+        // the literal anyway. Registered as POST only: a GET here is forwarded and Go answers
+        // its own mux 404 (measured — not a 405), exactly as before this route existed.
+        .route(
+            "/api/v4/users/status/ids",
+            partially_migrated(post(status::get_user_statuses_by_ids)),
         )
         .route(
             "/api/v4/users/me/preferences",
