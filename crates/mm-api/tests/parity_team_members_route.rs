@@ -111,11 +111,13 @@ async fn the_route_is_served_by_rust() {
     );
 }
 
-/// `GET /api/v4/users/me/teams` — the sibling route — is **not** migrated and must still be
-/// forwarded. Its `SanitizeTeam` strips `email` and `invite_id` based on two team-scoped
-/// permissions we cannot evaluate, so serving it here would leak an invite id. See D-094.
+/// `GET /api/v4/users/me/teams` — the sibling route — spent two phases forwarded because its
+/// `SanitizeTeam` needs `SessionHasPermissionToTeam` ([D-094]). That checker exists now and the
+/// route is served from Rust; this test used to hold it forwarded and now holds the opposite, so
+/// a registration typo cannot silently fall back to the proxy and pass every byte comparison
+/// with Go answering both sides. The route's own suite is `parity_teams_for_user.rs`.
 #[tokio::test]
-async fn the_sibling_teams_route_is_still_forwarded() {
+async fn the_sibling_teams_route_is_now_served_here() {
     if !stack_enabled() {
         eprintln!("skipping: set MM_PARITY_STACK=1 with the stack running");
         return;
@@ -136,7 +138,7 @@ async fn the_sibling_teams_route_is_still_forwarded() {
             .headers()
             .get("x-mmrs-served-by")
             .and_then(|v| v.to_str().ok()),
-        Some("go"),
-        "/users/me/teams needs the permission system and must not be served here"
+        Some("rust"),
+        "SessionHasPermissionToTeam landed; this route is ours now"
     );
 }

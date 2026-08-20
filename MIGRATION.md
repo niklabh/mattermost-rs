@@ -271,6 +271,12 @@ whenever a session skips, approximates, or discovers-but-does-not-close somethin
 | store/sqlstore/channel_store.go (`GetChannelUnread`) | `mm-store/src/channel_store.rs` | PARTIAL | 4 DB | **The unqualified column names carry the behaviour.** Go's `FROM Channels, ChannelMembers` is an implicit cross join whose four predicates name their columns bare, and each resolves to the only table that has it: `ChannelMembers` has no `Id` and no `DeleteAt`, `Channels` has no `ChannelId` and no `UserId`. So `DeleteAt = 0` is the **channel's** — which makes this the opposite of `GetMember`, whose api4 call site passes `includeDeleted = true`. The same two ids give a **404 here and a 200 there** on an archived channel, and both answers are Go's; asserted together so neither reads as a fixture accident. Three more: `MsgCount` is a *subtraction* (`TotalMsgCount - MsgCount`) with nothing forcing it non-negative; only `UrgentMentionCount` is coalesced, so a NULL in any of the other six is a Go **scan error and a 500**, reproduced with sqlx `!` overrides rather than `unwrap_or_default`; and `NotifyProps` is selected purely for the app layer, since `json:"-"` keeps it off the wire. The `Type IN (O,P,D,G)` filter is **unreachable through its own route** and needed a store-level test — [D-151]. |
 | app/channel.go (`GetChannelUnread`) | `mm-app/src/channel.rs` | PARTIAL | 4 pass | Store-error mapping plus the one transform: `mark_unread = mention` zeroes `MsgCount` and `MsgCountRoot` and **nothing else**, so a muted channel still reports the mentions that pierce the mute. Unlike `GetChannel` and `GetChannelMember`, **both error branches carry the same id** (`app.channel.get_unread.app_error`) and vary only the status — a client cannot tell a missing channel from a broken database here. The shortcut is lifted into `apply_mark_unread_shortcut` so it can be pinned without Postgres, the same reason `validate_ids` exists. |
 | api4/channel.go (`getChannelUnread`) | `mm-api/src/channels.rs` | PARTIAL | 15 pass + 10 parity + 4 DB | **The first route with two permission gates, and the first where the path's segment order disagrees with the validation order.** Registered under `BaseRoutes.ChannelForUser`, so the *user* id is the first segment — while the handler opens `RequireChannelId().RequireUserId()`, so the *channel* is validated first and wins when both are malformed. `SessionHasPermissionToUser` (`edit_other_users`) runs before `SessionHasPermissionToChannel` (`read_channel`) and **short-circuits it**, which matters because the second is a database read; neither the order nor the permission each gate names is visible in a response, so `first_denied_permission` takes the second gate as a closure and a test asserts it is never polled. Also closed [D-150]: Go's `{channel_id:[A-Za-z0-9]+}` is a **routing** rule, so a segment with a hyphen is a mux 404 where we answered 400 — now forwarded, which fixed `getChannelMember` too. Sixteen mutations run, sixteen caught, two no-op controls survived. |
+| store/sqlstore/channel_store.go (`GetByNames`) | `mm-store/src/channel_store.rs` | PARTIAL | 4 DB | The team filter **only exists when `teamId` is non-empty** (Go omits the predicate, channel_store.go:1656) — the DM/GM case — folded into one `$2 = '' OR` here and pinned with two teams sharing a channel name. Third transcription of `messageChannelTypes`; [D-151]'s shared oracle is now overdue. `allowFromCache` dropped: no cache, never staler than Go. |
+| app/channel.go (`GetChannelsByNames`, `FillInChannelProps`) | `mm-app/src/channel.rs` | PARTIAL | 6 pass | Only **open** channels render into `channel_mentions`, keyed by the mentioned channel's `Name` with `display_name` inside; the stale-prop delete branch is **dead through `getChannel`** (the store never selects `Props`) but ported and unit-pinned, same shape as [D-151]. The `len > 0` guard above both branches is load-bearing — without it an emptied header deletes a prop Go leaves. |
+| api4/channel.go (`getChannel`) | `mm-api/src/channels.rs` | PARTIAL | 5 pass + 11 parity | **The first route whose permission block branches on the fetched row**: open channels ask the team (`read_public_channel`) first and the channel gate only on denial; non-open channels never consult the team gate; both denials name `read_channel` (`get_channel_denial`, pinned in-process after the inline version survived a mutation). `?as_content_reviewer=true` is **forwarded** — license-gated, and Go re-runs the steps it checks first, so ordering holds by construction. Discoverable-channels fallback pinned off — [D-153]. Fifteen mutations, fifteen caught (one after extracting the denial helper); the **no-op control failing was the real finding** — see notes. |
+| store/sqlstore/team_store.go (`GetTeamsByUserId`) | `mm-store/src/team_store.rs` | PARTIAL | — | The **teams**, where `get_teams_for_user` (same file) returns the memberships. Two separate `DeleteAt = 0` predicates — the membership's and the team's — each resurrect a different thing if dropped, and both are **measured** over REST rather than transcribed (`parity_teams_for_user.rs`), unlike [D-151]'s type filter. |
+| app/team.go (`GetTeamsForUser`, `SanitizeTeam`, `SanitizeTeams`) | `mm-app/src/team.rs` | PARTIAL | 3 pass | The sanitiser's **pairing** is the content: `manage_team` restores `email`, `invite_user` restores `invite_id`, and crossing them leaks an invite id — lifted into `apply_team_sanitize` so all four cells are pinned without a database. Both permission reads run unconditionally, as Go's do. |
+| api4/team.go (`getTeamsForUser`) | `mm-api/src/teams.rs` | PARTIAL | 5 pass + 7 parity | **[D-094]'s "not escapable" example, now served** — the test that kept it forwarded now asserts the opposite. Gate: self by string comparison (no permission machinery runs), anyone else needs `sysconsole_read_user_management_users`. A plain member's own list lands in the sanitiser's **mixed cell**: `team_user` grants `invite_user`, so `invite_id` survives and only `email` is stripped — measured, the first draft of the test assumed both stripped and Go said otherwise. `json.Marshal` + `w.Write`, no newline ([D-086]); a nonexistent user is `[]` for an admin, never a 404. Nine mutations, nine caught, two controls survived. |
 | model/session.go | `mm-model/src/session.rs` | DONE | 20 pass | Strangler Fig critical path. Complete `IsValid`, `PreSave`, device-id validators. |
 | model/team_member.go | `mm-model/src/team_member.rs` | DONE | 6 pass | Pulled ahead of its turn: `Session.TeamMembers` is on the wire, so session.rs cannot round-trip without it. `TeamMemberWithError`/`EmailInviteWithError` deferred. |
 | model/team.go | `mm-model/src/team.rs` | DONE | 37 pass | First **complete** `IsValid` — every branch, all error ids. `Etag` landed with `channel_list.go`. |
@@ -3136,6 +3142,70 @@ set aside. Three Rust files and one correction to the previous session's ledger 
 7. **`me` is resolved before validation, not after.** `RequireUserId` substitutes the session's id
    for the literal `me` and *then* checks `IsValidId` (web/context.go:301). Validating first would
    400 on a request Go answers.
+
+## Notes — api4/team.go (`getTeamsForUser`), the route [D-094] said was not portable
+
+1. **The self test is a string comparison, not a permission check.** Go compares the session's
+   user id against the target before any machinery runs, so asking about oneself issues no role
+   queries at all — different from `getChannelUnread`'s user gate, which runs
+   `SessionHasPermissionToUser` even for self. Pinned by a closure the self case must never
+   poll.
+
+2. **A plain member's own team list is the sanitiser's mixed cell, and the first draft of the
+   parity test got it wrong.** The default `team_user` role grants `invite_user` but not
+   `manage_team`, so `invite_id` survives and `email` is stripped. The draft asserted both
+   stripped; Go returned the invite id and the byte comparison had already passed — the failure
+   was the test's explicit expectation, which is the assertion doing its job of keeping the byte
+   comparison honest about *what* it is agreeing on.
+
+3. **The two `DeleteAt` predicates are separately reachable over REST, so both are measured.**
+   Archiving the team removes it from the list while its membership row survives; leaving the
+   team removes it while the team survives; one fixture of each in the same test, plus an
+   untouched third membership so the absences are not an empty list. Contrast [D-151], where the
+   equivalent predicate needed a transcribed store-level test.
+
+4. **`me` and the parameterised route coexist without conflict.** axum matches literals first,
+   so `/users/me/teams/members` keeps its literal registration while `/users/{user_id}/teams`
+   takes `me` as an ordinary value the handler resolves — the same alias rule as the channel
+   routes, now on a path whose sibling is literal.
+
+## Notes — api4/channel.go (`getChannel`), the first branching permission block
+
+1. **The permission block branches on the fetched row, so the fetch comes first and a missing
+   channel is a 404, not a 403.** The opposite of `getChannelMember`, where the permission
+   check's own lookup is the fetch and a missing channel dies inside it as a 403. Both shapes are
+   Go's, asserted against the running server; a reader who assumes one route's order for the
+   other inverts an information-disclosure property.
+
+2. **A non-open channel never consults the team gate.** `read_public_channel` is held team-wide
+   by ordinary members, so handing private channels the open-channel fallback would leak every
+   private channel to its team. Pinned in-process (`channel_read_denied` takes both gates as
+   closures; tests assert the unconsulted one is never polled) because both denials answer the
+   same 403 — and the denial *names* `read_channel` from both branches, which survived a mutation
+   until `get_channel_denial` existed for a unit test to hold.
+
+3. **The content-reviewer branch is detected first and forwarded, even though Go checks it
+   third.** Forwarding the whole request lets Go re-run `RequireChannelId` and `GetChannel`
+   itself, so every subcase — bad id, missing channel, no license — is answered by the server
+   that owns the answer, and the ordering holds by construction rather than by reproduction.
+   Same Strangler-inside-a-route pattern as the `flagged_post` preferences.
+
+4. **A no-op control failed, and that was the session's most valuable verdict.** Reordering two
+   SELECT columns "killed" tests three runs in a row — different tests each time, which is the
+   signature of a race, not a mutation. Three DB fixture suites (`db_channel_unread`,
+   `db_channel_members`, `db_channel_authorization`) purge-and-seed shared rows from concurrently
+   running tests, and had been passing on scheduling luck; the harness's fresh rebuild shifted
+   the timing and `teams_pkey` duplicate-insert failures fell out on **unmutated** source. All
+   three are now serialised with a file-local mutex, and the control survived four consecutive
+   runs before any store-suite verdict was trusted. The rule CLAUDE.md already states, now with a
+   third instance: when a control fails, fix the harness before reading the tally.
+
+5. **`fill_in_channel_props`'s delete branch is dead code through its only route, and its guard
+   is not.** The store never selects `Props`, so the prop map is always `None` on entry and the
+   stale-prop delete cannot fire over HTTP — ported anyway and unit-pinned ([D-151]'s shape).
+   The `len(mentions) > 0` guard above it *is* behaviour: without it an emptied header would
+   delete a stale prop Go leaves in place, and the unreachable-database unit test catches exactly
+   that mutation.
 
 ## Notes — api4/channel.go (`getChannelUnread`), the second gated route
 

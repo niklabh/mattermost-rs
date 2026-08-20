@@ -56,6 +56,20 @@ pub type StringMap = BTreeMap<String, String>;
 /// `Post.Props` and `Channel.Props` serialise byte-for-byte like Go's. See [D-027].
 pub type StringInterface = serde_json::Map<String, serde_json::Value>;
 
+/// Port of `strconv.ParseBool`.
+///
+/// **Not** Rust's `str::parse::<bool>()`, which accepts only `"true"` and `"false"`. Go
+/// additionally accepts `1 t T TRUE True 0 f F FALSE False`. Everything else is an error —
+/// `None` here — which every current caller treats as `false`, because Go's call sites all
+/// discard the error (`value, _ := strconv.ParseBool(…)`).
+pub fn parse_go_bool(s: &str) -> Option<bool> {
+    match s {
+        "1" | "t" | "T" | "TRUE" | "true" | "True" => Some(true),
+        "0" | "f" | "F" | "FALSE" | "false" | "False" => Some(false),
+        _ => None,
+    }
+}
+
 /// Compares two `serde_json::Value`s the way Go compares two values that came out of
 /// `encoding/json`.
 ///

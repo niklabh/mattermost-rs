@@ -3258,6 +3258,14 @@ Registering a route directly is now the thing to avoid, and
 **Status** OPEN · **Severity** blocking · **Raised** 2026-08-17 (phase 2, after four routes)
 **Blocks** most of api4.
 
+**2026-08-20:** the wall is down for team- and channel-scoped reads. `SessionHasPermissionTo`,
+`SessionHasPermissionToTeam`, `SessionHasPermissionToChannel` and `SessionHasPermissionToUser`
+are all ported, and the entry's own "not escapable" example — `GET /users/{user_id}/teams`, kept
+forwarded because `SanitizeTeam` needs two team-scoped permission reads — now serves from Rust
+with the sanitisation byte-compared against Go (`parity_teams_for_user.rs`). Held OPEN because
+the *system-console* and ancillary checks (`SessionHasPermissionToChannelByPost`,
+`SessionHasPermissionToCategory`, …) are still unported and still gate real routes.
+
 The self-scoped routes are nearly exhausted, and what is left runs into one wall. Measured across
 `channels/api4/`:
 
@@ -5233,6 +5241,10 @@ One shared constant plus one generated fixture would make a widening upstream a 
 test-time event rather than a silent divergence. Cheap, and worth doing before the third
 transcription.
 
+**2026-08-20:** `GetByNames` landed as the third transcription (`get_by_names`, same file),
+pinned by the same shape of store-level test (`db_channel_get_by_names.rs`). The shared oracle is
+now overdue rather than merely worth doing.
+
 ## D-152 · `new_preview_post` cannot reproduce Go's two nil panics, by construction
 
 **Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-20 (permalink.go)
@@ -5254,3 +5266,22 @@ only that a caller who would have crashed the Go server now fails to compile.
 flow), or upstream adding real nil handling — in which case the signature should follow. The
 parity test asserts the panicking rows still panic, so an upstream change fails a test rather than
 passing silently.
+
+## D-153 · The discoverable-channels surface is pinned off rather than ported
+
+**Status** OPEN · **Severity** deferred-feature · **Raised** 2026-08-20 (api4/channel.go `getChannel`)
+
+Go's `getChannel` tries `serveDiscoverableNonMember` before answering 403 to a non-member of a
+non-open channel (api4/channel.go:886). The whole surface is gated on
+`FeatureFlags.DiscoverableChannels`, which is **false** at the pinned SHA (feature_flags.go:208)
+and unset in this deployment, so the gate's first line returns "not served" and the 403 follows —
+which is exactly what the port answers, asserted against the running Go server in
+`parity_channel_get.rs`.
+
+**What is owed if the flag is ever turned on:** `GetUser`, `IsDiscoverableJoinAllowed`,
+`sanitizeDiscoverableChannel`, and — the real blocker — a feature-flag/config surface, which this
+server does not have at all ([D-085] is the same gap for privacy settings). Until then every
+deployment must run Go with the flag at its default; turning it on server-side would make the two
+servers answer a non-member's GET differently, and nothing would fail loudly.
+
+**Where the pin lives:** the doc comment on `channel_read_denied` in `mm-api/src/channels.rs`.

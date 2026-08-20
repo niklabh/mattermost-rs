@@ -1,0 +1,130 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT t.id,\n               t.createat,\n               t.updateat,\n               t.deleteat,\n               t.displayname,\n               t.name,\n               t.description,\n               t.email,\n               t.type::text AS \"team_type\",\n               t.companyname,\n               t.alloweddomains,\n               t.inviteid,\n               t.allowopeninvite,\n               t.lastteamiconupdate,\n               t.schemeid,\n               t.groupconstrained,\n               t.cloudlimitsarchived,\n               EXISTS (\n                   SELECT 1 FROM accesscontrolpolicies acp\n                    WHERE acp.id = t.id AND acp.type = 'team'\n               ) AS \"policy_enforced!\",\n               COALESCE((\n                   SELECT acp.active FROM accesscontrolpolicies acp\n                    WHERE acp.id = t.id AND acp.type = 'team' AND acp.active = TRUE\n                    LIMIT 1\n               ), false) AS \"policy_is_active!\"\n          FROM teams t\n          JOIN teammembers tm ON tm.teamid = t.id\n         WHERE tm.userid = $1\n           AND tm.deleteat = 0\n           AND t.deleteat = 0\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "createat",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "updateat",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "deleteat",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "displayname",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 6,
+        "name": "description",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 7,
+        "name": "email",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 8,
+        "name": "team_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "companyname",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 10,
+        "name": "alloweddomains",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 11,
+        "name": "inviteid",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 12,
+        "name": "allowopeninvite",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 13,
+        "name": "lastteamiconupdate",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 14,
+        "name": "schemeid",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 15,
+        "name": "groupconstrained",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 16,
+        "name": "cloudlimitsarchived",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 17,
+        "name": "policy_enforced!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 18,
+        "name": "policy_is_active!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      null,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "45d1865a8e5b88af515f67822f81f516e83062d893b044d8daea6a704350f5b3"
+}

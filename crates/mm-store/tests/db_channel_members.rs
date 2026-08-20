@@ -42,6 +42,13 @@ fn stack_enabled() -> bool {
     std::env::var("MM_PARITY_STACK").is_ok_and(|v| v == "1")
 }
 
+/// `go_and_rust_agree_on_every_channel_role_shape` rewrites the shared membership row fourteen
+/// times and restores it; `the_two_role_resolvers_agree_for_an_ordinary_member` reads the same
+/// row twice and compares. Interleaved, the reader sees two different mid-mutation states and
+/// reports a divergence that is neither server's. Serialised for the same reason
+/// `db_channel_unread.rs` is.
+static SHARED_ROW: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 async fn pool() -> PgPool {
     let url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set for MM_STORE_DB=1");
     PgPoolOptions::new()
@@ -201,6 +208,7 @@ async fn go_and_rust_agree_on_every_channel_role_shape() {
         eprintln!("skipped: needs MM_STORE_DB=1 and MM_PARITY_STACK=1");
         return;
     }
+    let _shared_row = SHARED_ROW.lock().await;
 
     let pool = pool().await;
     let client = reqwest::Client::builder()
@@ -640,6 +648,7 @@ async fn the_two_role_resolvers_agree_for_an_ordinary_member() {
         eprintln!("skipped: needs MM_STORE_DB=1 and MM_PARITY_STACK=1");
         return;
     }
+    let _shared_row = SHARED_ROW.lock().await;
     let pool = pool().await;
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(20))

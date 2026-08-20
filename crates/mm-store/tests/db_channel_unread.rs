@@ -32,6 +32,12 @@
 //! # Every row here is `mmrs`-prefixed and removed before and after
 
 use mm_store::channel_store::get_channel_unread;
+
+/// The four tests share one set of fixture rows and each purges before seeding, so two running
+/// interleaved delete each other's fixtures mid-assertion — measured as `teams_pkey` duplicate
+/// inserts under load. Serialised here rather than by asking the operator for
+/// `--test-threads=1`, which is exactly the kind of instruction that gets lost.
+static FIXTURES: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 
@@ -127,6 +133,7 @@ async fn the_counters_are_the_channel_total_minus_the_members_own() {
         eprintln!("skipping: set MM_STORE_DB=1 with DATABASE_URL pointing at the stack");
         return;
     }
+    let _fixtures = FIXTURES.lock().await;
     let pool = pool().await;
     purge(&pool).await;
     seed(&pool).await;
@@ -158,6 +165,7 @@ async fn a_board_channel_has_no_unread_state() {
         eprintln!("skipping: set MM_STORE_DB=1 with DATABASE_URL pointing at the stack");
         return;
     }
+    let _fixtures = FIXTURES.lock().await;
     let pool = pool().await;
     purge(&pool).await;
     seed(&pool).await;
@@ -191,6 +199,7 @@ async fn an_archived_channel_has_no_unread_state_but_keeps_its_member() {
         eprintln!("skipping: set MM_STORE_DB=1 with DATABASE_URL pointing at the stack");
         return;
     }
+    let _fixtures = FIXTURES.lock().await;
     let pool = pool().await;
     purge(&pool).await;
     seed(&pool).await;
@@ -216,6 +225,7 @@ async fn a_non_member_is_a_miss() {
         eprintln!("skipping: set MM_STORE_DB=1 with DATABASE_URL pointing at the stack");
         return;
     }
+    let _fixtures = FIXTURES.lock().await;
     let pool = pool().await;
     purge(&pool).await;
     seed(&pool).await;

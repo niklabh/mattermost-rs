@@ -655,6 +655,10 @@ async fn purge_api_fixtures_once() {
         "DELETE FROM sidebarchannels WHERE channelid IN (SELECT id FROM channels WHERE name LIKE 'mmrs-parity-%')",
         "DELETE FROM channelmemberhistory WHERE channelid IN (SELECT id FROM channels WHERE name LIKE 'mmrs-parity-%')",
         "DELETE FROM channels WHERE name LIKE 'mmrs-parity-%'",
+        // Teams created by tests: Go's `DELETE /teams/{id}` archives like the channel one, and
+        // an archived team keeps its name, so the next run's create fails without this.
+        "DELETE FROM teammembers WHERE teamid IN (SELECT id FROM teams WHERE name LIKE 'mmrs-parity-%')",
+        "DELETE FROM teams WHERE name LIKE 'mmrs-parity-%'",
         "DELETE FROM users WHERE username LIKE 'mmrsplain%'",
     ] {
         let _ = sqlx::query(statement).execute(&pool).await;

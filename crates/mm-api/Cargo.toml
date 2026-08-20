@@ -12,6 +12,7 @@ mm-model.workspace = true
 mm-store.workspace = true
 
 axum.workspace = true
+form_urlencoded.workspace = true
 tokio.workspace = true
 reqwest.workspace = true
 serde.workspace = true

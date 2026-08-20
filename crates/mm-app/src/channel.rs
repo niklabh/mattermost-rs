@@ -150,6 +150,111 @@ impl App {
 
         Ok(unread)
     }
+
+    /// Port of `app.App.GetChannelsByNames` (channel.go:2350).
+    ///
+    /// One branch, one error id, no 404: a name that matches nothing is simply absent from the
+    /// result, and only a broken query is an error. Go passes `allowFromCache = true`; this port
+    /// has no channel-by-name cache, so the parameter does not exist — see the store method.
+    #[tracing::instrument(skip_all, fields(team_id = %team_id, names = channel_names.len()))]
+    pub async fn get_channels_by_names(
+        &self,
+        channel_names: &[String],
+        team_id: &str,
+    ) -> Result<Vec<Channel>, AppError> {
+        self.store()
+            .channel()
+            .get_by_names(team_id, channel_names)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "channels-by-names lookup failed");
+                AppError::new(
+                    "GetChannelsByNames",
+                    "app.channel.get_by_name.existing.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })
+    }
+
+    /// Port of `app.App.FillInChannelProps` (channel.go:4091) through the
+    /// `FillInChannelsProps` (:4095) it delegates to, specialised to the one-element list every
+    /// call is: the by-team grouping and the cross-channel mention batching are query
+    /// optimisations for the list case, not behaviour, and none of them changes what a single
+    /// channel's props end up holding.
+    ///
+    /// The prop is **written or deleted, never left stale**, and the delete has a guard:
+    ///
+    /// - A header that mentions at least one *open, living, same-team* channel gets
+    ///   `props.channel_mentions = {name: {"display_name": …}, …}`.
+    /// - A header whose mentions all miss (no such channel, archived, private, wrong team) does
+    ///   not merely skip the write — it **removes** a `channel_mentions` prop that is already
+    ///   there, because the header may have changed since the prop was computed.
+    /// - A header with no `~mention` at all skips *everything*, the delete included
+    ///   (channel.go:4109's `len > 0` guard sits above both branches). A stale prop survives an
+    ///   emptied header; that is Go's behaviour, not an oversight here.
+    ///
+    /// The lookup is scoped to the channel's own team — and a DM or GM has `TeamId == ""`, which
+    /// [`mm_store::channel_store::get_by_names`] turns into "every team", exactly as Go's omitted
+    /// predicate does. Only `Type == "O"` mentions render; a private channel's existence is not
+    /// leaked into a prop anyone in the channel can read.
+    #[tracing::instrument(skip_all, fields(channel_id = %channel.id))]
+    pub async fn fill_in_channel_props(&self, channel: &mut Channel) -> Result<(), AppError> {
+        // Go's `len(allChannelMentionNames) > 0` guard (channel.go:4109) sits above the query
+        // *and* the prop write/delete, so a header with no `~` touches nothing — including a
+        // stale `channel_mentions` prop, which survives. The guard is load-bearing:
+        // without it an empty header would fall into `apply_channel_mentions_prop`'s
+        // delete branch.
+        let mentions = mm_model::channel_mentions::channel_mentions(&channel.header);
+        if mentions.is_empty() {
+            return Ok(());
+        }
+
+        let mentioned = self
+            .get_channels_by_names(&mentions, &channel.team_id)
+            .await?;
+        apply_channel_mentions_prop(channel, &mentions, &mentioned);
+        Ok(())
+    }
+}
+
+/// The prop half of `FillInChannelsProps` (channel.go:4126-4147), lifted out of the store call so
+/// its branches can be pinned without a database — the same reason `apply_mark_unread_shortcut`
+/// exists below.
+///
+/// Only **open** channels render into the prop; a `~mention` of a private channel that the
+/// lookup returned (it is in `messageChannelTypes`) is dropped *here*, so a private channel's
+/// display name never leaks into a prop every channel reader can see. The key is the mentioned
+/// channel's `Name` as the database has it, not the mention text — the two are equal by the map
+/// lookup, but the distinction says which one is authoritative.
+///
+/// The `else` branch deletes a stale prop rather than leaving it. Through `getChannel` it is
+/// dead code — the store never selects `Props`, so `channel.props` is `None` on entry — but Go
+/// keeps it for callers that pass a hydrated channel, and dropping it would change any such
+/// future call site silently. Same shape as the unreachable type filter in [D-151].
+fn apply_channel_mentions_prop(channel: &mut Channel, mentions: &[String], mentioned: &[Channel]) {
+    let by_name: HashMap<&str, &Channel> = mentioned.iter().map(|c| (c.name.as_str(), c)).collect();
+
+    // `serde_json::Map` is a BTreeMap, so the keys serialise sorted — the same order Go's
+    // `encoding/json` gives a `map[string]any`.
+    let mut props = mm_model::utils::StringInterface::new();
+    for mention in mentions {
+        if let Some(mentioned) = by_name.get(mention.as_str()) {
+            if mentioned.channel_type == mm_model::channel::CHANNEL_TYPE_OPEN {
+                props.insert(
+                    mentioned.name.clone(),
+                    serde_json::json!({ "display_name": mentioned.display_name }),
+                );
+            }
+        }
+    }
+
+    if !props.is_empty() {
+        channel.add_prop("channel_mentions", serde_json::Value::Object(props));
+    } else if let Some(existing) = channel.props.as_mut() {
+        existing.remove("channel_mentions");
+    }
 }
 
 /// Go's `if channelUnread.NotifyProps[MarkUnreadNotifyProp] == ChannelMarkUnreadMention`
@@ -356,5 +461,146 @@ mod tests {
                 .and_then(serde_json::Value::as_str),
             Some("cccccccccccccccccccccccccc")
         );
+    }
+
+    /// A bare-bones channel for the `channel_mentions` prop tests. Only the four fields the
+    /// function reads (`header`, `name`, `channel_type`, `display_name`) and the one it writes
+    /// (`props`) matter; everything else stays zero.
+    fn bare_channel(name: &str, channel_type: &str, display_name: &str) -> Channel {
+        Channel {
+            id: String::new(),
+            create_at: 0,
+            update_at: 0,
+            delete_at: 0,
+            team_id: String::new(),
+            channel_type: channel_type.to_owned(),
+            display_name: display_name.to_owned(),
+            name: name.to_owned(),
+            header: String::new(),
+            purpose: String::new(),
+            last_post_at: 0,
+            total_msg_count: 0,
+            extra_update_at: 0,
+            creator_id: String::new(),
+            scheme_id: None,
+            props: None,
+            group_constrained: None,
+            auto_translation: false,
+            shared: None,
+            total_msg_count_root: 0,
+            policy_id: None,
+            last_root_post_at: 0,
+            banner_info: None,
+            policy_enforced: false,
+            policy_actions: None,
+            policy_is_active: false,
+            default_category_name: String::new(),
+            managed_category_name: String::new(),
+            discoverable: false,
+        }
+    }
+
+    /// Only `Type == "O"` renders into the prop. The private channel came back from the lookup —
+    /// `messageChannelTypes` includes `P` — and is dropped *here*, so its display name never
+    /// reaches a prop every channel reader can see.
+    #[test]
+    fn only_open_channels_render_into_the_prop() {
+        let mut channel = bare_channel("home", "O", "Home");
+        let mentions = vec!["town-square".to_owned(), "secret-plans".to_owned()];
+        let mentioned = vec![
+            bare_channel("town-square", "O", "Town Square"),
+            bare_channel("secret-plans", "P", "Secret Plans"),
+        ];
+
+        apply_channel_mentions_prop(&mut channel, &mentions, &mentioned);
+
+        let props = channel.props.as_ref().expect("the prop was written");
+        assert_eq!(
+            props.get("channel_mentions"),
+            Some(&serde_json::json!({
+                "town-square": { "display_name": "Town Square" }
+            })),
+            "one open channel in, one entry out, keyed by Name with only display_name inside"
+        );
+    }
+
+    /// The `else` branch: mentions that all miss do not merely skip the write — they delete a
+    /// prop that is already there, because the header may have changed since it was computed.
+    #[test]
+    fn unresolved_mentions_delete_a_stale_prop() {
+        let mut channel = bare_channel("home", "O", "Home");
+        channel.add_prop("channel_mentions", serde_json::json!({"gone": {}}));
+        channel.add_prop("other", serde_json::json!("survives"));
+
+        apply_channel_mentions_prop(&mut channel, &["missing".to_owned()], &[]);
+
+        let props = channel.props.as_ref().expect("the map itself survives");
+        assert!(
+            !props.contains_key("channel_mentions"),
+            "the stale prop is deleted, not left behind"
+        );
+        assert_eq!(
+            props.get("other"),
+            Some(&serde_json::json!("survives")),
+            "only the one key is deleted"
+        );
+    }
+
+    /// `AddProp` replaces the value wholesale — a fresh computation is never merged into a stale
+    /// one.
+    #[test]
+    fn a_resolved_mention_replaces_the_prop_not_merges_it() {
+        let mut channel = bare_channel("home", "O", "Home");
+        channel.add_prop(
+            "channel_mentions",
+            serde_json::json!({"stale": {"display_name": "Stale"}}),
+        );
+
+        apply_channel_mentions_prop(
+            &mut channel,
+            &["fresh".to_owned()],
+            &[bare_channel("fresh", "O", "Fresh")],
+        );
+
+        assert_eq!(
+            channel
+                .props
+                .as_ref()
+                .and_then(|p| p.get("channel_mentions")),
+            Some(&serde_json::json!({"fresh": {"display_name": "Fresh"}})),
+            "the stale key is gone because the whole value was replaced"
+        );
+    }
+
+    /// Go's `len > 0` guard sits above the delete too: a header with no `~` leaves even a stale
+    /// prop untouched. The store is unreachable, so this also proves no query is issued.
+    #[tokio::test]
+    async fn a_header_without_mentions_touches_nothing_and_queries_nothing() {
+        let app = unreachable_app();
+        let mut channel = bare_channel("home", "O", "Home");
+        channel.header = "no mentions here".to_owned();
+        channel.add_prop("channel_mentions", serde_json::json!({"stale": {}}));
+        let before = channel.clone();
+
+        app.fill_in_channel_props(&mut channel)
+            .await
+            .expect("no mentions means no store call, so the dead pool is never touched");
+        assert_eq!(channel, before, "the stale prop survives an emptied header");
+    }
+
+    /// A header **with** a mention against a broken store is Go's 500 with Go's error id — the
+    /// one from `GetChannelsByNames`, not a new one invented for the props pass.
+    #[tokio::test]
+    async fn a_broken_mention_lookup_is_gos_500() {
+        let app = unreachable_app();
+        let mut channel = bare_channel("home", "O", "Home");
+        channel.header = "see ~town-square".to_owned();
+
+        let err = app
+            .fill_in_channel_props(&mut channel)
+            .await
+            .expect_err("the store is unreachable and a mention forces a query");
+        assert_eq!(err.status_code, 500);
+        assert_eq!(err.id, "app.channel.get_by_name.existing.app_error");
     }
 }

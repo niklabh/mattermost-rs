@@ -160,6 +160,16 @@ pub trait ChannelStore {
         channel_id: &str,
         user_id: &str,
     ) -> impl std::future::Future<Output = Result<ChannelUnread, StoreError>> + Send;
+
+    /// Port of `SqlChannelStore.GetByNames` (channel_store.go:1634).
+    ///
+    /// Go's third parameter, `allowFromCache`, is dropped: this port has no channel-by-name
+    /// cache, so every call behaves as `false` — never staler than Go, same rows.
+    fn get_by_names(
+        &self,
+        team_id: &str,
+        names: &[String],
+    ) -> impl std::future::Future<Output = Result<Vec<Channel>, StoreError>> + Send;
 }
 
 /// Postgres-backed implementation.
@@ -205,6 +215,15 @@ impl ChannelStore for SqlChannelStore {
         user_id: &str,
     ) -> Result<ChannelUnread, StoreError> {
         get_channel_unread(&self.pool, channel_id, user_id).await
+    }
+
+    #[tracing::instrument(skip_all, fields(team_id = %team_id, names = names.len(), found))]
+    async fn get_by_names(
+        &self,
+        team_id: &str,
+        names: &[String],
+    ) -> Result<Vec<Channel>, StoreError> {
+        get_by_names(&self.pool, team_id, names).await
     }
 }
 
@@ -347,6 +366,91 @@ pub async fn get_member(
     })
 }
 
+/// The row shape of Go's `channelSliceColumns(true)` (channel_store.go:159): every `Channels`
+/// column the store selects, plus the two access-control flags computed per row. Shared by
+/// [`get`] and [`get_by_names`] so the two queries cannot drift in what they select or how a row
+/// becomes a [`Channel`].
+struct ChannelRow {
+    id: String,
+    createat: Option<i64>,
+    updateat: Option<i64>,
+    deleteat: Option<i64>,
+    teamid: Option<String>,
+    channel_type: String,
+    displayname: Option<String>,
+    name: Option<String>,
+    header: Option<String>,
+    purpose: Option<String>,
+    lastpostat: Option<i64>,
+    totalmsgcount: Option<i64>,
+    extraupdateat: Option<i64>,
+    creatorid: Option<String>,
+    schemeid: Option<String>,
+    groupconstrained: Option<bool>,
+    autotranslation: bool,
+    shared: Option<bool>,
+    totalmsgcountroot: Option<i64>,
+    lastrootpostat: Option<i64>,
+    bannerinfo: Option<serde_json::Value>,
+    defaultcategoryname: String,
+    discoverable: bool,
+    policy_enforced: bool,
+    policy_is_active: bool,
+}
+
+/// Port of `channelSliceColumns`'s scan target becoming a `model.Channel`.
+fn channel_from_row(row: ChannelRow) -> Result<Channel, StoreError> {
+    // `bannerinfo` is `jsonb`, so the same SQL-NULL-versus-JSON-`null` split as [D-135] applies.
+    let banner_info = match row.bannerinfo {
+        None | Some(serde_json::Value::Null) => None,
+        Some(value) => Some(serde_json::from_value::<ChannelBannerInfo>(value).map_err(
+            |source| StoreError::Decode {
+                entity: "Channel",
+                column: "bannerinfo",
+                source,
+            },
+        )?),
+    };
+
+    Ok(Channel {
+        id: row.id,
+        create_at: row.createat.unwrap_or_default(),
+        update_at: row.updateat.unwrap_or_default(),
+        delete_at: row.deleteat.unwrap_or_default(),
+        team_id: row.teamid.unwrap_or_default(),
+        channel_type: row.channel_type,
+        display_name: row.displayname.unwrap_or_default(),
+        name: row.name.unwrap_or_default(),
+        header: row.header.unwrap_or_default(),
+        purpose: row.purpose.unwrap_or_default(),
+        last_post_at: row.lastpostat.unwrap_or_default(),
+        total_msg_count: row.totalmsgcount.unwrap_or_default(),
+        extra_update_at: row.extraupdateat.unwrap_or_default(),
+        creator_id: row.creatorid.unwrap_or_default(),
+        scheme_id: row.schemeid,
+        group_constrained: row.groupconstrained,
+        auto_translation: row.autotranslation,
+        shared: row.shared,
+        total_msg_count_root: row.totalmsgcountroot.unwrap_or_default(),
+        last_root_post_at: row.lastrootpostat.unwrap_or_default(),
+        banner_info,
+        default_category_name: row.defaultcategoryname,
+        discoverable: row.discoverable,
+        policy_enforced: row.policy_enforced,
+        policy_is_active: row.policy_is_active,
+
+        // Not selected by Go's `channelSliceColumns`; each is filled elsewhere or left zero.
+        //   props                  — written by the store, never read back by these queries
+        //   policy_id              — set by the access-control layer
+        //   policy_actions         — hydrated by `App.HydrateChannelPolicyActions`, see [D-141]
+        //   managed_category_name  — set by the sidebar layer
+        props: None,
+        policy_id: None,
+        policy_actions: None,
+        managed_category_name: String::new(),
+    })
+}
+
 /// Port of `SqlChannelStore.Get` (channel_store.go:985).
 ///
 /// Two things in this query are easy to drop and both change what the caller sees:
@@ -365,7 +469,8 @@ pub async fn get_member(
 /// than being invented.
 #[tracing::instrument(skip(pool), fields(channel_id = %id))]
 pub async fn get(pool: &PgPool, id: &str) -> Result<Channel, StoreError> {
-    let row = sqlx::query!(
+    let row = sqlx::query_as!(
+        ChannelRow,
         r#"
         SELECT c.id,
                c.createat,
@@ -421,55 +526,88 @@ pub async fn get(pool: &PgPool, id: &str) -> Result<Channel, StoreError> {
     };
     tracing::Span::current().record("found", true);
 
-    // `bannerinfo` is `jsonb`, so the same SQL-NULL-versus-JSON-`null` split as [D-135] applies.
-    let banner_info = match row.bannerinfo {
-        None | Some(serde_json::Value::Null) => None,
-        Some(value) => Some(serde_json::from_value::<ChannelBannerInfo>(value).map_err(
-            |source| StoreError::Decode {
-                entity: "Channel",
-                column: "bannerinfo",
-                source,
-            },
-        )?),
-    };
+    channel_from_row(row)
+}
 
-    Ok(Channel {
-        id: row.id,
-        create_at: row.createat.unwrap_or_default(),
-        update_at: row.updateat.unwrap_or_default(),
-        delete_at: row.deleteat.unwrap_or_default(),
-        team_id: row.teamid.unwrap_or_default(),
-        channel_type: row.channel_type,
-        display_name: row.displayname.unwrap_or_default(),
-        name: row.name.unwrap_or_default(),
-        header: row.header.unwrap_or_default(),
-        purpose: row.purpose.unwrap_or_default(),
-        last_post_at: row.lastpostat.unwrap_or_default(),
-        total_msg_count: row.totalmsgcount.unwrap_or_default(),
-        extra_update_at: row.extraupdateat.unwrap_or_default(),
-        creator_id: row.creatorid.unwrap_or_default(),
-        scheme_id: row.schemeid,
-        group_constrained: row.groupconstrained,
-        auto_translation: row.autotranslation,
-        shared: row.shared,
-        total_msg_count_root: row.totalmsgcountroot.unwrap_or_default(),
-        last_root_post_at: row.lastrootpostat.unwrap_or_default(),
-        banner_info,
-        default_category_name: row.defaultcategoryname,
-        discoverable: row.discoverable,
-        policy_enforced: row.policy_enforced,
-        policy_is_active: row.policy_is_active,
+/// Port of `SqlChannelStore.getByNames` (channel_store.go:1638) as its exported non-archived
+/// variant, `GetByNames` (:1634).
+///
+/// Three predicates and a guard, all Go's:
+///
+/// - **`len(names) > 0` short-circuits before any SQL.** An empty list returns an empty slice
+///   without touching the database — reproduced here, so mentioning nothing costs nothing.
+/// - **`Type IN (O, P, D, G)`** — `messageChannelTypes` again, same reasoning as [`get`].
+/// - **`DeleteAt = 0`**: the non-archived variant. `FillInChannelProps` links only living
+///   channels, so a `~mention` of an archived channel renders as plain text.
+/// - **The team filter only exists when `teamId` is non-empty** (channel_store.go:1656). Go
+///   *omits the predicate* rather than comparing against `''`, so an empty team id searches every
+///   team — that is what a DM/GM channel (whose `TeamId` is `""`) passes down. The `$2 = ''` OR
+///   below is the same rule in one statement instead of two.
+///
+/// Go applies no `ORDER BY`; every caller builds a name-keyed map. The row order here is
+/// whatever Postgres returns, and nothing downstream may depend on it.
+#[tracing::instrument(skip(pool, names), fields(team_id = %team_id, names = names.len()))]
+pub async fn get_by_names(
+    pool: &PgPool,
+    team_id: &str,
+    names: &[String],
+) -> Result<Vec<Channel>, StoreError> {
+    if names.is_empty() {
+        return Ok(Vec::new());
+    }
 
-        // Not selected by Go's `Get`; each is filled elsewhere or left zero.
-        //   props                  — written by the store, never read back by this query
-        //   policy_id              — set by the access-control layer
-        //   policy_actions         — hydrated by `App.HydrateChannelPolicyActions`, see [D-141]
-        //   managed_category_name  — set by the sidebar layer
-        props: None,
-        policy_id: None,
-        policy_actions: None,
-        managed_category_name: String::new(),
-    })
+    let rows = sqlx::query_as!(
+        ChannelRow,
+        r#"
+        SELECT c.id,
+               c.createat,
+               c.updateat,
+               c.deleteat,
+               c.teamid,
+               c.type::text AS "channel_type!",
+               c.displayname,
+               c.name,
+               c.header,
+               c.purpose,
+               c.lastpostat,
+               c.totalmsgcount,
+               c.extraupdateat,
+               c.creatorid,
+               c.schemeid,
+               c.groupconstrained,
+               c.autotranslation,
+               c.shared,
+               c.totalmsgcountroot,
+               c.lastrootpostat,
+               c.bannerinfo,
+               c.defaultcategoryname,
+               c.discoverable,
+               EXISTS (
+                   SELECT 1 FROM accesscontrolpolicies acp
+                    WHERE acp.id = c.id AND acp.type = 'channel'
+               ) AS "policy_enforced!",
+               COALESCE((
+                   SELECT acp.active FROM accesscontrolpolicies acp
+                    WHERE acp.id = c.id AND acp.type = 'channel' AND acp.active = TRUE
+                    LIMIT 1
+               ), false) AS "policy_is_active!"
+          FROM channels c
+         WHERE c.name = ANY($1)
+           AND c.type IN ('O', 'P', 'D', 'G')
+           AND c.deleteat = 0
+           AND ($2::text = '' OR c.teamid = $2)
+        "#,
+        names,
+        team_id
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: format!("failed to get channels with names={names:?} teamId={team_id}"),
+        source,
+    })?;
+
+    rows.into_iter().map(channel_from_row).collect()
 }
 
 /// Port of `allChannelMember.Process` (channel_store.go:480).
