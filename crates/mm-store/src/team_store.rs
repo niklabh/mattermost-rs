@@ -1,5 +1,6 @@
-//! Port of `SqlTeamStore` (channels/store/sqlstore/team_store.go), `GetTeamsForUser` only,
-//! together with the scheme-roles machinery it exists to drive.
+//! Port of `SqlTeamStore` (channels/store/sqlstore/team_store.go): the team reads (`Get`,
+//! `GetByName`, `GetTeamsByUserId`), the membership reads (`GetTeamsForUser`, `GetMember`,
+//! `GetMembers`), the two member counts, and the scheme-roles machinery they exist to drive.
 //!
 //! # Why this is not just a SELECT
 //!
@@ -31,6 +32,19 @@ pub struct RolesInfo {
     pub scheme_guest: bool,
     pub scheme_user: bool,
     pub scheme_admin: bool,
+}
+
+/// The ported half of `model.TeamMembersGetOptions` (team_member.go:78) — `ViewRestrictions`
+/// is dropped, see [`TeamStore::get_members`].
+///
+/// `sort` is Go's raw query value, not an enum, because Go's three-way branch keys on the
+/// string: `""` orders by `UserId`, [`mm_model::team_member::USERNAME`] orders by `Username`,
+/// and **anything else orders by nothing at all** — the heap order, whatever it is. An enum with
+/// two variants would have to fold the third case into one of the others and change a result.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct TeamMembersGetOptions {
+    pub sort: String,
+    pub exclude_deleted_users: bool,
 }
 
 /// Port of `getTeamRoles` (team_store.go:100).
@@ -132,6 +146,31 @@ pub trait TeamStore {
     /// Port of `SqlTeamStore.Get` (team_store.go:354).
     fn get(&self, id: &str) -> impl std::future::Future<Output = Result<Team, StoreError>> + Send;
 
+    /// Port of `SqlTeamStore.GetByName` (team_store.go:424).
+    fn get_by_name(
+        &self,
+        name: &str,
+    ) -> impl std::future::Future<Output = Result<Team, StoreError>> + Send;
+
+    /// Port of `SqlTeamStore.GetMember` (team_store.go:1034).
+    fn get_member(
+        &self,
+        team_id: &str,
+        user_id: &str,
+    ) -> impl std::future::Future<Output = Result<TeamMember, StoreError>> + Send;
+
+    /// Port of `SqlTeamStore.GetMembers` (team_store.go:1063), restrictions-free — the
+    /// `ViewRestrictions` half of `TeamMembersGetOptions` is dropped for the same reason as
+    /// [`TeamStore::get_total_member_count`]'s parameter: the one route calling this forwards
+    /// any restricted caller to Go.
+    fn get_members(
+        &self,
+        team_id: &str,
+        offset: i64,
+        limit: i64,
+        options: &TeamMembersGetOptions,
+    ) -> impl std::future::Future<Output = Result<Vec<TeamMember>, StoreError>> + Send;
+
     /// Port of `SqlTeamStore.GetTotalMemberCount` (team_store.go:1106), restrictions-free.
     ///
     /// Go's second parameter is a `*model.ViewUsersRestrictions` that splices extra joins into
@@ -183,6 +222,27 @@ impl TeamStore for SqlTeamStore {
     #[tracing::instrument(skip_all, fields(team_id = %id, found))]
     async fn get(&self, id: &str) -> Result<Team, StoreError> {
         get(&self.pool, id).await
+    }
+
+    #[tracing::instrument(skip_all, fields(name = %name, found))]
+    async fn get_by_name(&self, name: &str) -> Result<Team, StoreError> {
+        get_by_name(&self.pool, name).await
+    }
+
+    #[tracing::instrument(skip_all, fields(team_id = %team_id, user_id = %user_id, found))]
+    async fn get_member(&self, team_id: &str, user_id: &str) -> Result<TeamMember, StoreError> {
+        get_member(&self.pool, team_id, user_id).await
+    }
+
+    #[tracing::instrument(skip_all, fields(team_id = %team_id, offset, limit, found))]
+    async fn get_members(
+        &self,
+        team_id: &str,
+        offset: i64,
+        limit: i64,
+        options: &TeamMembersGetOptions,
+    ) -> Result<Vec<TeamMember>, StoreError> {
+        get_members(&self.pool, team_id, offset, limit, options).await
     }
 
     #[tracing::instrument(skip_all, fields(team_id = %team_id))]
@@ -249,6 +309,62 @@ pub async fn get_active_member_count(pool: &PgPool, team_id: &str) -> Result<i64
     })
 }
 
+/// The row shape of Go's `teamSliceColumns(true)` (team_store.go:40): every `Teams` column the
+/// store selects plus the two access-control flags computed per row. Shared by [`get`],
+/// [`get_by_name`] and [`get_teams_by_user_id`] so the three queries cannot drift in what they
+/// select or how a row becomes a [`Team`] — the same lift as `channel_store::ChannelRow`.
+struct TeamRow {
+    id: String,
+    createat: Option<i64>,
+    updateat: Option<i64>,
+    deleteat: Option<i64>,
+    displayname: Option<String>,
+    name: Option<String>,
+    description: Option<String>,
+    email: Option<String>,
+    team_type: Option<String>,
+    companyname: Option<String>,
+    alloweddomains: Option<String>,
+    inviteid: Option<String>,
+    allowopeninvite: Option<bool>,
+    lastteamiconupdate: Option<i64>,
+    schemeid: Option<String>,
+    groupconstrained: Option<bool>,
+    cloudlimitsarchived: bool,
+    policy_enforced: bool,
+    policy_is_active: bool,
+}
+
+/// Go's `sqlx.Get` into `model.Team`: every nullable column reads as its zero value.
+fn team_from_row(row: TeamRow) -> Team {
+    Team {
+        id: row.id,
+        create_at: row.createat.unwrap_or_default(),
+        update_at: row.updateat.unwrap_or_default(),
+        delete_at: row.deleteat.unwrap_or_default(),
+        display_name: row.displayname.unwrap_or_default(),
+        name: row.name.unwrap_or_default(),
+        description: row.description.unwrap_or_default(),
+        email: row.email.unwrap_or_default(),
+        team_type: row.team_type.unwrap_or_default(),
+        company_name: row.companyname.unwrap_or_default(),
+        allowed_domains: row.alloweddomains.unwrap_or_default(),
+        invite_id: row.inviteid.unwrap_or_default(),
+        allow_open_invite: row.allowopeninvite.unwrap_or_default(),
+        last_team_icon_update: row.lastteamiconupdate.unwrap_or_default(),
+        scheme_id: row.schemeid,
+        group_constrained: row.groupconstrained,
+        cloud_limits_archived: row.cloudlimitsarchived,
+        policy_enforced: row.policy_enforced,
+        policy_is_active: row.policy_is_active,
+
+        // Not selected by Go's `teamSliceColumns`; each is filled elsewhere or left zero.
+        policy_id: None,
+        policy_actions: None,
+        recommended: false,
+    }
+}
+
 /// Port of `SqlTeamStore.Get` (team_store.go:354).
 ///
 /// The one row by primary key, with **no `DeleteAt` filter** — an archived team still answers,
@@ -266,7 +382,8 @@ pub async fn get_active_member_count(pool: &PgPool, team_id: &str) -> Result<i64
 /// a branch because *we* reasoned it dead is how [D-151]-class drift starts.
 #[tracing::instrument(skip(pool), fields(team_id = %id))]
 pub async fn get(pool: &PgPool, id: &str) -> Result<Team, StoreError> {
-    let row = sqlx::query!(
+    let row = sqlx::query_as!(
+        TeamRow,
         r#"
         SELECT t.id,
                t.createat,
@@ -324,32 +441,72 @@ pub async fn get(pool: &PgPool, id: &str) -> Result<Team, StoreError> {
     }
     tracing::Span::current().record("found", true);
 
-    Ok(Team {
-        id: row.id,
-        create_at: row.createat.unwrap_or_default(),
-        update_at: row.updateat.unwrap_or_default(),
-        delete_at: row.deleteat.unwrap_or_default(),
-        display_name: row.displayname.unwrap_or_default(),
-        name: row.name.unwrap_or_default(),
-        description: row.description.unwrap_or_default(),
-        email: row.email.unwrap_or_default(),
-        team_type: row.team_type.unwrap_or_default(),
-        company_name: row.companyname.unwrap_or_default(),
-        allowed_domains: row.alloweddomains.unwrap_or_default(),
-        invite_id: row.inviteid.unwrap_or_default(),
-        allow_open_invite: row.allowopeninvite.unwrap_or_default(),
-        last_team_icon_update: row.lastteamiconupdate.unwrap_or_default(),
-        scheme_id: row.schemeid,
-        group_constrained: row.groupconstrained,
-        cloud_limits_archived: row.cloudlimitsarchived,
-        policy_enforced: row.policy_enforced,
-        policy_is_active: row.policy_is_active,
+    Ok(team_from_row(row))
+}
 
-        // Not selected by Go's `teamSliceColumns`; each is filled elsewhere or left zero.
-        policy_id: None,
-        policy_actions: None,
-        recommended: false,
-    })
+/// Port of `SqlTeamStore.GetByName` (team_store.go:424).
+///
+/// [`get`]'s query with `Name = $1` for `Id = $1`, and the same absence of a `DeleteAt` filter —
+/// an archived team still answers by name. **No case folding**: `sq.Eq{"Name": name}` is an
+/// exact match, unlike `GetByUsername`'s `lower(?)`, and the handler's `IsValidTeamName` rejects
+/// anything with an uppercase letter before the query could see it anyway. No `Id == ""` guard
+/// either — that is `Get`'s alone (team_store.go:365 versus :435).
+///
+/// `Teams.Name` is unique, so `fetch_optional` is Go's `sqlx.Get`: the not-found criteria
+/// string is `name=<name>`, where `Get`'s is the bare id.
+#[tracing::instrument(skip(pool), fields(name = %name))]
+pub async fn get_by_name(pool: &PgPool, name: &str) -> Result<Team, StoreError> {
+    let row = sqlx::query_as!(
+        TeamRow,
+        r#"
+        SELECT t.id,
+               t.createat,
+               t.updateat,
+               t.deleteat,
+               t.displayname,
+               t.name,
+               t.description,
+               t.email,
+               t.type::text AS "team_type",
+               t.companyname,
+               t.alloweddomains,
+               t.inviteid,
+               t.allowopeninvite,
+               t.lastteamiconupdate,
+               t.schemeid,
+               t.groupconstrained,
+               t.cloudlimitsarchived,
+               EXISTS (
+                   SELECT 1 FROM accesscontrolpolicies acp
+                    WHERE acp.id = t.id AND acp.type = 'team'
+               ) AS "policy_enforced!",
+               COALESCE((
+                   SELECT acp.active FROM accesscontrolpolicies acp
+                    WHERE acp.id = t.id AND acp.type = 'team' AND acp.active = TRUE
+                    LIMIT 1
+               ), false) AS "policy_is_active!"
+          FROM teams t
+         WHERE t.name = $1
+        "#,
+        name
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: format!("failed to find Team with name={name}"),
+        source,
+    })?;
+
+    let Some(row) = row else {
+        tracing::Span::current().record("found", false);
+        return Err(StoreError::NotFound {
+            entity: "Team",
+            criteria: format!("name={name}"),
+        });
+    };
+    tracing::Span::current().record("found", true);
+
+    Ok(team_from_row(row))
 }
 
 /// Port of `SqlTeamStore.GetTeamsByUserId` (team_store.go:705).
@@ -367,7 +524,8 @@ pub async fn get(pool: &PgPool, id: &str) -> Result<Team, StoreError> {
 /// callers do not sort it, so neither does this port.
 #[tracing::instrument(skip(pool), fields(user_id = %user_id))]
 pub async fn get_teams_by_user_id(pool: &PgPool, user_id: &str) -> Result<Vec<Team>, StoreError> {
-    let rows = sqlx::query!(
+    let rows = sqlx::query_as!(
+        TeamRow,
         r#"
         SELECT t.id,
                t.createat,
@@ -410,35 +568,177 @@ pub async fn get_teams_by_user_id(pool: &PgPool, user_id: &str) -> Result<Vec<Te
         source,
     })?;
 
-    Ok(rows
-        .into_iter()
-        .map(|row| Team {
-            id: row.id,
-            create_at: row.createat.unwrap_or_default(),
-            update_at: row.updateat.unwrap_or_default(),
-            delete_at: row.deleteat.unwrap_or_default(),
-            display_name: row.displayname.unwrap_or_default(),
-            name: row.name.unwrap_or_default(),
-            description: row.description.unwrap_or_default(),
-            email: row.email.unwrap_or_default(),
-            team_type: row.team_type.unwrap_or_default(),
-            company_name: row.companyname.unwrap_or_default(),
-            allowed_domains: row.alloweddomains.unwrap_or_default(),
-            invite_id: row.inviteid.unwrap_or_default(),
-            allow_open_invite: row.allowopeninvite.unwrap_or_default(),
-            last_team_icon_update: row.lastteamiconupdate.unwrap_or_default(),
-            scheme_id: row.schemeid,
-            group_constrained: row.groupconstrained,
-            cloud_limits_archived: row.cloudlimitsarchived,
-            policy_enforced: row.policy_enforced,
-            policy_is_active: row.policy_is_active,
+    Ok(rows.into_iter().map(team_from_row).collect())
+}
 
-            // Not selected by Go's `teamSliceColumns`; each is filled elsewhere or left zero.
-            policy_id: None,
-            policy_actions: None,
-            recommended: false,
-        })
-        .collect())
+/// The row shape of Go's `teamMemberWithSchemeRoles` (team_store.go:62): the `TeamMembers`
+/// columns plus the team scheme's three default role names. Shared by every membership read so
+/// `ToModel` is written once.
+struct TeamMemberRow {
+    teamid: String,
+    userid: String,
+    roles: Option<String>,
+    deleteat: Option<i64>,
+    schemeuser: Option<bool>,
+    schemeadmin: Option<bool>,
+    schemeguest: Option<bool>,
+    createat: Option<i64>,
+    defaultteamguestrole: Option<String>,
+    defaultteamuserrole: Option<String>,
+    defaultteamadminrole: Option<String>,
+}
+
+/// Port of `teamMemberWithSchemeRoles.ToModel` (team_store.go:162). Go's `sql.NullBool` and
+/// `sql.NullString` both mean "NULL is the zero value" here — `Valid && Bool` for the flags,
+/// `""` for the role names — so `unwrap_or_default` is the same rule, not a looser one.
+fn team_member_from_row(row: TeamMemberRow) -> TeamMember {
+    let roles_result = get_team_roles(
+        row.schemeguest.unwrap_or_default(),
+        row.schemeuser.unwrap_or_default(),
+        row.schemeadmin.unwrap_or_default(),
+        row.defaultteamguestrole.as_deref().unwrap_or_default(),
+        row.defaultteamuserrole.as_deref().unwrap_or_default(),
+        row.defaultteamadminrole.as_deref().unwrap_or_default(),
+        row.roles.as_deref().unwrap_or_default(),
+    );
+
+    TeamMember {
+        team_id: row.teamid,
+        user_id: row.userid,
+        roles: roles_result.roles.join(" "),
+        delete_at: row.deleteat.unwrap_or_default(),
+        scheme_guest: roles_result.scheme_guest,
+        scheme_user: roles_result.scheme_user,
+        scheme_admin: roles_result.scheme_admin,
+        explicit_roles: roles_result.explicit_roles.join(" "),
+        create_at: row.createat.unwrap_or_default(),
+    }
+}
+
+/// Port of `SqlTeamStore.GetMember` (team_store.go:1034).
+///
+/// `getTeamMembersWithSchemeSelectQuery` — the same two LEFT JOINs as [`get_teams_for_user`] —
+/// narrowed to one `(TeamId, UserId)` pair. **No `DeleteAt` filter**: a departed member's
+/// soft-deleted row still answers, with its non-zero `delete_at` on the wire, where
+/// [`get_members`] below filters it out. Go reads this one from the **master** (`GetMember` is
+/// wrapped in `RequestContextWithMaster`); this port has one pool, so that is already true
+/// ([D-140]).
+#[tracing::instrument(skip(pool), fields(team_id = %team_id, user_id = %user_id))]
+pub async fn get_member(
+    pool: &PgPool,
+    team_id: &str,
+    user_id: &str,
+) -> Result<TeamMember, StoreError> {
+    let row = sqlx::query_as!(
+        TeamMemberRow,
+        r#"
+        SELECT tm.teamid,
+               tm.userid,
+               tm.roles,
+               tm.deleteat,
+               tm.schemeuser,
+               tm.schemeadmin,
+               tm.schemeguest,
+               tm.createat,
+               ts.defaultteamguestrole,
+               ts.defaultteamuserrole,
+               ts.defaultteamadminrole
+          FROM teammembers tm
+          LEFT JOIN teams t ON tm.teamid = t.id
+          LEFT JOIN schemes ts ON t.schemeid = ts.id
+         WHERE tm.teamid = $1
+           AND tm.userid = $2
+        "#,
+        team_id,
+        user_id
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: format!("failed to find TeamMembers with teamId={team_id} and userId={user_id}"),
+        source,
+    })?;
+
+    let Some(row) = row else {
+        tracing::Span::current().record("found", false);
+        return Err(StoreError::NotFound {
+            entity: "TeamMember",
+            criteria: format!("teamId={team_id}, userId={user_id}"),
+        });
+    };
+    tracing::Span::current().record("found", true);
+
+    Ok(team_member_from_row(row))
+}
+
+/// Port of `SqlTeamStore.GetMembers` (team_store.go:1063), restrictions-free.
+///
+/// Four of Go's decisions ride along, and the first is the opposite of its channel twin:
+///
+/// - **`Limit`/`Offset` are unconditional here** — `.Limit(uint64(limit)).Offset(uint64(offset))`
+///   with no `> 0` guard, so `limit = 0` is `LIMIT 0` and **`?per_page=0` is an empty list**,
+///   where `SqlChannelStore.GetMembers` guards the clause and serves the whole channel. Same
+///   parser, same zero, opposite answer; both measured against the running Go server.
+/// - **The ordering is a three-way branch on the raw `sort` string.** `""` orders by `UserId`;
+///   `"Username"` orders by `Users.Username`; **any other value orders by nothing** — Go skips
+///   the `UserId` default because `Sort != ""` and skips the username one because
+///   `Sort != USERNAME`. Expressed as two `CASE` keys so one statement stays compile-checked.
+///   That third shape is heap order, which both servers share but neither promises.
+/// - **`DeleteAt = 0` on the membership, always** — a departed member never appears in the
+///   list, though [`get_member`] still serves the row singly.
+/// - `exclude_deleted_users` adds `Users.DeleteAt = 0`. Go LEFT JOINs `Users` only when the
+///   sort or the flag needs it; joining it unconditionally is result-equivalent (`Users.Id` is
+///   the primary key, so the LEFT JOIN neither multiplies nor drops rows) and keeps one query.
+#[tracing::instrument(skip(pool), fields(team_id = %team_id, offset, limit, found))]
+pub async fn get_members(
+    pool: &PgPool,
+    team_id: &str,
+    offset: i64,
+    limit: i64,
+    options: &TeamMembersGetOptions,
+) -> Result<Vec<TeamMember>, StoreError> {
+    let rows = sqlx::query_as!(
+        TeamMemberRow,
+        r#"
+        SELECT tm.teamid,
+               tm.userid,
+               tm.roles,
+               tm.deleteat,
+               tm.schemeuser,
+               tm.schemeadmin,
+               tm.schemeguest,
+               tm.createat,
+               ts.defaultteamguestrole,
+               ts.defaultteamuserrole,
+               ts.defaultteamadminrole
+          FROM teammembers tm
+          LEFT JOIN teams t ON tm.teamid = t.id
+          LEFT JOIN schemes ts ON t.schemeid = ts.id
+          LEFT JOIN users u ON tm.userid = u.id
+         WHERE tm.teamid = $1
+           AND tm.deleteat = 0
+           AND (NOT $4::boolean OR u.deleteat = 0)
+         ORDER BY CASE WHEN $5::text = '' THEN tm.userid END,
+                  CASE WHEN $5::text = 'Username' THEN u.username END
+         LIMIT $3
+        OFFSET $2
+        "#,
+        team_id,
+        offset,
+        limit,
+        options.exclude_deleted_users,
+        options.sort
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: format!("failed to find TeamMembers with teamId={team_id}"),
+        source,
+    })?;
+
+    tracing::Span::current().record("found", rows.len());
+
+    Ok(rows.into_iter().map(team_member_from_row).collect())
 }
 
 /// Free function so `SqlSessionStore` can reach it without owning a `SqlTeamStore`.
@@ -461,7 +761,8 @@ pub async fn get_teams_for_user(
     // Both joins are LEFT: a team with no scheme — every team on Team Edition, where `Schemes` is
     // an enterprise feature — must still return its member, with the three default role names
     // NULL. An INNER join here would return nothing at all for those members.
-    let rows = sqlx::query!(
+    let rows = sqlx::query_as!(
+        TeamMemberRow,
         r#"
         SELECT tm.teamid,
                tm.userid,
@@ -492,35 +793,7 @@ pub async fn get_teams_for_user(
         source,
     })?;
 
-    // Port of `teamMemberWithSchemeRoles.ToModel` (team_store.go:162). Go's `sql.NullBool` and
-    // `sql.NullString` both mean "NULL is the zero value" here — `Valid && Bool` for the flags,
-    // `""` for the role names — so `unwrap_or_default` is the same rule, not a looser one.
-    Ok(rows
-        .into_iter()
-        .map(|row| {
-            let roles_result = get_team_roles(
-                row.schemeguest.unwrap_or_default(),
-                row.schemeuser.unwrap_or_default(),
-                row.schemeadmin.unwrap_or_default(),
-                row.defaultteamguestrole.as_deref().unwrap_or_default(),
-                row.defaultteamuserrole.as_deref().unwrap_or_default(),
-                row.defaultteamadminrole.as_deref().unwrap_or_default(),
-                row.roles.as_deref().unwrap_or_default(),
-            );
-
-            TeamMember {
-                team_id: row.teamid,
-                user_id: row.userid,
-                roles: roles_result.roles.join(" "),
-                delete_at: row.deleteat.unwrap_or_default(),
-                scheme_guest: roles_result.scheme_guest,
-                scheme_user: roles_result.scheme_user,
-                scheme_admin: roles_result.scheme_admin,
-                explicit_roles: roles_result.explicit_roles.join(" "),
-                create_at: row.createat.unwrap_or_default(),
-            }
-        })
-        .collect())
+    Ok(rows.into_iter().map(team_member_from_row).collect())
 }
 
 #[cfg(test)]

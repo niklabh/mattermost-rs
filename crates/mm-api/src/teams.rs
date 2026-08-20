@@ -2,6 +2,11 @@
 //!
 //! - `getTeamsForUser` — `GET /api/v4/users/{user_id}/teams`
 //! - `getTeamMembersForUser` — `GET /api/v4/users/me/teams/members` (`me` only)
+//! - `getTeam` — `GET /api/v4/teams/{team_id}`
+//! - `getTeamByName` — `GET /api/v4/teams/name/{team_name}`
+//! - `getTeamStats` — `GET /api/v4/teams/{team_id}/stats`
+//! - `getTeamMember` — `GET /api/v4/teams/{team_id}/members/{user_id}`
+//! - `getTeamMembers` — `GET /api/v4/teams/{team_id}/members`
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -14,6 +19,7 @@ use crate::AppState;
 use crate::auth::AuthenticatedSession;
 use crate::channels::{ME, require_id};
 use crate::error::ApiError;
+use mm_store::team_store::TeamMembersGetOptions;
 
 /// Port of `getTeamMembersForUser` for the `me` case.
 ///
@@ -445,11 +451,450 @@ pub async fn get_team_stats(
         .into_response()
 }
 
+/// Go's team-name-parameter charset: `{team_name:[A-Za-z0-9_-]+}` (api.go:216) — the id class
+/// plus `_` and `-`, one character narrower than the username class (no `.`). A segment outside
+/// it never matches Go's route and falls to the mux 404, so it is forwarded rather than
+/// answered — [D-150]'s rule under a third alphabet.
+fn segment_matches_team_name_mux(value: &str) -> bool {
+    !value.is_empty()
+        && value
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+}
+
+/// The literals under `/teams/name/` that Go never routes to `getTeamByName`.
+///
+/// gorilla/mux tries routes in registration order, and `BaseRoutes.Team`
+/// (`/teams/{team_id:[A-Za-z0-9]+}`) is registered **before** `BaseRoutes.TeamByName`
+/// (api.go:212 versus :216). `name` is a valid `[A-Za-z0-9]+` segment, so
+/// `GET /teams/name/<X>` first tries the `Team` subrouter with `team_id = "name"` — and when
+/// `<X>` is one of its **GET** literals (`image`, `stats`, and `members` via `TeamMembers`), that
+/// handler runs, `RequireTeamId` fails on `"name"`, and the answer is a 400 naming `team_id`. A
+/// `<X>` whose `Team` route is registered for another method only (`patch`, `privacy`,
+/// `restore`, `import`) is a method mismatch, which mux skips, and `getTeamByName("patch")`
+/// answers the usual 404. All seven measured against the running server.
+///
+/// axum resolves the same path the other way — a static `name` beats `{team_id}` regardless of
+/// registration order — so these three must be forwarded for Go's `{team_id}` precedence to
+/// hold. A team really named `stats` is unreachable by name on both servers as a result.
+const TEAM_BY_NAME_SHADOWED_LITERALS: [&str; 3] = ["image", "stats", "members"];
+
+/// Does Go's `{team_id}` subrouter shadow this `/teams/name/{team_name}` segment? See
+/// [`TEAM_BY_NAME_SHADOWED_LITERALS`].
+fn team_name_is_shadowed_by_team_id_route(team_name: &str) -> bool {
+    TEAM_BY_NAME_SHADOWED_LITERALS.contains(&team_name)
+}
+
+/// Go's permission block for [`get_team_by_name`] (api4/team.go:399):
+///
+/// ```go
+/// if (!team.AllowOpenInvite || team.Type != model.TeamOpen) && !SessionHasPermissionToTeam(view_team)
+/// ```
+///
+/// **Not** [`get_team`]'s block, though it guards the same field pair. `getTeam` computes
+/// `view_team` unconditionally and falls back to `list_public_teams` for a public team; this one
+/// admits a public team **without any permission query** and polls `view_team` only for a
+/// non-public one — the `&&` short-circuit is the observable shape. A port that reused
+/// `team_view_denied` would issue a role read on behalf of every public-team request and, for a
+/// caller somehow lacking `list_public_teams`, refuse a team Go serves.
+async fn team_by_name_denied<F, Fut>(is_public_team: bool, has_view_team: F) -> bool
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = bool>,
+{
+    !is_public_team && !has_view_team().await
+}
+
+/// Port of `getTeamByName` (api4/team.go:386), reached as `GET /api/v4/teams/name/{team_name}`.
+///
+/// # Order of operations
+///
+/// 1. **Forward what Go would not route here**: the three shadowed literals
+///    ([`TEAM_BY_NAME_SHADOWED_LITERALS`]) and any segment outside the mux charset
+///    ([`segment_matches_team_name_mux`]). Both are router decisions, and Go's router owns them.
+/// 2. `RequireTeamName` — `IsValidTeamName` (lowercase alphanumerics and hyphens, two characters
+///    minimum), failing with `invalid_url_param` naming `team_name`. The mux class is wider than
+///    the validator (`Up_per` routes, then 400s), so both steps are needed, in this order.
+/// 3. `GetTeamByName` — a 404 on a miss, and a **404 on a broken store too**; see
+///    `App::get_team_by_name`. As in `getTeam`, the fetch precedes the gate, because the gate
+///    needs the team's flags.
+/// 4. The permission block — see [`team_by_name_denied`]. Denial names `view_team`, via
+///    [`get_team_denial`].
+/// 5. `SanitizeTeam`, same pairing as `getTeam` ([D-094]).
+///
+/// # Wire format
+///
+/// `json.NewEncoder(w).Encode(team)` — trailing newline ([D-086]), like `getTeam`.
+#[tracing::instrument(skip_all, fields(team_name = %team_name, forwarded))]
+pub async fn get_team_by_name(
+    State(state): State<AppState>,
+    Path(team_name): Path<String>,
+    session: AuthenticatedSession,
+    request: axum::extract::Request,
+) -> Response {
+    if team_name_is_shadowed_by_team_id_route(&team_name)
+        || !segment_matches_team_name_mux(&team_name)
+    {
+        tracing::Span::current().record("forwarded", true);
+        return crate::proxy::forward_to_go(State(state), request).await;
+    }
+    tracing::Span::current().record("forwarded", false);
+
+    if !mm_model::team::is_valid_team_name(&team_name) {
+        return ApiError::invalid_url_param("team_name").into_response();
+    }
+
+    let mut team = match state.app.get_team_by_name(&team_name).await {
+        Ok(team) => team,
+        Err(err) => return ApiError(err).into_response(),
+    };
+
+    let denied = team_by_name_denied(team_is_public(&team), || async {
+        state
+            .app
+            .session_has_permission_to_team(
+                &session.0,
+                &team.id,
+                &mm_model::permission::PERMISSION_VIEW_TEAM,
+            )
+            .await
+    })
+    .await;
+
+    if denied {
+        return get_team_denial(&session.0).into_response();
+    }
+
+    state.app.sanitize_team(&session.0, &mut team).await;
+
+    let mut body = match serde_json::to_vec(&team) {
+        Ok(body) => body,
+        Err(err) => {
+            tracing::error!(error = %err, "failed to serialise Team");
+            return ApiError(mm_model::utils::AppError::new(
+                "getTeamByName",
+                "api.marshal_error",
+                None,
+                String::new(),
+                500,
+            ))
+            .into_response();
+        }
+    };
+    body.push(b'\n');
+
+    (
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
+    )
+        .into_response()
+}
+
+/// Go's `c.RequireTeamId().RequireUserId()` (api4/team.go:793), as one call so the **order** is
+/// testable — the parameter name travels only in the untranslated `message` ([D-092]), so a
+/// swapped chain survives every cross-server test. Same lift as `channels::validate_ids`.
+#[allow(clippy::result_large_err)]
+fn validate_team_and_user_ids(team_id: &str, user_id: &str) -> Result<(), ApiError> {
+    require_id(team_id, "team_id")?;
+    require_id(user_id, "user_id")?;
+    Ok(())
+}
+
+/// Go's `UserCanSeeOtherUser` (app/user.go:2710) as every ported route serves it: **self is
+/// visible without a query**, and anyone else is visible on the nil-restrictions fast path —
+/// user-based `view_members`, the default `system_user` grant. A caller holding neither takes
+/// the restricted remainder, which this server forwards. Returned as a three-way answer so the
+/// self short-circuit is pinned in-process: Go never computes restrictions for self, and a port
+/// that did would issue role reads on the commonest request.
+#[derive(Debug, PartialEq, Eq)]
+enum Visibility {
+    Visible,
+    Forward,
+}
+
+async fn user_visibility<F, Fut>(
+    session_user_id: &str,
+    target_user_id: &str,
+    has_view_members: F,
+) -> Visibility
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = bool>,
+{
+    if session_user_id == target_user_id || has_view_members().await {
+        Visibility::Visible
+    } else {
+        Visibility::Forward
+    }
+}
+
+/// Port of `getTeamMember` (api4/team.go:792), reached as
+/// `GET /api/v4/teams/{team_id}/members/{user_id}`.
+///
+/// # Order of operations
+///
+/// 1. **`me` resolves before validation** (web/context.go:301); then team id, then user id —
+///    see [`validate_team_and_user_ids`].
+/// 2. `SessionHasPermissionToTeam(view_team)` → 403 naming `view_team`. **Before** the
+///    visibility question and before any fetch: a non-member learns nothing about who else is
+///    in the team, not even whether the user exists.
+/// 3. `UserCanSeeOtherUser` — see [`user_visibility`]; the restricted remainder forwards whole,
+///    and Go re-runs steps 1–2 itself, so ordering holds by construction. A `false` answer would
+///    be a 403 naming `view_members`; it is unreachable on the fast path and lives in Go.
+/// 4. `GetTeamMember` — 404 `app.team.get_member.missing.app_error` when there is no row,
+///    including for a **well-formed team id that matches nothing**: Go never fetches the team,
+///    and the admin's system roles pass the gate, so the admin gets this 404 where a plain user
+///    got step 2's 403. Measured.
+/// 5. `SanitizeRoleData(currentUserId)` unless the session holds `manage_team_roles` on the
+///    team — the guard `getTeamMembersForUser` could skip because its rows were all the
+///    caller's own. Here the row is usually someone else's, so the guard is live: a team admin
+///    sees another member's roles, a plain member sees them blanked with `delete_at: -1`.
+///
+/// # Wire format
+///
+/// `json.NewEncoder(w).Encode(team)` — trailing newline ([D-086]).
+#[tracing::instrument(skip_all, fields(team_id = %team_id, user_id = %user_id, forwarded))]
+pub async fn get_team_member(
+    State(state): State<AppState>,
+    Path((team_id, user_id)): Path<(String, String)>,
+    session: AuthenticatedSession,
+    request: axum::extract::Request,
+) -> Response {
+    let user_id = if user_id == ME {
+        session.0.user_id.clone()
+    } else {
+        user_id
+    };
+
+    if let Err(err) = validate_team_and_user_ids(&team_id, &user_id) {
+        return err.into_response();
+    }
+
+    let has_view_team = state
+        .app
+        .session_has_permission_to_team(
+            &session.0,
+            &team_id,
+            &mm_model::permission::PERMISSION_VIEW_TEAM,
+        )
+        .await;
+    if !has_view_team {
+        return get_team_denial(&session.0).into_response();
+    }
+
+    let visibility = user_visibility(&session.0.user_id, &user_id, || async {
+        state
+            .app
+            .has_permission_to(
+                &session.0.user_id,
+                &mm_model::permission::PERMISSION_VIEW_MEMBERS,
+            )
+            .await
+    })
+    .await;
+    if visibility == Visibility::Forward {
+        tracing::Span::current().record("forwarded", true);
+        return crate::proxy::forward_to_go(State(state), request).await;
+    }
+    tracing::Span::current().record("forwarded", false);
+
+    let mut member = match state.app.get_team_member(&team_id, &user_id).await {
+        Ok(member) => member,
+        Err(err) => return ApiError(err).into_response(),
+    };
+
+    let can_manage_roles = state
+        .app
+        .session_has_permission_to_team(
+            &session.0,
+            &team_id,
+            &mm_model::permission::PERMISSION_MANAGE_TEAM_ROLES,
+        )
+        .await;
+    if !can_manage_roles {
+        member.sanitize_role_data(&session.0.user_id);
+    }
+
+    let mut body = match serde_json::to_vec(&member) {
+        Ok(body) => body,
+        Err(err) => {
+            tracing::error!(error = %err, "failed to serialise TeamMember");
+            return ApiError(mm_model::utils::AppError::new(
+                "getTeamMember",
+                "api.marshal_error",
+                None,
+                String::new(),
+                500,
+            ))
+            .into_response();
+        }
+    };
+    body.push(b'\n');
+
+    (
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
+    )
+        .into_response()
+}
+
+/// `getTeamMembers`'s two query parameters (api4/team.go:834) — literals in the handler, no
+/// model constants to cite.
+const SORT_PARAM: &str = "sort";
+const EXCLUDE_DELETED_USERS_PARAM: &str = "exclude_deleted_users";
+
+/// The `TeamMembersGetOptions` Go builds from the query string (api4/team.go:834-849), minus
+/// the restrictions this server forwards on.
+///
+/// `sort` is passed through **raw** — no trimming, no case folding — because the store's
+/// three-way branch compares it byte-for-byte against `"Username"`: `?sort=username` is the
+/// "anything else" arm and orders by nothing. `exclude_deleted_users` is `strconv.ParseBool`
+/// with the error discarded, the same idiom as every other boolean flag.
+fn team_members_options(query: Option<&str>) -> TeamMembersGetOptions {
+    TeamMembersGetOptions {
+        sort: crate::channels::query_first(query, SORT_PARAM).unwrap_or_default(),
+        exclude_deleted_users: crate::channels::query_flag_is_true(
+            query,
+            EXCLUDE_DELETED_USERS_PARAM,
+        ),
+    }
+}
+
+/// Port of `getTeamMembers` (api4/team.go:829), reached as
+/// `GET /api/v4/teams/{team_id}/members` — the second paginated route.
+///
+/// # Order of operations
+///
+/// 1. `RequireTeamId`; the query parameters are read before the gate, as Go does, but none of
+///    them can fail, so nothing is observable about that order.
+/// 2. `SessionHasPermissionToTeam(view_team)` → 403 naming `view_team`. **The team is never
+///    fetched**, so — exactly as `getTeamStats` — a well-formed id that matches nothing is an
+///    empty `[]` for a caller the gate admits and a 403 for everyone else.
+/// 3. `GetViewUsersRestrictions`: nil iff the caller holds user-based `view_members`; the
+///    restricted case is forwarded whole, same as `getTeamStats` and `getUser`.
+/// 4. `GetTeamMembers(page × per_page, per_page, options)` — the shared parser, with one
+///    difference from `getChannelMembers` that lives in the store: **`per_page=0` is an empty
+///    list here**, not the whole team, because `SqlTeamStore.GetMembers` emits `LIMIT 0`
+///    unguarded. Both measured; see `team_store::get_members`.
+/// 5. `SanitizeRoleData` over every element unless the caller holds `manage_team_roles` — a
+///    plain member sees every *other* row blanked with `delete_at: -1` and its own row intact,
+///    mid-list; a team admin sees every row whole.
+///
+/// # Wire format
+///
+/// `json.Marshal` + `w.Write` (team.go:868) — **no trailing newline**, unlike `getTeamMember`
+/// two functions up and unlike `getChannelMembers` ([D-086]). An empty page is `[]`.
+#[tracing::instrument(skip_all, fields(team_id = %team_id, page, per_page, forwarded))]
+pub async fn get_team_members(
+    State(state): State<AppState>,
+    Path(team_id): Path<String>,
+    axum::extract::RawQuery(query): axum::extract::RawQuery,
+    session: AuthenticatedSession,
+    request: axum::extract::Request,
+) -> Response {
+    let page = crate::channels::parse_page(query.as_deref());
+    let per_page = crate::channels::parse_per_page(query.as_deref());
+    tracing::Span::current().record("page", page);
+    tracing::Span::current().record("per_page", per_page);
+
+    if let Err(err) = require_id(&team_id, "team_id") {
+        return err.into_response();
+    }
+
+    let options = team_members_options(query.as_deref());
+
+    let has_view_team = state
+        .app
+        .session_has_permission_to_team(
+            &session.0,
+            &team_id,
+            &mm_model::permission::PERMISSION_VIEW_TEAM,
+        )
+        .await;
+    if !has_view_team {
+        return get_team_denial(&session.0).into_response();
+    }
+
+    if !state
+        .app
+        .has_permission_to(
+            &session.0.user_id,
+            &mm_model::permission::PERMISSION_VIEW_MEMBERS,
+        )
+        .await
+    {
+        tracing::Span::current().record("forwarded", true);
+        return crate::proxy::forward_to_go(State(state), request).await;
+    }
+    tracing::Span::current().record("forwarded", false);
+
+    let mut members = match state
+        .app
+        .get_team_members(&team_id, page.wrapping_mul(per_page), per_page, &options)
+        .await
+    {
+        Ok(members) => members,
+        Err(err) => return ApiError(err).into_response(),
+    };
+
+    let can_manage_roles = state
+        .app
+        .session_has_permission_to_team(
+            &session.0,
+            &team_id,
+            &mm_model::permission::PERMISSION_MANAGE_TEAM_ROLES,
+        )
+        .await;
+    if !can_manage_roles {
+        for member in &mut members {
+            member.sanitize_role_data(&session.0.user_id);
+        }
+    }
+
+    let body = match serde_json::to_vec(&members) {
+        Ok(body) => body,
+        Err(err) => {
+            tracing::error!(error = %err, "failed to serialise the member list");
+            return ApiError(mm_model::utils::AppError::new(
+                "getTeamMembers",
+                "api.marshal_error",
+                None,
+                String::new(),
+                500,
+            ))
+            .into_response();
+        }
+    };
+
+    (
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
+    )
+        .into_response()
+}
+
 #[cfg(test)]
 mod tests {
     use mm_model::team_member::TeamMember;
 
-    use super::{get_team_denial, team_is_public, team_view_denied};
+    use super::{
+        TeamMembersGetOptions, Visibility, get_team_denial, segment_matches_team_name_mux,
+        team_by_name_denied, team_is_public, team_members_options,
+        team_name_is_shadowed_by_team_id_route, team_view_denied, user_visibility,
+        validate_team_and_user_ids,
+    };
 
     /// All four cells of `AllowOpenInvite × Type` — either single-flag reading passes three of
     /// them and fails the one that leaks: an invite-only team with the column still true.
@@ -634,5 +1079,158 @@ mod tests {
         let body = serde_json::to_vec(&teams).expect("serialises");
         assert_eq!(body, b"[]");
         assert_ne!(body.last(), Some(&b'\n'));
+    }
+
+    /// `getTeamByName`'s gate is the `&&` short-circuit: a public team is admitted **without**
+    /// a permission query — the opposite of `getTeam`, which polls `view_team` first.
+    #[tokio::test]
+    async fn a_public_team_by_name_never_polls_view_team() {
+        let denied = team_by_name_denied(true, || async {
+            panic!("view_team must not run for a public team on the by-name route")
+        })
+        .await;
+        assert!(!denied);
+    }
+
+    /// A non-public team falls to `view_team`, in both directions — and there is no
+    /// `list_public_teams` fallback on this route at all.
+    #[tokio::test]
+    async fn a_non_public_team_by_name_takes_the_view_team_gate() {
+        assert!(!team_by_name_denied(false, || async { true }).await);
+        assert!(team_by_name_denied(false, || async { false }).await);
+    }
+
+    /// The team-name class is the id class plus `_` and `-` — **not** `.`, which the username
+    /// class admits. Each near-miss falls to the mux 404 forward.
+    #[test]
+    fn the_team_name_charset_is_gos_mux_class() {
+        for ok in ["slice-team", "a_b-c", "UPPER", "0", "--"] {
+            assert!(segment_matches_team_name_mux(ok), "{ok:?} matches Go's mux");
+        }
+        for bad in ["", "a.b", "a b", "a@b", "a%40b", "héllo"] {
+            assert!(
+                !segment_matches_team_name_mux(bad),
+                "{bad:?} never matches Go's route, so it must be forwarded"
+            );
+        }
+    }
+
+    /// Exactly the GET literals under `BaseRoutes.Team` — the PUT/POST-only ones (`patch`,
+    /// `privacy`, `restore`, `import`) are method mismatches mux skips, so Go serves them as
+    /// team names and this server must too.
+    #[test]
+    fn only_the_get_literals_under_team_are_shadowed() {
+        for shadowed in ["image", "stats", "members"] {
+            assert!(
+                team_name_is_shadowed_by_team_id_route(shadowed),
+                "{shadowed}"
+            );
+        }
+        for served in [
+            "patch",
+            "privacy",
+            "restore",
+            "import",
+            "exists",
+            "name",
+            "slice-team",
+        ] {
+            assert!(
+                !team_name_is_shadowed_by_team_id_route(served),
+                "{served} reaches getTeamByName in Go"
+            );
+        }
+    }
+
+    /// **The team id is validated first** (`RequireTeamId().RequireUserId()`), pinned in-process
+    /// because the parameter name is not on the wire ([D-092]).
+    #[test]
+    fn the_team_id_is_validated_before_the_user_id() {
+        let name = |err: crate::error::ApiError| {
+            err.0
+                .params
+                .as_ref()
+                .and_then(|p| p.get("Name"))
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+        };
+        assert_eq!(
+            name(validate_team_and_user_ids("nope", "alsonope").expect_err("both invalid")),
+            Some("team_id".to_owned())
+        );
+        assert_eq!(
+            name(validate_team_and_user_ids(ME, "alsonope").expect_err("user invalid")),
+            Some("user_id".to_owned())
+        );
+        assert!(validate_team_and_user_ids(ME, "aaaaaaaaaaaaaaaaaaaaaaaaaa").is_ok());
+    }
+
+    /// Self is visible without consulting `view_members` — Go returns before computing
+    /// restrictions, so the closure must never be polled.
+    #[tokio::test]
+    async fn asking_about_oneself_never_polls_view_members() {
+        let visibility = user_visibility(ME, ME, || async {
+            panic!("view_members must not run for self")
+        })
+        .await;
+        assert_eq!(visibility, Visibility::Visible);
+    }
+
+    /// Anyone else rides the fast path when the caller holds `view_members`, and forwards when
+    /// not — the restricted remainder is Go's.
+    #[tokio::test]
+    async fn asking_about_another_user_takes_the_view_members_fast_path() {
+        let other = "aaaaaaaaaaaaaaaaaaaaaaaaaa";
+        assert_eq!(
+            user_visibility(ME, other, || async { true }).await,
+            Visibility::Visible
+        );
+        assert_eq!(
+            user_visibility(ME, other, || async { false }).await,
+            Visibility::Forward
+        );
+    }
+
+    /// `sort` passes through raw — `username` is not `Username` — and the flag is Go's
+    /// `ParseBool` with the error discarded; a repeated key takes its first value.
+    #[test]
+    fn team_members_options_are_read_the_way_go_reads_them() {
+        assert_eq!(team_members_options(None), TeamMembersGetOptions::default());
+        assert_eq!(
+            team_members_options(Some("sort=Username&exclude_deleted_users=1")),
+            TeamMembersGetOptions {
+                sort: "Username".to_owned(),
+                exclude_deleted_users: true,
+            }
+        );
+        assert_eq!(
+            team_members_options(Some("sort=username&exclude_deleted_users=yes")),
+            TeamMembersGetOptions {
+                sort: "username".to_owned(),
+                exclude_deleted_users: false,
+            },
+            "no case folding on sort; `yes` is a ParseBool error, so false"
+        );
+        assert_eq!(
+            team_members_options(Some(
+                "sort=Username&sort=&exclude_deleted_users=false&exclude_deleted_users=true"
+            )),
+            TeamMembersGetOptions {
+                sort: "Username".to_owned(),
+                exclude_deleted_users: false,
+            },
+            "url.Values.Get takes the first value"
+        );
+    }
+
+    /// `getTeamMembers` marshals (no newline) while `getTeamMember` encodes (newline) — the two
+    /// call sites differ, two functions apart ([D-086]).
+    #[test]
+    fn the_member_list_has_no_newline_and_the_single_member_does() {
+        let list = serde_json::to_vec(&vec![member(ME)]).expect("serialises");
+        assert_ne!(list.last(), Some(&b'\n'));
+        let mut single = serde_json::to_vec(&member(ME)).expect("serialises");
+        single.push(b'\n');
+        assert_eq!(single.last(), Some(&b'\n'));
     }
 }

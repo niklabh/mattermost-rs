@@ -1,5 +1,6 @@
-//! Port of the team app-layer surface (channels/app/team.go): `GetTeamMembersForUser`,
-//! `GetTeamsForUser`, and the `SanitizeTeam`/`SanitizeTeams` pair.
+//! Port of the team app-layer surface (channels/app/team.go): `GetTeam`, `GetTeamByName`,
+//! `GetTeamsForUser`, `GetTeamMember`, `GetTeamMembers`, `GetTeamMembersForUser`,
+//! `GetTeamStats`, and the `SanitizeTeam`/`SanitizeTeams` pair.
 
 use mm_model::permission::{PERMISSION_INVITE_USER, PERMISSION_MANAGE_TEAM};
 use mm_model::session::Session;
@@ -7,6 +8,7 @@ use mm_model::team::Team;
 use mm_model::team_member::TeamMember;
 use mm_model::utils::AppError;
 use mm_store::TeamStore;
+use mm_store::team_store::TeamMembersGetOptions;
 
 use crate::App;
 
@@ -69,6 +71,107 @@ impl App {
                 )
             }
         })
+    }
+
+    /// Port of `app.App.GetTeamByName` (team.go:971).
+    ///
+    /// Two branches, two ids, **one status**: the not-found branch is
+    /// `app.team.get_by_name.missing.app_error` and the fallback is
+    /// `app.team.get_by_name.app_error` — and Go gives the fallback `http.StatusNotFound` too,
+    /// where every sibling (`GetTeam`, `GetTeamMember`) makes its fallback a 500. A broken
+    /// database therefore answers this route as a 404, and a port that "fixed" that would
+    /// drift on the wire. Neither branch carries `params`.
+    #[tracing::instrument(skip_all, fields(name = %name))]
+    pub async fn get_team_by_name(&self, name: &str) -> Result<Team, AppError> {
+        self.store().team().get_by_name(name).await.map_err(|err| {
+            if err.is_not_found() {
+                AppError::new(
+                    "GetTeamByName",
+                    "app.team.get_by_name.missing.app_error",
+                    None,
+                    String::new(),
+                    404,
+                )
+            } else {
+                tracing::error!(error = %err, "team lookup by name failed");
+                AppError::new(
+                    "GetTeamByName",
+                    "app.team.get_by_name.app_error",
+                    None,
+                    String::new(),
+                    404,
+                )
+            }
+        })
+    }
+
+    /// Port of `app.App.GetTeamMember` (team.go:1093).
+    ///
+    /// The `GetChannelMember` shape: the 404 id is the 500 id with `missing.` inserted
+    /// (`app.team.get_member.missing.app_error` / `app.team.get_member.app_error`), and here
+    /// the fallback really is a 500, unlike [`App::get_team_by_name`]'s. Go wraps the store
+    /// call in `RequestContextWithMaster`; one pool here, so already true ([D-140]).
+    #[tracing::instrument(skip_all, fields(team_id = %team_id, user_id = %user_id))]
+    pub async fn get_team_member(
+        &self,
+        team_id: &str,
+        user_id: &str,
+    ) -> Result<TeamMember, AppError> {
+        self.store()
+            .team()
+            .get_member(team_id, user_id)
+            .await
+            .map_err(|err| {
+                if err.is_not_found() {
+                    AppError::new(
+                        "GetTeamMember",
+                        "app.team.get_member.missing.app_error",
+                        None,
+                        String::new(),
+                        404,
+                    )
+                } else {
+                    tracing::error!(error = %err, "team member lookup failed");
+                    AppError::new(
+                        "GetTeamMember",
+                        "app.team.get_member.app_error",
+                        None,
+                        String::new(),
+                        500,
+                    )
+                }
+            })
+    }
+
+    /// Port of `app.App.GetTeamMembers` (team.go:1126), restrictions-free.
+    ///
+    /// One branch at 500, and the id is **`app.team.get_members.app_error` — the same id
+    /// [`App::get_team_members_for_user`] uses**, shared by four Go wrappers. A team with no
+    /// members, or no team at all, is an empty list, not a miss. Go takes `offset` already
+    /// multiplied (`c.Params.Page*c.Params.PerPage`, api4/team.go:851); the handler does that
+    /// multiplication, so this signature is Go's.
+    #[tracing::instrument(skip_all, fields(team_id = %team_id, offset, limit))]
+    pub async fn get_team_members(
+        &self,
+        team_id: &str,
+        offset: i64,
+        limit: i64,
+        options: &TeamMembersGetOptions,
+    ) -> Result<Vec<TeamMember>, AppError> {
+        self.store()
+            .team()
+            .get_members(team_id, offset, limit, options)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "team members lookup failed");
+                AppError::new(
+                    "GetTeamMembers",
+                    "app.team.get_members.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })
     }
 
     /// Port of `app.App.GetTeamStats` (team.go:2234), restrictions-free — the caller forwards
@@ -327,6 +430,55 @@ mod tests {
             err.params.is_none(),
             "Go passes nil params in both branches"
         );
+    }
+
+    /// `GetTeamByName`'s fallback is a **404**, not the 500 every sibling uses — a reader who
+    /// copies `get_team`'s shape ships a status Go never sends on this route.
+    #[tokio::test]
+    async fn a_broken_team_by_name_lookup_is_gos_404_with_the_unsuffixed_id() {
+        let err = unreachable_app()
+            .get_team_by_name("slice-team")
+            .await
+            .expect_err("the store is unreachable");
+        assert_eq!(
+            err.status_code, 404,
+            "team.go:979: StatusNotFound on the fallback too"
+        );
+        assert_eq!(err.id, "app.team.get_by_name.app_error");
+        assert_ne!(err.id, "app.team.get_by_name.missing.app_error");
+        assert_eq!(err.where_, "GetTeamByName");
+        assert!(err.params.is_none());
+    }
+
+    /// `GetTeamMember`'s fallback is the ordinary 500, with the id that lacks `missing.`.
+    #[tokio::test]
+    async fn a_broken_team_member_lookup_is_a_500_without_the_missing_infix() {
+        let err = unreachable_app()
+            .get_team_member("tttttttttttttttttttttttttt", "uuuuuuuuuuuuuuuuuuuuuuuuuu")
+            .await
+            .expect_err("the store is unreachable");
+        assert_eq!(err.status_code, 500);
+        assert_eq!(err.id, "app.team.get_member.app_error");
+        assert_eq!(err.where_, "GetTeamMember");
+        assert!(err.params.is_none());
+    }
+
+    /// `GetTeamMembers` shares `GetTeamMembersForUser`'s id and has no miss branch.
+    #[tokio::test]
+    async fn a_broken_team_members_lookup_is_the_shared_get_members_500() {
+        let err = unreachable_app()
+            .get_team_members(
+                "tttttttttttttttttttttttttt",
+                0,
+                60,
+                &TeamMembersGetOptions::default(),
+            )
+            .await
+            .expect_err("the store is unreachable");
+        assert_eq!(err.status_code, 500);
+        assert_eq!(err.id, "app.team.get_members.app_error");
+        assert_eq!(err.where_, "GetTeamMembers");
+        assert!(err.params.is_none());
     }
 
     /// The active count's id differs from the total's only by an inserted `active_`; pinned as a

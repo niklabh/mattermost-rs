@@ -294,7 +294,7 @@ const EXCLUDE_FILES_COUNT_PARAM: &str = "exclude_files_count";
 /// are all false, while `=1`, `=t` and `=True` are true. `form_urlencoded::parse` decodes
 /// percent-escapes and `+`-as-space the way `url.ParseQuery` does, which matters because the
 /// *decoded* value is what `ParseBool` sees.
-fn query_flag_is_true(query: Option<&str>, flag: &str) -> bool {
+pub(crate) fn query_flag_is_true(query: Option<&str>, flag: &str) -> bool {
     let Some(query) = query else {
         return false;
     };
@@ -318,7 +318,7 @@ const PER_PAGE_DEFAULT: i64 = 60;
 const PER_PAGE_MAXIMUM: i64 = 200;
 
 /// `url.Values.Get`: the first value of a repeated key, percent-decoded. `None` when absent.
-fn query_first(query: Option<&str>, key: &str) -> Option<String> {
+pub(crate) fn query_first(query: Option<&str>, key: &str) -> Option<String> {
     form_urlencoded::parse(query?.as_bytes())
         .find(|(k, _)| k == key)
         .map(|(_, value)| value.into_owned())
@@ -328,7 +328,7 @@ fn query_first(query: Option<&str>, key: &str) -> Option<String> {
 /// **or a negative value** falls to the default — there is no 400 for garbage pagination, ever.
 /// (Go's negative branch carries a carve-out for `getChannelMembersForUser`'s streaming mode;
 /// no ported route is that one, so the plain rule applies.)
-fn parse_page(query: Option<&str>) -> i64 {
+pub(crate) fn parse_page(query: Option<&str>) -> i64 {
     match query_first(query, "page").and_then(|v| v.parse::<i64>().ok()) {
         Some(val) if val >= 0 => val,
         _ => PAGE_DEFAULT,
@@ -339,7 +339,7 @@ fn parse_page(query: Option<&str>) -> i64 {
 /// and **zero is neither**, so `?per_page=0` survives the parser and reaches the store, whose
 /// `Limit > 0` guard turns it into *no limit at all*. A caller can ask for everything by asking
 /// for nothing, and both servers oblige.
-fn parse_per_page(query: Option<&str>) -> i64 {
+pub(crate) fn parse_per_page(query: Option<&str>) -> i64 {
     match query_first(query, "per_page").and_then(|v| v.parse::<i64>().ok()) {
         Some(val) if val > PER_PAGE_MAXIMUM => PER_PAGE_MAXIMUM,
         Some(val) if val >= 0 => val,

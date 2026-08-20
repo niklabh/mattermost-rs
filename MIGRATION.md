@@ -297,6 +297,9 @@ whenever a session skips, approximates, or discovers-but-does-not-close somethin
 | store/sqlstore/channel_store.go (`GetMembers`) | `mm-store/src/channel_store.rs` | PARTIAL | — | **`Limit > 0` and `Offset > 0` are guards, not clamps**: squirrel adds the clause only when positive, so `limit = 0` is *no limit* — expressed as `LIMIT CASE WHEN … END`, since Postgres reads `LIMIT NULL` as absent. No `ORDER BY`: pagination over heap order, identical across the two servers only because they share the table. The member row mapping moved to `channel_member_from_row`, shared with `GetMember`. `ChannelMembersGetOptions` flattened to the three used fields (the `allowFromCache` rule). |
 | app/channel.go (`GetChannelMembersPage`) | `mm-app/src/channel.rs` | PARTIAL | — | `Offset = page × per_page` (wrapping, as Go's `int` product), `Limit = per_page`, one 500-only id (`app.channel.get_members.app_error`) — an empty channel is `[]`, never a miss. |
 | api4/channel.go (`getChannelMembers`) + web/params.go (`page`, `per_page`) | `mm-api/src/channels.rs` | PARTIAL | 8 pass + 5 parity | **The first paginated route.** Go's pagination contract, measured: garbage and negatives fall to defaults (0 / 60) with **no 400 ever**, `per_page` clamps at 200 — and **`per_page=0` serves the whole channel**, because zero survives the parser and the store's guard reads it as unlimited. Gate is `read_channel` (missing channel → 403 like `getChannelStats`); `SanitizeForCurrentUser` blanks every row's timestamps to `-1` except the caller's own, mid-list. Encoder newline; an empty page is `[]`. Six mutations, six caught, two controls survived. |
+| store/sqlstore/team_store.go (`GetByName`, `GetMember`, `GetMembers`) | `mm-store/src/team_store.rs` | PARTIAL | 1 DB (8 branches) | **`GetMembers` emits `LIMIT`/`OFFSET` unguarded, so `per_page=0` is an empty list — the opposite of the channel store.** Sort is a three-way branch on the raw string (`""` → `UserId`, `"Username"` → `Username`, anything else → no `ORDER BY`); `GetMember` has no `DeleteAt` filter where `GetMembers` does; `GetByName` is exact-match, no folding, and serves archived teams. Restrictions dropped (forwarded). |
+| app/team.go (`GetTeamByName`, `GetTeamMember`, `GetTeamMembers`) | `mm-app/src/team.rs` | PARTIAL | 3 pass | **`GetTeamByName`'s fallback branch is a 404, not a 500** (team.go:979) — the only sibling that does this. `GetTeamMembers` shares `get_members.app_error` with `GetTeamMembersForUser`. |
+| api4/team.go (`getTeamByName`, `getTeamMember`, `getTeamMembers`) | `mm-api/src/teams.rs` | PARTIAL | 10 pass + 13 parity | By-name gate is `&&`-short-circuited — a public team is admitted with **no** permission query, no `list_public_teams` fallback (unlike `getTeam`). gorilla registers `{team_id}` before `/name/`, so `GET /teams/name/{image,stats,members}` is Go's 400 on `team_id`; axum resolves the other way, so those three forward (see `TEAM_BY_NAME_SHADOWED_LITERALS`). `SanitizeRoleData` gated on `manage_team_roles` — the guard `getTeamMembersForUser` could skip is live here. 17 mutations, 17 caught, 2 controls survived. |
 | model/session.go | `mm-model/src/session.rs` | DONE | 20 pass | Strangler Fig critical path. Complete `IsValid`, `PreSave`, device-id validators. |
 | model/team_member.go | `mm-model/src/team_member.rs` | DONE | 6 pass | Pulled ahead of its turn: `Session.TeamMembers` is on the wire, so session.rs cannot round-trip without it. `TeamMemberWithError`/`EmailInviteWithError` deferred. |
 | model/team.go | `mm-model/src/team.rs` | DONE | 37 pass | First **complete** `IsValid` — every branch, all error ids. `Etag` landed with `channel_list.go`. |
@@ -3454,3 +3457,24 @@ set aside. Three Rust files and one correction to the previous session's ledger 
    the system when the thing under test is a server: one run reported a genuine-looking 500 that
    was the *previous* mutation still bound to :8066. Third instance of [D-145]'s shape — the
    harness could not tell whether it had run the thing it claimed to.
+
+## Notes — api4/team.go (`getTeamByName`, `getTeamMember`, `getTeamMembers`)
+
+1. **Router precedence is wire format, and the two routers disagree.** gorilla/mux tries routes
+   in registration order and `BaseRoutes.Team` (`/teams/{team_id:[A-Za-z0-9]+}`) precedes
+   `TeamByName`; `name` satisfies that class, so `GET /teams/name/stats` runs `getTeamStats`
+   with `team_id = "name"` and 400s. axum gives a static segment precedence regardless of order.
+   Only the **GET** literals collide (`image`, `stats`, `members`) — a PUT/POST-only literal like
+   `patch` is a method mismatch mux skips, so Go serves it as a team name. Seven measured, three
+   forwarded, pinned in a unit test so a fourth GET literal upstream is a one-line change.
+
+2. **Same parser, same zero, opposite answer.** `per_page=0` serves the whole channel on
+   `getChannelMembers` and an empty list on `getTeamMembers`, because one store guards
+   `Limit > 0` and the other calls `.Limit(uint64(limit))` unconditionally. Neither handler knows;
+   a port copying the channel store's `CASE WHEN` would have drifted, and the DB test holds it.
+
+3. **A mutation harness that cannot build reports CAUGHT.** Four api-suite runs came back
+   `CAUGHT ()` — empty test list — because Docker had gone down and the sqlx macros could not
+   reach Postgres. A control that should have survived "died" too, which is what exposed it. The
+   tally above is from the re-run with the stack up, every catch naming its test. Worth a guard
+   in `mutate.sh` that distinguishes a build failure from a test failure; left as is this session.
