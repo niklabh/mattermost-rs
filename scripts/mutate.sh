@@ -32,6 +32,16 @@ export DATABASE_URL MM_STORE_DB=1 MM_PARITY_STACK=1
 NAME="$1"; FILE="$2"; FROM="$3"; TO="$4"; SUITE="${5:-unit}"
 [ -n "$FILE" ] || { sed -n '2,28p' "$0"; exit 2; }
 
+# Stack-backed suites share :8066 and the database with every other checkout; serialise them.
+case "$SUITE" in
+  store|api|all)
+    if [ -z "$MMRS_STACK_LOCKED" ]; then
+      export MMRS_STACK_LOCKED=1
+      exec "$ROOT/scripts/stack-lock.sh" "$0" "$@"
+    fi ;;
+esac
+
+
 WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
 BACKUP="$WORK/backup"; LOG="$WORK/test.log"
 cp "$FILE" "$BACKUP"
