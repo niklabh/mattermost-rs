@@ -19,3 +19,6 @@ chrono.workspace = true
 [dev-dependencies]
 # The DB-backed tests in tests/ need a runtime; they skip themselves unless MM_STORE_DB=1.
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+# `db_channel_members.rs` asks the running Go server the same question it asks this crate, so the
+# two answers can be compared. Dev-only: nothing in the library speaks HTTP.
+reqwest = { workspace = true, features = ["json"] }

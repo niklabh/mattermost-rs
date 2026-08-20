@@ -147,3 +147,11 @@ opt-level = 3
 opt-level = 3
 [profile.dev.package.bcrypt]
 opt-level = 3
+
+# `[profile.dev.package.*]` above does **not** reach `cargo test`: the test profile inherits
+# `dev`'s settings but not its per-package overrides, so the crypto crates were still being
+# compiled unoptimized for every test run. 42 password tests took 55 seconds because of it —
+# PBKDF2 is 600,000 SHA-256 rounds per hash by design, and that cost is paid at debug speed.
+# Optimizing dependencies only; our own crates keep debug builds and fast incremental rebuilds.
+[profile.test.package."*"]
+opt-level = 3

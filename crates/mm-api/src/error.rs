@@ -8,6 +8,12 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use mm_model::utils::AppError;
 
+/// The cutover marker every response this server produces carries: `rust` when a migrated handler
+/// answered, `go` when the proxy forwarded. Declared here because errors need it as much as
+/// successes do.
+pub const SERVED_BY: axum::http::HeaderName =
+    axum::http::HeaderName::from_static("x-mmrs-served-by");
+
 /// An error on its way to a client, carrying the `AppError` Go would have written.
 #[derive(Debug)]
 pub struct ApiError(pub AppError);
@@ -40,6 +46,25 @@ impl ApiError {
         ApiError(AppError::new(
             "Context",
             "api.context.invalid_body_param.app_error",
+            Some(params),
+            String::new(),
+            400,
+        ))
+    }
+
+    /// Port of `NewInvalidURLParamError` (web/context.go:259) — a path segment that is not a
+    /// valid id. 400, and note the **id differs from the body-param one by a single word**:
+    /// `invalid_url_param` versus `invalid_body_param`. Both carry the parameter name as `Name`.
+    pub fn invalid_url_param(parameter: &str) -> Self {
+        let mut params: std::collections::HashMap<String, serde_json::Value> =
+            std::collections::HashMap::new();
+        params.insert(
+            "Name".to_owned(),
+            serde_json::Value::String(parameter.to_owned()),
+        );
+        ApiError(AppError::new(
+            "Context",
+            "api.context.invalid_url_param.app_error",
             Some(params),
             String::new(),
             400,
@@ -83,13 +108,20 @@ impl IntoResponse for ApiError {
         match serde_json::to_vec(&self.0) {
             Ok(body) => (
                 status,
-                [(axum::http::header::CONTENT_TYPE, "application/json")],
+                [
+                    (axum::http::header::CONTENT_TYPE, "application/json"),
+                    // Our own cutover marker, matching what every success path and the proxy set.
+                    // Errors had been omitting it, which meant a 403 from a migrated route and a
+                    // 403 forwarded to Go were indistinguishable — including to the parity suite,
+                    // whose "was this actually served by Rust" guard reads exactly this header.
+                    (SERVED_BY, "rust"),
+                ],
                 body,
             )
                 .into_response(),
             Err(err) => {
                 tracing::error!(error = %err, "failed to serialise AppError");
-                status.into_response()
+                (status, [(SERVED_BY, "rust")]).into_response()
             }
         }
     }
@@ -123,6 +155,21 @@ mod tests {
         assert_eq!(
             err.into_response().status(),
             StatusCode::INTERNAL_SERVER_ERROR
+        );
+    }
+
+    /// An error is marked as ours. Without this a refusal from a migrated route looks exactly
+    /// like one forwarded to Go, which is what let a whole parity suite pass while every request
+    /// was being proxied.
+    #[test]
+    fn an_error_response_is_marked_as_served_by_rust() {
+        let response = ApiError::unauthenticated().into_response();
+        assert_eq!(
+            response
+                .headers()
+                .get(SERVED_BY)
+                .and_then(|v| v.to_str().ok()),
+            Some("rust")
         );
     }
 

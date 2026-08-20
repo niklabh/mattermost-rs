@@ -1,0 +1,83 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT cm.channelid,\n               cm.roles,\n               cm.schemeguest,\n               cm.schemeuser,\n               cm.schemeadmin,\n               teamscheme.defaultchannelguestrole    AS teamschemedefaultguestrole,\n               teamscheme.defaultchanneluserrole     AS teamschemedefaultuserrole,\n               teamscheme.defaultchanneladminrole    AS teamschemedefaultadminrole,\n               channelscheme.defaultchannelguestrole AS channelschemedefaultguestrole,\n               channelscheme.defaultchanneluserrole  AS channelschemedefaultuserrole,\n               channelscheme.defaultchanneladminrole AS channelschemedefaultadminrole\n          FROM channelmembers cm\n          INNER JOIN channels c ON cm.channelid = c.id\n          LEFT JOIN schemes channelscheme ON c.schemeid = channelscheme.id\n          LEFT JOIN teams t ON c.teamid = t.id\n          LEFT JOIN schemes teamscheme ON t.schemeid = teamscheme.id\n         WHERE cm.userid = $1\n           AND ($2 OR c.deleteat = 0)\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "channelid",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "roles",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "schemeguest",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "schemeuser",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 4,
+        "name": "schemeadmin",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
+        "name": "teamschemedefaultguestrole",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 6,
+        "name": "teamschemedefaultuserrole",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 7,
+        "name": "teamschemedefaultadminrole",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 8,
+        "name": "channelschemedefaultguestrole",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 9,
+        "name": "channelschemedefaultuserrole",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 10,
+        "name": "channelschemedefaultadminrole",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "ed30cd697bdd388d88ecbf1fcee111daab1505b64342b11476c012227787cf72"
+}

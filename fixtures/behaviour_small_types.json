@@ -1,0 +1,265 @@
+{
+    "channel_stats": [
+        {
+            "guest_count_": 0,
+            "in": 0,
+            "member_count_": 0,
+            "pinnedpost_count_": 0,
+            "wire": "{\"channel_id\":\"c1\",\"member_count\":0,\"guest_count\":0,\"pinnedpost_count\":0,\"files_count\":0}"
+        },
+        {
+            "guest_count_": 1,
+            "in": 1,
+            "member_count_": 1,
+            "pinnedpost_count_": 1,
+            "wire": "{\"channel_id\":\"c1\",\"member_count\":1,\"guest_count\":1,\"pinnedpost_count\":1,\"files_count\":1}"
+        },
+        {
+            "guest_count_": -1,
+            "in": -1,
+            "member_count_": -1,
+            "pinnedpost_count_": -1,
+            "wire": "{\"channel_id\":\"c1\",\"member_count\":-1,\"guest_count\":-1,\"pinnedpost_count\":-1,\"files_count\":-1}"
+        },
+        {
+            "guest_count_": 9007199254740992,
+            "in": 9007199254740992,
+            "member_count_": 9007199254740992,
+            "pinnedpost_count_": 9007199254740992,
+            "wire": "{\"channel_id\":\"c1\",\"member_count\":9007199254740992,\"guest_count\":9007199254740992,\"pinnedpost_count\":9007199254740992,\"files_count\":9007199254740992}"
+        },
+        {
+            "guest_count_": 9007199254740992,
+            "in": 9007199254740993,
+            "member_count_": 9007199254740992,
+            "pinnedpost_count_": 9007199254740992,
+            "wire": "{\"channel_id\":\"c1\",\"member_count\":9007199254740993,\"guest_count\":9007199254740993,\"pinnedpost_count\":9007199254740993,\"files_count\":9007199254740993}"
+        },
+        {
+            "guest_count_": 9007199254740996,
+            "in": 9007199254740995,
+            "member_count_": 9007199254740996,
+            "pinnedpost_count_": 9007199254740996,
+            "wire": "{\"channel_id\":\"c1\",\"member_count\":9007199254740995,\"guest_count\":9007199254740995,\"pinnedpost_count\":9007199254740995,\"files_count\":9007199254740995}"
+        },
+        {
+            "guest_count_": -9007199254740992,
+            "in": -9007199254740993,
+            "member_count_": -9007199254740992,
+            "pinnedpost_count_": -9007199254740992,
+            "wire": "{\"channel_id\":\"c1\",\"member_count\":-9007199254740993,\"guest_count\":-9007199254740993,\"pinnedpost_count\":-9007199254740993,\"files_count\":-9007199254740993}"
+        },
+        {
+            "guest_count_": 9223372036854776000,
+            "in": 9223372036854775807,
+            "member_count_": 9223372036854776000,
+            "pinnedpost_count_": 9223372036854776000,
+            "wire": "{\"channel_id\":\"c1\",\"member_count\":9223372036854775807,\"guest_count\":9223372036854775807,\"pinnedpost_count\":9223372036854775807,\"files_count\":9223372036854775807}"
+        }
+    ],
+    "preview_post": [
+        {
+            "name": "all_present",
+            "nil_result": false,
+            "out": "{\"post_id\":\"p1\",\"post\":{\"id\":\"p1\",\"create_at\":0,\"update_at\":0,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"\",\"channel_id\":\"\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"hello\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null},\"team_name\":\"core\",\"channel_display_name\":\"Town Square\",\"channel_type\":\"O\",\"channel_id\":\"c1\"}",
+            "panicked": false,
+            "permalink": "{\"preview_post\":{\"post_id\":\"p1\",\"post\":{\"id\":\"p1\",\"create_at\":0,\"update_at\":0,\"edit_at\":0,\"delete_at\":0,\"is_pinned\":false,\"user_id\":\"\",\"channel_id\":\"\",\"root_id\":\"\",\"original_id\":\"\",\"message\":\"hello\",\"type\":\"\",\"props\":null,\"hashtags\":\"\",\"file_ids\":null,\"pending_post_id\":\"\",\"reply_count\":0,\"last_reply_at\":0,\"participants\":null},\"team_name\":\"core\",\"channel_display_name\":\"Town Square\",\"channel_type\":\"O\",\"channel_id\":\"c1\"}}"
+        },
+        {
+            "name": "nil_post",
+            "nil_result": true,
+            "panicked": false,
+            "permalink": "{\"preview_post\":null}"
+        },
+        {
+            "name": "nil_team",
+            "panicked": true
+        },
+        {
+            "name": "nil_channel",
+            "panicked": true
+        },
+        {
+            "name": "all_nil",
+            "nil_result": true,
+            "panicked": false,
+            "permalink": "{\"preview_post\":null}"
+        }
+    ],
+    "push_constants": {
+        "PushStatus": "status",
+        "PushStatusErrorMsg": "error",
+        "PushStatusFail": "FAIL",
+        "PushStatusOk": "OK",
+        "PushStatusRemove": "REMOVE"
+    },
+    "push_responses": [
+        {
+            "name": "ok",
+            "out": "{\"status\":\"OK\"}"
+        },
+        {
+            "name": "remove",
+            "out": "{\"status\":\"REMOVE\"}"
+        },
+        {
+            "name": "error",
+            "out": "{\"error\":\"boom\",\"status\":\"FAIL\"}"
+        },
+        {
+            "name": "error_empty",
+            "out": "{\"error\":\"\",\"status\":\"FAIL\"}"
+        }
+    ],
+    "team_search": [
+        {
+            "is_paginated": false,
+            "name": "both_nil",
+            "wire": "{\"term\":\"term\"}"
+        },
+        {
+            "is_paginated": false,
+            "name": "page_only",
+            "wire": "{\"term\":\"term\",\"page\":5}"
+        },
+        {
+            "is_paginated": false,
+            "name": "per_page_only",
+            "wire": "{\"term\":\"term\",\"per_page\":5}"
+        },
+        {
+            "is_paginated": true,
+            "name": "both_set",
+            "wire": "{\"term\":\"term\",\"page\":5,\"per_page\":5}"
+        },
+        {
+            "is_paginated": true,
+            "name": "both_zero",
+            "wire": "{\"term\":\"term\",\"page\":0,\"per_page\":0}"
+        },
+        {
+            "is_paginated": false,
+            "name": "page_zero_per_page_nil",
+            "wire": "{\"term\":\"term\",\"page\":0}"
+        }
+    ],
+    "team_search_wire": [
+        {
+            "err": null,
+            "in": "{}",
+            "include_deleted_nil": true,
+            "include_policy_enforced_nil": true,
+            "include_policy_id_nil": true,
+            "is_paginated": false,
+            "name": "empty_object",
+            "out": "{\"term\":\"\"}",
+            "panicked": false,
+            "team_type_nil": true
+        },
+        {
+            "err": null,
+            "in": "{\"term\":\"eng\"}",
+            "include_deleted_nil": true,
+            "include_policy_enforced_nil": true,
+            "include_policy_id_nil": true,
+            "is_paginated": false,
+            "name": "term_only",
+            "out": "{\"term\":\"eng\"}",
+            "panicked": false,
+            "team_type_nil": true
+        },
+        {
+            "err": null,
+            "in": "{\"term\":\"eng\",\"page\":2,\"per_page\":50}",
+            "include_deleted_nil": true,
+            "include_policy_enforced_nil": true,
+            "include_policy_id_nil": true,
+            "is_paginated": true,
+            "name": "pagination",
+            "out": "{\"term\":\"eng\",\"page\":2,\"per_page\":50}",
+            "panicked": false,
+            "team_type_nil": true
+        },
+        {
+            "err": null,
+            "in": "{\"page\":0,\"per_page\":0}",
+            "include_deleted_nil": true,
+            "include_policy_enforced_nil": true,
+            "include_policy_id_nil": true,
+            "is_paginated": true,
+            "name": "page_zero",
+            "out": "{\"term\":\"\",\"page\":0,\"per_page\":0}",
+            "panicked": false,
+            "team_type_nil": true
+        },
+        {
+            "err": null,
+            "in": "{\"allow_open_invite\":true,\"group_constrained\":false,\"include_group_constrained\":true,\"exclude_policy_constrained\":false}",
+            "include_deleted_nil": true,
+            "include_policy_enforced_nil": true,
+            "include_policy_id_nil": true,
+            "is_paginated": false,
+            "name": "bools",
+            "out": "{\"term\":\"\",\"allow_open_invite\":true,\"group_constrained\":false,\"include_group_constrained\":true,\"exclude_policy_constrained\":false}",
+            "panicked": false,
+            "team_type_nil": true
+        },
+        {
+            "err": null,
+            "in": "{\"policy_id\":\"pol1\"}",
+            "include_deleted_nil": true,
+            "include_policy_enforced_nil": true,
+            "include_policy_id_nil": true,
+            "is_paginated": false,
+            "name": "policy_id",
+            "out": "{\"term\":\"\",\"policy_id\":\"pol1\"}",
+            "panicked": false,
+            "team_type_nil": true
+        },
+        {
+            "err": null,
+            "in": "{\"policy_id\":null}",
+            "include_deleted_nil": true,
+            "include_policy_enforced_nil": true,
+            "include_policy_id_nil": true,
+            "is_paginated": false,
+            "name": "policy_id_null",
+            "out": "{\"term\":\"\"}",
+            "panicked": false,
+            "team_type_nil": true
+        },
+        {
+            "err": null,
+            "in": "{\"IncludePolicyID\":true,\"include_policy_id\":true,\"IncludeDeleted\":true,\"include_deleted\":true,\"TeamType\":\"O\",\"team_type\":\"O\",\"IncludePolicyEnforced\":true,\"include_policy_enforced\":true}",
+            "include_deleted_nil": true,
+            "include_policy_enforced_nil": true,
+            "include_policy_id_nil": true,
+            "is_paginated": false,
+            "name": "dashed_fields",
+            "out": "{\"term\":\"\"}",
+            "panicked": false,
+            "team_type_nil": true
+        },
+        {
+            "err": null,
+            "in": "{\"nope\":1,\"term\":\"eng\"}",
+            "include_deleted_nil": true,
+            "include_policy_enforced_nil": true,
+            "include_policy_id_nil": true,
+            "is_paginated": false,
+            "name": "unknown_key",
+            "out": "{\"term\":\"eng\"}",
+            "panicked": false,
+            "team_type_nil": true
+        }
+    ],
+    "zero_values": {
+        "channel_stats": "{\"channel_id\":\"\",\"member_count\":0,\"guest_count\":0,\"pinnedpost_count\":0,\"files_count\":0}",
+        "cluster_info": "{\"id\":\"\",\"version\":\"\",\"schema_version\":\"\",\"config_hash\":\"\",\"ipaddress\":\"\",\"hostname\":\"\"}",
+        "permalink": "{\"preview_post\":null}",
+        "preview_post": "{\"post_id\":\"\",\"post\":null,\"team_name\":\"\",\"channel_display_name\":\"\",\"channel_type\":\"\",\"channel_id\":\"\"}",
+        "push_response": "{}",
+        "read_receipt": "{\"post_id\":\"\",\"user_id\":\"\",\"expire_at\":0}",
+        "team_search": "{\"term\":\"\"}"
+    }
+}

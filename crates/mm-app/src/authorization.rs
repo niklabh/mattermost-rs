@@ -14,15 +14,16 @@
 //!
 //! # What is ported
 //!
-//! The system-, team- and user-scoped checks, plus `GetRolesByNames` and the higher-scoped merge
-//! behind it. The channel, post, group, category, bot and property-field variants need stores that
-//! do not exist yet, and `SessionHasPermissionToAndNotRestrictedAdmin` needs `Config`. See [D-134].
+//! The system-, team-, user- and **channel**-scoped checks, plus `GetRolesByNames` and the
+//! higher-scoped merge behind it. The post, group, category, bot and property-field variants need
+//! stores that do not exist yet, and `SessionHasPermissionToAndNotRestrictedAdmin` needs `Config`.
+//! See [D-134].
 
 use mm_model::permission::Permission;
 use mm_model::role::Role;
 use mm_model::session::Session;
 use mm_model::utils::AppError;
-use mm_store::{RoleStore, UserStore};
+use mm_store::{ChannelStore, RoleStore, UserStore};
 
 use crate::App;
 
@@ -195,6 +196,115 @@ impl App {
             .await
     }
 
+    /// Port of `app.App.SessionHasPermissionToChannel` (authorization.go:101).
+    ///
+    /// Returns `(has_permission, is_member)`. The second value is **not** a by-product: Go's
+    /// comment on the sibling `HasPermissionToChannel` says it is "used for auditing access without
+    /// membership", so a caller can record that a system admin read a channel they do not belong
+    /// to. Dropping it would silently remove that signal from every audit record.
+    ///
+    /// # The branch order, which is not the obvious one
+    ///
+    /// 1. **An empty channel id denies** — before the unrestricted check, so even an unrestricted
+    ///    session is denied for `""`. Same shape as `session_has_permission_to_team`.
+    /// 2. **The channel must exist**, and it is fetched *before* the unrestricted check too. A
+    ///    404 and a broken lookup both deny; only the second is logged. So an unrestricted session
+    ///    asking about a channel that does not exist is denied — the existence check is not a
+    ///    formality that a privileged caller skips.
+    /// 3. Unrestricted grants.
+    /// 4. **Channel membership roles**, from the *plural* store read — see below.
+    /// 5. **`manage_system` on the session's user roles.** Note this is checked directly rather
+    ///    than through `session_has_permission_to`, so it does not re-run the unrestricted branch.
+    /// 6. **Fall back to the team**, when the channel has one; otherwise to the system check. A DM
+    ///    or GM has an empty `TeamId` and takes the second path.
+    ///
+    /// A store failure at step 4 is **swallowed** (Go's `if err == nil`): the check carries on to
+    /// the system and team fallbacks rather than denying outright. That is Go's behaviour and it is
+    /// reproduced, but it is worth naming — it is the one place in this file where a database
+    /// failure does not immediately deny, and the reason it is still safe is that every remaining
+    /// branch has to grant on its own evidence.
+    ///
+    /// # Why the roles come from the plural read
+    ///
+    /// Go calls `GetAllChannelMembersForUser`, not `GetMember`, and its comment says why: the
+    /// former is cache-backed and this is a hot path. That is not a detail we could optimise away,
+    /// because **the two store methods resolve roles differently** — see
+    /// `process_all_channel_member_roles` in `mm-store` and [D-142]. Substituting `GetMember`
+    /// here would change which role names reach `roles_grant_permission` for any member holding a
+    /// literal scheme role id in the `Roles` column.
+    #[tracing::instrument(skip(self, session), fields(user_id = %session.user_id))]
+    pub async fn session_has_permission_to_channel(
+        &self,
+        session: &Session,
+        channel_id: &str,
+        permission: &Permission,
+    ) -> (bool, bool) {
+        if channel_id.is_empty() {
+            return (false, false);
+        }
+
+        let channel = match self.get_channel(channel_id).await {
+            Ok(channel) => channel,
+            Err(err) => {
+                // Go logs only the non-404 case (authorization.go:110); a missing channel is
+                // ordinary and would otherwise fill the log with noise from probing clients.
+                if err.status_code != 404 {
+                    tracing::warn!(channel_id = %channel_id, error = %err, "Failed to get channel");
+                }
+                return (false, false);
+            }
+        };
+
+        if session.is_unrestricted() {
+            return (true, false);
+        }
+
+        let mut is_member = false;
+        // Go passes `includeDeleted = true` here, so membership of an archived channel still
+        // grants. Passing false would deny every check on an archived channel, which is not what
+        // archiving means: the channel becomes read-only, not invisible to its members.
+        if let Ok(members) = self
+            .store()
+            .channel()
+            .get_all_channel_members_for_user(&session.user_id, true)
+            .await
+        {
+            if let Some(roles) = members.get(channel_id) {
+                is_member = true;
+                let channel_roles = fields(roles);
+                if self
+                    .roles_grant_permission(&channel_roles, &permission.id)
+                    .await
+                {
+                    return (true, is_member);
+                }
+            }
+        }
+
+        if self
+            .roles_grant_permission(
+                &owned(session.get_user_roles()),
+                &mm_model::permission::PERMISSION_MANAGE_SYSTEM.id,
+            )
+            .await
+        {
+            return (true, is_member);
+        }
+
+        if !channel.team_id.is_empty() {
+            return (
+                self.session_has_permission_to_team(session, &channel.team_id, permission)
+                    .await,
+                is_member,
+            );
+        }
+
+        (
+            self.session_has_permission_to(session, permission).await,
+            is_member,
+        )
+    }
+
     /// Port of `app.App.SessionHasPermissionToUser` (authorization.go:250).
     ///
     /// This is the self-shortcut [D-094] names as the reason the four migrated `me`-scoped routes
@@ -245,6 +355,13 @@ fn owned(roles: Vec<&str>) -> Vec<String> {
     roles.into_iter().map(str::to_owned).collect()
 }
 
+/// Go's `strings.Fields` over a stored role string. Splits on runs of whitespace and drops
+/// empties, so an empty `Roles` value yields no names rather than one empty name — which would
+/// otherwise be looked up as a role called `""`.
+fn fields(roles: &str) -> Vec<String> {
+    roles.split_whitespace().map(str::to_owned).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -262,6 +379,12 @@ mod tests {
     fn app_with_unreachable_store() -> App {
         let pool = PgPoolOptions::new()
             .max_connections(1)
+            // `acquire_timeout` is set because sqlx's default is **30 seconds**, and the connection
+            // to :1 is refused instantly but retried until that window expires. Six tests wearing that
+            // default cost 90 seconds of every `cargo test -p mm-app`, and 6 minutes under
+            // `--test-threads=1`. The error a caller sees is `PoolTimedOut` either way, so nothing
+            // under test changes — only how long we wait to see it.
+            .acquire_timeout(std::time::Duration::from_millis(250))
             .connect_lazy("postgres://nobody:nobody@127.0.0.1:1/nonexistent")
             .expect("a lazy pool never connects");
         App::new(SqlStore::from_pool(pool))
