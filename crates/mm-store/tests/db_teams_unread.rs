@@ -1,5 +1,5 @@
-//! `SqlTeamStore::get_channel_unreads_for_all_teams` against a real Postgres, on the rows the
-//! REST API cannot build.
+//! `SqlTeamStore::get_channel_unreads_for_all_teams` and its singular sibling
+//! `get_channel_unreads_for_team` against a real Postgres, on the rows the REST API cannot build.
 //!
 //! ```sh
 //! docker compose up -d
@@ -21,7 +21,7 @@
 //!
 //! Every row is `mmrstu`-prefixed and removed before and after.
 
-use mm_store::team_store::get_channel_unreads_for_all_teams;
+use mm_store::team_store::{get_channel_unreads_for_all_teams, get_channel_unreads_for_team};
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 
@@ -252,6 +252,124 @@ async fn a_null_counter_is_an_error_not_a_zero() {
     seed(&pool, true).await;
 
     let result = get_channel_unreads_for_all_teams(&pool, "", USER).await;
+
+    purge(&pool).await;
+
+    let err = result.expect_err("a NULL MentionCount cannot scan into int64");
+    assert!(!err.is_not_found(), "a scan failure, not a miss: {err}");
+}
+
+/// The singular query is `TeamId = ?` where the plural is `TeamId <> ?`, and everything else is
+/// the same: only team A's channels come back, the space is still denied, the archived channel is
+/// still filtered by `DeleteAt = 0`, and the board is still admitted.
+#[tokio::test]
+async fn the_singular_query_is_scoped_to_one_team_and_keeps_the_same_three_filters() {
+    if !db_enabled() {
+        eprintln!("skipping: set MM_STORE_DB=1 with DATABASE_URL pointing at the stack");
+        return;
+    }
+    let _fixtures = FIXTURES.lock().await;
+    let pool = pool().await;
+    purge(&pool).await;
+    seed(&pool, false).await;
+
+    let rows = get_channel_unreads_for_team(&pool, TEAM_A, USER)
+        .await
+        .expect("the query runs");
+    let other = get_channel_unreads_for_team(&pool, TEAM_B, USER)
+        .await
+        .expect("the query runs");
+
+    purge(&pool).await;
+
+    let mut ids: Vec<&str> = rows.iter().map(|r| r.channel_id.as_str()).collect();
+    ids.sort_unstable();
+    assert_eq!(
+        ids,
+        vec![BOARD_A, OPEN_A],
+        "team A only: the space is denied, the archived channel is deleted, team B and the \
+         team-less DM are out of scope"
+    );
+    assert_eq!(
+        other
+            .iter()
+            .map(|r| r.channel_id.as_str())
+            .collect::<Vec<_>>(),
+        vec![OPEN_B],
+        "asking for team B returns team B, so the predicate is equality and not a constant"
+    );
+
+    let open_a = by_channel(&rows, OPEN_A).expect("open A");
+    assert_eq!(open_a.team_id, TEAM_A);
+    assert_eq!(open_a.msg_count, 25, "40 - 15");
+    assert_eq!(open_a.msg_count_root, 18, "30 - 12");
+    assert_eq!(open_a.mention_count, 7);
+    assert_eq!(open_a.mention_count_root, 5);
+    assert_eq!(
+        open_a.urgent_mention_count, 0,
+        "not selected by Go's query; stays at the zero value"
+    );
+    assert!(open_a.notify_props.as_ref().is_some_and(|p| p.is_empty()));
+    assert_eq!(by_channel(&rows, BOARD_A).expect("board A").msg_count, 250);
+}
+
+/// The predicate directions are genuinely opposite, on one fixture: `TeamId = ''` returns
+/// **exactly** the team-less direct channel that `TeamId <> ''` hides. Unreachable through
+/// `getTeamUnread` (`RequireTeamId` rejects the empty string) and asserted here because that is
+/// the only place a `<>` written where a `=` belongs would show up.
+#[tokio::test]
+async fn an_empty_team_id_selects_the_direct_channel_the_plural_query_hides() {
+    if !db_enabled() {
+        eprintln!("skipping: set MM_STORE_DB=1 with DATABASE_URL pointing at the stack");
+        return;
+    }
+    let _fixtures = FIXTURES.lock().await;
+    let pool = pool().await;
+    purge(&pool).await;
+    seed(&pool, false).await;
+
+    let singular = get_channel_unreads_for_team(&pool, "", USER)
+        .await
+        .expect("the query runs");
+    let plural = get_channel_unreads_for_all_teams(&pool, "", USER)
+        .await
+        .expect("the query runs");
+
+    purge(&pool).await;
+
+    assert_eq!(
+        singular
+            .iter()
+            .map(|r| r.channel_id.as_str())
+            .collect::<Vec<_>>(),
+        vec![DIRECT],
+        "the equality arm keeps only what the inequality arm drops"
+    );
+    assert!(
+        !plural.iter().any(|r| r.channel_id == DIRECT),
+        "…and the inequality arm drops it"
+    );
+    let direct = by_channel(&singular, DIRECT).expect("the DM");
+    assert_eq!(direct.msg_count, 50, "60 - 10");
+    assert_eq!(direct.msg_count_root, 40, "50 - 10");
+    assert_eq!(direct.mention_count, 4);
+    assert_eq!(direct.mention_count_root, 3);
+}
+
+/// A NULL counter fails the singular read too — the shared decode does not coalesce where Go's
+/// `int64` scan would fail.
+#[tokio::test]
+async fn a_null_counter_is_an_error_for_the_singular_query_as_well() {
+    if !db_enabled() {
+        eprintln!("skipping: set MM_STORE_DB=1 with DATABASE_URL pointing at the stack");
+        return;
+    }
+    let _fixtures = FIXTURES.lock().await;
+    let pool = pool().await;
+    purge(&pool).await;
+    seed(&pool, true).await;
+
+    let result = get_channel_unreads_for_team(&pool, TEAM_A, USER).await;
 
     purge(&pool).await;
 

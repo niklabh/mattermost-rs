@@ -156,6 +156,20 @@ mod tests {
         assert_eq!(round_tripped, expected);
     }
 
+    /// `TeamUnread` reaches a client from two routes with two different framings
+    /// (`getTeamUnread` encodes, `getTeamsUnreadForUser` marshals), so its field set is pinned
+    /// against a generated fixture rather than against either handler. Eight fields, none
+    /// `omitempty`, every one distinct and non-zero in the fixture.
+    #[test]
+    fn team_unread_matches_go_serialization() {
+        let go = include_str!("../../../fixtures/team_unread.json");
+        let parsed: TeamUnread = serde_json::from_str(go).unwrap();
+        let round_tripped = serde_json::to_value(&parsed).unwrap();
+        let expected: serde_json::Value = serde_json::from_str(go).unwrap();
+        assert_eq!(round_tripped, expected);
+        assert_eq!(expected.as_object().unwrap().len(), 8);
+    }
+
     #[test]
     fn create_at_never_reaches_the_wire() {
         let member = TeamMember {

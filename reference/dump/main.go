@@ -108,6 +108,7 @@ var registry = map[string]any{
 	"channel_member_history_result": &model.ChannelMemberHistoryResult{},
 	"analytics_row":                 &model.AnalyticsRow{},
 	"team_stats":                    &model.TeamStats{},
+	"team_unread":                   &model.TeamUnread{},
 	"users_stats":                   &model.UsersStats{},
 	"cluster_stats":                 &model.ClusterStats{},
 	"channel_search":                &model.ChannelSearch{},

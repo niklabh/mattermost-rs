@@ -199,6 +199,13 @@ pub trait TeamStore {
         exclude_team_id: &str,
         user_id: &str,
     ) -> impl std::future::Future<Output = Result<Vec<ChannelUnread>, StoreError>> + Send;
+
+    /// Port of `SqlTeamStore.GetChannelUnreadsForTeam` (team_store.go:1253).
+    fn get_channel_unreads_for_team(
+        &self,
+        team_id: &str,
+        user_id: &str,
+    ) -> impl std::future::Future<Output = Result<Vec<ChannelUnread>, StoreError>> + Send;
 }
 
 /// Postgres-backed implementation.
@@ -272,6 +279,15 @@ impl TeamStore for SqlTeamStore {
         user_id: &str,
     ) -> Result<Vec<ChannelUnread>, StoreError> {
         get_channel_unreads_for_all_teams(&self.pool, exclude_team_id, user_id).await
+    }
+
+    #[tracing::instrument(skip_all, fields(user_id = %user_id, team_id = %team_id, found))]
+    async fn get_channel_unreads_for_team(
+        &self,
+        team_id: &str,
+        user_id: &str,
+    ) -> Result<Vec<ChannelUnread>, StoreError> {
+        get_channel_unreads_for_team(&self.pool, team_id, user_id).await
     }
 }
 
@@ -815,6 +831,23 @@ pub async fn get_teams_for_user(
     Ok(rows.into_iter().map(team_member_from_row).collect())
 }
 
+/// The seven columns both `GetChannelUnreads…` queries select. Named so the two call sites share
+/// one decode ([`channel_unread_from_row`]) instead of two copies of the jsonb split — a
+/// divergence between them would be invisible on the wire until one route drifted.
+///
+/// `sqlx::query_as!` binds these by **column name**, not by position, so the order of the fields
+/// here and the order of the `SELECT` list are independent. Measured: a mutation reordering two
+/// same-typed columns survives a DB test whose expected values for them differ.
+struct ChannelUnreadRow {
+    teamid: String,
+    channelid: String,
+    msgcount: i64,
+    msgcountroot: i64,
+    mentioncount: i64,
+    mentioncountroot: i64,
+    notifyprops: Option<serde_json::Value>,
+}
+
 /// Port of `SqlTeamStore.GetChannelUnreadsForAllTeams` (team_store.go:1231).
 ///
 /// # The exclusion predicate is unconditional, and that is what hides the DMs
@@ -846,7 +879,8 @@ pub async fn get_channel_unreads_for_all_teams(
     exclude_team_id: &str,
     user_id: &str,
 ) -> Result<Vec<ChannelUnread>, StoreError> {
-    let rows = sqlx::query!(
+    let rows = sqlx::query_as!(
+        ChannelUnreadRow,
         r#"
         SELECT channels.teamid AS "teamid!",
                channels.id AS "channelid!",
@@ -875,32 +909,92 @@ pub async fn get_channel_unreads_for_all_teams(
     })?;
     tracing::Span::current().record("found", rows.len());
 
-    rows.into_iter()
-        .map(|row| {
-            // Same jsonb split as `channel_store::get_channel_unread`: SQL NULL and the JSON
-            // value `null` are different rows, and both are a nil map in Go ([D-135]).
-            let notify_props = match row.notifyprops {
-                None | Some(serde_json::Value::Null) => None,
-                Some(value) => Some(serde_json::from_value::<StringMap>(value).map_err(
-                    |source| StoreError::Decode {
-                        entity: "ChannelUnread",
-                        column: "notifyprops",
-                        source,
-                    },
-                )?),
-            };
-            Ok(ChannelUnread {
-                team_id: row.teamid,
-                channel_id: row.channelid,
-                msg_count: row.msgcount,
-                mention_count: row.mentioncount,
-                mention_count_root: row.mentioncountroot,
-                urgent_mention_count: 0,
-                msg_count_root: row.msgcountroot,
-                notify_props,
-            })
-        })
-        .collect()
+    rows.into_iter().map(channel_unread_from_row).collect()
+}
+
+/// Port of `SqlTeamStore.GetChannelUnreadsForTeam` (team_store.go:1253).
+///
+/// The near-twin of [`get_channel_unreads_for_all_teams`], and the difference is the whole
+/// reason both exist: this one is `TeamId = ?`, that one `TeamId <> ?`. Same seven selected
+/// columns, same `DeleteAt = 0`, same `Channels.Type NOT IN ('S')` space deny-list, same bare
+/// names resolving to `ChannelMembers.UserId` and the *channel's* `DeleteAt`/`TeamId`
+/// (`ChannelMembers` has neither column) — so an archived channel's unread state is gone here
+/// too, and a board's counters still feed the team badge.
+///
+/// # An equality predicate is not the complement of the inequality one
+///
+/// The sibling's unconditional `<> ''` is what hides direct and group channels from the default
+/// team-list answer, and passing an exclusion surfaces them as a `team_id: ""` entry. Nothing
+/// here can produce that entry over REST: `getTeamUnread` reaches this only after
+/// `RequireTeamId`, which rejects the empty string, so the `TeamId = ''` query that *would*
+/// return every DM is unreachable through the route. The store function itself does not defend
+/// against it — Go's does not either.
+///
+/// Nothing is coalesced (the `!` overrides reproduce Go's plain `int64` scan failing on a NULL),
+/// `UrgentMentionCount` is not selected and stays at zero, and `NotifyProps` never reaches a
+/// client but the app-layer fold branches on it.
+#[tracing::instrument(skip(pool), fields(user_id = %user_id, team_id = %team_id))]
+pub async fn get_channel_unreads_for_team(
+    pool: &PgPool,
+    team_id: &str,
+    user_id: &str,
+) -> Result<Vec<ChannelUnread>, StoreError> {
+    let rows = sqlx::query_as!(
+        ChannelUnreadRow,
+        r#"
+        SELECT channels.teamid AS "teamid!",
+               channels.id AS "channelid!",
+               (channels.totalmsgcount - channelmembers.msgcount) AS "msgcount!",
+               (channels.totalmsgcountroot - channelmembers.msgcountroot) AS "msgcountroot!",
+               channelmembers.mentioncount AS "mentioncount!",
+               channelmembers.mentioncountroot AS "mentioncountroot!",
+               channelmembers.notifyprops
+          FROM channels
+          JOIN channelmembers ON channels.id = channelmembers.channelid
+         WHERE channelmembers.userid = $1
+           AND channels.teamid = $2
+           AND channels.deleteat = 0
+           AND channels.type NOT IN ('S')
+        "#,
+        user_id,
+        team_id
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: format!("failed to find Channels with teamId={team_id} and userId={user_id}"),
+        source,
+    })?;
+    tracing::Span::current().record("found", rows.len());
+
+    rows.into_iter().map(channel_unread_from_row).collect()
+}
+
+/// The shared row decode of the two `GetChannelUnreads…` queries: they select the same seven
+/// columns in the same order, so the mapping is written once.
+fn channel_unread_from_row(row: ChannelUnreadRow) -> Result<ChannelUnread, StoreError> {
+    // Same jsonb split as `channel_store::get_channel_unread`: SQL NULL and the JSON
+    // value `null` are different rows, and both are a nil map in Go ([D-135]).
+    let notify_props = match row.notifyprops {
+        None | Some(serde_json::Value::Null) => None,
+        Some(value) => Some(
+            serde_json::from_value::<StringMap>(value).map_err(|source| StoreError::Decode {
+                entity: "ChannelUnread",
+                column: "notifyprops",
+                source,
+            })?,
+        ),
+    };
+    Ok(ChannelUnread {
+        team_id: row.teamid,
+        channel_id: row.channelid,
+        msg_count: row.msgcount,
+        mention_count: row.mentioncount,
+        mention_count_root: row.mentioncountroot,
+        urgent_mention_count: 0,
+        msg_count_root: row.msgcountroot,
+        notify_props,
+    })
 }
 
 #[cfg(test)]
