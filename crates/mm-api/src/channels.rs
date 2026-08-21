@@ -9,6 +9,9 @@
 //! - `getChannelsForTeamForUser` — `GET /api/v4/users/{user_id}/teams/{team_id}/channels`
 //! - `getChannelsForUser` — `GET /api/v4/users/{user_id}/channels` (streamed in Go; see the
 //!   handler for the byte layout that implies)
+//! - `getPublicChannelsForTeam` — `GET /api/v4/teams/{team_id}/channels`
+//! - `getPrivateChannelsForTeam` — `GET /api/v4/teams/{team_id}/channels/private`
+//! - `getDeletedChannelsForTeam` — `GET /api/v4/teams/{team_id}/channels/deleted`
 //!
 //! # The first route migrated *through* a permission check
 //!
@@ -38,9 +41,9 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use mm_model::channel::{CHANNEL_TYPE_OPEN, ChannelSearchOpts, is_valid_channel_identifier};
 use mm_model::permission::{
-    PERMISSION_EDIT_OTHER_USERS, PERMISSION_MANAGE_SYSTEM, PERMISSION_MANAGE_TEAM,
-    PERMISSION_READ_CHANNEL, PERMISSION_READ_PUBLIC_CHANNEL, PERMISSION_VIEW_TEAM, Permission,
-    make_permission_error,
+    PERMISSION_EDIT_OTHER_USERS, PERMISSION_LIST_TEAM_CHANNELS, PERMISSION_MANAGE_SYSTEM,
+    PERMISSION_MANAGE_TEAM, PERMISSION_READ_CHANNEL, PERMISSION_READ_PUBLIC_CHANNEL,
+    PERMISSION_VIEW_TEAM, Permission, make_permission_error,
 };
 use mm_model::utils::{is_valid_id, parse_go_bool};
 
@@ -1361,6 +1364,235 @@ pub async fn get_channel_members_for_team_for_user(
         .into_response())
 }
 
+/// Go's `c.Params.Page * c.Params.PerPage`, computed in `int` — 64 bits on every platform this
+/// deployment runs on — and therefore **wrapping** on overflow rather than saturating.
+///
+/// The distinction is on the wire. `page` and `per_page` are parsed with `strconv.Atoi`, which
+/// happily accepts `9223372036854775807`; multiplied by a `per_page` above 1 that wraps to a
+/// negative offset, which squirrel renders as `uint64(negative)` — a literal Postgres rejects as
+/// out of range for `bigint`. The result is a 500 carrying the store's own error id, measured on
+/// the running server. Saturating instead would answer `200 []` for the same request, and
+/// clamping the page to something "sensible" would answer a *page of channels*.
+///
+/// This port binds the offset as a signed parameter, so Postgres refuses it as "OFFSET must not
+/// be negative" instead of "out of range" — a different message behind the same 500 and the same
+/// id, since `detailed_error` is wiped ([D-092]).
+pub(crate) fn page_offset(page: i64, per_page: i64) -> i64 {
+    page.wrapping_mul(per_page)
+}
+
+/// `json.NewEncoder(w).Encode(channels)` for the three team channel lists: the list, then a
+/// newline ([D-086]).
+///
+/// Go logs an encode failure and leaves whatever it had already written on the wire; a
+/// `model.Channel` cannot fail to marshal, so the 500 below is the unreachable branch that keeps
+/// this crate free of `unwrap` rather than a behaviour claim.
+#[allow(clippy::result_large_err)]
+fn encoded_channel_list(
+    where_: &'static str,
+    channels: &mm_model::channel_list::ChannelList,
+) -> Result<Vec<u8>, ApiError> {
+    let mut body = serde_json::to_vec(channels).map_err(|err| {
+        tracing::error!(error = %err, "failed to serialise the channel list");
+        ApiError(mm_model::utils::AppError::new(
+            where_,
+            "api.marshal_error",
+            None,
+            String::new(),
+            500,
+        ))
+    })?;
+    body.push(b'\n');
+    Ok(body)
+}
+
+/// The 200 the three team channel lists share: JSON, the served-by marker, body, no etag.
+fn channel_list_response(body: Vec<u8>) -> Response {
+    (
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
+    )
+        .into_response()
+}
+
+/// Port of `getPublicChannelsForTeam` (api4/channel.go:1221), reached as
+/// `GET /api/v4/teams/{team_id}/channels` — the "Browse channels" list.
+///
+/// # Order of operations
+///
+/// 1. `RequireTeamId()`. No `me` alias and no user parameter at all: this list is the team's, not
+///    a member's, and nothing here consults the caller's memberships.
+/// 2. **One gate, `list_team_channels`, asked through `SessionHasPermissionToTeam`.** Not
+///    `view_team` — the constant its two siblings in this file use — and not `manage_system`,
+///    which is what the `/private` route asks for one segment deeper. An ordinary team member
+///    holds `list_team_channels`; a non-member does not, and gets a 403 (measured, both ways).
+/// 3. `page * per_page` as the offset — see [`page_offset`] for what an overflowing page does.
+/// 4. `GetPublicChannelsForTeam`, then `FillInChannelsProps`.
+/// 5. `json.NewEncoder(w).Encode` — trailing newline ([D-086]). **No etag on this route**, unlike
+///    the per-team-per-user list, so every request pays for the whole page.
+///
+/// # What "public" means here, and what it does not
+///
+/// The store joins `PublicChannels`, Go's denormalised shadow table, and filters on **its**
+/// `TeamId` and `DeleteAt` — see [`mm_store::channel_store::get_public_channels_for_team`]. An
+/// archived public channel is excluded (its shadow row survives with the new `DeleteAt`), and a
+/// channel the caller is not a member of is **included**: this is the browse list, not the
+/// sidebar.
+#[tracing::instrument(skip_all, fields(team_id = %team_id, count))]
+pub async fn get_public_channels_for_team(
+    State(state): State<AppState>,
+    Path(team_id): Path<String>,
+    axum::extract::RawQuery(query): axum::extract::RawQuery,
+    session: AuthenticatedSession,
+) -> Result<Response, ApiError> {
+    require_id(&team_id, "team_id")?;
+
+    if !state
+        .app
+        .session_has_permission_to_team(&session.0, &team_id, &PERMISSION_LIST_TEAM_CHANNELS)
+        .await
+    {
+        return Err(ApiError(*make_permission_error(
+            &session.0,
+            &[&PERMISSION_LIST_TEAM_CHANNELS],
+        )));
+    }
+
+    let per_page = parse_per_page(query.as_deref());
+    let offset = page_offset(parse_page(query.as_deref()), per_page);
+
+    let mut channels = state
+        .app
+        .get_public_channels_for_team(&team_id, offset, per_page)
+        .await?;
+    tracing::Span::current().record("count", channels.0.len());
+
+    state.app.fill_in_channels_props(&mut channels.0).await?;
+
+    Ok(channel_list_response(encoded_channel_list(
+        "getPublicChannelsForTeam",
+        &channels,
+    )?))
+}
+
+/// Port of `getPrivateChannelsForTeam` (api4/channel.go:1301), reached as
+/// `GET /api/v4/teams/{team_id}/channels/private`.
+///
+/// **Its gate is not its sibling's, and the difference is not a scope but a permission.** Go
+/// calls `SessionHasPermissionTo(session, PermissionManageSystem)` — the *system* check, with no
+/// team argument — so a team admin is refused here while passing
+/// [`get_public_channels_for_team`] one segment up. Copying the sibling's
+/// `session_has_permission_to_team(team_id, list_team_channels)` would hand every member of the
+/// team a list of its private channels, which is the one thing this route exists to withhold.
+/// The refusal names `manage_system`; a plain team member gets a 403 (measured).
+///
+/// Everything after the gate is the sibling's: offset paging, `FillInChannelsProps`, an
+/// `Encode`d list with a trailing newline, no etag.
+#[tracing::instrument(skip_all, fields(team_id = %team_id, count))]
+pub async fn get_private_channels_for_team(
+    State(state): State<AppState>,
+    Path(team_id): Path<String>,
+    axum::extract::RawQuery(query): axum::extract::RawQuery,
+    session: AuthenticatedSession,
+) -> Result<Response, ApiError> {
+    require_id(&team_id, "team_id")?;
+
+    if !state
+        .app
+        .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)
+        .await
+    {
+        return Err(ApiError(*make_permission_error(
+            &session.0,
+            &[&PERMISSION_MANAGE_SYSTEM],
+        )));
+    }
+
+    let per_page = parse_per_page(query.as_deref());
+    let offset = page_offset(parse_page(query.as_deref()), per_page);
+
+    let mut channels = state
+        .app
+        .get_private_channels_for_team(&team_id, offset, per_page)
+        .await?;
+    tracing::Span::current().record("count", channels.0.len());
+
+    state.app.fill_in_channels_props(&mut channels.0).await?;
+
+    Ok(channel_list_response(encoded_channel_list(
+        "getPrivateChannelsForTeam",
+        &channels,
+    )?))
+}
+
+/// Port of `getDeletedChannelsForTeam` (api4/channel.go:1272), reached as
+/// `GET /api/v4/teams/{team_id}/channels/deleted`.
+///
+/// # Two permissions, and only one of them can refuse
+///
+/// The gate is `list_team_channels` on the team, exactly as [`get_public_channels_for_team`].
+/// `manage_system` is then asked **as a question, not as a gate**: its answer becomes
+/// `skipTeamMembershipCheck`, which widens what the store returns rather than deciding whether
+/// anything is returned at all. Turning that second check into a second gate would 403 every
+/// ordinary member; dropping it would hide a system admin's archived DMs and private channels.
+/// Both halves are measured against Go, which needs two actors — the fixture admin can only ever
+/// see the wide answer.
+///
+/// The order matters for a reason the wire cannot show: Go asks `SessionHasPermissionTo` only
+/// after the team gate has passed, so a refused caller never pays for the system-role lookup.
+/// Pinned in-process, like [`channel_read_denied`] and friends.
+#[tracing::instrument(skip_all, fields(team_id = %team_id, count))]
+pub async fn get_deleted_channels_for_team(
+    State(state): State<AppState>,
+    Path(team_id): Path<String>,
+    axum::extract::RawQuery(query): axum::extract::RawQuery,
+    session: AuthenticatedSession,
+) -> Result<Response, ApiError> {
+    require_id(&team_id, "team_id")?;
+
+    if !state
+        .app
+        .session_has_permission_to_team(&session.0, &team_id, &PERMISSION_LIST_TEAM_CHANNELS)
+        .await
+    {
+        return Err(ApiError(*make_permission_error(
+            &session.0,
+            &[&PERMISSION_LIST_TEAM_CHANNELS],
+        )));
+    }
+
+    let skip_team_membership_check = state
+        .app
+        .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)
+        .await;
+
+    let per_page = parse_per_page(query.as_deref());
+    let offset = page_offset(parse_page(query.as_deref()), per_page);
+
+    let mut channels = state
+        .app
+        .get_deleted_channels(
+            &team_id,
+            offset,
+            per_page,
+            &session.0.user_id,
+            skip_team_membership_check,
+        )
+        .await?;
+    tracing::Span::current().record("count", channels.0.len());
+
+    state.app.fill_in_channels_props(&mut channels.0).await?;
+
+    Ok(channel_list_response(encoded_channel_list(
+        "getDeletedChannelsForTeam",
+        &channels,
+    )?))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2240,5 +2472,76 @@ mod tests {
         )
         .await;
         assert!(!allowed);
+    }
+
+    /// `page * per_page` in Go's `int` — 64-bit and **wrapping**, not saturating and not clamped.
+    ///
+    /// Only the ordinary rows are observable over HTTP as a *page*; the overflow rows are
+    /// observable only as the 500 the resulting offset provokes, which the parity suite asserts
+    /// but which cannot tell a wrap from a saturation (both 500, one by "out of range" and one
+    /// by a page number Postgres also refuses). So the arithmetic is pinned here.
+    #[test]
+    fn the_offset_is_page_times_per_page_and_it_wraps() {
+        assert_eq!(page_offset(0, 60), 0);
+        assert_eq!(page_offset(3, 60), 180);
+        assert_eq!(page_offset(1, 0), 0, "per_page=0 pages nowhere");
+        assert_eq!(
+            page_offset(i64::MAX, 1),
+            i64::MAX,
+            "no overflow at per_page=1"
+        );
+        assert_eq!(
+            page_offset(i64::MAX, 200),
+            i64::MAX.wrapping_mul(200),
+            "wraps like Go's int, rather than saturating to i64::MAX"
+        );
+        assert!(
+            page_offset(i64::MAX, 200) < 0,
+            "and the wrap is what makes the store refuse it"
+        );
+        assert_eq!(
+            page_offset(4_611_686_018_427_387_904, 4),
+            0,
+            "a wrap that lands on zero serves the first page — Go's answer too"
+        );
+    }
+
+    /// `web.PerPageDefault` / `PerPageMaximum` as these three routes see them: the parser is
+    /// shared, but the *clamp* is only observable on a team with more than 200 channels, which
+    /// no parity fixture builds. Pinned here instead.
+    #[test]
+    fn per_page_defaults_to_sixty_and_clamps_at_two_hundred() {
+        assert_eq!(parse_per_page(None), 60);
+        assert_eq!(parse_per_page(Some("per_page=201")), 200);
+        assert_eq!(parse_per_page(Some("per_page=200")), 200);
+        assert_eq!(parse_per_page(Some("per_page=0")), 0, "a real LIMIT 0 here");
+        assert_eq!(parse_per_page(Some("per_page=-1")), 60);
+        assert_eq!(parse_per_page(Some("per_page=abc")), 60);
+        assert_eq!(parse_page(Some("page=-1")), 0);
+        assert_eq!(parse_page(Some("page=7")), 7);
+    }
+
+    /// The three team lists carry **no** `ETag`, unlike `getChannelsForTeamForUser`, and the
+    /// body is a bare array with the encoder newline even when empty — which for these routes is
+    /// reachable, since a page past the end is `200 []` rather than a 404.
+    #[test]
+    fn an_empty_team_list_is_an_empty_array_with_a_newline() {
+        let body = encoded_channel_list("x", &mm_model::channel_list::ChannelList(Vec::new()))
+            .expect("serialises");
+        assert_eq!(body, b"[]\n");
+
+        let response = channel_list_response(body);
+        assert_eq!(response.status(), StatusCode::OK);
+        assert!(
+            response.headers().get("ETag").is_none(),
+            "Go's handler never computes one for these three routes"
+        );
+        assert_eq!(
+            response
+                .headers()
+                .get("x-mmrs-served-by")
+                .and_then(|v| v.to_str().ok()),
+            Some("rust")
+        );
     }
 }

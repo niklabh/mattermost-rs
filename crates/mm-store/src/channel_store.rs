@@ -204,6 +204,37 @@ pub trait ChannelStore {
         from_channel_id: &str,
     ) -> impl std::future::Future<Output = Result<ChannelList, StoreError>> + Send;
 
+    /// Port of `SqlChannelStore.GetPublicChannelsForTeam` (channel_store.go:1499): one
+    /// offset/limit page of a team's living public channels, joined through the denormalised
+    /// `PublicChannels` shadow table.
+    fn get_public_channels_for_team(
+        &self,
+        team_id: &str,
+        offset: i64,
+        limit: i64,
+    ) -> impl std::future::Future<Output = Result<ChannelList, StoreError>> + Send;
+
+    /// Port of `SqlChannelStore.GetPrivateChannelsForTeam` (channel_store.go:1476): one
+    /// offset/limit page of a team's living private channels, straight off `Channels`.
+    fn get_private_channels_for_team(
+        &self,
+        team_id: &str,
+        offset: i64,
+        limit: i64,
+    ) -> impl std::future::Future<Output = Result<ChannelList, StoreError>> + Send;
+
+    /// Port of `SqlChannelStore.GetDeleted` (channel_store.go:1735): one offset/limit page of a
+    /// team's **archived** message channels, narrowed to what `user_id` may see unless
+    /// `skip_team_membership_check`.
+    fn get_deleted(
+        &self,
+        team_id: &str,
+        offset: i64,
+        limit: i64,
+        user_id: &str,
+        skip_team_membership_check: bool,
+    ) -> impl std::future::Future<Output = Result<ChannelList, StoreError>> + Send;
+
     /// Port of `SqlChannelStore.GetMemberCount` (channel_store.go:2666).
     ///
     /// Go's `allowFromCache` is dropped like `get_by_names`'s: no cache, never staler than Go.
@@ -339,6 +370,46 @@ impl ChannelStore for SqlChannelStore {
             last_delete_at,
             page_size,
             from_channel_id,
+        )
+        .await
+    }
+
+    #[tracing::instrument(skip_all, fields(team_id = %team_id, offset, limit, count))]
+    async fn get_public_channels_for_team(
+        &self,
+        team_id: &str,
+        offset: i64,
+        limit: i64,
+    ) -> Result<ChannelList, StoreError> {
+        get_public_channels_for_team(&self.pool, team_id, offset, limit).await
+    }
+
+    #[tracing::instrument(skip_all, fields(team_id = %team_id, offset, limit, count))]
+    async fn get_private_channels_for_team(
+        &self,
+        team_id: &str,
+        offset: i64,
+        limit: i64,
+    ) -> Result<ChannelList, StoreError> {
+        get_private_channels_for_team(&self.pool, team_id, offset, limit).await
+    }
+
+    #[tracing::instrument(skip_all, fields(team_id = %team_id, user_id = %user_id, offset, limit, count))]
+    async fn get_deleted(
+        &self,
+        team_id: &str,
+        offset: i64,
+        limit: i64,
+        user_id: &str,
+        skip_team_membership_check: bool,
+    ) -> Result<ChannelList, StoreError> {
+        get_deleted(
+            &self.pool,
+            team_id,
+            offset,
+            limit,
+            user_id,
+            skip_team_membership_check,
         )
         .await
     }
@@ -1248,6 +1319,278 @@ pub async fn get_channels_by_user(
         });
     }
 
+    let channels = rows
+        .into_iter()
+        .map(channel_from_row)
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(ChannelList(channels))
+}
+
+/// Port of `SqlChannelStore.GetPublicChannelsForTeam` (channel_store.go:1499) — the store behind
+/// the webapp's "Browse channels" list.
+///
+/// Three things here are not what a reader would write from the route's name:
+///
+/// - **It does not filter on `Channels.Type`.** Membership of the `PublicChannels` table *is* the
+///   type test: `upsertPublicChannelT` (channel_store.go:589) inserts a row only for
+///   `ChannelTypeOpen` and **deletes** it for anything else, so a channel converted to private
+///   loses its row. Adding `Channels.Type = 'O'` would pass every test against a coherent
+///   database and hide the drift the join exists to expose.
+/// - **Both the team and the deletion predicate are read off `pc`, not off `Channels`** — and so
+///   is the `ORDER BY`. `PublicChannels` is a denormalised shadow of five channel columns; when
+///   it disagrees with `Channels` the shadow wins here. Archiving *keeps* the row and copies the
+///   new `DeleteAt` into it (measured), so `pc.DeleteAt = 0` is the archived-channel filter and
+///   is load-bearing rather than redundant.
+/// - **Offset paging, not the keyset [`get_channels_by_user`] uses.** `LIMIT 0` is a real limit,
+///   so `per_page=0` is an empty page rather than "no limit" — the opposite of `GetMembers`,
+///   whose `Limit > 0` guard turns the same zero into the whole channel.
+///
+/// **Zero rows is an empty list, not `ErrNotFound`.** Go declares `channels := model.ChannelList{}`
+/// and `sqlx.Select` leaves it empty, so a page past the end is `200 []` — measured against the
+/// running server, and the opposite of [`get_channels`]'s 404.
+#[tracing::instrument(skip(pool), fields(team_id = %team_id, offset, limit))]
+pub async fn get_public_channels_for_team(
+    pool: &PgPool,
+    team_id: &str,
+    offset: i64,
+    limit: i64,
+) -> Result<ChannelList, StoreError> {
+    let rows = sqlx::query_as!(
+        ChannelRow,
+        r#"
+        SELECT channels.id,
+               channels.createat,
+               channels.updateat,
+               channels.deleteat,
+               channels.teamid,
+               channels.type::text AS "channel_type!",
+               channels.displayname,
+               channels.name,
+               channels.header,
+               channels.purpose,
+               channels.lastpostat,
+               channels.totalmsgcount,
+               channels.extraupdateat,
+               channels.creatorid,
+               channels.schemeid,
+               channels.groupconstrained,
+               channels.autotranslation,
+               channels.shared,
+               channels.totalmsgcountroot,
+               channels.lastrootpostat,
+               channels.bannerinfo,
+               channels.defaultcategoryname,
+               channels.discoverable,
+               EXISTS (
+                   SELECT 1 FROM accesscontrolpolicies acp
+                    WHERE acp.id = channels.id AND acp.type = 'channel'
+               ) AS "policy_enforced!",
+               COALESCE((
+                   SELECT acp.active FROM accesscontrolpolicies acp
+                    WHERE acp.id = channels.id AND acp.type = 'channel' AND acp.active = TRUE
+                    LIMIT 1
+               ), false) AS "policy_is_active!"
+          FROM channels
+          JOIN publicchannels pc ON (pc.id = channels.id)
+         WHERE pc.teamid = $1
+           AND pc.deleteat = 0
+         ORDER BY pc.displayname
+         LIMIT $2 OFFSET $3
+        "#,
+        team_id,
+        limit,
+        offset
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: format!("failed to find channel with teamId={team_id}"),
+        source,
+    })?;
+
+    tracing::Span::current().record("count", rows.len());
+    let channels = rows
+        .into_iter()
+        .map(channel_from_row)
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(ChannelList(channels))
+}
+
+/// Port of `SqlChannelStore.GetPrivateChannelsForTeam` (channel_store.go:1476).
+///
+/// The public sibling's *shape*, one table shallower: no `PublicChannels` join, so the channel
+/// type has to be written out — `Type = 'P'` exactly, **not** `messageChannelTypes` and not
+/// `<> 'O'`, so a board or a space in the team is never listed. `TeamId` and `DeleteAt` are read
+/// off `Channels` here because there is no shadow table to read them from, and the `ORDER BY` is
+/// `Channels.DisplayName` for the same reason.
+///
+/// Same offset paging and same empty-list-not-404 as [`get_public_channels_for_team`].
+#[tracing::instrument(skip(pool), fields(team_id = %team_id, offset, limit))]
+pub async fn get_private_channels_for_team(
+    pool: &PgPool,
+    team_id: &str,
+    offset: i64,
+    limit: i64,
+) -> Result<ChannelList, StoreError> {
+    let rows = sqlx::query_as!(
+        ChannelRow,
+        r#"
+        SELECT c.id,
+               c.createat,
+               c.updateat,
+               c.deleteat,
+               c.teamid,
+               c.type::text AS "channel_type!",
+               c.displayname,
+               c.name,
+               c.header,
+               c.purpose,
+               c.lastpostat,
+               c.totalmsgcount,
+               c.extraupdateat,
+               c.creatorid,
+               c.schemeid,
+               c.groupconstrained,
+               c.autotranslation,
+               c.shared,
+               c.totalmsgcountroot,
+               c.lastrootpostat,
+               c.bannerinfo,
+               c.defaultcategoryname,
+               c.discoverable,
+               EXISTS (
+                   SELECT 1 FROM accesscontrolpolicies acp
+                    WHERE acp.id = c.id AND acp.type = 'channel'
+               ) AS "policy_enforced!",
+               COALESCE((
+                   SELECT acp.active FROM accesscontrolpolicies acp
+                    WHERE acp.id = c.id AND acp.type = 'channel' AND acp.active = TRUE
+                    LIMIT 1
+               ), false) AS "policy_is_active!"
+          FROM channels c
+         WHERE c.type = 'P'
+           AND c.teamid = $1
+           AND c.deleteat = 0
+         ORDER BY c.displayname
+         LIMIT $2 OFFSET $3
+        "#,
+        team_id,
+        limit,
+        offset
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: format!("failed to find channel with teamId={team_id}"),
+        source,
+    })?;
+
+    tracing::Span::current().record("count", rows.len());
+    let channels = rows
+        .into_iter()
+        .map(channel_from_row)
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(ChannelList(channels))
+}
+
+/// Port of `SqlChannelStore.GetDeleted` (channel_store.go:1735) — the archived half of the browse
+/// dialog.
+///
+/// Every predicate is the mirror image of a sibling's, which is what makes this one easy to get
+/// wrong:
+///
+/// - **`DeleteAt <> 0`**, where both siblings say `= 0`. Archived is the whole point.
+/// - **`TeamId = ? OR TeamId = ''`** — the teamless arm that makes a DM or GM appear under every
+///   team, exactly as [`get_by_name`] does and unlike [`get_by_names`], which *omits* its
+///   predicate instead. Together with the `skip` arm below this means a system admin's archived
+///   DMs are listed under any team id they ask about.
+/// - **`Type IN (O, P, D, G)`** — `messageChannelTypes`, so a board is not listed even when
+///   archived.
+/// - **The membership narrowing is skipped for `manage_system`, not for a team admin.** Without
+///   the skip a caller sees *every* archived public channel of the team — no membership needed,
+///   which is what "public" means — plus the archived private ones they still hold a
+///   `ChannelMembers` row for, and **no** archived DMs or GMs at all, since neither arm admits
+///   `D` or `G`. With the skip every type passes. Both halves measured against Go.
+///
+/// The predicate stays `Id IN (SELECT ChannelId …)` rather than becoming a join: a join would
+/// duplicate a row for a member with two membership rows, which cannot happen, and would change
+/// the plan for no reason.
+///
+/// Go's `sql.ErrNoRows` branch (channel_store.go:1772) maps to `store.NewErrNotFound`, but
+/// `sqlx.Select` into a slice never returns that sentinel — zero rows is an empty slice — so the
+/// 404 in `App.GetDeletedChannels` is unreachable on both servers. Reproduced as an empty list
+/// and measured: a team with nothing archived answers `200 []`.
+#[tracing::instrument(skip(pool), fields(team_id = %team_id, user_id = %user_id, offset, limit, skip_team_membership_check))]
+pub async fn get_deleted(
+    pool: &PgPool,
+    team_id: &str,
+    offset: i64,
+    limit: i64,
+    user_id: &str,
+    skip_team_membership_check: bool,
+) -> Result<ChannelList, StoreError> {
+    let rows = sqlx::query_as!(
+        ChannelRow,
+        r#"
+        SELECT c.id,
+               c.createat,
+               c.updateat,
+               c.deleteat,
+               c.teamid,
+               c.type::text AS "channel_type!",
+               c.displayname,
+               c.name,
+               c.header,
+               c.purpose,
+               c.lastpostat,
+               c.totalmsgcount,
+               c.extraupdateat,
+               c.creatorid,
+               c.schemeid,
+               c.groupconstrained,
+               c.autotranslation,
+               c.shared,
+               c.totalmsgcountroot,
+               c.lastrootpostat,
+               c.bannerinfo,
+               c.defaultcategoryname,
+               c.discoverable,
+               EXISTS (
+                   SELECT 1 FROM accesscontrolpolicies acp
+                    WHERE acp.id = c.id AND acp.type = 'channel'
+               ) AS "policy_enforced!",
+               COALESCE((
+                   SELECT acp.active FROM accesscontrolpolicies acp
+                    WHERE acp.id = c.id AND acp.type = 'channel' AND acp.active = TRUE
+                    LIMIT 1
+               ), false) AS "policy_is_active!"
+          FROM channels c
+         WHERE (c.teamid = $1 OR c.teamid = '')
+           AND c.deleteat <> 0
+           AND c.type IN ('O', 'P', 'D', 'G')
+           AND ($4::boolean
+                OR c.type = 'O'
+                OR (c.type = 'P'
+                    AND c.id IN (SELECT cm.channelid FROM channelmembers cm WHERE cm.userid = $5)))
+         ORDER BY c.displayname
+         LIMIT $2 OFFSET $3
+        "#,
+        team_id,
+        limit,
+        offset,
+        skip_team_membership_check,
+        user_id
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: format!(
+            "failed to get deleted channels with TeamId={team_id} and UserId={user_id}"
+        ),
+        source,
+    })?;
+
+    tracing::Span::current().record("count", rows.len());
     let channels = rows
         .into_iter()
         .map(channel_from_row)

@@ -3667,3 +3667,45 @@ set aside. Three Rust files and one correction to the previous session's ledger 
 5. **The DB test is transcribed for the type filter.** `NOT IN ('S')` admits a board here where
    `GetChannelUnread`'s `IN (O, P, D, G)` refuses it; neither row exists on Team Edition over REST,
    so both are planted and asserted against our own SQL, not Go's.
+
+### Ledger row — merge into the route table above
+
+| File | Rust | Status | Tests | Notes |
+|---|---|---|---|---|
+| api4/channel.go (`getPublicChannelsForTeam`) | `mm-api/src/channels.rs` | PARTIAL | 3 pass + 7 parity + 4 DB | `GET /teams/{team_id}/channels`, `…/channels/private` and `…/channels/deleted` served. Gate is `list_team_channels` on the team for the first and third and **`manage_system` on the system** for `/private` (a team admin is refused — measured); `/deleted` asks `manage_system` a *second* time as `skipTeamMembershipCheck`, which widens rather than refuses. Offset paging (`page * per_page`, wrapping like Go's `int`): an out-of-range page and `per_page=0` are both `200 []`, an overflowing page is a 500 on both servers. The browse list joins Go's denormalised `PublicChannels` and reads team, `DeleteAt` and the sort key off **it** — see `mm-store/src/channel_store.rs::get_public_channels_for_team`. Mutations: 19 run, 19 caught, 2 controls survived. |
+
+## Notes — api4/channel.go (`getPublicChannelsForTeam`, `getPrivateChannelsForTeam`, `getDeletedChannelsForTeam`)
+
+1. **Three routes under one prefix, three different permission questions.** `/channels` and
+   `/channels/deleted` gate on `list_team_channels` *through the team*; `/channels/private` gates
+   on `manage_system` *through the system*, with no team argument, so a team admin is refused
+   there and admitted on the other two. `/channels/deleted` then asks `manage_system` again and
+   uses the answer as `skipTeamMembershipCheck` — a question, not a gate. Reading each gate
+   rather than copying the first is the whole session: the plausible wrong constant is a
+   different one for each route, and only a non-admin actor can tell them apart.
+2. **The browse list believes a shadow table, not `Channels`.** `GetPublicChannelsForTeam` joins
+   `PublicChannels` and writes its team predicate, its `DeleteAt = 0` and its `ORDER BY` on `pc`.
+   Through REST the two tables always agree, so `pc.` → `channels.` survives every cross-server
+   test; `db_channel_team_lists.rs` plants a row whose shadow says "this team, living, sorts
+   first" while `Channels` says "other team, archived, sorts last", and all three mutations die
+   on it. There is **no `Type = 'O'` predicate** — membership of the shadow *is* the type test,
+   because `upsertPublicChannelT` deletes the row for any non-open channel.
+3. **`per_page=0` is `LIMIT 0` here, and the whole channel on `getChannelMembers`.** Same parser,
+   same zero, opposite answer — the second time this pair has appeared (see the `getTeamMembers`
+   notes). These three stores call `.Limit(uint64(limit))` unconditionally; the member store
+   guards `Limit > 0`.
+4. **An overflowing page is a 500, not an empty list.** `page * per_page` is `int64` in Go and
+   wraps, so `page=9223372036854775807&per_page=200` reaches the store as a negative offset and
+   Postgres refuses it. Measured on both servers, with the same error id. Saturating the
+   multiplication would have answered `200 []` and clamping it would have answered a *page*, so
+   `page_offset` is a named function with its own unit test.
+5. **`GetDeleted`'s 404 is unreachable on both servers.** Go maps `sql.ErrNoRows` to
+   `ErrNotFound`, but `sqlx.Select` into a slice never returns that sentinel. Ported anyway
+   (`App::get_deleted_channels`), because deleting the branch would silently promote the case to
+   a 500 if the store ever gained one. A team with nothing archived is `200 []`.
+6. **One mutation verdict was discarded before counting.** `OFFSET $3 + 1` fails sqlx's
+   compile-time check, which the harness reports as `CAUGHT ()` — a verdict about the macro, not
+   the tests. Re-run as a swapped `limit`/`offset` bind, which compiles and dies on the page
+   walk. And one `CAUGHT (…)` named `malformed_ids_are_400s` from another suite; re-taken against
+   `--test parity_team_channel_lists` alone, where it is caught by the right test. Both shapes
+   are already in this ledger.
