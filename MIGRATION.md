@@ -3709,3 +3709,58 @@ set aside. Three Rust files and one correction to the previous session's ledger 
    walk. And one `CAUGHT (…)` named `malformed_ids_are_400s` from another suite; re-taken against
    `--test parity_team_channel_lists` alone, where it is caught by the right test. Both shapes
    are already in this ledger.
+## Ledger rows — `getUsers` (appended; belongs in the route table above)
+
+| File | Rust | Status | Tests | Notes |
+|---|---|---|---|---|
+| store/sqlstore/user_store.go (`GetAllProfiles`, `GetProfiles`, `GetProfilesInChannel`, `GetProfilesNotInChannel`, `GetProfilesNotInTeam`, `GetEtagForProfiles`, `GetEtagForProfilesNotInTeam`) | `mm-store/src/user_store.rs` | PARTIAL | 2 pass + 8 DB | Five listings for nil view restrictions, no role filter and the default sort, plus the two etag queries. `tm.DeleteAt = 0` in the join **excludes** a former member from `in_team` and **includes** them in `not_in_team`; the `in_team` etag has no such condition at all, so a former member still moves it. `not_in_channel`/`not_in_team` take an offset (their Go caller multiplies) and carry no `DeleteAt` predicate whatsoever. |
+| app/user.go (`GetUsersPage`, `GetUsersInTeamPage`, `GetUsersInChannelPage`, `GetUsersNotInChannelPage`, `GetUsersNotInTeamPage`, `GetUsersInTeamEtag`, `GetUsersNotInTeamEtag`) | `mm-app/src/user.rs` | PARTIAL | 1 pass | All five listings are one wire error (`app.user.get_profiles.app_error`, 500); only `where` differs and it is `json:"-"`. **The etag can never equal Go's**: Go interpolates two `*bool` config fields without dereferencing them, so its etag carries heap addresses — see the doc comment on `get_users_in_team_etag`. |
+| api4/user.go (`getUsers`) | `mm-api/src/users.rs` | PARTIAL | 3 pass + 7 parity | `GET /users` served for five of Go's eight dispatch arms — unfiltered, `in_team`, `in_channel`, `not_in_channel`, `not_in_team` — including paging, `active`/`inactive`, the two etags and their 304. Forwarded, each by the condition Go itself dispatches on: `without_team=true`, `in_group`, `not_in_group`, any `sort`, any of `role`/`roles`/`channel_roles`/`team_roles`, `group_constrained=true` and `abac_match_only=true` on the two `not_in_*` arms, and `active=true&inactive=true`. Mutations: 21 run, 21 caught, 2 controls survived. |
+
+## Notes — api4/user.go (`getUsers`)
+
+1. **Go's etag for this route contains two heap addresses, and no other process can reproduce
+   them.** `UserService.GetUsersInTeamEtag` (app/users/users.go:184, and its two siblings at 143
+   and 188) interpolates `PrivacySettings.ShowFullName` and `ShowEmailAddress` — both `*bool` —
+   with `%v` and **no dereference**, so Go answers
+   `11.11.0.1787307018591.0x32494e83e753.0x32494e83e752.`. Every other api4 call site writes
+   `*c.App.Config()...`. The port emits the values, so the two servers' etags differ in exactly
+   those two components and each 304s only on its own — measured, and pinned from both sides.
+   Behind the proxy a client only ever sees the etag of whichever server answered, so the
+   consequence is a cache miss, never a wrong body.
+
+2. **The `not_in_team` arm computes its etag from `in_team`.** `api4/user.go:1049` reads
+   `GetUsersNotInTeamEtag(inTeamId, …)` inside the `notInTeamId != ""` branch. With `in_team`
+   absent — the usual case — the etag is `MAX(UpdateAt).COUNT(Id)` over *every user with no team
+   membership at all*, while the body lists users outside `not_in_team`. Reproduced, not
+   corrected; the parity test asserts that adding `in_team` changes the etag on Go itself, which
+   is what makes the mutation to the obvious parameter die.
+
+3. **`active=true&inactive=true` is Go's `SetInvalidURLParam` without a `return`.** The handler
+   carries on, serves a 200 with the full list, and `handleContextError` then appends an error
+   object to the body it has already written — the `getChannelsForUser` shape. Forwarded rather
+   than reproduced, and that is the rule's whole content: only *both* flags at once.
+
+4. **`GET /users` with a NULL `Nickname` anywhere in the table is a 500 — on Go.** `sql: Scan
+   error on column index 10 … converting NULL to string is unsupported`, surfaced as
+   `app.user.get_profiles.app_error`; this port reads the row happily. No Mattermost server
+   writes such a row, but `mm-app`'s `db_authorization` suite plants one and purges only at the
+   start, so it survives between runs. Under `cargo test --workspace` the `parity_*` binaries
+   run first and never see it; a standalone re-run afterwards fails four tests that are about
+   something else. `parity_users_list` normalises the NULLs (it does not delete another suite's
+   rows) before it starts.
+
+5. **One shape is deliberately never compared: `page=0&per_page=100` with no other filter.**
+   That is the only call on this route `LocalCacheUserStore` caches (user_layer.go:120,
+   "hardcoded to the webapp call"), and the cache is stale after every login for the same reason
+   `POST /users/ids` is. Every other query here — all four filtered arms included — reaches
+   Postgres directly on both servers, which is why this suite needed none of the fixture
+   patching the `getUsersByIds` one did.
+
+6. **`per_page=0` means an empty page here and "everything" on the channel-member routes.** Same
+   query parameter, opposite meaning: squirrel emits `LIMIT 0` for these queries, while
+   `GetChannelMembers`'s store guards on `Limit > 0`. Pinned in the DB test and over HTTP.
+
+7. **There is no `since` on this route.** `UserGetOptions.UpdatedAfter` exists and the store
+   honours it, but `getUsers` never sets it — `since` belongs to `POST /users/ids`. Named here
+   because the two handlers sit forty lines apart and share an options struct.

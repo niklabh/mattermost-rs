@@ -8,7 +8,11 @@ use axum::extract::{Path, State};
 use axum::http::header::{ETAG, IF_NONE_MATCH};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use mm_model::permission::{PERMISSION_MANAGE_SYSTEM, PERMISSION_VIEW_MEMBERS};
+use mm_app::user::UserPage;
+use mm_model::permission::{
+    PERMISSION_MANAGE_SYSTEM, PERMISSION_READ_CHANNEL, PERMISSION_VIEW_MEMBERS,
+    PERMISSION_VIEW_TEAM, make_permission_error,
+};
 use mm_model::user::User;
 use mm_model::utils::{AppError, PAYLOAD_PARSE_ERROR, is_valid_id, sorted_array_from_json};
 
@@ -474,15 +478,638 @@ async fn serve_users_by_ids(
         .into_response())
 }
 
+/// The query parameters `getUsers` reads (api4/user.go:851-866), after the two conversions Go
+/// applies on the way in: `url.Values.Get` for the strings and `strconv.ParseBool` — error
+/// discarded — for the flags.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct GetUsersQuery {
+    in_team: String,
+    not_in_team: String,
+    in_channel: String,
+    not_in_channel: String,
+    in_group: String,
+    not_in_group: String,
+    group_constrained: bool,
+    without_team: bool,
+    inactive: bool,
+    active: bool,
+    role: String,
+    roles: String,
+    channel_roles: String,
+    team_roles: String,
+    sort: String,
+    /// Read only inside the two `not_in_*` branches (api4/user.go:1021, 1062).
+    abac_match_only: bool,
+    /// `c.Params.Page` / `c.Params.PerPage` from the shared middleware — never a 400, whatever
+    /// the caller sends. There is **no `since` here**: `UserGetOptions.UpdatedAfter` exists but
+    /// `getUsers` never sets it, so the store's `UpdatedAfter` filter is unreachable from this
+    /// route (it is `POST /users/ids` that has `since`).
+    page: i64,
+    per_page: i64,
+}
+
+fn parse_get_users_request(query: Option<&str>) -> GetUsersQuery {
+    let get = |key: &str| crate::channels::query_first(query, key).unwrap_or_default();
+    GetUsersQuery {
+        in_team: get("in_team"),
+        not_in_team: get("not_in_team"),
+        in_channel: get("in_channel"),
+        not_in_channel: get("not_in_channel"),
+        in_group: get("in_group"),
+        not_in_group: get("not_in_group"),
+        group_constrained: crate::channels::query_flag_is_true(query, "group_constrained"),
+        without_team: crate::channels::query_flag_is_true(query, "without_team"),
+        inactive: crate::channels::query_flag_is_true(query, "inactive"),
+        active: crate::channels::query_flag_is_true(query, "active"),
+        role: get("role"),
+        roles: get("roles"),
+        channel_roles: get("channel_roles"),
+        team_roles: get("team_roles"),
+        sort: get("sort"),
+        abac_match_only: crate::channels::query_flag_is_true(query, "abac_match_only"),
+        page: crate::channels::parse_page(query),
+        per_page: crate::channels::parse_per_page(query),
+    }
+}
+
+/// Which arm of `getUsers`'s if/else-if chain (api4/user.go:1005-1130) this request selects.
+///
+/// The chain is **ordered**, and the order is not the order the parameters are declared in: a
+/// request carrying both `in_team` and `in_channel` is an `in_team` request, and one carrying
+/// `without_team=true` is that regardless of everything else. Resolving the branch first is what
+/// lets the forwarding rules below be scoped to the parameters Go actually reads on the arm it
+/// picked, rather than to the parameters merely present in the query string.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Branch {
+    WithoutTeam,
+    NotInChannel,
+    NotInTeam,
+    InTeam,
+    InChannel,
+    InGroup,
+    NotInGroup,
+    All,
+}
+
+fn branch_of(query: &GetUsersQuery) -> Branch {
+    if query.without_team {
+        Branch::WithoutTeam
+    } else if !query.not_in_channel.is_empty() {
+        Branch::NotInChannel
+    } else if !query.not_in_team.is_empty() {
+        Branch::NotInTeam
+    } else if !query.in_team.is_empty() {
+        Branch::InTeam
+    } else if !query.in_channel.is_empty() {
+        Branch::InChannel
+    } else if !query.in_group.is_empty() {
+        Branch::InGroup
+    } else if !query.not_in_group.is_empty() {
+        Branch::NotInGroup
+    } else {
+        Branch::All
+    }
+}
+
+/// Why this request goes to Go whole. `None` means this server answers it.
+///
+/// Each variant names a piece of Go the port does not have, and each is checked by **the same
+/// condition Go uses to reach that piece** — not by the mere presence of a parameter. So
+/// `?in_team=X&in_group=Y` is served (Go's chain picks `in_team` and never looks at the group),
+/// while `?in_group=Y` alone is forwarded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ForwardReason {
+    /// `role`, `roles`, `channel_roles` or `team_roles` — any one of them makes Go call
+    /// `GetAllRoles()` to validate the names (api4/user.go:917), and there is no role store
+    /// here. Go's guard is the four-way `||`, so this is deliberately *not* branch-scoped: a
+    /// `team_roles` that the chosen branch would ignore still triggers the validation, and can
+    /// still 400.
+    RoleFilter,
+    /// Any `sort`. `last_activity_at` needs the `Status` table, `create_at`, `status` and
+    /// `admin` need three more store methods, and `display_name` needs groups — and every
+    /// invalid value is one of five 400 branches. One rule covers the lot, and it is the same
+    /// rule Go dispatches on (`sort == ""` is what reaches the plain store calls).
+    Sort,
+    /// `active=true&inactive=true`. Go calls `SetInvalidURLParam("inactive")` **without
+    /// returning** (api4/user.go:900), so the request carries on, serves a 200 with the full
+    /// list, and then `handleContextError` appends an error object to the body it has already
+    /// written — the `getChannelsForUser` shape. Left to Go rather than reproduced.
+    ActiveAndInactive,
+    /// `without_team=true` → `GetUsersWithoutTeamPage`, plus its own `list_users_without_team`
+    /// permission.
+    WithoutTeam,
+    /// `in_group` / `not_in_group` → the group store, which does not exist here.
+    InGroup,
+    NotInGroup,
+    /// `group_constrained=true` on a `not_in_*` branch → `applyChannelGroupConstrainedFilter` /
+    /// `applyTeamGroupConstrainedFilter`, three group tables deep. The other branches never read
+    /// the flag, so they are served with it set.
+    GroupConstrained,
+    /// `abac_match_only=true` on a `not_in_*` branch → the Enterprise Advanced access-control
+    /// service. See the handler's note for the half of ABAC this cannot detect.
+    AbacMatchOnly,
+}
+
+fn forward_reason(query: &GetUsersQuery, branch: Branch) -> Option<ForwardReason> {
+    if !query.role.is_empty()
+        || !query.roles.is_empty()
+        || !query.channel_roles.is_empty()
+        || !query.team_roles.is_empty()
+    {
+        return Some(ForwardReason::RoleFilter);
+    }
+    if !query.sort.is_empty() {
+        return Some(ForwardReason::Sort);
+    }
+    if query.inactive && query.active {
+        return Some(ForwardReason::ActiveAndInactive);
+    }
+    match branch {
+        Branch::WithoutTeam => Some(ForwardReason::WithoutTeam),
+        Branch::InGroup => Some(ForwardReason::InGroup),
+        Branch::NotInGroup => Some(ForwardReason::NotInGroup),
+        Branch::NotInChannel | Branch::NotInTeam => {
+            if query.group_constrained {
+                Some(ForwardReason::GroupConstrained)
+            } else if query.abac_match_only {
+                Some(ForwardReason::AbacMatchOnly)
+            } else {
+                None
+            }
+        }
+        Branch::InTeam | Branch::InChannel | Branch::All => None,
+    }
+}
+
+/// Port of `getUsers` (api4/user.go:850) — `GET /api/v4/users`, the webapp's user list.
+///
+/// # What is served and what is forwarded
+///
+/// Five of the eight arms of Go's dispatch chain are served — the unfiltered list, `in_team`,
+/// `in_channel`, `not_in_channel` and `not_in_team` — and the rest go to Go whole. Every
+/// forwarding rule is [`ForwardReason`], and each is the *same* condition Go uses to reach the
+/// code the port lacks, so a query that Go would answer from a served arm is never forwarded
+/// merely because some parameter that arm ignores is present.
+///
+/// # The order of the three pre-flight steps
+///
+/// 1. **Forward first.** Go's own 400s (`sort`, the role names, `inactive`) all live behind the
+///    forwarding rules, so a forwarded request gets Go's validation as well as Go's answer.
+/// 2. **`not_in_channel` without `in_team` is `invalid_url_param` naming `team_id`** — the
+///    *url*-param id for a query parameter, and it names a parameter the caller did not send.
+///    This is the only 400 this handler can produce.
+/// 3. **The restrictions fast path**, `getUser`'s rule: a caller without user-based
+///    `view_members` has non-nil `ViewUsersRestrictions`, which every store query below would
+///    have to join on, so the whole request is forwarded. Checked before the permission gates
+///    because Go computes the restrictions before the dispatch.
+///
+/// # The etag is on two arms, and one of them reads the wrong parameter
+///
+/// `in_team` and `not_in_team` compute an etag and can answer 304; the other three never send
+/// one. The `not_in_team` arm passes **`in_team`** to `GetUsersNotInTeamEtag` (api4/user.go:1049)
+/// — see [`mm_app::App::get_users_not_in_team_etag`], which reproduces it.
+///
+/// # ABAC is a licence-gated divergence
+///
+/// `ChannelAccessControlled` / `TeamAccessControlled` return false without an Enterprise
+/// Advanced licence, which is this deployment, so the served arms match. On a licensed server
+/// with attribute-based access control on, a policy-enforced **private** channel would narrow
+/// Go's `not_in_channel` list without any query parameter to detect it by — the port cannot see
+/// the licence, so that variant would diverge. Recorded as [D-154]; the explicit
+/// `abac_match_only=true` half is forwarded.
+///
+/// # Not ported
+///
+/// `UpdateLastActivityAtIfNeeded` — a write on the read path, deferred with the session cache
+/// (D-084). `json.Marshal` + `w.Write`: **no trailing newline** ([D-086]).
+#[tracing::instrument(skip_all, fields(user_id = %session.0.user_id, branch, forwarded, count))]
+pub async fn get_users(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::extract::RawQuery(query): axum::extract::RawQuery,
+    session: AuthenticatedSession,
+    request: axum::extract::Request,
+) -> Response {
+    let parsed = parse_get_users_request(query.as_deref());
+    let branch = branch_of(&parsed);
+    tracing::Span::current().record("branch", tracing::field::debug(branch));
+
+    if let Some(reason) = forward_reason(&parsed, branch) {
+        tracing::Span::current().record("forwarded", tracing::field::debug(reason));
+        return crate::proxy::forward_to_go(State(state), request).await;
+    }
+
+    if !parsed.not_in_channel.is_empty() && parsed.in_team.is_empty() {
+        return ApiError::invalid_url_param("team_id").into_response();
+    }
+
+    if !state
+        .app
+        .has_permission_to(&session.0.user_id, &PERMISSION_VIEW_MEMBERS)
+        .await
+    {
+        tracing::Span::current().record("forwarded", "view_restrictions");
+        return crate::proxy::forward_to_go(State(state), request).await;
+    }
+    tracing::Span::current().record("forwarded", false);
+
+    match serve_users(&state, &headers, &session, &parsed, branch).await {
+        Ok(response) => response,
+        Err(err) => err.into_response(),
+    }
+}
+
+/// Go's `HandleEtag` (web/context.go:230): a plain string compare against `If-None-Match`, no
+/// weak comparison and no candidate list, and the 304 carries the etag back.
+fn etag_matches(headers: &HeaderMap, etag: &str) -> bool {
+    headers
+        .get(IF_NONE_MATCH)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value == etag)
+}
+
+/// The dispatch itself: one arm per served branch, each with its own permission gate, in Go's
+/// order. Returns the etag alongside the users so the caller can set the header only when Go
+/// would — `if etag != ""` (api4/user.go:1136).
+async fn serve_users(
+    state: &AppState,
+    headers: &HeaderMap,
+    session: &AuthenticatedSession,
+    query: &GetUsersQuery,
+    branch: Branch,
+) -> Result<Response, ApiError> {
+    let page = UserPage {
+        page: query.page,
+        per_page: query.per_page,
+        inactive: query.inactive,
+        active: query.active,
+    };
+
+    let (users, etag) = match branch {
+        Branch::NotInChannel => {
+            let (allowed, _) = state
+                .app
+                .session_has_permission_to_channel(
+                    &session.0,
+                    &query.not_in_channel,
+                    &PERMISSION_READ_CHANNEL,
+                )
+                .await;
+            if !allowed {
+                return Err(ApiError(*make_permission_error(
+                    &session.0,
+                    &[&PERMISSION_READ_CHANNEL],
+                )));
+            }
+            let users = state
+                .app
+                .get_users_not_in_channel_page(&query.in_team, &query.not_in_channel, page)
+                .await?;
+            (users, None)
+        }
+        Branch::NotInTeam => {
+            if !state
+                .app
+                .session_has_permission_to_team(
+                    &session.0,
+                    &query.not_in_team,
+                    &PERMISSION_VIEW_TEAM,
+                )
+                .await
+            {
+                return Err(ApiError(*make_permission_error(
+                    &session.0,
+                    &[&PERMISSION_VIEW_TEAM],
+                )));
+            }
+            // `in_team`, not `not_in_team` — Go's argument, reproduced deliberately.
+            let etag = state
+                .app
+                .get_users_not_in_team_etag(
+                    &query.in_team,
+                    state.show_full_name,
+                    state.show_email_address,
+                )
+                .await;
+            if etag_matches(headers, &etag) {
+                return Ok(not_modified(etag));
+            }
+            let users = state
+                .app
+                .get_users_not_in_team_page(&query.not_in_team, page)
+                .await?;
+            (users, Some(etag))
+        }
+        Branch::InTeam => {
+            if !state
+                .app
+                .session_has_permission_to_team(&session.0, &query.in_team, &PERMISSION_VIEW_TEAM)
+                .await
+            {
+                return Err(ApiError(*make_permission_error(
+                    &session.0,
+                    &[&PERMISSION_VIEW_TEAM],
+                )));
+            }
+            let etag = state
+                .app
+                .get_users_in_team_etag(
+                    &query.in_team,
+                    state.show_full_name,
+                    state.show_email_address,
+                )
+                .await;
+            if etag_matches(headers, &etag) {
+                return Ok(not_modified(etag));
+            }
+            let users = state
+                .app
+                .get_users_in_team_page(&query.in_team, page)
+                .await?;
+            (users, Some(etag))
+        }
+        Branch::InChannel => {
+            let (allowed, _) = state
+                .app
+                .session_has_permission_to_channel(
+                    &session.0,
+                    &query.in_channel,
+                    &PERMISSION_READ_CHANNEL,
+                )
+                .await;
+            if !allowed {
+                return Err(ApiError(*make_permission_error(
+                    &session.0,
+                    &[&PERMISSION_READ_CHANNEL],
+                )));
+            }
+            let users = state
+                .app
+                .get_users_in_channel_page(&query.in_channel, page)
+                .await?;
+            (users, None)
+        }
+        // `RestrictUsersGetByPermissions` only fills in the restrictions, and a caller whose
+        // restrictions are non-nil was forwarded before this function ran.
+        Branch::All => (state.app.get_users_page(page).await?, None),
+        // Forwarded by `forward_reason`; forwarding again rather than panicking keeps the
+        // impossible case a working request instead of a 500.
+        Branch::WithoutTeam | Branch::InGroup | Branch::NotInGroup => {
+            return Err(ApiError(AppError::new(
+                "getUsers",
+                "api.context.404.app_error",
+                None,
+                String::new(),
+                404,
+            )));
+        }
+    };
+    tracing::Span::current().record("count", users.len());
+
+    // `sanitizeProfiles(profiles, c.IsSystemAdmin())` — the same strict per-user map as
+    // `getUsersByIds`, with no self exception. Go also runs `u.Sanitize(map[string]bool{})` in
+    // the store first; that clears a strict subset of what this clears, so it is not ported.
+    let is_admin = state
+        .app
+        .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)
+        .await;
+    let mut users = users;
+    let options = sanitize_options(state.show_full_name, state.show_email_address, is_admin);
+    for user in &mut users {
+        user.sanitize_profile(&options, is_admin);
+    }
+
+    let body = serde_json::to_vec(&users).map_err(|err| {
+        tracing::error!(error = %err, "failed to serialise the user list");
+        ApiError(AppError::new(
+            "getUsers",
+            "api.marshal_error",
+            None,
+            String::new(),
+            500,
+        ))
+    })?;
+
+    let mut response = (
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
+    )
+        .into_response();
+    if let Some(etag) = etag
+        && let Ok(value) = axum::http::HeaderValue::from_str(&etag)
+    {
+        response.headers_mut().insert(ETAG, value);
+    }
+    Ok(response)
+}
+
+/// Go's 304: the etag header and nothing else. `x-mmrs-served-by` is ours, on every response we
+/// answer — the parity suite reads it to prove the request was not forwarded.
+fn not_modified(etag: String) -> Response {
+    (
+        StatusCode::NOT_MODIFIED,
+        [
+            (HEADER_ETAG_SERVER, etag.as_str()),
+            ("x-mmrs-served-by", "rust"),
+        ],
+    )
+        .into_response()
+}
+
 #[cfg(test)]
 mod tests {
     use mm_model::user::User;
     use std::collections::HashMap;
 
     use super::{
-        UsersByIdsRequest, parse_users_by_ids_request, sanitize_options,
+        Branch, ForwardReason, UsersByIdsRequest, branch_of, forward_reason,
+        parse_get_users_request, parse_users_by_ids_request, sanitize_options,
         segment_matches_username_mux,
     };
+
+    /// `branch_of` on the query string, so the tests read like requests.
+    fn branch(query: &str) -> Branch {
+        branch_of(&parse_get_users_request(Some(query)))
+    }
+
+    /// `forward_reason` on the query string.
+    fn forward(query: &str) -> Option<ForwardReason> {
+        let parsed = parse_get_users_request(Some(query));
+        forward_reason(&parsed, branch_of(&parsed))
+    }
+
+    /// The chain is ordered and the order is **not** the order the parameters are declared in.
+    /// Every pair below has a plausible wrong answer: a reader who checks `in_team` first would
+    /// get four of these wrong, and one who checks the parameters in declaration order would get
+    /// `without_team` wrong.
+    #[test]
+    fn the_dispatch_chain_is_gos_order_not_the_declaration_order() {
+        assert_eq!(branch(""), Branch::All);
+        assert_eq!(branch("page=2&per_page=10"), Branch::All);
+        assert_eq!(branch("in_team=t"), Branch::InTeam);
+        assert_eq!(branch("in_channel=c"), Branch::InChannel);
+        assert_eq!(branch("not_in_team=t"), Branch::NotInTeam);
+        assert_eq!(branch("not_in_channel=c&in_team=t"), Branch::NotInChannel);
+        assert_eq!(branch("in_group=g"), Branch::InGroup);
+        assert_eq!(branch("not_in_group=g"), Branch::NotInGroup);
+
+        // The precedence pairs.
+        assert_eq!(
+            branch("in_team=t&in_channel=c"),
+            Branch::InTeam,
+            "in_team is checked before in_channel"
+        );
+        assert_eq!(
+            branch("in_team=t&not_in_team=o"),
+            Branch::NotInTeam,
+            "not_in_team is checked before in_team"
+        );
+        assert_eq!(
+            branch("in_team=t&not_in_channel=c&not_in_team=o"),
+            Branch::NotInChannel,
+            "not_in_channel outranks both team filters"
+        );
+        assert_eq!(
+            branch("in_team=t&in_group=g"),
+            Branch::InTeam,
+            "in_group is last but one — an in_team request never reaches it"
+        );
+        assert_eq!(
+            branch("without_team=true&in_team=t&not_in_channel=c"),
+            Branch::WithoutTeam,
+            "without_team short-circuits the whole chain"
+        );
+        // The flag is ParseBool, so only truthy values take the branch.
+        assert_eq!(branch("without_team=false&in_team=t"), Branch::InTeam);
+        assert_eq!(branch("without_team&in_team=t"), Branch::InTeam);
+        assert_eq!(branch("without_team=1"), Branch::WithoutTeam);
+
+        // An empty value is an absent filter, not a filter on the empty string.
+        assert_eq!(branch("in_team=&in_channel=c"), Branch::InChannel);
+    }
+
+    /// The forwarding boundary, from both sides. The role rule is global because Go's validation
+    /// guard is; the group and ABAC rules are branch-scoped because Go only reads those
+    /// parameters on the arm that uses them.
+    #[test]
+    fn the_forwarding_rules_are_the_conditions_go_dispatches_on() {
+        // Served.
+        for served in [
+            "",
+            "page=1&per_page=200",
+            "in_team=t",
+            "in_channel=c",
+            "not_in_team=t",
+            "not_in_channel=c&in_team=t",
+            "in_team=t&active=true",
+            "in_channel=c&inactive=true",
+            "sort=",
+            "role=&roles=&channel_roles=&team_roles=",
+            "without_team=false",
+            "group_constrained=false&not_in_team=t",
+        ] {
+            assert_eq!(forward(served), None, "{served:?} must be served");
+        }
+
+        // The four role parameters, each on its own, and each still forwarding on a branch that
+        // would ignore it — Go validates them all before it dispatches.
+        assert_eq!(
+            forward("role=system_admin"),
+            Some(ForwardReason::RoleFilter)
+        );
+        assert_eq!(
+            forward("roles=system_user"),
+            Some(ForwardReason::RoleFilter)
+        );
+        assert_eq!(
+            forward("in_team=t&channel_roles=channel_admin"),
+            Some(ForwardReason::RoleFilter),
+            "channel_roles is ignored by the in_team arm but still triggers GetAllRoles"
+        );
+        assert_eq!(
+            forward("in_channel=c&team_roles=team_admin"),
+            Some(ForwardReason::RoleFilter)
+        );
+
+        // Every sort, valid or not — including the ones Go 400s on.
+        for sort in [
+            "last_activity_at",
+            "create_at",
+            "status",
+            "admin",
+            "display_name",
+            "bogus",
+        ] {
+            assert_eq!(
+                forward(&format!("in_team=t&sort={sort}")),
+                Some(ForwardReason::Sort),
+                "sort={sort}"
+            );
+        }
+
+        assert_eq!(
+            forward("active=true&inactive=true"),
+            Some(ForwardReason::ActiveAndInactive)
+        );
+        assert_eq!(
+            forward("active=true&inactive=false"),
+            None,
+            "only both-at-once reaches Go's return-less SetInvalidURLParam"
+        );
+
+        assert_eq!(
+            forward("without_team=true"),
+            Some(ForwardReason::WithoutTeam)
+        );
+        assert_eq!(forward("in_group=g"), Some(ForwardReason::InGroup));
+        assert_eq!(forward("not_in_group=g"), Some(ForwardReason::NotInGroup));
+        assert_eq!(
+            forward("in_team=t&in_group=g"),
+            None,
+            "the in_team arm never reads in_group, so this is served"
+        );
+
+        // group_constrained and abac_match_only, on and off the arms that read them.
+        for scoped in ["not_in_team=t", "not_in_channel=c&in_team=t"] {
+            assert_eq!(
+                forward(&format!("{scoped}&group_constrained=true")),
+                Some(ForwardReason::GroupConstrained),
+                "{scoped}"
+            );
+            assert_eq!(
+                forward(&format!("{scoped}&abac_match_only=true")),
+                Some(ForwardReason::AbacMatchOnly),
+                "{scoped}"
+            );
+        }
+        for ignored in ["", "in_team=t", "in_channel=c"] {
+            assert_eq!(
+                forward(&format!(
+                    "{ignored}&group_constrained=true&abac_match_only=true"
+                )),
+                None,
+                "{ignored:?} never reads either flag"
+            );
+        }
+    }
+
+    /// Paging comes from the shared middleware and never fails; `since` — which the sibling
+    /// `POST /users/ids` has — does not exist on this route at all.
+    #[test]
+    fn paging_defaults_and_caps_apply_and_there_is_no_since() {
+        let parsed = parse_get_users_request(Some("page=3&per_page=999&since=1"));
+        assert_eq!(parsed.page, 3);
+        assert_eq!(parsed.per_page, 200, "capped at PerPageMaximum");
+        let parsed = parse_get_users_request(Some("page=-1&per_page=abc"));
+        assert_eq!((parsed.page, parsed.per_page), (0, 60));
+        let parsed = parse_get_users_request(None);
+        assert_eq!((parsed.page, parsed.per_page), (0, 60));
+        assert_eq!(parsed.per_page, 60);
+    }
 
     const A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaa";
     const B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbb";
