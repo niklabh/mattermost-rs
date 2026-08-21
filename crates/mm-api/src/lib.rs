@@ -280,6 +280,13 @@ pub fn router(state: AppState) -> Router {
                 get(channels::get_channel_members_for_team_for_user),
             ),
         )
+        // `BaseRoutes.TeamForUser` again (api.go:34): the singular unread, a sibling of
+        // `/users/{user_id}/teams/unread` above with one more segment. Nothing shadows it — the
+        // literal `unread` is the last segment here, not the `{team_id}` slot.
+        .route(
+            "/api/v4/users/{user_id}/teams/{team_id}/unread",
+            partially_migrated_with_ids(&state, get(teams::get_team_unread)),
+        )
         // Sibling literal segments (`/channels/direct`, `/channels/search`, …) are all POST-only
         // in Go, and all alphanumeric. A GET to one of them matches `{channel_id}` here exactly
         // as it matches gorilla's `{channel_id:[A-Za-z0-9]+}` there, and 400s identically; a POST

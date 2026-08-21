@@ -8,13 +8,14 @@
 //! - `getTeamMember` — `GET /api/v4/teams/{team_id}/members/{user_id}`
 //! - `getTeamMembers` — `GET /api/v4/teams/{team_id}/members`
 //! - `getTeamsUnreadForUser` — `GET /api/v4/users/{user_id}/teams/unread`
+//! - `getTeamUnread` — `GET /api/v4/users/{user_id}/teams/{team_id}/unread`
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use mm_model::permission::{
-    PERMISSION_MANAGE_SYSTEM, PERMISSION_SYSCONSOLE_READ_USER_MANAGEMENT_USERS,
-    make_permission_error,
+    PERMISSION_EDIT_OTHER_USERS, PERMISSION_MANAGE_SYSTEM,
+    PERMISSION_SYSCONSOLE_READ_USER_MANAGEMENT_USERS, PERMISSION_VIEW_TEAM, make_permission_error,
 };
 
 use crate::AppState;
@@ -997,6 +998,132 @@ pub async fn get_teams_unread_for_user(
         .into_response()
 }
 
+/// `getTeamUnread`'s two permission gates in Go's order (api4/team.go:1323-1331), returning the
+/// permission the refusal names — or `None` when both grant.
+///
+/// Lifted out of the handler for the same reason `validate_team_and_user_ids` is: the order is
+/// **not observable over HTTP**. `WipeDetailed` empties `detailed_error` outside dev mode
+/// (model/utils.go:339) and `message` is the untranslated third of [D-092], so a caller who fails
+/// *both* gates gets a byte-identical 403 either way. The order is pinned here, where a unit test
+/// can hold it — including that the team check is not even *evaluated* when the user check
+/// refuses, which is what makes running them in Go's sequence cheap as well as correct.
+async fn team_unread_denied<U, UFut, T, TFut>(
+    user_allowed: U,
+    team_allowed: T,
+) -> Option<&'static mm_model::permission::Permission>
+where
+    U: FnOnce() -> UFut,
+    UFut: std::future::Future<Output = bool>,
+    T: FnOnce() -> TFut,
+    TFut: std::future::Future<Output = bool>,
+{
+    if !user_allowed().await {
+        return Some(&PERMISSION_EDIT_OTHER_USERS);
+    }
+    if !team_allowed().await {
+        return Some(&PERMISSION_VIEW_TEAM);
+    }
+    None
+}
+
+/// Port of `getTeamUnread` (api4/team.go:1318), reached as
+/// `GET /api/v4/users/{user_id}/teams/{team_id}/unread`.
+///
+/// # Not the plural route with a filter
+///
+/// Its sibling `getTeamsUnreadForUser` gates on `manage_system` alone, reads
+/// `GetChannelUnreadsForAllTeams` (`TeamId <> ?`) and forwards the collapsed-threads variant to
+/// Go. This one shares none of that:
+///
+/// 1. **Two gates, in order.** `SessionHasPermissionToUser` — which *does* carry the
+///    unrestricted/`manage_system` shortcut, the self shortcut and the
+///    "even `edit_other_users` cannot touch a system admin" rule — then
+///    `SessionHasPermissionToTeam(view_team)`. So the caller is refused for a team they cannot
+///    see **even when asking about themselves**, which the plural route never does. Which of the
+///    two permissions a refusal names never reaches a client — `WipeDetailed` empties
+///    `detailed_error` outside dev mode — so the order lives in [`team_unread_denied`] with the
+///    unit test that pins it.
+/// 2. **A different query**, `GetChannelUnreadsForTeam` — `TeamId = ?`.
+/// 3. **Nothing is forwarded.** There is no threads half in Go's singular handler at all, so
+///    `include_collapsed_threads` is not even read here; the three `thread_*` counters are always
+///    zero, on both servers, for every caller.
+///
+/// # Wire format
+///
+/// `json.NewEncoder(w).Encode` (team.go:1341) — an *encoder*, so the body carries a **trailing
+/// newline**, where the plural route's `json.Marshal` + `w.Write` does not ([D-086]). Two routes
+/// for the same struct in one Go file, opposite answers; the parity suite asserts the byte.
+///
+/// A user with nothing unread is an all-zero object carrying the requested `team_id`, never a
+/// 404 and never an omission — Go builds the struct before the loop.
+#[tracing::instrument(skip_all, fields(user_id = %user_id, team_id = %team_id))]
+pub async fn get_team_unread(
+    State(state): State<AppState>,
+    Path((user_id, team_id)): Path<(String, String)>,
+    session: AuthenticatedSession,
+) -> Response {
+    let user_id = if user_id == ME {
+        session.0.user_id.clone()
+    } else {
+        user_id
+    };
+
+    if let Err(err) = validate_team_and_user_ids(&team_id, &user_id) {
+        return err.into_response();
+    }
+
+    let denial = team_unread_denied(
+        || async {
+            state
+                .app
+                .session_has_permission_to_user(&session.0, &user_id)
+                .await
+        },
+        || async {
+            state
+                .app
+                .session_has_permission_to_team(&session.0, &team_id, &PERMISSION_VIEW_TEAM)
+                .await
+        },
+    )
+    .await;
+    if let Some(permission) = denial {
+        return ApiError(*make_permission_error(&session.0, &[permission])).into_response();
+    }
+
+    let unread = match state.app.get_team_unread(&team_id, &user_id).await {
+        Ok(unread) => unread,
+        Err(err) => return ApiError(err).into_response(),
+    };
+
+    let mut body = match serde_json::to_vec(&unread) {
+        Ok(body) => body,
+        Err(err) => {
+            tracing::error!(error = %err, "failed to serialise the team unread");
+            return ApiError(mm_model::utils::AppError::new(
+                "getTeamUnread",
+                "api.marshal_error",
+                None,
+                String::new(),
+                500,
+            ))
+            .into_response();
+        }
+    };
+    // `json.NewEncoder(w).Encode` writes the newline; the plural sibling's `w.Write` does not.
+    body.push(b'\n');
+
+    (
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
+    )
+        .into_response()
+}
+
 #[cfg(test)]
 mod tests {
     use mm_model::team_member::TeamMember;
@@ -1004,8 +1131,8 @@ mod tests {
     use super::{
         TeamMembersGetOptions, Visibility, get_team_denial, segment_matches_team_name_mux,
         team_by_name_denied, team_is_public, team_members_options,
-        team_name_is_shadowed_by_team_id_route, team_view_denied, user_visibility,
-        validate_team_and_user_ids, wants_collapsed_threads,
+        team_name_is_shadowed_by_team_id_route, team_unread_denied, team_view_denied,
+        user_visibility, validate_team_and_user_ids, wants_collapsed_threads,
     };
 
     /// The string compare, not `ParseBool`: only the literal `true` forwards. `=1`, `=t` and
@@ -1373,5 +1500,44 @@ mod tests {
         let mut single = serde_json::to_vec(&member(ME)).expect("serialises");
         single.push(b'\n');
         assert_eq!(single.last(), Some(&b'\n'));
+    }
+
+    /// The user gate runs **first** and short-circuits: a caller who fails both is refused with
+    /// `edit_other_users`, and the team check is never evaluated. Neither fact reaches a client
+    /// (`WipeDetailed`, [D-092]), so this is the only place either can be asserted.
+    #[tokio::test]
+    async fn the_user_gate_runs_first_and_the_team_gate_is_not_polled_when_it_refuses() {
+        let team_polled = std::cell::Cell::new(false);
+        let denial = team_unread_denied(
+            || async { false },
+            || async {
+                team_polled.set(true);
+                false
+            },
+        )
+        .await;
+        assert_eq!(
+            denial.map(|p| p.id.as_ref()),
+            Some("edit_other_users"),
+            "the user gate names its own permission when both would refuse"
+        );
+        assert!(
+            !team_polled.get(),
+            "the team check must not run once the user check has refused"
+        );
+
+        assert_eq!(
+            team_unread_denied(|| async { true }, || async { false })
+                .await
+                .map(|p| p.id.as_ref()),
+            Some("view_team"),
+            "and the team gate names view_team, not the user gate's permission"
+        );
+        assert!(
+            team_unread_denied(|| async { true }, || async { true })
+                .await
+                .is_none(),
+            "both granting is not a denial"
+        );
     }
 }

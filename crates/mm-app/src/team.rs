@@ -316,19 +316,89 @@ impl App {
         tracing::Span::current().record("teams", members.len());
         Ok(members)
     }
+
+    /// Port of `app.App.GetTeamUnread` (team.go:1214) — the **singular** sibling of
+    /// [`App::get_teams_unread_for_user`].
+    ///
+    /// Three things differ from the plural route and none of them is symmetry:
+    ///
+    /// 1. **A different store call.** `GetChannelUnreadsForTeam` filters `TeamId = ?` where the
+    ///    plural filters `TeamId <> ?`. Reusing the plural query with a post-filter would answer
+    ///    the same for every reachable input but is not the query Go runs.
+    /// 2. **There is no collapsed-threads half at all.** The plural route consults the Threads
+    ///    store behind a config flag and this one never does, so the three `thread_*` counters
+    ///    are Go's zero values on *every* request — nothing is forwarded, and CRT changes nothing.
+    /// 3. **A team with no unread rows is still an answer**, not an omission: Go builds the
+    ///    struct before the loop with `TeamId` set from the *parameter*. A user in no channel of
+    ///    the team — or in no such team at all — gets an all-zero `TeamUnread` carrying the
+    ///    requested id, where the plural route would simply not list the team.
+    ///
+    /// The per-row accumulation is [`accumulate_channel_unread`], shared with the plural fold
+    /// because Go's two copies are the same four lines.
+    #[tracing::instrument(skip_all, fields(user_id = %user_id, team_id = %team_id, channels))]
+    pub async fn get_team_unread(
+        &self,
+        team_id: &str,
+        user_id: &str,
+    ) -> Result<TeamUnread, AppError> {
+        let channel_unreads = self
+            .store()
+            .team()
+            .get_channel_unreads_for_team(team_id, user_id)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "channel unreads lookup failed");
+                AppError::new(
+                    "GetTeamUnread",
+                    "app.team.get_unread.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })?;
+        tracing::Span::current().record("channels", channel_unreads.len());
+
+        let mut team_unread = TeamUnread {
+            team_id: team_id.to_owned(),
+            ..Default::default()
+        };
+        for cu in &channel_unreads {
+            accumulate_channel_unread(&mut team_unread, cu);
+        }
+        Ok(team_unread)
+    }
+}
+
+/// One channel row folded into a team total — Go's `unreads` closure (team.go:1989) and the body
+/// of `GetTeamUnread`'s loop (team.go:1227), which are the same four lines written twice.
+///
+/// The two **mention** counters are added unconditionally. The two **message** counters are added
+/// only when the member's `mark_unread` notify prop is not `mention`: a muted channel contributes
+/// its mentions to the team badge and nothing else. The prop is read off the *member* row, so one
+/// muted channel in a team of three leaves the other two counted, and a nil map indexes to `""`
+/// in Go — which is not `mention` — so a row with no props is counted in full.
+fn accumulate_channel_unread(tu: &mut TeamUnread, cu: &ChannelUnread) {
+    tu.mention_count += cu.mention_count;
+    tu.mention_count_root += cu.mention_count_root;
+    let muted = cu
+        .notify_props
+        .as_ref()
+        .and_then(|props| props.get(MARK_UNREAD_NOTIFY_PROP))
+        .map(String::as_str)
+        == Some(CHANNEL_MARK_UNREAD_MENTION);
+    if !muted {
+        tu.msg_count += cu.msg_count;
+        tu.msg_count_root += cu.msg_count_root;
+    }
 }
 
 /// The per-team fold of `GetTeamsUnreadForUser` (team.go:1989-2019).
 ///
 /// # What is summed when
 ///
-/// The two **mention** counters are added for every channel row. The two **message** counters
-/// are added only when the member's `mark_unread` notify prop is not `mention` — a muted channel
-/// contributes its mentions to the team badge and nothing else. That is the same shortcut
-/// `GetChannelUnread` applies to a single channel, expressed as a skip rather than a zeroing, and
-/// it reads the prop off the *member* row, so one muted channel in a team of three leaves the
-/// other two counted. A nil map indexes to `""` in Go, which is not `mention`, so a row with no
-/// props is counted in full.
+/// Per row, [`accumulate_channel_unread`] — mentions always, messages unless the channel is
+/// muted. That is the same shortcut `GetChannelUnread` applies to a single channel, expressed as
+/// a skip rather than a zeroing.
 ///
 /// # Order
 ///
@@ -353,19 +423,7 @@ pub fn fold_team_unreads(data: &[ChannelUnread]) -> Vec<TeamUnread> {
                 members.len() - 1
             }
         };
-        let tu = &mut members[index];
-        tu.mention_count += cu.mention_count;
-        tu.mention_count_root += cu.mention_count_root;
-        let muted = cu
-            .notify_props
-            .as_ref()
-            .and_then(|props| props.get(MARK_UNREAD_NOTIFY_PROP))
-            .map(String::as_str)
-            == Some(CHANNEL_MARK_UNREAD_MENTION);
-        if !muted {
-            tu.msg_count += cu.msg_count;
-            tu.msg_count_root += cu.msg_count_root;
-        }
+        accumulate_channel_unread(&mut members[index], cu);
     }
     members
 }
@@ -705,5 +763,95 @@ mod tests {
         assert_eq!(err.status_code, 500);
         assert_eq!(err.id, "app.team.get_unread.app_error", "team.go:1983");
         assert_eq!(err.where_, "GetTeamsUnreadForUser");
+    }
+
+    /// The singular route shares the id with its plural sibling and differs in `where_` only —
+    /// the one field that separates the two 500s in a log.
+    #[tokio::test]
+    async fn the_singular_lookup_failure_shares_the_id_and_not_the_where() {
+        let err = unreachable_app()
+            .get_team_unread("tttttttttttttttttttttttttt", "uuuuuuuuuuuuuuuuuuuuuuuuuu")
+            .await
+            .expect_err("the store is unreachable");
+        assert_eq!(err.status_code, 500);
+        assert_eq!(err.id, "app.team.get_unread.app_error", "team.go:1217");
+        assert_eq!(err.where_, "GetTeamUnread");
+        assert_ne!(err.where_, "GetTeamsUnreadForUser");
+    }
+
+    /// The singular fold, on rows the singular query could actually return (all one team): every
+    /// counter sums, the muted row keeps its mentions and loses its messages, and the thread
+    /// counters stay at Go's zero.
+    #[test]
+    fn the_singular_fold_sums_every_counter_and_honours_the_mute() {
+        let mut plain = TeamUnread {
+            team_id: "team1".to_owned(),
+            ..Default::default()
+        };
+        for cu in &[
+            row("team1", "c1", 10, 7, 3, 2),
+            row("team1", "c2", 100, 70, 30, 20),
+        ] {
+            accumulate_channel_unread(&mut plain, cu);
+        }
+        assert_eq!(
+            (
+                plain.msg_count,
+                plain.msg_count_root,
+                plain.mention_count,
+                plain.mention_count_root
+            ),
+            (110, 77, 33, 22),
+            "four pairwise-different sums, so a swapped column cannot pass"
+        );
+        assert_eq!(
+            (
+                plain.thread_count,
+                plain.thread_mention_count,
+                plain.thread_urgent_mention_count
+            ),
+            (0, 0, 0),
+            "the singular handler has no threads half at all"
+        );
+
+        let mut with_mute = TeamUnread {
+            team_id: "team1".to_owned(),
+            ..Default::default()
+        };
+        for cu in &[
+            muted(row("team1", "c1", 10, 7, 3, 2), CHANNEL_MARK_UNREAD_MENTION),
+            row("team1", "c2", 100, 70, 30, 20),
+        ] {
+            accumulate_channel_unread(&mut with_mute, cu);
+        }
+        assert_eq!(with_mute.msg_count, 100, "the muted row's 10 is skipped");
+        assert_eq!(with_mute.msg_count_root, 70);
+        assert_eq!(with_mute.mention_count, 33, "mentions pierce the mute");
+        assert_eq!(with_mute.mention_count_root, 22);
+    }
+
+    /// The **parameter** is the `team_id` on the wire, not any row's — which is the only reason
+    /// a user with nothing unread still gets an answer naming the team they asked about. A fold
+    /// that took the id from the rows would emit `""` here.
+    #[test]
+    fn an_empty_row_set_is_an_all_zero_object_carrying_the_requested_team_id() {
+        let unread = TeamUnread {
+            team_id: "tttttttttttttttttttttttttt".to_owned(),
+            ..Default::default()
+        };
+        assert_eq!(
+            serde_json::to_value(&unread).unwrap(),
+            serde_json::json!({
+                "team_id": "tttttttttttttttttttttttttt",
+                "msg_count": 0,
+                "mention_count": 0,
+                "mention_count_root": 0,
+                "msg_count_root": 0,
+                "thread_count": 0,
+                "thread_mention_count": 0,
+                "thread_urgent_mention_count": 0,
+            }),
+            "eight fields, none omitempty"
+        );
     }
 }

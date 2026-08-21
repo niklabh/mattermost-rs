@@ -3667,3 +3667,48 @@ set aside. Three Rust files and one correction to the previous session's ledger 
 5. **The DB test is transcribed for the type filter.** `NOT IN ('S')` admits a board here where
    `GetChannelUnread`'s `IN (O, P, D, G)` refuses it; neither row exists on Team Edition over REST,
    so both are planted and asserted against our own SQL, not Go's.
+
+## Route rows — api4/team.go (`getTeamUnread`), appended 2026-08-21
+
+| Go source | Rust file | Status | Tests | Notes |
+|---|---|---|---|---|
+| store/sqlstore/team_store.go (`GetChannelUnreadsForTeam`) | `mm-store/src/team_store.rs` | PARTIAL | 3 DB | The plural sibling's query with `TeamId = ?` in place of `TeamId <> ?` — same seven columns, same `DeleteAt = 0`, same `NOT IN ('S')` deny-list, same bare-name resolution. Both now share one row decode (`channel_unread_from_row`); `sqlx::query_as!` maps by **column name**, not position, which a reordering control proved. |
+| app/team.go (`GetTeamUnread`) | `mm-app/src/team.rs` | PARTIAL | 3 pass | Singular fold. The `team_id` on the wire is the **parameter**, not any row's, so a user with nothing unread still gets an all-zero object naming the team. No collapsed-threads half exists in Go here at all, so the three `thread_*` counters are always zero. Shares `accumulate_channel_unread` with the plural fold. |
+| api4/team.go (`getTeamUnread`) | `mm-api/src/teams.rs` | PARTIAL | 1 pass + 7 parity + 3 DB (+1 model fixture) | `GET /users/{user_id}/teams/{team_id}/unread` served, **nothing forwarded**. Two gates in order — `SessionHasPermissionToUser`, then `SessionHasPermissionToTeam(view_team)` — so a caller is refused for a team they cannot see *even asking about themselves*, which the plural sibling never does. Body carries a **trailing newline** (`json.NewEncoder`), where the plural sibling's `json.Marshal` + `w.Write` does not. Mutations: 12 run, 12 caught, 2 controls survived. |
+
+## Notes — api4/team.go (`getTeamUnread`)
+
+1. **The singular route is not the plural one with a filter, and Go does not share an
+   implementation.** Different store call (`GetChannelUnreadsForTeam`, `TeamId = ?`), different
+   gates (`SessionHasPermissionToUser` + `view_team`, not `manage_system`), different wire
+   framing (`json.NewEncoder` → trailing newline, not `json.Marshal` + `w.Write`), and **no
+   collapsed-threads branch at all** — `include_collapsed_threads` is never read, so nothing is
+   forwarded and CRT changes nothing about this route. Four differences between two handlers 500
+   lines apart in one file; assuming symmetry would have got every one of them wrong.
+2. **A team with nothing unread is an all-zero object, not a miss.** Go builds the struct before
+   the loop with `TeamId` from the *parameter*, so a well-formed team id that matches no row —
+   for a caller who can see it — is a 200 whose `team_id` is the id that was asked for. Measured
+   against Go on an id that exists nowhere.
+3. **Gate order is not observable over HTTP, so it is pinned in-process.** `WipeDetailed`
+   (model/utils.go:339) empties `detailed_error` outside dev mode and `message` is the
+   untranslated third of [D-092], so a caller failing *both* gates gets a byte-identical 403
+   whichever check ran first. `teams::team_unread_denied` lifts the pair out of the handler and a
+   unit test asserts the order *and* that the team check is never evaluated once the user check
+   refuses. The same lift as `validate_team_and_user_ids`, for the same reason.
+4. **`SessionHasPermissionToUser` step 5 has no REST oracle on this deployment.** "Even
+   `edit_other_users` cannot read a system admin" needs a caller holding `edit_other_users`, and
+   **no persisted system role in this database carries it** — `system_manager`,
+   `system_user_manager` and `system_read_only_admin` were all checked and all lack it — while
+   Team Edition refuses system-role assignment over REST. That branch rests on the unit tests in
+   `mm-app/src/authorization.rs`, not on measurement.
+5. **A no-op mutation control found a fixture race, which is what controls are for.** The first
+   `c2` run failed on `a_team_the_caller_cannot_see_…`: it byte-compared unread counters on the
+   *shared* fixture team, and every other test in the binary was adding users to that same team —
+   each of which posts a join message into `town-square`, which every member's team total then
+   includes. This route sums over **all** the caller's channels in a team, so two tests sharing a
+   team move each other's answer. Every fixture in `parity_team_unread.rs` now creates its own
+   team. Had the control not been run, the suite would have been flaky-green.
+6. **`sqlx::query_as!` maps result columns by name.** The control that reorders two independent
+   `SELECT` columns survives, and the DB fixture's `mention_count`/`mention_count_root` are
+   distinct values that would have caught a positional mapping. Worth knowing before anyone
+   "tidies" a select list.
