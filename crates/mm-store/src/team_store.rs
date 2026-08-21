@@ -1,6 +1,7 @@
 //! Port of `SqlTeamStore` (channels/store/sqlstore/team_store.go): the team reads (`Get`,
 //! `GetByName`, `GetTeamsByUserId`), the membership reads (`GetTeamsForUser`, `GetMember`,
-//! `GetMembers`), the two member counts, and the scheme-roles machinery they exist to drive.
+//! `GetMembers`), the two member counts, the per-channel unread rows behind the team unread
+//! badges (`GetChannelUnreadsForAllTeams`), and the scheme-roles machinery they exist to drive.
 //!
 //! # Why this is not just a SELECT
 //!
@@ -11,8 +12,10 @@
 //! computation, and getting it wrong produces a **silent** permission difference rather than an
 //! error: a member who should be a team admin quietly is not, or vice versa.
 
+use mm_model::channel_member::ChannelUnread;
 use mm_model::team::Team;
 use mm_model::team_member::TeamMember;
+use mm_model::utils::StringMap;
 use sqlx::PgPool;
 
 use crate::error::StoreError;
@@ -189,6 +192,13 @@ pub trait TeamStore {
         &self,
         team_id: &str,
     ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
+
+    /// Port of `SqlTeamStore.GetChannelUnreadsForAllTeams` (team_store.go:1231).
+    fn get_channel_unreads_for_all_teams(
+        &self,
+        exclude_team_id: &str,
+        user_id: &str,
+    ) -> impl std::future::Future<Output = Result<Vec<ChannelUnread>, StoreError>> + Send;
 }
 
 /// Postgres-backed implementation.
@@ -253,6 +263,15 @@ impl TeamStore for SqlTeamStore {
     #[tracing::instrument(skip_all, fields(team_id = %team_id))]
     async fn get_active_member_count(&self, team_id: &str) -> Result<i64, StoreError> {
         get_active_member_count(&self.pool, team_id).await
+    }
+
+    #[tracing::instrument(skip_all, fields(user_id = %user_id, exclude_team_id = %exclude_team_id, found))]
+    async fn get_channel_unreads_for_all_teams(
+        &self,
+        exclude_team_id: &str,
+        user_id: &str,
+    ) -> Result<Vec<ChannelUnread>, StoreError> {
+        get_channel_unreads_for_all_teams(&self.pool, exclude_team_id, user_id).await
     }
 }
 
@@ -794,6 +813,94 @@ pub async fn get_teams_for_user(
     })?;
 
     Ok(rows.into_iter().map(team_member_from_row).collect())
+}
+
+/// Port of `SqlTeamStore.GetChannelUnreadsForAllTeams` (team_store.go:1231).
+///
+/// # The exclusion predicate is unconditional, and that is what hides the DMs
+///
+/// `GetTeamsForUser` in this file adds its `TeamId <> ?` only when an exclusion was asked for.
+/// This query does **not**: squirrel renders `sq.NotEq{"TeamId": excludeTeamId}` for the empty
+/// string too, as `TeamId <> ''`. Direct and group channels carry an empty `TeamId`, so with no
+/// `exclude_team` they are filtered out — and with one, they all pass and surface as a
+/// `TeamUnread` whose `team_id` is `""`. Both halves are Go's answer and both are measured by the
+/// parity suite; writing the conditional form the sibling uses would leak every DM into the
+/// default response.
+///
+/// # The bare names resolve the same way as in `GetChannelUnread`
+///
+/// `UserId` is the member's, `DeleteAt` and `TeamId` are the channel's (`ChannelMembers` has
+/// neither). So an **archived** channel's unread state is gone here while its membership row
+/// survives. `Channels.Type NOT IN ('S')` is the space deny-list (`nonMessageBackingChannelTypes`,
+/// channel_store.go:52) — narrower than `GetChannelUnread`'s `IN (O, P, D, G)`: a board's
+/// counters **do** feed the team badge here. Unreachable over REST on Team Edition, seeded by
+/// the DB test.
+///
+/// Nothing is coalesced: each selected counter scans into a plain `int64` in Go, so a NULL is a
+/// 500, not a zero — the `!` overrides reproduce that. `UrgentMentionCount` is not selected at
+/// all and stays at Go's zero value. `NotifyProps` never reaches a client (`json:"-"`) but the
+/// app layer branches on it.
+#[tracing::instrument(skip(pool), fields(user_id = %user_id, exclude_team_id = %exclude_team_id))]
+pub async fn get_channel_unreads_for_all_teams(
+    pool: &PgPool,
+    exclude_team_id: &str,
+    user_id: &str,
+) -> Result<Vec<ChannelUnread>, StoreError> {
+    let rows = sqlx::query!(
+        r#"
+        SELECT channels.teamid AS "teamid!",
+               channels.id AS "channelid!",
+               (channels.totalmsgcount - channelmembers.msgcount) AS "msgcount!",
+               (channels.totalmsgcountroot - channelmembers.msgcountroot) AS "msgcountroot!",
+               channelmembers.mentioncount AS "mentioncount!",
+               channelmembers.mentioncountroot AS "mentioncountroot!",
+               channelmembers.notifyprops
+          FROM channels
+          JOIN channelmembers ON channels.id = channelmembers.channelid
+         WHERE channelmembers.userid = $1
+           AND channels.deleteat = 0
+           AND channels.teamid <> $2
+           AND channels.type NOT IN ('S')
+        "#,
+        user_id,
+        exclude_team_id
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: format!(
+            "failed to find Channels with userId={user_id} and teamId!={exclude_team_id}"
+        ),
+        source,
+    })?;
+    tracing::Span::current().record("found", rows.len());
+
+    rows.into_iter()
+        .map(|row| {
+            // Same jsonb split as `channel_store::get_channel_unread`: SQL NULL and the JSON
+            // value `null` are different rows, and both are a nil map in Go ([D-135]).
+            let notify_props = match row.notifyprops {
+                None | Some(serde_json::Value::Null) => None,
+                Some(value) => Some(serde_json::from_value::<StringMap>(value).map_err(
+                    |source| StoreError::Decode {
+                        entity: "ChannelUnread",
+                        column: "notifyprops",
+                        source,
+                    },
+                )?),
+            };
+            Ok(ChannelUnread {
+                team_id: row.teamid,
+                channel_id: row.channelid,
+                msg_count: row.msgcount,
+                mention_count: row.mentioncount,
+                mention_count_root: row.mentioncountroot,
+                urgent_mention_count: 0,
+                msg_count_root: row.msgcountroot,
+                notify_props,
+            })
+        })
+        .collect()
 }
 
 #[cfg(test)]
