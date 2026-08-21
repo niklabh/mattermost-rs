@@ -5290,3 +5290,27 @@ deployment must run Go with the flag at its default; turning it on server-side w
 servers answer a non-member's GET differently, and nothing would fail loudly.
 
 **Where the pin lives:** the doc comment on `channel_read_denied` in `mm-api/src/channels.rs`.
+
+## D-154 · `getUsers` cannot see the licence, so ABAC-narrowed `not_in_channel` would diverge
+
+**Status** OPEN · **Severity** deferred-feature · **Raised** 2026-08-21 (api4/user.go `getUsers`)
+
+Go's `not_in_channel` arm asks `ChannelAccessControlled` (app/channel.go:4522) and, for a
+policy-enforced **private** channel, replaces the listing with
+`GetUsersNotInAbacChannel` — a narrowed candidate set. The `not_in_team` arm does the same when
+`abac_match_only=true`. Both gates return false without an Enterprise Advanced licence *and*
+`AccessControlSettings.EnableAttributeBasedAccessControl`, which is this deployment, so the
+served arms match Go today and the parity suite measures that.
+
+The port has neither a licence surface nor an access-control service, so it cannot detect the
+enforced case. `abac_match_only=true` is forwarded on both `not_in_*` arms, which closes the
+half a query parameter can name. The half it cannot: on a licensed server with ABAC on, a
+policy-enforced private channel's `not_in_channel` list would come back **unnarrowed** from this
+port — a listing Go was configured to restrict.
+
+**What is owed:** `License()` plus `AccessControlSettings`, the same config gap as [D-085], and
+then either the ABAC query or a forward on `ChannelAccessControlled`. Until then this route must
+not be deployed against a licensed Enterprise Advanced server with attribute-based access
+control enabled.
+
+**Where the pin lives:** the doc comment on `users::get_users` in `mm-api/src/users.rs`.

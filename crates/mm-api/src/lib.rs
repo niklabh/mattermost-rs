@@ -320,6 +320,13 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/users/{user_id}/channels/{channel_id}/unread",
             partially_migrated_with_ids(&state, get(channels::get_channel_unread)),
         )
+        // `BaseRoutes.Users.Handle("", ...)` (api4/user.go:34) — the bare `/users` collection.
+        // It is one segment shorter than every `/api/v4/users/...` route registered above, so
+        // axum sees a distinct path and there is no literal-versus-parameterised question to
+        // answer: nothing that matched `{user_id}` or the `me`/`ids`/`username` literals can
+        // match here, and nothing here could have matched them. Only `GET` is migrated; `POST`
+        // (createUser) and the rest fall to `partially_migrated`'s method fallback.
+        .route("/api/v4/users", partially_migrated(get(users::get_users)))
         .fallback(proxy::forward_to_go)
         .with_state(state)
 }
