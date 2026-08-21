@@ -7,6 +7,8 @@
 //! - `getChannelMembers` — `GET /api/v4/channels/{channel_id}/members`
 //! - `getChannelByName` — `GET /api/v4/teams/{team_id}/channels/name/{channel_name}`
 //! - `getChannelsForTeamForUser` — `GET /api/v4/users/{user_id}/teams/{team_id}/channels`
+//! - `getChannelsForUser` — `GET /api/v4/users/{user_id}/channels` (streamed in Go; see the
+//!   handler for the byte layout that implies)
 //!
 //! # The first route migrated *through* a permission check
 //!
@@ -1081,6 +1083,174 @@ pub async fn get_channels_for_team_for_user(
         .into_response())
 }
 
+/// Go's `pageSize` in `getChannelsForUser` (api4/channel.go:1454): the keyset page the handler
+/// walks. Not on the wire directly — the client always gets the whole list — but the **byte**
+/// layout is: a `,` lands between pages, and a total that is an exact multiple of this ends the
+/// loop on a `not_found` rather than on a short page.
+const CHANNELS_FOR_USER_PAGE_SIZE: i64 = 100;
+
+/// The error id on which `getChannelsForUser`'s page loop ends (api4/channel.go:1471): the
+/// store's `ErrNotFound` for an empty page, which [`mm_app::App::get_channels_for_user`] maps
+/// to this id. Compared by **id**, as Go does, so a 404 from anywhere else would stop the loop
+/// too — there is nowhere else for one to come from.
+const CHANNELS_NOT_FOUND_ID: &str = "app.channel.get_channels.not_found.app_error";
+
+/// Port of the body `getChannelsForUser` streams (api4/channel.go:1454-1513), byte for byte.
+///
+/// Go writes `[` before it has fetched anything, then for every page: a `,` if it is not the
+/// first page, then each channel through `json.NewEncoder(w).Encode` — which appends a `\n` —
+/// with a `,` between channels, and finally `]`. So two channels are
+/// `[{…}\n,{…}\n]`, and the page boundary is invisible: `…}\n,{…` either way. **No newline
+/// after `]`**, unlike the `Encode`d lists elsewhere ([D-086]).
+///
+/// The loop ends on a page shorter than [`CHANNELS_FOR_USER_PAGE_SIZE`], or on the store's
+/// `not_found` for a page after a full one — which is how an exact multiple of the page size
+/// terminates. **A user with no channels is that same `not_found` on the first page**, and
+/// since the `[` and the `200` are already out, the wire carries `[` followed by the error
+/// body and nothing else: a 200 whose body is not JSON. `mid_stream_error` is that path for
+/// every error once the bracket is written — `Encode` failures included, which Go logs and
+/// skips, leaving the separators as if the element had been written.
+///
+/// `fetch_page` is the app call, `(from_channel_id) -> Result<ChannelList, AppError>`, with
+/// `FillInChannelsProps` folded in by the caller; the function owns only the byte layout.
+async fn stream_channels_for_user<F, Fut>(mut fetch_page: F) -> Vec<u8>
+where
+    F: FnMut(String) -> Fut,
+    Fut: std::future::Future<Output = Result<mm_model::channel_list::ChannelList, ApiError>>,
+{
+    let mut body = b"[".to_vec();
+    let mut from_channel_id = String::new();
+    loop {
+        let mut channels = match fetch_page(from_channel_id.clone()).await {
+            Ok(channels) => channels,
+            Err(err) => {
+                if !from_channel_id.is_empty() && err.0.id == CHANNELS_NOT_FOUND_ID {
+                    break;
+                }
+                return mid_stream_error(body, err);
+            }
+        };
+
+        // The intermediary comma between pages.
+        if !from_channel_id.is_empty() {
+            body.push(b',');
+        }
+
+        let count = channels.0.len();
+        for (i, channel) in channels.0.iter().enumerate() {
+            if let Err(err) = serde_json::to_writer(&mut body, channel) {
+                tracing::warn!(error = %err, channel_id = %channel.id, "Error while writing response");
+            }
+            body.push(b'\n');
+            if i + 1 < count {
+                body.push(b',');
+            }
+        }
+
+        if (count as i64) < CHANNELS_FOR_USER_PAGE_SIZE {
+            break;
+        }
+        // `channels[len(channels)-1].Id`: the list is done with, so the id moves out.
+        from_channel_id = channels.0.pop().map(|c| c.id).unwrap_or_default();
+    }
+    body.push(b']');
+    body
+}
+
+/// What the wire carries when `getChannelsForUser` fails after its `[`: the bytes so far, then
+/// Go's error body (`handleContextError`'s `c.Err.ToJSON()`), and no closing bracket — see
+/// [`ApiError::into_wire`]. The status line is already `200`.
+fn mid_stream_error(mut body: Vec<u8>, err: ApiError) -> Vec<u8> {
+    let (_, error_body) = err.into_wire();
+    body.extend(error_body.unwrap_or_default());
+    body
+}
+
+/// Port of `getChannelsForUser` (api4/channel.go:1435), reached as
+/// `GET /api/v4/users/{user_id}/channels` — the route the webapp calls on load, as
+/// `/users/me/channels?include_deleted=…&last_delete_at=…`.
+///
+/// # Order of operations
+///
+/// 1. `me` resolves before validation (web/context.go:301), then `RequireUserId()`.
+/// 2. One gate: `SessionHasPermissionToUser`, naming `edit_other_users`. No team gate — the list
+///    spans every team — and it runs **before** the query string is parsed, so a refused caller
+///    sending `last_delete_at=-1` gets the 403, not the 400.
+/// 3. `last_delete_at` ([`parse_last_delete_at`]) and `include_deleted` (`ParseBool`, error is
+///    false). Unlike the per-team sibling there is no `ChannelSearchOpts`; the values go to the
+///    store as they are.
+/// 4. **The response is streamed** — `200` and `[` are committed before the first page is
+///    fetched, and every error after that point lands *inside* the body with the status
+///    already sent. No etag. See [`stream_channels_for_user`] for the byte layout and the
+///    zero-channel case, which is **not a 404** the way the sibling's is.
+/// 5. Each page gets `FillInChannelsProps` before it is written, per page, so a header mention
+///    resolves against that page's team groups only — the same result, since the lookup is by
+///    team and name rather than by list position.
+///
+/// The body is assembled in memory rather than streamed: the bytes are identical, and a
+/// `Content-Length` instead of chunked transfer is not something a client can observe through
+/// its JSON parser.
+///
+/// # Not ported
+///
+/// `HydrateChannelsPolicyActions`, as in the sibling ([D-141]).
+#[tracing::instrument(skip_all, fields(user_id = %user_id))]
+pub async fn get_channels_for_user(
+    State(state): State<AppState>,
+    Path(user_id): Path<String>,
+    axum::extract::RawQuery(query): axum::extract::RawQuery,
+    session: AuthenticatedSession,
+) -> Result<Response, ApiError> {
+    let user_id = if user_id == ME {
+        session.0.user_id.clone()
+    } else {
+        user_id
+    };
+
+    require_id(&user_id, "user_id")?;
+
+    if !state
+        .app
+        .session_has_permission_to_user(&session.0, &user_id)
+        .await
+    {
+        return Err(ApiError(*make_permission_error(
+            &session.0,
+            &[&PERMISSION_EDIT_OTHER_USERS],
+        )));
+    }
+
+    let last_delete_at = parse_last_delete_at(query.as_deref())?;
+    let include_deleted = query_flag_is_true(query.as_deref(), INCLUDE_DELETED_PARAM);
+
+    let app = &state.app;
+    let user_id = &user_id;
+    let body = stream_channels_for_user(|from_channel_id| async move {
+        let mut channels = app
+            .get_channels_for_user(
+                user_id,
+                include_deleted,
+                last_delete_at,
+                CHANNELS_FOR_USER_PAGE_SIZE,
+                &from_channel_id,
+            )
+            .await?;
+        app.fill_in_channels_props(&mut channels.0).await?;
+        Ok(channels)
+    })
+    .await;
+
+    Ok((
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
+    )
+        .into_response())
+}
+
 /// The two gates of [`get_channel_members_for_team_for_user`] (api4/channel.go:1984-1992),
 /// **team first** — the reverse of [`channels_for_team_denied`], its sibling one path segment
 /// up, which gates the user first. Then a self-shortcut by string comparison, and only a
@@ -1784,6 +1954,169 @@ mod tests {
                 .await
                 .is_none()
         );
+    }
+
+    /// A list of `n` channels with distinct, sortable ids, for the streaming layout tests.
+    fn channel_page(ids: std::ops::Range<usize>) -> mm_model::channel_list::ChannelList {
+        mm_model::channel_list::ChannelList(
+            ids.map(|i| mm_model::channel::Channel {
+                id: format!("{i:0>26}"),
+                ..Default::default()
+            })
+            .collect(),
+        )
+    }
+
+    fn not_found() -> ApiError {
+        ApiError(mm_model::utils::AppError::new(
+            "GetChannelsForUser",
+            CHANNELS_NOT_FOUND_ID,
+            None,
+            String::new(),
+            404,
+        ))
+    }
+
+    /// The byte layout of a short single page: `[`, each element `Encode`d (trailing newline)
+    /// with `,` between, and a bare `]` — no newline after it.
+    #[tokio::test]
+    async fn a_short_page_streams_as_bracket_elements_newline_comma_bracket() {
+        let mut calls = Vec::new();
+        let body = stream_channels_for_user(|from| {
+            calls.push(from);
+            async { Ok(channel_page(0..2)) }
+        })
+        .await;
+        assert_eq!(
+            calls,
+            vec![String::new()],
+            "one page, fetched from the start"
+        );
+
+        let text = String::from_utf8(body).unwrap();
+        assert!(text.starts_with("[{\"id\":\"000"), "{text}");
+        assert!(
+            text.ends_with("}\n]"),
+            "no newline after the bracket: {text:?}"
+        );
+        assert_eq!(
+            text.matches("}\n,{").count(),
+            1,
+            "one separator between two elements"
+        );
+        let parsed: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(parsed.as_array().unwrap().len(), 2);
+    }
+
+    /// Two full pages and a short third: the loop keys on the last id of each page, and the
+    /// page boundary is the same `}\n,{` as an element boundary.
+    #[tokio::test]
+    async fn full_pages_continue_from_the_last_id_and_join_with_a_comma() {
+        let page = CHANNELS_FOR_USER_PAGE_SIZE as usize;
+        let mut calls = Vec::new();
+        let body = stream_channels_for_user(|from| {
+            calls.push(from.clone());
+            async move {
+                Ok(match from.as_str() {
+                    "" => channel_page(0..page),
+                    f if f == format!("{:0>26}", page - 1) => channel_page(page..2 * page),
+                    f if f == format!("{:0>26}", 2 * page - 1) => {
+                        channel_page(2 * page..2 * page + 1)
+                    }
+                    other => panic!("unexpected keyset {other}"),
+                })
+            }
+        })
+        .await;
+        assert_eq!(calls.len(), 3);
+
+        let text = String::from_utf8(body).unwrap();
+        assert_eq!(
+            text.matches("}\n,{").count(),
+            2 * page,
+            "2*page+1 elements, 2*page commas"
+        );
+        assert!(!text.contains(",,"), "no doubled comma at a page boundary");
+        assert!(
+            !text.contains("\n\n"),
+            "no doubled newline at a page boundary"
+        );
+        let parsed: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(parsed.as_array().unwrap().len(), 2 * page + 1);
+    }
+
+    /// A total that is an exact multiple of the page size ends on the store's `not_found` for
+    /// the page after, and that error is swallowed: the body closes normally.
+    #[tokio::test]
+    async fn an_exact_multiple_of_the_page_size_ends_on_a_swallowed_not_found() {
+        let page = CHANNELS_FOR_USER_PAGE_SIZE as usize;
+        let mut calls = 0;
+        let body = stream_channels_for_user(|from| {
+            calls += 1;
+            async move {
+                if from.is_empty() {
+                    Ok(channel_page(0..page))
+                } else {
+                    Err(not_found())
+                }
+            }
+        })
+        .await;
+        assert_eq!(calls, 2, "the full page forces one more fetch");
+
+        let text = String::from_utf8(body).unwrap();
+        assert!(text.ends_with("}\n]"), "{}", &text[text.len() - 40..]);
+        assert!(!text.contains("not_found"));
+        let parsed: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(parsed.as_array().unwrap().len(), page);
+    }
+
+    /// Zero channels is the same `not_found` on the **first** page, and that one is not
+    /// swallowed: the body is `[` followed by the error JSON — request id populated, detail
+    /// wiped, status code 404 in the body — and no closing bracket.
+    #[tokio::test]
+    async fn zero_channels_is_a_bracket_then_the_error_body() {
+        let body = stream_channels_for_user(|_| async { Err(not_found()) }).await;
+        let text = String::from_utf8(body).unwrap();
+        assert!(text.starts_with("[{\"id\":\"app.channel.get_channels.not_found.app_error\""));
+        assert!(text.ends_with("\"status_code\":404}"), "{text}");
+        assert!(
+            serde_json::from_str::<serde_json::Value>(&text).is_err(),
+            "not JSON"
+        );
+        let error: serde_json::Value = serde_json::from_str(&text[1..]).unwrap();
+        assert_eq!(error["request_id"].as_str().map(str::len), Some(26));
+        assert_eq!(error["detailed_error"], "");
+    }
+
+    /// Any other error after a page has been written — a 500 from the store, or a
+    /// `not_found` that is not the keyset's — lands after the elements so far.
+    #[tokio::test]
+    async fn a_mid_stream_error_lands_after_the_elements_written_so_far() {
+        let page = CHANNELS_FOR_USER_PAGE_SIZE as usize;
+        let body = stream_channels_for_user(|from| async move {
+            if from.is_empty() {
+                Ok(channel_page(0..page))
+            } else {
+                Err(ApiError(mm_model::utils::AppError::new(
+                    "GetChannelsForUser",
+                    "app.channel.get_channels.get.app_error",
+                    None,
+                    "db went away",
+                    500,
+                )))
+            }
+        })
+        .await;
+        let text = String::from_utf8(body).unwrap();
+        assert_eq!(text.matches("}\n,{").count(), page - 1);
+        assert!(
+            text.contains("}\n{\"id\":\"app.channel.get_channels.get.app_error\""),
+            "{}",
+            &text[text.len() - 200..]
+        );
+        assert!(text.ends_with("\"status_code\":500}"));
+        assert!(!text.contains("db went away"), "detail is wiped");
     }
 
     /// The members route gates team first and names `view_team`; a self read never polls the
