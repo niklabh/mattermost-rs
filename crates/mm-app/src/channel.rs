@@ -1,6 +1,6 @@
 //! Port of the channel app-layer surface (channels/app/channel.go): `GetChannel`,
-//! `GetChannelByName`, `GetChannelsForTeamForUser`, `GetChannelMember`, `GetChannelUnread` and
-//! `FillInChannelsProps`.
+//! `GetChannelByName`, `GetChannelsForTeamForUser`, `GetChannelsForUser`, `GetChannelMember`,
+//! `GetChannelUnread` and `FillInChannelsProps`.
 
 use std::collections::HashMap;
 
@@ -415,6 +415,59 @@ impl App {
                     )
                 } else {
                     tracing::error!(error = %err, "channels-for-team-for-user lookup failed");
+                    AppError::new(
+                        "GetChannelsForUser",
+                        "app.channel.get_channels.get.app_error",
+                        None,
+                        String::new(),
+                        500,
+                    )
+                }
+            })?;
+        tracing::Span::current().record("count", channels.0.len());
+        Ok(channels)
+    }
+
+    /// Port of `app.App.GetChannelsForUser` (channel.go:2429): one keyset page of the user's
+    /// channels across every team, in id order.
+    ///
+    /// The 404 is **load-bearing** here, not merely reachable: `getChannelsForUser` streams the
+    /// pages and stops on this error once `from_channel_id` is set, so it is the normal end of
+    /// the loop whenever the total is a multiple of the page size — and the answer for a user
+    /// with no channels at all, which the handler then writes *after* the `[` it has already
+    /// sent (see `mm_api::channels::get_channels_for_user`). The `Where` is `GetChannelsForUser`
+    /// — here it is actually this function's own name.
+    #[tracing::instrument(skip_all, fields(user_id = %user_id, from_channel_id = %from_channel_id, count))]
+    pub async fn get_channels_for_user(
+        &self,
+        user_id: &str,
+        include_deleted: bool,
+        last_delete_at: i64,
+        page_size: i64,
+        from_channel_id: &str,
+    ) -> Result<ChannelList, AppError> {
+        let channels = self
+            .store()
+            .channel()
+            .get_channels_by_user(
+                user_id,
+                include_deleted,
+                last_delete_at,
+                page_size,
+                from_channel_id,
+            )
+            .await
+            .map_err(|err| {
+                if err.is_not_found() {
+                    AppError::new(
+                        "GetChannelsForUser",
+                        "app.channel.get_channels.not_found.app_error",
+                        None,
+                        String::new(),
+                        404,
+                    )
+                } else {
+                    tracing::error!(error = %err, "channels-for-user lookup failed");
                     AppError::new(
                         "GetChannelsForUser",
                         "app.channel.get_channels.get.app_error",

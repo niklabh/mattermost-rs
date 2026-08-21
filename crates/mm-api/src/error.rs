@@ -78,20 +78,29 @@ impl From<AppError> for ApiError {
     }
 }
 
-impl IntoResponse for ApiError {
-    fn into_response(mut self) -> Response {
-        // Port of the tail of `web.Handler.ServeHTTP` (channels/web/handlers.go:424-455), which
-        // is where Go turns an `AppError` into a body. Three steps happen there and nowhere else,
-        // so an `AppError` serialised straight out of a handler is NOT what a client sees:
-        //
-        //   1. `c.Err.RequestId = c.AppContext.RequestId()` — populated on every error.
-        //   2. `c.Err.Translate(c.AppContext.T)` — the id becomes a human message. Not ported;
-        //      we emit the untranslated id, which is what an unconfigured Go server also does.
-        //      See [D-092].
-        //   3. `if !EnableDeveloper { c.Err.WipeDetailed() }` — `detailed_error` is blanked. The
-        //      setting defaults to false, so **the default is to wipe**, and a port that skips
-        //      this leaks internal detail Go withholds. Reproduced unconditionally because the
-        //      config that would turn it off is not ported either.
+impl ApiError {
+    /// The status and body bytes Go's `handleContextError` (channels/web/handlers.go:400-455)
+    /// would write for this error — the one place an `AppError` becomes wire format.
+    ///
+    /// Three steps happen there and nowhere else, so an `AppError` serialised straight out of a
+    /// handler is NOT what a client sees:
+    ///
+    ///   1. `c.Err.RequestId = c.AppContext.RequestId()` — populated on every error.
+    ///   2. `c.Err.Translate(c.AppContext.T)` — the id becomes a human message. Not ported;
+    ///      we emit the untranslated id, which is what an unconfigured Go server also does.
+    ///      See [D-092].
+    ///   3. `if !EnableDeveloper { c.Err.WipeDetailed() }` — `detailed_error` is blanked. The
+    ///      setting defaults to false, so **the default is to wipe**, and a port that skips
+    ///      this leaks internal detail Go withholds. Reproduced unconditionally because the
+    ///      config that would turn it off is not ported either.
+    ///
+    /// Split from [`IntoResponse`] for the one handler that cannot use the status: Go's
+    /// `getChannelsForUser` streams, has already committed a `200` and a `[` by the time an
+    /// error can occur, and then writes exactly these bytes after them (`WriteHeader` is a
+    /// no-op once the headers are out). `None` for the body only if serialisation fails, which
+    /// it cannot — every field is a string, an i32 or skipped — but library code does not get
+    /// to `unwrap`.
+    pub fn into_wire(mut self) -> (StatusCode, Option<Vec<u8>>) {
         self.0.request_id = mm_model::utils::new_id();
         self.0.wipe_detailed();
 
@@ -103,10 +112,19 @@ impl IntoResponse for ApiError {
             .and_then(|code| StatusCode::from_u16(code).ok())
             .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
 
-        // Serialising `AppError` cannot fail — every field is a string, an i32 or skipped — but
-        // library code does not get to `unwrap`, so a failure degrades to a bare status.
-        match serde_json::to_vec(&self.0) {
-            Ok(body) => (
+        let body = serde_json::to_vec(&self.0)
+            .map_err(|err| tracing::error!(error = %err, "failed to serialise AppError"))
+            .ok();
+        (status, body)
+    }
+}
+
+impl IntoResponse for ApiError {
+    fn into_response(self) -> Response {
+        // Port of the tail of `web.Handler.ServeHTTP` — see `into_wire` for the steps.
+        let (status, body) = self.into_wire();
+        match body {
+            Some(body) => (
                 status,
                 [
                     (axum::http::header::CONTENT_TYPE, "application/json"),
@@ -119,10 +137,7 @@ impl IntoResponse for ApiError {
                 body,
             )
                 .into_response(),
-            Err(err) => {
-                tracing::error!(error = %err, "failed to serialise AppError");
-                (status, [(SERVED_BY, "rust")]).into_response()
-            }
+            None => (status, [(SERVED_BY, "rust")]).into_response(),
         }
     }
 }

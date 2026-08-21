@@ -191,6 +191,19 @@ pub trait ChannelStore {
         opts: &ChannelSearchOpts,
     ) -> impl std::future::Future<Output = Result<ChannelList, StoreError>> + Send;
 
+    /// Port of `SqlChannelStore.GetChannelsByUser` (channel_store.go:1264): one page of every
+    /// message channel the user is a member of, across all teams, in **id order** — the keyset
+    /// the streaming `getChannelsForUser` handler walks 100 at a time. `ErrNotFound` for an
+    /// empty page, which the handler relies on to stop when the page size divides the total.
+    fn get_channels_by_user(
+        &self,
+        user_id: &str,
+        include_deleted: bool,
+        last_delete_at: i64,
+        page_size: i64,
+        from_channel_id: &str,
+    ) -> impl std::future::Future<Output = Result<ChannelList, StoreError>> + Send;
+
     /// Port of `SqlChannelStore.GetMemberCount` (channel_store.go:2666).
     ///
     /// Go's `allowFromCache` is dropped like `get_by_names`'s: no cache, never staler than Go.
@@ -308,6 +321,26 @@ impl ChannelStore for SqlChannelStore {
         opts: &ChannelSearchOpts,
     ) -> Result<ChannelList, StoreError> {
         get_channels(&self.pool, team_id, user_id, opts).await
+    }
+
+    #[tracing::instrument(skip_all, fields(user_id = %user_id, from_channel_id = %from_channel_id))]
+    async fn get_channels_by_user(
+        &self,
+        user_id: &str,
+        include_deleted: bool,
+        last_delete_at: i64,
+        page_size: i64,
+        from_channel_id: &str,
+    ) -> Result<ChannelList, StoreError> {
+        get_channels_by_user(
+            &self.pool,
+            user_id,
+            include_deleted,
+            last_delete_at,
+            page_size,
+            from_channel_id,
+        )
+        .await
     }
 
     #[tracing::instrument(skip_all, fields(channel_id = %channel_id))]
@@ -1088,6 +1121,123 @@ pub async fn get_channels(
     .await
     .map_err(|source| StoreError::Db {
         context: format!("failed to get channels with TeamId={team_id} and UserId={user_id}"),
+        source,
+    })?;
+
+    if rows.is_empty() {
+        return Err(StoreError::NotFound {
+            entity: "Channel",
+            criteria: format!("userId={user_id}"),
+        });
+    }
+
+    let channels = rows
+        .into_iter()
+        .map(channel_from_row)
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(ChannelList(channels))
+}
+
+/// Port of `SqlChannelStore.GetChannelsByUser` (channel_store.go:1264) — every message channel
+/// the user is a member of, **in every team**, as one keyset page in `ORDER BY Channels.Id ASC`.
+/// That order is on the wire: `getChannelsForUser` streams the pages back to back, so the
+/// client sees the whole list in id order, not display-name order like its per-team sibling
+/// [`get_channels`].
+///
+/// The differences from [`get_channels`], each one a branch a reader could plausibly carry over
+/// by mistake:
+///
+/// - **No team predicate** at all — but a `LEFT JOIN Teams` so that a channel of an **archived
+///   team** can be filtered. A DM or GM has `TeamId = ''`, matches no team row, and passes every
+///   team test through the `Teams.Id IS NULL` arm.
+/// - **Keyset, not offset:** `from_channel_id` non-empty adds `Channels.Id > ?`; `page_size`
+///   of `-1` means no `LIMIT`. The handler passes 100 and the last id of the previous page.
+/// - **Deletion filters apply to the team too.** Without `include_deleted`: `Channels.DeleteAt =
+///   0 AND (Teams.DeleteAt = 0 OR Teams.Id IS NULL)`. With it and a non-zero `last_delete_at`:
+///   a living-or-archived-since test on **both** the channel and the team. With it and zero:
+///   no filter — archived channels of archived teams included.
+/// - **`Type IN (O, P, D, G)`** — `messageChannelTypes`, as everywhere.
+///
+/// **Zero rows is `ErrNotFound`** (channel_store.go:1323), including for a page past the end —
+/// which is the normal way the handler's loop ends when the total is a multiple of the page
+/// size. The app layer turns it into `app.channel.get_channels.not_found.app_error`.
+#[tracing::instrument(
+    skip(pool),
+    fields(user_id = %user_id, include_deleted, last_delete_at, page_size, from_channel_id = %from_channel_id)
+)]
+pub async fn get_channels_by_user(
+    pool: &PgPool,
+    user_id: &str,
+    include_deleted: bool,
+    last_delete_at: i64,
+    page_size: i64,
+    from_channel_id: &str,
+) -> Result<ChannelList, StoreError> {
+    // Go's `Limit(uint64(pageSize))` is skipped only for exactly -1; `LIMIT NULL` is "no limit"
+    // in Postgres, so the one statement covers both.
+    let limit: Option<i64> = (page_size != -1).then_some(page_size);
+    let rows = sqlx::query_as!(
+        ChannelRow,
+        r#"
+        SELECT ch.id,
+               ch.createat,
+               ch.updateat,
+               ch.deleteat,
+               ch.teamid,
+               ch.type::text AS "channel_type!",
+               ch.displayname,
+               ch.name,
+               ch.header,
+               ch.purpose,
+               ch.lastpostat,
+               ch.totalmsgcount,
+               ch.extraupdateat,
+               ch.creatorid,
+               ch.schemeid,
+               ch.groupconstrained,
+               ch.autotranslation,
+               ch.shared,
+               ch.totalmsgcountroot,
+               ch.lastrootpostat,
+               ch.bannerinfo,
+               ch.defaultcategoryname,
+               ch.discoverable,
+               EXISTS (
+                   SELECT 1 FROM accesscontrolpolicies acp
+                    WHERE acp.id = ch.id AND acp.type = 'channel'
+               ) AS "policy_enforced!",
+               COALESCE((
+                   SELECT acp.active FROM accesscontrolpolicies acp
+                    WHERE acp.id = ch.id AND acp.type = 'channel' AND acp.active = TRUE
+                    LIMIT 1
+               ), false) AS "policy_is_active!"
+          FROM channels ch
+          JOIN channelmembers cm ON ch.id = cm.channelid
+          LEFT JOIN teams t ON ch.teamid = t.id
+         WHERE cm.userid = $1
+           AND ch.type IN ('O', 'P', 'D', 'G')
+           AND ($2::text = '' OR ch.id > $2)
+           AND CASE
+                 WHEN $3::boolean THEN (
+                     $4::bigint = 0
+                     OR ((ch.deleteat = 0 OR ch.deleteat >= $4)
+                         AND (t.id IS NULL OR t.deleteat = 0 OR t.deleteat >= $4))
+                 )
+                 ELSE ch.deleteat = 0 AND (t.deleteat = 0 OR t.id IS NULL)
+               END
+         ORDER BY ch.id ASC
+         LIMIT $5
+        "#,
+        user_id,
+        from_channel_id,
+        include_deleted,
+        last_delete_at,
+        limit
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: format!("failed to get channels with UserId={user_id}"),
         source,
     })?;
 

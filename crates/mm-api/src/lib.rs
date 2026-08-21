@@ -292,6 +292,13 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/channels/{channel_id}/members/{user_id}",
             partially_migrated_with_ids(&state, get(channels::get_channel_member)),
         )
+        // `BaseRoutes.User.Handle("/channels")` (api4/channel.go:75). Exact match: the deeper
+        // `…/channels/{channel_id}/unread` below is its own route, and Go has no literal
+        // sibling directly under `/users/{user_id}/channels/`.
+        .route(
+            "/api/v4/users/{user_id}/channels",
+            partially_migrated_with_ids(&state, get(channels::get_channels_for_user)),
+        )
         // Note the segment order: the **user** comes first here and second above, because Go
         // hangs this one off `BaseRoutes.ChannelForUser` (api4/api.go:223). The handler's `Path`
         // tuple has to match this, not the other route's.

@@ -310,6 +310,9 @@ whenever a session skips, approximates, or discovers-but-does-not-close somethin
 | store/sqlstore/channel_store.go (`GetMembersForUser`) | `mm-store/src/channel_store.rs` | PARTIAL | 3 DB | **The team predicate is on `Teams.Id` through the LEFT join** (`= ? OR = '' OR IS NULL`), so a DM — and a membership whose channel names a team that no longer exists — is in every team's answer; **no `DeleteAt` filter**, so archived memberships are listed; `Type NOT IN ('S')` only, so a board is listed where `GetChannels` hides it. Heap order. Mutations: 5 run, 5 caught, 2 controls survived. |
 | app/channel.go (`GetChannelMembersForUser`) | `mm-app/src/channel.rs` | PARTIAL | — | One 500-only id, **shared with `GetChannelMembersPage`** (`app.channel.get_members.app_error`; `where` differs). Empty is `[]`, the store builds the slice before appending. |
 | api4/channel.go (`getChannelMembersForTeamForUser`) | `mm-api/src/channels.rs` | PARTIAL | 1 pass + 7 parity | `GET /users/{user_id}/teams/{team_id}/channels/members` served. Gates **team first** (`view_team`), then self-by-string or `manage_system` *through the team* — a team admin's `manage_team` is refused (measured). Every row is the target's, so an admin reading another user gets **every** `last_viewed_at`/`last_update_at` as `-1`; zero memberships is `[]` where the sibling list is a 404. Mutations: 5 run, 5 caught, 1 control survived. |
+| store/sqlstore/channel_store.go (`GetChannelsByUser`) | `mm-store/src/channel_store.rs` | PARTIAL | 3 DB | Keyset page (`Id > from`, `LIMIT` unless `-1`) over every team in **`ORDER BY Id`**; the deletion filters test the **team** too through a `LEFT JOIN Teams` (`IS NULL` admits DMs), and `include_deleted` with `last_delete_at = 0` is no filter at all. `ErrNotFound` for an empty page. |
+| app/channel.go (`GetChannelsForUser`) | `mm-app/src/channel.rs` | PARTIAL | — | Same two ids as the per-team sibling; the 404 is the handler's loop terminator, not only an error. |
+| api4/channel.go (`getChannelsForUser`) | `mm-api/src/channels.rs` | PARTIAL | 5 pass + 6 parity | `GET /users/{user_id}/channels` served. Go **streams**: `[`, pages of 100 `Encode`d element by element (`}\n,{` separators, no newline after `]`), and **zero channels is a 200 whose body is `[` plus the 404 error JSON** — reproduced byte for byte. One gate (`edit_other_users`) before query parsing; `last_delete_at < 0` is the one real 400. Mutations: 16 run, 16 caught, 2 controls survived (one harness lesson: an inclusive-keyset mutant hung the unbounded page walk in the DB test until the loop got a bound). |
 | model/session.go | `mm-model/src/session.rs` | DONE | 20 pass | Strangler Fig critical path. Complete `IsValid`, `PreSave`, device-id validators. |
 | model/team_member.go | `mm-model/src/team_member.rs` | DONE | 6 pass | Pulled ahead of its turn: `Session.TeamMembers` is on the wire, so session.rs cannot round-trip without it. `TeamMemberWithError`/`EmailInviteWithError` deferred. |
 | model/team.go | `mm-model/src/team.rs` | DONE | 37 pass | First **complete** `IsValid` — every branch, all error ids. `Etag` landed with `channel_list.go`. |
@@ -3566,6 +3569,25 @@ set aside. Three Rust files and one correction to the previous session's ledger 
 5. **The 304 carries `x-mmrs-served-by`.** The first stack run failed on the test helper, not the
    route: the Rust 304 answered `ETag` only. Added for diagnostics; Go's 304 is `ETag` only too
    and the extra header is ours on every served response.
+
+## Notes — api4/channel.go (`getChannelsForUser`)
+
+1. **The response is committed before the query runs.** Go writes `200` and `[` first, so every
+   error after that — including the store's `not_found` for a user with no channels — lands
+   *inside* the body, status line unchanged: `[{"id":"app.channel.get_channels.not_found…",
+   …"status_code":404}`, no closing bracket, not JSON. Measured on Go (a fresh teamless user),
+   and the one place `ApiError::into_wire` exists for. The per-team sibling 404s properly.
+2. **The page boundary is invisible on the wire.** A page ends `}\n` and the next begins `,{`,
+   exactly an element boundary, so `pageSize` cannot be caught by bytes — the unit tests pin it
+   via the constant and the REST suite plants 100/101/200 channels to walk the loop for real,
+   including the swallowed `not_found` on an exact multiple.
+3. **Id order, not display-name order.** The webapp sorts client-side, so nobody notices, but the
+   sibling's `ORDER BY DisplayName` is the plausible copy-paste and the parity test asserts the
+   sorted ids.
+4. **Two equivalent mutants, not run.** `< pageSize` → `<=` costs one extra query and the same
+   bytes (the extra page is the swallowed `not_found`); dropping `$4 = 0 OR` from the
+   `include_deleted` arm leaves `DeleteAt >= 0`, always true. Neither is load-bearing.
+5. **A survivor can hang instead of surviving.** The inclusive-keyset mutant (`Id >= from`) made the DB test's page walk return the same row forever; the walk is now bounded so the mutant fails in milliseconds.
 
 ## Notes — api4/channel.go (`getChannelMembersForTeamForUser`)
 
