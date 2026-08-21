@@ -10,6 +10,7 @@ pub mod channels;
 pub mod error;
 pub mod preferences;
 pub mod proxy;
+pub mod roles;
 pub mod sessions;
 pub mod status;
 pub mod teams;
@@ -357,6 +358,29 @@ pub fn router(state: AppState) -> Router {
         // match here, and nothing here could have matched them. Only `GET` is migrated; `POST`
         // (createUser) and the rest fall to `partially_migrated`'s method fallback.
         .route("/api/v4/users", partially_migrated(get(users::get_users)))
+        // `BaseRoutes.Roles` (api4/api.go). The literal `names` sits beside `{role_id}` and
+        // gorilla registered `{role_id:[A-Za-z0-9]+}` *first*, so `GET /roles/names` is a
+        // `getRole` call there with `role_id = "names"` and 400s. Registered POST-only here, so
+        // a GET falls to `partially_migrated`'s method fallback and Go answers exactly that.
+        .route(
+            "/api/v4/roles/names",
+            partially_migrated(post(roles::get_roles_by_names)),
+        )
+        // `role_name` is deliberately not id-shaped: Go's class is `[a-z0-9_]+`, narrower than
+        // the `[A-Za-z0-9]+` the id middleware enforces, so the handler carries its own mux
+        // forward like `username` and `category` do. One segment deeper than `{role_id}`, so
+        // there is no conflict with it.
+        .route(
+            "/api/v4/roles/name/{role_name}",
+            partially_migrated(get(roles::get_role_by_name)),
+        )
+        // `[A-Za-z0-9]+` matches the id middleware's rule exactly. `GET /api/v4/roles` (one
+        // segment shorter, `getAllRoles`) and `.../{role_id}/patch` (one longer) both fall to
+        // `Router::fallback` and stay forwarded.
+        .route(
+            "/api/v4/roles/{role_id}",
+            partially_migrated_with_ids(&state, get(roles::get_role)),
+        )
         .fallback(proxy::forward_to_go)
         .with_state(state)
 }
