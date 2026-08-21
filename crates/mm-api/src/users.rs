@@ -1,5 +1,6 @@
 //! Port of `getUser` (channels/api4/user.go:305), reached as `GET /api/v4/users/me` and
-//! `GET /api/v4/users/{user_id}`.
+//! `GET /api/v4/users/{user_id}`; `getUserByUsername`; and `getUsersByIds`
+//! (`POST /api/v4/users/ids`).
 
 use std::collections::HashMap;
 
@@ -9,7 +10,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use mm_model::permission::{PERMISSION_MANAGE_SYSTEM, PERMISSION_VIEW_MEMBERS};
 use mm_model::user::User;
-use mm_model::utils::is_valid_id;
+use mm_model::utils::{AppError, PAYLOAD_PARSE_ERROR, is_valid_id, sorted_array_from_json};
 
 use crate::AppState;
 use crate::auth::AuthenticatedSession;
@@ -310,12 +311,266 @@ pub async fn get_user_by_username(
     }
 }
 
+/// The validated inputs of `getUsersByIds`, split from the handler so every 400 branch has a
+/// unit test that needs no server: the id list after `SortedArrayFromJSON`, and `since`.
+#[derive(Debug, PartialEq, Eq)]
+struct UsersByIdsRequest {
+    user_ids: Vec<String>,
+    since: i64,
+}
+
+/// The two 400 branches of `getUsersByIds` (api4/user.go:1183-1203), in Go's order:
+///
+/// 1. **The body does not decode** → `api.payload.parse.error`, `where` `getUsersByIds`. The
+///    decoder's habits are [`sorted_array_from_json`]'s and are pinned by its oracle.
+/// 2. **No ids** (`[]` or `null`) → `invalid_body_param` naming `user_ids`.
+/// 3. **`since` present and not an integer** → `invalid_body_param` naming `since` — the
+///    *body*-param id for a query parameter, because `SetInvalidParamWithErr` is what Go calls.
+///    `strconv.ParseInt(s, 10, 64)`: a leading sign is accepted, whitespace and out-of-range are
+///    not, all of which `i64::from_str` matches. An **empty** `since=` is skipped, not an error.
+///
+/// Unlike `getUserStatusesByIds` there is **no length check** on the ids: `"zz"` is a legal id
+/// here and is simply not found.
+#[allow(clippy::result_large_err)]
+fn parse_users_by_ids_request(
+    body: &[u8],
+    query: Option<&str>,
+) -> Result<UsersByIdsRequest, ApiError> {
+    let user_ids = sorted_array_from_json(body).map_err(|err| {
+        tracing::debug!(error = %err, "user_ids body did not decode");
+        ApiError(AppError::new(
+            "getUsersByIds",
+            PAYLOAD_PARSE_ERROR,
+            None,
+            String::new(),
+            400,
+        ))
+    })?;
+    if user_ids.is_empty() {
+        return Err(ApiError::invalid_param("user_ids"));
+    }
+
+    let since = match crate::channels::query_first(query, "since") {
+        Some(raw) if !raw.is_empty() => raw
+            .parse::<i64>()
+            .map_err(|_| ApiError::invalid_param("since"))?,
+        _ => 0,
+    };
+
+    Ok(UsersByIdsRequest { user_ids, since })
+}
+
+/// Port of `getUsersByIds` (api4/user.go:1182) — `POST /api/v4/users/ids`, the lookup the
+/// webapp makes for every author it is about to render.
+///
+/// # The restrictions forward comes first, before the body is read
+///
+/// Go's order is body → `since` → `GetViewUsersRestrictions` → query. Ours checks the
+/// nil-restrictions fast path (user-based `view_members`, `getUser`'s rule) **first** and
+/// forwards the whole request for a restricted caller — the body has to be intact to forward,
+/// and Go re-runs both 400 branches itself, so the observable order is unchanged.
+///
+/// # Every user is sanitised as "other", including the caller
+///
+/// `sanitizeProfiles(users, IsAdmin)` is `SanitizeProfile` for each — the strict populated map,
+/// admin forcing four flags — with no self exception: the caller's own row in the list loses
+/// its email under the default privacy settings, where `GET /users/me` would keep it.
+///
+/// # What the store returns, and in which order
+///
+/// Deactivated users are included (no `DeleteAt` filter); unknown ids are silently absent;
+/// `since` drops users not updated after it. Order is `Username ASC` from the query — but Go's
+/// `userProfileByIdsCache` answers **hits first, in request order**, then the misses sorted, so
+/// Go's wire order varies with what was recently asked. A client that depends on it is already
+/// broken against Go; the parity suite compares as sets.
+///
+/// # Go's `update_at` is stale after a login; ours is the row's
+///
+/// `DoLogin` → `UpdateLastLogin` writes `Users.UpdateAt` (user_store.go:502) and nothing
+/// invalidates that cache, so Go serves the pre-login value — here and via `GET /users/{id}` —
+/// until eviction (measured: `…234499` from Go, `…304155` in the row, seconds after a login).
+/// `since` is therefore answered against different timestamps by the two servers for a recently
+/// logged-in user. Not reproducible without porting the cache; the parity fixture forces
+/// coherence with an empty `PATCH`, which Go does invalidate on.
+///
+/// `json.Marshal` + `w.Write`: no trailing newline ([D-086]).
+#[tracing::instrument(skip_all, fields(user_id = %session.0.user_id, count, forwarded))]
+pub async fn get_users_by_ids(
+    State(state): State<AppState>,
+    session: AuthenticatedSession,
+    request: axum::extract::Request,
+) -> Response {
+    if !state
+        .app
+        .has_permission_to(&session.0.user_id, &PERMISSION_VIEW_MEMBERS)
+        .await
+    {
+        tracing::Span::current().record("forwarded", true);
+        return crate::proxy::forward_to_go(State(state), request).await;
+    }
+    tracing::Span::current().record("forwarded", false);
+
+    match serve_users_by_ids(&state, &session, request).await {
+        Ok(response) => response,
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn serve_users_by_ids(
+    state: &AppState,
+    session: &AuthenticatedSession,
+    request: axum::extract::Request,
+) -> Result<Response, ApiError> {
+    let query = request.uri().query().map(str::to_owned);
+    let bytes = axum::body::to_bytes(request.into_body(), usize::MAX)
+        .await
+        .map_err(|err| {
+            tracing::warn!(error = %err, "could not read the request body");
+            ApiError(AppError::new(
+                "getUsersByIds",
+                PAYLOAD_PARSE_ERROR,
+                None,
+                String::new(),
+                400,
+            ))
+        })?;
+    let parsed = parse_users_by_ids_request(&bytes, query.as_deref())?;
+    tracing::Span::current().record("count", parsed.user_ids.len());
+
+    // `c.IsSystemAdmin()` — the session's roles (web/context.go:134).
+    let is_admin = state
+        .app
+        .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)
+        .await;
+
+    let mut users = state
+        .app
+        .get_users_by_ids(&parsed.user_ids, parsed.since)
+        .await?;
+    let options = sanitize_options(state.show_full_name, state.show_email_address, is_admin);
+    for user in &mut users {
+        user.sanitize_profile(&options, is_admin);
+    }
+
+    let body = serde_json::to_vec(&users).map_err(|err| {
+        tracing::error!(error = %err, "failed to serialise users");
+        ApiError(AppError::new(
+            "getUsersByIds",
+            "api.marshal_error",
+            None,
+            String::new(),
+            500,
+        ))
+    })?;
+
+    Ok((
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
+    )
+        .into_response())
+}
+
 #[cfg(test)]
 mod tests {
     use mm_model::user::User;
     use std::collections::HashMap;
 
-    use super::{sanitize_options, segment_matches_username_mux};
+    use super::{
+        UsersByIdsRequest, parse_users_by_ids_request, sanitize_options,
+        segment_matches_username_mux,
+    };
+
+    const A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+    /// Sorted, de-duplicated, and — unlike the status route — **no** length check: a two-byte
+    /// id is accepted and left to the query to not find.
+    #[test]
+    fn users_by_ids_body_is_sorted_deduplicated_and_not_length_checked() {
+        let parsed =
+            parse_users_by_ids_request(format!(r#"["{B}","zz","{A}","{B}"]"#).as_bytes(), None)
+                .expect("valid");
+        assert_eq!(
+            parsed,
+            UsersByIdsRequest {
+                user_ids: vec![A.to_owned(), B.to_owned(), "zz".to_owned()],
+                since: 0,
+            }
+        );
+    }
+
+    /// Branch 1: the parse error wears this handler's `where`, not the status route's.
+    #[test]
+    fn an_undecodable_body_is_the_payload_parse_error_from_get_users_by_ids() {
+        for body in ["", "{", "[1]", "[\"a\" \"b\"]"] {
+            let err = parse_users_by_ids_request(body.as_bytes(), None)
+                .expect_err("rejected")
+                .0;
+            assert_eq!(err.id, "api.payload.parse.error", "body {body:?}");
+            assert_eq!(err.where_, "getUsersByIds", "body {body:?}");
+            assert_eq!(err.status_code, 400);
+        }
+    }
+
+    /// Branch 2: `[]` and `null` are the body-param error naming `user_ids`, checked **before**
+    /// `since` — a bad `since` on an empty body reports `user_ids`.
+    #[test]
+    fn an_empty_list_names_user_ids_even_with_a_bad_since() {
+        for body in ["[]", "null"] {
+            let err = parse_users_by_ids_request(body.as_bytes(), Some("since=abc"))
+                .expect_err("rejected")
+                .0;
+            assert_eq!(err.id, "api.context.invalid_body_param.app_error");
+            assert_eq!(
+                err.params.as_ref().and_then(|p| p.get("Name")),
+                Some(&serde_json::Value::String("user_ids".to_owned())),
+                "body {body:?}"
+            );
+        }
+    }
+
+    /// Branch 3: `since` is `ParseInt` — sign accepted, anything else a body-param 400 naming
+    /// `since`; empty is skipped; the first of a repeated key wins (`url.Values.Get`).
+    #[test]
+    fn since_parses_like_parse_int() {
+        let body = format!(r#"["{A}"]"#);
+        let since_of = |query: &str| {
+            parse_users_by_ids_request(body.as_bytes(), Some(query))
+                .map(|r| r.since)
+                .map_err(|e| {
+                    e.0.params
+                        .and_then(|p| p.get("Name").cloned())
+                        .and_then(|n| n.as_str().map(str::to_owned))
+                })
+        };
+        assert_eq!(since_of("since=1786973424207"), Ok(1_786_973_424_207));
+        assert_eq!(
+            since_of("since=-5"),
+            Ok(-5),
+            "a negative is legal; the store ignores it"
+        );
+        assert_eq!(
+            since_of("since=%2B7"),
+            Ok(7),
+            "a leading plus is ParseInt-legal"
+        );
+        assert_eq!(since_of("since="), Ok(0), "empty is skipped, not parsed");
+        assert_eq!(since_of("other=1"), Ok(0));
+        assert_eq!(since_of("since=3&since=abc"), Ok(3), "Get takes the first");
+        for bad in [
+            "since=abc",
+            "since=1.5",
+            "since=%201",
+            "since=1_000",
+            "since=99999999999999999999",
+        ] {
+            assert_eq!(since_of(bad), Err(Some("since".to_owned())), "{bad}");
+        }
+    }
 
     /// The username class is the id class plus exactly `_`, `-` and `.` — each admitted, and
     /// the near-misses (space, `@`, `%`, empty, non-ASCII) all fall to the mux 404 forward.

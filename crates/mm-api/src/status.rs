@@ -4,8 +4,7 @@
 use axum::extract::{Path, Request, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use mm_model::utils::AppError;
-use serde::Deserialize;
+use mm_model::utils::{AppError, sorted_array_from_json};
 
 use crate::AppState;
 use crate::auth::AuthenticatedSession;
@@ -142,19 +141,15 @@ fn payload_parse_error() -> ApiError {
     ))
 }
 
-/// The first half of `getUserStatusesByIds`: `model.SortedArrayFromJSON` (model/utils.go:546)
+/// The first half of `getUserStatusesByIds`: [`sorted_array_from_json`] (model/utils.go:546)
 /// followed by the handler's own two checks. Returns the ids **sorted and de-duplicated**, which
 /// is the list the app layer receives and whose order reaches the wire.
 ///
 /// The branches, in Go's order, and the error each one answers:
 ///
-/// 1. **The body is not a JSON array of strings** → 400 `api.payload.parse.error`. This is
-///    `json.NewDecoder(r.Body).Decode(&[]string)`, which has two habits serde does not: it reads
-///    the **first** JSON value and ignores whatever follows (`["a"] garbage` decodes), and a JSON
-///    `null` inside the array leaves that element as `""` rather than failing. Both are
-///    reproduced — the first by not calling `end()` on the deserializer, the second by decoding
-///    `Option<String>`. A bare top-level `null` is *not* an error in Go either: it decodes to a
-///    nil slice, which the next branch catches.
+/// 1. **The body is not a JSON array of strings** → 400 `api.payload.parse.error`. The
+///    decoder's habits (trailing bytes ignored, `null` elements as `""`, a `null` body as an
+///    empty list) live in `sorted_array_from_json` and its oracle.
 /// 2. **No ids** (`null`, or `[]`) → 400 `invalid_body_param` naming `user_ids`.
 /// 3. **Any id whose byte length is not 26** → the same 400. `len(userId)` is a byte count and
 ///    nothing checks the charset, so `"ZZZZZZZZZZZZZZZZZZZZZZZZZZ"` passes and is answered
@@ -165,22 +160,10 @@ fn payload_parse_error() -> ApiError {
 /// is Go's.
 #[allow(clippy::result_large_err)]
 fn parse_user_ids(body: &[u8]) -> Result<Vec<String>, ApiError> {
-    let mut deserializer = serde_json::Deserializer::from_slice(body);
-    let decoded: Option<Vec<Option<String>>> = Deserialize::deserialize(&mut deserializer)
-        .map_err(|err| {
-            tracing::debug!(error = %err, "user_ids body did not decode");
-            payload_parse_error()
-        })?;
-
-    let mut user_ids: Vec<String> = decoded
-        .unwrap_or_default()
-        .into_iter()
-        .map(Option::unwrap_or_default)
-        .collect();
-
-    // `RemoveDuplicateStrings`: sort, then drop adjacent equals.
-    user_ids.sort();
-    user_ids.dedup();
+    let user_ids = sorted_array_from_json(body).map_err(|err| {
+        tracing::debug!(error = %err, "user_ids body did not decode");
+        payload_parse_error()
+    })?;
 
     if user_ids.is_empty() {
         return Err(ApiError::invalid_param("user_ids"));

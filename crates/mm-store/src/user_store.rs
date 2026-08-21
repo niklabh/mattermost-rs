@@ -1,4 +1,5 @@
-//! Port of `SqlUserStore` (channels/store/sqlstore/user_store.go), `Get` and `GetByUsername`.
+//! Port of `SqlUserStore` (channels/store/sqlstore/user_store.go), `Get`, `GetByUsername` and
+//! `GetProfileByIds`.
 
 use mm_model::user::User;
 use mm_model::utils::{StringArray, StringMap};
@@ -16,6 +17,19 @@ pub trait UserStore {
         &self,
         username: &str,
     ) -> impl std::future::Future<Output = Result<User, StoreError>> + Send;
+
+    /// Port of `SqlUserStore.GetProfileByIds` (user_store.go:1172) for nil view restrictions.
+    ///
+    /// `since` is `UserGetByIdsOpts.Since`: applied as `UpdateAt > since` **only when positive**
+    /// (`options.Since > 0`), so `0` and a negative value both mean "no filter". `IsAdmin` is
+    /// not a store concern — Go carries it in the same options struct but only the sanitizer
+    /// reads it. The restricted variant (`applyViewRestrictionsFilter`'s joins) is not ported;
+    /// the api layer forwards those callers.
+    fn get_profile_by_ids(
+        &self,
+        ids: &[String],
+        since: i64,
+    ) -> impl std::future::Future<Output = Result<Vec<User>, StoreError>> + Send;
 }
 
 /// Postgres-backed implementation.
@@ -284,6 +298,78 @@ impl UserStore for SqlUserStore {
         tracing::Span::current().record("found", true);
 
         user_from_row(row)
+    }
+    #[tracing::instrument(skip_all, fields(count = ids.len(), since, found))]
+    async fn get_profile_by_ids(
+        &self,
+        ids: &[String],
+        since: i64,
+    ) -> Result<Vec<User>, StoreError> {
+        // `usersQuery.Where({"Users.Id": userIds}).OrderBy("Users.Username ASC")`, plus
+        // `Where(Gt{"Users.UpdateAt": Since})` when `Since > 0`. The branch is taken here, in
+        // Rust, so the SQL has one shape: a NULL parameter is "no filter".
+        //
+        // **No `DeleteAt` predicate.** A deactivated user is returned like any other — the
+        // webapp relies on it to render the authors of old posts. Pinned by the DB test.
+        //
+        // The order is the column's collation, which both servers share because they share
+        // the database. What they do *not* share is Go's `userProfileByIdsCache`: on the
+        // nil-restrictions path Go answers cache hits first, in request order, and only the
+        // misses come back from this query sorted — so the wire order over there depends on
+        // what was asked recently. Ours is always the query's. See `users::get_users_by_ids`.
+        let since_filter = (since > 0).then_some(since);
+        let rows = sqlx::query_as!(
+            UserRow,
+            r#"
+            SELECT u.id,
+                   u.createat,
+                   u.updateat,
+                   u.deleteat,
+                   u.username,
+                   u.password,
+                   u.authdata,
+                   u.authservice,
+                   u.email,
+                   u.emailverified,
+                   u.nickname,
+                   u.firstname,
+                   u.lastname,
+                   u.position,
+                   u.roles,
+                   u.allowmarketing,
+                   u.props,
+                   u.notifyprops,
+                   u.lastpasswordupdate,
+                   u.lastpictureupdate,
+                   u.failedattempts::bigint AS failedattempts,
+                   u.locale,
+                   u.timezone,
+                   u.mfaactive,
+                   u.mfasecret,
+                   u.mfausedtimestamps,
+                   u.remoteid,
+                   u.lastlogin,
+                   (b.userid IS NOT NULL) AS "isbot!",
+                   COALESCE(b.description, '') AS "botdescription!",
+                   COALESCE(b.lasticonupdate, 0) AS "botlasticonupdate!"
+              FROM users u
+              LEFT JOIN bots b ON b.userid = u.id
+             WHERE u.id = ANY($1::varchar[])
+               AND ($2::bigint IS NULL OR u.updateat > $2)
+             ORDER BY u.username ASC
+            "#,
+            ids,
+            since_filter,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to find Users".to_owned(),
+            source,
+        })?;
+        tracing::Span::current().record("found", rows.len());
+
+        rows.into_iter().map(user_from_row).collect()
     }
 }
 

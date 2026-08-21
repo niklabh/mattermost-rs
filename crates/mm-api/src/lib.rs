@@ -154,6 +154,14 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/users/{user_id}",
             partially_migrated_with_ids(&state, get(users::get_user)),
         )
+        // The literal `ids` beside `{user_id}`: axum prefers the literal, so `POST /users/ids`
+        // lands here while `GET /users/ids` is forwarded by `partially_migrated` and Go
+        // answers as before. The GET route's exact-26-char rule never saw `ids` anyway (three
+        // characters), so nothing that was forwarded stops being forwarded.
+        .route(
+            "/api/v4/users/ids",
+            partially_migrated(post(users::get_users_by_ids)),
+        )
         // Deeper than the `{user_id}` route, so no conflict — and the parameter is *not*
         // id-shaped: Go's username class allows `_`, `-` and `.`, so the id-charset middleware
         // must not apply. The handler carries its own mux-charset forward instead.

@@ -297,6 +297,10 @@ whenever a session skips, approximates, or discovers-but-does-not-close somethin
 | store/sqlstore/user_store.go (`GetByUsername`) | `mm-store/src/user_store.rs` | PARTIAL | 1 pass + 1 DB | `usersQuery` with `Username = lower(?)` — the **parameter** is folded, never the column, and the fold is **unreachable over REST** (`IsValidUsername` rejects uppercase first; it serves Go's login paths) — DB-pinned, [D-151]'s shape. The shared row mapping moved to `user_from_row`, `query_as!` style. |
 | app/user.go (`GetUserByUsername`) | `mm-app/src/user.rs` | PARTIAL | 1 pass | **One id for both branches** (`app.user.get_by_username.app_error`, status-only split) and it is *not* `MissingAccountError` — three lines from `GetUser`'s two-id shape in the same Go file. |
 | api4/user.go (`getUserByUsername`) | `mm-api/src/users.rs` | PARTIAL | 1 pass + 5 parity | Fetch **before** visibility (the inversion of `getUser`), with the failure branch's existence-hiding 403 for restricted callers kept Go's-own via the pre-fetch `view_members` forward. `RequireUsername` answers the **body**-param 400 for a path segment; the mux class (`[A-Za-z0-9\_\-\.]+`) is wider than the validator (`[a-z0-9\.\-_]+`), so `SliceUser` routes and then 400s. Tail shared with both `getUser` variants via `respond_with_user`. Five mutations, five caught, two controls survived. |
+| model/utils.go (`SortedArrayFromJSON`) | `mm-model/src/utils.rs` | DONE | 1 oracle (37 bodies) | `json.Decoder.Decode` into `[]string` then sort+dedup: trailing bytes ignored, `null` element → `""`, `null` body → empty list, and a **lone surrogate escape → U+FFFD** where serde rejects — reproduced by rewriting the escape before decoding. `status.rs` now uses it. |
+| store/sqlstore/user_store.go (`GetProfileByIds`) | `mm-store/src/user_store.rs` | PARTIAL | 2 DB | `Since` filters only when **positive** (`0` and negative are no filter); **no `DeleteAt` predicate**; `ORDER BY Username`. View restrictions not ported (api forwards). |
+| app/user.go (`GetUsersByIds`) | `mm-app/src/user.rs` | PARTIAL | 1 pass | One branch, one id (`app.user.get_profiles.app_error`, 500); no not-found. Sanitising stays in the api layer with the privacy stand-ins (D-085). |
+| api4/user.go (`getUsersByIds`) | `mm-api/src/users.rs` | PARTIAL | 4 pass + 5 parity | `POST /users/ids`, the literal beside `{user_id}`; restricted callers forwarded before the body is read. **No self exception**: the caller's own row is `SanitizeProfile`d like the rest. **Go's order and `update_at` both come from `userProfileByIdsCache`** — order varies with recent requests, and `update_at` is stale after every login (`UpdateLastLogin` never invalidates); the suite compares as sets and patches each fixture user. Fifteen mutations, fifteen caught, two controls survived. |
 | store/sqlstore/channel_store.go (`GetMembers`) | `mm-store/src/channel_store.rs` | PARTIAL | — | **`Limit > 0` and `Offset > 0` are guards, not clamps**: squirrel adds the clause only when positive, so `limit = 0` is *no limit* — expressed as `LIMIT CASE WHEN … END`, since Postgres reads `LIMIT NULL` as absent. No `ORDER BY`: pagination over heap order, identical across the two servers only because they share the table. The member row mapping moved to `channel_member_from_row`, shared with `GetMember`. `ChannelMembersGetOptions` flattened to the three used fields (the `allowFromCache` rule). |
 | app/channel.go (`GetChannelMembersPage`) | `mm-app/src/channel.rs` | PARTIAL | — | `Offset = page × per_page` (wrapping, as Go's `int` product), `Limit = per_page`, one 500-only id (`app.channel.get_members.app_error`) — an empty channel is `[]`, never a miss. |
 | api4/channel.go (`getChannelMembers`) + web/params.go (`page`, `per_page`) | `mm-api/src/channels.rs` | PARTIAL | 8 pass + 5 parity | **The first paginated route.** Go's pagination contract, measured: garbage and negatives fall to defaults (0 / 60) with **no 400 ever**, `per_page` clamps at 200 — and **`per_page=0` serves the whole channel**, because zero survives the parser and the store's guard reads it as unlimited. Gate is `read_channel` (missing channel → 403 like `getChannelStats`); `SanitizeForCurrentUser` blanks every row's timestamps to `-1` except the caller's own, mid-list. Encoder newline; an empty page is `[]`. Six mutations, six caught, two controls survived. |
@@ -3608,3 +3612,28 @@ set aside. Three Rust files and one correction to the previous session's ledger 
    `c.type` is NULL and `NULL NOT IN ('S')` is not true, so the type predicate drops the row the
    join would have admitted. Not run, since no test can see it; noted so nobody reads the join
    as load-bearing on its own.
+
+## Notes — api4/user.go (`getUsersByIds`)
+
+1. **Go's `update_at` on this route is whatever the cache last saw, and login does not refresh
+   it.** `DoLogin` → `UpdateLastLogin` writes `Users.UpdateAt` (user_store.go:502) and nothing
+   invalidates `userProfileByIdsCache`, which also backs `GET /users/{id}`. Measured seconds
+   after a login: Go `…234499`, row `…304155`. The first parity run failed on exactly this — every
+   compared user fresher in the port than in Go. An empty `PATCH` (`UpdateUser`, which does
+   invalidate) makes a fixture coherent; the fixture admin, logged in once per binary and never
+   patched, is kept out of every compared list. A `since` query is therefore answered against
+   different timestamps by the two servers for a recently logged-in user, and that is Go's.
+2. **Go's wire order is cache hits in request order, then database misses by username.** The
+   port is always the query's `Username ASC`. Sets are compared; no client can rely on an order
+   Go itself does not keep.
+3. **The non-admin view has *more* keys than the admin's in one place.** `ClearNonProfileFields`
+   sets `AuthData` to a pointer to `""`, which `omitempty` keeps, while dropping `notify_props`
+   and `last_password_update`. A "fewer fields for non-admins" assertion failed against Go; the
+   shape is pinned instead.
+4. **`Since != 0` survived until a row with `UpdateAt = -5` existed.** Negative `since` and no
+   filter coincide on every real row; the DB fixture now carries one that separates them.
+5. **A stray failure during the `a3` mutation run came from `parity_channel_members_list`
+   (`pages_split_cover_and_run_out_identically`), not from this suite** — cargo stops at the first
+   failing binary, so the verdict was re-taken against `parity_users_by_ids` alone, where
+   `since_drops_users_not_updated_after_it` caught it. Read a `CAUGHT (…)` whose named test is
+   not yours as unverified.
