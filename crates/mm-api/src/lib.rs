@@ -320,6 +320,29 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/users/{user_id}/channels/{channel_id}/unread",
             partially_migrated_with_ids(&state, get(channels::get_channel_unread)),
         )
+        // `BaseRoutes.ChannelsForTeam` (api.go:212) — the browse-channels list and its two
+        // siblings. Unlike `/teams/name/{team_name}` above there is **no precedence puzzle
+        // here**: every route gorilla registers under `/teams/{team_id}/channels/` is a static
+        // literal, so neither router has a parameter to prefer over one. The literals we do not
+        // serve (`/recommended`, `/ids`, `/search`, `/autocomplete`, `/search_autocomplete`,
+        // `/managed_categories`) are simply unregistered and fall to `Router::fallback` whole —
+        // asserted over HTTP in `tests/parity_team_channel_lists.rs`, because "still forwarded"
+        // is a claim about the router, not about a handler.
+        //
+        // `/channels/name/{channel_name}` (registered above) is one segment deeper and cannot
+        // collide with the two literals below.
+        .route(
+            "/api/v4/teams/{team_id}/channels",
+            partially_migrated_with_ids(&state, get(channels::get_public_channels_for_team)),
+        )
+        .route(
+            "/api/v4/teams/{team_id}/channels/private",
+            partially_migrated_with_ids(&state, get(channels::get_private_channels_for_team)),
+        )
+        .route(
+            "/api/v4/teams/{team_id}/channels/deleted",
+            partially_migrated_with_ids(&state, get(channels::get_deleted_channels_for_team)),
+        )
         .fallback(proxy::forward_to_go)
         .with_state(state)
 }

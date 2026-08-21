@@ -481,6 +481,118 @@ impl App {
         Ok(channels)
     }
 
+    /// Port of `app.App.GetPublicChannelsForTeam` (channel.go:2526).
+    ///
+    /// **One error branch, not two.** Unlike its `GetDeletedChannels` sibling this function does
+    /// not test for `ErrNotFound`: every failure is `app.channel.get_public_channels.get.app_error`
+    /// with a 500, including the one an out-of-range `page` produces. `page * per_page` is
+    /// computed in `int64` in Go and *wraps* on overflow, so a large enough page reaches the store
+    /// as a negative offset and the query fails — measured as a 500 with this id, which is why the
+    /// handler does not clamp it away.
+    #[tracing::instrument(skip_all, fields(team_id = %team_id, offset, limit, count))]
+    pub async fn get_public_channels_for_team(
+        &self,
+        team_id: &str,
+        offset: i64,
+        limit: i64,
+    ) -> Result<ChannelList, AppError> {
+        let channels = self
+            .store()
+            .channel()
+            .get_public_channels_for_team(team_id, offset, limit)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "public-channels-for-team lookup failed");
+                AppError::new(
+                    "GetPublicChannelsForTeam",
+                    "app.channel.get_public_channels.get.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })?;
+        tracing::Span::current().record("count", channels.0.len());
+        Ok(channels)
+    }
+
+    /// Port of `app.App.GetPrivateChannelsForTeam` (channel.go:2535).
+    ///
+    /// The public sibling with one string changed. The id is
+    /// `app.channel.get_private_channels.get.app_error` and the `where` is
+    /// `GetPrivateChannelsForTeam`; both are on the wire, and a copy-paste that kept the public
+    /// one would be invisible until a client branched on the id.
+    #[tracing::instrument(skip_all, fields(team_id = %team_id, offset, limit, count))]
+    pub async fn get_private_channels_for_team(
+        &self,
+        team_id: &str,
+        offset: i64,
+        limit: i64,
+    ) -> Result<ChannelList, AppError> {
+        let channels = self
+            .store()
+            .channel()
+            .get_private_channels_for_team(team_id, offset, limit)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "private-channels-for-team lookup failed");
+                AppError::new(
+                    "GetPrivateChannelsForTeam",
+                    "app.channel.get_private_channels.get.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })?;
+        tracing::Span::current().record("count", channels.0.len());
+        Ok(channels)
+    }
+
+    /// Port of `app.App.GetDeletedChannels` (channel.go:2488).
+    ///
+    /// **The 404 branch is dead and is ported anyway.** Go maps `store.ErrNotFound` to
+    /// `app.channel.get_deleted.missing.app_error`, but the store reaches that only through
+    /// `err == sql.ErrNoRows`, which `sqlx.Select` into a slice never returns — zero archived
+    /// channels is `200 []` on the running Go server, measured. Keeping the branch costs nothing
+    /// and means a future `GetDeleted` that *can* answer `NotFound` already carries Go's id;
+    /// deleting it would silently promote that case to a 500.
+    #[tracing::instrument(skip_all, fields(team_id = %team_id, user_id = %user_id, offset, limit, count))]
+    pub async fn get_deleted_channels(
+        &self,
+        team_id: &str,
+        offset: i64,
+        limit: i64,
+        user_id: &str,
+        skip_team_membership_check: bool,
+    ) -> Result<ChannelList, AppError> {
+        let channels = self
+            .store()
+            .channel()
+            .get_deleted(team_id, offset, limit, user_id, skip_team_membership_check)
+            .await
+            .map_err(|err| {
+                if err.is_not_found() {
+                    AppError::new(
+                        "GetDeletedChannels",
+                        "app.channel.get_deleted.missing.app_error",
+                        None,
+                        String::new(),
+                        404,
+                    )
+                } else {
+                    tracing::error!(error = %err, "deleted-channels lookup failed");
+                    AppError::new(
+                        "GetDeletedChannels",
+                        "app.channel.get_deleted.existing.app_error",
+                        None,
+                        String::new(),
+                        500,
+                    )
+                }
+            })?;
+        tracing::Span::current().record("count", channels.0.len());
+        Ok(channels)
+    }
+
     /// Port of `app.App.FillInChannelProps` (channel.go:4091): the one-element case of
     /// [`App::fill_in_channels_props`], which is exactly how Go defines it.
     #[tracing::instrument(skip_all, fields(channel_id = %channel.id))]
