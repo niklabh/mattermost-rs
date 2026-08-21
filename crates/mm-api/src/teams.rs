@@ -7,12 +7,14 @@
 //! - `getTeamStats` — `GET /api/v4/teams/{team_id}/stats`
 //! - `getTeamMember` — `GET /api/v4/teams/{team_id}/members/{user_id}`
 //! - `getTeamMembers` — `GET /api/v4/teams/{team_id}/members`
+//! - `getTeamsUnreadForUser` — `GET /api/v4/users/{user_id}/teams/unread`
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use mm_model::permission::{
-    PERMISSION_SYSCONSOLE_READ_USER_MANAGEMENT_USERS, make_permission_error,
+    PERMISSION_MANAGE_SYSTEM, PERMISSION_SYSCONSOLE_READ_USER_MANAGEMENT_USERS,
+    make_permission_error,
 };
 
 use crate::AppState;
@@ -885,6 +887,116 @@ pub async fn get_team_members(
         .into_response()
 }
 
+/// `getTeamsUnreadForUser`'s two query parameters — literals in the handler (team.go:775-776).
+const EXCLUDE_TEAM_PARAM: &str = "exclude_team";
+const INCLUDE_COLLAPSED_THREADS_PARAM: &str = "include_collapsed_threads";
+
+/// Would Go take the collapsed-threads path? A **string compare** against `"true"`
+/// (team.go:776), not `strconv.ParseBool`: `=1`, `=t` and `=True` are all false here, where
+/// the `query_flag_is_true` routes would read them as true.
+fn wants_collapsed_threads(query: Option<&str>) -> bool {
+    crate::channels::query_first(query, INCLUDE_COLLAPSED_THREADS_PARAM).as_deref() == Some("true")
+}
+
+/// Port of `getTeamsUnreadForUser` (api4/team.go:761), reached as
+/// `GET /api/v4/users/{user_id}/teams/unread`.
+///
+/// # Order of operations
+///
+/// 1. `me` resolves, then `RequireUserId`.
+/// 2. **Self by string comparison, or `manage_system`** — the real system-admin permission, not
+///    the `sysconsole_read_user_management_users` its `/teams` sibling accepts. A sysconsole
+///    reader can list another user's teams and is refused their unread counts.
+/// 3. `exclude_team` is passed through verbatim — **no `IsValidId`**, and an empty value is still
+///    a predicate (see the store: it is what hides the DMs).
+/// 4. `include_collapsed_threads=true` is **forwarded to Go whole**. That half needs the Threads
+///    store, `CollapsedThreads` and `PostPriority` config, none of which is ported. Go re-runs
+///    the same gate, so forwarding before step 2 would answer identically; it runs after so the
+///    served and forwarded paths share one refusal. The webapp sends `true` whenever the user has
+///    CRT on, so on a CRT-enabled deployment most real traffic for this route is still Go's.
+///
+/// # Wire format
+///
+/// `json.Marshal` + `w.Write` (team.go:788) — **no trailing newline** ([D-086]). The list's
+/// order is Go's map-iteration order, i.e. random per request; see `App::fold_team_unreads`.
+#[tracing::instrument(skip_all, fields(user_id = %user_id, forwarded, count))]
+pub async fn get_teams_unread_for_user(
+    State(state): State<AppState>,
+    Path(user_id): Path<String>,
+    axum::extract::RawQuery(query): axum::extract::RawQuery,
+    session: AuthenticatedSession,
+    request: axum::extract::Request,
+) -> Response {
+    let user_id = if user_id == ME {
+        session.0.user_id.clone()
+    } else {
+        user_id
+    };
+
+    if let Err(err) = require_id(&user_id, "user_id") {
+        return err.into_response();
+    }
+
+    let denied = teams_for_user_denied(&session.0.user_id, &user_id, || async {
+        state
+            .app
+            .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)
+            .await
+    })
+    .await;
+    if denied {
+        return ApiError(*make_permission_error(
+            &session.0,
+            &[&PERMISSION_MANAGE_SYSTEM],
+        ))
+        .into_response();
+    }
+
+    if wants_collapsed_threads(query.as_deref()) {
+        tracing::Span::current().record("forwarded", true);
+        return crate::proxy::forward_to_go(State(state), request).await;
+    }
+    tracing::Span::current().record("forwarded", false);
+
+    let exclude_team =
+        crate::channels::query_first(query.as_deref(), EXCLUDE_TEAM_PARAM).unwrap_or_default();
+
+    let unreads = match state
+        .app
+        .get_teams_unread_for_user(&exclude_team, &user_id)
+        .await
+    {
+        Ok(unreads) => unreads,
+        Err(err) => return ApiError(err).into_response(),
+    };
+    tracing::Span::current().record("count", unreads.len());
+
+    let body = match serde_json::to_vec(&unreads) {
+        Ok(body) => body,
+        Err(err) => {
+            tracing::error!(error = %err, "failed to serialise the team unread list");
+            return ApiError(mm_model::utils::AppError::new(
+                "getTeamsUnreadForUser",
+                "api.marshal_error",
+                None,
+                String::new(),
+                500,
+            ))
+            .into_response();
+        }
+    };
+
+    (
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
+    )
+        .into_response()
+}
+
 #[cfg(test)]
 mod tests {
     use mm_model::team_member::TeamMember;
@@ -893,8 +1005,37 @@ mod tests {
         TeamMembersGetOptions, Visibility, get_team_denial, segment_matches_team_name_mux,
         team_by_name_denied, team_is_public, team_members_options,
         team_name_is_shadowed_by_team_id_route, team_view_denied, user_visibility,
-        validate_team_and_user_ids,
+        validate_team_and_user_ids, wants_collapsed_threads,
     };
+
+    /// The string compare, not `ParseBool`: only the literal `true` forwards. `=1`, `=t` and
+    /// `=True` — all true under the sibling routes' flag parser — are served here, as Go would.
+    #[test]
+    fn only_the_literal_true_forwards_the_collapsed_threads_variant() {
+        assert!(wants_collapsed_threads(Some(
+            "include_collapsed_threads=true"
+        )));
+        assert!(wants_collapsed_threads(Some(
+            "exclude_team=abc&include_collapsed_threads=true&x=1"
+        )));
+        // First value of a repeated key, as `url.Values.Get` does.
+        assert!(wants_collapsed_threads(Some(
+            "include_collapsed_threads=true&include_collapsed_threads=false"
+        )));
+        for served in [
+            None,
+            Some(""),
+            Some("include_collapsed_threads"),
+            Some("include_collapsed_threads="),
+            Some("include_collapsed_threads=1"),
+            Some("include_collapsed_threads=t"),
+            Some("include_collapsed_threads=True"),
+            Some("include_collapsed_threads=false&include_collapsed_threads=true"),
+            Some("exclude_team=true"),
+        ] {
+            assert!(!wants_collapsed_threads(served), "{served:?}");
+        }
+    }
 
     /// All four cells of `AllowOpenInvite × Type` — either single-flag reading passes three of
     /// them and fails the one that leaks: an invite-only team with the column still true.

@@ -1,11 +1,13 @@
 //! Port of the team app-layer surface (channels/app/team.go): `GetTeam`, `GetTeamByName`,
 //! `GetTeamsForUser`, `GetTeamMember`, `GetTeamMembers`, `GetTeamMembersForUser`,
-//! `GetTeamStats`, and the `SanitizeTeam`/`SanitizeTeams` pair.
+//! `GetTeamStats`, `GetTeamsUnreadForUser`, and the `SanitizeTeam`/`SanitizeTeams` pair.
 
+use mm_model::channel_member::{CHANNEL_MARK_UNREAD_MENTION, ChannelUnread};
 use mm_model::permission::{PERMISSION_INVITE_USER, PERMISSION_MANAGE_TEAM};
 use mm_model::session::Session;
 use mm_model::team::Team;
-use mm_model::team_member::TeamMember;
+use mm_model::team_member::{TeamMember, TeamUnread};
+use mm_model::user::MARK_UNREAD_NOTIFY_PROP;
 use mm_model::utils::AppError;
 use mm_store::TeamStore;
 use mm_store::team_store::TeamMembersGetOptions;
@@ -283,6 +285,89 @@ impl App {
             self.sanitize_team(session, team).await;
         }
     }
+
+    /// Port of `app.App.GetTeamsUnreadForUser` (team.go:1980), **without** the collapsed-threads
+    /// half: the caller forwards `include_collapsed_threads=true` to Go, so the thread counters
+    /// here are always Go's zero values. Any store failure is `app.team.get_unread.app_error` at
+    /// 500; the folding is [`fold_team_unreads`].
+    #[tracing::instrument(skip_all, fields(user_id = %user_id, exclude_team_id = %exclude_team_id, teams))]
+    pub async fn get_teams_unread_for_user(
+        &self,
+        exclude_team_id: &str,
+        user_id: &str,
+    ) -> Result<Vec<TeamUnread>, AppError> {
+        let data = self
+            .store()
+            .team()
+            .get_channel_unreads_for_all_teams(exclude_team_id, user_id)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "channel unreads lookup failed");
+                AppError::new(
+                    "GetTeamsUnreadForUser",
+                    "app.team.get_unread.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })?;
+
+        let members = fold_team_unreads(&data);
+        tracing::Span::current().record("teams", members.len());
+        Ok(members)
+    }
+}
+
+/// The per-team fold of `GetTeamsUnreadForUser` (team.go:1989-2019).
+///
+/// # What is summed when
+///
+/// The two **mention** counters are added for every channel row. The two **message** counters
+/// are added only when the member's `mark_unread` notify prop is not `mention` — a muted channel
+/// contributes its mentions to the team badge and nothing else. That is the same shortcut
+/// `GetChannelUnread` applies to a single channel, expressed as a skip rather than a zeroing, and
+/// it reads the prop off the *member* row, so one muted channel in a team of three leaves the
+/// other two counted. A nil map indexes to `""` in Go, which is not `mention`, so a row with no
+/// props is counted in full.
+///
+/// # Order
+///
+/// Go collects the result out of a `map[string]*TeamUnread`, so its order is **random per
+/// request**; the webapp keys the list by `team_id`. This fold emits teams in order of first
+/// appearance, which is deterministic and one of the orders Go can produce. A parity test
+/// therefore compares the two lists as sets, never byte for byte.
+///
+/// A user in no channels — or one whose every channel is in the excluded team — is `[]`, never
+/// `null`: Go initialises the slice.
+pub fn fold_team_unreads(data: &[ChannelUnread]) -> Vec<TeamUnread> {
+    let mut members: Vec<TeamUnread> = Vec::new();
+    for cu in data {
+        let index = match members.iter().position(|tu| tu.team_id == cu.team_id) {
+            Some(index) => index,
+            None => {
+                members.push(TeamUnread {
+                    // The id is the row's and the list owns it; the source rows are borrowed.
+                    team_id: cu.team_id.clone(),
+                    ..Default::default()
+                });
+                members.len() - 1
+            }
+        };
+        let tu = &mut members[index];
+        tu.mention_count += cu.mention_count;
+        tu.mention_count_root += cu.mention_count_root;
+        let muted = cu
+            .notify_props
+            .as_ref()
+            .and_then(|props| props.get(MARK_UNREAD_NOTIFY_PROP))
+            .map(String::as_str)
+            == Some(CHANNEL_MARK_UNREAD_MENTION);
+        if !muted {
+            tu.msg_count += cu.msg_count;
+            tu.msg_count_root += cu.msg_count_root;
+        }
+    }
+    members
 }
 
 /// The field half of `SanitizeTeam` (team.go:2307-2320), lifted out of the two permission reads
@@ -509,5 +594,116 @@ mod tests {
         );
         assert_eq!(miss.id, "app.team.get.find.app_error", "team.go:903");
         assert_ne!(miss.id, "app.team.get.finding.app_error");
+    }
+
+    fn row(
+        team: &str,
+        channel: &str,
+        msg: i64,
+        msg_root: i64,
+        mention: i64,
+        mention_root: i64,
+    ) -> ChannelUnread {
+        ChannelUnread {
+            team_id: team.to_owned(),
+            channel_id: channel.to_owned(),
+            msg_count: msg,
+            msg_count_root: msg_root,
+            mention_count: mention,
+            mention_count_root: mention_root,
+            urgent_mention_count: 0,
+            notify_props: None,
+        }
+    }
+
+    fn muted(mut row: ChannelUnread, level: &str) -> ChannelUnread {
+        let mut props = mm_model::utils::StringMap::new();
+        props.insert(MARK_UNREAD_NOTIFY_PROP.to_owned(), level.to_owned());
+        row.notify_props = Some(props);
+        row
+    }
+
+    /// Two channels in one team and one in another: the fold groups by team and sums all four
+    /// counters, with every value distinct so a swapped column cannot pass.
+    #[test]
+    fn rows_fold_per_team_and_every_counter_sums() {
+        let data = [
+            row("team1", "c1", 10, 7, 3, 2),
+            row("team2", "c2", 100, 70, 30, 20),
+            row("team1", "c3", 1000, 700, 300, 200),
+        ];
+        let folded = fold_team_unreads(&data);
+        assert_eq!(folded.len(), 2);
+        assert_eq!(folded[0].team_id, "team1", "first appearance order");
+        assert_eq!(folded[0].msg_count, 1010);
+        assert_eq!(folded[0].msg_count_root, 707);
+        assert_eq!(folded[0].mention_count, 303);
+        assert_eq!(folded[0].mention_count_root, 202);
+        assert_eq!(folded[1].team_id, "team2");
+        assert_eq!(folded[1].msg_count, 100);
+        assert_eq!(folded[1].mention_count_root, 20);
+        for tu in &folded {
+            assert_eq!(
+                (
+                    tu.thread_count,
+                    tu.thread_mention_count,
+                    tu.thread_urgent_mention_count
+                ),
+                (0, 0, 0)
+            );
+        }
+    }
+
+    /// `mark_unread = mention` skips the two message counters of **that row only**; the mention
+    /// counters still add, and the sibling channel in the same team is counted in full.
+    #[test]
+    fn a_muted_channel_contributes_mentions_but_not_messages() {
+        let data = [
+            muted(row("team1", "c1", 10, 7, 3, 2), CHANNEL_MARK_UNREAD_MENTION),
+            row("team1", "c2", 100, 70, 30, 20),
+        ];
+        let folded = fold_team_unreads(&data);
+        assert_eq!(folded.len(), 1);
+        assert_eq!(folded[0].msg_count, 100, "the muted row's 10 is skipped");
+        assert_eq!(folded[0].msg_count_root, 70);
+        assert_eq!(folded[0].mention_count, 33, "mentions pierce the mute");
+        assert_eq!(folded[0].mention_count_root, 22);
+    }
+
+    /// `all` (or any other level) and an absent map both count in full — Go's nil-map index is
+    /// `""`, which is simply not `mention`.
+    #[test]
+    fn only_the_mention_level_mutes() {
+        let data = [
+            muted(
+                row("team1", "c1", 10, 7, 3, 2),
+                mm_model::channel_member::CHANNEL_MARK_UNREAD_ALL,
+            ),
+            muted(row("team1", "c2", 100, 70, 30, 20), ""),
+            row("team1", "c3", 1000, 700, 300, 200),
+        ];
+        let folded = fold_team_unreads(&data);
+        assert_eq!(folded[0].msg_count, 1110);
+        assert_eq!(folded[0].msg_count_root, 777);
+    }
+
+    #[test]
+    fn no_rows_is_an_empty_list() {
+        assert!(fold_team_unreads(&[]).is_empty());
+        assert_eq!(
+            serde_json::to_string(&fold_team_unreads(&[])).unwrap(),
+            "[]"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_unreads_lookup_failure_is_a_500_with_the_get_unread_id() {
+        let err = unreachable_app()
+            .get_teams_unread_for_user("", "uuuuuuuuuuuuuuuuuuuuuuuuuu")
+            .await
+            .expect_err("the store is unreachable");
+        assert_eq!(err.status_code, 500);
+        assert_eq!(err.id, "app.team.get_unread.app_error", "team.go:1983");
+        assert_eq!(err.where_, "GetTeamsUnreadForUser");
     }
 }

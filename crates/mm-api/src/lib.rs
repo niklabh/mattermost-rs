@@ -216,6 +216,12 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/users/{user_id}/teams",
             partially_migrated_with_ids(&state, get(teams::get_teams_for_user)),
         )
+        // `BaseRoutes.TeamsForUser` (api.go:33): the literal `unread` sits beside `{team_id}`
+        // routes below; axum prefers the literal, gorilla registers it first — same answer.
+        .route(
+            "/api/v4/users/{user_id}/teams/unread",
+            partially_migrated_with_ids(&state, get(teams::get_teams_unread_for_user)),
+        )
         // Sibling literal segments under /teams/ (`/teams/name/...`, `/teams/search`, …) are
         // POST-only or deeper paths in Go; the same reasoning as the /channels/{channel_id}
         // route below applies unchanged.

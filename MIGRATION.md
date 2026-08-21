@@ -310,6 +310,9 @@ whenever a session skips, approximates, or discovers-but-does-not-close somethin
 | store/sqlstore/channel_store.go (`GetMembersForUser`) | `mm-store/src/channel_store.rs` | PARTIAL | 3 DB | **The team predicate is on `Teams.Id` through the LEFT join** (`= ? OR = '' OR IS NULL`), so a DM — and a membership whose channel names a team that no longer exists — is in every team's answer; **no `DeleteAt` filter**, so archived memberships are listed; `Type NOT IN ('S')` only, so a board is listed where `GetChannels` hides it. Heap order. Mutations: 5 run, 5 caught, 2 controls survived. |
 | app/channel.go (`GetChannelMembersForUser`) | `mm-app/src/channel.rs` | PARTIAL | — | One 500-only id, **shared with `GetChannelMembersPage`** (`app.channel.get_members.app_error`; `where` differs). Empty is `[]`, the store builds the slice before appending. |
 | api4/channel.go (`getChannelMembersForTeamForUser`) | `mm-api/src/channels.rs` | PARTIAL | 1 pass + 7 parity | `GET /users/{user_id}/teams/{team_id}/channels/members` served. Gates **team first** (`view_team`), then self-by-string or `manage_system` *through the team* — a team admin's `manage_team` is refused (measured). Every row is the target's, so an admin reading another user gets **every** `last_viewed_at`/`last_update_at` as `-1`; zero memberships is `[]` where the sibling list is a 404. Mutations: 5 run, 5 caught, 1 control survived. |
+| store/sqlstore/team_store.go (`GetChannelUnreadsForAllTeams`) | `mm-store/src/team_store.rs` | PARTIAL | 3 DB | **The exclusion predicate is unconditional** (`TeamId <> ?` even for `''`), so DMs/GMs are hidden by default and surface as `team_id: ""` once any `exclude_team` is given; the sibling `GetTeamsForUser`'s conditional form would leak every DM. Deny-list is `NOT IN ('S')` — a board's counters feed the badge where `GetChannelUnread` refuses it; nothing coalesced. |
+| app/team.go (`GetTeamsUnreadForUser`) | `mm-app/src/team.rs` | PARTIAL | 5 pass | Per-team fold: mentions always add, messages add unless that **row's** `mark_unread = mention`; one 500-only id. Go's list order is map-iteration (random per request), so the port emits first-appearance order and tests compare as sets. |
+| api4/team.go (`getTeamsUnreadForUser`) | `mm-api/src/teams.rs` | PARTIAL | 1 pass + 7 parity + 3 DB | `GET /users/{user_id}/teams/unread` served; gate is self-by-string or **`manage_system`** (a `system_read_only_admin` can list another user's teams and is refused their badges — measured). `include_collapsed_threads=true` (literal string compare, not `ParseBool`) is **forwarded to Go** — the Threads store, `CollapsedThreads` and `PostPriority` config are unported — so on a CRT-enabled deployment most webapp traffic for this route is still Go's. Mutations: 10 run, 10 caught, 2 controls survived. |
 | model/session.go | `mm-model/src/session.rs` | DONE | 20 pass | Strangler Fig critical path. Complete `IsValid`, `PreSave`, device-id validators. |
 | model/team_member.go | `mm-model/src/team_member.rs` | DONE | 6 pass | Pulled ahead of its turn: `Session.TeamMembers` is on the wire, so session.rs cannot round-trip without it. `TeamMemberWithError`/`EmailInviteWithError` deferred. |
 | model/team.go | `mm-model/src/team.rs` | DONE | 37 pass | First **complete** `IsValid` — every branch, all error ids. `Etag` landed with `channel_list.go`. |
@@ -3586,3 +3589,30 @@ set aside. Three Rust files and one correction to the previous session's ledger 
    `c.type` is NULL and `NULL NOT IN ('S')` is not true, so the type predicate drops the row the
    join would have admitted. Not run, since no test can see it; noted so nobody reads the join
    as load-bearing on its own.
+
+## Notes — api4/team.go (`getTeamsUnreadForUser`)
+
+1. **Half the route is forwarded, by query string.** `include_collapsed_threads=true` needs
+   `ThreadStore.GetTeamsUnreadForUser` (three grouped queries over `Threads`/`ThreadMemberships`,
+   plus `channelMembershipPredicate`) gated on two config values the Rust side cannot read. The
+   handler forwards that variant whole, after the permission gate so both paths share one refusal.
+   The webapp sends `true` whenever the user has CRT on, which on an `always_on` deployment is
+   everyone — so this is a served route that most real traffic bypasses until the Threads store
+   lands. The flag is a **string compare** against `true` (team.go:776), so `=1`/`=True` are served.
+2. **`TeamId <> ''` is Go's default behaviour, not a bug to fix.** With no `exclude_team` the
+   predicate hides every DM and GM (their `TeamId` is empty); with one, they all pass and fold into
+   a `TeamUnread` with `team_id: ""`. Both halves are measured against Go. The sibling
+   `GetTeamsForUser` in the same store file adds its exclusion conditionally, and copying that
+   shape here passes every test except the DM one.
+3. **Order cannot be asserted.** Go appends out of a map, so two consecutive Go answers for a
+   two-team user differ about half the time and `fetch_both_stable` would never settle. The suite
+   has its own `fetch_both_sorted` (settle-check and comparison both on the `team_id`-sorted
+   list); the no-newline check is made on the raw bytes.
+4. **The gate's plausible wrong constant needed a new actor.** `/teams` accepts
+   `sysconsole_read_user_management_users`; this route wants `manage_system`. Team Edition refuses
+   system-role assignment over REST, so the test writes `system_read_only_admin` into `Users.Roles`
+   and re-logs-in. `system_user_manager` would have done per role.go, but the *persisted* role row
+   in this database lacks the permission — the first attempt measured a 403 on the control.
+5. **The DB test is transcribed for the type filter.** `NOT IN ('S')` admits a board here where
+   `GetChannelUnread`'s `IN (O, P, D, G)` refuses it; neither row exists on Team Edition over REST,
+   so both are planted and asserted against our own SQL, not Go's.
