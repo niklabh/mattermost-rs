@@ -3667,3 +3667,63 @@ set aside. Three Rust files and one correction to the previous session's ledger 
 5. **The DB test is transcribed for the type filter.** `NOT IN ('S')` admits a board here where
    `GetChannelUnread`'s `IN (O, P, D, G)` refuses it; neither row exists on Team Edition over REST,
    so both are planted and asserted against our own SQL, not Go's.
+
+## Ledger additions — api4/role.go (appended 2026-08-21, branch `phase-2/par-roles`)
+
+| Go file | Rust file | Status | Tests | Notes |
+|---|---|---|---|---|
+| app/role.go (`GetRole`, `GetRoleByName`, `GetAllRoles`) | `mm-app/src/role.rs` | PARTIAL | 6 pass | Reads go **straight to the store**: nothing on this path consults `MakeDefaultRoles`, so a patched row — not the compiled default — is what clients see, and no `DeleteAt` filter hides a deleted role. The merge that follows every read is here; `GetRolesByNames` keeps its own copy in `authorization.rs`. |
+| api4/role.go (`getRolesByNames`, `getRoleByName`, `getRole`) | `mm-api/src/roles.rs` | PARTIAL | 10 pass + 11 parity | `POST /roles/names`, `GET /roles/name/{role_name}`, `GET /roles/{role_id}` served; `getAllRoles` and `patchRole` still forwarded. **An empty result is `null`, not `[]`** — the cache layer's nil slice, measured. Order is the request's (sorted), not the table's. `TrustRequester` is CSRF-only and unobservable here today. Mutations: 17 run, 17 caught, 2 controls survived. |
+
+## Notes — api4/role.go (`getRolesByNames`, `getRoleByName`, `getRole`)
+
+1. **`APISessionRequiredTrustRequester` changes exactly one thing: CSRF.** `TrustRequester` is
+   read in a single expression (`web/handlers.go:509`) and only when a **cookie**-authenticated
+   **non-GET** request has a session. Two of these three routes are GETs, so it can only ever
+   matter for `POST /roles/names` from a browser without an `X-CSRF-Token` header — which Go
+   accepts and `POST /users/status/ids` does not. This port has no CSRF check anywhere, so it
+   agrees by having nothing to switch off. **When CSRF lands, these three must be exempt**; the
+   note lives in `roles.rs`.
+2. **A role on the wire is the database row, never the compiled default.** `MakeDefaultRoles()`
+   seeds the table at startup and is not consulted again; `PUT /roles/{id}/patch` rewrites the row
+   and every later read returns it. The parity suite patches a built-in away from its default and
+   asserts the answer is the row's. Worth knowing: the seeded `system_post_all` row *already*
+   diverges from its compiled default (the ancillary-permission migrations added `upload_file` and
+   `use_group_mentions`), so the test picks a permission present in both to remove.
+3. **An empty answer is `null`, not `[]`.** `SqlRoleStore.GetByNames` carefully returns
+   `[]*model.Role{}`, and then `LocalCacheRoleStore.GetByNames` throws that away: it starts from a
+   nil slice and ends `append(foundRoles, roles...)` (role_layer.go:70, :104). Appending nothing to
+   nil is nil, so "no roles" is `null` on the wire — reachable with all-unknown names or a body of
+   blanks that `CleanRoleNames` drops. `Vec::new()` serialising as `[]` was the invisible wrong
+   answer; the handler special-cases it.
+4. **Order comes from Go's cache, not its SQL.** The same cache layer returns hits **in request
+   order** and appends only the misses. Names are cached for 30 minutes and every permission check
+   populates it, so real traffic always sees request order — which `SortedArrayFromJSON` has
+   sorted. Measured: five built-in names scrambled came back alphabetical, while the table's heap
+   order for the same five is `team_user, channel_admin, system_user, system_admin, channel_user`.
+   The port sorts by name and the suite warms Go's cache before each comparison.
+5. **`scheme_id` is `null` for every seeded role**, not `""`. Guessed as `""` first; Go says
+   otherwise.
+6. **The higher-scoped merge needed a hand-built channel scheme to test at all.** It fires only for
+   a scheme-managed role the `ChannelHigherScopedPermissions` UNION answered about, and that needs
+   a channel scheme — enterprise-licensed, so unreachable over REST. Dropping the merge call
+   entirely survived every test until the suite planted a scheme, three scheme roles and a channel
+   using it directly in the database. It now pins the real behaviour: `manage_system` on the row
+   vanishes (not channel-scoped), `read_channel` arrives from the higher scope, moderated
+   `create_post` survives only because both list it, and the **admin** role takes everything from
+   the higher scope regardless of moderation.
+7. **A test fixture can take the shared stack down.** The first version of that fixture inserted
+   its channel into the *fixture team* and omitted `TotalMsgCountRoot`/`LastRootPostAt`. Both are
+   plain `int64` in `model.Channel`, the columns went NULL, and `GetTeamChannels` — which every
+   `POST /api/v4/channels` calls through `GetNumberOfChannelsOnTeam`, with no `DeleteAt` filter —
+   could no longer scan the team, 500ing channel creation for a sibling worktree. Fixed twice
+   over: the fixture now owns its own team, spells out every column Go's model persists, and
+   asserts through `assert_scannable_by_go` that no column backing a non-pointer Go field is NULL.
+   The database's own nullability cannot answer that question — it is looser than Go's.
+8. **`GET /api/v4/roles/names` is not this route.** gorilla registered `{role_id:[A-Za-z0-9]+}`
+   before the literal `names`, so a GET there is `getRole("names")` and 400s on `IsValidId`.
+   Registering the literal POST-only keeps that true through the method fallback and the proxy.
+9. **A pre-existing flake, not ours.** `parity_channel_members_list::pages_split_cover_and_run_out_identically`
+   failed once during a full-crate run here on a paging order tie and passes on its own. It stops
+   cargo before later binaries, so two mutation verdicts named its suite and had to be re-taken
+   against `parity_roles` alone.
