@@ -5314,3 +5314,32 @@ not be deployed against a licensed Enterprise Advanced server with attribute-bas
 control enabled.
 
 **Where the pin lives:** the doc comment on `users::get_users` in `mm-api/src/users.rs`.
+
+## D-155 · `purge_api_fixtures` deletes test teams but not the default channels Go creates under them
+
+**Status** OPEN · **Severity** test-harness · **Raised** 2026-08-21 (parallel route session)
+
+`purge_api_fixtures_once` (`mm-api/tests/common/mod.rs:631`) selects almost everything by the
+`mmrs-parity-%` name prefix. That prefix is correct for rows the suites author, but **not** for
+the rows Go authors on their behalf: creating a team makes `town-square` and `off-topic`, whose
+names carry no prefix, plus a `SidebarCategories` row per member keyed on `TeamId`. The teardown
+then runs `DELETE FROM teams WHERE name LIKE 'mmrs-parity-%'` and leaves all of them behind with
+a dangling `TeamId`.
+
+Measured 2026-08-21: 4,790 orphan channels and 11,019 orphan sidebar categories had accumulated
+since 2026-08-20 and were cleared by hand mid-session; **1,426 and 3,489 came back within the
+same day's runs**, so the rate is roughly one leak per fixture team per run.
+
+This is not inert. `getChannelMembersForTeamForUser` already documents that a dangling `TeamId`
+arrives as NULL through its LEFT join and therefore matches the `IS NULL` arm — so an orphan is
+listed under *every* team. Orphans also share tied sort keys under the channel lists'
+`ORDER BY DisplayName` with no tiebreak, which is the mechanism behind the intermittent
+`pages_split_cover_and_run_out_identically` and `a_team_and_channel_the_user_is_in` failures seen
+this session.
+
+**What is owed:** delete by `TeamId` rather than by name — the orphan set is
+`channels c LEFT JOIN teams t ON t.id = c.teamid WHERE c.teamid <> '' AND t.id IS NULL`, plus the
+same shape for `sidebarcategories`/`sidebarchannels`, ordered before the `teams` delete. Deferred
+here only because `common/mod.rs` was shared by four concurrent agents.
+
+**Where the pin lives:** the doc comment on `purge_api_fixtures` in `mm-api/tests/common/mod.rs`.

@@ -624,6 +624,15 @@ pub async fn fetch_both_stable(
 /// anything.
 static PURGED: tokio::sync::OnceCell<()> = tokio::sync::OnceCell::const_new();
 
+/// Delete every row the api suites author, once per test binary.
+///
+/// **Known gap — [D-155].** Selection is by the `mmrs-parity-%` name prefix, which does not
+/// reach the rows *Go* authors on a fixture's behalf: a created team's `town-square` and
+/// `off-topic` channels carry no prefix, and its `SidebarCategories` are keyed on `TeamId`, so
+/// the `teams` delete below orphans all of them. An orphaned channel's dangling `TeamId` arrives
+/// as NULL through the channel-member join and is therefore listed under every team, and its
+/// empty display name ties under the channel lists' `ORDER BY DisplayName`. Delete by
+/// `TeamId`-has-no-team, not by name, when this is fixed.
 pub async fn purge_api_fixtures() {
     PURGED.get_or_init(purge_api_fixtures_once).await;
 }
