@@ -881,6 +881,92 @@ pub fn remove_duplicate_strings(input: &mut Vec<String>) {
     input.dedup();
 }
 
+/// Port of `model.SortedArrayFromJSON` (utils.go:546): `json.Decoder.Decode` into `[]string`,
+/// then [`remove_duplicate_strings`]. The body every "by ids" / "by names" POST in api4 carries.
+///
+/// Go's decoder has habits serde's does not, and each is reproduced because the oracle
+/// (`fixtures/behaviour_utils.json`, `sorted_array_from_json`) records them:
+///
+/// - **`Decode` reads one value and stops.** `["a"] garbage` and `["a"]["b"]` both decode to
+///   `["a"]`; hence no `end()` call on the deserializer.
+/// - **A `null` element is `""`**, not an error — it reaches the caller's length/emptiness checks
+///   as an empty string. Hence `Vec<Option<String>>`.
+/// - **A `null` body is `(nil, nil)`** — no error, an empty list. Returned here as `Ok(vec![])`:
+///   every caller only asks `len() == 0`, and Go's nil and empty slices answer that alike.
+/// - **A lone surrogate escape (`"\ud800"`) is U+FFFD**, where serde rejects the string. The
+///   same replacement Go applies to invalid UTF-8 bytes; only the escape form is reproduced,
+///   because the other cannot be carried through a JSON fixture. See [`replace_lone_surrogates`].
+///
+/// Sorting is Go's `sort.Strings` — bytewise, so `"Z" < "a" < "é"` — which is `Vec<String>::sort`.
+pub fn sorted_array_from_json(data: &[u8]) -> Result<Vec<String>, serde_json::Error> {
+    let data = replace_lone_surrogates(data);
+    let mut deserializer = serde_json::Deserializer::from_slice(&data);
+    let decoded: Option<Vec<Option<String>>> = Deserialize::deserialize(&mut deserializer)?;
+    let mut out: Vec<String> = decoded
+        .unwrap_or_default()
+        .into_iter()
+        .map(Option::unwrap_or_default)
+        .collect();
+    remove_duplicate_strings(&mut out);
+    Ok(out)
+}
+
+/// Rewrite every `\uXXXX` escape that is a surrogate **without its partner** as `�`, which
+/// is what Go's `encoding/json` decodes it to (`unquote`, via `utf8.RuneError`); serde_json
+/// instead fails the whole body with "lone leading surrogate". A proper pair is left alone, and
+/// a high surrogate followed by anything but a low one is replaced on its own — Go then decodes
+/// the following escape normally (`"\ud83dA"` → `"�A"`, pinned by the oracle).
+///
+/// Only escape sequences are inspected, so `\\ud800` (an escaped backslash and then text) is
+/// untouched: the scan consumes two bytes for every non-`u` escape. Outside a string a backslash
+/// is a syntax error either way, so not tracking string boundaries costs nothing.
+fn replace_lone_surrogates(data: &[u8]) -> Cow<'_, [u8]> {
+    fn hex4(bytes: &[u8]) -> Option<u32> {
+        bytes
+            .get(..4)
+            .and_then(|b| std::str::from_utf8(b).ok())
+            .and_then(|s| u32::from_str_radix(s, 16).ok())
+    }
+    let is_high = |c: u32| (0xD800..=0xDBFF).contains(&c);
+    let is_low = |c: u32| (0xDC00..=0xDFFF).contains(&c);
+
+    // `out` is allocated on the first replacement and holds everything up to `i` from then on;
+    // until then the input is returned borrowed.
+    let mut out: Option<Vec<u8>> = None;
+    let mut i = 0;
+    while i < data.len() {
+        // Length of the token at `i`, and whether it is a lone surrogate escape.
+        let (len, lone) = if data[i] != b'\\' {
+            (1, false)
+        } else if data.get(i + 1) != Some(&b'u') {
+            (2.min(data.len() - i), false)
+        } else {
+            match hex4(&data[i + 2..]) {
+                None => (2, false),
+                Some(code)
+                    if is_high(code)
+                        && data.get(i + 6..i + 8) == Some(b"\\u")
+                        && hex4(&data[i + 8..]).is_some_and(is_low) =>
+                {
+                    (12, false)
+                }
+                Some(code) => (6, is_high(code) || is_low(code)),
+            }
+        };
+        if lone {
+            out.get_or_insert_with(|| data[..i].to_vec())
+                .extend_from_slice(b"\\ufffd");
+        } else if let Some(buf) = out.as_mut() {
+            buf.extend_from_slice(&data[i..i + len]);
+        }
+        i += len;
+    }
+    match out {
+        None => Cow::Borrowed(data),
+        Some(buf) => Cow::Owned(buf),
+    }
+}
+
 /// Port of `model.RemoveDuplicateStringsNonSort` (utils.go:838). Preserves first-seen order.
 pub fn remove_duplicate_strings_non_sort(input: &[String]) -> Vec<String> {
     let mut seen = std::collections::HashSet::with_capacity(input.len());
@@ -2236,6 +2322,33 @@ mod go_parity {
     #[test]
     fn sanitize_unicode_matches_go() {
         check_transform("sanitize_unicode", sanitize_unicode);
+    }
+
+    /// `SortedArrayFromJSON` over every recorded body: the decode verdict and, when it decodes,
+    /// the sorted, de-duplicated list. Go's nil slice (a `null` body) is our empty vector — the
+    /// `out` is compared against `null` as an empty list for that reason.
+    #[test]
+    fn sorted_array_from_json_matches_go() {
+        let oracle = oracle();
+        let cases = oracle["sorted_array_from_json"].as_object().unwrap();
+        assert!(cases.len() >= 30, "corpus is thin: {}", cases.len());
+        for (body, want) in cases {
+            let want_ok = want["ok"].as_bool().unwrap();
+            let want_out: Vec<String> = match &want["out"] {
+                Value::Null => Vec::new(),
+                other => serde_json::from_value(other.clone()).unwrap(),
+            };
+            match sorted_array_from_json(body.as_bytes()) {
+                Ok(got) => {
+                    assert!(
+                        want_ok,
+                        "{body:?}: Go refused this body, we decoded {got:?}"
+                    );
+                    assert_eq!(got, want_out, "{body:?}");
+                }
+                Err(err) => assert!(!want_ok, "{body:?}: Go decoded {want_out:?}, we said {err}"),
+            }
+        }
     }
 
     #[test]

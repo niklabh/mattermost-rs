@@ -112,6 +112,7 @@ func writeBehaviourFixture(outDir string) error {
 		"is_valid_voip_device_id":                       deviceIDAll(true),
 		"redact_device_id":                              redactAll(),
 		"session_is_mobile":                             sessionBoolAll(),
+		"sorted_array_from_json":                        sortedArrayFromJSONAll(),
 	}
 
 	blob, err := json.MarshalIndent(out, "", "    ")
@@ -152,6 +153,59 @@ func clearMentionAll() map[string]string {
 		"</mention>only-close", "<mentions>not a tag</mentions>",
 	} {
 		res[in] = model.ClearMentionTags(in)
+	}
+	return res
+}
+
+// `model.SortedArrayFromJSON` (utils.go:546) is `json.Decoder.Decode` into `[]string` followed by
+// `RemoveDuplicateStrings`. Keyed by the raw request body; `ok` is whether the decode succeeded
+// (the caller's `PayloadParseError` branch), `out` is the returned slice — `null` for Go's nil
+// slice, which a `null` body produces *without* an error. The decoder's habits are the point:
+// it reads one value and ignores trailing bytes, a `null` element becomes `""`, and a lone
+// surrogate escape is replaced rather than rejected.
+func sortedArrayFromJSONAll() map[string]map[string]any {
+	bodies := []string{
+		`["b","a","b"]`,
+		`["a"]`,
+		`[]`,
+		` [ ] `,
+		`null`,
+		``,
+		` `,
+		`{`,
+		`{}`,
+		`"abc"`,
+		`true`,
+		`123`,
+		`[1]`,
+		`["a",1]`,
+		`[{}]`,
+		`[["a"]]`,
+		`[null]`,
+		`["a", null]`,
+		`["a"] garbage`,
+		`["a"]["b"]`,
+		`["a"]]`,
+		`  ["x"]`,
+		`["a",]`,
+		`["a" "b"]`,
+		`["\u0041","A"]`,
+		`["é","e","E","1"," ","","Z","z","aa","a"]`,
+		`["\ud83d\ude00","\u00e9"]`,
+		`["\ud800"]`,
+		`["\udc00"]`,
+		`["\ud83dA"]`,
+		`["😀"]`,
+		`["\\ud800"]`,
+		`["\uD800"]`,
+		"\ufeff[\"a\"]",
+		"[\"a\\u0000b\"]",
+		"[\"tab\there\"]",
+	}
+	res := map[string]map[string]any{}
+	for _, body := range bodies {
+		out, err := model.SortedArrayFromJSON(strings.NewReader(body))
+		res[body] = map[string]any{"ok": err == nil, "out": out}
 	}
 	return res
 }

@@ -1,4 +1,4 @@
-//! Port of `app.GetUser` (channels/app/user.go).
+//! Port of `app.GetUser`, `app.GetUserByUsername` and `app.GetUsersByIds` (channels/app/user.go).
 
 use mm_model::user::User;
 use mm_model::utils::AppError;
@@ -55,6 +55,40 @@ impl App {
     }
 }
 
+impl App {
+    /// Port of `app.App.GetUsersByIds` (user.go:900) → `UserService.GetUsersByIds`
+    /// (app/users/users.go:146), **minus the sanitizer**: Go's `sanitizeProfiles(users,
+    /// options.IsAdmin)` reads the privacy settings from config, which in this deployment are
+    /// `AppState`'s stand-ins (D-085), so the caller applies `SanitizeProfile` per user with the
+    /// same map `getUser` builds. Every caller sanitises — there is no raw consumer.
+    ///
+    /// `ViewRestrictions` is not a parameter: the api layer forwards any caller whose
+    /// restrictions would be non-nil, so this is always the `allowFromCache` path minus the
+    /// cache. One error branch, one id — `app.user.get_profiles.app_error`, 500 — for any store
+    /// failure; there is no not-found, an unknown id is simply absent from the list.
+    #[tracing::instrument(skip_all, fields(count = ids.len(), since))]
+    pub async fn get_users_by_ids(
+        &self,
+        ids: &[String],
+        since: i64,
+    ) -> Result<Vec<User>, AppError> {
+        self.store()
+            .user()
+            .get_profile_by_ids(ids, since)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "users-by-ids lookup failed");
+                AppError::new(
+                    "GetUsersByIds",
+                    "app.user.get_profiles.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })
+    }
+}
+
 /// The store-error-to-`AppError` mapping for `GetUser`, split out so it is reachable from a test
 /// without a database. A miss and a broken query are different HTTP statuses, and collapsing them
 /// would report a server fault to the client as a missing account.
@@ -104,6 +138,26 @@ mod tests {
         });
         assert_eq!(err.status_code, 500);
         assert_eq!(err.id, "app.user.get.app_error");
+    }
+
+    /// `GetUsersByIds` has a single error branch with its own id — not `GetUser`'s pair and
+    /// not `GetUserByUsername`'s — and no not-found at all.
+    #[tokio::test]
+    async fn a_broken_by_ids_lookup_is_a_500_with_get_profiles_id() {
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .acquire_timeout(std::time::Duration::from_millis(250))
+            .connect_lazy("postgres://nobody@127.0.0.1:1/nothing")
+            .expect("a lazy pool is built without connecting");
+        let app = crate::App::new(mm_store::SqlStore::from_pool(pool));
+
+        let err = app
+            .get_users_by_ids(&["y9i4er48tt8bukijy7i3u5y9ar".to_owned()], 0)
+            .await
+            .expect_err("the store is unreachable");
+        assert_eq!(err.status_code, 500);
+        assert_eq!(err.id, "app.user.get_profiles.app_error");
+        assert_eq!(err.where_, "GetUsersByIds");
+        assert!(err.params.is_none());
     }
 
     /// `GetUserByUsername` shares one id across both branches — only the status splits them —

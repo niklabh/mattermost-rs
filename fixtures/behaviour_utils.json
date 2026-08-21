@@ -3771,6 +3771,200 @@
         "true ": false,
         "yes": false
     },
+    "sorted_array_from_json": {
+        "": {
+            "ok": false,
+            "out": null
+        },
+        " ": {
+            "ok": false,
+            "out": null
+        },
+        "  [\"x\"]": {
+            "ok": true,
+            "out": [
+                "x"
+            ]
+        },
+        " [ ] ": {
+            "ok": true,
+            "out": []
+        },
+        "\"abc\"": {
+            "ok": false,
+            "out": null
+        },
+        "123": {
+            "ok": false,
+            "out": null
+        },
+        "[\"\\\\ud800\"]": {
+            "ok": true,
+            "out": [
+                "\\ud800"
+            ]
+        },
+        "[\"\\u0041\",\"A\"]": {
+            "ok": true,
+            "out": [
+                "A"
+            ]
+        },
+        "[\"\\uD800\"]": {
+            "ok": true,
+            "out": [
+                "�"
+            ]
+        },
+        "[\"\\ud800\"]": {
+            "ok": true,
+            "out": [
+                "�"
+            ]
+        },
+        "[\"\\ud83dA\"]": {
+            "ok": true,
+            "out": [
+                "�A"
+            ]
+        },
+        "[\"\\ud83d\\ude00\",\"\\u00e9\"]": {
+            "ok": true,
+            "out": [
+                "é",
+                "😀"
+            ]
+        },
+        "[\"\\udc00\"]": {
+            "ok": true,
+            "out": [
+                "�"
+            ]
+        },
+        "[\"a\" \"b\"]": {
+            "ok": false,
+            "out": null
+        },
+        "[\"a\", null]": {
+            "ok": true,
+            "out": [
+                "",
+                "a"
+            ]
+        },
+        "[\"a\",1]": {
+            "ok": false,
+            "out": null
+        },
+        "[\"a\",]": {
+            "ok": false,
+            "out": null
+        },
+        "[\"a\"]": {
+            "ok": true,
+            "out": [
+                "a"
+            ]
+        },
+        "[\"a\"] garbage": {
+            "ok": true,
+            "out": [
+                "a"
+            ]
+        },
+        "[\"a\"][\"b\"]": {
+            "ok": true,
+            "out": [
+                "a"
+            ]
+        },
+        "[\"a\"]]": {
+            "ok": true,
+            "out": [
+                "a"
+            ]
+        },
+        "[\"a\\u0000b\"]": {
+            "ok": true,
+            "out": [
+                "a\u0000b"
+            ]
+        },
+        "[\"b\",\"a\",\"b\"]": {
+            "ok": true,
+            "out": [
+                "a",
+                "b"
+            ]
+        },
+        "[\"tab\there\"]": {
+            "ok": false,
+            "out": null
+        },
+        "[\"é\",\"e\",\"E\",\"1\",\" \",\"\",\"Z\",\"z\",\"aa\",\"a\"]": {
+            "ok": true,
+            "out": [
+                "",
+                " ",
+                "1",
+                "E",
+                "Z",
+                "a",
+                "aa",
+                "e",
+                "z",
+                "é"
+            ]
+        },
+        "[\"😀\"]": {
+            "ok": true,
+            "out": [
+                "😀"
+            ]
+        },
+        "[1]": {
+            "ok": false,
+            "out": null
+        },
+        "[[\"a\"]]": {
+            "ok": false,
+            "out": null
+        },
+        "[]": {
+            "ok": true,
+            "out": []
+        },
+        "[null]": {
+            "ok": true,
+            "out": [
+                ""
+            ]
+        },
+        "[{}]": {
+            "ok": false,
+            "out": null
+        },
+        "null": {
+            "ok": true,
+            "out": null
+        },
+        "true": {
+            "ok": false,
+            "out": null
+        },
+        "{": {
+            "ok": false,
+            "out": null
+        },
+        "{}": {
+            "ok": false,
+            "out": null
+        },
+        "﻿[\"a\"]": {
+            "ok": false,
+            "out": null
+        }
+    },
     "user_display_names": {
         "first_only|full_name": "Ada",
         "first_only|full_name|@": "Ada",
