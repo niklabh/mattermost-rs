@@ -1,0 +1,83 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT tm.teamid,\n               tm.userid,\n               tm.roles,\n               tm.deleteat,\n               tm.schemeuser,\n               tm.schemeadmin,\n               tm.schemeguest,\n               tm.createat,\n               ts.defaultteamguestrole,\n               ts.defaultteamuserrole,\n               ts.defaultteamadminrole\n          FROM teammembers tm\n          LEFT JOIN teams t ON tm.teamid = t.id\n          LEFT JOIN schemes ts ON t.schemeid = ts.id\n         WHERE tm.teamid = $1\n           AND tm.userid = $2\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "teamid",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "userid",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "roles",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "deleteat",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "schemeuser",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
+        "name": "schemeadmin",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 6,
+        "name": "schemeguest",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 7,
+        "name": "createat",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 8,
+        "name": "defaultteamguestrole",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 9,
+        "name": "defaultteamuserrole",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 10,
+        "name": "defaultteamadminrole",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "947ee727450cf8156961a6426ad4e0db68bc89ff1235379a6853ce960467f310"
+}

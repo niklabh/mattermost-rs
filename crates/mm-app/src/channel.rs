@@ -187,6 +187,37 @@ impl App {
             })
     }
 
+    /// Port of `app.App.GetChannelMembersForUser` (channel.go:2618).
+    ///
+    /// One branch, 500-only, and the id is **shared with [`App::get_channel_members_page`]**
+    /// (`app.channel.get_members.app_error`) — only `where` tells the two apart on the wire. A
+    /// user with no memberships in the team is `[]`, never a miss: the store builds
+    /// `model.ChannelMembers{}` before appending, so the empty case encodes as an array.
+    #[tracing::instrument(skip_all, fields(team_id = %team_id, user_id = %user_id, count))]
+    pub async fn get_channel_members_for_user(
+        &self,
+        team_id: &str,
+        user_id: &str,
+    ) -> Result<Vec<ChannelMember>, AppError> {
+        let members = self
+            .store()
+            .channel()
+            .get_members_for_user(team_id, user_id)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "channel members for user lookup failed");
+                AppError::new(
+                    "GetChannelMembersForUser",
+                    "app.channel.get_members.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })?;
+        tracing::Span::current().record("count", members.len());
+        Ok(members)
+    }
+
     /// Port of `app.App.GetChannelMemberCount` (channel.go:2664).
     ///
     /// One branch: the store's only failure mode is a broken query, so there is no 404 here — a

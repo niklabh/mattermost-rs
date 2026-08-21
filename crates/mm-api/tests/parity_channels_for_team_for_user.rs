@@ -475,8 +475,9 @@ async fn malformed_ids_are_400s() {
     }
 }
 
-/// Go's deeper siblings under the same prefix — `…/channels/members`, `…/channels/categories`
-/// — are not migrated and must still reach Go.
+/// Go's deeper sibling under the same prefix — `…/channels/categories` — is not migrated and
+/// must still reach Go. (`…/channels/members` was in this list until it was served; see
+/// `parity_channel_members_for_team_for_user.rs`.)
 #[tokio::test]
 async fn deeper_sibling_routes_are_still_forwarded() {
     if !stack_enabled() {
@@ -489,7 +490,7 @@ async fn deeper_sibling_routes_are_still_forwarded() {
     let token = go_minted_token(&client).await;
     let (team_id, _) = common::a_team_and_channel_the_user_is_in(&client, &token).await;
 
-    for suffix in ["members", "categories"] {
+    for suffix in ["categories"] {
         let path = format!("/api/v4/users/me/teams/{team_id}/channels/{suffix}");
         let response = client
             .get(format!("{RUST}{path}"))

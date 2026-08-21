@@ -252,11 +252,19 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/teams/{team_id}/channels/name/{channel_name}",
             partially_migrated_with_ids(&state, get(channels::get_channel_by_name)),
         )
-        // `BaseRoutes.TeamForUser` (api.go:34). Go's deeper siblings (`…/channels/members`,
-        // `…/channels/categories`) fall to `Router::fallback` whole.
+        // `BaseRoutes.TeamForUser` (api.go:34). Go's deeper sibling `…/channels/categories`
+        // falls to `Router::fallback` whole.
         .route(
             "/api/v4/users/{user_id}/teams/{team_id}/channels",
             partially_migrated_with_ids(&state, get(channels::get_channels_for_team_for_user)),
+        )
+        // `BaseRoutes.ChannelMembersForUser` (api.go:229), a subrouter with one GET at "".
+        .route(
+            "/api/v4/users/{user_id}/teams/{team_id}/channels/members",
+            partially_migrated_with_ids(
+                &state,
+                get(channels::get_channel_members_for_team_for_user),
+            ),
         )
         // Sibling literal segments (`/channels/direct`, `/channels/search`, …) are all POST-only
         // in Go, and all alphanumeric. A GET to one of them matches `{channel_id}` here exactly

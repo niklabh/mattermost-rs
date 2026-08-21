@@ -664,6 +664,17 @@ async fn purge_api_fixtures_once() {
         // Rows the getUser suite plants directly (Team Edition cannot author a ToS over REST).
         "DELETE FROM usertermsofservice WHERE userid IN (SELECT id FROM users WHERE username LIKE 'mmrsplain%')",
         "DELETE FROM users WHERE username LIKE 'mmrsplain%'",
+        // DMs opened with a deleted `mmrsplain` user. A DM is named `<id>__<id>` and carries no
+        // `mmrs-parity-` prefix, so nothing above reaches it, and the fixture user had
+        // accumulated 124 of them — all with an empty display name, all tied under the channel
+        // list's `ORDER BY DisplayName`, and Go and Postgres broke the tie differently often
+        // enough to fail the byte-for-byte assertion one run in three. Must run **after** the
+        // users are gone, because "a side that names no user" is the selector.
+        "DELETE FROM channelmembers WHERE channelid IN (SELECT id FROM channels WHERE type = 'D' AND (split_part(name, '__', 1) NOT IN (SELECT id FROM users) OR split_part(name, '__', 2) NOT IN (SELECT id FROM users)))",
+        "DELETE FROM posts WHERE channelid IN (SELECT id FROM channels WHERE type = 'D' AND (split_part(name, '__', 1) NOT IN (SELECT id FROM users) OR split_part(name, '__', 2) NOT IN (SELECT id FROM users)))",
+        "DELETE FROM sidebarchannels WHERE channelid IN (SELECT id FROM channels WHERE type = 'D' AND (split_part(name, '__', 1) NOT IN (SELECT id FROM users) OR split_part(name, '__', 2) NOT IN (SELECT id FROM users)))",
+        "DELETE FROM channelmemberhistory WHERE channelid IN (SELECT id FROM channels WHERE type = 'D' AND (split_part(name, '__', 1) NOT IN (SELECT id FROM users) OR split_part(name, '__', 2) NOT IN (SELECT id FROM users)))",
+        "DELETE FROM channels WHERE type = 'D' AND (split_part(name, '__', 1) NOT IN (SELECT id FROM users) OR split_part(name, '__', 2) NOT IN (SELECT id FROM users))",
     ] {
         let _ = sqlx::query(statement).execute(&pool).await;
     }

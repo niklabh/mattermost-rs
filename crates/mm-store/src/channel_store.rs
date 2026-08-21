@@ -226,6 +226,14 @@ pub trait ChannelStore {
         offset: i64,
         limit: i64,
     ) -> impl std::future::Future<Output = Result<Vec<ChannelMember>, StoreError>> + Send;
+
+    /// Port of `SqlChannelStore.GetMembersForUser` (channel_store.go:3261): every membership
+    /// of one user in one team's channels, plus the teamless ones.
+    fn get_members_for_user(
+        &self,
+        team_id: &str,
+        user_id: &str,
+    ) -> impl std::future::Future<Output = Result<Vec<ChannelMember>, StoreError>> + Send;
 }
 
 /// Postgres-backed implementation.
@@ -330,6 +338,15 @@ impl ChannelStore for SqlChannelStore {
         limit: i64,
     ) -> Result<Vec<ChannelMember>, StoreError> {
         get_members(&self.pool, channel_id, offset, limit).await
+    }
+
+    #[tracing::instrument(skip_all, fields(team_id = %team_id, user_id = %user_id))]
+    async fn get_members_for_user(
+        &self,
+        team_id: &str,
+        user_id: &str,
+    ) -> Result<Vec<ChannelMember>, StoreError> {
+        get_members_for_user(&self.pool, team_id, user_id).await
     }
 }
 
@@ -573,6 +590,82 @@ pub async fn get_members(
     .await
     .map_err(|source| StoreError::Db {
         context: format!("failed to get ChannelMembers with channelId={channel_id}"),
+        source,
+    })?;
+
+    tracing::Span::current().record("found", rows.len());
+
+    rows.into_iter().map(channel_member_from_row).collect()
+}
+
+/// Port of `SqlChannelStore.GetMembersForUser` (channel_store.go:3261): the caller's memberships
+/// across a team, the body of `GET /users/{user_id}/teams/{team_id}/channels/members`.
+///
+/// The same `channelMembersForTeamWithSchemeSelectQuery` as [`get_member`] with three
+/// predicates, each of which a reader would plausibly write differently:
+///
+/// - **The team predicate is on `Teams.Id`, through the LEFT join — not on `Channels.TeamId`.**
+///   Go writes `Teams.Id = ? OR Teams.Id = '' OR Teams.Id IS NULL`; a DM or GM has an empty
+///   `Channels.TeamId`, matches no team row, and arrives as NULL — so every teamless membership
+///   is in every team's answer, exactly as [`get_channels`] lists every DM under every team. The
+///   `= ''` arm can never match (no team has an empty id) and is kept only because dropping it
+///   is a mutation a test cannot see. A membership whose channel names a team that no longer
+///   exists *also* arrives as NULL and is listed under every team — reproduced, not repaired.
+/// - **No `DeleteAt` filter at all** — neither the channel's nor anything else's. An archived
+///   channel's membership is in the list (the sibling channel list hides the channel by default).
+///   The DB test pins it.
+/// - **`Channels.Type NOT IN ('S')`** (`nonMessageBackingChannelTypes`, channel_store.go:52):
+///   a Space's backing channel is excluded; boards are not, unlike [`get_channels`]'s allow-list.
+///
+/// No `ORDER BY` — heap order, shared with Go through the shared table and nothing else.
+#[tracing::instrument(skip(pool), fields(team_id = %team_id, user_id = %user_id, found))]
+pub async fn get_members_for_user(
+    pool: &PgPool,
+    team_id: &str,
+    user_id: &str,
+) -> Result<Vec<ChannelMember>, StoreError> {
+    let rows = sqlx::query_as!(
+        ChannelMemberRow,
+        r#"
+        SELECT cm.channelid,
+               cm.userid,
+               cm.roles,
+               cm.lastviewedat,
+               cm.msgcount,
+               cm.mentioncount,
+               cm.mentioncountroot,
+               COALESCE(cm.urgentmentioncount, 0) AS "urgentmentioncount!",
+               cm.msgcountroot,
+               cm.notifyprops,
+               cm.lastupdateat,
+               cm.schemeuser,
+               cm.schemeadmin,
+               cm.schemeguest,
+               teamscheme.defaultchannelguestrole    AS teamschemedefaultguestrole,
+               teamscheme.defaultchanneluserrole     AS teamschemedefaultuserrole,
+               teamscheme.defaultchanneladminrole    AS teamschemedefaultadminrole,
+               channelscheme.defaultchannelguestrole AS channelschemedefaultguestrole,
+               channelscheme.defaultchanneluserrole  AS channelschemedefaultuserrole,
+               channelscheme.defaultchanneladminrole AS channelschemedefaultadminrole,
+               cm.autotranslationdisabled
+          FROM channelmembers cm
+          INNER JOIN channels c ON cm.channelid = c.id
+          LEFT JOIN schemes channelscheme ON c.schemeid = channelscheme.id
+          LEFT JOIN teams t ON c.teamid = t.id
+          LEFT JOIN schemes teamscheme ON t.schemeid = teamscheme.id
+         WHERE cm.userid = $1
+           AND (t.id = $2 OR t.id = '' OR t.id IS NULL)
+           AND c.type NOT IN ('S')
+        "#,
+        user_id,
+        team_id
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: format!(
+            "failed to find ChannelMembers data with teamId={team_id} and userId={user_id}"
+        ),
         source,
     })?;
 

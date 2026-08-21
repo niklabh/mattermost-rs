@@ -36,8 +36,9 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use mm_model::channel::{CHANNEL_TYPE_OPEN, ChannelSearchOpts, is_valid_channel_identifier};
 use mm_model::permission::{
-    PERMISSION_EDIT_OTHER_USERS, PERMISSION_MANAGE_TEAM, PERMISSION_READ_CHANNEL,
-    PERMISSION_READ_PUBLIC_CHANNEL, PERMISSION_VIEW_TEAM, Permission, make_permission_error,
+    PERMISSION_EDIT_OTHER_USERS, PERMISSION_MANAGE_SYSTEM, PERMISSION_MANAGE_TEAM,
+    PERMISSION_READ_CHANNEL, PERMISSION_READ_PUBLIC_CHANNEL, PERMISSION_VIEW_TEAM, Permission,
+    make_permission_error,
 };
 use mm_model::utils::{is_valid_id, parse_go_bool};
 
@@ -1080,6 +1081,116 @@ pub async fn get_channels_for_team_for_user(
         .into_response())
 }
 
+/// The two gates of [`get_channel_members_for_team_for_user`] (api4/channel.go:1984-1992),
+/// **team first** — the reverse of [`channels_for_team_denied`], its sibling one path segment
+/// up, which gates the user first. Then a self-shortcut by string comparison, and only a
+/// non-self caller polls the second team check, which asks for `manage_system` *through the
+/// team* (`SessionHasPermissionToTeam`): a team admin's `manage_team` does not admit them to
+/// another member's memberships, and the error names `manage_system`, not `edit_other_users`.
+async fn members_for_team_denied<T, TFut, M, MFut>(
+    team_allowed: T,
+    is_self: bool,
+    manage_system_allowed: M,
+) -> Option<&'static Permission>
+where
+    T: FnOnce() -> TFut,
+    TFut: std::future::Future<Output = bool>,
+    M: FnOnce() -> MFut,
+    MFut: std::future::Future<Output = bool>,
+{
+    if !team_allowed().await {
+        return Some(&PERMISSION_VIEW_TEAM);
+    }
+    if !is_self && !manage_system_allowed().await {
+        return Some(&PERMISSION_MANAGE_SYSTEM);
+    }
+    None
+}
+
+/// Port of `getChannelMembersForTeamForUser` (api4/channel.go:1978), reached as
+/// `GET /api/v4/users/{user_id}/teams/{team_id}/channels/members` — the request the webapp
+/// sends right after [`get_channels_for_team_for_user`] on every team load.
+///
+/// # Order of operations
+///
+/// 1. `me` resolves before validation (web/context.go:301).
+/// 2. `RequireUserId().RequireTeamId()` — user first, [`validate_user_then_team`].
+/// 3. Two gates, **team then self-or-`manage_system`** — [`members_for_team_denied`].
+/// 4. `GetChannelMembersForUser`: every membership in the team's channels plus the teamless
+///    ones (DMs, GMs — and the sibling list's "DM in every team" rule holds here too), archived
+///    channels **included**, in heap order. **Zero memberships is `[]`**, where the sibling
+///    list is a 404 — the two routes disagree on the empty case.
+/// 5. `SanitizeForCurrentUser` over every element. Every row is the *target* user's, so for a
+///    self read nothing is blanked and for an admin reading someone else **every** row's
+///    `last_viewed_at` and `last_update_at` is `-1`.
+/// 6. `json.NewEncoder(w).Encode` — trailing newline ([D-086]). No etag on this route.
+#[tracing::instrument(skip_all, fields(user_id = %user_id, team_id = %team_id, count))]
+pub async fn get_channel_members_for_team_for_user(
+    State(state): State<AppState>,
+    Path((user_id, team_id)): Path<(String, String)>,
+    session: AuthenticatedSession,
+) -> Result<Response, ApiError> {
+    let user_id = if user_id == ME {
+        session.0.user_id.clone()
+    } else {
+        user_id
+    };
+
+    validate_user_then_team(&user_id, &team_id)?;
+
+    let denied = members_for_team_denied(
+        || async {
+            state
+                .app
+                .session_has_permission_to_team(&session.0, &team_id, &PERMISSION_VIEW_TEAM)
+                .await
+        },
+        session.0.user_id == user_id,
+        || async {
+            state
+                .app
+                .session_has_permission_to_team(&session.0, &team_id, &PERMISSION_MANAGE_SYSTEM)
+                .await
+        },
+    )
+    .await;
+    if let Some(permission) = denied {
+        return Err(ApiError(*make_permission_error(&session.0, &[permission])));
+    }
+
+    let mut members = state
+        .app
+        .get_channel_members_for_user(&team_id, &user_id)
+        .await?;
+    tracing::Span::current().record("count", members.len());
+
+    for member in &mut members {
+        member.sanitize_for_current_user(&session.0.user_id);
+    }
+
+    let mut body = serde_json::to_vec(&members).map_err(|err| {
+        tracing::error!(error = %err, "failed to serialise the member list");
+        ApiError(mm_model::utils::AppError::new(
+            "getChannelMembersForTeamForUser",
+            "api.marshal_error",
+            None,
+            String::new(),
+            500,
+        ))
+    })?;
+    body.push(b'\n');
+
+    Ok((
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
+    )
+        .into_response())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1670,6 +1781,36 @@ mod tests {
 
         assert!(
             channels_for_team_denied(true, || async { true })
+                .await
+                .is_none()
+        );
+    }
+
+    /// The members route gates team first and names `view_team`; a self read never polls the
+    /// `manage_system` check; a non-self read does, and a refusal names `manage_system`.
+    #[tokio::test]
+    async fn the_members_for_team_gates_run_team_then_self_or_manage_system() {
+        let denied = members_for_team_denied(
+            || async { false },
+            false,
+            || async { panic!("manage_system must not be polled when the team gate denies") },
+        )
+        .await;
+        assert_eq!(denied.map(|p| p.id.as_ref()), Some("view_team"));
+
+        let denied = members_for_team_denied(
+            || async { true },
+            true,
+            || async { panic!("a self read must not poll manage_system") },
+        )
+        .await;
+        assert!(denied.is_none());
+
+        let denied = members_for_team_denied(|| async { true }, false, || async { false }).await;
+        assert_eq!(denied.map(|p| p.id.as_ref()), Some("manage_system"));
+
+        assert!(
+            members_for_team_denied(|| async { true }, false, || async { true })
                 .await
                 .is_none()
         );

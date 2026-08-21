@@ -307,6 +307,9 @@ whenever a session skips, approximates, or discovers-but-does-not-close somethin
 | app/channel.go (`GetChannelByName`, `GetChannelsForTeamForUser`, `FillInChannelsProps`) | `mm-app/src/channel.rs` | PARTIAL | — | The list's error `where` is `GetChannelsForUser` (copied from the sibling in Go, on the wire). `FillInChannelProps` is now the one-element case of the list version, which batches mentions per team; `HydrateChannelsPolicyActions` stays unported ([D-141]). |
 | api4/channel.go (`getChannelByName`) | `mm-api/src/channels.rs` | PARTIAL | 6 pass + 8 parity | Name lower-cased **before** `RequireChannelName`; non-open non-member is a **404** with the store's `missing` id (not `getChannel`'s 403), `manage_team` admits a team admin to a private channel, and the open-branch 403 names `read_public_channel`. Mux class `[A-Za-z0-9_-]+` forwards a dotted segment. Encoder newline. |
 | api4/channel.go (`getChannelsForTeamForUser`) | `mm-api/src/channels.rs` | PARTIAL | 6 pass + 7 parity | Mutations across the two routes: 17 run, 17 caught, 2 controls survived per suite.  `RequireUserId().RequireTeamId()` (user first), gates `edit_other_users` then `view_team` **before** query parsing; `last_delete_at < 0` is the one 400 (`+` in a query is a space, so only `%2B` is a sign). Etag computed before `FillInChannelsProps`, exact `If-None-Match` → 304 with `ETag`; zero channels is a 404. Encoder newline. |
+| store/sqlstore/channel_store.go (`GetMembersForUser`) | `mm-store/src/channel_store.rs` | PARTIAL | 3 DB | **The team predicate is on `Teams.Id` through the LEFT join** (`= ? OR = '' OR IS NULL`), so a DM — and a membership whose channel names a team that no longer exists — is in every team's answer; **no `DeleteAt` filter**, so archived memberships are listed; `Type NOT IN ('S')` only, so a board is listed where `GetChannels` hides it. Heap order. Mutations: 5 run, 5 caught, 2 controls survived. |
+| app/channel.go (`GetChannelMembersForUser`) | `mm-app/src/channel.rs` | PARTIAL | — | One 500-only id, **shared with `GetChannelMembersPage`** (`app.channel.get_members.app_error`; `where` differs). Empty is `[]`, the store builds the slice before appending. |
+| api4/channel.go (`getChannelMembersForTeamForUser`) | `mm-api/src/channels.rs` | PARTIAL | 1 pass + 7 parity | `GET /users/{user_id}/teams/{team_id}/channels/members` served. Gates **team first** (`view_team`), then self-by-string or `manage_system` *through the team* — a team admin's `manage_team` is refused (measured). Every row is the target's, so an admin reading another user gets **every** `last_viewed_at`/`last_update_at` as `-1`; zero memberships is `[]` where the sibling list is a 404. Mutations: 5 run, 5 caught, 1 control survived. |
 | model/session.go | `mm-model/src/session.rs` | DONE | 20 pass | Strangler Fig critical path. Complete `IsValid`, `PreSave`, device-id validators. |
 | model/team_member.go | `mm-model/src/team_member.rs` | DONE | 6 pass | Pulled ahead of its turn: `Session.TeamMembers` is on the wire, so session.rs cannot round-trip without it. `TeamMemberWithError`/`EmailInviteWithError` deferred. |
 | model/team.go | `mm-model/src/team.rs` | DONE | 37 pass | First **complete** `IsValid` — every branch, all error ids. `Etag` landed with `channel_list.go`. |
@@ -3563,3 +3566,23 @@ set aside. Three Rust files and one correction to the previous session's ledger 
 5. **The 304 carries `x-mmrs-served-by`.** The first stack run failed on the test helper, not the
    route: the Rust 304 answered `ETag` only. Added for diagnostics; Go's 304 is `ETag` only too
    and the extra header is ours on every served response.
+
+## Notes — api4/channel.go (`getChannelMembersForTeamForUser`)
+
+1. **Two siblings, two gate orders, two empty cases.** `…/channels` gates user then team and
+   404s on nothing; `…/channels/members` one segment deeper gates team then user and answers
+   `[]`. The second gate is `manage_system` asked *through* `SessionHasPermissionToTeam`, so a
+   team admin — who has `manage_team`, the plausible wrong constant — is refused, and only a
+   team-admin caller can tell the two constants apart; the suite promotes one via `schemeRoles`
+   to make the `manage_team` mutation die.
+2. **The team filter is `Teams.Id`, not `Channels.TeamId`.** Through the LEFT join an empty or
+   dangling `TeamId` both arrive as NULL and match the `IS NULL` arm, so the DM-in-every-team
+   rule of the channel list holds here for a different reason, and a channel whose team row was
+   deleted is listed under every team too. Writing the predicate on `Channels.TeamId` passes
+   every REST test; the DB test seeds the dangling case.
+3. **No deletion filter at all.** The channel list hides an archived channel by default; this
+   route lists its membership unconditionally. Measured over both servers.
+4. **`INNER JOIN channels` → `LEFT JOIN` is an equivalent mutant here**: an orphaned membership's
+   `c.type` is NULL and `NULL NOT IN ('S')` is not true, so the type predicate drops the row the
+   join would have admitted. Not run, since no test can see it; noted so nobody reads the join
+   as load-bearing on its own.
