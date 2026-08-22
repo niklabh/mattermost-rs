@@ -141,6 +141,19 @@ pub trait ChannelStore {
         id: &str,
     ) -> impl std::future::Future<Output = Result<Channel, StoreError>> + Send;
 
+    /// Port of `SqlChannelStore.GetForPost` (channel_store.go:3152).
+    fn get_for_post(
+        &self,
+        post_id: &str,
+    ) -> impl std::future::Future<Output = Result<Channel, StoreError>> + Send;
+
+    /// Port of `SqlChannelStore.GetMemberForPost` (channel_store.go:2479).
+    fn get_member_for_post(
+        &self,
+        post_id: &str,
+        user_id: &str,
+    ) -> impl std::future::Future<Output = Result<ChannelMember, StoreError>> + Send;
+
     /// Port of `SqlChannelStore.GetMember` (channel_store.go:2440).
     fn get_member(
         &self,
@@ -296,6 +309,20 @@ impl ChannelStore for SqlChannelStore {
     #[tracing::instrument(skip_all, fields(channel_id = %id, found))]
     async fn get(&self, id: &str) -> Result<Channel, StoreError> {
         get(&self.pool, id).await
+    }
+
+    #[tracing::instrument(skip_all, fields(post_id = %post_id, found))]
+    async fn get_for_post(&self, post_id: &str) -> Result<Channel, StoreError> {
+        get_for_post(&self.pool, post_id).await
+    }
+
+    #[tracing::instrument(skip_all, fields(post_id = %post_id, user_id = %user_id, found))]
+    async fn get_member_for_post(
+        &self,
+        post_id: &str,
+        user_id: &str,
+    ) -> Result<ChannelMember, StoreError> {
+        get_member_for_post(&self.pool, post_id, user_id).await
     }
 
     #[tracing::instrument(skip_all, fields(channel_id = %channel_id, user_id = %user_id, found))]
@@ -623,6 +650,154 @@ pub async fn get_member(
         return Err(StoreError::NotFound {
             entity: "ChannelMember",
             criteria: format!("channelId={channel_id}, userId={user_id}"),
+        });
+    };
+    tracing::Span::current().record("found", true);
+
+    channel_member_from_row(row)
+}
+
+/// Port of `SqlChannelStore.GetForPost` (channel_store.go:3152) — the channel a post lives in.
+///
+/// The same column list as [`get`] (both build it from `channelSliceColumns`, channel_store.go:152)
+/// joined through `Posts`, but **two predicates lighter, and the difference is the behaviour**:
+///
+/// - **No `Type IN ('O','P','D','G')` filter.** [`get`] carries `messageChannelTypes` and this
+///   does not, so a post in a channel of some other type resolves here and would 404 there.
+/// - **No `DeleteAt = 0` filter** on either table, so a post in an *archived* channel still
+///   resolves. That is what makes `SessionHasPermissionToChannelByPost` answer at all for an
+///   archived channel rather than falling through to its system-permission branch — archiving
+///   makes a channel read-only, not invisible to the permission system.
+///
+/// Go wraps a missing row as an error rather than returning `nil, nil`, and every caller in
+/// `authorization.go` treats that error as "fall through to the next branch" rather than as a
+/// denial — see the by-post checks in `mm-app`.
+#[tracing::instrument(skip(pool), fields(post_id = %post_id, found))]
+pub async fn get_for_post(pool: &PgPool, post_id: &str) -> Result<Channel, StoreError> {
+    let row = sqlx::query_as!(
+        ChannelRow,
+        r#"
+        SELECT c.id,
+               c.createat,
+               c.updateat,
+               c.deleteat,
+               c.teamid,
+               c.type::text AS "channel_type!",
+               c.displayname,
+               c.name,
+               c.header,
+               c.purpose,
+               c.lastpostat,
+               c.totalmsgcount,
+               c.extraupdateat,
+               c.creatorid,
+               c.schemeid,
+               c.groupconstrained,
+               c.autotranslation,
+               c.shared,
+               c.totalmsgcountroot,
+               c.lastrootpostat,
+               c.bannerinfo,
+               c.defaultcategoryname,
+               c.discoverable,
+               EXISTS (
+                   SELECT 1 FROM accesscontrolpolicies acp
+                    WHERE acp.id = c.id AND acp.type = 'channel'
+               ) AS "policy_enforced!",
+               COALESCE((
+                   SELECT acp.active FROM accesscontrolpolicies acp
+                    WHERE acp.id = c.id AND acp.type = 'channel' AND acp.active = TRUE
+                    LIMIT 1
+               ), false) AS "policy_is_active!"
+          FROM channels c
+          INNER JOIN posts p ON c.id = p.channelid
+         WHERE p.id = $1
+        "#,
+        post_id
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: format!("failed to get Channel with postId={post_id}"),
+        source,
+    })?;
+
+    let Some(row) = row else {
+        tracing::Span::current().record("found", false);
+        return Err(StoreError::NotFound {
+            entity: "Channel",
+            criteria: format!("postId={post_id}"),
+        });
+    };
+    tracing::Span::current().record("found", true);
+
+    channel_from_row(row)
+}
+
+/// Port of `SqlChannelStore.GetMemberForPost` (channel_store.go:2479).
+///
+/// [`get_member`] with the channel-id predicate replaced by a join through `Posts`: the caller
+/// has a post and wants the asking user's membership of whatever channel it is in. The scheme
+/// joins are identical, so the role resolution is identical — which matters, because this feeds
+/// `roles_grant_permission` exactly as `get_member` does ([D-142]).
+///
+/// The `Channels` join is **INNER**, as in [`get_member`], so a post whose channel row is gone
+/// yields nothing rather than a member with empty scheme defaults. Note this query does *not*
+/// filter deleted channels either — see [`get_for_post`].
+#[tracing::instrument(skip(pool), fields(post_id = %post_id, user_id = %user_id, found))]
+pub async fn get_member_for_post(
+    pool: &PgPool,
+    post_id: &str,
+    user_id: &str,
+) -> Result<ChannelMember, StoreError> {
+    let row = sqlx::query_as!(
+        ChannelMemberRow,
+        r#"
+        SELECT cm.channelid,
+               cm.userid,
+               cm.roles,
+               cm.lastviewedat,
+               cm.msgcount,
+               cm.mentioncount,
+               cm.mentioncountroot,
+               COALESCE(cm.urgentmentioncount, 0) AS "urgentmentioncount!",
+               cm.msgcountroot,
+               cm.notifyprops,
+               cm.lastupdateat,
+               cm.schemeuser,
+               cm.schemeadmin,
+               cm.schemeguest,
+               teamscheme.defaultchannelguestrole    AS teamschemedefaultguestrole,
+               teamscheme.defaultchanneluserrole     AS teamschemedefaultuserrole,
+               teamscheme.defaultchanneladminrole    AS teamschemedefaultadminrole,
+               channelscheme.defaultchannelguestrole AS channelschemedefaultguestrole,
+               channelscheme.defaultchanneluserrole  AS channelschemedefaultuserrole,
+               channelscheme.defaultchanneladminrole AS channelschemedefaultadminrole,
+               cm.autotranslationdisabled
+          FROM channelmembers cm
+          INNER JOIN posts p ON cm.channelid = p.channelid
+          INNER JOIN channels c ON cm.channelid = c.id
+          LEFT JOIN schemes channelscheme ON c.schemeid = channelscheme.id
+          LEFT JOIN teams t ON c.teamid = t.id
+          LEFT JOIN schemes teamscheme ON t.schemeid = teamscheme.id
+         WHERE cm.userid = $1
+           AND p.id = $2
+        "#,
+        user_id,
+        post_id
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: format!("failed to get ChannelMember with postId={post_id} and userId={user_id}"),
+        source,
+    })?;
+
+    let Some(row) = row else {
+        tracing::Span::current().record("found", false);
+        return Err(StoreError::NotFound {
+            entity: "ChannelMember",
+            criteria: format!("postId={post_id}, userId={user_id}"),
         });
     };
     tracing::Span::current().record("found", true);

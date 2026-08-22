@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT u.updateat\n              FROM users u, teammembers tm\n             WHERE tm.teamid = $1\n               AND u.id = tm.userid\n             ORDER BY u.updateat DESC\n             LIMIT 1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "updateat",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "c53508fa04d7632aa424db9d7e402945cde5beccdc458bdd7f138b06e2de5c3a"
+}

@@ -1,0 +1,168 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT c.id,\n               c.createat,\n               c.updateat,\n               c.deleteat,\n               c.teamid,\n               c.type::text AS \"channel_type!\",\n               c.displayname,\n               c.name,\n               c.header,\n               c.purpose,\n               c.lastpostat,\n               c.totalmsgcount,\n               c.extraupdateat,\n               c.creatorid,\n               c.schemeid,\n               c.groupconstrained,\n               c.autotranslation,\n               c.shared,\n               c.totalmsgcountroot,\n               c.lastrootpostat,\n               c.bannerinfo,\n               c.defaultcategoryname,\n               c.discoverable,\n               EXISTS (\n                   SELECT 1 FROM accesscontrolpolicies acp\n                    WHERE acp.id = c.id AND acp.type = 'channel'\n               ) AS \"policy_enforced!\",\n               COALESCE((\n                   SELECT acp.active FROM accesscontrolpolicies acp\n                    WHERE acp.id = c.id AND acp.type = 'channel' AND acp.active = TRUE\n                    LIMIT 1\n               ), false) AS \"policy_is_active!\"\n          FROM channels c\n         WHERE c.type = 'P'\n           AND c.teamid = $1\n           AND c.deleteat = 0\n         ORDER BY c.displayname\n         LIMIT $2 OFFSET $3\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "createat",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "updateat",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "deleteat",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "teamid",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "channel_type!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "displayname",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 7,
+        "name": "name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 8,
+        "name": "header",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 9,
+        "name": "purpose",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 10,
+        "name": "lastpostat",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 11,
+        "name": "totalmsgcount",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 12,
+        "name": "extraupdateat",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 13,
+        "name": "creatorid",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 14,
+        "name": "schemeid",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 15,
+        "name": "groupconstrained",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 16,
+        "name": "autotranslation",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 17,
+        "name": "shared",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 18,
+        "name": "totalmsgcountroot",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 19,
+        "name": "lastrootpostat",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 20,
+        "name": "bannerinfo",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 21,
+        "name": "defaultcategoryname",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 22,
+        "name": "discoverable",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 23,
+        "name": "policy_enforced!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 24,
+        "name": "policy_is_active!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      true,
+      null,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "b7299ffeacb5f67cd66be0b69fc6f8682de59b48e1d00ad599df1674742d4a3d"
+}

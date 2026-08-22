@@ -3260,8 +3260,29 @@ Registering a route directly is now the thing to avoid, and
 
 ## D-094 · The permission system now gates almost every remaining route
 
-**Status** OPEN · **Severity** blocking · **Raised** 2026-08-17 (phase 2, after four routes)
-**Blocks** most of api4.
+**Status** CLOSED · **Severity** blocking · **Raised** 2026-08-17 (phase 2, after four routes)
+**Closed** 2026-08-21 (phase 2, authorization.go)
+
+**Closed because the claim in the title is no longer true.** The wall this entry described was
+that 674 `SessionHasPermission*` call sites across 59 api4 files reached checks we had not
+ported, so a route needing one had to be forwarded. `authorization.go` is now ported to **20 of
+its 36 functions** — every system-, team-, channel-, user- and post-scoped check, in both the
+session-scoped and `askingUserId` forms. That is the entire surface an ordinary read or write of a
+team, channel, user or post reaches.
+
+What remains unported is not a wall but four specific stores, each blocking a named and
+self-contained group: group, sidebar-category, bot and property-field. Those are tracked in
+[D-134], which stays OPEN and now lists them precisely. `HasPermissionToFileAction` is enterprise
+ABAC and permanently out of scope.
+
+The two `Config` reads this entry did not anticipate are [D-156].
+
+Everything below is the original entry, kept because its analysis of *escapable* versus
+*not escapable* checks is still the right way to judge a route.
+
+---
+
+**Original entry (2026-08-17), superseded above.**
 
 **2026-08-20:** the wall is down for team- and channel-scoped reads. `SessionHasPermissionTo`,
 `SessionHasPermissionToTeam`, `SessionHasPermissionToChannel` and `SessionHasPermissionToUser`
@@ -4687,14 +4708,44 @@ the difference is a decision rather than an accident.
 
 ---
 
-## D-134 · Most of `authorization.go` is unported, and each part waits on a different thing
+## D-134 · Four stores still block sixteen functions in `authorization.go`
 
 **Status** OPEN · **Severity** incomplete · **Raised** 2026-08-19 (phase 2, authorization)
+**Narrowed** 2026-08-21 — title and scope rewritten; it is no longer "most of" the file.
 
-Ported: `RolesGrantPermission`, `SessionHasPermissionTo`, `SessionHasPermissionToAny`,
-`SessionHasPermissionToTeam`, `SessionHasPermissionToUser`, and `GetRolesByNames` with the
-higher-scoped merge behind it. That is the system-, team- and user-scoped surface — enough to gate a
-route that does not name a channel.
+**Ported: 20 of 36.** Every system-, team-, channel-, user- and post-scoped check, in both the
+session-scoped and `askingUserId` forms:
+
+`RolesGrantPermission`, `HasPermissionTo`, `SessionHasPermissionTo`, `…ToAndNotRestrictedAdmin`,
+`…ToAny`, `…ToTeam`, `…ToTeams`, `…ToChannel`, `…ToChannels`, `…ToUser`, `…ToChannelByPost`,
+`…ToReadPost`, `…ToReadChannel`, `HasPermissionToTeam`, `HasPermissionToChannel`,
+`HasPermissionToUser`, `HasPermissionToChannelByPost`, `HasPermissionToReadChannel`,
+`HasPermissionToResolveChannelMention`, `HasPermissionToChannelMemberCount` — plus
+`GetRolesByNames` and the higher-scoped merge behind it.
+
+**Remaining: 16, and every one is blocked on a store rather than a decision.**
+
+| Blocked on | Functions |
+|---|---|
+| group store | `SessionHasPermissionToGroup` |
+| sidebar-category store | `SessionHasPermissionToCategory` |
+| bot store | `SessionHasPermissionToManageBot`, `SessionHasPermissionToUserOrBot` |
+| property store (+ post store) | the 11 property-field functions, 6 public and 5 private |
+| — (enterprise ABAC, permanently out of scope) | `HasPermissionToFileAction` |
+
+`SessionHasPermissionToManageBot` is the one to read first when the bot store lands: it returns
+`*model.AppError` rather than a bool, deliberately, so the failure can be told apart — and
+`…ToUserOrBot` branches on the *error id and Where* (`store.sql_bot.get.missing.app_error` /
+`SqlBotStore.Get`), so the error identity is wire-load-bearing, not decoration.
+
+**Two claims in the original entry were wrong and are corrected here.** The by-post group was
+listed as blocked on a post store — it is not. `GetForPost` returns a `Channel` and
+`GetMemberForPost` returns a `ChannelMember`; both are **channel-store** queries that merely join
+through `Posts`, and neither needs a post model. They were ported 2026-08-21 on that basis. And
+`SessionHasPermissionToAndNotRestrictedAdmin` was listed as blocked on `Config`; it needed one
+bool, now modelled in `mm-app/src/config.rs` — see [D-156] for what that costs.
+
+Everything below is the original entry.
 
 What is left, grouped by what each is actually waiting for:
 
@@ -5343,3 +5394,47 @@ same shape for `sidebarcategories`/`sidebarchannels`, ordered before the `teams`
 here only because `common/mod.rs` was shared by four concurrent agents.
 
 **Where the pin lives:** the doc comment on `purge_api_fixtures` in `mm-api/tests/common/mod.rs`.
+
+---
+
+## D-156 · The two config settings the permission checks read cannot be read from Go's config
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-08-21 (phase 2, authorization.go)
+
+`authorization.go` consults `model.Config` in exactly two places, and both are now ported:
+
+| Setting | Read by | Go default |
+|---|---|---|
+| `ExperimentalSettings.RestrictSystemAdmin` | `SessionHasPermissionToAndNotRestrictedAdmin` (:31) | `false` |
+| `ComplianceSettings.Enable` | `HasPermissionToReadChannel` (:475) | `false` |
+
+**The Go server keeps its configuration in a file we cannot see.** `docker-compose.yml` mounts the
+`mattermost-config` volume at `/mattermost/config` and leaves `MM_CONFIG` unset, so the config
+store is `config.json` inside that volume. The strangler-fig deployment shares a *database*, not a
+filesystem — this is the first ported value with no shared source of truth to read, which is why
+it is a divergence rather than a lookup.
+
+**What we do instead:** `mm-app/src/config.rs` reads the same `MM_<SECTION>_<SETTING>` environment
+variables the Go server overlays on top of its file, defaulting to Go's own defaults. An operator
+who configures the Go server by environment — which is how `docker-compose.yml` configures it
+today — gets identical values on both servers automatically. **An operator who edits `config.json`
+directly does not**, and that is the whole of this entry.
+
+**Both settings over-grant when we are wrong**, which is why this is not filed as ACCEPTED:
+
+- Missing a `RestrictSystemAdmin=true` admits a restricted admin Go denies.
+- Missing a `ComplianceSettings.Enable=true` lets a non-member read a public channel that Go, with
+  compliance on, confines to members.
+
+Note the second is **not** made unreachable by Team Edition. `authorization.go:475` reads the
+setting without consulting the licence, even though every compliance *feature* is licence-gated
+(`app/compliance.go:18`) — so the setting alone moves the branch on an unlicensed server.
+
+**What is owed:** either read `config.json` from a path the operator supplies, or have `mm-api`
+ask the Go server for its effective config once at startup (`GET /api/v4/config` requires
+`manage_system`, so this needs a service account or an admin token). Deferred because neither is
+needed for a default deployment and both add a startup dependency on the Go server that the proxy
+otherwise does not have.
+
+**Where the pin lives:** the module doc on `mm-app/src/config.rs`, which states which direction
+each setting fails.

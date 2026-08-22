@@ -8,11 +8,21 @@
 #
 #   suite = unit    cargo test --workspace --lib          (no stack; fast, the default)
 #           store   mm-store DB-backed tests               (needs Postgres)
+#           app     mm-app DB-backed tests                 (needs Postgres)
 #           api     mm-api parity suites                   (needs Postgres + Go + a live mm-api)
 #           all     everything
 #
 # Pick the *narrowest* suite that should catch the mutation. The whole point of a mutation is that
 # you can predict which test dies; running everything turns a 5-second check into a 90-second one.
+#
+# Narrow it further with MUTATE_FILTER, a cargo-test name filter:
+#
+#   MUTATE_FILTER=authorization:: scripts/mutate.sh ...
+#
+# `unit` without a filter runs the 47-second PBKDF2 suite on every single mutation, which is the
+# whole cost of a fifteen-mutation run. Filtering to the module under test cuts each one to
+# seconds. Set it to the narrowest name that still contains every test able to catch the change —
+# too narrow and a SURVIVED verdict means nothing.
 #
 # Prerequisites for `store`, `api` and `all`:
 #   docker compose up -d
@@ -34,7 +44,7 @@ NAME="$1"; FILE="$2"; FROM="$3"; TO="$4"; SUITE="${5:-unit}"
 
 # Stack-backed suites share :8066 and the database with every other checkout; serialise them.
 case "$SUITE" in
-  store|api|all)
+  store|app|api|all)
     if [ -z "$MMRS_STACK_LOCKED" ]; then
       export MMRS_STACK_LOCKED=1
       exec "$ROOT/scripts/stack-lock.sh" "$0" "$@"
@@ -42,7 +52,12 @@ case "$SUITE" in
 esac
 
 
-WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
+WORK=$(mktemp -d)
+# Restore the source on **any** exit, including SIGINT/SIGTERM. A bare `EXIT` trap does not run
+# when the shell is killed, and a timeout that lands mid-run then leaves the mutation applied in
+# the working tree — measured, and it survived into a later `cargo test` before being noticed.
+trap 'rm -rf "$WORK"' EXIT
+trap 'restore_source 2>/dev/null; rm -rf "$WORK"; exit 143' TERM INT HUP
 BACKUP="$WORK/backup"; LOG="$WORK/test.log"
 cp "$FILE" "$BACKUP"
 
@@ -71,8 +86,9 @@ PY
 
 RC=0
 case "$SUITE" in
-  unit)  cargo test --workspace --lib > "$LOG" 2>&1 || RC=$? ;;
-  store) cargo test -p mm-store --tests > "$LOG" 2>&1 || RC=$? ;;
+  unit)  cargo test --workspace --lib ${MUTATE_FILTER:+$MUTATE_FILTER} > "$LOG" 2>&1 || RC=$? ;;
+  store) cargo test -p mm-store --tests ${MUTATE_FILTER:+$MUTATE_FILTER} > "$LOG" 2>&1 || RC=$? ;;
+  app)   cargo test -p mm-app --tests ${MUTATE_FILTER:+$MUTATE_FILTER} > "$LOG" 2>&1 || RC=$? ;;
   api)   if restart_server; then
            cargo test -p mm-api --tests > "$LOG" 2>&1 || RC=$?
          else

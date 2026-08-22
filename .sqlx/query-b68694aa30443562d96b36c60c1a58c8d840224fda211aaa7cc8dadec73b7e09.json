@@ -1,0 +1,59 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT channels.teamid AS \"teamid!\",\n               channels.id AS \"channelid!\",\n               (channels.totalmsgcount - channelmembers.msgcount) AS \"msgcount!\",\n               (channels.totalmsgcountroot - channelmembers.msgcountroot) AS \"msgcountroot!\",\n               channelmembers.mentioncount AS \"mentioncount!\",\n               channelmembers.mentioncountroot AS \"mentioncountroot!\",\n               channelmembers.notifyprops\n          FROM channels\n          JOIN channelmembers ON channels.id = channelmembers.channelid\n         WHERE channelmembers.userid = $1\n           AND channels.teamid = $2\n           AND channels.deleteat = 0\n           AND channels.type NOT IN ('S')\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "teamid!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "channelid!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "msgcount!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "msgcountroot!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "mentioncount!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "mentioncountroot!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "notifyprops",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      true,
+      false,
+      null,
+      null,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "b68694aa30443562d96b36c60c1a58c8d840224fda211aaa7cc8dadec73b7e09"
+}

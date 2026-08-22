@@ -1,0 +1,143 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT cm.channelid,\n               cm.userid,\n               cm.roles,\n               cm.lastviewedat,\n               cm.msgcount,\n               cm.mentioncount,\n               cm.mentioncountroot,\n               COALESCE(cm.urgentmentioncount, 0) AS \"urgentmentioncount!\",\n               cm.msgcountroot,\n               cm.notifyprops,\n               cm.lastupdateat,\n               cm.schemeuser,\n               cm.schemeadmin,\n               cm.schemeguest,\n               teamscheme.defaultchannelguestrole    AS teamschemedefaultguestrole,\n               teamscheme.defaultchanneluserrole     AS teamschemedefaultuserrole,\n               teamscheme.defaultchanneladminrole    AS teamschemedefaultadminrole,\n               channelscheme.defaultchannelguestrole AS channelschemedefaultguestrole,\n               channelscheme.defaultchanneluserrole  AS channelschemedefaultuserrole,\n               channelscheme.defaultchanneladminrole AS channelschemedefaultadminrole,\n               cm.autotranslationdisabled\n          FROM channelmembers cm\n          INNER JOIN posts p ON cm.channelid = p.channelid\n          INNER JOIN channels c ON cm.channelid = c.id\n          LEFT JOIN schemes channelscheme ON c.schemeid = channelscheme.id\n          LEFT JOIN teams t ON c.teamid = t.id\n          LEFT JOIN schemes teamscheme ON t.schemeid = teamscheme.id\n         WHERE cm.userid = $1\n           AND p.id = $2\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "channelid",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "userid",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "roles",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "lastviewedat",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "msgcount",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "mentioncount",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "mentioncountroot",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 7,
+        "name": "urgentmentioncount!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 8,
+        "name": "msgcountroot",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 9,
+        "name": "notifyprops",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 10,
+        "name": "lastupdateat",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 11,
+        "name": "schemeuser",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 12,
+        "name": "schemeadmin",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 13,
+        "name": "schemeguest",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 14,
+        "name": "teamschemedefaultguestrole",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 15,
+        "name": "teamschemedefaultuserrole",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 16,
+        "name": "teamschemedefaultadminrole",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 17,
+        "name": "channelschemedefaultguestrole",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 18,
+        "name": "channelschemedefaultuserrole",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 19,
+        "name": "channelschemedefaultadminrole",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 20,
+        "name": "autotranslationdisabled",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      null,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "9dff734eb3d17cafc82dc7985285528b3b579d55caacd53169d28cee8d17b044"
+}
