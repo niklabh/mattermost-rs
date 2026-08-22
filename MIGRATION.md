@@ -3869,3 +3869,84 @@ set aside. Three Rust files and one correction to the previous session's ledger 
    failed once during a full-crate run here on a paging order tie and passes on its own. It stops
    cargo before later binaries, so two mutation verdicts named its suite and had to be re-taken
    against `parity_roles` alone.
+
+## Ledger additions — api4/post.go `getPost` (appended 2026-08-22, branch `phase-2/par-posts`)
+
+| Go file | Rust file | Status | Tests | Notes |
+|---|---|---|---|---|
+| store/sqlstore/post_store.go (`GetSingle`), post_priority_store.go, post_acknowledgements_store.go | `mm-store/src/post_store.rs` | PARTIAL | 5 unit + parity | Eighteen columns plus a correlated `ReplyCount`; six `Post` fields are **never selected** and their zero values are on the wire. NULL `props`/`fileids` stay `null`, they do not become `{}`/`[]`. |
+| store/sqlstore/reaction_store.go (`GetForPost`) | `mm-store/src/reaction_store.rs` | PARTIAL | parity | Two `COALESCE`s, and the `DeleteAt` one appears in the predicate as well as the select list. `ORDER BY CreateAt` is wire surface. |
+| store/sqlstore/emoji_store.go (`GetMultipleByName`) | `mm-store/src/emoji_store.rs` | PARTIAL | parity | `DeleteAt = 0` lives in Go's **shared** `emojiSelectQuery`, not in the method body. No `ORDER BY` — see note 4. |
+| store/sqlstore/file_info_store.go (`GetByIds`) | `mm-store/src/file_info_store.rs` | PARTIAL | parity | `ORDER BY CreateAt DESC` is then overwritten by `orderFileInfosByID`; it only decides the tail. |
+| app/post.go + app/post_metadata.go (`GetSinglePost`, `GetPostIfAuthorized`, `PreparePostForClientWithEmbedsAndImages`, `SanitizePostMetadataForUser`) | `mm-app/src/post.rs` | PARTIAL | 9 unit + parity | The pipeline is a **total function that can refuse**: shapes needing the markdown parser or a link fetch return `PrepareError::Unreproducible` and the handler forwards. `REFUSED_PROPS` and `message_may_contain_a_link` are the predicate. |
+| api4/post.go (`getPost`) | `mm-api/src/posts.rs` | PARTIAL | 8 parity | `GET /api/v4/posts/{post_id}` served for reproducible shapes, forwarded otherwise. ETag, 304, `include_deleted` + `manage_system` gate all ported. Mutations: 23 run, 23 caught, 2 controls survived. |
+
+## Notes — api4/post.go (`getPost`)
+
+1. **The route declines, on purpose, and the suite tests both halves.** `PreparePostForClient`'s
+   embed and image stages need Go's markdown parser (`getFirstLink`, `getImages` — [D-044]) and a
+   live HTTP fetch of the link (`getLinkMetadata`), whose answer depends on what the remote host
+   says at that moment. Neither is reproducible, so `mm_app::post` refuses those shapes and
+   `posts.rs` forwards them. `parity_post_get::shapes_with_links_are_forwarded_and_still_match`
+   asserts `x-mmrs-served-by: go` for each; the mirror test asserts ordinary messages are still
+   served, or the route would forward everything and be worth nothing.
+2. **The refusal predicate is a deliberate superset.** `message_may_contain_a_link` looks for
+   `://`, `www`, `![` and `<`. Mattermost's autolinker recognises only a `www\d{0,3}\.` host, a
+   scheme plus `://`, and the angle-bracket form — it has **no email rule**, so
+   `someone@example.com` is not a server-side link even though the webapp renders one, and a
+   markdown `[text](url)` is not an autolink either. Widening the needles is free; narrowing them
+   is a wire-format bug no comparison of served shapes would catch.
+3. **`preparePostFilesForClient` runs twice, and the second call is load-bearing in a window Go
+   normally closes behind itself.** The deleted-post short circuit replaces the metadata between
+   the two passes, so only the second one can put `files` back — but `DeletePost` soft-deletes a
+   post's file infos from a **goroutine** (app/post.go:2013), so by the time a client asks, the
+   files are usually gone and the metadata is `{}` either way. Measured, not assumed: the first
+   fixture asserted `files` were present on a deleted post and failed. The suite now waits for
+   that goroutine and restores the rows, which holds the transient state still and makes the
+   second pass observable. See `App::prepare_post_for_client_with_embeds_and_images`.
+4. **Two Go queries have no `ORDER BY` and are reproduced that way.** `GetMultipleByName` (emoji)
+   and `GetForPost` (acknowledgements) both take Postgres's own row order. Adding an `ORDER BY`
+   here would make us *disagree* with Go whenever its unordered scan came back differently, so a
+   post with two or more custom emoji, or two or more acknowledgements, is not order-stable across
+   the two servers. Not observed to flake — the fixtures use one of each — but it is a real
+   divergence and the reason the rich-post fixture does not use two acknowledgements.
+5. **`ServiceSettings.PostPriority` and `EnableCustomEmoji` default to `true`.** Every config
+   field ported before this one defaults to `false`, and copying that pattern would have silently
+   dropped `metadata.emojis` and `metadata.priority` from every response. `IsPostPriorityEnabled`
+   reads the setting and **no licence at all**, so the branch is live on Team Edition even though
+   *creating* a priority row over REST is licence-gated.
+6. **Two fixtures had to be written straight to the database.** `POST /posts` with
+   `metadata.priority` answers `license_error.feature_unavailable` here, and there is no other way
+   to author a `PostsPriority` or `PostAcknowledgements` row. The read path is not licence-gated,
+   so the suite plants the rows and both servers read them through their own store. Same technique
+   for the NULL `Reactions.UpdateAt`/`DeleteAt` the two `COALESCE`s exist for — nothing reachable
+   through REST writes one.
+7. **`Post.PreSave` sorts `FileIds`.** `o.FileIds = RemoveDuplicateStrings(o.FileIds)`
+   (post.go:740) sorts before deduplicating, so a post stores its attachments in alphabetical id
+   order regardless of what the client sent — and `orderFileInfosByID` then reorders the store's
+   `CreateAt DESC` result into *that*. Whether the two orders differ is a coin flip on random
+   ids, and on the first run they agreed, which made the reordering invisible to a fixture that
+   looked like it was testing it. The suite now plants `FileIds` directly to force them apart.
+8. **`ReplyCount` is a thread count.** The subquery keys on `Posts.RootId` when the post is a
+   reply and `Posts.Id` when it is a root, so a root reports its replies and a reply reports the
+   same number including itself. The fixture uses three replies with one deleted so that
+   "children only", "thread including the root" and "forgot `DeleteAt = 0`" each give a different
+   wrong answer.
+9. **The cloud-limit 403 and its header are unreachable and are not written.**
+   `GetLastAccessiblePostTime` returns `0` without a licence carrying a `PostHistory` limit, so
+   `app.post.cloud.get.app_error` never fires and `First-Inaccessible-Post-Time` is never set.
+   Reproducing the header blind, against an oracle that cannot be run, would be a guess; the
+   handler's doc comment says where it goes if a Cloud licence ever lands.
+10. **`GetPostIfAuthorized` duplicates a fallback that cannot grant anything.**
+   `HasPermissionToReadChannel` already falls back to `read_public_channel` for open **and**
+   open-board channels; `GetPostIfAuthorized` repeats it for `O` only. The repetition changes
+   nothing about *who* is allowed in — only which permission id the 403 names, which clients read.
+11. **The mutation harness was lying, and the controls are what caught it.** `scripts/mutate.sh`'s
+   `api` arm ran *every* mm-api suite on every mutation. Narrowing it with
+   `--tests --test parity_post_get` looked right and was not: `--test X` **replaces** `--tests`
+   rather than narrowing it, so cargo built all 32 targets and the first full run came back
+   "25 caught, 0 survived" — with **both no-op controls caught**, which is the only reason the
+   tally was thrown away instead of reported. `MUTATE_API_SUITE` now selects the binary properly,
+   and a non-zero exit with no failing test is reported as a HARNESS FAULT rather than as CAUGHT.
+   A mutation must also *compile*: the first `include_deleted` mutation left sqlx's `$2` unused
+   and only ever produced a build error. See `scripts/mutations/post_get.plan`.

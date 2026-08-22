@@ -1,0 +1,64 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT userid    AS \"user_id!\",\n                   postid    AS \"post_id!\",\n                   emojiname AS \"emoji_name!\",\n                   createat  AS \"create_at!\",\n                   COALESCE(updateat, createat) AS \"update_at!\",\n                   COALESCE(deleteat, 0)        AS \"delete_at!\",\n                   remoteid  AS \"remote_id?\",\n                   channelid AS \"channel_id!\"\n              FROM reactions\n             WHERE postid = $1\n               AND COALESCE(deleteat, 0) = 0\n             ORDER BY createat\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "user_id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "post_id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "emoji_name!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "create_at!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "update_at!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "delete_at!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "remote_id?",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 7,
+        "name": "channel_id!",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      null,
+      null,
+      true,
+      false
+    ]
+  },
+  "hash": "8dad1b4309cb8ba60ffc1b4371298a4fb1e473115c5d4d966d24a93f3cd092c9"
+}

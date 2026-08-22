@@ -1,0 +1,131 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT posts.id,\n                   posts.createat   AS \"create_at!\",\n                   posts.updateat   AS \"update_at!\",\n                   posts.editat     AS \"edit_at!\",\n                   posts.deleteat   AS \"delete_at!\",\n                   posts.ispinned   AS \"is_pinned!\",\n                   posts.userid     AS \"user_id!\",\n                   posts.channelid  AS \"channel_id!\",\n                   posts.rootid     AS \"root_id!\",\n                   posts.originalid AS \"original_id!\",\n                   posts.message    AS \"message!\",\n                   posts.type       AS \"post_type!\",\n                   posts.props      AS \"props?\",\n                   posts.hashtags   AS \"hashtags!\",\n                   posts.filenames  AS \"filenames?\",\n                   posts.fileids    AS \"file_ids?\",\n                   posts.hasreactions AS \"has_reactions!\",\n                   posts.remoteid   AS \"remote_id?\",\n                   (SELECT COUNT(*)\n                      FROM posts p\n                     WHERE p.rootid = (CASE WHEN posts.rootid = '' THEN posts.id ELSE posts.rootid END)\n                       AND p.deleteat = 0) AS \"reply_count!\"\n              FROM posts\n             WHERE posts.id = $1\n               AND ($2 OR posts.deleteat = 0)\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "create_at!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "update_at!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "edit_at!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "delete_at!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "is_pinned!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 6,
+        "name": "user_id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 7,
+        "name": "channel_id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 8,
+        "name": "root_id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 9,
+        "name": "original_id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 10,
+        "name": "message!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 11,
+        "name": "post_type!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 12,
+        "name": "props?",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 13,
+        "name": "hashtags!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 14,
+        "name": "filenames?",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 15,
+        "name": "file_ids?",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 16,
+        "name": "has_reactions!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 17,
+        "name": "remote_id?",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 18,
+        "name": "reply_count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      null
+    ]
+  },
+  "hash": "1e0c82f86b58f30318a31cdf630c17b3fc2595004b14b540c4e8d63021a1a97b"
+}

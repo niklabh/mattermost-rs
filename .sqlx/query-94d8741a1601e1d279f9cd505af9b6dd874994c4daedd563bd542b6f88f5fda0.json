@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT postid                  AS \"post_id!\",\n                   channelid               AS \"channel_id!\",\n                   priority                AS \"priority!\",\n                   requestedack            AS \"requested_ack?\",\n                   persistentnotifications AS \"persistent_notifications?\"\n              FROM postspriority\n             WHERE postid = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "post_id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "channel_id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "priority!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "requested_ack?",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 4,
+        "name": "persistent_notifications?",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "94d8741a1601e1d279f9cd505af9b6dd874994c4daedd563bd542b6f88f5fda0"
+}

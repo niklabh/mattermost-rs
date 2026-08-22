@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id        AS \"id!\",\n                   createat  AS \"create_at!\",\n                   updateat  AS \"update_at!\",\n                   deleteat  AS \"delete_at!\",\n                   creatorid AS \"creator_id!\",\n                   name      AS \"name!\"\n              FROM emoji\n             WHERE deleteat = 0\n               AND name = ANY($1)\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "create_at!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "update_at!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "delete_at!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "creator_id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "name!",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "82d6c58c3641a590d445934c7823d9cb9eb25fea06b3a700de0fe6740577f4a4"
+}

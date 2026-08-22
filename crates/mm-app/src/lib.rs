@@ -7,6 +7,7 @@ pub mod authorization;
 pub mod channel;
 pub mod config;
 pub mod password;
+pub mod post;
 pub mod preference;
 pub mod role;
 pub mod session;
