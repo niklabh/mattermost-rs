@@ -920,6 +920,288 @@ fn not_modified(etag: String) -> Response {
         .into_response()
 }
 
+/// The four query parameters `autocompleteUsers` reads (api4/user.go:1386-1389).
+///
+/// There is no `page`/`per_page` here and no `c.Params` at all — the handler goes straight to
+/// `r.URL.Query()`, so nothing in this route can produce a 400 for a malformed parameter.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct AutocompleteQuery {
+    in_channel: String,
+    in_team: String,
+    name: String,
+    /// Already defaulted and clamped — see [`autocomplete_limit`].
+    limit: i64,
+}
+
+fn parse_autocomplete_request(query: Option<&str>) -> AutocompleteQuery {
+    let get = |key: &str| crate::channels::query_first(query, key).unwrap_or_default();
+    AutocompleteQuery {
+        in_channel: get("in_channel"),
+        in_team: get("in_team"),
+        name: get("name"),
+        limit: autocomplete_limit(crate::channels::query_first(query, "limit")),
+    }
+}
+
+/// `strconv.Atoi` with the error **discarded**, which is what the handler does
+/// (`limit, _ := strconv.Atoi(limitStr)`).
+///
+/// Go returns a value alongside its error and the two failure modes give *different* values:
+/// a syntax error yields `0`, and a range error yields the saturated bound. So
+/// `?limit=99999999999999999999` is `MaxInt64`, which the clamp below turns into 1000, while
+/// `?limit=12abc` is `0` and returns nothing at all. Both measured against the running Go
+/// server — a Rust `parse::<i64>()` that treats every error alike gets the first one wrong.
+fn go_atoi(raw: &str) -> i64 {
+    match raw.parse::<i64>() {
+        Ok(value) => value,
+        Err(err) => match err.kind() {
+            std::num::IntErrorKind::PosOverflow => i64::MAX,
+            std::num::IntErrorKind::NegOverflow => i64::MIN,
+            _ => 0,
+        },
+    }
+}
+
+/// Port of the limit block at api4/user.go:1390-1395.
+///
+/// Read the branches carefully, because two of the three plausible readings are wrong:
+///
+/// - The default applies **only to an absent or empty `limit`**, not to an unparseable one. A
+///   garbage limit is `0`, and `LIMIT 0` is an empty list with a 200 — not 100 results.
+/// - The clamp is one-sided. There is no floor, so a **negative** limit reaches Postgres and
+///   fails the query: a 500 carrying `app.user.search.app_error`, on both servers.
+fn autocomplete_limit(raw: Option<String>) -> i64 {
+    let Some(raw) = raw.filter(|value| !value.is_empty()) else {
+        return mm_store::user_store::USER_SEARCH_DEFAULT_LIMIT;
+    };
+    let limit = go_atoi(&raw);
+    if limit > mm_store::user_store::USER_SEARCH_MAX_LIMIT {
+        mm_store::user_store::USER_SEARCH_MAX_LIMIT
+    } else {
+        limit
+    }
+}
+
+/// Port of the `AllowFullNames` block at api4/user.go:1402-1406.
+///
+/// `manage_system` forces it **on** outright; everyone else gets
+/// `PrivacySettings.ShowFullName`. Written as the if/else Go writes rather than the `||` it
+/// collapses to, so that which input was consulted stays visible — and so a mutation to either
+/// arm is a failing test rather than a value that happens to agree.
+fn allow_full_names(is_admin: bool, show_full_name: bool) -> bool {
+    if is_admin { true } else { show_full_name }
+}
+
+/// Port of `autocompleteUsers` (api4/user.go:1385) — `GET /api/v4/users/autocomplete`, the
+/// route behind every `@`-mention keystroke in the webapp.
+///
+/// # Three arms, three *shapes*
+///
+/// The response is always a `model.UserAutocomplete`, but which of its fields are populated
+/// depends on the parameters, and `out_of_channel` and `agents` carry `omitempty` while `users`
+/// does not. So:
+///
+/// | parameters | `users` | `out_of_channel` | `agents` |
+/// |---|---|---|---|
+/// | `in_channel` + `in_team` | in-channel matches, `[]` when none | out-of-channel matches, **omitted** when none | omitted |
+/// | `in_team` only | in-team matches, `[]` when none | **omitted always** — the field is never assigned | omitted |
+/// | neither | system-wide matches, `[]` when none | omitted always | omitted |
+///
+/// `users` is `[]` and never `null` because the store returns `[]*model.User{}` rather than nil,
+/// which is why the app layer hands back `Some(vec)`.
+///
+/// # Never autocomplete on emails
+///
+/// `AllowEmails: false` is hard-wired (api4/user.go:1399) and it moves a *search* column, not a
+/// response field: `performSearch` picks `UserSearchTypeNames` over `UserSearchTypeAll`, so
+/// `Email` is never a `LIKE` target. A user whose address contains the term and whose name does
+/// not is invisible to this route — while the `email` field itself is still on the wire for
+/// anyone the search *did* match, subject to the privacy settings. The two are unrelated and
+/// conflating them is the easy mistake.
+///
+/// # `AllowFullNames` has two sources and only one of them is the setting
+///
+/// `manage_system` sets it to `true` outright; everyone else gets
+/// `PrivacySettings.ShowFullName`. So an admin searches first and last names even on a server
+/// configured to hide them.
+///
+/// # The gates run before the missing-team check
+///
+/// `?in_channel=X` with no `in_team` is a 500 — but only if the caller could have read `X`.
+/// The `read_channel` gate is evaluated first, so an unauthorised caller gets a 403 and never
+/// learns that the parameter combination was invalid.
+///
+/// # `Agents` is unreachable here
+///
+/// `GetUsersForAgents` goes through `agentsBridge` to the `mattermost-plugin-ai` bridge API.
+/// Without that plugin the call errors, the handler's `appErr == nil` guard fails, and `Agents`
+/// is left nil — and `omitempty` then drops it. Measured on the running server: the key is
+/// absent from every response. `Vec::new()` with `skip_serializing_if` reproduces that; an
+/// `Option` or a bare `Vec` without the skip would emit `"agents":null` or `"agents":[]`, and
+/// neither has ever appeared on this deployment's wire.
+///
+/// # Not ported
+///
+/// `RestrictUsersSearchByPermissions` only fills in `ViewRestrictions`, so a caller who lacks
+/// user-based `view_members` is forwarded whole — `getUsers`' rule, for the same reason: every
+/// query below would need the restriction joins.
+#[tracing::instrument(skip_all, fields(user_id = %session.0.user_id, arm, forwarded))]
+pub async fn autocomplete_users(
+    State(state): State<AppState>,
+    axum::extract::RawQuery(query): axum::extract::RawQuery,
+    session: AuthenticatedSession,
+    request: axum::extract::Request,
+) -> Response {
+    let parsed = parse_autocomplete_request(query.as_deref());
+
+    // `c.IsSystemAdmin()` and the `AllowFullNames` gate are the *same* permission check asked
+    // twice (api4/user.go:1397, 1403). Asking once and reusing it is the only shortcut taken.
+    let is_admin = state
+        .app
+        .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)
+        .await;
+    let options = mm_store::user_store::UserSearchOptions {
+        allow_full_names: allow_full_names(is_admin, state.show_full_name),
+        limit: parsed.limit,
+    };
+
+    if !parsed.in_channel.is_empty() {
+        let (allowed, _) = state
+            .app
+            .session_has_permission_to_channel(
+                &session.0,
+                &parsed.in_channel,
+                &PERMISSION_READ_CHANNEL,
+            )
+            .await;
+        if !allowed {
+            return ApiError(*make_permission_error(
+                &session.0,
+                &[&PERMISSION_READ_CHANNEL],
+            ))
+            .into_response();
+        }
+    }
+
+    if !parsed.in_team.is_empty()
+        && !state
+            .app
+            .session_has_permission_to_team(&session.0, &parsed.in_team, &PERMISSION_VIEW_TEAM)
+            .await
+    {
+        return ApiError(*make_permission_error(&session.0, &[&PERMISSION_VIEW_TEAM]))
+            .into_response();
+    }
+
+    // `RestrictUsersSearchByPermissions` stands here in Go — after both gates, before the
+    // dispatch. A caller with non-nil restrictions goes to Go whole, including for the
+    // missing-team-id 500 below, which Go raises in exactly the same place.
+    if !state
+        .app
+        .has_permission_to(&session.0.user_id, &PERMISSION_VIEW_MEMBERS)
+        .await
+    {
+        tracing::Span::current().record("forwarded", "view_restrictions");
+        return crate::proxy::forward_to_go(State(state), request).await;
+    }
+    tracing::Span::current().record("forwarded", false);
+
+    match serve_autocomplete(&state, &parsed, &options, is_admin).await {
+        Ok(response) => response,
+        Err(err) => err.into_response(),
+    }
+}
+
+/// The dispatch and the response body, split out so the handler above is just the gates.
+async fn serve_autocomplete(
+    state: &AppState,
+    query: &AutocompleteQuery,
+    options: &mm_store::user_store::UserSearchOptions,
+    is_admin: bool,
+) -> Result<Response, ApiError> {
+    let mut autocomplete = mm_model::user_autocomplete::UserAutocomplete::default();
+
+    if !query.in_channel.is_empty() {
+        tracing::Span::current().record("arm", "in_channel");
+        // The channel arm needs the team as well, and refuses rather than guessing: the team is
+        // what makes the *out of channel* half answerable, and Go calls that a server error
+        // (500) rather than a bad request. Reproduced, status and id both.
+        if query.in_team.is_empty() {
+            return Err(ApiError(AppError::new(
+                "autocompleteUser",
+                "api.user.autocomplete_users.missing_team_id.app_error",
+                None,
+                format!("channelId={}", query.in_channel),
+                500,
+            )));
+        }
+        let result = state
+            .app
+            .autocomplete_users_in_channel(&query.in_team, &query.in_channel, &query.name, options)
+            .await?;
+        autocomplete.users = result.in_channel;
+        // `autocomplete.OutOfChannel = result.OutOfChannel` — into the `omitempty` field, so an
+        // empty out-of-channel list is a *missing key*, not `[]`.
+        autocomplete.out_of_channel = result.out_of_channel.unwrap_or_default();
+    } else if !query.in_team.is_empty() {
+        tracing::Span::current().record("arm", "in_team");
+        let result = state
+            .app
+            .autocomplete_users_in_team(&query.in_team, &query.name, options)
+            .await?;
+        autocomplete.users = result.in_team;
+    } else {
+        tracing::Span::current().record("arm", "system");
+        // `SearchUsersInTeam(c.AppContext, "", name, options)` — the empty team id is Go's, and
+        // it is what makes this the system-wide arm.
+        let users = state
+            .app
+            .search_users_in_team("", &query.name, options)
+            .await?;
+        autocomplete.users = Some(users);
+    }
+
+    // `a.SanitizeProfile(user, options.IsAdmin)` over both lists, in the app layer on Go's side
+    // and here on ours (D-085). **There is no self exception**: unlike `getUser`, whose caller
+    // gets the lax empty-map `Sanitize` on its own row, everyone here goes through the strict
+    // populated map. So a non-admin searching for itself sees its own `notify_props` emptied
+    // away (and the key dropped by `omitempty`) and its own `auth_data` blanked to `""` — which
+    // `omitempty` keeps, because a pointer to the empty string is not nil. Measured, not
+    // reasoned: `sanitisation_matches_go_for_both_an_admin_and_a_plain_caller`.
+    let sanitize = sanitize_options(state.show_full_name, state.show_email_address, is_admin);
+    for user in autocomplete.users.iter_mut().flatten() {
+        user.sanitize_profile(&sanitize, is_admin);
+    }
+    for user in &mut autocomplete.out_of_channel {
+        user.sanitize_profile(&sanitize, is_admin);
+    }
+
+    // `json.NewEncoder(w).Encode(autocomplete)` — **with** the trailing newline `Encode`
+    // appends. The sibling `getUsers` uses `json.Marshal` and has none ([D-086]); the two
+    // handlers are eleven lines apart in the same Go file and differ by this one byte.
+    let mut body = serde_json::to_vec(&autocomplete).map_err(|err| {
+        tracing::error!(error = %err, "failed to serialise UserAutocomplete");
+        ApiError(AppError::new(
+            "autocompleteUser",
+            "api.marshal_error",
+            None,
+            String::new(),
+            500,
+        ))
+    })?;
+    body.push(b'\n');
+
+    Ok((
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
+    )
+        .into_response())
+}
+
 #[cfg(test)]
 mod tests {
     use mm_model::user::User;
@@ -1361,5 +1643,134 @@ mod tests {
         assert_ne!(both, user.etag(false, true));
         assert_ne!(both, user.etag(true, false));
         assert_eq!(both, user.etag(true, true), "etag is deterministic");
+    }
+}
+
+/// The parts of `autocompleteUsers` that need no database: the query parsing, the limit block,
+/// and the `AllowFullNames` derivation.
+#[cfg(test)]
+mod autocomplete_tests {
+    use super::{
+        AutocompleteQuery, allow_full_names, autocomplete_limit, go_atoi,
+        parse_autocomplete_request, sanitize_options,
+    };
+    use mm_store::user_store::{USER_SEARCH_DEFAULT_LIMIT, USER_SEARCH_MAX_LIMIT};
+
+    fn limit(query: &str) -> i64 {
+        parse_autocomplete_request(Some(query)).limit
+    }
+
+    #[test]
+    fn the_four_parameters_are_read_verbatim() {
+        let parsed =
+            parse_autocomplete_request(Some("in_channel=chan1&in_team=team1&name=%40bob&limit=7"));
+        assert_eq!(
+            parsed,
+            AutocompleteQuery {
+                in_channel: "chan1".to_owned(),
+                in_team: "team1".to_owned(),
+                // The `@` a mention box sends survives url-decoding intact; the store trims it.
+                name: "@bob".to_owned(),
+                limit: 7,
+            }
+        );
+    }
+
+    #[test]
+    fn an_empty_query_string_is_all_defaults() {
+        assert_eq!(
+            parse_autocomplete_request(None),
+            AutocompleteQuery {
+                limit: USER_SEARCH_DEFAULT_LIMIT,
+                ..AutocompleteQuery::default()
+            }
+        );
+    }
+
+    /// The default fires for an **absent or empty** parameter and for nothing else.
+    #[test]
+    fn only_a_missing_limit_gets_the_default() {
+        assert_eq!(limit("name=a"), USER_SEARCH_DEFAULT_LIMIT);
+        assert_eq!(limit("name=a&limit="), USER_SEARCH_DEFAULT_LIMIT);
+        assert_eq!(limit("name=a&limit=7"), 7);
+    }
+
+    /// One-sided: clamped above, untouched below. A floor added here would turn the 500 that
+    /// `?limit=-1` produces on both servers into a 200 on one of them.
+    #[test]
+    fn the_clamp_has_a_ceiling_and_no_floor() {
+        assert_eq!(limit("limit=5000"), USER_SEARCH_MAX_LIMIT);
+        assert_eq!(limit("limit=1000"), USER_SEARCH_MAX_LIMIT);
+        assert_eq!(limit("limit=999"), 999);
+        assert_eq!(limit("limit=-1"), -1, "no floor — this reaches Postgres");
+    }
+
+    /// A limit Go cannot parse is `0`, not the default, and `LIMIT 0` returns nothing.
+    /// Confirmed against the running Go server: `?limit=12abc` answers `{"users":[]}`.
+    #[test]
+    fn an_unparseable_limit_is_zero_and_not_the_default() {
+        assert_eq!(limit("limit=12abc"), 0);
+        assert_eq!(limit("limit=1e3"), 0);
+        assert_eq!(limit("limit=abc"), 0);
+        assert_eq!(
+            limit("limit=%20 5"),
+            0,
+            "Go's Atoi rejects surrounding space"
+        );
+    }
+
+    /// Go's `Atoi` distinguishes a syntax error from a range error and returns a different value
+    /// for each. Both halves measured on the running server: the positive overflow answers with
+    /// users, the negative one answers 500.
+    #[test]
+    fn an_overflowing_limit_saturates_the_way_gos_atoi_does() {
+        assert_eq!(go_atoi("99999999999999999999"), i64::MAX);
+        assert_eq!(go_atoi("-99999999999999999999"), i64::MIN);
+        assert_eq!(go_atoi("nope"), 0);
+        assert_eq!(go_atoi("+5"), 5, "Go's Atoi accepts a leading plus");
+
+        assert_eq!(limit("limit=99999999999999999999"), USER_SEARCH_MAX_LIMIT);
+        assert_eq!(
+            limit("limit=-99999999999999999999"),
+            i64::MIN,
+            "no floor, so the negative overflow reaches the query and fails it"
+        );
+    }
+
+    #[test]
+    fn the_limit_helper_agrees_with_the_parser() {
+        assert_eq!(autocomplete_limit(None), USER_SEARCH_DEFAULT_LIMIT);
+        assert_eq!(
+            autocomplete_limit(Some(String::new())),
+            USER_SEARCH_DEFAULT_LIMIT
+        );
+        assert_eq!(autocomplete_limit(Some("0".to_owned())), 0);
+    }
+
+    /// `manage_system` forces full-name search on regardless of the setting, and only the
+    /// non-admin branch consults it. Written as the table because the two inputs are easy to
+    /// collapse into a single `||` that then hides which one was consulted.
+    #[test]
+    fn allow_full_names_is_the_permission_or_the_setting() {
+        assert!(allow_full_names(true, false), "admin overrides the setting");
+        assert!(allow_full_names(true, true));
+        assert!(allow_full_names(false, true), "the setting is consulted");
+        assert!(!allow_full_names(false, false), "and it can say no");
+    }
+
+    /// The sanitiser this route hands every user, including the caller's own row. A non-admin
+    /// never sees `auth_data`/`auth_service` on anyone — those two flags have no config source,
+    /// so the populated map's strict mode strips them.
+    #[test]
+    fn autocomplete_sanitises_with_no_self_exception() {
+        let non_admin = sanitize_options(true, true, false);
+        assert_eq!(non_admin.get("email"), Some(&true));
+        assert_eq!(non_admin.get("fullname"), Some(&true));
+        assert_eq!(non_admin.get("authservice"), None);
+        assert_eq!(non_admin.get("authdata"), None);
+
+        let admin = sanitize_options(false, false, true);
+        assert_eq!(admin.get("authservice"), Some(&true));
+        assert_eq!(admin.get("authdata"), Some(&true));
     }
 }

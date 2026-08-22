@@ -1,7 +1,9 @@
 //! Port of `app.GetUser`, `app.GetUserByUsername` and `app.GetUsersByIds` (channels/app/user.go).
 
 use mm_model::user::User;
+use mm_model::user_autocomplete::{UserAutocompleteInChannel, UserAutocompleteInTeam};
 use mm_model::utils::AppError;
+use mm_store::user_store::UserSearchOptions;
 use mm_store::{StoreError, UserStore};
 
 use crate::App;
@@ -271,6 +273,122 @@ impl App {
             .get_etag_for_profiles_not_in_team(team_id)
             .await;
         format!("{store_etag}.{show_full_name}.{show_email_address}.")
+    }
+}
+
+/// The one error every user *search* produces: a 500 carrying `app.user.search.app_error`.
+///
+/// Five app functions mint it and only `where` separates them, which — like
+/// [`get_profiles_error`] — is `json:"-"` and therefore invisible to a client. It is reachable
+/// from a real client: `?limit=-1` casts to a `uint64` on Go's side and to a negative `LIMIT` on
+/// ours, and Postgres refuses both. Measured, not inferred.
+fn search_error(where_: &'static str, err: StoreError) -> AppError {
+    tracing::error!(error = %err, where_, "user search failed");
+    AppError::new(
+        where_,
+        "app.user.search.app_error",
+        None,
+        String::new(),
+        500,
+    )
+}
+
+impl App {
+    /// Port of `app.App.SearchUsersInTeam` (app/user.go:2477).
+    ///
+    /// `autocompleteUsers`' third arm — no `in_channel` and no `in_team` — calls this with an
+    /// **empty team id**, which the store reads as "no team filter": the search covers every
+    /// active user in the installation, gated by nothing but the caller's view restrictions.
+    ///
+    /// Sanitisation is the caller's here, unlike Go, where this function runs `SanitizeProfile`
+    /// itself. The privacy settings it needs live in `AppState` until config is ported (D-085),
+    /// which is the same split [`App::get_users_page`] makes.
+    #[tracing::instrument(skip_all, fields(team_id = %team_id, found))]
+    pub async fn search_users_in_team(
+        &self,
+        team_id: &str,
+        term: &str,
+        options: &UserSearchOptions,
+    ) -> Result<Vec<User>, AppError> {
+        let users = self
+            .store()
+            .user()
+            .search(team_id, term.trim(), options)
+            .await
+            .map_err(|err| search_error("SearchUsersInTeam", err))?;
+        tracing::Span::current().record("found", users.len());
+        Ok(users)
+    }
+
+    /// Port of `app.App.AutocompleteUsersInTeam` (app/user.go:2567).
+    ///
+    /// The same store call as [`App::search_users_in_team`] wrapped in
+    /// `UserAutocompleteInTeam` — and a **different `where`** on the error, which is the only
+    /// thing that distinguishes the two on this route.
+    #[tracing::instrument(skip_all, fields(team_id = %team_id, found))]
+    pub async fn autocomplete_users_in_team(
+        &self,
+        team_id: &str,
+        term: &str,
+        options: &UserSearchOptions,
+    ) -> Result<UserAutocompleteInTeam, AppError> {
+        let users = self
+            .store()
+            .user()
+            .search(team_id, term.trim(), options)
+            .await
+            .map_err(|err| search_error("AutocompleteUsersInTeam", err))?;
+        tracing::Span::current().record("found", users.len());
+
+        // `autocomplete.InTeam = users`, where `users` is the store's `[]*model.User{}` — never
+        // nil, so the field is `[]` and not `null` even when nothing matched. `Some(vec![])` is
+        // what carries that distinction; `None` would emit `"in_team":null`.
+        Ok(UserAutocompleteInTeam {
+            in_team: Some(users),
+        })
+    }
+
+    /// Port of `app.App.AutocompleteUsersInChannel` (app/user.go:2548) → the store's own
+    /// `AutocompleteUsersInChannel` (user_store.go:2332).
+    ///
+    /// # Go runs the two halves concurrently and this does not
+    ///
+    /// The store's `AutocompleteUsersInChannel` puts `SearchInChannel` and `SearchNotInChannel`
+    /// in an `errgroup`; these run in sequence, because this crate deliberately carries no
+    /// runtime dependency (`tokio` is a dev-dependency only) and a join combinator would add
+    /// one. Nothing observable changes: the two queries are independent, and when both fail the
+    /// `AppError` is the same id and status either way, so no client can tell which arrived
+    /// first. What changes is latency — two round trips instead of one, on a route the webapp
+    /// calls per keystroke.
+    ///
+    /// # The team id feeds only the *out of channel* half
+    ///
+    /// `SearchInChannel` never sees it. That is the comment at api4/user.go:1434 in code form:
+    /// the channel decides who is in, the team decides who is available to invite.
+    #[tracing::instrument(skip_all, fields(team_id = %team_id, channel_id = %channel_id))]
+    pub async fn autocomplete_users_in_channel(
+        &self,
+        team_id: &str,
+        channel_id: &str,
+        term: &str,
+        options: &UserSearchOptions,
+    ) -> Result<UserAutocompleteInChannel, AppError> {
+        let term = term.trim();
+        let store = self.store().user();
+
+        let in_channel = store
+            .search_in_channel(channel_id, term, options)
+            .await
+            .map_err(|err| search_error("AutocompleteUsersInChannel", err))?;
+        let out_of_channel = store
+            .search_not_in_channel(team_id, channel_id, term, options)
+            .await
+            .map_err(|err| search_error("AutocompleteUsersInChannel", err))?;
+
+        Ok(UserAutocompleteInChannel {
+            in_channel: Some(in_channel),
+            out_of_channel: Some(out_of_channel),
+        })
     }
 }
 

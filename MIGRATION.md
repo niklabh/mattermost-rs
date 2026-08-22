@@ -3869,3 +3869,53 @@ set aside. Three Rust files and one correction to the previous session's ledger 
    failed once during a full-crate run here on a paging order tie and passes on its own. It stops
    cargo before later binaries, so two mutation verdicts named its suite and had to be re-taken
    against `parity_roles` alone.
+
+## Ledger additions — api4/user.go (`autocompleteUsers`, appended 2026-08-22, branch `phase-2/par-autocomplete`)
+
+| Go file | Rust file | Status | Tests | Notes |
+|---|---|---|---|---|
+| store/sqlstore/user_store.go (`Search`, `SearchInChannel`, `SearchNotInChannel`, `performSearch`, `sanitizeSearchTerm`) | `mm-store/src/user_store.rs` | PARTIAL | 4 unit + 12 db | `UserSearchOptions` is ported down to the two fields this route varies; the other seven are hard-coded to the values `autocompleteUsers` pins, and the table in the doc comment says which and why. The per-term `AND` clauses are one `NOT EXISTS (… unnest(terms) … WHERE NOT (…))` rather than N appended `WHERE`s — same set, one compile-checked statement. |
+| app/user.go (`SearchUsersInTeam`, `AutocompleteUsersInTeam`, `AutocompleteUsersInChannel`) | `mm-app/src/user.rs` | PARTIAL | 12 db (store-level) | All three mint the same `app.user.search.app_error` 500 and differ only in `where`, which is `json:"-"`. Sanitisation stays in the api layer (D-085), unlike Go. The two channel halves run **sequentially** where Go uses an `errgroup`: latency only, and this crate carries no runtime dependency. |
+| api4/user.go (`autocompleteUsers`) | `mm-api/src/users.rs` | DONE | 9 unit + 15 parity | `GET /api/v4/users/autocomplete`, all three arms served. The response body ends in a **newline** (`json.NewEncoder`, where the `getUsers` sibling in the same file uses `json.Marshal` and has none — [D-086]). `out_of_channel` and `agents` are `omitempty` and `users` is not, so an empty in-channel list is `[]` and an empty out-of-channel list is a *missing key*. Mutations: 20 run, 20 caught, 2 controls survived. |
+
+## Notes — api4/user.go (`autocompleteUsers`)
+
+1. **`agents` is never on this deployment's wire.** `GetUsersForAgents` goes through
+   `agentsBridge` to the `mattermost-plugin-ai` bridge; without the plugin the call errors, the
+   handler's `appErr == nil` guard fails, `Agents` stays nil and `omitempty` drops it. Measured on
+   every arm, not inferred — `Vec::new()` serialising as `[]` where Go emits nothing has been the
+   invisible wrong answer here twice, so `agents_never_appears_on_any_arm` asserts Go's key set as
+   well as ours and fails if the bridge ever becomes reachable.
+2. **The limit block has three failure modes and only one of them is the default.** `limit, _ :=
+   strconv.Atoi(...)` discards the error, and Go's `Atoi` returns a *different value* for a syntax
+   error (`0`) than for a range error (the saturated bound). So `?limit=12abc` is `LIMIT 0` — an
+   empty list with a 200, not 100 results — while `?limit=99999999999999999999` is `MaxInt64`
+   clamped to 1000. The clamp is **one-sided**: `?limit=-1` reaches Postgres and 500s on both
+   servers. All four measured against the running Go server; a Rust `parse::<i64>()` that treats
+   every error alike gets the overflow case wrong.
+3. **"Never autocomplete on emails" moves a search column, not a response field.**
+   `AllowEmails: false` picks `UserSearchTypeNames` over `UserSearchTypeAll`, so `Email` is not a
+   `LIKE` target — while the `email` field is still returned for anyone the search *did* match,
+   subject to the privacy settings. The parity suite plants a token that exists only in one user's
+   address, asserts it finds nobody, and then asserts that same user's `email` is on the wire when
+   found by name.
+4. **Sanitisation differs in both directions, and each direction is a `null`-vs-empty trap.**
+   `ClearNonProfileFields(asAdmin=false)` empties `notify_props`, whose `omitempty` then drops the
+   key; it also sets `auth_data` to a pointer to `""`, which `omitempty` **keeps** because the
+   pointer is not nil. So a non-admin's response carries `auth_data: ""` and no `notify_props`,
+   and an admin's carries the real `notify_props` and no `auth_data`. There is no self exception:
+   unlike `getUser`, the caller's own row is sanitised like everyone else's.
+5. **The permission gates run before the missing-team-id check.** `?in_channel=X` with no
+   `in_team` is a 500 (`api.user.autocomplete_users.missing_team_id.app_error`) — but only for a
+   caller who could have read `X`; otherwise the `read_channel` gate answers 403 first and the
+   channel's existence is not leaked. Reversing the two is a mutation the suite catches.
+6. **Order is `ORDER BY Username ASC` in all three queries and nothing else.** No ranking, no
+   `DISTINCT` (that only arrives with `applyViewRestrictionsFilter`, whose callers are forwarded),
+   so the result is fully deterministic and the parity suite compares bytes rather than sets.
+7. **A pre-existing flake that takes the shared Go server down — [D-157].**
+   `db_user_profile_lists::the_in_team_etag_has_no_membership_deletion_condition` fails
+   intermittently on a clean tree (two consecutive `get_millis()` fallbacks colliding in the same
+   millisecond). The panic skips that file's trailing purge, and the six rows it leaves have
+   twelve NULL columns Go's `model.User` cannot scan — so **Go's own `GET /api/v4/users` then
+   500s for every worktree**, which failed four `parity_users_list` tests here until the rows were
+   cleared by hand. Cost this session two mutation re-takes and one full-suite re-run.
