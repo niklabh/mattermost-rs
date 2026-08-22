@@ -14,8 +14,12 @@
 //! driver. Queries here spell them the way the database does.
 
 pub mod channel_store;
+pub mod emoji_store;
 pub mod error;
+pub mod file_info_store;
+pub mod post_store;
 pub mod preference_store;
+pub mod reaction_store;
 pub mod role_store;
 pub mod scheme_store;
 pub mod session_store;
@@ -25,8 +29,12 @@ pub mod user_store;
 pub mod user_terms_of_service_store;
 
 pub use channel_store::{ChannelStore, SqlChannelStore};
+pub use emoji_store::{EmojiStore, SqlEmojiStore};
 pub use error::StoreError;
+pub use file_info_store::{FileInfoStore, SqlFileInfoStore};
+pub use post_store::{PostStore, SqlPostStore};
 pub use preference_store::{PreferenceStore, SqlPreferenceStore};
+pub use reaction_store::{ReactionStore, SqlReactionStore};
 pub use role_store::{RoleStore, SqlRoleStore};
 pub use scheme_store::{SchemeStore, SqlSchemeStore};
 pub use session_store::{SessionStore, SqlSessionStore};
@@ -46,6 +54,10 @@ use sqlx::postgres::PgPoolOptions;
 #[derive(Debug, Clone)]
 pub struct SqlStore {
     channel: SqlChannelStore,
+    emoji: SqlEmojiStore,
+    file_info: SqlFileInfoStore,
+    post: SqlPostStore,
+    reaction: SqlReactionStore,
     preference: SqlPreferenceStore,
     role: SqlRoleStore,
     scheme: SqlSchemeStore,
@@ -79,6 +91,10 @@ impl SqlStore {
     pub fn from_pool(pool: PgPool) -> Self {
         Self {
             channel: SqlChannelStore::new(pool.clone()),
+            emoji: SqlEmojiStore::new(pool.clone()),
+            file_info: SqlFileInfoStore::new(pool.clone()),
+            post: SqlPostStore::new(pool.clone()),
+            reaction: SqlReactionStore::new(pool.clone()),
             preference: SqlPreferenceStore::new(pool.clone()),
             role: SqlRoleStore::new(pool.clone()),
             scheme: SqlSchemeStore::new(pool.clone()),
@@ -98,6 +114,27 @@ impl SqlStore {
     /// Port of `store.Store.Session()`.
     pub fn session(&self) -> &SqlSessionStore {
         &self.session
+    }
+
+    /// Port of `store.Store.Emoji()`.
+    pub fn emoji(&self) -> &SqlEmojiStore {
+        &self.emoji
+    }
+
+    /// Port of `store.Store.FileInfo()`.
+    pub fn file_info(&self) -> &SqlFileInfoStore {
+        &self.file_info
+    }
+
+    /// Port of `store.Store.Post()` — and, folded in, `PostPriority()` and
+    /// `PostAcknowledgement()`. See [`post_store`].
+    pub fn post(&self) -> &SqlPostStore {
+        &self.post
+    }
+
+    /// Port of `store.Store.Reaction()`.
+    pub fn reaction(&self) -> &SqlReactionStore {
+        &self.reaction
     }
 
     /// Port of `store.Store.Preference()`.

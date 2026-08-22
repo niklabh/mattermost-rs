@@ -62,14 +62,48 @@ pub struct Config {
     /// open channels, confining reads to members so the compliance export sees every access.
     /// Read by [`crate::App::has_permission_to_read_channel`].
     pub compliance_enable: bool,
+
+    /// `ImageProxySettings.Enable` (config.go:3996). Go default `false`.
+    ///
+    /// When true, `PostWithProxyAddedToImageURLs` rewrites every markdown image destination in
+    /// the message and may set `message_source`. That needs the markdown parser ([D-044]), so
+    /// [`crate::post::prepare_post_for_client_with_embeds_and_images`] refuses the post and the
+    /// handler forwards to Go instead.
+    pub image_proxy_enable: bool,
+
+    /// `ServiceSettings.EnablePostIconOverride` (config.go:848). Go default `false`.
+    ///
+    /// When true, `OverrideIconURLIfEmoji` resolves an `override_icon_emoji` prop to a static
+    /// emoji URL and writes it back into the post's props. Same treatment: a post carrying that
+    /// prop is refused, and forwarded, while this is on.
+    pub enable_post_icon_override: bool,
+
+    /// `ServiceSettings.EnableCustomEmoji` (config.go:849). Go default **`true`**.
+    ///
+    /// Gates `metadata.emojis` entirely — `getCustomEmojisForPost` returns an empty slice
+    /// without touching the store when this is off.
+    pub enable_custom_emoji: bool,
+
+    /// `ServiceSettings.PostPriority` (config.go:992). Go default **`true`**.
+    ///
+    /// Gates `metadata.priority` *and* `metadata.acknowledgements`. `IsPostPriorityEnabled`
+    /// (app/post_priority.go:46) reads this and nothing else — there is **no licence check**,
+    /// so the branch is live on Team Edition.
+    pub post_priority: bool,
 }
 
 impl Default for Config {
-    /// Go's `SetDefaults` for exactly these two fields. Both are `false`.
+    /// Go's `SetDefaults` for exactly these fields. **Two of them default to `true`** — copying
+    /// the `false` of the two above would silently drop `metadata.emojis` and
+    /// `metadata.priority` from every response.
     fn default() -> Self {
         Self {
             restrict_system_admin: false,
             compliance_enable: false,
+            image_proxy_enable: false,
+            enable_post_icon_override: false,
+            enable_custom_emoji: true,
+            post_priority: true,
         }
     }
 }
@@ -87,6 +121,19 @@ impl Config {
                 default.restrict_system_admin,
             ),
             compliance_enable: env_bool("MM_COMPLIANCESETTINGS_ENABLE", default.compliance_enable),
+            image_proxy_enable: env_bool(
+                "MM_IMAGEPROXYSETTINGS_ENABLE",
+                default.image_proxy_enable,
+            ),
+            enable_post_icon_override: env_bool(
+                "MM_SERVICESETTINGS_ENABLEPOSTICONOVERRIDE",
+                default.enable_post_icon_override,
+            ),
+            enable_custom_emoji: env_bool(
+                "MM_SERVICESETTINGS_ENABLECUSTOMEMOJI",
+                default.enable_custom_emoji,
+            ),
+            post_priority: env_bool("MM_SERVICESETTINGS_POSTPRIORITY", default.post_priority),
         }
     }
 }
@@ -123,10 +170,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn go_defaults_are_both_false() {
+    fn defaults_match_gos_set_defaults() {
         let config = Config::default();
         assert!(!config.restrict_system_admin, "config.go:1269 — new(false)");
         assert!(!config.compliance_enable, "config.go:2875 — new(false)");
+        assert!(!config.image_proxy_enable, "config.go:3996 — new(false)");
+        assert!(
+            !config.enable_post_icon_override,
+            "config.go:848 — new(false)"
+        );
+        // The two that are **not** false. A port that assumed the pattern held would drop
+        // `metadata.emojis` and `metadata.priority` from every post.
+        assert!(config.enable_custom_emoji, "config.go:850 — new(true)");
+        assert!(config.post_priority, "config.go:993 — new(true)");
     }
 
     /// Exactly `strconv.ParseBool`'s twelve spellings, and nothing else.

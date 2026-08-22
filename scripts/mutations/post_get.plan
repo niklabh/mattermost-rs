@@ -1,0 +1,42 @@
+# Mutation plan for GET /api/v4/posts/{post_id} — see CLAUDE.md § "Mutation testing".
+#
+#   MUTATE_API_SUITE=parity_post_get scripts/mutate-batch.sh scripts/mutations/post_get.plan
+#
+# Tab-separated: name<TAB>file<TAB>from<TAB>to<TAB>suite.  `\n` becomes a newline.
+#
+# S2 was first written as `AND (false OR posts.deleteat = 0)`. That does not compile: sqlx's
+# query_as! then sees `$2` unused and the bind-count no longer matches, so the mutation reports a
+# non-zero exit with no failing test — a harness fault, not a caught mutation. A mutation must
+# produce a *working* program that is wrong, never one that will not build.
+# --- store: SqlPostStore.GetSingle -------------------------------------------------------
+S1 deleted-post predicate inverted	crates/mm-store/src/post_store.rs	AND ($2 OR posts.deleteat = 0)	AND ($2 OR posts.deleteat != 0)	api
+S2 include_deleted flag never reaches the store	crates/mm-app/src/post.rs	.get_single(post_id, incl_deleted)	.get_single(post_id, false)	api
+S3 reply-count root case inverted	crates/mm-store/src/post_store.rs	CASE WHEN posts.rootid = '' THEN posts.id ELSE posts.rootid END	CASE WHEN posts.rootid != '' THEN posts.id ELSE posts.rootid END	api
+S4 reply-count deleted filter dropped	crates/mm-store/src/post_store.rs	\n                       AND p.deleteat = 0) AS "reply_count!"	) AS "reply_count!"	api
+S5 acknowledgement soft-delete filter inverted	crates/mm-store/src/post_store.rs	WHERE acknowledgedat != 0	WHERE acknowledgedat = 0	api
+S6 priority booleans swapped	crates/mm-store/src/post_store.rs	requestedack            AS "requested_ack?",\n                   persistentnotifications AS "persistent_notifications?"	persistentnotifications AS "requested_ack?",\n                   requestedack            AS "persistent_notifications?"	api
+# --- store: SqlReactionStore --------------------------------------------------------------
+S7 reaction order reversed	crates/mm-store/src/reaction_store.rs	ORDER BY createat	ORDER BY createat DESC	api
+S8 UpdateAt coalesce falls back to zero	crates/mm-store/src/reaction_store.rs	COALESCE(updateat, createat) AS "update_at!"	COALESCE(updateat, 0) AS "update_at!"	api
+S9 DeleteAt coalesce dropped from the predicate	crates/mm-store/src/reaction_store.rs	AND COALESCE(deleteat, 0) = 0	AND deleteat = 0	api
+# --- store: SqlEmojiStore -----------------------------------------------------------------
+S10 soft-deleted emoji filter dropped	crates/mm-store/src/emoji_store.rs	WHERE deleteat = 0\n               AND name = ANY($1)	WHERE name = ANY($1)	api
+# --- store: SqlFileInfoStore --------------------------------------------------------------
+S11 file deleted filter inverted	crates/mm-store/src/file_info_store.rs	AND ($2 OR fileinfo.deleteat = 0)	AND ($2 OR fileinfo.deleteat != 0)	api
+S12 file channel_id reads the post id	crates/mm-store/src/file_info_store.rs	COALESCE(fileinfo.channelid, '')       AS "channel_id!"	COALESCE(fileinfo.postid, '')       AS "channel_id!"	api
+# --- app: the pipeline --------------------------------------------------------------------
+A1 priority root-only gate inverted	crates/mm-app/src/post.rs	&& post.root_id.is_empty()	&& !post.root_id.is_empty()	api
+A2 has_reactions gate inverted	crates/mm-app/src/post.rs	let reactions = if post.has_reactions {	let reactions = if !post.has_reactions {	api
+A3 deleted short circuit boundary off by one	crates/mm-app/src/post.rs	if post.delete_at > 0 && !opts.retain_content {	if post.delete_at >= 0 && !opts.retain_content {	api
+A4 system-emoji filter inverted	crates/mm-app/src/post.rs	.filter(|name| get_system_emoji_id(name).is_none())	.filter(|name| get_system_emoji_id(name).is_some())	api
+A5 second files pass dropped	crates/mm-app/src/post.rs	self.get_embeds_and_images(&mut post)?;\n        self.prepare_post_files_for_client(&mut post, opts).await;	self.get_embeds_and_images(&mut post)?;	api
+A6 file-order short circuit widened	crates/mm-app/src/post.rs	if ids.is_empty() || infos.len() < 2 {	if ids.is_empty() || infos.len() < 3 {	api
+A7 link gate stops recognising www	crates/mm-app/src/post.rs	|| message.contains("www")	|| message.contains("wwwz")	api
+A8 refused props ignored	crates/mm-app/src/post.rs	if props.contains_key(refused) {	if false && props.contains_key(refused) {	api
+# --- api: the handler ---------------------------------------------------------------------
+H1 etag comparison inverted	crates/mm-api/src/posts.rs	if if_none_match.as_deref() == Some(etag.as_str()) {	if if_none_match.as_deref() != Some(etag.as_str()) {	api
+H2 manage_system gate inverted	crates/mm-api/src/posts.rs	if include_deleted\n        && !state	if !include_deleted\n        && !state	api
+H3 post id validity check dropped	crates/mm-api/src/posts.rs	if !is_valid_id(post_id) {	if false && !is_valid_id(post_id) {	api
+# --- no-op controls: a CAUGHT here means the harness is noisy and no verdict counts --------
+C1 control rename a binding	crates/mm-app/src/post.rs	let names = get_emoji_names_for_post(post, reactions);\n        if names.is_empty() {\n            return Ok(Vec::new());\n        }\n\n        let custom: Vec<String> = names	let emoji_names = get_emoji_names_for_post(post, reactions);\n        if emoji_names.is_empty() {\n            return Ok(Vec::new());\n        }\n\n        let custom: Vec<String> = emoji_names	api
+C2 control reorder two independent select columns	crates/mm-store/src/post_store.rs	posts.editat     AS "edit_at!",\n                   posts.deleteat   AS "delete_at!",	posts.deleteat   AS "delete_at!",\n                   posts.editat     AS "edit_at!",	api

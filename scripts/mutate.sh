@@ -19,6 +19,10 @@
 #
 #   MUTATE_FILTER=authorization:: scripts/mutate.sh ...
 #
+# For `api`, MUTATE_API_SUITE picks a single integration-test binary:
+#
+#   MUTATE_API_SUITE=parity_post_get scripts/mutate.sh ...
+#
 # `unit` without a filter runs the 47-second PBKDF2 suite on every single mutation, which is the
 # whole cost of a fifteen-mutation run. Filtering to the module under test cuts each one to
 # seconds. Set it to the narrowest name that still contains every test able to catch the change —
@@ -90,7 +94,20 @@ case "$SUITE" in
   store) cargo test -p mm-store --tests ${MUTATE_FILTER:+$MUTATE_FILTER} > "$LOG" 2>&1 || RC=$? ;;
   app)   cargo test -p mm-app --tests ${MUTATE_FILTER:+$MUTATE_FILTER} > "$LOG" 2>&1 || RC=$? ;;
   api)   if restart_server; then
-           cargo test -p mm-api --tests > "$LOG" 2>&1 || RC=$?
+           # MUTATE_API_SUITE narrows to one integration-test binary. Without it every parity
+           # suite runs on every mutation, which is slow *and* wrong: an unrelated pre-existing
+           # flake (parity_channel_members_list's paging order tie) then reports as CAUGHT and
+           # the verdict belongs to a suite that never saw the change.
+           #
+           # `--test X` **replaces** `--tests`; passing both is not a narrowing, it is a union —
+           # cargo then builds all 32 targets. Measured: a whole 25-mutation run came back
+           # "25 caught, 0 survived" with both no-op controls caught, because every verdict was
+           # really some other suite failing.
+           if [ -n "$MUTATE_API_SUITE" ]; then
+             cargo test -p mm-api --test "$MUTATE_API_SUITE" ${MUTATE_FILTER:+$MUTATE_FILTER} > "$LOG" 2>&1 || RC=$?
+           else
+             cargo test -p mm-api --tests ${MUTATE_FILTER:+$MUTATE_FILTER} > "$LOG" 2>&1 || RC=$?
+           fi
          else
            RC=1; echo "does not compile, or the server never came up" > "$LOG"
          fi ;;
@@ -108,5 +125,14 @@ case "$SUITE" in api|all) restart_server || true ;; esac
 if [ $RC -eq 0 ]; then
   echo "$NAME: **SURVIVED** — the suite cannot see this change. Fix the fixture, not the tally."
 else
-  echo "$NAME: CAUGHT ($(grep -h '^test .* FAILED' "$LOG" | head -3 | sed 's/ \.\.\. FAILED//;s/^test //' | paste -sd'; ' -))"
+  NAMED=$(grep -h '^test .* FAILED' "$LOG" | head -3 | sed 's/ \.\.\. FAILED//;s/^test //' | paste -sd'; ' -)
+  if [ -z "$NAMED" ]; then
+    # The suite exited non-zero without failing a named test: a compile error, a server that
+    # never came up, or the wrong targets being run. That is a harness fault, not a caught
+    # mutation, and reporting it as CAUGHT is how a whole run comes back green on nothing.
+    echo "$NAME: **HARNESS FAULT** — non-zero exit but no test failed. Last lines:"
+    tail -5 "$LOG" | sed 's/^/    /'
+  else
+    echo "$NAME: CAUGHT ($NAMED)"
+  fi
 fi

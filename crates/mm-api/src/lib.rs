@@ -8,6 +8,7 @@
 pub mod auth;
 pub mod channels;
 pub mod error;
+pub mod posts;
 pub mod preferences;
 pub mod proxy;
 pub mod roles;
@@ -380,6 +381,16 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/roles/{role_id}",
             partially_migrated_with_ids(&state, get(roles::get_role)),
+        )
+        // `BaseRoutes.Post` (api4/api.go:239) — `/posts/{post_id:[A-Za-z0-9]+}` with a single
+        // GET at "". Every other `/posts/...` path Go registers is either one segment deeper
+        // (`/patch`, `/thread`, `/files/info`, …) or a literal sibling of `{post_id}`
+        // (`/posts/ids`, `/posts/ephemeral`) that this router does not register at all, so both
+        // fall to `Router::fallback` and stay forwarded. `partially_migrated` keeps `PUT` and
+        // `DELETE` on this exact path going to Go.
+        .route(
+            "/api/v4/posts/{post_id}",
+            partially_migrated_with_ids(&state, get(posts::get_post)),
         )
         .fallback(proxy::forward_to_go)
         .with_state(state)

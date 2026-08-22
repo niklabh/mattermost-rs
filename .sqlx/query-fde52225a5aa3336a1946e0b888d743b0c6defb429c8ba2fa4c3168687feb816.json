@@ -1,0 +1,143 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT fileinfo.id                            AS \"id!\",\n                   fileinfo.creatorid                     AS \"creator_id!\",\n                   fileinfo.postid                        AS \"post_id!\",\n                   COALESCE(fileinfo.channelid, '')       AS \"channel_id!\",\n                   fileinfo.createat                      AS \"create_at!\",\n                   fileinfo.updateat                      AS \"update_at!\",\n                   fileinfo.deleteat                      AS \"delete_at!\",\n                   fileinfo.path                          AS \"path!\",\n                   fileinfo.thumbnailpath                 AS \"thumbnail_path!\",\n                   fileinfo.previewpath                   AS \"preview_path!\",\n                   fileinfo.name                          AS \"name!\",\n                   fileinfo.extension                     AS \"extension!\",\n                   fileinfo.size                          AS \"size!\",\n                   fileinfo.mimetype                      AS \"mime_type!\",\n                   fileinfo.width                         AS \"width!\",\n                   fileinfo.height                        AS \"height!\",\n                   fileinfo.haspreviewimage               AS \"has_preview_image!\",\n                   fileinfo.minipreview                   AS \"mini_preview?\",\n                   COALESCE(fileinfo.content, '')         AS \"content!\",\n                   COALESCE(fileinfo.remoteid, '')        AS \"remote_id!\",\n                   fileinfo.archived                      AS \"archived!\"\n              FROM fileinfo\n             WHERE fileinfo.id = ANY($1)\n               AND ($2 OR fileinfo.deleteat = 0)\n             ORDER BY fileinfo.createat DESC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "creator_id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "post_id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "channel_id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "create_at!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "update_at!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "delete_at!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 7,
+        "name": "path!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 8,
+        "name": "thumbnail_path!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 9,
+        "name": "preview_path!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 10,
+        "name": "name!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 11,
+        "name": "extension!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 12,
+        "name": "size!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 13,
+        "name": "mime_type!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 14,
+        "name": "width!",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 15,
+        "name": "height!",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 16,
+        "name": "has_preview_image!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 17,
+        "name": "mini_preview?",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 18,
+        "name": "content!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 19,
+        "name": "remote_id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 20,
+        "name": "archived!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "TextArray",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      null,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      null,
+      null,
+      false
+    ]
+  },
+  "hash": "fde52225a5aa3336a1946e0b888d743b0c6defb429c8ba2fa4c3168687feb816"
+}
