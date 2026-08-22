@@ -15,6 +15,7 @@
 use mm_model::channel_member::ChannelUnread;
 use mm_model::team::Team;
 use mm_model::team_member::TeamMember;
+use mm_model::team_search::TeamSearch;
 use mm_model::utils::StringMap;
 use sqlx::PgPool;
 
@@ -206,6 +207,22 @@ pub trait TeamStore {
         team_id: &str,
         user_id: &str,
     ) -> impl std::future::Future<Output = Result<Vec<ChannelUnread>, StoreError>> + Send;
+
+    /// Port of `SqlTeamStore.GetAllPage` (team_store.go:653) — see [`get_all_page`] for the
+    /// three things a reader gets wrong about it.
+    fn get_all_page(
+        &self,
+        offset: i64,
+        limit: i64,
+        opts: &TeamSearch,
+    ) -> impl std::future::Future<Output = Result<Vec<Team>, StoreError>> + Send;
+
+    /// Port of `SqlTeamStore.AnalyticsTeamCount` (team_store.go:759) — see
+    /// [`analytics_team_count`].
+    fn analytics_team_count(
+        &self,
+        opts: &TeamSearch,
+    ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
 }
 
 /// Postgres-backed implementation.
@@ -288,6 +305,21 @@ impl TeamStore for SqlTeamStore {
         user_id: &str,
     ) -> Result<Vec<ChannelUnread>, StoreError> {
         get_channel_unreads_for_team(&self.pool, team_id, user_id).await
+    }
+
+    #[tracing::instrument(skip_all, fields(offset, limit))]
+    async fn get_all_page(
+        &self,
+        offset: i64,
+        limit: i64,
+        opts: &TeamSearch,
+    ) -> Result<Vec<Team>, StoreError> {
+        get_all_page(&self.pool, offset, limit, opts).await
+    }
+
+    #[tracing::instrument(skip_all)]
+    async fn analytics_team_count(&self, opts: &TeamSearch) -> Result<i64, StoreError> {
+        analytics_team_count(&self.pool, opts).await
     }
 }
 
@@ -994,6 +1026,233 @@ fn channel_unread_from_row(row: ChannelUnreadRow) -> Result<ChannelUnread, Store
         urgent_mention_count: 0,
         msg_count_root: row.msgcountroot,
         notify_props,
+    })
+}
+
+/// [`TeamRow`] plus the one column the retention-policy join contributes.
+///
+/// A separate struct rather than an `Option` field on `TeamRow`: `sqlx::query_as!` checks the
+/// SELECT list against the struct exactly, so a shared struct would force every other team query
+/// to select a column Go does not.
+struct TeamPageRow {
+    id: String,
+    createat: Option<i64>,
+    updateat: Option<i64>,
+    deleteat: Option<i64>,
+    displayname: Option<String>,
+    name: Option<String>,
+    description: Option<String>,
+    email: Option<String>,
+    team_type: Option<String>,
+    companyname: Option<String>,
+    alloweddomains: Option<String>,
+    inviteid: Option<String>,
+    allowopeninvite: Option<bool>,
+    lastteamiconupdate: Option<i64>,
+    schemeid: Option<String>,
+    groupconstrained: Option<bool>,
+    cloudlimitsarchived: bool,
+    policy_enforced: bool,
+    policy_is_active: bool,
+    /// `RetentionPoliciesTeams.PolicyId as PolicyID`, projected only under
+    /// `IncludePolicyID` — see [`get_all_page`].
+    policyid: Option<String>,
+}
+
+fn team_from_page_row(row: TeamPageRow) -> Team {
+    let policy_id = row.policyid;
+    let mut team = team_from_row(TeamRow {
+        id: row.id,
+        createat: row.createat,
+        updateat: row.updateat,
+        deleteat: row.deleteat,
+        displayname: row.displayname,
+        name: row.name,
+        description: row.description,
+        email: row.email,
+        team_type: row.team_type,
+        companyname: row.companyname,
+        alloweddomains: row.alloweddomains,
+        inviteid: row.inviteid,
+        allowopeninvite: row.allowopeninvite,
+        lastteamiconupdate: row.lastteamiconupdate,
+        schemeid: row.schemeid,
+        groupconstrained: row.groupconstrained,
+        cloudlimitsarchived: row.cloudlimitsarchived,
+        policy_enforced: row.policy_enforced,
+        policy_is_active: row.policy_is_active,
+    });
+    team.policy_id = policy_id;
+    team
+}
+
+/// Port of `SqlTeamStore.GetAllPage` (team_store.go:653) — the listing behind `GET /api/v4/teams`.
+///
+/// # There is no `DeleteAt` filter, and that is not an oversight
+///
+/// Every other team listing in this file drops archived teams; this one does not. **Measured**:
+/// seven of the eight teams in the development database are archived and Go's
+/// `GET /api/v4/teams` returns all eight, `delete_at` and all. A `deleteat = 0` predicate added
+/// here would look like a bug fix and would silently shorten every System Console team page.
+///
+/// # `per_page=0` is an empty page here, not "everything"
+///
+/// Squirrel renders `Limit(uint64(0))` as a literal `LIMIT 0`, so a caller asking for zero rows
+/// gets zero rows. This is the **opposite** of `getChannelMembers`, where `per_page=0` reaches a
+/// store-side `Limit > 0` guard and means *no limit at all* — see `parse_per_page`'s note in
+/// `mm-api`. Same query parameter, same parser, two different meanings one route apart; measured
+/// against the running Go server both ways.
+///
+/// # `ORDER BY DisplayName` with no tiebreak
+///
+/// Reproduced verbatim, including the absence of a secondary sort key. Two teams with the same
+/// display name come back in whatever order the planner chooses — adding `, Id` here would make
+/// *us* deterministic and Go not, which is a divergence, not an improvement.
+///
+/// # The join is unconditional where Go's is not
+///
+/// Go adds `LEFT JOIN RetentionPoliciesTeams` only when `ExcludePolicyConstrained` or
+/// `IncludePolicyID` is set. Joining always is safe because `retentionpoliciesteams.teamid` is
+/// that table's **primary key**, so the join can never duplicate a team row, and `policyid` is
+/// projected only under `include_policy_id` — which reproduces Go's column list exactly (without
+/// the flag Go never selects the column, leaving `Team.PolicyID` nil).
+///
+/// # `allowopeninvite` is nullable and Go compares with `=`
+///
+/// A team whose column is NULL satisfies neither `AllowOpenInvite = true` nor
+/// `AllowOpenInvite = false`, so it is missing from **both** the public-only and private-only
+/// listings while a caller holding both permissions still sees it. Written as `=` rather than
+/// `IS NOT TRUE` for exactly that reason. Note this is `GetAllPage`'s filter, which is much
+/// simpler than the `teamSearchQuery` one a few lines above it in Go — that one folds
+/// `GroupConstrained` into the private case, and `getAllTeams` never reaches it.
+///
+/// # `include_policy_enforced`
+///
+/// Widens the listing to also surface access-control-governed teams so the directory filter can
+/// evaluate them. Set only by the public-only branch of `getAllTeams`, and only when team
+/// membership ABAC is switched on — which it is not on this Team Edition deployment, so the
+/// predicate is ported from the Go source and **never exercised against a governed team here**:
+/// `AccessControlPolicies` holds zero rows.
+#[tracing::instrument(skip(pool, opts), fields(offset, limit, found))]
+pub async fn get_all_page(
+    pool: &PgPool,
+    offset: i64,
+    limit: i64,
+    opts: &TeamSearch,
+) -> Result<Vec<Team>, StoreError> {
+    let include_policy_id = opts.include_policy_id.unwrap_or(false);
+    let exclude_policy_constrained = opts.exclude_policy_constrained.unwrap_or(false);
+    let include_policy_enforced = opts.include_policy_enforced.unwrap_or(false);
+    let allow_open_invite = opts.allow_open_invite;
+
+    let rows = sqlx::query_as!(
+        TeamPageRow,
+        r#"
+        SELECT t.id,
+               t.createat,
+               t.updateat,
+               t.deleteat,
+               t.displayname,
+               t.name,
+               t.description,
+               t.email,
+               t.type::text AS "team_type",
+               t.companyname,
+               t.alloweddomains,
+               t.inviteid,
+               t.allowopeninvite,
+               t.lastteamiconupdate,
+               t.schemeid,
+               t.groupconstrained,
+               t.cloudlimitsarchived,
+               EXISTS (
+                   SELECT 1 FROM accesscontrolpolicies acp
+                    WHERE acp.id = t.id AND acp.type = 'team'
+               ) AS "policy_enforced!",
+               COALESCE((
+                   SELECT acp.active FROM accesscontrolpolicies acp
+                    WHERE acp.id = t.id AND acp.type = 'team' AND acp.active = TRUE
+                    LIMIT 1
+               ), false) AS "policy_is_active!",
+               CASE WHEN $1::boolean THEN rpt.policyid END AS "policyid"
+          FROM teams t
+          LEFT JOIN retentionpoliciesteams rpt ON t.id = rpt.teamid
+         WHERE (NOT $2::boolean OR rpt.teamid IS NULL)
+           AND ($3::boolean IS NULL
+                OR t.allowopeninvite = $3
+                OR ($4::boolean AND EXISTS (
+                       SELECT 1 FROM accesscontrolpolicies acp
+                        WHERE acp.id = t.id AND acp.type = 'team'
+                   )))
+         ORDER BY t.displayname
+         LIMIT $5 OFFSET $6
+        "#,
+        include_policy_id,
+        exclude_policy_constrained,
+        allow_open_invite,
+        include_policy_enforced,
+        limit,
+        offset,
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: "failed to find Teams".to_owned(),
+        source,
+    })?;
+
+    tracing::Span::current().record("found", rows.len());
+    Ok(rows.into_iter().map(team_from_page_row).collect())
+}
+
+/// Port of `SqlTeamStore.AnalyticsTeamCount` (team_store.go:759) — the `total_count` half of
+/// `include_total_count=true`.
+///
+/// # It counts archived teams, and the condition for that reads backwards
+///
+/// Go filters `DeleteAt = 0` when `opts == nil || (opts.IncludeDeleted != nil &&
+/// !*opts.IncludeDeleted)`. A **nil** `IncludeDeleted` on a non-nil `opts` therefore takes the
+/// *permissive* branch: deleted teams are counted. `getAllTeams` never sets the field, so the
+/// count includes archived teams — which is what makes it agree with [`get_all_page`], whose
+/// listing has no `DeleteAt` filter either. Measured: `total_count` is 8 in a database holding
+/// one live team and seven archived ones.
+///
+/// Go's `opts == nil` arm is unreachable from this port — the one route always passes a
+/// `TeamSearch` — so `include_deleted == Some(false)` is the whole predicate.
+///
+/// # It does **not** honour `exclude_policy_constrained`
+///
+/// Only `DeleteAt` and `AllowOpenInvite` reach this query. So
+/// `?exclude_policy_constrained=true&include_total_count=true` returns a `total_count` that
+/// counts the very teams the accompanying list omits. That is Go's answer, and the asymmetry is
+/// the reason this is not written as "the same filters as `get_all_page`".
+#[tracing::instrument(skip(pool, opts))]
+pub async fn analytics_team_count(pool: &PgPool, opts: &TeamSearch) -> Result<i64, StoreError> {
+    let exclude_deleted = opts.include_deleted == Some(false);
+    let allow_open_invite = opts.allow_open_invite;
+    let include_policy_enforced = opts.include_policy_enforced.unwrap_or(false);
+
+    sqlx::query_scalar!(
+        r#"
+        SELECT count(*) AS "count!"
+          FROM teams t
+         WHERE (NOT $1::boolean OR t.deleteat = 0)
+           AND ($2::boolean IS NULL
+                OR t.allowopeninvite = $2
+                OR ($3::boolean AND EXISTS (
+                       SELECT 1 FROM accesscontrolpolicies acp
+                        WHERE acp.id = t.id AND acp.type = 'team'
+                   )))
+        "#,
+        exclude_deleted,
+        allow_open_invite,
+        include_policy_enforced,
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: "failed to count Teams".to_owned(),
+        source,
     })
 }
 

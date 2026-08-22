@@ -436,6 +436,26 @@ mod tests {
     }
 
     #[test]
+    fn teams_with_count_matches_go_serialization() {
+        let go = include_str!("../../../fixtures/teams_with_count.json");
+        let parsed: TeamsWithCount = serde_json::from_str(go).unwrap();
+        let round_tripped = serde_json::to_value(&parsed).unwrap();
+        let expected: serde_json::Value = serde_json::from_str(go).unwrap();
+        assert_eq!(round_tripped, expected);
+    }
+
+    /// `Teams []*Team` carries no `omitempty`, so an empty listing is `{"teams":[],...}` — and
+    /// `[]`, not `null`, because `GetAllPage` initialises the slice. `total_count` is an `int64`
+    /// and always present. This is the body `?include_total_count=true&per_page=0` returns.
+    #[test]
+    fn teams_with_count_is_an_empty_array_never_null() {
+        assert_eq!(
+            serde_json::to_string(&TeamsWithCount::default()).unwrap(),
+            r#"{"teams":[],"total_count":0}"#
+        );
+    }
+
+    #[test]
     fn nil_pointers_serialise_as_null_not_omitted() {
         // scheme_id, group_constrained and policy_id have no omitempty in Go.
         let value = serde_json::to_value(Team::default()).unwrap();

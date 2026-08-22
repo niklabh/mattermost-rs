@@ -358,6 +358,16 @@ pub fn router(state: AppState) -> Router {
         // match here, and nothing here could have matched them. Only `GET` is migrated; `POST`
         // (createUser) and the rest fall to `partially_migrated`'s method fallback.
         .route("/api/v4/users", partially_migrated(get(users::get_users)))
+        // `BaseRoutes.Teams.Handle("", ...)` (api4/team.go:35) — the bare `/teams` collection,
+        // and the same non-question as `/api/v4/users` above: it is one segment shorter than
+        // every `/api/v4/teams/...` route registered earlier, so axum sees a distinct path and
+        // there is no literal-versus-parameter precedence to settle. Nothing that matched
+        // `{team_id}` or the `name` literal can match here, and nothing here could have matched
+        // them. `GET` only; `POST` (createTeam) falls to `partially_migrated`'s method fallback.
+        .route(
+            "/api/v4/teams",
+            partially_migrated(get(teams::get_all_teams)),
+        )
         // `BaseRoutes.Roles` (api4/api.go). The literal `names` sits beside `{role_id}` and
         // gorilla registered `{role_id:[A-Za-z0-9]+}` *first*, so `GET /roles/names` is a
         // `getRole` call there with `role_id = "names"` and 400s. Registered POST-only here, so

@@ -162,6 +162,9 @@ var registry = map[string]any{
 	"scheme_id_patch":               &model.SchemeIDPatch{},
 	"scheme_conveyor":               &model.SchemeConveyor{},
 	"scheme_roles":                  &model.SchemeRoles{},
+
+	// The `include_total_count=true` body of GET /api/v4/teams.
+	"teams_with_count": &model.TeamsWithCount{},
 }
 
 // overrides pins specific fields to semantically valid values, keyed by the

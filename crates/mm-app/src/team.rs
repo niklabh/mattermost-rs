@@ -5,8 +5,9 @@
 use mm_model::channel_member::{CHANNEL_MARK_UNREAD_MENTION, ChannelUnread};
 use mm_model::permission::{PERMISSION_INVITE_USER, PERMISSION_MANAGE_TEAM};
 use mm_model::session::Session;
-use mm_model::team::Team;
+use mm_model::team::{Team, TeamsWithCount};
 use mm_model::team_member::{TeamMember, TeamUnread};
+use mm_model::team_search::TeamSearch;
 use mm_model::user::MARK_UNREAD_NOTIFY_PROP;
 use mm_model::utils::AppError;
 use mm_store::TeamStore;
@@ -252,6 +253,106 @@ impl App {
             })
     }
 
+    /// Port of `app.App.GetAllTeamsPage` (team.go:1010) — a thin wrapper whose only content is
+    /// the error id: `app.team.get_all.app_error` at 500, the same id
+    /// [`App::get_teams_for_user`] uses for a different query.
+    #[tracing::instrument(skip_all, fields(offset, limit))]
+    pub async fn get_all_teams_page(
+        &self,
+        offset: i64,
+        limit: i64,
+        opts: &TeamSearch,
+    ) -> Result<Vec<Team>, AppError> {
+        self.store()
+            .team()
+            .get_all_page(offset, limit, opts)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "the team listing failed");
+                AppError::new(
+                    "GetAllTeamsPage",
+                    "app.team.get_all.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })
+    }
+
+    /// Port of `app.App.GetAllTeamsPageWithCount` (team.go:1019).
+    ///
+    /// **The count runs first**, and the two store calls carry *different* error ids —
+    /// `app.team.analytics_team_count.app_error` for the count, `app.team.get_all.app_error` for
+    /// the page. Both are 500s, so the only thing separating them on the wire is the `id` the
+    /// webapp branches on; swapping them is a mutation with no compiler consequence, which is
+    /// why the paging-overflow parity test asserts which one comes back.
+    #[tracing::instrument(skip_all, fields(offset, limit, total_count))]
+    pub async fn get_all_teams_page_with_count(
+        &self,
+        offset: i64,
+        limit: i64,
+        opts: &TeamSearch,
+    ) -> Result<TeamsWithCount, AppError> {
+        let total_count = self
+            .store()
+            .team()
+            .analytics_team_count(opts)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "the team count failed");
+                AppError::new(
+                    "GetAllTeamsPageWithCount",
+                    "app.team.analytics_team_count.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })?;
+        tracing::Span::current().record("total_count", total_count);
+
+        let teams = self
+            .store()
+            .team()
+            .get_all_page(offset, limit, opts)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "the team listing failed");
+                AppError::new(
+                    "GetAllTeamsPageWithCount",
+                    "app.team.get_all.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })?;
+
+        Ok(TeamsWithCount { teams, total_count })
+    }
+
+    /// Port of `app.App.TeamMembershipAccessControlEnabled` (team.go:932).
+    ///
+    /// Go's gate is a conjunction of three things, and **only the licence decides it here**:
+    ///
+    /// | term | value on this deployment | why |
+    /// |---|---|---|
+    /// | `FeatureFlags.TeamMembershipAccessControl` | `true` | `SetDefaults` sets it (feature_flags.go:173) — note it is *not* dark by default |
+    /// | `MinimumEnterpriseAdvancedLicense(License())` | `false` | the image is `mattermost-team-edition` and `Licenses` holds zero rows |
+    /// | `AccessControlSettings.EnableAttributeBasedAccessControl` | irrelevant | short-circuited by the licence |
+    ///
+    /// So this returns a constant `false`, and it is a **measurement, not an assumption**: a
+    /// Team Edition binary has no enterprise code to load a licence into, and `docker-compose.yml`
+    /// pins that image. The three callers this constant switches off — `IncludePolicyEnforced` in
+    /// `getAllTeams`, `FilterNonQualifyingTeamsForUser` and `AnnotateRecommendedTeamsForUser` —
+    /// all short-circuit on it before doing anything, so the whole ABAC directory surface is a
+    /// no-op and the ported handler reproduces Go by omitting it.
+    ///
+    /// Point this at a real licence read before running against an Enterprise Advanced server;
+    /// until then the honest statement is that those branches are read from the Go source and
+    /// never exercised.
+    pub fn team_membership_access_control_enabled(&self) -> bool {
+        false
+    }
+
     /// Port of `app.App.SanitizeTeam` (team.go:2303).
     ///
     /// **Both permission checks run unconditionally, before any branch** — Go computes
@@ -470,6 +571,19 @@ mod tests {
             .connect_lazy("postgres://nobody@127.0.0.1:1/nothing")
             .expect("a lazy pool is built without connecting");
         App::new(SqlStore::from_pool(pool))
+    }
+
+    /// Pins the deployment fact three of `getAllTeams`' branches rest on. Not a tautology: it is
+    /// the only place a licence read would have to land, and flipping this constant is the
+    /// mutation that turns the ABAC directory surface on with nothing else to notice.
+    // `connect_lazy` needs a reactor to exist even though nothing here opens a connection.
+    #[tokio::test]
+    async fn team_membership_access_control_is_off_on_this_deployment() {
+        assert!(
+            !unreachable_app().team_membership_access_control_enabled(),
+            "the image is mattermost-team-edition and Licenses holds no rows, so \
+             MinimumEnterpriseAdvancedLicense is false and the whole ABAC gate is dark"
+        );
     }
 
     fn team() -> Team {
