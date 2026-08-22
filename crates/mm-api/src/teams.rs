@@ -9,12 +9,14 @@
 //! - `getTeamMembers` — `GET /api/v4/teams/{team_id}/members`
 //! - `getTeamsUnreadForUser` — `GET /api/v4/users/{user_id}/teams/unread`
 //! - `getTeamUnread` — `GET /api/v4/users/{user_id}/teams/{team_id}/unread`
+//! - `getAllTeams` — `GET /api/v4/teams`
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use mm_model::permission::{
-    PERMISSION_EDIT_OTHER_USERS, PERMISSION_MANAGE_SYSTEM,
+    PERMISSION_EDIT_OTHER_USERS, PERMISSION_LIST_PRIVATE_TEAMS, PERMISSION_LIST_PUBLIC_TEAMS,
+    PERMISSION_MANAGE_SYSTEM, PERMISSION_SYSCONSOLE_READ_COMPLIANCE_DATA_RETENTION_POLICY,
     PERMISSION_SYSCONSOLE_READ_USER_MANAGEMENT_USERS, PERMISSION_VIEW_TEAM, make_permission_error,
 };
 
@@ -1124,16 +1126,341 @@ pub async fn get_team_unread(
         .into_response()
 }
 
+/// The two ways [`get_all_teams`] refuses, which are **not** the same 403.
+///
+/// Go writes one of them with `c.SetPermissionError` and the other by hand, and the difference is
+/// visible to a client: `api.context.permissions.app_error` versus
+/// `api.team.get_all_teams.insufficient_permissions`. Both measured against the running server.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum AllTeamsDenial {
+    /// `exclude_policy_constrained` without `sysconsole_read_compliance_data_retention_policy`.
+    /// The ordinary `SetPermissionError` shape, naming that permission.
+    RetentionPolicyRead,
+    /// Neither `list_private_teams` nor `list_public_teams`. Go builds this `AppError` inline
+    /// (api4/team.go:1477) with its own id and an empty detail — the one refusal on this route
+    /// that does **not** go through `SetPermissionError`.
+    NeitherListPermission,
+}
+
+/// Go's permission-to-query-options block for [`get_all_teams`] (api4/team.go:1447-1478), lifted
+/// out whole so all four cells of the private/public matrix and both refusals are unit-testable
+/// without a database.
+///
+/// The four combinations, and what a reader would plausibly get wrong about each:
+///
+/// | `list_private` | `list_public` | `allow_open_invite` | note |
+/// |---|---|---|---|
+/// | yes | yes | unset | no filter at all — **archived teams included**, because the store has no `DeleteAt` predicate |
+/// | yes | no | `Some(false)` | private-only. A team whose `allowopeninvite` column is NULL matches neither value and is absent from *both* single-permission listings |
+/// | no | yes | `Some(true)` | public-only, and the only branch that can set `include_policy_enforced` |
+/// | no | no | — | [`AllTeamsDenial::NeitherListPermission`] |
+///
+/// Two orderings carry meaning and are pinned by tests:
+///
+/// - **`exclude_policy_constrained` is checked before anything else**, so a caller lacking the
+///   retention-policy read gets that refusal even when it also lacks both list permissions. The
+///   ids differ, so swapping these two blocks is visible on the wire.
+/// - **`include_policy_id` is set from the same permission, unconditionally.** Go evaluates
+///   `SessionHasPermissionTo(...ComplianceDataRetentionPolicy)` *twice* — once inside the
+///   `exclude_policy_constrained` branch and once after it. The call is a pure role lookup, so
+///   this port polls once and reuses the answer; the only observable difference would be the
+///   number of role reads.
+///
+/// `include_policy_enforced` is the ABAC widening, reachable only when
+/// [`mm_app::App::team_membership_access_control_enabled`] is true — which it never is on this
+/// Team Edition deployment. The parameter is threaded through anyway so the branch is exercised
+/// by a unit test rather than left unwritten.
+pub(crate) fn all_teams_opts(
+    exclude_policy_constrained: bool,
+    can_read_retention_policy: bool,
+    list_private: bool,
+    list_public: bool,
+    membership_access_control_enabled: bool,
+) -> Result<mm_model::team_search::TeamSearch, AllTeamsDenial> {
+    let mut opts = mm_model::team_search::TeamSearch::default();
+
+    if exclude_policy_constrained {
+        if !can_read_retention_policy {
+            return Err(AllTeamsDenial::RetentionPolicyRead);
+        }
+        opts.exclude_policy_constrained = Some(true);
+    }
+
+    if can_read_retention_policy {
+        opts.include_policy_id = Some(true);
+    }
+
+    match (list_private, list_public) {
+        (true, true) => {}
+        (true, false) => opts.allow_open_invite = Some(false),
+        (false, true) => {
+            opts.allow_open_invite = Some(true);
+            if membership_access_control_enabled {
+                opts.include_policy_enforced = Some(true);
+            }
+        }
+        (false, false) => return Err(AllTeamsDenial::NeitherListPermission),
+    }
+
+    Ok(opts)
+}
+
+/// Port of `getAllTeams` (api4/team.go:1443), reached as `GET /api/v4/teams`.
+///
+/// The webapp's "join another team" page calls this, and the System Console calls it with
+/// `include_total_count=true`.
+///
+/// # `per_page=0` means an empty page on this route
+///
+/// `web.ParamsFromRequest` treats `0` as a legitimate value (params.go:234) and squirrel renders
+/// `Limit(0)` as a literal `LIMIT 0`, so `?per_page=0` returns `[]`. The *same* parameter on
+/// `getChannelMembers` means "no limit" because that store guards with `Limit > 0`. Both
+/// measured against the running Go server; see [`mm_store::team_store::get_all_page`].
+///
+/// # The response shape switches on a query flag
+///
+/// `include_total_count=true` produces `{"teams": [...], "total_count": N}`; anything else
+/// produces a bare array. `total_count` comes from a **different query** with a different filter
+/// set — it ignores `exclude_policy_constrained` entirely — so the two halves of that object can
+/// legitimately disagree. Go's asymmetry, reproduced.
+///
+/// # What is deliberately not here
+///
+/// Go follows the store read with `FilterNonQualifyingTeamsForUser` and
+/// `AnnotateRecommendedTeamsForUser`, gated behind `for_directory` / `manage_system`. Both
+/// functions return immediately unless `TeamMembershipAccessControlEnabled()` — which is
+/// **false** on this deployment for the reasons set out on
+/// [`mm_app::App::team_membership_access_control_enabled`] — so the whole block is a no-op and is
+/// omitted rather than written blind. `for_directory=true` is therefore accepted and ignored,
+/// exactly as Go does with ABAC off; that equivalence is measured over HTTP, the ABAC-on
+/// behaviour is not, and nothing here should be taken as a claim about it.
+///
+/// # Wire format
+///
+/// `json.Marshal` + `w.Write` (team.go:1530), so **no trailing newline** — measured byte for
+/// byte, same call-site rule as [`get_teams_for_user`] and unlike the channel lists ([D-086]).
+#[tracing::instrument(skip_all, fields(user_id = %session.0.user_id, count))]
+pub async fn get_all_teams(
+    State(state): State<AppState>,
+    session: AuthenticatedSession,
+    axum::extract::RawQuery(query): axum::extract::RawQuery,
+) -> Result<Response, ApiError> {
+    let query = query.as_deref();
+
+    let can_read_retention_policy = state
+        .app
+        .session_has_permission_to(
+            &session.0,
+            &PERMISSION_SYSCONSOLE_READ_COMPLIANCE_DATA_RETENTION_POLICY,
+        )
+        .await;
+    let list_private = state
+        .app
+        .session_has_permission_to(&session.0, &PERMISSION_LIST_PRIVATE_TEAMS)
+        .await;
+    let list_public = state
+        .app
+        .session_has_permission_to(&session.0, &PERMISSION_LIST_PUBLIC_TEAMS)
+        .await;
+
+    let opts = all_teams_opts(
+        crate::channels::query_flag_is_true(query, "exclude_policy_constrained"),
+        can_read_retention_policy,
+        list_private,
+        list_public,
+        state.app.team_membership_access_control_enabled(),
+    )
+    .map_err(|denial| match denial {
+        AllTeamsDenial::RetentionPolicyRead => ApiError(*make_permission_error(
+            &session.0,
+            &[&PERMISSION_SYSCONSOLE_READ_COMPLIANCE_DATA_RETENTION_POLICY],
+        )),
+        AllTeamsDenial::NeitherListPermission => ApiError(mm_model::utils::AppError::new(
+            "getAllTeams",
+            "api.team.get_all_teams.insufficient_permissions",
+            None,
+            String::new(),
+            403,
+        )),
+    })?;
+
+    // `limit := c.Params.PerPage; offset := limit * c.Params.Page` (team.go:1462) — the
+    // multiplication wraps in Go too, and both servers then hand the database a value it
+    // rejects, so an absurd `page` is a 500 on both sides rather than a divergence.
+    let limit = crate::channels::parse_per_page(query);
+    let offset = crate::channels::page_offset(crate::channels::parse_page(query), limit);
+
+    let body = if crate::channels::query_flag_is_true(query, "include_total_count") {
+        let mut result = state
+            .app
+            .get_all_teams_page_with_count(offset, limit, &opts)
+            .await?;
+        tracing::Span::current().record("count", result.teams.len());
+        state
+            .app
+            .sanitize_teams(&session.0, &mut result.teams)
+            .await;
+        serialised_team_listing(&result)?
+    } else {
+        let mut teams = state.app.get_all_teams_page(offset, limit, &opts).await?;
+        tracing::Span::current().record("count", teams.len());
+        state.app.sanitize_teams(&session.0, &mut teams).await;
+        serialised_team_listing(&teams)?
+    };
+
+    Ok((
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
+    )
+        .into_response())
+}
+
+/// `json.Marshal` for either shape [`get_all_teams`] can return, with Go's own failure id.
+///
+/// Neither `[]*model.Team` nor `model.TeamsWithCount` can fail to marshal, so the 500 is the
+/// branch that keeps this crate free of `unwrap` rather than a behaviour claim — the same shape
+/// as `encoded_channel_list`.
+#[allow(clippy::result_large_err)]
+fn serialised_team_listing<T: serde::Serialize>(value: &T) -> Result<Vec<u8>, ApiError> {
+    serde_json::to_vec(value).map_err(|err| {
+        tracing::error!(error = %err, "failed to serialise the team listing");
+        ApiError(mm_model::utils::AppError::new(
+            "getAllTeams",
+            "api.marshal_error",
+            None,
+            String::new(),
+            500,
+        ))
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use mm_model::team_member::TeamMember;
 
     use super::{
-        TeamMembersGetOptions, Visibility, get_team_denial, segment_matches_team_name_mux,
-        team_by_name_denied, team_is_public, team_members_options,
+        AllTeamsDenial, TeamMembersGetOptions, Visibility, all_teams_opts, get_team_denial,
+        segment_matches_team_name_mux, team_by_name_denied, team_is_public, team_members_options,
         team_name_is_shadowed_by_team_id_route, team_unread_denied, team_view_denied,
         user_visibility, validate_team_and_user_ids, wants_collapsed_threads,
     };
+
+    /// `list_private && list_public` is Go's empty branch: **no** filter, so the listing spans
+    /// public, private and archived teams alike.
+    #[test]
+    fn both_list_permissions_filter_nothing() {
+        let opts = all_teams_opts(false, false, true, true, false).expect("granted");
+        assert_eq!(opts.allow_open_invite, None);
+        assert_eq!(opts.include_policy_enforced, None);
+        assert_eq!(opts.exclude_policy_constrained, None);
+        assert_eq!(opts.include_policy_id, None);
+        assert_eq!(opts.include_deleted, None, "no DeleteAt filter is ever set");
+    }
+
+    /// Private-only asks for `AllowOpenInvite = false`, public-only for `true`. Crossing these
+    /// two hands every private team to a caller holding only the *public* listing permission,
+    /// which is the whole point of the pair.
+    #[test]
+    fn one_list_permission_picks_the_matching_open_invite_value() {
+        assert_eq!(
+            all_teams_opts(false, false, true, false, false)
+                .expect("granted")
+                .allow_open_invite,
+            Some(false),
+            "list_private_teams alone means the non-open-invite teams"
+        );
+        assert_eq!(
+            all_teams_opts(false, false, false, true, false)
+                .expect("granted")
+                .allow_open_invite,
+            Some(true),
+            "list_public_teams alone means the open-invite teams"
+        );
+    }
+
+    /// The ABAC widening is reachable **only** from the public-only branch, and only with team
+    /// membership access control switched on. Everywhere else it stays unset — including the
+    /// private-only branch, where setting it would surface governed teams to a caller Go never
+    /// shows them to.
+    #[test]
+    fn include_policy_enforced_is_the_public_only_branch_with_abac_on() {
+        assert_eq!(
+            all_teams_opts(false, false, false, true, true)
+                .expect("granted")
+                .include_policy_enforced,
+            Some(true)
+        );
+        for (private, public) in [(true, true), (true, false)] {
+            assert_eq!(
+                all_teams_opts(false, false, private, public, true)
+                    .expect("granted")
+                    .include_policy_enforced,
+                None,
+                "abac must not widen the ({private}, {public}) branch"
+            );
+        }
+        assert_eq!(
+            all_teams_opts(false, false, false, true, false)
+                .expect("granted")
+                .include_policy_enforced,
+            None,
+            "and with abac off the public-only branch does not widen either"
+        );
+    }
+
+    /// Neither permission is the route's own 403, not `SetPermissionError`. The two ids are
+    /// different strings on the wire and the webapp branches on `id`.
+    #[test]
+    fn neither_list_permission_is_its_own_refusal() {
+        assert_eq!(
+            all_teams_opts(false, true, false, false, false),
+            Err(AllTeamsDenial::NeitherListPermission)
+        );
+    }
+
+    /// `exclude_policy_constrained` is gated **before** the list-permission matrix, so a caller
+    /// with neither list permission and no retention read gets the *retention* refusal. Moving
+    /// the block below the matrix changes which error id a client sees.
+    #[test]
+    fn the_retention_gate_is_checked_before_the_list_matrix() {
+        assert_eq!(
+            all_teams_opts(true, false, false, false, false),
+            Err(AllTeamsDenial::RetentionPolicyRead),
+            "the retention refusal wins over the neither-permission one"
+        );
+        assert_eq!(
+            all_teams_opts(true, false, true, true, false),
+            Err(AllTeamsDenial::RetentionPolicyRead),
+            "and it refuses a caller who could otherwise list everything"
+        );
+    }
+
+    /// The same permission drives two independent options: it *gates* the exclusion and it
+    /// *enables* `include_policy_id` unconditionally. Holding it without asking for the exclusion
+    /// still sets the id, and that is the branch that puts a non-null `policy_id` on the wire.
+    #[test]
+    fn the_retention_permission_sets_include_policy_id_on_its_own() {
+        let opts = all_teams_opts(false, true, true, true, false).expect("granted");
+        assert_eq!(opts.include_policy_id, Some(true));
+        assert_eq!(
+            opts.exclude_policy_constrained, None,
+            "the flag was not asked for, so the exclusion stays off"
+        );
+
+        let opts = all_teams_opts(true, true, true, true, false).expect("granted");
+        assert_eq!(opts.exclude_policy_constrained, Some(true));
+        assert_eq!(opts.include_policy_id, Some(true), "both, not either");
+
+        let opts = all_teams_opts(false, false, true, true, false).expect("granted");
+        assert_eq!(
+            opts.include_policy_id, None,
+            "without the permission there is no policy id column at all"
+        );
+    }
 
     /// The string compare, not `ParseBool`: only the literal `true` forwards. `=1`, `=t` and
     /// `=True` — all true under the sibling routes' flag parser — are served here, as Go would.

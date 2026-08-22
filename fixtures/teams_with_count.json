@@ -1,0 +1,32 @@
+{
+    "teams": [
+        {
+            "id": "yefzzcw675e89pecxq3j756oxh",
+            "create_at": 1700220093000,
+            "update_at": 1704227568000,
+            "delete_at": 1707518930000,
+            "display_name": "displayname-5f9ed8",
+            "name": "name-b39e60",
+            "description": "description-300fba",
+            "email": "email-496737@example.com",
+            "type": "type-59b957",
+            "company_name": "companyname-8066d4",
+            "allowed_domains": "alloweddomains-5cedf8",
+            "invite_id": "zpn7i6t9wdp46nnr5m7d9865ih",
+            "allow_open_invite": true,
+            "last_team_icon_update": 1707674089000,
+            "scheme_id": "bz3k1sozj7xocszoifpbqu19ya",
+            "group_constrained": true,
+            "policy_id": "bdj7yt98ud9j3q6w4bd6xgx6uo",
+            "cloud_limits_archived": true,
+            "policy_enforced": true,
+            "policy_actions": {
+                "key0-83de44": true,
+                "key1-84dff7": true
+            },
+            "policy_is_active": true,
+            "recommended": true
+        }
+    ],
+    "total_count": 60
+}

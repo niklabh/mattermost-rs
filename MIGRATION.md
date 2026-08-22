@@ -3950,3 +3950,60 @@ set aside. Three Rust files and one correction to the previous session's ledger 
    and a non-zero exit with no failing test is reported as a HARNESS FAULT rather than as CAUGHT.
    A mutation must also *compile*: the first `include_deleted` mutation left sqlx's `$2` unused
    and only ever produced a build error. See `scripts/mutations/post_get.plan`.
+---
+
+## `GET /api/v4/teams` — `getAllTeams` (2026-08-22)
+
+| Layer | File | Status |
+|---|---|---|
+| api | `crates/mm-api/src/teams.rs` — `get_all_teams`, `all_teams_opts` | DONE, served from Rust |
+| app | `crates/mm-app/src/team.rs` — `get_all_teams_page`, `get_all_teams_page_with_count`, `team_membership_access_control_enabled` | DONE |
+| store | `crates/mm-store/src/team_store.rs` — `get_all_page`, `analytics_team_count` | DONE |
+| model | `mm-model::team::TeamsWithCount` (already ported) + `fixtures/teams_with_count.json` | fixture added |
+
+Tests: 6 unit (`teams::tests`, the permission matrix), 1 unit (`team::tests`, the ABAC constant),
+2 model (fixture round-trip and the empty shape), 10 DB (`crates/mm-store/tests/db_team_all_page.rs`),
+16 cross-server (`crates/mm-api/tests/parity_teams_all.rs`). Mutations: 18 run, 18 caught, 2
+controls survived.
+
+The three things a reader would otherwise get wrong, each pinned in the doc comment on the thing
+it constrains:
+
+1. **`per_page=0` is an empty page here.** Squirrel renders `Limit(0)` as a literal `LIMIT 0`, so
+   `?per_page=0` returns `[]` — the exact opposite of `getChannelMembers`, where the same
+   parameter reaches a store-side `Limit > 0` guard and means *no limit*. Same parser, two
+   meanings, one route apart. Measured against the running Go server both ways.
+2. **`GetAllPage` has no `DeleteAt` filter, and `AnalyticsTeamCount`'s reads backwards.** Archived
+   teams are listed *and* counted: the count's deleted filter engages only on an explicit
+   `IncludeDeleted = false`, and `getAllTeams` never sets it. Adding `deleteat = 0` would look
+   like a bug fix and would shorten every System Console team page.
+3. **The count ignores `exclude_policy_constrained`.** Only `DeleteAt` and `AllowOpenInvite` reach
+   that query, so `?exclude_policy_constrained=true&include_total_count=true` reports a total that
+   counts the teams its own list omits. Making the two agree would be the divergence.
+
+Also worth knowing:
+
+- **The neither-permission 403 is not `SetPermissionError`.** Go builds it inline with
+  `api.team.get_all_teams.insufficient_permissions`; the `exclude_policy_constrained` gate a few
+  lines above it *is* `SetPermissionError` and answers `api.context.permissions.app_error`. Two
+  different ids from one handler, both measured.
+- **`allowopeninvite` is nullable and Go filters with `=`.** A team whose column is NULL is in
+  neither the public-only nor the private-only listing. Writing the private filter as
+  `IS NOT TRUE` — the natural-looking Rust — is a real divergence; the DB suite seeds a NULL row
+  because the REST create path cannot produce one.
+- **The ABAC directory surface is dark and stays unwritten.**
+  `FilterNonQualifyingTeamsForUser`, `AnnotateRecommendedTeamsForUser` and `for_directory` all
+  short-circuit on `TeamMembershipAccessControlEnabled()`, which is false here — the feature flag
+  defaults *true* (feature_flags.go:173), so the licence is the only term that matters and the
+  deployment image is `mattermost-team-edition` with zero rows in `Licenses`. That constant is a
+  unit test, not a comment, so flipping it fails rather than silently turning a branch on.
+- **The permission matrix needed roles that do not exist.** No pair of built-in roles gives
+  private-without-public, so `parity_teams_all.rs` writes four rows into `Roles` and assigns each
+  to its own user through Go's `PUT /users/{id}/roles`. Both servers read the same table, so every
+  cell of the matrix is measured rather than reasoned about.
+- **Nothing in the suite asserts an absolute count.** The route lists the whole `Teams` table,
+  which sibling worktrees write to; every assertion is either a byte comparison of the two
+  servers' answers to one request or a membership question about ids the suite created. The
+  fixture also asserts up front that no two teams share a display name, because `ORDER BY
+  DisplayName` carries no tiebreak on either side and a tie would flake as a byte diff that has
+  nothing to do with the handler.
