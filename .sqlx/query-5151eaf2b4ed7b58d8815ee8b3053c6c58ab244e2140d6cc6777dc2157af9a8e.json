@@ -1,0 +1,76 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT sidebarcategories.id AS \"id!\",\n               sidebarcategories.userid AS \"userid!\",\n               sidebarcategories.teamid AS \"teamid!\",\n               sidebarcategories.sortorder AS \"sortorder!\",\n               sidebarcategories.sorting AS \"sorting!\",\n               sidebarcategories.type AS \"category_type!\",\n               sidebarcategories.displayname AS \"displayname!\",\n               sidebarcategories.muted AS \"muted!\",\n               sidebarcategories.collapsed AS \"collapsed!\",\n               -- `?` and not the schema's NOT NULL: the join is a LEFT JOIN, so a category\n               -- with no explicit channels yields one row with this column NULL. sqlx infers\n               -- nullability from the column definition and cannot see that, and without the\n               -- override every empty category fails the whole query with UnexpectedNullError.\n               sidebarchannels.channelid AS \"channelid?\"\n        FROM sidebarcategories\n        LEFT JOIN sidebarchannels ON sidebarchannels.categoryid = sidebarcategories.id\n        WHERE sidebarcategories.id = $1\n        ORDER BY sidebarchannels.sortorder ASC\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "userid!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "teamid!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "sortorder!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "sorting!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "category_type!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 6,
+        "name": "displayname!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 7,
+        "name": "muted!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 8,
+        "name": "collapsed!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 9,
+        "name": "channelid?",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "5151eaf2b4ed7b58d8815ee8b3053c6c58ab244e2140d6cc6777dc2157af9a8e"
+}

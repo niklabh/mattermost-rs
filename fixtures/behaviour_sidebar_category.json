@@ -1,0 +1,177 @@
+{
+    "category_ids": [
+        {
+            "input": "",
+            "is_valid_category_id": false,
+            "is_valid_id": false
+        },
+        {
+            "input": "y9i4er48tt8bukijy7i3u5y9ar",
+            "is_valid_category_id": true,
+            "is_valid_id": true
+        },
+        {
+            "input": "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+            "is_valid_category_id": true,
+            "is_valid_id": true
+        },
+        {
+            "input": "abcdefghijklmnopqrstuvwxy",
+            "is_valid_category_id": false,
+            "is_valid_id": false
+        },
+        {
+            "input": "abcdefghijklmnopqrstuvwxyza",
+            "is_valid_category_id": false,
+            "is_valid_id": false
+        },
+        {
+            "input": "favorites_abcdefghijklmnopqrstuvwxyz_0123456789abcdefghijklmnop",
+            "is_valid_category_id": true,
+            "is_valid_id": false
+        },
+        {
+            "input": "channels_abcdefghijklmnopqrstuvwxyz_0123456789abcdefghijklmnop",
+            "is_valid_category_id": true,
+            "is_valid_id": false
+        },
+        {
+            "input": "direct_messages_abcdefghijklmnopqrstuvwxyz_0123456789abcdefghijklmnop",
+            "is_valid_category_id": true,
+            "is_valid_id": false
+        },
+        {
+            "input": "custom_abcdefghijklmnopqrstuvwxyz_0123456789abcdefghijklmnop",
+            "is_valid_category_id": false,
+            "is_valid_id": false
+        },
+        {
+            "input": "managed_abcdefghijklmnopqrstuvwxyz_0123456789abcdefghijklmnop",
+            "is_valid_category_id": false,
+            "is_valid_id": false
+        },
+        {
+            "input": "zzfavorites_abcdefghijklmnopqrstuvwxyz_0123456789abcdefghijklmnop",
+            "is_valid_category_id": true,
+            "is_valid_id": false
+        },
+        {
+            "input": "favorites_abcdefghijklmnopqrstuvwxyz_0123456789abcdefghijklmnopzz",
+            "is_valid_category_id": true,
+            "is_valid_id": false
+        },
+        {
+            "input": "zzchannels_abcdefghijklmnopqrstuvwxyz_0123456789abcdefghijklmnop!!",
+            "is_valid_category_id": true,
+            "is_valid_id": false
+        },
+        {
+            "input": "/direct_messages_abcdefghijklmnopqrstuvwxyz_0123456789abcdefghijklmnop/",
+            "is_valid_category_id": true,
+            "is_valid_id": false
+        },
+        {
+            "input": "favorites_abcdefghijklmnopqrstuvwxy_0123456789abcdefghijklmnop",
+            "is_valid_category_id": false,
+            "is_valid_id": false
+        },
+        {
+            "input": "favorites_abcdefghijklmnopqrstuvwxyz_abcdefghijklmnopqrstuvwxy",
+            "is_valid_category_id": false,
+            "is_valid_id": false
+        },
+        {
+            "input": "favorites_abcdefghijklmnopqrstuvwxyza_0123456789abcdefghijklmnop",
+            "is_valid_category_id": false,
+            "is_valid_id": false
+        },
+        {
+            "input": "favorites_abcdefghijklmnopqrstuvwxyz_abcdefghijklmnopqrstuvwxyza",
+            "is_valid_category_id": true,
+            "is_valid_id": false
+        },
+        {
+            "input": "favorites_ABCDEFGHIJKLMNOPQRSTUVWXYZ_0123456789abcdefghijklmnop",
+            "is_valid_category_id": false,
+            "is_valid_id": false
+        },
+        {
+            "input": "FAVORITES_abcdefghijklmnopqrstuvwxyz_0123456789abcdefghijklmnop",
+            "is_valid_category_id": false,
+            "is_valid_id": false
+        },
+        {
+            "input": "favoritesabcdefghijklmnopqrstuvwxyz_0123456789abcdefghijklmnop",
+            "is_valid_category_id": false,
+            "is_valid_id": false
+        },
+        {
+            "input": "favorites_abcdefghijklmnopqrstuvwxyz0123456789abcdefghijklmnop",
+            "is_valid_category_id": false,
+            "is_valid_id": false
+        },
+        {
+            "input": "messages_abcdefghijklmnopqrstuvwxyz_0123456789abcdefghijklmnop",
+            "is_valid_category_id": false,
+            "is_valid_id": false
+        },
+        {
+            "input": "channel_abcdefghijklmnopqrstuvwxyz_0123456789abcdefghijklmnop",
+            "is_valid_category_id": false,
+            "is_valid_id": false
+        }
+    ],
+    "constants": {
+        "DefaultSidebarSortOrderChannels": 10,
+        "DefaultSidebarSortOrderDMs": 20,
+        "DefaultSidebarSortOrderFavorites": 0,
+        "ManagedCategoryPropertyFieldName": "category_name",
+        "ManagedCategoryPropertyGroupName": "managed_channel_categories",
+        "MinimalSidebarSortDistance": 10,
+        "SidebarCategoryChannels": "channels",
+        "SidebarCategoryCustom": "custom",
+        "SidebarCategoryDirectMessages": "direct_messages",
+        "SidebarCategoryFavorites": "favorites",
+        "SidebarCategoryManaged": "managed",
+        "SidebarCategorySortAlphabetical": "alpha",
+        "SidebarCategorySortDefault": "",
+        "SidebarCategorySortManual": "manual",
+        "SidebarCategorySortRecent": "recent"
+    },
+    "nil_shapes": {
+        "category_empty_channels": {
+            "id": "y9i4er48tt8bukijy7i3u5y9ar",
+            "user_id": "",
+            "team_id": "",
+            "sort_order": 0,
+            "sorting": "",
+            "type": "",
+            "display_name": "",
+            "muted": false,
+            "collapsed": false,
+            "channel_ids": []
+        },
+        "category_nil_channels": {
+            "id": "y9i4er48tt8bukijy7i3u5y9ar",
+            "user_id": "",
+            "team_id": "",
+            "sort_order": 0,
+            "sorting": "",
+            "type": "",
+            "display_name": "",
+            "muted": false,
+            "collapsed": false,
+            "channel_ids": null
+        },
+        "channel_ids_of_empty": [],
+        "channel_ids_of_nil": null,
+        "ordered_empty": {
+            "categories": [],
+            "order": []
+        },
+        "ordered_nil": {
+            "categories": null,
+            "order": null
+        }
+    }
+}

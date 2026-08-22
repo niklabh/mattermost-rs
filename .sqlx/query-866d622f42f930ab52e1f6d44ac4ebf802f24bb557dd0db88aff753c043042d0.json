@@ -1,0 +1,31 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT channels.id AS \"id!\",\n               channels.type::text AS \"channel_type!\"\n        FROM channelmembers\n        LEFT JOIN channels ON channels.id = channelmembers.channelid\n        WHERE channelmembers.userid = $1\n          AND (\n                ($3 AND channels.type IN ('D', 'G'))\n             OR ($4 AND channels.type IN ('O', 'P') AND channels.teamid = $2)\n          )\n          AND channels.deleteat = 0\n          AND NOT EXISTS (\n                SELECT 1\n                FROM sidebarchannels\n                JOIN sidebarcategories ON sidebarchannels.categoryid = sidebarcategories.id\n                WHERE sidebarchannels.channelid = channelmembers.channelid\n                  AND sidebarcategories.userid = $1\n                  AND sidebarcategories.teamid = $2\n          )\n        ORDER BY channels.displayname ASC\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "channel_type!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Bool",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "866d622f42f930ab52e1f6d44ac4ebf802f24bb557dd0db88aff753c043042d0"
+}

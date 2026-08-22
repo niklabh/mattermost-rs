@@ -162,6 +162,13 @@ var registry = map[string]any{
 	"scheme_id_patch":               &model.SchemeIDPatch{},
 	"scheme_conveyor":               &model.SchemeConveyor{},
 	"scheme_roles":                  &model.SchemeRoles{},
+
+	// channel_sidebar.go, ported for the read side of BaseRoutes.ChannelCategories
+	// (GET .../channels/categories, .../categories/order, .../categories/{category_id}).
+	"sidebar_category":               &model.SidebarCategory{},
+	"sidebar_category_with_channels": &model.SidebarCategoryWithChannels{},
+	"ordered_sidebar_categories":     &model.OrderedSidebarCategories{},
+	"sidebar_channel":                &model.SidebarChannel{},
 }
 
 // overrides pins specific fields to semantically valid values, keyed by the
@@ -724,6 +731,12 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_audit.json"))
+
+	if err := writeSidebarCategoryBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: sidebar category behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_sidebar_category.json"))
 
 	// Not a fixture: a generated Rust source file. See behaviour_emoji.go for why the emoji
 	// table is emitted rather than transcribed.

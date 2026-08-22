@@ -475,11 +475,15 @@ async fn malformed_ids_are_400s() {
     }
 }
 
-/// Go's deeper sibling under the same prefix — `…/channels/categories` — is not migrated and
-/// must still reach Go. (`…/channels/members` was in this list until it was served; see
-/// `parity_channel_members_for_team_for_user.rs`.)
+/// Go's deeper siblings under the same prefix. **Both are now served here**: `…/channels/members`
+/// left this list when it was migrated, and `…/channels/categories` followed when the sidebar
+/// routes landed — see `parity_sidebar_router.rs`, which holds the forwarding claims for that
+/// family (its five writes are still Go's).
+///
+/// Kept, inverted, rather than deleted: the assertion is what noticed the sidebar migration, and
+/// it goes on guarding these two paths against silently *stopping* being served.
 #[tokio::test]
-async fn deeper_sibling_routes_are_still_forwarded() {
+async fn deeper_sibling_routes_are_served_here() {
     if !stack_enabled() {
         eprintln!("skipping: set MM_PARITY_STACK=1 with the stack running");
         return;
@@ -490,7 +494,7 @@ async fn deeper_sibling_routes_are_still_forwarded() {
     let token = go_minted_token(&client).await;
     let (team_id, _) = common::a_team_and_channel_the_user_is_in(&client, &token).await;
 
-    for suffix in ["categories"] {
+    for suffix in ["categories", "members"] {
         let path = format!("/api/v4/users/me/teams/{team_id}/channels/{suffix}");
         let response = client
             .get(format!("{RUST}{path}"))
@@ -503,8 +507,8 @@ async fn deeper_sibling_routes_are_still_forwarded() {
                 .headers()
                 .get("x-mmrs-served-by")
                 .and_then(|v| v.to_str().ok()),
-            Some("go"),
-            "{suffix}: not migrated, must be forwarded"
+            Some("rust"),
+            "{suffix}: migrated, must be served here"
         );
         assert_eq!(response.status().as_u16(), 200, "{suffix}");
     }

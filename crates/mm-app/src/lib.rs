@@ -10,6 +10,8 @@ pub mod password;
 pub mod preference;
 pub mod role;
 pub mod session;
+/// The read side of `app/channel_category.go`.
+pub mod sidebar;
 pub mod status;
 pub mod team;
 pub mod user;

@@ -90,12 +90,23 @@ case "$SUITE" in
   store) cargo test -p mm-store --tests ${MUTATE_FILTER:+$MUTATE_FILTER} > "$LOG" 2>&1 || RC=$? ;;
   app)   cargo test -p mm-app --tests ${MUTATE_FILTER:+$MUTATE_FILTER} > "$LOG" 2>&1 || RC=$? ;;
   api)   if restart_server; then
-           cargo test -p mm-api --tests > "$LOG" 2>&1 || RC=$?
+           # `--tests` runs EVERY parity binary, so one suite broken by a sibling worktree's
+           # fixtures turns every verdict into a false CAUGHT — measured, when
+           # `parity_users_list` began failing against the *Go* server mid-session and duly
+           # "caught" a no-op control. MUTATE_API_TARGETS narrows the target selection:
+           #
+           #   MUTATE_API_TARGETS='--test parity_sidebar_categories --test parity_sidebar_router'
+           #
+           # `${=…}` is zsh's explicit word-splitting; without it the whole value is one word.
+           # A test-*name* filter goes in MUTATE_FILTER as everywhere else, but note that an
+           # integration test's name is its function alone — the file name is not part of it,
+           # so selecting a suite means selecting its target, not filtering by name.
+           cargo test -p mm-api ${=MUTATE_API_TARGETS:---tests} ${=MUTATE_FILTER} > "$LOG" 2>&1 || RC=$?
          else
            RC=1; echo "does not compile, or the server never came up" > "$LOG"
          fi ;;
   all)   if restart_server; then
-           cargo test --workspace > "$LOG" 2>&1 || RC=$?
+           cargo test --workspace ${=MUTATE_FILTER} > "$LOG" 2>&1 || RC=$?
          else
            RC=1; echo "does not compile, or the server never came up" > "$LOG"
          fi ;;

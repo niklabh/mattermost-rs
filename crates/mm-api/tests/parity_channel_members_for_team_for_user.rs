@@ -378,7 +378,11 @@ async fn malformed_ids_are_400s() {
     }
 }
 
-/// The route is served here, not forwarded — and the `categories` sibling still is forwarded.
+/// The route is served here, not forwarded — and so, since `mm_api::sidebar` landed, is its
+/// `categories` sibling. This test used to assert `categories` was **forwarded**; that was true
+/// when it was written and stopped being true when the sidebar routes were migrated, which is
+/// the assertion doing its job. The forwarding claims for that family now live in
+/// `parity_sidebar_router.rs`, where the writes are still checked to be forwarded.
 #[tokio::test]
 async fn the_route_is_served_by_rust() {
     if !stack_enabled() {
@@ -391,7 +395,7 @@ async fn the_route_is_served_by_rust() {
     let token = go_minted_token(&client).await;
     let (team_id, _) = common::a_team_and_channel_the_user_is_in(&client, &token).await;
 
-    for (suffix, served_by) in [("members", "rust"), ("categories", "go")] {
+    for (suffix, served_by) in [("members", "rust"), ("categories", "rust")] {
         let path = format!("/api/v4/users/me/teams/{team_id}/channels/{suffix}");
         let response = client
             .get(format!("{RUST}{path}"))
