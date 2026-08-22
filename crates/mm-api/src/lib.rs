@@ -164,6 +164,18 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/users/ids",
             partially_migrated(post(users::get_users_by_ids)),
         )
+        // The same precedence question as `ids` above, with the same answer. `autocomplete` is
+        // a literal sibling of `{user_id}`; axum prefers the literal, so `GET
+        // /users/autocomplete` lands here. Nothing that used to be answered stops being
+        // answered: the `{user_id}` handler serves only exact 26-character ids and forwarded
+        // this twelve-character segment to Go — which is what the comment on that route already
+        // says, naming `autocomplete` among the literals it hands on. Registered GET-only, so
+        // any other method on the path falls to `partially_migrated`'s fallback and is
+        // forwarded exactly as before.
+        .route(
+            "/api/v4/users/autocomplete",
+            partially_migrated(get(users::autocomplete_users)),
+        )
         // Deeper than the `{user_id}` route, so no conflict — and the parameter is *not*
         // id-shaped: Go's username class allows `_`, `-` and `.`, so the id-charset middleware
         // must not apply. The handler carries its own mux-charset forward instead.

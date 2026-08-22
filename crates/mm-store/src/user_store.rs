@@ -102,6 +102,111 @@ pub trait UserStore {
         &self,
         team_id: &str,
     ) -> impl std::future::Future<Output = String> + Send;
+
+    /// Port of `SqlUserStore.Search` (user_store.go:1628) → `performSearch`.
+    ///
+    /// An **empty `team_id` means no team filter at all**, which is Go's `if teamId != ""`
+    /// guard around the `TeamMembers` join — and it is a reachable state, not a defensive
+    /// check: `autocompleteUsers`' third arm calls `SearchUsersInTeam(rctx, "", …)` and
+    /// searches every user in the installation.
+    fn search(
+        &self,
+        team_id: &str,
+        term: &str,
+        options: &UserSearchOptions,
+    ) -> impl std::future::Future<Output = Result<Vec<User>, StoreError>> + Send;
+
+    /// Port of `SqlUserStore.SearchInChannel` (user_store.go:1727) → `performSearch`.
+    fn search_in_channel(
+        &self,
+        channel_id: &str,
+        term: &str,
+        options: &UserSearchOptions,
+    ) -> impl std::future::Future<Output = Result<Vec<User>, StoreError>> + Send;
+
+    /// Port of `SqlUserStore.SearchNotInChannel` (user_store.go:1707) → `performSearch`, for
+    /// `GroupConstrained = false`.
+    ///
+    /// The `team_id` guard is Go's again, but on this route it can never fire: the only caller
+    /// is `AutocompleteUsersInChannel`, and `autocompleteUsers` refuses a channel search with
+    /// no team before ever reaching it (api4/user.go:1437). Kept anyway so the port matches the
+    /// function it is a port of.
+    fn search_not_in_channel(
+        &self,
+        team_id: &str,
+        channel_id: &str,
+        term: &str,
+        options: &UserSearchOptions,
+    ) -> impl std::future::Future<Output = Result<Vec<User>, StoreError>> + Send;
+}
+
+/// `model.UserSearchDefaultLimit` (model/user_search.go:7).
+pub const USER_SEARCH_DEFAULT_LIMIT: i64 = 100;
+/// `model.UserSearchMaxLimit` (model/user_search.go:6).
+pub const USER_SEARCH_MAX_LIMIT: i64 = 1000;
+
+/// The slice of `model.UserSearchOptions` (model/user_search.go:29) that `autocompleteUsers`
+/// actually varies, and therefore the only slice this port implements.
+///
+/// The five fields left out are left out because that handler pins each of them and the pinned
+/// value is what the SQL below hard-codes:
+///
+/// | field | value on this route | consequence in the SQL |
+/// |---|---|---|
+/// | `AllowEmails` | **always `false`** — "Never autocomplete on emails" (api4/user.go:1399) | `Email` is not a searchable column here at all |
+/// | `AllowInactive` | never set, so `false` | `Users.DeleteAt = 0` is unconditional |
+/// | `Role` / `Roles` / `TeamRoles` / `ChannelRoles` | never set | `applyRoleFilter` and `applyMultiRoleFilters` are both no-ops |
+/// | `GroupConstrained` | never set | no group-constrained join |
+/// | `ViewRestrictions` | non-nil only for a caller without `view_members`, whom the api layer forwards to Go | `applyViewRestrictionsFilter` is a no-op, and so is its `DISTINCT` |
+///
+/// `IsAdmin` is absent for a different reason: it is carried in the same Go struct but no query
+/// reads it — only the sanitizer does, and sanitisation lives in the api layer here (D-085).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UserSearchOptions {
+    /// `AllowFullNames`: whether `FirstName` and `LastName` join `Username` and `Nickname` as
+    /// searchable columns (`UserSearchTypeNames` vs `UserSearchTypeNamesNoFullName`,
+    /// user_store.go:34-35).
+    pub allow_full_names: bool,
+    /// `Limit`, already defaulted and clamped by the caller. Go casts it with `uint64(...)` and
+    /// hands it to Postgres unchecked, so a **negative** limit is a failed query and a 500 on
+    /// both servers — measured against the running Go server, not inferred.
+    pub limit: i64,
+}
+
+/// Port of `sanitizeSearchTerm` (sqlstore/utils.go:62).
+///
+/// Two steps in this order: strip every occurrence of the escape character, *then* prefix `%`
+/// and `_` with it. Doing it the other way round would escape the escapes.
+pub fn sanitize_search_term(term: &str, escape_char: char) -> String {
+    let stripped: String = term.chars().filter(|c| *c != escape_char).collect();
+    let mut out = String::with_capacity(stripped.len());
+    for c in stripped.chars() {
+        if c == '%' || c == '_' {
+            out.push(escape_char);
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// The terms `generateSearchQuery` (user_store.go:1755) would build one `AND` clause each from.
+///
+/// `performSearch` sanitises, then guards on `strings.TrimSpace(term) != ""`, then splits with
+/// `strings.Fields`; the loop trims **all** leading `@` off each field with `strings.TrimLeft`
+/// — so `@@bob` searches for `bob`, and a term that is nothing but `@` searches for the empty
+/// string, which `LIKE '%%'` matches everything.
+///
+/// An empty result means no search predicate at all, which is Go's blank-term branch: the whole
+/// `generateSearchQuery` call is skipped and every row in the joined set is returned.
+pub fn search_terms(term: &str) -> Vec<String> {
+    let sanitized = sanitize_search_term(term, '*');
+    if sanitized.trim().is_empty() {
+        return Vec::new();
+    }
+    sanitized
+        .split_whitespace()
+        .map(|field| field.trim_start_matches('@').to_owned())
+        .collect()
 }
 
 /// Which `DeleteAt` predicate Go's `if options.Inactive { … } else if options.Active { … }`
@@ -879,6 +984,260 @@ impl UserStore for SqlUserStore {
             }
         }
     }
+
+    #[tracing::instrument(skip_all, fields(team_id = %team_id, terms, found))]
+    async fn search(
+        &self,
+        team_id: &str,
+        term: &str,
+        options: &UserSearchOptions,
+    ) -> Result<Vec<User>, StoreError> {
+        let terms = search_terms(term);
+        tracing::Span::current().record("terms", terms.len());
+
+        // `usersQuery.OrderBy("Username ASC").Limit(...)`, plus the `TeamMembers` join when a
+        // team is given. Written as a LEFT JOIN with `tm.UserId IS NOT NULL` rather than Go's
+        // INNER JOIN so that the no-team case is the *same statement* — `teamid = ''` matches
+        // nothing, so the guard is what admits everyone, and one statement means one place for
+        // the thirty columns to be right.
+        let rows = sqlx::query_as!(
+            UserRow,
+            r#"
+            SELECT u.id,
+                   u.createat,
+                   u.updateat,
+                   u.deleteat,
+                   u.username,
+                   u.password,
+                   u.authdata,
+                   u.authservice,
+                   u.email,
+                   u.emailverified,
+                   u.nickname,
+                   u.firstname,
+                   u.lastname,
+                   u.position,
+                   u.roles,
+                   u.allowmarketing,
+                   u.props,
+                   u.notifyprops,
+                   u.lastpasswordupdate,
+                   u.lastpictureupdate,
+                   u.failedattempts::bigint AS failedattempts,
+                   u.locale,
+                   u.timezone,
+                   u.mfaactive,
+                   u.mfasecret,
+                   u.mfausedtimestamps,
+                   u.remoteid,
+                   u.lastlogin,
+                   (b.userid IS NOT NULL) AS "isbot!",
+                   COALESCE(b.description, '') AS "botdescription!",
+                   COALESCE(b.lasticonupdate, 0) AS "botlasticonupdate!"
+              FROM users u
+              LEFT JOIN teammembers tm
+                ON (tm.userid = u.id AND tm.deleteat = 0 AND tm.teamid = $1)
+              LEFT JOIN bots b ON b.userid = u.id
+             WHERE ($1 = '' OR tm.userid IS NOT NULL)
+               AND u.deleteat = 0
+               AND NOT EXISTS (
+                     SELECT 1
+                       FROM unnest($2::text[]) AS s(term)
+                      WHERE NOT (
+                                lower(u.username) LIKE lower('%' || s.term || '%') ESCAPE '*'
+                             OR ($3 AND lower(u.firstname) LIKE lower('%' || s.term || '%') ESCAPE '*')
+                             OR ($3 AND lower(u.lastname) LIKE lower('%' || s.term || '%') ESCAPE '*')
+                             OR lower(u.nickname) LIKE lower('%' || s.term || '%') ESCAPE '*'
+                             OR u.id = s.term
+                            )
+                   )
+             ORDER BY u.username ASC
+             LIMIT $4
+            "#,
+            team_id,
+            &terms,
+            options.allow_full_names,
+            options.limit,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to find Users with term={term}"),
+            source,
+        })?;
+        tracing::Span::current().record("found", rows.len());
+
+        rows.into_iter().map(user_from_row).collect()
+    }
+
+    #[tracing::instrument(skip_all, fields(channel_id = %channel_id, terms, found))]
+    async fn search_in_channel(
+        &self,
+        channel_id: &str,
+        term: &str,
+        options: &UserSearchOptions,
+    ) -> Result<Vec<User>, StoreError> {
+        let terms = search_terms(term);
+        tracing::Span::current().record("terms", terms.len());
+
+        // No team join and no `TeamMembers` at all — `SearchInChannel` takes no team id, so a
+        // channel member who has since left the team is still listed. The channel id lives in
+        // the join condition exactly as it does in `get_profiles_in_channel`.
+        let rows = sqlx::query_as!(
+            UserRow,
+            r#"
+            SELECT u.id,
+                   u.createat,
+                   u.updateat,
+                   u.deleteat,
+                   u.username,
+                   u.password,
+                   u.authdata,
+                   u.authservice,
+                   u.email,
+                   u.emailverified,
+                   u.nickname,
+                   u.firstname,
+                   u.lastname,
+                   u.position,
+                   u.roles,
+                   u.allowmarketing,
+                   u.props,
+                   u.notifyprops,
+                   u.lastpasswordupdate,
+                   u.lastpictureupdate,
+                   u.failedattempts::bigint AS failedattempts,
+                   u.locale,
+                   u.timezone,
+                   u.mfaactive,
+                   u.mfasecret,
+                   u.mfausedtimestamps,
+                   u.remoteid,
+                   u.lastlogin,
+                   (b.userid IS NOT NULL) AS "isbot!",
+                   COALESCE(b.description, '') AS "botdescription!",
+                   COALESCE(b.lasticonupdate, 0) AS "botlasticonupdate!"
+              FROM users u
+              JOIN channelmembers cm ON (cm.userid = u.id AND cm.channelid = $1)
+              LEFT JOIN bots b ON b.userid = u.id
+             WHERE u.deleteat = 0
+               AND NOT EXISTS (
+                     SELECT 1
+                       FROM unnest($2::text[]) AS s(term)
+                      WHERE NOT (
+                                lower(u.username) LIKE lower('%' || s.term || '%') ESCAPE '*'
+                             OR ($3 AND lower(u.firstname) LIKE lower('%' || s.term || '%') ESCAPE '*')
+                             OR ($3 AND lower(u.lastname) LIKE lower('%' || s.term || '%') ESCAPE '*')
+                             OR lower(u.nickname) LIKE lower('%' || s.term || '%') ESCAPE '*'
+                             OR u.id = s.term
+                            )
+                   )
+             ORDER BY u.username ASC
+             LIMIT $4
+            "#,
+            channel_id,
+            &terms,
+            options.allow_full_names,
+            options.limit,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to find Users with term={term}"),
+            source,
+        })?;
+        tracing::Span::current().record("found", rows.len());
+
+        rows.into_iter().map(user_from_row).collect()
+    }
+
+    #[tracing::instrument(skip_all, fields(team_id = %team_id, channel_id = %channel_id, terms, found))]
+    async fn search_not_in_channel(
+        &self,
+        team_id: &str,
+        channel_id: &str,
+        term: &str,
+        options: &UserSearchOptions,
+    ) -> Result<Vec<User>, StoreError> {
+        let terms = search_terms(term);
+        tracing::Span::current().record("terms", terms.len());
+
+        // The anti-join: `cm.UserId IS NULL` against a **LEFT** join whose channel id sits in
+        // the join condition. Moving `cm.channelid = $2` into the WHERE turns it into an inner
+        // join and the result is empty for everyone — the same trap `get_profiles_not_in_channel`
+        // documents, and the reason both queries spell the condition where they do.
+        let rows = sqlx::query_as!(
+            UserRow,
+            r#"
+            SELECT u.id,
+                   u.createat,
+                   u.updateat,
+                   u.deleteat,
+                   u.username,
+                   u.password,
+                   u.authdata,
+                   u.authservice,
+                   u.email,
+                   u.emailverified,
+                   u.nickname,
+                   u.firstname,
+                   u.lastname,
+                   u.position,
+                   u.roles,
+                   u.allowmarketing,
+                   u.props,
+                   u.notifyprops,
+                   u.lastpasswordupdate,
+                   u.lastpictureupdate,
+                   u.failedattempts::bigint AS failedattempts,
+                   u.locale,
+                   u.timezone,
+                   u.mfaactive,
+                   u.mfasecret,
+                   u.mfausedtimestamps,
+                   u.remoteid,
+                   u.lastlogin,
+                   (b.userid IS NOT NULL) AS "isbot!",
+                   COALESCE(b.description, '') AS "botdescription!",
+                   COALESCE(b.lasticonupdate, 0) AS "botlasticonupdate!"
+              FROM users u
+              LEFT JOIN teammembers tm
+                ON (tm.userid = u.id AND tm.deleteat = 0 AND tm.teamid = $1)
+              LEFT JOIN channelmembers cm ON (cm.userid = u.id AND cm.channelid = $2)
+              LEFT JOIN bots b ON b.userid = u.id
+             WHERE cm.userid IS NULL
+               AND ($1 = '' OR tm.userid IS NOT NULL)
+               AND u.deleteat = 0
+               AND NOT EXISTS (
+                     SELECT 1
+                       FROM unnest($3::text[]) AS s(term)
+                      WHERE NOT (
+                                lower(u.username) LIKE lower('%' || s.term || '%') ESCAPE '*'
+                             OR ($4 AND lower(u.firstname) LIKE lower('%' || s.term || '%') ESCAPE '*')
+                             OR ($4 AND lower(u.lastname) LIKE lower('%' || s.term || '%') ESCAPE '*')
+                             OR lower(u.nickname) LIKE lower('%' || s.term || '%') ESCAPE '*'
+                             OR u.id = s.term
+                            )
+                   )
+             ORDER BY u.username ASC
+             LIMIT $5
+            "#,
+            team_id,
+            channel_id,
+            &terms,
+            options.allow_full_names,
+            options.limit,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to find Users with term={term}"),
+            source,
+        })?;
+        tracing::Span::current().record("found", rows.len());
+
+        rows.into_iter().map(user_from_row).collect()
+    }
 }
 
 #[cfg(test)]
@@ -916,5 +1275,51 @@ mod tests {
             criteria: "y9i4er48tt8bukijy7i3u5y9ar".to_owned(),
         };
         assert!(err.to_string().contains("y9i4er48tt8bukijy7i3u5y9ar"));
+    }
+
+    /// The escape character goes away first and the wildcards are escaped second. Reversing the
+    /// two turns `%` into `**%`, and a caller could then never search for a literal per cent.
+    #[test]
+    fn the_search_term_sanitiser_strips_then_escapes() {
+        assert_eq!(sanitize_search_term("bob", '*'), "bob");
+        assert_eq!(sanitize_search_term("50%", '*'), "50*%");
+        assert_eq!(sanitize_search_term("a_b", '*'), "a*_b");
+        // Every `*` the caller sent is removed before anything is escaped, so nothing the
+        // caller writes can become an escape sequence.
+        assert_eq!(sanitize_search_term("a*b", '*'), "ab");
+        assert_eq!(sanitize_search_term("*%", '*'), "*%");
+        assert_eq!(sanitize_search_term("100%_x*", '*'), "100*%*_x");
+    }
+
+    /// `strings.Fields` then `strings.TrimLeft(term, "@")` — **all** leading at-signs, not one.
+    #[test]
+    fn the_terms_are_whitespace_split_and_lose_every_leading_at() {
+        assert_eq!(search_terms("bob"), ["bob"]);
+        assert_eq!(search_terms("@bob"), ["bob"]);
+        assert_eq!(search_terms("@@bob"), ["bob"]);
+        assert_eq!(search_terms("  bob   alice "), ["bob", "alice"]);
+        // Trailing and interior at-signs survive: TrimLeft only.
+        assert_eq!(search_terms("bob@"), ["bob@"]);
+        assert_eq!(search_terms("a@b"), ["a@b"]);
+    }
+
+    /// `performSearch`'s `if strings.TrimSpace(term) != ""` guard is applied to the **sanitised**
+    /// term, so a term made only of escape characters vanishes and the search predicate is
+    /// dropped entirely — the query then returns the whole joined set.
+    #[test]
+    fn a_blank_or_escape_only_term_produces_no_predicate() {
+        assert!(search_terms("").is_empty());
+        assert!(search_terms("   ").is_empty());
+        assert!(search_terms("*").is_empty(), "sanitising leaves nothing");
+        assert!(search_terms("**").is_empty());
+    }
+
+    /// A term of nothing but at-signs is *not* blank before the trim, so Go keeps the clause and
+    /// searches for the empty string — `LIKE '%%'`, which matches every row. Dropping the clause
+    /// instead would give the same answer here and a different one for `@ bob`.
+    #[test]
+    fn a_term_of_only_at_signs_survives_as_the_empty_string() {
+        assert_eq!(search_terms("@"), [""]);
+        assert_eq!(search_terms("@ bob"), ["", "bob"]);
     }
 }
