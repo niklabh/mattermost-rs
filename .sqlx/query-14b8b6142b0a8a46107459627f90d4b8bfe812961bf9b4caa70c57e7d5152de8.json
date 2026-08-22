@@ -1,0 +1,205 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT u.id,\n                   u.createat,\n                   u.updateat,\n                   u.deleteat,\n                   u.username,\n                   u.password,\n                   u.authdata,\n                   u.authservice,\n                   u.email,\n                   u.emailverified,\n                   u.nickname,\n                   u.firstname,\n                   u.lastname,\n                   u.position,\n                   u.roles,\n                   u.allowmarketing,\n                   u.props,\n                   u.notifyprops,\n                   u.lastpasswordupdate,\n                   u.lastpictureupdate,\n                   u.failedattempts::bigint AS failedattempts,\n                   u.locale,\n                   u.timezone,\n                   u.mfaactive,\n                   u.mfasecret,\n                   u.mfausedtimestamps,\n                   u.remoteid,\n                   u.lastlogin,\n                   (b.userid IS NOT NULL) AS \"isbot!\",\n                   COALESCE(b.description, '') AS \"botdescription!\",\n                   COALESCE(b.lasticonupdate, 0) AS \"botlasticonupdate!\"\n              FROM users u\n              JOIN channelmembers cm ON (cm.userid = u.id)\n              LEFT JOIN bots b ON b.userid = u.id\n             WHERE cm.channelid = $1\n               AND ($4::bool IS NULL\n                    OR ($4 AND u.deleteat != 0)\n                    OR (NOT $4 AND u.deleteat = 0))\n             ORDER BY u.username ASC\n             OFFSET $2 LIMIT $3\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "createat",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "updateat",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "deleteat",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "username",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "password",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 6,
+        "name": "authdata",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 7,
+        "name": "authservice",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 8,
+        "name": "email",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 9,
+        "name": "emailverified",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 10,
+        "name": "nickname",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 11,
+        "name": "firstname",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 12,
+        "name": "lastname",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 13,
+        "name": "position",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 14,
+        "name": "roles",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 15,
+        "name": "allowmarketing",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 16,
+        "name": "props",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 17,
+        "name": "notifyprops",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 18,
+        "name": "lastpasswordupdate",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 19,
+        "name": "lastpictureupdate",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 20,
+        "name": "failedattempts",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 21,
+        "name": "locale",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 22,
+        "name": "timezone",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 23,
+        "name": "mfaactive",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 24,
+        "name": "mfasecret",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 25,
+        "name": "mfausedtimestamps",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 26,
+        "name": "remoteid",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 27,
+        "name": "lastlogin",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 28,
+        "name": "isbot!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 29,
+        "name": "botdescription!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 30,
+        "name": "botlasticonupdate!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8",
+        "Int8",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      null,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "14b8b6142b0a8a46107459627f90d4b8bfe812961bf9b4caa70c57e7d5152de8"
+}

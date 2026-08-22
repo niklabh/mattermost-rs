@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT CONCAT(MAX(u.updateat), '.', COUNT(u.id)) AS etag\n              FROM users u\n              LEFT JOIN teammembers tm\n                ON tm.userid = u.id\n               AND tm.teamid = $1\n               AND tm.deleteat = 0\n             WHERE tm.userid IS NULL\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "etag",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "3f0c045fcdfebee84a7ad87aed25f85a371d031f4d44822b6a5dca2380ca6f4f"
+}
