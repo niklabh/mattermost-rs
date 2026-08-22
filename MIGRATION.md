@@ -4140,3 +4140,24 @@ Also worth knowing:
     `MUTATE_API_TARGETS` (`--test parity_sidebar_categories --test parity_sidebar_router`) so a
     verdict can only come from the suite under test, and `${=…}` so a multi-word value splits at
     all under zsh. Every tally above was re-taken through it.
+
+## D-157 closed — the etag flake that took the shared Go server down, 2026-08-22
+
+`crates/mm-store/tests/db_user_profile_lists.rs` asserted that two consecutive
+`get_etag_for_profiles` calls on a memberless team differ. They tie whenever both land in the
+same millisecond — about one run in three — and the panic skipped the trailing `purge`, leaving
+six rows whose twelve NULL columns Go's `model.User` cannot scan. From that moment Go's
+`GET /api/v4/users` 500s for **every worktree sharing this database**.
+
+Both halves are fixed, and both were measured rather than reasoned about:
+
+1. The assertion now pins the *property* — that the fallback suffix is the clock, not any stored
+   `UpdateAt` — so it needs no sleep and cannot tie. Twelve consecutive runs pass where the old
+   one failed roughly one in three.
+2. That file's `insert_user` now spells out every column backing a non-pointer Go field, so a
+   panicked-past purge leaves rows Go can still read. Verified end-to-end against the running Go
+   server: a row inserted the old eight-column way makes `GET /api/v4/users` return **500**, the
+   same row inserted the new way returns **200**.
+
+The finding lives in the doc comment on `insert_user` and beside the assertion; the backlog entry
+is gone rather than marked closed, per *docs/TECH_DEBT.md is a backlog, not a diary*.

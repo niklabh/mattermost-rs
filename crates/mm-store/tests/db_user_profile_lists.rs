@@ -75,10 +75,33 @@ async fn purge(pool: &PgPool) {
     }
 }
 
+/// Every column backing a **non-pointer** field of Go's `model.User` is spelled out, not just
+/// the ones this file's assertions read.
+///
+/// The database's own nullability is looser than Go's struct: `password`, `authservice`,
+/// `emailverified`, `allowmarketing`, `props`, `notifyprops`, `lastpasswordupdate`,
+/// `failedattempts`, `locale`, `timezone`, `mfaactive` and `mfasecret` all accept NULL here and
+/// none of them can be scanned into `model.User` there. A row missing them is invisible to this
+/// suite and fatal to the Go server — `GET /api/v4/users` 500s for **every worktree sharing this
+/// database** from that moment on, because the listing is unfiltered.
+///
+/// That is not hypothetical: it is [D-157]. An assertion in this file panicked past the trailing
+/// `purge`, the six rows it left behind had all twelve columns NULL, and a sibling worktree's
+/// `parity_users_list` failed four tests on Go's own 500 until they were cleared by hand. The
+/// assertion that panicked is fixed too, but a fixture must not depend on its suite never
+/// failing — a panic is exactly when cleanup does not run. Same trap the roles session recorded,
+/// reached from a different direction.
 async fn insert_user(pool: &PgPool, id: &str, username: &str, update_at: i64, delete_at: i64) {
     sqlx::query(
-        "INSERT INTO users (id, createat, updateat, deleteat, username, email, roles, lastlogin)
-         VALUES ($1, 1000, $2, $3, $4, $1 || '@mmrs.invalid', 'system_user', 0)",
+        "INSERT INTO users (id, createat, updateat, deleteat, username, password, authdata,
+                            authservice, email, emailverified, nickname, firstname, lastname,
+                            position, roles, allowmarketing, props, notifyprops,
+                            lastpasswordupdate, lastpictureupdate, failedattempts, locale,
+                            timezone, mfaactive, mfasecret, mfausedtimestamps, remoteid,
+                            lastlogin)
+         VALUES ($1, 1000, $2, $3, $4, 'hash', NULL, '', $1 || '@mmrs.invalid', true, '', '', '',
+                 '', 'system_user', false, '{}'::jsonb, '{}'::jsonb, 1000, 0, 0, 'en',
+                 '{}'::jsonb, false, '', 'null'::jsonb, '', 0)",
     )
     .bind(id)
     .bind(update_at)
@@ -483,17 +506,36 @@ async fn the_in_team_etag_has_no_membership_deletion_condition() {
     );
 
     // A team with no members at all has no row to read, and Go falls back to the clock — so
-    // the etag is deliberately different every time and can never produce a 304.
-    let first = store
+    // the etag is a function of *when* it was asked and never of the data, and can never
+    // produce a 304.
+    //
+    // Asserting that two consecutive calls differ is the obvious way to say that, and it is
+    // wrong: both land in the same millisecond roughly one run in three, and the panic skips
+    // the `purge` below. That is [D-157] — the rows it orphaned took Go's `GET /api/v4/users`
+    // down for every worktree on this database. The property that actually separates the clock
+    // fallback from a stored `UpdateAt` is that the suffix is *now*. It holds on every run and
+    // needs no sleep, which a suite this size cannot afford anyway.
+    let etag = store
         .get_etag_for_profiles("mmrsulist000000000000notem")
         .await;
-    let second = store
-        .get_etag_for_profiles("mmrsulist000000000000notem")
-        .await;
-    assert!(first.starts_with(&format!("{version}.")));
+    let suffix = etag
+        .strip_prefix(&format!("{version}."))
+        .unwrap_or_else(|| panic!("the etag must carry the version prefix: {etag}"));
+    let millis: i64 = suffix
+        .parse()
+        .unwrap_or_else(|e| panic!("the fallback must be a millisecond reading: {etag} ({e})"));
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_millis() as i64;
+    assert!(
+        (now - millis).abs() < 60_000,
+        "the fallback must be the clock, not a stored value: {etag} against a now of {now}"
+    );
     assert_ne!(
-        first, second,
-        "the millisecond fallback must not be mistaken for a stable etag"
+        millis, BOB_UPDATE_AT,
+        "and specifically not the newest UpdateAt in the table — that is what this query would \
+         return if the empty-team case stopped reaching the fallback at all"
     );
 
     purge(&pool).await;
