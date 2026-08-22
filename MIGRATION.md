@@ -3717,7 +3717,7 @@ set aside. Three Rust files and one correction to the previous session's ledger 
 |---|---|---|---|---|
 | store/sqlstore/user_store.go (`GetAllProfiles`, `GetProfiles`, `GetProfilesInChannel`, `GetProfilesNotInChannel`, `GetProfilesNotInTeam`, `GetEtagForProfiles`, `GetEtagForProfilesNotInTeam`) | `mm-store/src/user_store.rs` | PARTIAL | 2 pass + 8 DB | Five listings for nil view restrictions, no role filter and the default sort, plus the two etag queries. `tm.DeleteAt = 0` in the join **excludes** a former member from `in_team` and **includes** them in `not_in_team`; the `in_team` etag has no such condition at all, so a former member still moves it. `not_in_channel`/`not_in_team` take an offset (their Go caller multiplies) and carry no `DeleteAt` predicate whatsoever. |
 | app/user.go (`GetUsersPage`, `GetUsersInTeamPage`, `GetUsersInChannelPage`, `GetUsersNotInChannelPage`, `GetUsersNotInTeamPage`, `GetUsersInTeamEtag`, `GetUsersNotInTeamEtag`) | `mm-app/src/user.rs` | PARTIAL | 1 pass | All five listings are one wire error (`app.user.get_profiles.app_error`, 500); only `where` differs and it is `json:"-"`. **The etag can never equal Go's**: Go interpolates two `*bool` config fields without dereferencing them, so its etag carries heap addresses — see the doc comment on `get_users_in_team_etag`. |
-| api4/user.go (`getUsers`) | `mm-api/src/users.rs` | PARTIAL | 3 pass + 7 parity | `GET /users` served for five of Go's eight dispatch arms — unfiltered, `in_team`, `in_channel`, `not_in_channel`, `not_in_team` — including paging, `active`/`inactive`, the two etags and their 304. Forwarded, each by the condition Go itself dispatches on: `without_team=true`, `in_group`, `not_in_group`, any `sort`, any of `role`/`roles`/`channel_roles`/`team_roles`, `group_constrained=true` and `abac_match_only=true` on the two `not_in_*` arms, and `active=true&inactive=true`. Mutations: 21 run, 21 caught, 2 controls survived. |
+| api4/user.go (`getUsers`) | `mm-api/src/users.rs` | PARTIAL | 3 pass + 7 parity | `GET /users` served for five of Go's eight dispatch arms — unfiltered, `in_team`, `in_channel`, `not_in_channel`, `not_in_team` — including paging, `active`/`inactive`, the two etags and their 304. Forwarded, each by the condition Go itself dispatches on: `without_team=true`, `in_group`, `not_in_group`, any `sort`, any of `role`/`roles`/`channel_roles`/`team_roles`, `group_constrained=true` and `abac_match_only=true` on the two `not_in_*` arms, and `active=true&inactive=true`. Mutations: 23 run, 23 caught (3 only after the fixture gained the requests that separate the gate's three comparisons), 3 controls survived. |
 
 ## Notes — api4/user.go (`getUsers`)
 
@@ -4056,3 +4056,87 @@ Also worth knowing:
    twelve NULL columns Go's `model.User` cannot scan — so **Go's own `GET /api/v4/users` then
    500s for every worktree**, which failed four `parity_users_list` tests here until the rows were
    cleared by hand. Cost this session two mutation re-takes and one full-suite re-run.
+## Ledger additions — api4/channel_category.go, the read side (appended 2026-08-22, branch `phase-2/par-sidebar`)
+
+| Go file | Rust file | Status | Tests | Notes |
+|---|---|---|---|---|
+| model/channel_sidebar.go | `mm-model/src/sidebar_category.rs` | DONE | 10 pass | `SidebarCategory`, `SidebarCategoryWithChannels` (Go embeds, so `#[serde(flatten)]` — nine inlined keys then `channel_ids`), `OrderedSidebarCategories`, `SidebarChannel` (`SortOrder` is `json:"-"`). **`IsValidCategoryId`'s regexp is unanchored** and its two halves are `[a-z0-9]` where `IsValidId` accepts upper case, so the two branches disagree about case and `zzfavorites_<26>_<26>!!` is valid; corpus in `fixtures/behaviour_sidebar_category.json`. The three arrays carry no `omitempty`, so nil is `null` and empty is `[]` — modelled `Option<Vec<_>>`. |
+| store/sqlstore/channel_store_categories.go (the three reads) | `mm-store/src/sidebar_category_store.rs` | PARTIAL | 2 pass + 23 parity | **The answer is not what is in `SidebarChannels`.** Every read appends *orphans* — channels the user is a member of that appear in no category of theirs — to the Channels or DMs category, so on a normal server most of a user's sidebar is rows the join never returns. Orphans come last, in `DisplayName` order, after the explicit channels' `SortOrder` order. Ported in its own module rather than into `channel_store.rs`; Go hangs them off `ChannelStore`. |
+| app/channel_category.go (the three reads) + app/authorization.go (`SessionHasPermissionToCategory`) | `mm-app/src/sidebar.rs` | PARTIAL | 3 pass | One error id (`app.channel.sidebar_categories.app_error`) for every branch of all four; only the status code moves. `SessionHasPermissionToCategory` is **not** `SessionHasPermissionToUser` — no unrestricted branch, no `manage_system`, no self shortcut, and it compares `category.UserId` against *both* the session and the path's `user_id`. The create-on-empty branch is a write and is not ported; it is reported as `SidebarCategoriesResult::NeedsInitialCategories` and the API forwards. |
+| api4/channel_category.go (`getCategoriesForTeamForUser`, `getCategoryOrderForTeamForUser`, `getCategoryForTeamForUser`) | `mm-api/src/sidebar.rs` | PARTIAL | 7 pass + 23 parity | The three GETs served; the five writes on the same paths still forwarded (asserted over HTTP). **The path parameter is `{category}`, not `{category_id}`** — Go's mux class is `[A-Za-z0-9_-]+` and a default category id is `{type}_{userId}_{teamId}`, so the `_id` suffix would have enrolled it in the shared `[A-Za-z0-9]+` middleware and forwarded the common case. Two framings in one Go file: `/order` carries a trailing newline, the other two do not. Mutations: 21 run, 21 caught, 2 controls survived. |
+
+## Notes — api4/channel_category.go (the read side)
+
+1. **`getCategoryForTeamForUser`'s first gate is not the one the other two use.** The two list
+   handlers gate on `SessionHasPermissionToUser`; the singular one gates on
+   `SessionHasPermissionToCategory`. Both refusals name `model.PermissionEditOtherUsers`, which is
+   what makes them so easy to conflate — and the difference is a real hole: `SessionHasPermissionToUser`
+   grants outright when the path names the caller (its self shortcut), so a port that reached for it
+   would hand any user any *other* user's category by naming itself in the path.
+   `parity_sidebar_categories::a_category_belonging_to_someone_else_is_refused_even_when_naming_yourself`
+   is that request, and Go 403s it.
+2. **A missing category is a 403, not a 404, for anyone without `edit_other_users`.** The gate
+   fetches the category itself and denies on the miss, so `GetSidebarCategory`'s own 404 is
+   unreachable through the route unless the caller short-circuits the gate. Both answers are
+   asserted, side by side, so neither reads as a fixture accident.
+3. **Most of the body is not in the table it comes from.** `getOrphanedSidebarChannels` adds every
+   channel the user is a member of that has no `SidebarChannels` row *for that user on that team* —
+   public and private ones on the current team, DMs and GMs regardless of team. Joining a channel
+   writes a membership row and nothing else, so a port that returned the join alone answers with a
+   nearly empty sidebar and looks entirely plausible. Its `sq.Or{}` guard is load-bearing: with both
+   selectors false squirrel renders an empty disjunct, which matches everything, so Go returns
+   early — and so does this, with a unit test on a deliberately unreachable pool.
+4. **`order` beside `{category_id}`: same answer, different reasons.** gorilla picks the literal
+   because `api4/channel.go` registers it first (:80 against :82); axum picks it because a static
+   segment beats a parameter outright. No reverse-shadowing case here, unlike `/teams/name/{team_name}`.
+   Pinned by a test that reads the *shape* of the answer: an array can only have come from the order
+   handler, since the category handler would have 400'd on `IsValidCategoryId("order")`.
+5. **Two write framings in one file, forty lines apart.** `getCategoriesForTeamForUser` and
+   `getCategoryForTeamForUser` end in `json.Marshal` + `w.Write`; `getCategoryOrderForTeamForUser`
+   ends in `json.NewEncoder(w).Encode`. So one of the three carries a trailing newline ([D-086]) and
+   the suite asserts the byte on all three.
+6. **The empty-categories branch is a write, and is forwarded.** Go creates the three default
+   categories inside the GET, migrating the user's favourites into `SidebarChannels` as it goes.
+   Two servers racing to insert the same deterministic ids is not a thing to reproduce, so the
+   handler forwards and Go performs its own migration. Reachable only where the rows are missing;
+   joining a team creates them. `GetSidebarCategoryOrder` has **no** such fallback, so the same user
+   in that state gets three categories from `/categories` and `[]` from `/categories/order`.
+7. **sqlx infers nullability from the column, not from the join.** `SidebarChannels.ChannelId` is
+   `NOT NULL` in the schema and NULL in every `LEFT JOIN` row for a category with no explicit
+   channels; without an explicit `AS "channelid?"` every empty category failed the whole query with
+   `UnexpectedNullError`. It cost a debugging cycle because `StoreError::Db`'s `Display` is its
+   context string alone — so `mm-app/src/sidebar.rs` logs `?err` rather than the crate's usual
+   `%err`, and says why.
+8. **Two pre-existing tests asserted `…/channels/categories` was forwarded**, in
+   `parity_channels_for_team_for_user.rs` and `parity_channel_members_for_team_for_user.rs`. Both
+   were correct when written and both failed here, which is the assertion doing its job; both are
+   inverted rather than deleted, and now guard against the routes silently *stopping* being served.
+   The forwarding claims for this family live in `parity_sidebar_router.rs`.
+9. **This suite's fixtures are prefixed `mmrssidebar`, not `mmrs-parity-`.** `common::purge_api_fixtures`
+   runs once per test *binary* and binaries run concurrently, so sharing the prefix lets another
+   suite's start-up delete this one's team mid-run. The local purge selects by **team**, not by name,
+   which also closes [D-155] for these rows: Go authors `town-square`, `off-topic` and three
+   `SidebarCategories` on the fixture's behalf and none of them carries a prefix.
+10. **The subject of every byte comparison is a freshly created user, not the fixture admin.** The
+    admin accumulates DMs from every other suite, whose empty display names tie under the orphan
+    query's `ORDER BY DisplayName` and make the comparison order-random. One DM is created
+    deliberately, so the `D`/`G`-to-DMs dispatch is observable without a tie.
+
+11. **The three comparisons in `SessionHasPermissionToCategory` needed three separate requests,
+    and the suite had none of them.** `category.UserId == session.UserId`,
+    `category.UserId == userID` and `category.TeamId == teamID` all look like the same check, and
+    a fixture where the caller asks about its own category on its own team satisfies all three at
+    once — so removing any one of them survived. Each now has a request that isolates it: your own
+    category with someone else in the path (only the path comparison can refuse); their category
+    with them in the path, on a team you can see (only the session comparison can refuse); and your
+    own category named under a *different team you are a member of* (only the team comparison can,
+    since the `view_team` gate behind it would grant — which is why a third fixture team exists).
+    Three mutations survived until these landed; all three are caught now.
+12. **A no-op control failing was the real finding, again.** Mid-session `parity_users_list` began
+    failing against the **Go** server — [D-157], a sibling suite's assertion panicking past its own
+    purge and leaving `Users` rows whose non-pointer columns are NULL, which 500s `GET /users` for
+    every worktree. `scripts/mutate.sh`'s `api` suite ran *every* parity binary, so that one broken
+    suite turned every verdict into a false CAUGHT, control included. The harness now takes
+    `MUTATE_API_TARGETS` (`--test parity_sidebar_categories --test parity_sidebar_router`) so a
+    verdict can only come from the suite under test, and `${=…}` so a multi-word value splits at
+    all under zsh. Every tally above was re-taken through it.

@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT id AS \"id!\"\n        FROM sidebarcategories\n        WHERE userid = $1\n          AND teamid = $2\n        ORDER BY sidebarcategories.sortorder ASC\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "936c5756c5574ded2b93a2198038ccf274fcfc3c7a8fa63a411f5e87762777b6"
+}

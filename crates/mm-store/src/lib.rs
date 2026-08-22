@@ -23,6 +23,8 @@ pub mod reaction_store;
 pub mod role_store;
 pub mod scheme_store;
 pub mod session_store;
+/// The read side of `SidebarCategories` — Go hangs these off `ChannelStore`.
+pub mod sidebar_category_store;
 pub mod status_store;
 pub mod team_store;
 pub mod user_store;
@@ -38,6 +40,7 @@ pub use reaction_store::{ReactionStore, SqlReactionStore};
 pub use role_store::{RoleStore, SqlRoleStore};
 pub use scheme_store::{SchemeStore, SqlSchemeStore};
 pub use session_store::{SessionStore, SqlSessionStore};
+pub use sidebar_category_store::{SidebarCategoryStore, SqlSidebarCategoryStore};
 pub use status_store::{SqlStatusStore, StatusStore};
 pub use team_store::{SqlTeamStore, TeamStore};
 pub use user_store::{SqlUserStore, UserStore};
@@ -62,6 +65,7 @@ pub struct SqlStore {
     role: SqlRoleStore,
     scheme: SqlSchemeStore,
     session: SqlSessionStore,
+    sidebar_category: SqlSidebarCategoryStore,
     status: SqlStatusStore,
     team: SqlTeamStore,
     user: SqlUserStore,
@@ -99,6 +103,7 @@ impl SqlStore {
             role: SqlRoleStore::new(pool.clone()),
             scheme: SqlSchemeStore::new(pool.clone()),
             session: SqlSessionStore::new(pool.clone()),
+            sidebar_category: SqlSidebarCategoryStore::new(pool.clone()),
             status: SqlStatusStore::new(pool.clone()),
             team: SqlTeamStore::new(pool.clone()),
             user_terms_of_service: SqlUserTermsOfServiceStore::new(pool.clone()),
@@ -150,6 +155,12 @@ impl SqlStore {
     /// Port of `store.Store.Scheme()`.
     pub fn scheme(&self) -> &SqlSchemeStore {
         &self.scheme
+    }
+
+    /// The sidebar-category reads. Go reaches them through `store.Store.Channel()`; they are
+    /// their own store here so the sidebar routes migrate independently of the channel ones.
+    pub fn sidebar_category(&self) -> &SqlSidebarCategoryStore {
+        &self.sidebar_category
     }
 
     /// Port of `store.Store.Status()`.

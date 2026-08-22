@@ -13,6 +13,7 @@ pub mod preferences;
 pub mod proxy;
 pub mod roles;
 pub mod sessions;
+pub mod sidebar;
 pub mod status;
 pub mod teams;
 pub mod users;
@@ -280,8 +281,9 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/teams/{team_id}/channels/name/{channel_name}",
             partially_migrated_with_ids(&state, get(channels::get_channel_by_name)),
         )
-        // `BaseRoutes.TeamForUser` (api.go:34). Go's deeper sibling `…/channels/categories`
-        // falls to `Router::fallback` whole.
+        // `BaseRoutes.TeamForUser` (api.go:34). Its deeper siblings `…/channels/members` and
+        // `…/channels/categories` are their own routes below — one segment longer, so nothing
+        // here shadows them.
         .route(
             "/api/v4/users/{user_id}/teams/{team_id}/channels",
             partially_migrated_with_ids(&state, get(channels::get_channels_for_team_for_user)),
@@ -413,6 +415,33 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/posts/{post_id}",
             partially_migrated_with_ids(&state, get(posts::get_post)),
+        )
+        // `BaseRoutes.ChannelCategories` (api.go:231), the three GETs. The five writes on
+        // these same paths fall to `partially_migrated`'s method fallback and stay forwarded —
+        // asserted over HTTP in `tests/parity_sidebar_router.rs`.
+        //
+        // One segment deeper than `/users/{user_id}/teams/{team_id}/channels` above and a
+        // sibling of `…/channels/members`; all three are static at that position, so there is
+        // nothing for either router to prefer.
+        .route(
+            "/api/v4/users/{user_id}/teams/{team_id}/channels/categories",
+            partially_migrated_with_ids(&state, get(sidebar::get_categories_for_team_for_user)),
+        )
+        // The literal `order` beside `{category}` below. gorilla registers it first
+        // (api4/channel.go:80 against :82) and axum prefers a static segment outright, so both
+        // routers serve `getCategoryOrderForTeamForUser` here — same answer, different reason.
+        .route(
+            "/api/v4/users/{user_id}/teams/{team_id}/channels/categories/order",
+            partially_migrated_with_ids(&state, get(sidebar::get_category_order_for_team_for_user)),
+        )
+        // Deliberately `{category}` and not `{category_id}`: Go's mux class here is
+        // `[A-Za-z0-9_-]+`, and a default category's id is `{type}_{userId}_{teamId}`. Naming it
+        // `*_id` would enrol it in `parameter_is_id_shaped`'s `[A-Za-z0-9]+` rule and forward
+        // every underscore-bearing id — which is to say the common case. The handler carries
+        // Go's own charset instead, like `username`, `role_name` and `channel_name` do.
+        .route(
+            "/api/v4/users/{user_id}/teams/{team_id}/channels/categories/{category}",
+            partially_migrated_with_ids(&state, get(sidebar::get_category_for_team_for_user)),
         )
         .fallback(proxy::forward_to_go)
         .with_state(state)

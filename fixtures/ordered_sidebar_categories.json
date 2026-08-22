@@ -1,0 +1,23 @@
+{
+    "categories": [
+        {
+            "id": "jtrtibta6jzud94kdkddth5xgr",
+            "user_id": "zxswdj67h7harn8cegu753u3oe",
+            "team_id": "owoyzgarfmiijwo6bqpoekxmko",
+            "sort_order": 71,
+            "sorting": "sorting-021f42",
+            "type": "type-cd6e02",
+            "display_name": "displayname-545b49",
+            "muted": true,
+            "collapsed": true,
+            "channel_ids": [
+                "channels-7b0240",
+                "channels-b5325a"
+            ]
+        }
+    ],
+    "order": [
+        "order-756b8c",
+        "order-af9ba6"
+    ]
+}

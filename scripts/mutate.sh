@@ -19,9 +19,11 @@
 #
 #   MUTATE_FILTER=authorization:: scripts/mutate.sh ...
 #
-# For `api`, MUTATE_API_SUITE picks a single integration-test binary:
+# For `api`, narrow to the suite(s) under test — leaving this unset lets an unrelated suite
+# decide the verdict, which has twice produced a whole run of false CAUGHTs:
 #
-#   MUTATE_API_SUITE=parity_post_get scripts/mutate.sh ...
+#   MUTATE_API_SUITE=parity_post_get scripts/mutate.sh ...            # one binary
+#   MUTATE_API_TARGETS='--test parity_a --test parity_b' scripts/mutate.sh ...   # several
 #
 # `unit` without a filter runs the 47-second PBKDF2 suite on every single mutation, which is the
 # whole cost of a fifteen-mutation run. Filtering to the module under test cuts each one to
@@ -94,25 +96,35 @@ case "$SUITE" in
   store) cargo test -p mm-store --tests ${MUTATE_FILTER:+$MUTATE_FILTER} > "$LOG" 2>&1 || RC=$? ;;
   app)   cargo test -p mm-app --tests ${MUTATE_FILTER:+$MUTATE_FILTER} > "$LOG" 2>&1 || RC=$? ;;
   api)   if restart_server; then
-           # MUTATE_API_SUITE narrows to one integration-test binary. Without it every parity
-           # suite runs on every mutation, which is slow *and* wrong: an unrelated pre-existing
-           # flake (parity_channel_members_list's paging order tie) then reports as CAUGHT and
-           # the verdict belongs to a suite that never saw the change.
+           # `--tests` runs EVERY parity binary, which is slow *and* wrong: a suite that never
+           # saw the change decides the verdict. Both failure modes below were measured, in
+           # separate sessions, before this narrowing existed.
            #
-           # `--test X` **replaces** `--tests`; passing both is not a narrowing, it is a union —
-           # cargo then builds all 32 targets. Measured: a whole 25-mutation run came back
-           # "25 caught, 0 survived" with both no-op controls caught, because every verdict was
-           # really some other suite failing.
-           if [ -n "$MUTATE_API_SUITE" ]; then
-             cargo test -p mm-api --test "$MUTATE_API_SUITE" ${MUTATE_FILTER:+$MUTATE_FILTER} > "$LOG" 2>&1 || RC=$?
-           else
-             cargo test -p mm-api --tests ${MUTATE_FILTER:+$MUTATE_FILTER} > "$LOG" 2>&1 || RC=$?
+           #   - `--test X` **replaces** `--tests` rather than narrowing it, so passing both is
+           #     a union and cargo builds all 32 targets. A whole 25-mutation run came back
+           #     "25 caught, 0 survived" with both no-op controls caught, because every verdict
+           #     was really some other suite failing.
+           #   - One suite broken by a sibling worktree's fixtures (`parity_users_list` failing
+           #     against the *Go* server, D-157) likewise "caught" a no-op control.
+           #
+           # A no-op control reporting CAUGHT is the signature of both. Narrow the *targets*:
+           #
+           #   MUTATE_API_TARGETS='--test parity_sidebar_categories --test parity_sidebar_router'
+           #   MUTATE_API_SUITE=parity_post_get      # older single-suite spelling, still honoured
+           #
+           # A test-*name* filter goes in MUTATE_FILTER as everywhere else, but note that an
+           # integration test's name is its function alone — the file name is not part of it,
+           # so selecting a suite means selecting its target, not filtering by name.
+           # `${=…}` is zsh's explicit word-splitting; without it the whole value is one word.
+           if [ -z "$MUTATE_API_TARGETS" ] && [ -n "$MUTATE_API_SUITE" ]; then
+             MUTATE_API_TARGETS="--test $MUTATE_API_SUITE"
            fi
+           cargo test -p mm-api ${=MUTATE_API_TARGETS:---tests} ${=MUTATE_FILTER} > "$LOG" 2>&1 || RC=$?
          else
            RC=1; echo "does not compile, or the server never came up" > "$LOG"
          fi ;;
   all)   if restart_server; then
-           cargo test --workspace > "$LOG" 2>&1 || RC=$?
+           cargo test --workspace ${=MUTATE_FILTER} > "$LOG" 2>&1 || RC=$?
          else
            RC=1; echo "does not compile, or the server never came up" > "$LOG"
          fi ;;

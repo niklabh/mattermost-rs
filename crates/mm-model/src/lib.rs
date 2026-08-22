@@ -74,6 +74,8 @@ pub mod scheme;
 pub mod search_params;
 pub mod search_requests;
 pub mod session;
+/// `channel_sidebar.go`, for the read side of `BaseRoutes.ChannelCategories`.
+pub mod sidebar_category;
 pub mod slack_compatibility;
 pub mod stats;
 pub mod status;
