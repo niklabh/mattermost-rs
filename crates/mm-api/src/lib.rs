@@ -329,6 +329,18 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/channels/{channel_id}/members/{user_id}",
             partially_migrated_with_ids(&state, get(channels::get_channel_member)),
         )
+        // `BaseRoutes.PostsForChannel` (api.go:240) — a `PathPrefix("/posts")` subrouter with a
+        // single `GET` at `""`. gorilla's prefix router 404s anything deeper (`/posts/unread`
+        // hangs off `ChannelForUser`, not off this), and axum's exact path leaves those to
+        // `Router::fallback`, so both routers answer the same way for every path but this one.
+        //
+        // The three cursor branches (`since`, `after`, `before`) and `collapsedThreadsExtended`
+        // are forwarded **by the handler**, not by the router — they are query parameters, and a
+        // router cannot see them. `mm_api::posts::get_posts_for_channel` says why each goes.
+        .route(
+            "/api/v4/channels/{channel_id}/posts",
+            partially_migrated_with_ids(&state, get(posts::get_posts_for_channel)),
+        )
         // `BaseRoutes.User.Handle("/channels")` (api4/channel.go:75). Exact match: the deeper
         // `…/channels/{channel_id}/unread` below is its own route, and Go has no literal
         // sibling directly under `/users/{user_id}/channels/`.

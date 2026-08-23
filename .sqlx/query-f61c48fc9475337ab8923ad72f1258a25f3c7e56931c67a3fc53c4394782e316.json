@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT updateat AS \"update_at!\"\n              FROM posts\n             WHERE channelid = $1\n             ORDER BY updateat DESC\n             LIMIT 1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "update_at!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "f61c48fc9475337ab8923ad72f1258a25f3c7e56931c67a3fc53c4394782e316"
+}

@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT postid         AS \"post_id!\",\n                   userid         AS \"user_id!\",\n                   channelid      AS \"channel_id?\",\n                   acknowledgedat AS \"acknowledged_at!\",\n                   remoteid       AS \"remote_id?\"\n              FROM postacknowledgements\n             WHERE postid = ANY($1::varchar[])\n               AND acknowledgedat != 0\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "post_id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "channel_id?",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "acknowledged_at!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "remote_id?",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "VarcharArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "57b304b31fecf7172cb3d56695a2d622d3d92e7e7ed0051ea88a0d2eb4dfad26"
+}

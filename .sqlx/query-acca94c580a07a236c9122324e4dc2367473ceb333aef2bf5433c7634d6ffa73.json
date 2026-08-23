@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                SELECT id AS \"id!\"\n                  FROM posts\n                 WHERE createat > $2\n                   AND channelid = $1\n                   AND deleteat = 0\n                   AND (NOT $3 OR rootid = '')\n                 ORDER BY createat ASC\n                 LIMIT 1\n                ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "acca94c580a07a236c9122324e4dc2367473ceb333aef2bf5433c7634d6ffa73"
+}

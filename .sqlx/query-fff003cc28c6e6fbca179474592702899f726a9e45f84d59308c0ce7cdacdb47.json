@@ -1,0 +1,27 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                SELECT posts.id AS \"id!\"\n                  FROM posts\n                 WHERE posts.createat > $2\n                   AND posts.channelid = $1\n                   AND posts.deleteat = 0\n                   AND (posts.type != $5\n                        OR posts.userid = $4\n                        OR NOT EXISTS (SELECT 1\n                                         FROM readreceipts rr\n                                        WHERE rr.postid = posts.id\n                                          AND rr.userid = $4\n                                          AND rr.expireat < $6))\n                   AND (NOT $3 OR posts.rootid = '')\n                 ORDER BY posts.createat ASC\n                 LIMIT 1\n                ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8",
+        "Bool",
+        "Text",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "fff003cc28c6e6fbca179474592702899f726a9e45f84d59308c0ce7cdacdb47"
+}

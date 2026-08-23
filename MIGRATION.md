@@ -4161,3 +4161,104 @@ Both halves are fixed, and both were measured rather than reasoned about:
 
 The finding lives in the doc comment on `insert_user` and beside the assertion; the backlog entry
 is gone rather than marked closed, per *docs/TECH_DEBT.md is a backlog, not a diary*.
+
+## `GET /api/v4/channels/{channel_id}/posts` — `getPostsForChannel` (2026-08-23)
+
+| Layer | File | Status |
+|---|---|---|
+| api | `crates/mm-api/src/posts.rs` — `get_posts_for_channel` | PARTIAL, the page branch served |
+| app | `crates/mm-app/src/post.rs` — `get_posts_page`, `get_posts_etag`, `prepare_post_list_for_client`, `sanitize_post_list_metadata_for_user`, `get_next_post_id_from_post_list`, `get_prev_post_id_from_post_list` | PARTIAL |
+| store | `crates/mm-store/src/post_store.rs` — `get_posts` (both branches), `get_etag`, `get_post_id_around_time`, `get_visible_post_id_around_time`, `get_priority_for_posts`, `get_acknowledgements_for_posts` | PARTIAL |
+| app | `crates/mm-app/src/config.rs` — `enable_burn_on_read`, `feature_flag_burn_on_read`, `Config::burn_on_read` | DONE |
+| model | `mm-model::post_list::PostList` (already ported) | — |
+
+Served: the plain page, with and without `collapsedThreads`, `skipFetchThreads` and
+`include_deleted`, plus the etag and both pagination cursors. Forwarded, by the handler rather
+than by the router because these are query parameters: `since > 0`, `after`, `before`,
+`collapsedThreadsExtended`, an unparseable `since`, and any page holding a post the metadata
+pipeline already refuses.
+
+Tests: 15 cross-server (`crates/mm-api/tests/parity_channel_posts.rs`), 4 DB
+(`crates/mm-store/tests/db_post_channel_page.rs`), 3 unit (two in `post_store::tests` for the
+NULL-versus-JSON-null split, one in `config::tests` for the burn-on-read conjunction).
+Mutations: **21 run, 18 caught, 1 explained survivor, 2 controls survived**
+(`scripts/mutations/getposts-for-channel.tsv`).
+
+What a reader would otherwise get wrong, each pinned in the doc comment on the thing it
+constrains:
+
+1. **A NULL `props` column is `{}` on the wire, not `null`** — and this was a *live bug in the
+   already-shipped `getPost`*, found by predicting the opposite and measuring. sqlx allocates a
+   nil map before scanning into it, so `StringInterface.Scan`'s early return on NULL lands on an
+   empty map; slices get no such treatment, which is why NULL `fileids` really is `null`. A jsonb
+   `'null'` is a third answer again (`null`, because `json.Unmarshal` resets the map). [D-158]
+   carries the audit owed for every other ported store that scans a Go map.
+2. **`GetEtag` takes `collapsedThreads` and drops it.** `q.Where(sq.Eq{"RootId": ""})` at
+   post_store.go:954 discards the builder squirrel returns by value, so the filter never reaches
+   the SQL and both modes share one etag. Applying it — the obvious reading — makes our 304s
+   disagree with Go's.
+3. **`MakeNonNil` runs on the plain branch and not the collapsed one, and it does not matter.**
+   The asymmetry is real and the wire difference it predicts does not exist, for the reason in
+   (1): the map was never nil. Removing the call is therefore a mutation that survives, and it is
+   reported as an explained survivor rather than as a test gap.
+4. **`getRootPosts` does not select roots.** There is no `RootId = ''` predicate: the window is
+   every post in the channel, replies included. The collapsed-threads query is the one that filters
+   to roots. `getParentsPosts` then fetches the *threads* those rows belong to and adds them to
+   `posts` **without** adding them to `order`, so a page's map is routinely larger than its order.
+5. **`skipFetchThreads` decides whether `reply_count` is computed at all**, not what is returned.
+   With it off Go selects no `ReplyCount` column, so every post on the page reports `0`; with it on
+   a correlated subquery counts the thread. Both measured against Go on the same fixture.
+6. **The burn-on-read cursor is the live one.** `ServiceSettings.EnableBurnOnRead` and
+   `FeatureFlags.BurnOnRead` both default to `true`, so `getCursorPostId` reaches
+   `GetVisiblePostIdAroundTime` — the query carrying the `ReadReceipts` subquery — and the plain
+   lookup beside it is the fallback. Neither is reachable from the parity suite (the receipt-aware
+   half needs a burn-on-read post, which the metadata pipeline refuses and forwards), so both are
+   covered at the store level instead.
+7. **Priority and acknowledgements are fetched for `order`, not for `posts`.**
+   `PreparePostListForClient` calls the per-post pipeline with *empty* opts — `IncludePriority`
+   false — and then batches both reads over the order alone. A root pulled in only as a parent
+   therefore carries no `metadata.priority` even when its row exists. Both rows are planted
+   directly, because the write paths are licence-gated on Team Edition and the read paths are not.
+8. **The two 403s this route can raise are byte-identical.** `include_deleted` without
+   `manage_system` reports `read_deleted_posts` and an unreadable channel reports
+   `read_channel_content`, but `MakePermissionError` puts the id in `DetailedError` and that field
+   is stripped for a non-admin caller. So the gate *order* — which Go fixes deliberately, to keep a
+   missing channel from leaking through a permission error — is not observable through the route,
+   and no test can pin it. Said here rather than asserted falsely.
+9. **Go caches the etag for thirty minutes** ([D-159]). For a channel with posts the cached value
+   and our fresh read agree; for an *empty* channel Go repeats the clock reading its first request
+   took while we take a new one, so Go can 304 where we answer 200. It becomes a live hazard the
+   moment `mm-api` writes a post, because a write that does not go through Go's store never
+   invalidates it.
+
+Three of those verdicts were findings rather than confirmations:
+
+- **`make-non-nil` survived, and stays in the code.** Removing `list.make_non_nil()` changes no
+  byte, for the reason in (1) — the map was never nil. Reported as an explained survivor rather
+  than deleted: it is Go's line, and it becomes load-bearing again the day the props handling
+  changes.
+- **Two mutations of the `before` half of the cursor queries survived at first.** `before` and
+  `after` are separate statements, and `db_post_channel_page` only ever stepped forwards, so half
+  of both queries had no oracle — including the half `prev_post_id` actually uses. Four
+  assertions later, both are caught.
+- **`scripts/mutate.sh` grew `MUTATE_STORE_TARGETS`**, mirroring the api one. `--tests` builds all
+  twenty mm-store binaries per mutation, which is minutes of rebuild and lets a suite that never
+  saw the change decide the verdict — the failure the api narrowing already existed to prevent.
+  Two harness faults on the way there were the plan's fault, not the code's: a mutation that
+  drops a bind parameter does not compile, and zsh's `read` collapses an empty tab-delimited
+  field, which splices the *suite* name into the source.
+
+Also worth knowing:
+
+- **`?since=0` is not a `since` request.** Go's test is `since > 0`, so an explicit zero falls
+  through to the page branch, etag and all — while `?since=1` selects a different store query
+  entirely. `?after=` and `?before=` behave the same way: empty is absent.
+- **`getPostsCollapsedThreads` ignores two of its own options.** `include_deleted` and
+  `skipFetchThreads` are in the struct and in neither the query nor the response; the 403 gate in
+  front of `include_deleted` still fires, which is the only trace the parameter leaves.
+- **Participants are stub users.** Without `collapsedThreadsExtended` each is a zero-valued
+  `model.User` carrying only an id, so it serialises with every non-`omitempty` key at its zero
+  value. Reproducing that means constructing the same zero value, not something tidier.
+- **An empty channel is not reachable through the API.** Creating a channel makes Go write a
+  `system_join_channel` post for its creator, so the store test and the parity fixture both delete
+  the row directly — otherwise the clock-stamped etag branch has no fixture at all.

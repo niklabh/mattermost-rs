@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT count(*) AS \"count!\"\n          FROM teams t\n         WHERE (NOT $1::boolean OR t.deleteat = 0)\n           AND ($2::boolean IS NULL\n                OR t.allowopeninvite = $2\n                OR ($3::boolean AND EXISTS (\n                       SELECT 1 FROM accesscontrolpolicies acp\n                        WHERE acp.id = t.id AND acp.type = 'team'\n                   )))\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bool",
+        "Bool",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "5ff471048d91d2f5d17b1005c1332acde392c3b1e55500f64ae2c19e7ea2b988"
+}
