@@ -48,10 +48,12 @@ use mm_model::post::{
     POST_PROPS_OVERRIDE_ICON_EMOJI, POST_PROPS_PREVIEWED_POST, POST_PROPS_UNSAFE_LINKS,
     POST_TYPE_BURN_ON_READ, Post,
 };
+use mm_model::post_list::{PostList, PostMap};
 use mm_model::post_metadata::PostMetadata;
 use mm_model::reaction::Reaction;
 use mm_model::session::Session;
-use mm_model::utils::{AppError, remove_duplicate_strings};
+use mm_model::utils::{AppError, etag, get_millis, remove_duplicate_strings};
+use mm_store::post_store::GetPostsOptions;
 use mm_store::{EmojiStore, FileInfoStore, PostStore, ReactionStore, StoreError};
 
 use crate::App;
@@ -501,6 +503,277 @@ impl App {
         }
         refuse_on_props(&post)?;
         Ok((post, true))
+    }
+
+    /// Port of `app.App.GetPostsPage` (post.go:1337).
+    ///
+    /// Three of the four stages Go runs after the store are inert here and one is unreachable:
+    ///
+    /// - `revealBurnOnReadPostsForUser` only does work when the list carries burn-on-read posts,
+    ///   and any list that does is refused by [`App::prepare_post_list_for_client`] a moment
+    ///   later, so the request is forwarded whole rather than half-reproduced.
+    /// - `filterInaccessiblePosts` needs a licence with a `PostHistory` limit; without one
+    ///   `GetLastAccessiblePostTime` returns `0` and the function returns immediately.
+    /// - `applyPostsWillBeConsumedHook` is a plugin hook, refused per post by post type.
+    ///
+    /// Only Go's 500 branch is reachable from here. Its 400 sibling
+    /// (`app.post.get_posts.app_error`) is raised for `ErrInvalidInput`, which the store returns
+    /// for `PerPage > 1000` — a value `parse_per_page` clamps away before the handler runs.
+    #[tracing::instrument(skip(self), fields(channel_id = %opts.channel_id))]
+    pub async fn get_posts_page(&self, opts: GetPostsOptions<'_>) -> Result<PostList, AppError> {
+        self.store().post().get_posts(opts).await.map_err(|err| {
+            tracing::error!(error = %err, "post page lookup failed");
+            AppError::new(
+                "GetPostsPage",
+                "app.post.get_root_posts.app_error",
+                None,
+                String::new(),
+                500,
+            )
+        })
+    }
+
+    /// Port of `app.App.GetPostsEtag` (post.go:1421) and the string half of the store's
+    /// `GetEtag`.
+    ///
+    /// Two things about the value are easy to get wrong:
+    ///
+    /// 1. **An empty channel's etag is a clock reading**, `CurrentVersion.<now>`, so it changes
+    ///    on every request and can never produce a 304. Go reaches that branch through
+    ///    `err != nil` on a query that matched no rows.
+    /// 2. **`collapsedThreads` does not enter into it.** Go takes the flag, means to filter the
+    ///    query by `RootId = ''`, and drops the filter on the floor — see
+    ///    [`mm_store::PostStore::get_etag`]. So a collapsed and a non-collapsed request share an
+    ///    etag, and a reply arriving in a thread changes the etag of both.
+    ///
+    /// The translation etag branch above it needs the enterprise `AutoTranslation` interface,
+    /// which is nil on this build, so `includeTranslations` is always false.
+    #[tracing::instrument(skip(self), fields(channel_id = %channel_id))]
+    pub async fn get_posts_etag(&self, channel_id: &str) -> String {
+        match self.store().post().get_etag(channel_id).await {
+            Some(update_at) => etag(&[&update_at]),
+            None => etag(&[&get_millis()]),
+        }
+    }
+
+    /// Port of `app.App.PreparePostListForClient` (post_metadata.go:56).
+    ///
+    /// # The new list keeps six fields and drops the seventh
+    ///
+    /// Go copies `Posts`, `Order`, `NextPostId`, `PrevPostId`, `HasNext` and
+    /// `FirstInaccessiblePostTime` into a fresh struct — `BurnOnReadPosts` is **not** copied, so
+    /// a list that reached here carrying revealed burn-on-read posts loses them. It is `json:"-"`
+    /// either way, so nothing on the wire moves; the copy is faithful because the next thing to
+    /// touch this list is `AddCursorIdsForPostList`, and a future port of the burn-on-read path
+    /// that relied on the field surviving would be wrong.
+    ///
+    /// `Posts` is materialised unconditionally (`make(map…)`), so a nil input map becomes `{}`.
+    ///
+    /// # Priority is fetched for `order`, not for `posts`
+    ///
+    /// The batch reads take `list.Order`, which on a non-collapsed page is the window's own
+    /// posts and **not** the parent posts merged in beside them. So a root post pulled in only
+    /// because one of its replies is on this page carries no `metadata.priority`, even when it
+    /// has a `PostsPriority` row. Passing the map's keys instead would add a field Go omits.
+    ///
+    /// `populatePostListTranslations` is the remaining stage and is a no-op: it returns
+    /// immediately when the enterprise `AutoTranslation` interface is nil, which it is here.
+    #[tracing::instrument(skip_all)]
+    pub async fn prepare_post_list_for_client(
+        &self,
+        original: &PostList,
+    ) -> Result<PostList, PrepareError> {
+        let mut list = PostList {
+            posts: Some(PostMap::new()),
+            order: original.order.clone(),
+            next_post_id: original.next_post_id.clone(),
+            prev_post_id: original.prev_post_id.clone(),
+            has_next: original.has_next,
+            first_inaccessible_post_time: original.first_inaccessible_post_time,
+            burn_on_read_posts: None,
+        };
+
+        for (id, original_post) in original.posts.iter().flatten() {
+            // The opts are Go's literal `&model.PreparePostForClientOpts{}` — every flag false,
+            // `IncludePriority` included, which is why the batch reads below exist at all.
+            let post = self
+                .prepare_post_for_client_with_embeds_and_images(
+                    original_post,
+                    PreparePostForClientOpts::default(),
+                )
+                .await?;
+            if let Some(posts) = list.posts.as_mut() {
+                // Keyed by the **map key**, not by `post.Id`. They agree for every list this
+                // store produces; Go's choice is reproduced rather than corrected.
+                posts.insert(id.clone(), post);
+            }
+        }
+
+        if self.config().post_priority {
+            let order: Vec<String> = list.order.clone().unwrap_or_default();
+
+            // Go discards both errors (`priority, _ :=`) and carries on with an empty map, so a
+            // failed read silently drops `metadata.priority` rather than failing the request.
+            let priorities = match self.store().post().get_priority_for_posts(&order).await {
+                Ok(rows) => rows,
+                Err(err) => {
+                    tracing::warn!(error = %err, "Failed to get priority for a post list");
+                    Vec::new()
+                }
+            };
+            let acknowledgements = match self
+                .store()
+                .post()
+                .get_acknowledgements_for_posts(&order)
+                .await
+            {
+                Ok(rows) => rows,
+                Err(err) => {
+                    tracing::warn!(error = %err, "Failed to get acknowledgements for a post list");
+                    Vec::new()
+                }
+            };
+
+            for priority in priorities {
+                if let Some(post) = list
+                    .posts
+                    .as_mut()
+                    .and_then(|posts| posts.get_mut(&priority.post_id))
+                    && let Some(metadata) = post.metadata.as_mut()
+                {
+                    metadata.priority = Some(priority);
+                }
+            }
+            for acknowledgement in acknowledgements {
+                if let Some(post) = list
+                    .posts
+                    .as_mut()
+                    .and_then(|posts| posts.get_mut(&acknowledgement.post_id))
+                    && let Some(metadata) = post.metadata.as_mut()
+                {
+                    metadata.acknowledgements.push(acknowledgement);
+                }
+            }
+        }
+
+        Ok(list)
+    }
+
+    /// Port of `app.App.SanitizePostListMetadataForUser` (post_metadata.go:506).
+    ///
+    /// The `bool` is `allPreviewsHaveMembership`, an **and** across every post — one post whose
+    /// permalink preview the caller cannot see lowers it for the whole list. It only reaches an
+    /// audit record, and [`App::sanitize_post_metadata_for_user`] can only answer `true` on the
+    /// shapes this server serves, so it is `true` here by construction.
+    #[tracing::instrument(skip_all)]
+    pub async fn sanitize_post_list_metadata_for_user(
+        &self,
+        list: PostList,
+        user_id: &str,
+    ) -> Result<(PostList, bool), PrepareError> {
+        let mut sanitized = list.go_clone();
+        let mut all_previews_have_membership = true;
+
+        if let Some(posts) = sanitized.posts.as_mut() {
+            for (_, post) in posts.iter_mut() {
+                let (clean, is_member) = self
+                    .sanitize_post_metadata_for_user(std::mem::take(post), user_id)
+                    .await?;
+                *post = clean;
+                all_previews_have_membership = all_previews_have_membership && is_member;
+            }
+        }
+
+        Ok((sanitized, all_previews_have_membership))
+    }
+
+    /// Port of `app.App.GetNextPostIdFromPostList` (post.go:1842).
+    ///
+    /// "Next" is **newer**: the list is ordered newest first, so the cursor a client follows to
+    /// get the newer page is anchored on `Order[0]`.
+    #[tracing::instrument(skip_all)]
+    pub async fn get_next_post_id_from_post_list(
+        &self,
+        list: &PostList,
+        user_id: &str,
+        collapsed_threads: bool,
+    ) -> String {
+        let Some(first) = self.post_at(list, 0) else {
+            return String::new();
+        };
+        self.get_cursor_post_id(
+            &first.channel_id,
+            first.create_at,
+            user_id,
+            collapsed_threads,
+            false,
+        )
+        .await
+    }
+
+    /// Port of `app.App.GetPrevPostIdFromPostList` (post.go:1850). "Previous" is **older**.
+    #[tracing::instrument(skip_all)]
+    pub async fn get_prev_post_id_from_post_list(
+        &self,
+        list: &PostList,
+        user_id: &str,
+        collapsed_threads: bool,
+    ) -> String {
+        let last = list.order.as_ref().map_or(0, Vec::len).checked_sub(1);
+        let Some(last) = last.and_then(|index| self.post_at(list, index)) else {
+            return String::new();
+        };
+        self.get_cursor_post_id(
+            &last.channel_id,
+            last.create_at,
+            user_id,
+            collapsed_threads,
+            true,
+        )
+        .await
+    }
+
+    /// `postList.Posts[postList.Order[i]]`, which Go dereferences without a nil check — an order
+    /// entry naming a post the map does not hold panics there and returns `None` here. No query
+    /// in this crate produces such a list.
+    fn post_at<'a>(&self, list: &'a PostList, index: usize) -> Option<&'a Post> {
+        let id = list.order.as_ref()?.get(index)?;
+        list.posts.as_ref()?.get(id)
+    }
+
+    /// Port of `app.App.getCursorPostId` (post.go:1864).
+    ///
+    /// The burn-on-read branch is the **live** one on a default-configured server; see
+    /// [`mm_store::PostStore::get_visible_post_id_around_time`]. Go warn-logs a failed lookup and
+    /// returns an empty cursor rather than failing the request, so the client sees
+    /// `"next_post_id":""` and stops paging.
+    async fn get_cursor_post_id(
+        &self,
+        channel_id: &str,
+        from_time: i64,
+        user_id: &str,
+        collapsed_threads: bool,
+        before: bool,
+    ) -> String {
+        let post = self.store().post();
+        let found = if self.config().burn_on_read() {
+            post.get_visible_post_id_around_time(
+                channel_id,
+                from_time,
+                before,
+                collapsed_threads,
+                user_id,
+            )
+            .await
+        } else {
+            post.get_post_id_around_time(channel_id, from_time, before, collapsed_threads)
+                .await
+        };
+
+        found.unwrap_or_else(|err| {
+            tracing::warn!(error = %err, "getCursorPostId: failed to get post id");
+            String::new()
+        })
     }
 }
 

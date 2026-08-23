@@ -1,0 +1,134 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT q2.id,\n                   q2.createat     AS \"create_at!\",\n                   q2.updateat     AS \"update_at!\",\n                   q2.editat       AS \"edit_at!\",\n                   q2.deleteat     AS \"delete_at!\",\n                   q2.ispinned     AS \"is_pinned!\",\n                   q2.userid       AS \"user_id!\",\n                   q2.channelid    AS \"channel_id!\",\n                   q2.rootid       AS \"root_id!\",\n                   q2.originalid   AS \"original_id!\",\n                   q2.message      AS \"message!\",\n                   q2.type         AS \"post_type!\",\n                   q2.props        AS \"props?\",\n                   q2.hashtags     AS \"hashtags!\",\n                   q2.filenames    AS \"filenames?\",\n                   q2.fileids      AS \"file_ids?\",\n                   q2.hasreactions AS \"has_reactions!\",\n                   q2.remoteid     AS \"remote_id?\",\n                   CASE WHEN $4 THEN (SELECT COUNT(*)\n                                        FROM posts sub\n                                       WHERE sub.rootid = (CASE WHEN q2.rootid = '' THEN q2.id ELSE q2.rootid END)\n                                         AND ($5 OR sub.deleteat = 0))\n                        ELSE 0::bigint END AS \"reply_count!\"\n              FROM posts q2\n             INNER JOIN (SELECT DISTINCT q3.rootid\n                           FROM (SELECT posts.rootid\n                                   FROM posts\n                                  WHERE posts.channelid = $1\n                                    AND ($5 OR posts.deleteat = 0)\n                                  ORDER BY posts.createat DESC\n                                  LIMIT $2 OFFSET $3) q3\n                          WHERE q3.rootid != '') q1\n                ON (q1.rootid = q2.id OR (NOT $4 AND q1.rootid = q2.rootid))\n             WHERE q2.channelid = $1\n               AND ($5 OR q2.deleteat = 0)\n             ORDER BY q2.createat\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "create_at!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "update_at!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "edit_at!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "delete_at!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "is_pinned!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 6,
+        "name": "user_id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 7,
+        "name": "channel_id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 8,
+        "name": "root_id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 9,
+        "name": "original_id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 10,
+        "name": "message!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 11,
+        "name": "post_type!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 12,
+        "name": "props?",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 13,
+        "name": "hashtags!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 14,
+        "name": "filenames?",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 15,
+        "name": "file_ids?",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 16,
+        "name": "has_reactions!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 17,
+        "name": "remote_id?",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 18,
+        "name": "reply_count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8",
+        "Int8",
+        "Bool",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      null
+    ]
+  },
+  "hash": "a1606d373efa9d6267df028f921a50e2f92f1e64f3d7e6a3d0af49476c38113b"
+}

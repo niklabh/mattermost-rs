@@ -93,7 +93,12 @@ PY
 RC=0
 case "$SUITE" in
   unit)  cargo test --workspace --lib ${MUTATE_FILTER:+$MUTATE_FILTER} > "$LOG" 2>&1 || RC=$? ;;
-  store) cargo test -p mm-store --tests ${MUTATE_FILTER:+$MUTATE_FILTER} > "$LOG" 2>&1 || RC=$? ;;
+  # `--tests` builds all twenty mm-store test binaries, which costs minutes per mutation and
+  # lets a suite that never saw the change decide the verdict — the same two problems
+  # MUTATE_API_TARGETS exists for. Narrow it the same way:
+  #
+  #   MUTATE_STORE_TARGETS='--test db_post_channel_page'
+  store) cargo test -p mm-store ${=MUTATE_STORE_TARGETS:---tests} ${=MUTATE_FILTER} > "$LOG" 2>&1 || RC=$? ;;
   app)   cargo test -p mm-app --tests ${MUTATE_FILTER:+$MUTATE_FILTER} > "$LOG" 2>&1 || RC=$? ;;
   api)   if restart_server; then
            # `--tests` runs EVERY parity binary, which is slow *and* wrong: a suite that never

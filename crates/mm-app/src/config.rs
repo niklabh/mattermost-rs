@@ -90,6 +90,28 @@ pub struct Config {
     /// (app/post_priority.go:46) reads this and nothing else — there is **no licence check**,
     /// so the branch is live on Team Edition.
     pub post_priority: bool,
+
+    /// `ServiceSettings.EnableBurnOnRead` (config.go:472). Go default **`true`**.
+    pub enable_burn_on_read: bool,
+
+    /// `FeatureFlags.BurnOnRead` (feature_flags.go:90). Go default **`true`**.
+    ///
+    /// Kept apart from the setting above because `isBurnOnReadEnabled` (app/post_helpers.go:270)
+    /// ands the two, and either one alone turns the feature off. Folding them into a single
+    /// field here would make a deployment that disables only the flag indistinguishable from one
+    /// that disables only the setting — the same value, reached two ways, is exactly the sort of
+    /// coincidence that hides a wrong read.
+    pub feature_flag_burn_on_read: bool,
+}
+
+impl Config {
+    /// Port of `app.App.isBurnOnReadEnabled` (post_helpers.go:270).
+    ///
+    /// **Both halves default to true**, so on a stock server this is on — which is why
+    /// `getCursorPostId` reaches the read-receipt-aware cursor query rather than the plain one.
+    pub fn burn_on_read(&self) -> bool {
+        self.feature_flag_burn_on_read && self.enable_burn_on_read
+    }
 }
 
 impl Default for Config {
@@ -104,6 +126,8 @@ impl Default for Config {
             enable_post_icon_override: false,
             enable_custom_emoji: true,
             post_priority: true,
+            enable_burn_on_read: true,
+            feature_flag_burn_on_read: true,
         }
     }
 }
@@ -134,6 +158,14 @@ impl Config {
                 default.enable_custom_emoji,
             ),
             post_priority: env_bool("MM_SERVICESETTINGS_POSTPRIORITY", default.post_priority),
+            enable_burn_on_read: env_bool(
+                "MM_SERVICESETTINGS_ENABLEBURNONREAD",
+                default.enable_burn_on_read,
+            ),
+            feature_flag_burn_on_read: env_bool(
+                "MM_FEATUREFLAGS_BURNONREAD",
+                default.feature_flag_burn_on_read,
+            ),
         }
     }
 }
@@ -183,6 +215,32 @@ mod tests {
         // `metadata.emojis` and `metadata.priority` from every post.
         assert!(config.enable_custom_emoji, "config.go:850 — new(true)");
         assert!(config.post_priority, "config.go:993 — new(true)");
+        assert!(config.enable_burn_on_read, "config.go:1034 — new(true)");
+        assert!(
+            config.feature_flag_burn_on_read,
+            "feature_flags.go:187 — f.BurnOnRead = true"
+        );
+        // And therefore the conjunction, which is what decides which cursor query runs.
+        assert!(
+            config.burn_on_read(),
+            "post_helpers.go:270 — both halves true"
+        );
+    }
+
+    /// Either half alone turns it off — the reason the two are separate fields.
+    #[test]
+    fn burn_on_read_needs_both_halves() {
+        let config = Config {
+            enable_burn_on_read: false,
+            ..Config::default()
+        };
+        assert!(!config.burn_on_read(), "the setting alone disables it");
+
+        let config = Config {
+            feature_flag_burn_on_read: false,
+            ..Config::default()
+        };
+        assert!(!config.burn_on_read(), "the flag alone disables it");
     }
 
     /// Exactly `strconv.ParseBool`'s twelve spellings, and nothing else.

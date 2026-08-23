@@ -1,0 +1,24 @@
+# getPostsForChannel — store, app and api mutations
+root-posts-order	crates/mm-store/src/post_store.rs	ORDER BY p.createat DESC	ORDER BY p.createat ASC	api
+root-posts-deleted	crates/mm-store/src/post_store.rs	AND ($5 OR p.deleteat = 0)	AND ($5 OR p.deleteat >= 0)	api
+root-posts-skipfetch	crates/mm-store/src/post_store.rs	CASE WHEN $4 THEN (SELECT COUNT(*)\n                                        FROM posts sub\n                                       WHERE sub.rootid = (CASE WHEN p.rootid	CASE WHEN NOT $4 THEN (SELECT COUNT(*)\n                                        FROM posts sub\n                                       WHERE sub.rootid = (CASE WHEN p.rootid	api
+parents-join-siblings	crates/mm-store/src/post_store.rs	ON (q1.rootid = q2.id OR (NOT $4 AND q1.rootid = q2.rootid))	ON (q1.rootid = q2.id)	api
+parents-empty-root	crates/mm-store/src/post_store.rs	WHERE q3.rootid != '') q1	WHERE q3.rootid = q3.rootid) q1	api
+ct-roots-only	crates/mm-store/src/post_store.rs	AND posts.rootid = ''\n             ORDER BY posts.createat DESC	AND posts.rootid >= ''\n             ORDER BY posts.createat DESC	api
+ct-reply-count-column	crates/mm-store/src/post_store.rs	COALESCE(threads.replycount, 0)          AS "thread_reply_count!"	COALESCE(threads.lastreplyat, 0)          AS "thread_reply_count!"	api
+ct-following-user	crates/mm-store/src/post_store.rs	AND threadmemberships.userid = $4	AND threadmemberships.userid <> $4	api
+etag-newest	crates/mm-store/src/post_store.rs	ORDER BY updateat DESC	ORDER BY updateat ASC	api
+null-props-empty-map	crates/mm-store/src/post_store.rs	None => Some(StringInterface::new()),	None => None,	api
+# `to` is a no-op statement rather than the empty string: zsh's `read` collapses an empty
+# tab-delimited field, which silently shifts `suite` into `to` and splices it into the source.
+make-non-nil	crates/mm-store/src/post_store.rs	        list.make_non_nil();\n	        let _ = &list;\n	api
+thread-reply-count-assign	crates/mm-store/src/post_store.rs	post.reply_count = row.thread_reply_count;	post.reply_count = row.last_reply_at;	api
+cursor-next-is-first	crates/mm-app/src/post.rs	let Some(first) = self.post_at(list, 0) else {	let Some(first) = self.post_at(list, 1) else {	api
+priority-gate	crates/mm-app/src/post.rs	        if self.config().post_priority {	        if !self.config().post_priority {	api
+priority-keyed-on-order	crates/mm-app/src/post.rs	let order: Vec<String> = list.order.clone().unwrap_or_default();	let order: Vec<String> = list.posts.iter().flatten().map(|(id, _)| id.clone()).collect();	api
+since-strictly-positive	crates/mm-api/src/posts.rs	Ok(since) if since > 0 => return Outcome::Forward,	Ok(since) if since >= 0 => return Outcome::Forward,	api
+visible-cursor-burn	crates/mm-store/src/post_store.rs	AND rr.expireat < $6))\n                   AND (NOT $3 OR posts.rootid = '')\n                 ORDER BY posts.createat DESC	AND rr.expireat > $6))\n                   AND (NOT $3 OR posts.rootid = '')\n                 ORDER BY posts.createat DESC	store
+plain-cursor-collapsed	crates/mm-store/src/post_store.rs	AND (NOT $3 OR rootid = '')\n                 ORDER BY createat DESC	AND (NOT $3 OR rootid >= '')\n                 ORDER BY createat DESC	store
+cursor-prev-direction	crates/mm-app/src/post.rs	            true,\n        )\n        .await\n    }	            false,\n        )\n        .await\n    }	api
+control-rename-binding	crates/mm-app/src/post.rs	let last = list.order.as_ref().map_or(0, Vec::len).checked_sub(1);	let last_index = list.order.as_ref().map_or(0, Vec::len).checked_sub(1);\n        let last = last_index;	api
+control-column-order	crates/mm-store/src/post_store.rs	                   posts.hashtags   AS "hashtags!",\n                   posts.filenames  AS "filenames?",	                   posts.filenames  AS "filenames?",\n                   posts.hashtags   AS "hashtags!",	api

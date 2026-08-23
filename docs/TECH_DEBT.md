@@ -5440,3 +5440,67 @@ otherwise does not have.
 each setting fails.
 
 ---
+
+## D-158 · sqlx materialises a nil Go map before scanning, and only one ported store knows it
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-08-23 (phase 2, getPostsForChannel)
+
+Reading `StringInterface.Scan` (model/utils.go:185) says a NULL column leaves the field nil, and a
+nil Go map marshals as `null`. That is what `mm-store/src/post_store.rs` did, and it was wrong:
+the running server answers `"props":{}` for a post whose `props` column is SQL NULL.
+
+The scan never sees a nil map. **sqlx allocates one first** — `reflectx.FieldByIndexes` calls
+`reflect.MakeMap` for any nil map on the path to the field it is about to scan into — so `Scan`'s
+early return on NULL lands on an empty map. Slices get no such treatment, which is why a NULL
+`fileids` column really does reach the client as `null`. Measured three ways on the same row:
+
+| `posts.props` | Go answers |
+|---|---|
+| SQL `NULL` | `{}` |
+| jsonb `'null'` | `null` — `json.Unmarshal` sets the map back to nil |
+| jsonb `'[1,2]'` | 500, `app.post.get.app_error` |
+
+Fixed for `Post` and pinned by `parity_channel_posts::a_null_props_column_is_an_empty_object_on_every_route`,
+which asserts it on `GET /posts/{id}` as well — the divergence had been shipping there since that
+route landed, undetected because no fixture had a NULL column.
+
+**What is owed:** the same question for every other ported store that scans a Go **map** field out
+of a nullable column. `Channel.Props`, `Session.Props`, `User.NotifyProps` and
+`User.Props` are all `StringMap`/`StringInterface` over nullable columns, and each is one
+`UPDATE … SET col = NULL` and one request away from an answer. None of them can be produced
+through the REST API, which is why none was noticed; that is an argument for checking them, not
+for assuming they are fine.
+
+**Where the pin lives:** the module doc on `mm-store/src/post_store.rs`, with the table above.
+
+---
+
+## D-159 · Go caches the post etag for thirty minutes; we read it fresh every time
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-08-23 (phase 2, getPostsForChannel)
+
+`LocalCachePostStore.GetEtag` (localcachelayer/post_layer.go:74) memoises a channel's last post
+time for `LastPostsCacheSec` — thirty minutes — and drops the entry only when a post is written
+**through the store**. `mm-api` has no cache layer and reads the newest `Posts.UpdateAt` on every
+request. Two consequences, one live and one waiting:
+
+- **An empty channel diverges today.** With no posts there is no last post time, so Go caches the
+  clock reading its *first* request took and repeats it for half an hour, while we stamp a fresh
+  reading each time. Go can therefore answer 304 to a client echoing that etag back where we
+  answer 200 with the same empty list. Bodies are identical; only the header and the status move.
+  Pinned by `parity_channel_posts::an_empty_channel_stamps_the_etag_with_the_clock`, which asserts
+  Go's two reads agree and ours is bracketed by the clock.
+- **Any write that does not go through Go's store makes its etag stale.** Today that is only test
+  fixtures writing rows directly. The moment `mm-api` serves a write — `createPost`, a reaction,
+  anything that moves `Posts.UpdateAt` — Go will keep serving the pre-write etag for up to thirty
+  minutes and 304 clients that should have been given the new page. This is the first place the
+  Strangler Fig's shared database is not enough: the two servers also share a *cache invalidation
+  protocol*, and we do not speak it.
+
+**What is owed:** before the first post-mutating route ships, either invalidate through Go's
+cluster-invalidation channel or accept and document a staleness window. Not before — a read-only
+`mm-api` cannot make Go's cache wrong.
+
+**Where the pin lives:** the doc on `mm_app::App::get_posts_etag` and the test named above.
+
+---
