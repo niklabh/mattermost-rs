@@ -1,0 +1,11 @@
+{
+    "create_at": 1700527554000,
+    "user_id": "qmfyuotah161ajqcb8bdt3p7fo",
+    "required_plan": "requiredplan-9f89f4",
+    "required_feature": "requiredfeature-01d3d9",
+    "trial": true,
+    "sent_at": {
+        "Int64": 30,
+        "Valid": true
+    }
+}

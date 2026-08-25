@@ -1,0 +1,30 @@
+{
+    "visibility": "visibility-23f24d",
+    "sort_order": 49.25,
+    "options": [
+        {
+            "id": "ew4aqb7ow47a7rtuohd5bjp5ta",
+            "name": "name-b4bdd7",
+            "color": "color-859fb1",
+            "rank": 78
+        }
+    ],
+    "value_type": "valuetype-8c2a29",
+    "ldap": "ldap-68ac45",
+    "saml": "saml-709db0",
+    "managed": "managed-499781",
+    "protected": true,
+    "source_plugin_id": "rxwm8zurdayrgh8gsxxge8eyec",
+    "access_mode": "accessmode-8a60cc",
+    "display_name": "displayname-ee224d",
+    "owners": [
+        {
+            "id": "6wkds1cz9bgyeoou8pr3x74cyo",
+            "type": "type-2a3703",
+            "scopes": [
+                "scopes-5680c5",
+                "scopes-5851b7"
+            ]
+        }
+    ]
+}

@@ -1,0 +1,30 @@
+{
+    "version": "version-b9805f",
+    "client_id": "t5sraiecbhsnyoxqjtkoarbcry",
+    "labels": {
+        "key0-e85293": "val0-d23485",
+        "key1-e750e0": "val1-d132d2"
+    },
+    "start": 118.75,
+    "end": 105.625,
+    "counters": [
+        {
+            "metric": "metric-9679bb",
+            "value": 71.5,
+            "labels": {
+                "key0-6c0364": "val0-487d92",
+                "key1-6d0517": "val1-497f45"
+            }
+        }
+    ],
+    "histograms": [
+        {
+            "metric": "metric-b65f4a",
+            "value": 40.25,
+            "labels": {
+                "key0-7f6360": "val0-59ac41",
+                "key1-806513": "val1-5aadf4"
+            }
+        }
+    ]
+}

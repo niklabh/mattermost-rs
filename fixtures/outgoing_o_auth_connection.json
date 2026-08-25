@@ -1,0 +1,17 @@
+{
+    "id": "u4ryuni6qcjmowckbgfmh7y1zy",
+    "creator_id": "u3hk1ec3knrdewm4iro31wcego",
+    "create_at": 1707620241000,
+    "update_at": 1705067068000,
+    "name": "name-2a32d0",
+    "client_id": "58p5ikr3isi3rjs4zkwjumfm1e",
+    "client_secret": "clientsecret-7e21dc",
+    "credentials_username": "credentialsusername-c2ac13",
+    "credentials_password": "correct-horse-battery-26aeb2",
+    "oauth_token_url": "https://example.com/oauthtokenurl/3c2fa4",
+    "grant_type": "granttype-4f9b81",
+    "audiences": [
+        "audiences-f17756",
+        "audiences-f7b3fc"
+    ]
+}

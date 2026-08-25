@@ -1,0 +1,83 @@
+{
+    "response_type": "responsetype-20f481",
+    "text": "text-b5b982",
+    "username": "username-be8d9e",
+    "channel_id": "h41to8e9rmfd7gp8dyqt6e6k8a",
+    "icon_url": "https://example.com/iconurl/74969b",
+    "type": "type-0cb348",
+    "props": {
+        "key0-cb78c3": "val0-58f0ea",
+        "key1-cc7a76": "val1-59f29d"
+    },
+    "goto_location": "gotolocation-db9f8f",
+    "trigger_id": "nfc3zrgq51bbwz1zuqec7shnde",
+    "skip_slack_parsing": true,
+    "attachments": [
+        {
+            "id": 33,
+            "fallback": "fallback-edba58",
+            "color": "color-fccc7d",
+            "pretext": "pretext-4a1c0c",
+            "author_name": "authorname-4cdad6",
+            "author_link": "https://example.com/authorlink/3e09dc",
+            "author_icon": "authoricon-1eb16d",
+            "title": "title-130692",
+            "title_link": "https://example.com/titlelink/0f3276",
+            "text": "text-a2d752",
+            "fields": [
+                {
+                    "title": "title-d0a6c7",
+                    "value": "value-965877",
+                    "short": true
+                }
+            ],
+            "image_url": "https://example.com/imageurl/1d44f7",
+            "thumb_url": "https://example.com/thumburl/df0f94",
+            "footer": "footer-64f2dd",
+            "footer_icon": "footericon-014983",
+            "ts": "timestamp-f318bb",
+            "actions": [
+                {
+                    "id": "xaiwzama5c4zwcjpjxoztzbixe",
+                    "type": "type-af9d59",
+                    "name": "name-c5c1df",
+                    "tooltip": "tooltip-168c76",
+                    "disabled": true,
+                    "style": "style-8efa34",
+                    "data_source": "datasource-be178b",
+                    "options": [
+                        {
+                            "text": "text-f11469",
+                            "value": "value-07763e"
+                        }
+                    ],
+                    "default_option": "defaultoption-02334f",
+                    "integration": {
+                        "url": "https://example.com/url/175d45",
+                        "context": {
+                            "key0-cbc51f": "val0-688c1b",
+                            "key1-ccc6d2": "val1-698dce"
+                        }
+                    },
+                    "cookie": "cookie-5f9526"
+                }
+            ]
+        }
+    ],
+    "extra_responses": [
+        {
+            "response_type": "",
+            "text": "",
+            "username": "",
+            "channel_id": "",
+            "icon_url": "",
+            "type": "",
+            "props": null,
+            "goto_location": "",
+            "trigger_id": "",
+            "skip_slack_parsing": false,
+            "attachments": null,
+            "extra_responses": null
+        }
+    ]
+}

@@ -1,0 +1,34 @@
+{
+    "subject": {
+        "id": "5kw3eqs5yqkhddpm1o7psbriar",
+        "type": "type-37555a",
+        "role": "role-8934e1",
+        "scoped_roles": [
+            {
+                "scope": "scope-82e569",
+                "role": "role-bad7d5"
+            }
+        ],
+        "attributes": {
+            "key0-bb5196": "val0-9ffb89",
+            "key1-bc5349": "val1-a0fd3c"
+        },
+        "session": {
+            "key0-cc33d5": "val0-fff046",
+            "key1-cb3222": "val1-feee93"
+        },
+        "email": "email-6199da@example.com",
+        "email_verified": true,
+        "is_bot": true,
+        "create_at": 1704871653000
+    },
+    "resource": {
+        "id": "k4k4h6bcocoxonczi3hn3bby9y",
+        "type": "type-68bff3"
+    },
+    "action": "action-478443",
+    "context": {
+        "key0-496416": "val0-d36138",
+        "key1-4a65c9": "val1-d462eb"
+    }
+}

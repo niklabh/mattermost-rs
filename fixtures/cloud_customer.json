@@ -1,0 +1,35 @@
+{
+    "name": "name-76975e",
+    "email": "email-50576c@example.com",
+    "contact_first_name": "contactfirstname-efd2cd",
+    "contact_last_name": "contactlastname-a7182e",
+    "num_employees": 81,
+    "monthly_subscription_alt_payment_method": "cloudaltpaymentmethod-c58f11",
+    "id": "w4drtm456xeh4scejnziz7gt3w",
+    "creator_id": "caftc1i8yp3t1gepn3fkqbdudr",
+    "create_at": 1701744841000,
+    "billing_address": {
+        "city": "city-1722f3",
+        "country": "country-d729f3",
+        "line1": "line1-a5733f",
+        "line2": "line2-a4718c",
+        "postal_code": "postalcode-597789",
+        "state": "state-ea5c9e"
+    },
+    "company_address": {
+        "city": "city-585134",
+        "country": "country-428a6e",
+        "line1": "line1-acfd5d",
+        "line2": "line2-abfbaa",
+        "postal_code": "postalcode-4b1855",
+        "state": "state-947be9"
+    },
+    "payment_method": {
+        "type": "type-0fb8bf",
+        "last_four": "lastfour-5474f2",
+        "exp_month": 41,
+        "exp_year": 16,
+        "card_brand": "cardbrand-433e73",
+        "name": "name-d351c8"
+    }
+}

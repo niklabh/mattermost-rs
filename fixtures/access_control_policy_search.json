@@ -1,0 +1,22 @@
+{
+    "term": "term-f8cafa",
+    "type": "type-98bb56",
+    "parent_id": "e3qhoe97ab1nj6k63yt95omrro",
+    "ids": [
+        "ids-6825b0",
+        "ids-6843a1"
+    ],
+    "cursor": {
+        "id": "se6i5kcfxmgqr3j9mswak66che"
+    },
+    "limit": 92,
+    "include_children": true,
+    "active": true,
+    "team_id": "f6znter4s7h7g9fcfnojipu34c",
+    "scope": "scope-1d908a",
+    "scope_id": "hkda6abf41875fcjt7onmicx5w",
+    "actions": [
+        "actions-a38bb3",
+        "actions-a9c859"
+    ]
+}

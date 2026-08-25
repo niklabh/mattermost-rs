@@ -1,0 +1,24 @@
+{
+    "id": "7dook41razd3bg9dyiirjts81y",
+    "token": "hy5f1kdeboc3dr3amrwgode31r",
+    "create_at": 1705470103000,
+    "update_at": 1702010298000,
+    "delete_at": 1702174908000,
+    "creator_id": "iuiaxhsj7xkwqz9po93cu5gieh",
+    "channel_id": "mhgezzk6haaw3myktxqi73jtjo",
+    "team_id": "88bhfdbamhp85bsbakgdozo4xw",
+    "trigger_words": [
+        "triggerwords-0da419",
+        "triggerwords-1593c0"
+    ],
+    "trigger_when": 31,
+    "callback_urls": [
+        "https://example.com/callbackurls/f8101d",
+        "https://example.com/callbackurls/ffffc4"
+    ],
+    "display_name": "displayname-f1c1a1",
+    "description": "description-958c33",
+    "content_type": "contenttype-739642",
+    "username": "username-fc05ea",
+    "icon_url": "https://example.com/iconurl/f227b0"
+}

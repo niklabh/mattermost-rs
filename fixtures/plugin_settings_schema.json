@@ -1,0 +1,53 @@
+{
+    "header": "header-a43129",
+    "footer": "footer-664b62",
+    "settings": [
+        {
+            "key": "key-7721a1",
+            "display_name": "displayname-797a2e",
+            "type": "type-e00d89",
+            "help_text": "helptext-330a4d",
+            "regenerate_help_text": "regeneratehelptext-70cdb7",
+            "placeholder": "placeholder-ffe7e4",
+            "default": "default-110648",
+            "options": [
+                {
+                    "display_name": "displayname-554d22",
+                    "value": "value-3269b6"
+                }
+            ],
+            "hosting": "hosting-eddb33",
+            "secret": true
+        }
+    ],
+    "sections": [
+        {
+            "key": "key-305bed",
+            "title": "title-ec93c4",
+            "subtitle": "subtitle-9d81f2",
+            "settings": [
+                {
+                    "key": "key-9c02d8",
+                    "display_name": "displayname-883df6",
+                    "type": "type-9007ab",
+                    "help_text": "helptext-b7b923",
+                    "regenerate_help_text": "regeneratehelptext-0ef7bb",
+                    "placeholder": "placeholder-fefe07",
+                    "default": "default-9db1a7",
+                    "options": [
+                        {
+                            "display_name": "displayname-c760da",
+                            "value": "value-87d327"
+                        }
+                    ],
+                    "hosting": "hosting-9ac2e1",
+                    "secret": true
+                }
+            ],
+            "header": "header-bfc844",
+            "footer": "footer-264964",
+            "custom": true,
+            "fallback": true
+        }
+    ]
+}

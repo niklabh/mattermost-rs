@@ -1,0 +1,54 @@
+{
+    "decision": true,
+    "blame": [
+        {
+            "source": "source-902909",
+            "outcome": "outcome-15eb59",
+            "policy_id": "tg8cqasambwsdiwca7tpoi5jcr",
+            "policy_name": "policyname-3889c6",
+            "rule_name": "rulename-6e174c",
+            "role": "role-1abda2",
+            "expression": "expression-3ea11d",
+            "evaluation_tree": {
+                "kind": "kind-f91dd3",
+                "expression": "expression-bef55f",
+                "outcome": "outcome-dbafac",
+                "error": "error-eb77e9",
+                "operator": "operator-4fff9b",
+                "attribute": "attribute-5c1e87",
+                "actual_value": "actualvalue-1248b6",
+                "expected_value": "expectedvalue-7d4e8a",
+                "children": [
+                    {
+                        "kind": "",
+                        "expression": "",
+                        "outcome": ""
+                    }
+                ]
+            },
+            "merged_rules": [
+                {
+                    "name": "name-e1e5c9",
+                    "expression": "expression-820979",
+                    "evaluation_tree": {
+                        "kind": "kind-73dda8",
+                        "expression": "expression-0a72e6",
+                        "outcome": "outcome-c8712b",
+                        "error": "error-1f85b4",
+                        "operator": "operator-323fab",
+                        "attribute": "attribute-8d27ff",
+                        "actual_value": "actualvalue-5819a8",
+                        "expected_value": "expectedvalue-181c52",
+                        "children": [
+                            {
+                                "kind": "",
+                                "expression": "",
+                                "outcome": ""
+                            }
+                        ]
+                    }
+                }
+            ]
+        }
+    ]
+}

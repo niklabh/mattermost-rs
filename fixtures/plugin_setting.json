@@ -1,0 +1,17 @@
+{
+    "key": "key-5b67b1",
+    "display_name": "displayname-acb8eb",
+    "type": "type-d1807b",
+    "help_text": "helptext-fd1484",
+    "regenerate_help_text": "regeneratehelptext-b0bdf3",
+    "placeholder": "placeholder-b03bb2",
+    "default": "default-89c587",
+    "options": [
+        {
+            "display_name": "displayname-122fee",
+            "value": "value-2c643d"
+        }
+    ],
+    "hosting": "hosting-48bd72",
+    "secret": true
+}

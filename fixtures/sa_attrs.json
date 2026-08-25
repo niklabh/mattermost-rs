@@ -1,0 +1,10 @@
+{
+    "enabled": true,
+    "platforms": [
+        "platforms-a9f0e2",
+        "platforms-e88cb0"
+    ],
+    "ttl_seconds": 67,
+    "grace_period_seconds": 10,
+    "display_name": "displayname-b72f8f"
+}

@@ -1,0 +1,28 @@
+{
+    "key": "key-a7e2dd",
+    "title": "title-2db503",
+    "subtitle": "subtitle-132c86",
+    "settings": [
+        {
+            "key": "key-15ad99",
+            "display_name": "displayname-10890c",
+            "type": "type-154169",
+            "help_text": "helptext-9b2bd0",
+            "regenerate_help_text": "regeneratehelptext-68b053",
+            "placeholder": "placeholder-0b9fb4",
+            "default": "default-610195",
+            "options": [
+                {
+                    "display_name": "displayname-5d2abe",
+                    "value": "value-5abedd"
+                }
+            ],
+            "hosting": "hosting-501e02",
+            "secret": true
+        }
+    ],
+    "header": "header-f467af",
+    "footer": "footer-cdb68a",
+    "custom": true,
+    "fallback": true
+}

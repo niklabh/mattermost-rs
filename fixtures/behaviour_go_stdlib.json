@@ -1,0 +1,1540 @@
+{
+    "duration_string": [
+        {
+            "nanos": 0,
+            "out": "0s"
+        },
+        {
+            "nanos": 1,
+            "out": "1ns"
+        },
+        {
+            "nanos": 999,
+            "out": "999ns"
+        },
+        {
+            "nanos": 1000,
+            "out": "1µs"
+        },
+        {
+            "nanos": 1500,
+            "out": "1.5µs"
+        },
+        {
+            "nanos": 999999,
+            "out": "999.999µs"
+        },
+        {
+            "nanos": 1000000,
+            "out": "1ms"
+        },
+        {
+            "nanos": 1500000,
+            "out": "1.5ms"
+        },
+        {
+            "nanos": 999999999,
+            "out": "999.999999ms"
+        },
+        {
+            "nanos": 1000000000,
+            "out": "1s"
+        },
+        {
+            "nanos": 1500000000,
+            "out": "1.5s"
+        },
+        {
+            "nanos": 1000000001,
+            "out": "1.000000001s"
+        },
+        {
+            "nanos": 59000000000,
+            "out": "59s"
+        },
+        {
+            "nanos": 60000000000,
+            "out": "1m0s"
+        },
+        {
+            "nanos": 61500000000,
+            "out": "1m1.5s"
+        },
+        {
+            "nanos": 3600000000000,
+            "out": "1h0m0s"
+        },
+        {
+            "nanos": 3661000000000,
+            "out": "1h1m1s"
+        },
+        {
+            "nanos": 86400000000000,
+            "out": "24h0m0s"
+        },
+        {
+            "nanos": -1,
+            "out": "-1ns"
+        },
+        {
+            "nanos": -1500000000,
+            "out": "-1.5s"
+        },
+        {
+            "nanos": -3661000000000,
+            "out": "-1h1m1s"
+        },
+        {
+            "nanos": 9223372036854775807,
+            "out": "2562047h47m16.854775807s"
+        },
+        {
+            "nanos": -9223372036854775808,
+            "out": "-2562047h47m16.854775808s"
+        },
+        {
+            "nanos": 300000000000,
+            "out": "5m0s"
+        },
+        {
+            "nanos": 86400000000000,
+            "out": "24h0m0s"
+        }
+    ],
+    "mod_semver_isvalid": [
+        {
+            "in": "",
+            "out": false
+        },
+        {
+            "in": "v",
+            "out": false
+        },
+        {
+            "in": "0",
+            "out": false
+        },
+        {
+            "in": "1",
+            "out": false
+        },
+        {
+            "in": "0.1",
+            "out": false
+        },
+        {
+            "in": "v0",
+            "out": true
+        },
+        {
+            "in": "v0.1",
+            "out": true
+        },
+        {
+            "in": "v0.1.0",
+            "out": true
+        },
+        {
+            "in": "v1.2.3",
+            "out": true
+        },
+        {
+            "in": "0.1.0",
+            "out": false
+        },
+        {
+            "in": "1.2.3",
+            "out": false
+        },
+        {
+            "in": "V1.2.3",
+            "out": false
+        },
+        {
+            "in": "v1.2.3.4",
+            "out": false
+        },
+        {
+            "in": "v01.2.3",
+            "out": false
+        },
+        {
+            "in": "v1.02.3",
+            "out": false
+        },
+        {
+            "in": "v1.2.3-alpha",
+            "out": true
+        },
+        {
+            "in": "v1.2.3-alpha.1",
+            "out": true
+        },
+        {
+            "in": "v1.2.3-0",
+            "out": true
+        },
+        {
+            "in": "v1.2.3-01",
+            "out": false
+        },
+        {
+            "in": "v1.2.3-",
+            "out": false
+        },
+        {
+            "in": "v1.2.3+build",
+            "out": true
+        },
+        {
+            "in": "v1.2.3+build.1",
+            "out": true
+        },
+        {
+            "in": "v1.2.3-alpha+build",
+            "out": true
+        },
+        {
+            "in": "v1.2.3+",
+            "out": false
+        },
+        {
+            "in": "v1.2.3 ",
+            "out": false
+        },
+        {
+            "in": " v1.2.3",
+            "out": false
+        },
+        {
+            "in": "v1.2.-3",
+            "out": false
+        },
+        {
+            "in": "v-1.2.3",
+            "out": false
+        },
+        {
+            "in": "vx.y.z",
+            "out": false
+        },
+        {
+            "in": "v0.1",
+            "out": true
+        },
+        {
+            "in": "v0.2",
+            "out": true
+        },
+        {
+            "in": "v0.3",
+            "out": true
+        },
+        {
+            "in": "v0.4",
+            "out": true
+        },
+        {
+            "in": "v0.5",
+            "out": true
+        },
+        {
+            "in": "0.1.0",
+            "out": false
+        },
+        {
+            "in": "5.6.0",
+            "out": false
+        },
+        {
+            "in": "5.6",
+            "out": false
+        },
+        {
+            "in": "10.0.0-rc.1",
+            "out": false
+        },
+        {
+            "in": "1.2.3.4",
+            "out": false
+        },
+        {
+            "in": "01.2.3",
+            "out": false
+        },
+        {
+            "in": "1.02.3",
+            "out": false
+        },
+        {
+            "in": "1.2.03",
+            "out": false
+        },
+        {
+            "in": "1.2.3-alpha",
+            "out": false
+        },
+        {
+            "in": "1.2.3-alpha.1",
+            "out": false
+        },
+        {
+            "in": "1.2.3-0",
+            "out": false
+        },
+        {
+            "in": "1.2.3-01",
+            "out": false
+        },
+        {
+            "in": "1.2.3-0a",
+            "out": false
+        },
+        {
+            "in": "1.2.3+build",
+            "out": false
+        },
+        {
+            "in": "1.2.3+01",
+            "out": false
+        },
+        {
+            "in": "1.2.3+build.01",
+            "out": false
+        },
+        {
+            "in": "1.2.3-",
+            "out": false
+        },
+        {
+            "in": "1.2.3+",
+            "out": false
+        },
+        {
+            "in": "1.2.3-alpha..1",
+            "out": false
+        },
+        {
+            "in": "1.2.3-AL.pha",
+            "out": false
+        },
+        {
+            "in": "1.2.3-alpha_1",
+            "out": false
+        },
+        {
+            "in": " 1.2.3",
+            "out": false
+        },
+        {
+            "in": "1.2.3 ",
+            "out": false
+        },
+        {
+            "in": "1.2",
+            "out": false
+        },
+        {
+            "in": "1",
+            "out": false
+        },
+        {
+            "in": "",
+            "out": false
+        }
+    ],
+    "path_clean": [
+        {
+            "in": "",
+            "out": "."
+        },
+        {
+            "in": ".",
+            "out": "."
+        },
+        {
+            "in": "..",
+            "out": ".."
+        },
+        {
+            "in": "/",
+            "out": "/"
+        },
+        {
+            "in": "//",
+            "out": "/"
+        },
+        {
+            "in": "///",
+            "out": "/"
+        },
+        {
+            "in": "a",
+            "out": "a"
+        },
+        {
+            "in": "a/",
+            "out": "a"
+        },
+        {
+            "in": "/a",
+            "out": "/a"
+        },
+        {
+            "in": "/a/",
+            "out": "/a"
+        },
+        {
+            "in": "a//b",
+            "out": "a/b"
+        },
+        {
+            "in": "a/./b",
+            "out": "a/b"
+        },
+        {
+            "in": "a/../b",
+            "out": "b"
+        },
+        {
+            "in": "a/b/..",
+            "out": "a"
+        },
+        {
+            "in": "..//a",
+            "out": "../a"
+        },
+        {
+            "in": "../a",
+            "out": "../a"
+        },
+        {
+            "in": "a/..",
+            "out": "."
+        },
+        {
+            "in": "/..",
+            "out": "/"
+        },
+        {
+            "in": "/../a",
+            "out": "/a"
+        },
+        {
+            "in": "/a/../..",
+            "out": "/"
+        },
+        {
+            "in": "a/../../b",
+            "out": "../b"
+        },
+        {
+            "in": "./a",
+            "out": "a"
+        },
+        {
+            "in": "././a",
+            "out": "a"
+        },
+        {
+            "in": "a/./././b",
+            "out": "a/b"
+        },
+        {
+            "in": "/a//b///c",
+            "out": "/a/b/c"
+        },
+        {
+            "in": "static/plugin",
+            "out": "static/plugin"
+        },
+        {
+            "in": "/static/plugin/",
+            "out": "/static/plugin"
+        },
+        {
+            "in": "/static//plugin/../assets",
+            "out": "/static/assets"
+        },
+        {
+            "in": "a/b/c/../../d",
+            "out": "a/d"
+        },
+        {
+            "in": "../../a",
+            "out": "../../a"
+        },
+        {
+            "in": "/../../a",
+            "out": "/a"
+        }
+    ],
+    "path_join": [
+        {
+            "a": "",
+            "b": "",
+            "out": ""
+        },
+        {
+            "a": "",
+            "b": "a",
+            "out": "a"
+        },
+        {
+            "a": "a",
+            "b": "",
+            "out": "a"
+        },
+        {
+            "a": "/",
+            "b": "a",
+            "out": "/a"
+        },
+        {
+            "a": "a",
+            "b": "b",
+            "out": "a/b"
+        },
+        {
+            "a": "/base",
+            "b": "rel",
+            "out": "/base/rel"
+        },
+        {
+            "a": "/base/",
+            "b": "/rel",
+            "out": "/base/rel"
+        },
+        {
+            "a": "/base",
+            "b": "../rel",
+            "out": "/rel"
+        },
+        {
+            "a": "/base/deep",
+            "b": "../../rel",
+            "out": "/rel"
+        },
+        {
+            "a": "base",
+            "b": "./rel",
+            "out": "base/rel"
+        },
+        {
+            "a": "/",
+            "b": "/",
+            "out": "/"
+        },
+        {
+            "a": "/plugins/com.example",
+            "b": "autocomplete",
+            "out": "/plugins/com.example/autocomplete"
+        },
+        {
+            "a": "/plugins/com.example/",
+            "b": "/autocomplete/",
+            "out": "/plugins/com.example/autocomplete"
+        },
+        {
+            "a": "",
+            "b": "../escape",
+            "out": "../escape"
+        },
+        {
+            "a": "/",
+            "b": "../escape",
+            "out": "/escape"
+        }
+    ],
+    "slice_percent_s": [
+        {
+            "in": null,
+            "len": 2,
+            "out": "[]"
+        },
+        {
+            "in": [],
+            "len": 2,
+            "out": "[]"
+        },
+        {
+            "in": [
+                ""
+            ],
+            "len": 2,
+            "out": "[]"
+        },
+        {
+            "in": [
+                "a"
+            ],
+            "len": 3,
+            "out": "[a]"
+        },
+        {
+            "in": [
+                "a",
+                "b"
+            ],
+            "len": 5,
+            "out": "[a b]"
+        },
+        {
+            "in": [
+                "",
+                ""
+            ],
+            "len": 3,
+            "out": "[ ]"
+        },
+        {
+            "in": [
+                "one",
+                "two",
+                "three"
+            ],
+            "len": 15,
+            "out": "[one two three]"
+        },
+        {
+            "in": [
+                "https://example.com/hook",
+                "https://example.com/other"
+            ],
+            "len": 52,
+            "out": "[https://example.com/hook https://example.com/other]"
+        },
+        {
+            "in": [
+                "a b",
+                "c\td"
+            ],
+            "len": 9,
+            "out": "[a b c\td]"
+        },
+        {
+            "in": [
+                "[bracketed]"
+            ],
+            "len": 13,
+            "out": "[[bracketed]]"
+        }
+    ],
+    "strict_semver": [
+        {
+            "in": "",
+            "lenient_err": "invalid semantic version",
+            "lenient_ok": false,
+            "strict_err": "version string empty",
+            "strict_ok": false
+        },
+        {
+            "in": "v",
+            "lenient_err": "invalid semantic version",
+            "lenient_ok": false,
+            "strict_err": "invalid semantic version",
+            "strict_ok": false
+        },
+        {
+            "in": "0",
+            "lenient_major": 0,
+            "lenient_minor": 0,
+            "lenient_ok": true,
+            "lenient_patch": 0,
+            "lenient_string": "0.0.0",
+            "strict_err": "invalid semantic version",
+            "strict_ok": false
+        },
+        {
+            "in": "1",
+            "lenient_major": 1,
+            "lenient_minor": 0,
+            "lenient_ok": true,
+            "lenient_patch": 0,
+            "lenient_string": "1.0.0",
+            "strict_err": "invalid semantic version",
+            "strict_ok": false
+        },
+        {
+            "in": "0.1",
+            "lenient_major": 0,
+            "lenient_minor": 1,
+            "lenient_ok": true,
+            "lenient_patch": 0,
+            "lenient_string": "0.1.0",
+            "strict_err": "invalid semantic version",
+            "strict_ok": false
+        },
+        {
+            "in": "v0",
+            "lenient_major": 0,
+            "lenient_minor": 0,
+            "lenient_ok": true,
+            "lenient_patch": 0,
+            "lenient_string": "0.0.0",
+            "strict_err": "invalid semantic version",
+            "strict_ok": false
+        },
+        {
+            "in": "v0.1",
+            "lenient_major": 0,
+            "lenient_minor": 1,
+            "lenient_ok": true,
+            "lenient_patch": 0,
+            "lenient_string": "0.1.0",
+            "strict_err": "invalid semantic version",
+            "strict_ok": false
+        },
+        {
+            "in": "v0.1.0",
+            "lenient_major": 0,
+            "lenient_minor": 1,
+            "lenient_ok": true,
+            "lenient_patch": 0,
+            "lenient_string": "0.1.0",
+            "strict_err": "invalid characters in version",
+            "strict_ok": false
+        },
+        {
+            "in": "v1.2.3",
+            "lenient_major": 1,
+            "lenient_minor": 2,
+            "lenient_ok": true,
+            "lenient_patch": 3,
+            "lenient_string": "1.2.3",
+            "strict_err": "invalid characters in version",
+            "strict_ok": false
+        },
+        {
+            "in": "0.1.0",
+            "lenient_major": 0,
+            "lenient_minor": 1,
+            "lenient_ok": true,
+            "lenient_patch": 0,
+            "lenient_string": "0.1.0",
+            "strict_major": 0,
+            "strict_metadata": "",
+            "strict_minor": 1,
+            "strict_ok": true,
+            "strict_patch": 0,
+            "strict_prerelease": "",
+            "strict_string": "0.1.0"
+        },
+        {
+            "in": "1.2.3",
+            "lenient_major": 1,
+            "lenient_minor": 2,
+            "lenient_ok": true,
+            "lenient_patch": 3,
+            "lenient_string": "1.2.3",
+            "strict_major": 1,
+            "strict_metadata": "",
+            "strict_minor": 2,
+            "strict_ok": true,
+            "strict_patch": 3,
+            "strict_prerelease": "",
+            "strict_string": "1.2.3"
+        },
+        {
+            "in": "V1.2.3",
+            "lenient_err": "invalid semantic version",
+            "lenient_ok": false,
+            "strict_err": "invalid characters in version",
+            "strict_ok": false
+        },
+        {
+            "in": "v1.2.3.4",
+            "lenient_err": "invalid semantic version",
+            "lenient_ok": false,
+            "strict_err": "invalid characters in version",
+            "strict_ok": false
+        },
+        {
+            "in": "v01.2.3",
+            "lenient_major": 1,
+            "lenient_minor": 2,
+            "lenient_ok": true,
+            "lenient_patch": 3,
+            "lenient_string": "1.2.3",
+            "strict_err": "invalid characters in version",
+            "strict_ok": false
+        },
+        {
+            "in": "v1.02.3",
+            "lenient_major": 1,
+            "lenient_minor": 2,
+            "lenient_ok": true,
+            "lenient_patch": 3,
+            "lenient_string": "1.2.3",
+            "strict_err": "invalid characters in version",
+            "strict_ok": false
+        },
+        {
+            "in": "v1.2.3-alpha",
+            "lenient_major": 1,
+            "lenient_minor": 2,
+            "lenient_ok": true,
+            "lenient_patch": 3,
+            "lenient_string": "1.2.3-alpha",
+            "strict_err": "invalid characters in version",
+            "strict_ok": false
+        },
+        {
+            "in": "v1.2.3-alpha.1",
+            "lenient_major": 1,
+            "lenient_minor": 2,
+            "lenient_ok": true,
+            "lenient_patch": 3,
+            "lenient_string": "1.2.3-alpha.1",
+            "strict_err": "invalid characters in version",
+            "strict_ok": false
+        },
+        {
+            "in": "v1.2.3-0",
+            "lenient_major": 1,
+            "lenient_minor": 2,
+            "lenient_ok": true,
+            "lenient_patch": 3,
+            "lenient_string": "1.2.3-0",
+            "strict_err": "invalid characters in version",
+            "strict_ok": false
+        },
+        {
+            "in": "v1.2.3-01",
+            "lenient_err": "version segment starts with 0",
+            "lenient_ok": false,
+            "strict_err": "version segment starts with 0",
+            "strict_ok": false
+        },
+        {
+            "in": "v1.2.3-",
+            "lenient_err": "invalid semantic version",
+            "lenient_ok": false,
+            "strict_err": "invalid prerelease string",
+            "strict_ok": false
+        },
+        {
+            "in": "v1.2.3+build",
+            "lenient_major": 1,
+            "lenient_minor": 2,
+            "lenient_ok": true,
+            "lenient_patch": 3,
+            "lenient_string": "1.2.3+build",
+            "strict_err": "invalid characters in version",
+            "strict_ok": false
+        },
+        {
+            "in": "v1.2.3+build.1",
+            "lenient_major": 1,
+            "lenient_minor": 2,
+            "lenient_ok": true,
+            "lenient_patch": 3,
+            "lenient_string": "1.2.3+build.1",
+            "strict_err": "invalid characters in version",
+            "strict_ok": false
+        },
+        {
+            "in": "v1.2.3-alpha+build",
+            "lenient_major": 1,
+            "lenient_minor": 2,
+            "lenient_ok": true,
+            "lenient_patch": 3,
+            "lenient_string": "1.2.3-alpha+build",
+            "strict_err": "invalid characters in version",
+            "strict_ok": false
+        },
+        {
+            "in": "v1.2.3+",
+            "lenient_err": "invalid semantic version",
+            "lenient_ok": false,
+            "strict_err": "invalid metadata string",
+            "strict_ok": false
+        },
+        {
+            "in": "v1.2.3 ",
+            "lenient_err": "invalid semantic version",
+            "lenient_ok": false,
+            "strict_err": "invalid characters in version",
+            "strict_ok": false
+        },
+        {
+            "in": " v1.2.3",
+            "lenient_err": "invalid semantic version",
+            "lenient_ok": false,
+            "strict_err": "invalid characters in version",
+            "strict_ok": false
+        },
+        {
+            "in": "v1.2.-3",
+            "lenient_err": "invalid semantic version",
+            "lenient_ok": false,
+            "strict_err": "invalid characters in version",
+            "strict_ok": false
+        },
+        {
+            "in": "v-1.2.3",
+            "lenient_err": "invalid semantic version",
+            "lenient_ok": false,
+            "strict_err": "invalid characters in version",
+            "strict_ok": false
+        },
+        {
+            "in": "vx.y.z",
+            "lenient_err": "invalid semantic version",
+            "lenient_ok": false,
+            "strict_err": "invalid characters in version",
+            "strict_ok": false
+        },
+        {
+            "in": "v0.1",
+            "lenient_major": 0,
+            "lenient_minor": 1,
+            "lenient_ok": true,
+            "lenient_patch": 0,
+            "lenient_string": "0.1.0",
+            "strict_err": "invalid semantic version",
+            "strict_ok": false
+        },
+        {
+            "in": "v0.2",
+            "lenient_major": 0,
+            "lenient_minor": 2,
+            "lenient_ok": true,
+            "lenient_patch": 0,
+            "lenient_string": "0.2.0",
+            "strict_err": "invalid semantic version",
+            "strict_ok": false
+        },
+        {
+            "in": "v0.3",
+            "lenient_major": 0,
+            "lenient_minor": 3,
+            "lenient_ok": true,
+            "lenient_patch": 0,
+            "lenient_string": "0.3.0",
+            "strict_err": "invalid semantic version",
+            "strict_ok": false
+        },
+        {
+            "in": "v0.4",
+            "lenient_major": 0,
+            "lenient_minor": 4,
+            "lenient_ok": true,
+            "lenient_patch": 0,
+            "lenient_string": "0.4.0",
+            "strict_err": "invalid semantic version",
+            "strict_ok": false
+        },
+        {
+            "in": "v0.5",
+            "lenient_major": 0,
+            "lenient_minor": 5,
+            "lenient_ok": true,
+            "lenient_patch": 0,
+            "lenient_string": "0.5.0",
+            "strict_err": "invalid semantic version",
+            "strict_ok": false
+        },
+        {
+            "in": "0.1.0",
+            "lenient_major": 0,
+            "lenient_minor": 1,
+            "lenient_ok": true,
+            "lenient_patch": 0,
+            "lenient_string": "0.1.0",
+            "strict_major": 0,
+            "strict_metadata": "",
+            "strict_minor": 1,
+            "strict_ok": true,
+            "strict_patch": 0,
+            "strict_prerelease": "",
+            "strict_string": "0.1.0"
+        },
+        {
+            "in": "5.6.0",
+            "lenient_major": 5,
+            "lenient_minor": 6,
+            "lenient_ok": true,
+            "lenient_patch": 0,
+            "lenient_string": "5.6.0",
+            "strict_major": 5,
+            "strict_metadata": "",
+            "strict_minor": 6,
+            "strict_ok": true,
+            "strict_patch": 0,
+            "strict_prerelease": "",
+            "strict_string": "5.6.0"
+        },
+        {
+            "in": "5.6",
+            "lenient_major": 5,
+            "lenient_minor": 6,
+            "lenient_ok": true,
+            "lenient_patch": 0,
+            "lenient_string": "5.6.0",
+            "strict_err": "invalid semantic version",
+            "strict_ok": false
+        },
+        {
+            "in": "10.0.0-rc.1",
+            "lenient_major": 10,
+            "lenient_minor": 0,
+            "lenient_ok": true,
+            "lenient_patch": 0,
+            "lenient_string": "10.0.0-rc.1",
+            "strict_major": 10,
+            "strict_metadata": "",
+            "strict_minor": 0,
+            "strict_ok": true,
+            "strict_patch": 0,
+            "strict_prerelease": "rc.1",
+            "strict_string": "10.0.0-rc.1"
+        },
+        {
+            "in": "1.2.3.4",
+            "lenient_err": "invalid semantic version",
+            "lenient_ok": false,
+            "strict_err": "invalid characters in version",
+            "strict_ok": false
+        },
+        {
+            "in": "01.2.3",
+            "lenient_major": 1,
+            "lenient_minor": 2,
+            "lenient_ok": true,
+            "lenient_patch": 3,
+            "lenient_string": "1.2.3",
+            "strict_err": "version segment starts with 0",
+            "strict_ok": false
+        },
+        {
+            "in": "1.02.3",
+            "lenient_major": 1,
+            "lenient_minor": 2,
+            "lenient_ok": true,
+            "lenient_patch": 3,
+            "lenient_string": "1.2.3",
+            "strict_err": "version segment starts with 0",
+            "strict_ok": false
+        },
+        {
+            "in": "1.2.03",
+            "lenient_major": 1,
+            "lenient_minor": 2,
+            "lenient_ok": true,
+            "lenient_patch": 3,
+            "lenient_string": "1.2.3",
+            "strict_err": "version segment starts with 0",
+            "strict_ok": false
+        },
+        {
+            "in": "1.2.3-alpha",
+            "lenient_major": 1,
+            "lenient_minor": 2,
+            "lenient_ok": true,
+            "lenient_patch": 3,
+            "lenient_string": "1.2.3-alpha",
+            "strict_major": 1,
+            "strict_metadata": "",
+            "strict_minor": 2,
+            "strict_ok": true,
+            "strict_patch": 3,
+            "strict_prerelease": "alpha",
+            "strict_string": "1.2.3-alpha"
+        },
+        {
+            "in": "1.2.3-alpha.1",
+            "lenient_major": 1,
+            "lenient_minor": 2,
+            "lenient_ok": true,
+            "lenient_patch": 3,
+            "lenient_string": "1.2.3-alpha.1",
+            "strict_major": 1,
+            "strict_metadata": "",
+            "strict_minor": 2,
+            "strict_ok": true,
+            "strict_patch": 3,
+            "strict_prerelease": "alpha.1",
+            "strict_string": "1.2.3-alpha.1"
+        },
+        {
+            "in": "1.2.3-0",
+            "lenient_major": 1,
+            "lenient_minor": 2,
+            "lenient_ok": true,
+            "lenient_patch": 3,
+            "lenient_string": "1.2.3-0",
+            "strict_major": 1,
+            "strict_metadata": "",
+            "strict_minor": 2,
+            "strict_ok": true,
+            "strict_patch": 3,
+            "strict_prerelease": "0",
+            "strict_string": "1.2.3-0"
+        },
+        {
+            "in": "1.2.3-01",
+            "lenient_err": "version segment starts with 0",
+            "lenient_ok": false,
+            "strict_err": "version segment starts with 0",
+            "strict_ok": false
+        },
+        {
+            "in": "1.2.3-0a",
+            "lenient_major": 1,
+            "lenient_minor": 2,
+            "lenient_ok": true,
+            "lenient_patch": 3,
+            "lenient_string": "1.2.3-0a",
+            "strict_major": 1,
+            "strict_metadata": "",
+            "strict_minor": 2,
+            "strict_ok": true,
+            "strict_patch": 3,
+            "strict_prerelease": "0a",
+            "strict_string": "1.2.3-0a"
+        },
+        {
+            "in": "1.2.3+build",
+            "lenient_major": 1,
+            "lenient_minor": 2,
+            "lenient_ok": true,
+            "lenient_patch": 3,
+            "lenient_string": "1.2.3+build",
+            "strict_major": 1,
+            "strict_metadata": "build",
+            "strict_minor": 2,
+            "strict_ok": true,
+            "strict_patch": 3,
+            "strict_prerelease": "",
+            "strict_string": "1.2.3+build"
+        },
+        {
+            "in": "1.2.3+01",
+            "lenient_major": 1,
+            "lenient_minor": 2,
+            "lenient_ok": true,
+            "lenient_patch": 3,
+            "lenient_string": "1.2.3+01",
+            "strict_major": 1,
+            "strict_metadata": "01",
+            "strict_minor": 2,
+            "strict_ok": true,
+            "strict_patch": 3,
+            "strict_prerelease": "",
+            "strict_string": "1.2.3+01"
+        },
+        {
+            "in": "1.2.3+build.01",
+            "lenient_major": 1,
+            "lenient_minor": 2,
+            "lenient_ok": true,
+            "lenient_patch": 3,
+            "lenient_string": "1.2.3+build.01",
+            "strict_major": 1,
+            "strict_metadata": "build.01",
+            "strict_minor": 2,
+            "strict_ok": true,
+            "strict_patch": 3,
+            "strict_prerelease": "",
+            "strict_string": "1.2.3+build.01"
+        },
+        {
+            "in": "1.2.3-",
+            "lenient_err": "invalid semantic version",
+            "lenient_ok": false,
+            "strict_err": "invalid prerelease string",
+            "strict_ok": false
+        },
+        {
+            "in": "1.2.3+",
+            "lenient_err": "invalid semantic version",
+            "lenient_ok": false,
+            "strict_err": "invalid metadata string",
+            "strict_ok": false
+        },
+        {
+            "in": "1.2.3-alpha..1",
+            "lenient_err": "invalid semantic version",
+            "lenient_ok": false,
+            "strict_err": "invalid prerelease string",
+            "strict_ok": false
+        },
+        {
+            "in": "1.2.3-AL.pha",
+            "lenient_major": 1,
+            "lenient_minor": 2,
+            "lenient_ok": true,
+            "lenient_patch": 3,
+            "lenient_string": "1.2.3-AL.pha",
+            "strict_major": 1,
+            "strict_metadata": "",
+            "strict_minor": 2,
+            "strict_ok": true,
+            "strict_patch": 3,
+            "strict_prerelease": "AL.pha",
+            "strict_string": "1.2.3-AL.pha"
+        },
+        {
+            "in": "1.2.3-alpha_1",
+            "lenient_err": "invalid semantic version",
+            "lenient_ok": false,
+            "strict_err": "invalid prerelease string",
+            "strict_ok": false
+        },
+        {
+            "in": " 1.2.3",
+            "lenient_err": "invalid semantic version",
+            "lenient_ok": false,
+            "strict_err": "invalid characters in version",
+            "strict_ok": false
+        },
+        {
+            "in": "1.2.3 ",
+            "lenient_err": "invalid semantic version",
+            "lenient_ok": false,
+            "strict_err": "invalid characters in version",
+            "strict_ok": false
+        },
+        {
+            "in": "1.2",
+            "lenient_major": 1,
+            "lenient_minor": 2,
+            "lenient_ok": true,
+            "lenient_patch": 0,
+            "lenient_string": "1.2.0",
+            "strict_err": "invalid semantic version",
+            "strict_ok": false
+        },
+        {
+            "in": "1",
+            "lenient_major": 1,
+            "lenient_minor": 0,
+            "lenient_ok": true,
+            "lenient_patch": 0,
+            "lenient_string": "1.0.0",
+            "strict_err": "invalid semantic version",
+            "strict_ok": false
+        },
+        {
+            "in": "",
+            "lenient_err": "invalid semantic version",
+            "lenient_ok": false,
+            "strict_err": "version string empty",
+            "strict_ok": false
+        }
+    ],
+    "strict_semver_cmp": [
+        {
+            "a": "v1.0.0",
+            "a_less_than_b": false,
+            "b": "v1.0.0",
+            "compare": 0
+        },
+        {
+            "a": "v1.0.0",
+            "a_less_than_b": true,
+            "b": "v1.0.1",
+            "compare": -1
+        },
+        {
+            "a": "v1.0.1",
+            "a_less_than_b": false,
+            "b": "v1.0.0",
+            "compare": 1
+        },
+        {
+            "a": "v1.0.0",
+            "a_less_than_b": true,
+            "b": "v1.1.0",
+            "compare": -1
+        },
+        {
+            "a": "v1.0.0",
+            "a_less_than_b": true,
+            "b": "v2.0.0",
+            "compare": -1
+        },
+        {
+            "a": "v0.9.9",
+            "a_less_than_b": true,
+            "b": "v1.0.0",
+            "compare": -1
+        },
+        {
+            "a": "v1.0.0-alpha",
+            "a_less_than_b": true,
+            "b": "v1.0.0",
+            "compare": -1
+        },
+        {
+            "a": "v1.0.0",
+            "a_less_than_b": false,
+            "b": "v1.0.0-alpha",
+            "compare": 1
+        },
+        {
+            "a": "v1.0.0-alpha",
+            "a_less_than_b": true,
+            "b": "v1.0.0-beta",
+            "compare": -1
+        },
+        {
+            "a": "v1.0.0-alpha.1",
+            "a_less_than_b": true,
+            "b": "v1.0.0-alpha.2",
+            "compare": -1
+        },
+        {
+            "a": "v1.0.0-alpha.1",
+            "a_less_than_b": true,
+            "b": "v1.0.0-alpha.beta",
+            "compare": -1
+        },
+        {
+            "a": "v1.0.0-1",
+            "a_less_than_b": true,
+            "b": "v1.0.0-alpha",
+            "compare": -1
+        },
+        {
+            "a": "v1.0.0+build1",
+            "a_less_than_b": false,
+            "b": "v1.0.0+build2",
+            "compare": 0
+        },
+        {
+            "a": "v1.0.0+build",
+            "a_less_than_b": false,
+            "b": "v1.0.0",
+            "compare": 0
+        },
+        {
+            "a": "v5.6.0",
+            "a_less_than_b": true,
+            "b": "v5.6.1",
+            "compare": -1
+        },
+        {
+            "a": "v5.10.0",
+            "a_less_than_b": false,
+            "b": "v5.9.0",
+            "compare": 1
+        }
+    ],
+    "string_iface_xml": [
+        {
+            "in": null,
+            "out": "\u003cProbe\u003e\u003cProps\u003e\u003c/Props\u003e\u003c/Probe\u003e"
+        },
+        {
+            "in": {},
+            "out": "\u003cProbe\u003e\u003cProps\u003e\u003c/Props\u003e\u003c/Probe\u003e"
+        },
+        {
+            "in": {
+                "s": "plain"
+            },
+            "out": "\u003cProbe\u003e\u003cProps\u003e\u003cEntry key=\"s\" value=\"plain\"\u003e\u003c/Entry\u003e\u003c/Props\u003e\u003c/Probe\u003e"
+        },
+        {
+            "in": {
+                "n": null
+            },
+            "out": "\u003cProbe\u003e\u003cProps\u003e\u003cEntry key=\"n\" value=\"null\" type=\"json\"\u003e\u003c/Entry\u003e\u003c/Props\u003e\u003c/Probe\u003e"
+        },
+        {
+            "in": {
+                "b": true,
+                "f": 1.5,
+                "i": 3
+            },
+            "out": "\u003cProbe\u003e\u003cProps\u003e\u003cEntry key=\"b\" value=\"true\" type=\"json\"\u003e\u003c/Entry\u003e\u003cEntry key=\"f\" value=\"1.5\" type=\"json\"\u003e\u003c/Entry\u003e\u003cEntry key=\"i\" value=\"3\" type=\"json\"\u003e\u003c/Entry\u003e\u003c/Props\u003e\u003c/Probe\u003e"
+        },
+        {
+            "in": {
+                "arr": [
+                    "a",
+                    1
+                ],
+                "obj": {
+                    "k": "v"
+                }
+            },
+            "out": "\u003cProbe\u003e\u003cProps\u003e\u003cEntry key=\"arr\" value=\"[\u0026#34;a\u0026#34;,1]\" type=\"json\"\u003e\u003c/Entry\u003e\u003cEntry key=\"obj\" value=\"{\u0026#34;k\u0026#34;:\u0026#34;v\u0026#34;}\" type=\"json\"\u003e\u003c/Entry\u003e\u003c/Props\u003e\u003c/Probe\u003e"
+        },
+        {
+            "in": {
+                "json_with_quote": {
+                    "k": "a\"b"
+                },
+                "str_with_quote": "a\"b"
+            },
+            "out": "\u003cProbe\u003e\u003cProps\u003e\u003cEntry key=\"json_with_quote\" value=\"{\u0026#34;k\u0026#34;:\u0026#34;a\\\u0026#34;b\u0026#34;}\" type=\"json\"\u003e\u003c/Entry\u003e\u003cEntry key=\"str_with_quote\" value=\"a\u0026#34;b\"\u003e\u003c/Entry\u003e\u003c/Props\u003e\u003c/Probe\u003e"
+        },
+        {
+            "in": {
+                "numeric_string": "42"
+            },
+            "out": "\u003cProbe\u003e\u003cProps\u003e\u003cEntry key=\"numeric_string\" value=\"42\"\u003e\u003c/Entry\u003e\u003c/Props\u003e\u003c/Probe\u003e"
+        }
+    ],
+    "string_map_xml": [
+        {
+            "in": null,
+            "out": "\u003cProbe\u003e\u003cProps\u003e\u003c/Props\u003e\u003c/Probe\u003e"
+        },
+        {
+            "in": {},
+            "out": "\u003cProbe\u003e\u003cProps\u003e\u003c/Props\u003e\u003c/Probe\u003e"
+        },
+        {
+            "in": {
+                "a": "1"
+            },
+            "out": "\u003cProbe\u003e\u003cProps\u003e\u003cEntry key=\"a\" value=\"1\"\u003e\u003c/Entry\u003e\u003c/Props\u003e\u003c/Probe\u003e"
+        },
+        {
+            "in": {
+                "a": "first",
+                "m": "middle",
+                "z": "last"
+            },
+            "out": "\u003cProbe\u003e\u003cProps\u003e\u003cEntry key=\"a\" value=\"first\"\u003e\u003c/Entry\u003e\u003cEntry key=\"m\" value=\"middle\"\u003e\u003c/Entry\u003e\u003cEntry key=\"z\" value=\"last\"\u003e\u003c/Entry\u003e\u003c/Props\u003e\u003c/Probe\u003e"
+        },
+        {
+            "in": {
+                "amp": "a\u0026b",
+                "gt": "a\u003eb",
+                "lt": "a\u003cb"
+            },
+            "out": "\u003cProbe\u003e\u003cProps\u003e\u003cEntry key=\"amp\" value=\"a\u0026amp;b\"\u003e\u003c/Entry\u003e\u003cEntry key=\"gt\" value=\"a\u0026gt;b\"\u003e\u003c/Entry\u003e\u003cEntry key=\"lt\" value=\"a\u0026lt;b\"\u003e\u003c/Entry\u003e\u003c/Props\u003e\u003c/Probe\u003e"
+        },
+        {
+            "in": {
+                "apos": "a'b",
+                "quote": "a\"b"
+            },
+            "out": "\u003cProbe\u003e\u003cProps\u003e\u003cEntry key=\"apos\" value=\"a\u0026#39;b\"\u003e\u003c/Entry\u003e\u003cEntry key=\"quote\" value=\"a\u0026#34;b\"\u003e\u003c/Entry\u003e\u003c/Props\u003e\u003c/Probe\u003e"
+        },
+        {
+            "in": {
+                "cr": "a\rb",
+                "newline": "a\nb",
+                "tab": "a\tb"
+            },
+            "out": "\u003cProbe\u003e\u003cProps\u003e\u003cEntry key=\"cr\" value=\"a\u0026#xD;b\"\u003e\u003c/Entry\u003e\u003cEntry key=\"newline\" value=\"a\u0026#xA;b\"\u003e\u003c/Entry\u003e\u003cEntry key=\"tab\" value=\"a\u0026#x9;b\"\u003e\u003c/Entry\u003e\u003c/Props\u003e\u003c/Probe\u003e"
+        },
+        {
+            "in": {
+                "": "empty-key",
+                "empty": ""
+            },
+            "out": "\u003cProbe\u003e\u003cProps\u003e\u003cEntry key=\"\" value=\"empty-key\"\u003e\u003c/Entry\u003e\u003cEntry key=\"empty\" value=\"\"\u003e\u003c/Entry\u003e\u003c/Props\u003e\u003c/Probe\u003e"
+        },
+        {
+            "in": {
+                "unicode": "héllo   \u2028"
+            },
+            "out": "\u003cProbe\u003e\u003cProps\u003e\u003cEntry key=\"unicode\" value=\"héllo   \u2028\"\u003e\u003c/Entry\u003e\u003c/Props\u003e\u003c/Probe\u003e"
+        }
+    ],
+    "time_string": [
+        {
+            "millis": 0,
+            "out": "1970-01-01 05:30:00 +0530 IST",
+            "rfc3339": "1970-01-01T05:30:00+05:30"
+        },
+        {
+            "millis": 1,
+            "out": "1970-01-01 05:30:00.001 +0530 IST",
+            "rfc3339": "1970-01-01T05:30:00+05:30"
+        },
+        {
+            "millis": 10,
+            "out": "1970-01-01 05:30:00.01 +0530 IST",
+            "rfc3339": "1970-01-01T05:30:00+05:30"
+        },
+        {
+            "millis": 100,
+            "out": "1970-01-01 05:30:00.1 +0530 IST",
+            "rfc3339": "1970-01-01T05:30:00+05:30"
+        },
+        {
+            "millis": 1000,
+            "out": "1970-01-01 05:30:01 +0530 IST",
+            "rfc3339": "1970-01-01T05:30:01+05:30"
+        },
+        {
+            "millis": 1001,
+            "out": "1970-01-01 05:30:01.001 +0530 IST",
+            "rfc3339": "1970-01-01T05:30:01+05:30"
+        },
+        {
+            "millis": 1010,
+            "out": "1970-01-01 05:30:01.01 +0530 IST",
+            "rfc3339": "1970-01-01T05:30:01+05:30"
+        },
+        {
+            "millis": 1100,
+            "out": "1970-01-01 05:30:01.1 +0530 IST",
+            "rfc3339": "1970-01-01T05:30:01+05:30"
+        },
+        {
+            "millis": 1500,
+            "out": "1970-01-01 05:30:01.5 +0530 IST",
+            "rfc3339": "1970-01-01T05:30:01+05:30"
+        },
+        {
+            "millis": 1999,
+            "out": "1970-01-01 05:30:01.999 +0530 IST",
+            "rfc3339": "1970-01-01T05:30:01+05:30"
+        },
+        {
+            "millis": 1700000000000,
+            "out": "2023-11-15 03:43:20 +0530 IST",
+            "rfc3339": "2023-11-15T03:43:20+05:30"
+        },
+        {
+            "millis": 1700000000123,
+            "out": "2023-11-15 03:43:20.123 +0530 IST",
+            "rfc3339": "2023-11-15T03:43:20+05:30"
+        },
+        {
+            "millis": 1700000000120,
+            "out": "2023-11-15 03:43:20.12 +0530 IST",
+            "rfc3339": "2023-11-15T03:43:20+05:30"
+        },
+        {
+            "millis": 1700000000100,
+            "out": "2023-11-15 03:43:20.1 +0530 IST",
+            "rfc3339": "2023-11-15T03:43:20+05:30"
+        },
+        {
+            "millis": -1,
+            "out": "1970-01-01 05:29:59.999 +0530 IST",
+            "rfc3339": "1970-01-01T05:29:59+05:30"
+        },
+        {
+            "millis": -1000,
+            "out": "1970-01-01 05:29:59 +0530 IST",
+            "rfc3339": "1970-01-01T05:29:59+05:30"
+        },
+        {
+            "millis": -1500,
+            "out": "1970-01-01 05:29:58.5 +0530 IST",
+            "rfc3339": "1970-01-01T05:29:58+05:30"
+        },
+        {
+            "millis": 1000000000000,
+            "out": "2001-09-09 07:16:40 +0530 IST",
+            "rfc3339": "2001-09-09T07:16:40+05:30"
+        },
+        {
+            "millis": 253402300799000,
+            "out": "10000-01-01 05:29:59 +0530 IST",
+            "rfc3339": "1816-03-30T11:49:35+05:53"
+        }
+    ],
+    "time_zone": "Asia/Kolkata"
+}

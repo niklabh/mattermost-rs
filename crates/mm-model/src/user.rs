@@ -3248,3 +3248,121 @@ mod is_valid_go_parity {
         assert!(bad.is_valid().is_err());
     }
 }
+
+// ---------------------------------------------------------------------------
+// Landed with the `user_get.go` / `user_count.go` / `user_search.go` port: three option bags
+// there hold a `*ViewUsersRestrictions`, whose Go home is this file.
+// ---------------------------------------------------------------------------
+
+/// Port of `model.ViewUsersRestrictions` (user.go:263) — the teams and channels a caller is
+/// allowed to see users in.
+///
+/// No `json:` tags: it is derived from the caller's permissions on every request and never sent.
+/// `//msgp:ignore` in Go, for the same reason.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ViewUsersRestrictions {
+    pub teams: Vec<String>,
+    pub channels: Vec<String>,
+}
+
+impl ViewUsersRestrictions {
+    /// Port of `(*ViewUsersRestrictions).Hash` (user.go:281) — the cache key for a restricted
+    /// query.
+    ///
+    /// Three details that decide whether two servers agree on a cache entry:
+    ///
+    /// - the ids are **sorted together**, teams and channels in one list, so the split between
+    ///   the two fields does not affect the digest;
+    /// - they are joined with the **empty string**, not a separator — so `["ab","c"]` and
+    ///   `["a","bc"]` hash the same. That is Go's behaviour and it is reproduced, not fixed;
+    /// - the digest is SHA-256 formatted with `%x`, i.e. lowercase hex, unpadded-per-byte.
+    ///
+    /// Go's nil receiver returns `""`; on `&self` that state is unrepresentable, so the caller
+    /// holding an `Option` maps `None` to `""` itself.
+    pub fn hash(&self) -> String {
+        use sha2::{Digest, Sha256};
+
+        let mut ids: Vec<&str> = self
+            .teams
+            .iter()
+            .chain(self.channels.iter())
+            .map(String::as_str)
+            .collect();
+        ids.sort_unstable();
+
+        let mut hasher = Sha256::new();
+        hasher.update(ids.concat().as_bytes());
+        hasher
+            .finalize()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect()
+    }
+}
+
+/// Port of `model.GetUsersNotInChannelOptions` (user.go:269).
+///
+/// Carries **both** pagination schemes: `page`/`limit` for an ordinary channel, `cursor_id` for
+/// one under an ABAC policy. The Go comment is explicit that `page` is *discarded* when the
+/// channel has a policy — so a client that sets both does not get what it asked for.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GetUsersNotInChannelOptions {
+    #[serde(rename = "team_id")]
+    pub team_id: String,
+
+    #[serde(rename = "page")]
+    pub page: i64,
+
+    #[serde(rename = "limit")]
+    pub limit: i64,
+
+    /// Empty starts from the beginning, for ABAC channels.
+    #[serde(rename = "cursor_id")]
+    pub cursor_id: String,
+
+    #[serde(rename = "etag")]
+    pub etag: String,
+}
+
+// ---------------------------------------------------------------------------
+// Landed with the `report.go` port: `UserReport` embeds `UserPostStats`, whose Go home is this
+// file. `LoginTypeResponse` is its immediate neighbour and is ported with it.
+// ---------------------------------------------------------------------------
+
+/// Port of `model.UserPostStats` (user.go:1150) — the activity columns joined onto a user report.
+///
+/// **All four are `*int`/`*int64` with `omitempty`**, so a user with no posts is four absent keys
+/// rather than four zeros — which is what lets the CSV export tell "no data" from "zero".
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct UserPostStats {
+    /// Epoch milliseconds.
+    #[serde(rename = "last_status_at", skip_serializing_if = "Option::is_none")]
+    pub last_status_at: Option<i64>,
+
+    /// Epoch milliseconds.
+    #[serde(rename = "last_post_date", skip_serializing_if = "Option::is_none")]
+    pub last_post_date: Option<i64>,
+
+    #[serde(rename = "days_active", skip_serializing_if = "Option::is_none")]
+    pub days_active: Option<i64>,
+
+    #[serde(rename = "total_posts", skip_serializing_if = "Option::is_none")]
+    pub total_posts: Option<i64>,
+}
+
+/// Port of `model.LoginTypeResponse` (user.go:1157).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LoginTypeResponse {
+    #[serde(rename = "auth_service")]
+    pub auth_service: String,
+
+    #[serde(
+        rename = "is_deactivated",
+        skip_serializing_if = "crate::serde_helpers::is_false"
+    )]
+    pub is_deactivated: bool,
+}

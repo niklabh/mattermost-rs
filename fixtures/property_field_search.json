@@ -1,0 +1,15 @@
+{
+    "object_types": [
+        "objecttypes-11b536",
+        "objecttypes-d31967"
+    ],
+    "target_type": "targettype-e9a512",
+    "target_id": "wzmrp76oohymbhswe557bboysy",
+    "channel_id": "bxzbwa3xm53yes8cdjt16zx1yo",
+    "team_id": "kixh8yqcic8rfe17aqyh3koqee",
+    "since": 1703470920000,
+    "cursor_id": "z3naekdrgpff6hk8oowgepnkmh",
+    "cursor_create_at": 1707004849000,
+    "cursor_update_at": 1702323548000,
+    "per_page": 3
+}

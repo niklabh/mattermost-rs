@@ -1,0 +1,179 @@
+{
+    "user": {
+        "id": "dg11n7pqowir63idrf447bbkjh",
+        "create_at": 1705779522000,
+        "update_at": 1700810043000,
+        "delete_at": 1706394713000,
+        "username": "username-3546bc",
+        "password": "correct-horse-battery-047f40",
+        "auth_data": "authdata-ae200a",
+        "auth_service": "authservice-bddc84",
+        "email": "email-3c7032@example.com",
+        "email_verified": true,
+        "nickname": "nickname-66d2f9",
+        "first_name": "firstname-dd10dd",
+        "last_name": "lastname-cd1558",
+        "position": "position-6bb5cf",
+        "roles": "roles-9fcc81",
+        "allow_marketing": true,
+        "props": {
+            "key0-cc97fb": "val0-aa3fce",
+            "key1-cd99ae": "val1-ab4181"
+        },
+        "notify_props": {
+            "key0-48617f": "val0-df23d9",
+            "key1-475fcc": "val1-de2226"
+        },
+        "last_password_update": 1705361583000,
+        "last_picture_update": 1700810230000,
+        "failed_attempts": 13,
+        "locale": "locale-5255d5",
+        "timezone": {
+            "key0-67cee6": "val0-1c64d8",
+            "key1-66cd33": "val1-1b6325"
+        },
+        "mfa_active": true,
+        "mfa_secret": "mfasecret-0168a6",
+        "remote_id": "4qxtj1iosuc6qer6nufmbc63hh",
+        "last_activity_at": 1705925355000,
+        "is_bot": true,
+        "bot_description": "botdescription-881525",
+        "bot_last_icon_update": 1704258148000,
+        "terms_of_service_id": "zd9o57esefbze4abb54tco1dqo",
+        "terms_of_service_create_at": 1702731111000,
+        "disable_welcome_email": true,
+        "last_login": 1701877700000,
+        "mfa_used_timestamps": [
+            "mfausedtimestamps-fcc879",
+            "mfausedtimestamps-04b821"
+        ]
+    },
+    "decisions": {
+        "key0-473641": {
+            "decision": true,
+            "blame": [
+                {
+                    "source": "source-972a90",
+                    "outcome": "outcome-3f90ba",
+                    "policy_id": "xh1h9hinwzuu3ubd393kfj888o",
+                    "policy_name": "policyname-97cc82",
+                    "rule_name": "rulename-b18342",
+                    "role": "role-ee7df4",
+                    "expression": "expression-6b6b0b",
+                    "evaluation_tree": {
+                        "kind": "kind-2a297d",
+                        "expression": "expression-2d8ccb",
+                        "outcome": "outcome-e4f77f",
+                        "error": "error-e9118a",
+                        "operator": "operator-46b38c",
+                        "attribute": "attribute-7aab29",
+                        "actual_value": "actualvalue-4c86dc",
+                        "expected_value": "expectedvalue-e2dad6",
+                        "children": [
+                            {
+                                "kind": "",
+                                "expression": "",
+                                "outcome": ""
+                            }
+                        ]
+                    },
+                    "merged_rules": [
+                        {
+                            "name": "name-f90b2f",
+                            "expression": "expression-f582a9",
+                            "evaluation_tree": {
+                                "kind": "kind-d33394",
+                                "expression": "expression-d85474",
+                                "outcome": "outcome-f59ca3",
+                                "error": "error-e7f366",
+                                "operator": "operator-701fa2",
+                                "attribute": "attribute-f6e0ba",
+                                "actual_value": "actualvalue-d9f0c3",
+                                "expected_value": "expectedvalue-7bca79",
+                                "children": [
+                                    {
+                                        "kind": "",
+                                        "expression": "",
+                                        "outcome": ""
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+    },
+    "sessions": [
+        {
+            "id": "3cfat1317nmmwgyktdfuf3hsze",
+            "device": "device-01b0f4",
+            "network": "network-cf7ea0",
+            "last_active_at": 1704626926000,
+            "decisions": {
+                "key0-3a90d4": {
+                    "decision": true,
+                    "blame": [
+                        {
+                            "source": "source-ee09ed",
+                            "outcome": "outcome-42cba7",
+                            "policy_id": "ujew7ogey78fyukuj5yconnqky",
+                            "policy_name": "policyname-911655",
+                            "rule_name": "rulename-b0c312",
+                            "role": "role-c2a677",
+                            "expression": "expression-bb317e",
+                            "evaluation_tree": {
+                                "kind": "kind-39a576",
+                                "expression": "expression-ca7e61",
+                                "outcome": "outcome-8506ee",
+                                "error": "error-b4d455",
+                                "operator": "operator-18317d",
+                                "attribute": "attribute-d8c1a3",
+                                "actual_value": "actualvalue-98043e",
+                                "expected_value": "expectedvalue-6902ed",
+                                "children": [
+                                    {
+                                        "kind": "",
+                                        "expression": "",
+                                        "outcome": ""
+                                    }
+                                ]
+                            },
+                            "merged_rules": [
+                                {
+                                    "name": "name-369d07",
+                                    "expression": "expression-687587",
+                                    "evaluation_tree": {
+                                        "kind": "kind-acaec1",
+                                        "expression": "expression-379612",
+                                        "outcome": "outcome-7cc884",
+                                        "error": "error-a519ec",
+                                        "operator": "operator-23a859",
+                                        "attribute": "attribute-d36d44",
+                                        "actual_value": "actualvalue-f840c9",
+                                        "expected_value": "expectedvalue-f1f903",
+                                        "children": [
+                                            {
+                                                "kind": "",
+                                                "expression": "",
+                                                "outcome": ""
+                                            }
+                                        ]
+                                    }
+                                }
+                            ]
+                        }
+                    ]
+                }
+            },
+            "attributes": {
+                "key0-47dbf7": "val0-291ba8",
+                "key1-46da44": "val1-2819f5"
+            }
+        }
+    ],
+    "attributes": {
+        "key0-5c545c": "val0-1b5456",
+        "key1-5d560f": "val1-1c5609"
+    }
+}

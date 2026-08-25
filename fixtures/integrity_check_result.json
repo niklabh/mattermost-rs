@@ -1,0 +1,19 @@
+{
+    "data": {
+        "parent_name": "Channels",
+        "child_name": "Posts",
+        "parent_id_attr": "Id",
+        "child_id_attr": "ChannelId",
+        "records": [
+            {
+                "parent_id": "parent-id-1",
+                "child_id": "child-id-1"
+            },
+            {
+                "parent_id": null,
+                "child_id": "child-id-2"
+            }
+        ]
+    },
+    "err": null
+}

@@ -1,0 +1,162 @@
+{
+    "enabled": [
+        {
+            "id": "9a7tww38aiowbcj7djj1xtubey",
+            "name": "name-7e46fd",
+            "description": "description-50f20d",
+            "homepage_url": "https://example.com/homepageurl/7cfd45",
+            "support_url": "https://example.com/supporturl/daa7ef",
+            "release_notes_url": "https://example.com/releasenotesurl/90b4a2",
+            "icon_path": "iconpath-fd6b2f",
+            "version": "version-69b3d5",
+            "min_server_version": "minserverversion-dee1bb",
+            "server": {
+                "executables": {
+                    "key0-71eb16": "val0-0bb949",
+                    "key1-70e963": "val1-0ab796"
+                },
+                "executable": "executable-f74423"
+            },
+            "webapp": {
+                "bundle_path": "bundlepath-d4d7cd"
+            },
+            "settings_schema": {
+                "header": "header-045967",
+                "footer": "footer-b8b709",
+                "settings": [
+                    {
+                        "key": "key-bdbe0a",
+                        "display_name": "displayname-e5ff65",
+                        "type": "type-19d316",
+                        "help_text": "helptext-1aef02",
+                        "regenerate_help_text": "regeneratehelptext-ac080e",
+                        "placeholder": "placeholder-ce8c85",
+                        "default": "default-7d2925",
+                        "options": [
+                            {
+                                "display_name": "displayname-0b37f6",
+                                "value": "value-ac9240"
+                            }
+                        ],
+                        "hosting": "hosting-074a6e",
+                        "secret": true
+                    }
+                ],
+                "sections": [
+                    {
+                        "key": "key-71ca87",
+                        "title": "title-3b4713",
+                        "subtitle": "subtitle-079329",
+                        "settings": [
+                            {
+                                "key": "key-28ae58",
+                                "display_name": "displayname-251aa4",
+                                "type": "type-de4002",
+                                "help_text": "helptext-80e370",
+                                "regenerate_help_text": "regeneratehelptext-7e1d7c",
+                                "placeholder": "placeholder-d1cc33",
+                                "default": "default-6722bf",
+                                "options": [
+                                    {
+                                        "display_name": "",
+                                        "value": ""
+                                    }
+                                ],
+                                "hosting": "hosting-a98a62",
+                                "secret": true
+                            }
+                        ],
+                        "header": "header-9008f7",
+                        "footer": "footer-dc533e",
+                        "custom": true,
+                        "fallback": true
+                    }
+                ]
+            },
+            "props": {
+                "key0-48512c": "val0-6aa959",
+                "key1-474f79": "val1-69a7a6"
+            }
+        }
+    ],
+    "disabled": [
+        {
+            "id": "z8pojqj5bn7khbs4y1husb74ia",
+            "name": "name-4baca2",
+            "description": "description-f62b3c",
+            "homepage_url": "https://example.com/homepageurl/edbb84",
+            "support_url": "https://example.com/supporturl/ba9eb0",
+            "release_notes_url": "https://example.com/releasenotesurl/aa196c",
+            "icon_path": "iconpath-d2b8f5",
+            "version": "version-49da62",
+            "min_server_version": "minserverversion-5f7f07",
+            "server": {
+                "executables": {
+                    "key0-f5cda6": "val0-9294a2",
+                    "key1-f6cf59": "val1-939655"
+                },
+                "executable": "executable-c4860a"
+            },
+            "webapp": {
+                "bundle_path": "bundlepath-75e48b"
+            },
+            "settings_schema": {
+                "header": "header-6ddc4d",
+                "footer": "footer-7429ee",
+                "settings": [
+                    {
+                        "key": "key-6ab7d7",
+                        "display_name": "displayname-70f40e",
+                        "type": "type-8f573c",
+                        "help_text": "helptext-73bbe9",
+                        "regenerate_help_text": "regeneratehelptext-9871bb",
+                        "placeholder": "placeholder-9c6f1f",
+                        "default": "default-be3c03",
+                        "options": [
+                            {
+                                "display_name": "displayname-025f30",
+                                "value": "value-69190f"
+                            }
+                        ],
+                        "hosting": "hosting-5b2705",
+                        "secret": true
+                    }
+                ],
+                "sections": [
+                    {
+                        "key": "key-922a82",
+                        "title": "title-f658ca",
+                        "subtitle": "subtitle-f8ad56",
+                        "settings": [
+                            {
+                                "key": "key-cb9377",
+                                "display_name": "displayname-654517",
+                                "type": "type-9b5fb6",
+                                "help_text": "helptext-da4b11",
+                                "regenerate_help_text": "regeneratehelptext-8c82b0",
+                                "placeholder": "placeholder-bc6745",
+                                "default": "default-b9eaa7",
+                                "options": [
+                                    {
+                                        "display_name": "",
+                                        "value": ""
+                                    }
+                                ],
+                                "hosting": "hosting-f2f996",
+                                "secret": true
+                            }
+                        ],
+                        "header": "header-faed6e",
+                        "footer": "footer-c69b99",
+                        "custom": true,
+                        "fallback": true
+                    }
+                ]
+            },
+            "props": {
+                "key0-b5c7ad": "val0-b1e9b4",
+                "key1-b6c960": "val1-b2eb67"
+            }
+        }
+    ]
+}

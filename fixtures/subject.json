@@ -1,0 +1,23 @@
+{
+    "id": "4z843f1pdjsjnesqi1mr4gmc1r",
+    "type": "type-3f0ed0",
+    "role": "role-51fb4b",
+    "scoped_roles": [
+        {
+            "scope": "scope-ccb21a",
+            "role": "role-fb82c7"
+        }
+    ],
+    "attributes": {
+        "key0-3a1806": "val0-8919a7",
+        "key1-391653": "val1-8817f4"
+    },
+    "session": {
+        "key0-38c567": "val0-5ae2cc",
+        "key1-39c71a": "val1-5be47f"
+    },
+    "email": "email-c17853@example.com",
+    "email_verified": true,
+    "is_bot": true,
+    "create_at": 1706858134000
+}

@@ -1,0 +1,29 @@
+{
+    "skuLabel": {
+        "id": "dyu5xb55c36tt13es6dzs357dy",
+        "defaultMessage": "defaultmessage-8e4c71",
+        "values": {
+            "key0-a97598": "val0-a9d649",
+            "key1-a873e5": "val1-a8d496"
+        }
+    },
+    "title": {
+        "id": "a63xot6nfegqafft9bdhrkec7o",
+        "defaultMessage": "defaultmessage-d5b001",
+        "values": {
+            "key0-f74bd9": "val0-7002a6",
+            "key1-f84d8c": "val1-710459"
+        }
+    },
+    "subtitle": {
+        "id": "o7rwgnu5qqn7tin8ecf8shwf5y",
+        "defaultMessage": "defaultmessage-ce2728",
+        "values": {
+            "key0-b26980": "val0-2bc6ea",
+            "key1-b36b33": "val1-2cc89d"
+        }
+    },
+    "videoUrl": "https://example.com/videourl/e0768c",
+    "videoPoster": "videoposter-ed6174",
+    "useCase": "usecase-670325"
+}

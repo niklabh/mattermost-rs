@@ -1,0 +1,54 @@
+{
+    "policy": {
+        "id": "688e7a9ftkz8wxspt5t6mnpqxe",
+        "name": "name-04614e",
+        "type": "type-67bb7f",
+        "active": true,
+        "create_at": 1706157482000,
+        "revision": 3,
+        "version": "version-f7818b",
+        "roles": [
+            "roles-c716c3",
+            "roles-806d5d"
+        ],
+        "imports": [
+            "imports-1346c3",
+            "imports-1b366a"
+        ],
+        "rules": [
+            {
+                "actions": [
+                    "actions-a17b81",
+                    "actions-60f0d0"
+                ],
+                "expression": "expression-3738bb",
+                "name": "name-b69ec6",
+                "role": "role-9f44f3"
+            }
+        ],
+        "scope": "scope-8a494b",
+        "scope_id": "mp8xejj6mwsr5knc6o1uhzbcjw",
+        "props": {
+            "key0-dfb425": "val0-1d6178",
+            "key1-e0b5d8": "val1-1e632b"
+        }
+    },
+    "actions": [
+        "actions-86282e",
+        "actions-3f7ec8"
+    ],
+    "rule_name": "rulename-39d6e7",
+    "channel_id": "54o1ruwg9n16frpdrj8ep6pfhe",
+    "team_id": "c58zkk3i76zhggqtqwiumhfxac",
+    "users": [
+        {
+            "user_id": "okgn5k6mo7eoepcqfsihznntyo",
+            "use_active_session": true,
+            "session_overrides": {
+                "key0-bf64d0": "val0-0f0d0f",
+                "key1-be631d": "val1-0e0b5c"
+            }
+        }
+    ],
+    "evaluation_scope": "evaluationscope-104502"
+}

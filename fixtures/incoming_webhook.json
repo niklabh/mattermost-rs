@@ -1,0 +1,15 @@
+{
+    "id": "pex1j1maothfk8jbrurztbmakw",
+    "create_at": 1701562357000,
+    "update_at": 1706566856000,
+    "delete_at": 1704253818000,
+    "user_id": "yg9r4zjru46rsuihjiq1j8phjc",
+    "channel_id": "1f3n86mbp4rpzzuorxhsn5ce5c",
+    "team_id": "tcx55rbuwyek9sy7zsed88aoih",
+    "display_name": "displayname-56996f",
+    "description": "description-e67c22",
+    "username": "username-6e1b1f",
+    "icon_url": "https://example.com/iconurl/d650ea",
+    "channel_locked": true,
+    "last_used": 26
+}

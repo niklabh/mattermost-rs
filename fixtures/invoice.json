@@ -1,0 +1,29 @@
+{
+    "id": "woiycui7qi3c4i3cy38m47u13w",
+    "number": "number-bd91c2",
+    "create_at": 1703933899000,
+    "total": 85,
+    "tax": 76,
+    "status": "status-465b5e",
+    "description": "description-b95067",
+    "period_start": 22,
+    "period_end": 85,
+    "subscription_id": "9rkuxfs9uniwetowg6mp9f7meo",
+    "line_items": [
+        {
+            "price_id": "esd5w88whg53xrwfzeqxjafz1h",
+            "total": 61,
+            "quantity": 27.5,
+            "price_per_unit": 29,
+            "description": "description-49ce8d",
+            "type": "type-369a23",
+            "metadata": {
+                "key0-b2913b": "val0-505837",
+                "key1-b392ee": "val1-5159ea"
+            },
+            "period_start": 38,
+            "period_end": 45
+        }
+    ],
+    "current_product_name": "currentproductname-6be508"
+}

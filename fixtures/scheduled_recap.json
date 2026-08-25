@@ -1,0 +1,24 @@
+{
+    "id": "nsxud7wiwd9mgaw7g85jm896sc",
+    "user_id": "p46jg3cjpmwcnep61p1a149ear",
+    "title": "title-87d86d",
+    "days_of_week": 78,
+    "time_of_day": "timeofday-1dc89c",
+    "timezone": "timezone-a268a5",
+    "time_period": "timeperiod-aec858",
+    "next_run_at": 1705906878000,
+    "last_run_at": 1706778049000,
+    "run_count": 76,
+    "channel_mode": "channelmode-49b7b2",
+    "channel_ids": [
+        "channelids-681ca6",
+        "channelids-217340"
+    ],
+    "custom_instructions": "custominstructions-fe8a3d",
+    "agent_id": "53ytgc7updc75rkdnc35g4q35w",
+    "is_recurring": true,
+    "enabled": true,
+    "create_at": 1704705494000,
+    "update_at": 1701368071000,
+    "delete_at": 1704644693000
+}

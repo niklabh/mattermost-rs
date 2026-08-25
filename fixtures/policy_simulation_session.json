@@ -1,0 +1,66 @@
+{
+    "id": "dtd73gz7w37nuu4e51px5j54fr",
+    "device": "device-47e645",
+    "network": "network-5a7a8c",
+    "last_active_at": 1705037701000,
+    "decisions": {
+        "key0-7bd5eb": {
+            "decision": true,
+            "blame": [
+                {
+                    "source": "source-3e1d67",
+                    "outcome": "outcome-61e8d9",
+                    "policy_id": "ofhed51amrgbxuuso8zfosycnh",
+                    "policy_name": "policyname-5dd580",
+                    "rule_name": "rulename-8e3101",
+                    "role": "role-7083b1",
+                    "expression": "expression-472b43",
+                    "evaluation_tree": {
+                        "kind": "kind-e91784",
+                        "expression": "expression-baef3e",
+                        "outcome": "outcome-70d6c2",
+                        "error": "error-24569c",
+                        "operator": "operator-572cc2",
+                        "attribute": "attribute-fb157a",
+                        "actual_value": "actualvalue-5a66d5",
+                        "expected_value": "expectedvalue-881d45",
+                        "children": [
+                            {
+                                "kind": "",
+                                "expression": "",
+                                "outcome": ""
+                            }
+                        ]
+                    },
+                    "merged_rules": [
+                        {
+                            "name": "name-a08a50",
+                            "expression": "expression-1c538d",
+                            "evaluation_tree": {
+                                "kind": "kind-a6da1c",
+                                "expression": "expression-4e432f",
+                                "outcome": "outcome-8559f8",
+                                "error": "error-1d3cbd",
+                                "operator": "operator-14afad",
+                                "attribute": "attribute-580718",
+                                "actual_value": "actualvalue-613334",
+                                "expected_value": "expectedvalue-9b62e4",
+                                "children": [
+                                    {
+                                        "kind": "",
+                                        "expression": "",
+                                        "outcome": ""
+                                    }
+                                ]
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+    },
+    "attributes": {
+        "key0-2e4be9": "val0-18b621",
+        "key1-2f4d9c": "val1-19b7d4"
+    }
+}

@@ -1,0 +1,23 @@
+{
+    "omit_users": {
+        "key0-283a3c": true,
+        "key1-273889": true
+    },
+    "user_id": "sep5d9u5t1tce3e7s898zdpnao",
+    "channel_id": "anf5875wupxjnhhpsx5zj8n61r",
+    "team_id": "yy9gozhppa6qmc39pbxa453hhw",
+    "connection_id": "e8g81gg9a9sb3dskxrcp9tzcdo",
+    "omit_connection_id": "yy69om8wtt5czc369ysxjdms3c",
+    "contains_sanitized_data": true,
+    "contains_sensitive_data": true,
+    "broadcast_hooks": [
+        "broadcasthooks-cedc93",
+        "broadcasthooks-d0ad85"
+    ],
+    "broadcast_hook_args": [
+        {
+            "key0-e94fbc": "val0-6d65be",
+            "key1-e84e09": "val1-6c640b"
+        }
+    ]
+}

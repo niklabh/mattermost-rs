@@ -1,0 +1,12 @@
+{
+    "conditions": [
+        {
+            "attribute": "attribute-e3797d",
+            "operator": "operator-b79784",
+            "value": "value-e026da",
+            "value_type": 39,
+            "attribute_type": "attributetype-949ef6",
+            "has_masked_values": true
+        }
+    ]
+}

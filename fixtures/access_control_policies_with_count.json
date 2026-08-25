@@ -1,0 +1,39 @@
+{
+    "policies": [
+        {
+            "id": "j893htdgw1h8jfz7u3ngpe7aqo",
+            "name": "name-4c586b",
+            "type": "type-8c18ff",
+            "active": true,
+            "create_at": 1702405170000,
+            "revision": 35,
+            "version": "version-361ba2",
+            "roles": [
+                "roles-7e85ba",
+                "roles-b702d3"
+            ],
+            "imports": [
+                "imports-fbf246",
+                "imports-c3752d"
+            ],
+            "rules": [
+                {
+                    "actions": [
+                        "actions-1a94c6",
+                        "actions-18c3d4"
+                    ],
+                    "expression": "expression-2a9bc3",
+                    "name": "name-f13c44",
+                    "role": "role-0af787"
+                }
+            ],
+            "scope": "scope-86e387",
+            "scope_id": "6cya8rgbn4fjroyyoqecnfck1e",
+            "props": {
+                "key0-862868": "val0-962291",
+                "key1-872a1b": "val1-972444"
+            }
+        }
+    ],
+    "total": 46
+}

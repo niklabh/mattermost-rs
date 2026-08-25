@@ -1,0 +1,49 @@
+{
+    "id": "zmfm86nqhr41y5qcsxhr7atiry",
+    "token": "sjoabutanbufh3mdod8dormgma",
+    "create_at": 1703817413000,
+    "update_at": 1703092472000,
+    "delete_at": 1702720298000,
+    "creator_id": "3krto4yabw5c49cmdbwbodts3w",
+    "team_id": "xqmd5wzqgpowm1rw8zjqhcubew",
+    "trigger": "trigger-534ae9",
+    "method": "method-a3d897",
+    "username": "username-fa99ad",
+    "icon_url": "https://example.com/iconurl/4247a0",
+    "auto_complete": true,
+    "auto_complete_desc": "autocompletedesc-d53cc9",
+    "auto_complete_hint": "autocompletehint-81f63d",
+    "display_name": "displayname-27d994",
+    "description": "description-d429c8",
+    "url": "https://example.com/url/b19fb8",
+    "plugin_id": "g8hxo6tawbqfk9zs9b7dt84hkw",
+    "autocomplete_data": {
+        "Trigger": "trigger-819c55",
+        "Hint": "hint-eeee48",
+        "HelpText": "helptext-8b4ee0",
+        "RoleID": "8omosh6ykcnnz5aabp3hyiyrfc",
+        "Arguments": [
+            {
+                "Name": "name-5fcd14",
+                "HelpText": "helptext-19bf60",
+                "Type": "TextInput",
+                "Required": true,
+                "Data": {
+                    "Hint": "hint-autocomplete",
+                    "Pattern": "^[a-z]+$"
+                }
+            }
+        ],
+        "SubCommands": [
+            {
+                "Trigger": "",
+                "Hint": "",
+                "HelpText": "",
+                "RoleID": "",
+                "Arguments": null,
+                "SubCommands": null
+            }
+        ]
+    },
+    "autocomplete_icon_data": "autocompleteicondata-c63aa7"
+}

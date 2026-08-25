@@ -1,0 +1,20 @@
+{
+    "object_id": "3xnwjqpzrghjwggre1h5qefaue",
+    "object_type": "objecttype-f7810e",
+    "channel_id": "u74n9ge5b3k5z5d1f6ctsdkizc",
+    "lang": "lang-808a1f",
+    "provider": "provider-a74125",
+    "type": "type-afcd3f",
+    "text": "text-ff267a",
+    "object_json": {
+        "key": "value"
+    },
+    "confidence": 113.875,
+    "state": "state-e29d65",
+    "meta": {
+        "key0-17482c": "val0-3a8de2",
+        "key1-1849df": "val1-3b8f95"
+    },
+    "norm_hash": "normhash-7d3d2b",
+    "update_at": 1700099322000
+}

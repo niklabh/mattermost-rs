@@ -1,0 +1,70 @@
+{
+    "text": "text-deed36",
+    "username": "username-e10218",
+    "icon_url": "https://example.com/iconurl/b641e1",
+    "props": {
+        "key0-e747b2": "val0-db6e44",
+        "key1-e84965": "val1-dc6ff7"
+    },
+    "attachments": [
+        {
+            "id": 55,
+            "fallback": "fallback-4a41d7",
+            "color": "color-d243c3",
+            "pretext": "pretext-d7227c",
+            "author_name": "authorname-7375db",
+            "author_link": "https://example.com/authorlink/7dcf0b",
+            "author_icon": "authoricon-a8eb4e",
+            "title": "title-0fbafe",
+            "title_link": "https://example.com/titlelink/f127ee",
+            "text": "text-9f6189",
+            "fields": [
+                {
+                    "title": "title-dfdf50",
+                    "value": "value-076984",
+                    "short": true
+                }
+            ],
+            "image_url": "https://example.com/imageurl/e1affb",
+            "thumb_url": "https://example.com/thumburl/0c1308",
+            "footer": "footer-ec140d",
+            "footer_icon": "footericon-e7be3d",
+            "ts": "timestamp-88ac1e",
+            "actions": [
+                {
+                    "id": "yoh6znwinsy93p347qfjkfwb9o",
+                    "type": "type-e9bc1f",
+                    "name": "name-89965c",
+                    "tooltip": "tooltip-aff1f5",
+                    "disabled": true,
+                    "style": "style-ac317e",
+                    "data_source": "datasource-7be98b",
+                    "options": [
+                        {
+                            "text": "text-736478",
+                            "value": "value-0cd2b9"
+                        }
+                    ],
+                    "default_option": "defaultoption-85fe02",
+                    "integration": {
+                        "url": "https://example.com/url/1acd58",
+                        "context": {
+                            "key0-56659e": "val0-32392f",
+                            "key1-576751": "val1-333ae2"
+                        }
+                    },
+                    "cookie": "cookie-dee93f"
+                }
+            ]
+        }
+    ],
+    "type": "type-82442a",
+    "response_type": "responsetype-1b9d2c",
+    "priority": {
+        "priority": "priority-02667b",
+        "requested_ack": true,
+        "persistent_notifications": true,
+        "PostId": "nqf7ow4usgyeearj5bji8cryoo",
+        "ChannelId": "5utn3yu3gbyrtd9rf1b81ckyjy"
+    }
+}

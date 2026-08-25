@@ -1,0 +1,109 @@
+{
+    "user": {
+        "id": "6ybtdrfakwgn7eafngemoiocfa",
+        "create_at": 1706477839000,
+        "update_at": 1702883730000,
+        "delete_at": 1700596196000,
+        "username": "username-d32d00",
+        "password": "correct-horse-battery-49d392",
+        "auth_data": "authdata-6c93fc",
+        "auth_service": "authservice-c01e79",
+        "email": "email-754b2d@example.com",
+        "email_verified": true,
+        "nickname": "nickname-88f336",
+        "first_name": "firstname-e54235",
+        "last_name": "lastname-6e30a0",
+        "position": "position-498e2f",
+        "roles": "roles-c97724",
+        "allow_marketing": true,
+        "props": {
+            "key0-772483": "val0-586434",
+            "key1-7622d0": "val1-576281"
+        },
+        "notify_props": {
+            "key0-3d23bf": "val0-b4da8b",
+            "key1-3e2572": "val1-b5dc3e"
+        },
+        "last_password_update": 1703862990000,
+        "last_picture_update": 1705252569000,
+        "failed_attempts": 46,
+        "locale": "locale-edb16c",
+        "timezone": {
+            "key0-e2da2b": "val0-b02171",
+            "key1-e3dbde": "val1-b12324"
+        },
+        "mfa_active": true,
+        "mfa_secret": "mfasecret-92df1a",
+        "remote_id": "ajdcfnmfi7kqw7keakrsmcnw7e",
+        "last_activity_at": 1701234330000,
+        "is_bot": true,
+        "bot_description": "botdescription-a3e9ef",
+        "bot_last_icon_update": 1702199783000,
+        "terms_of_service_id": "si8dzcepeni1sy1p8qao4x7mfc",
+        "terms_of_service_create_at": 1707075318000,
+        "disable_welcome_email": true,
+        "last_login": 1705207351000,
+        "mfa_used_timestamps": [
+            "mfausedtimestamps-1f0f29",
+            "mfausedtimestamps-171f82"
+        ]
+    },
+    "team_members": [
+        {
+            "team_id": "qaewi5augpx5wkeujmztgpn9ze",
+            "user_id": "3ygyuqoimd1zr6aqbg7bksxfqe",
+            "roles": "roles-a3901d",
+            "delete_at": 1706821403000,
+            "scheme_guest": true,
+            "scheme_user": true,
+            "scheme_admin": true,
+            "explicit_roles": "explicitroles-762592"
+        }
+    ],
+    "teams": [
+        {
+            "id": "urebwewpadst83oqdete5x9pnc",
+            "create_at": 1702640578000,
+            "update_at": 1705447099000,
+            "delete_at": 1703255769000,
+            "display_name": "displayname-5b5194",
+            "name": "name-0c07d4",
+            "description": "description-163e88",
+            "email": "email-e3cac4@example.com",
+            "type": "type-867d83",
+            "company_name": "companyname-ac49e1",
+            "allowed_domains": "alloweddomains-b88a0a",
+            "invite_id": "1198sqappo1mat6yxc7o45jrzo",
+            "allow_open_invite": true,
+            "last_team_icon_update": 1705779306000,
+            "scheme_id": "sejqmxr7supyn3ewhs6j5pq4yr",
+            "group_constrained": true,
+            "policy_id": "8944j93ca6qqmd8uwu913twhhw",
+            "cloud_limits_archived": true,
+            "policy_enforced": true,
+            "policy_actions": {
+                "key0-64dc5b": true,
+                "key1-63daa8": true
+            },
+            "policy_is_active": true,
+            "recommended": true
+        }
+    ],
+    "preferences": [
+        {
+            "user_id": "14yr13gf1k76c1cnjf1cmr75ha",
+            "category": "category-fd402e",
+            "name": "name-e6633e",
+            "value": "value-998840"
+        }
+    ],
+    "client_cfg": {
+        "key0-3e561e": "val0-4a2f8c",
+        "key1-3d546b": "val1-492dd9"
+    },
+    "license_cfg": {
+        "key0-85b514": "val0-723da3",
+        "key1-84b361": "val1-713bf0"
+    },
+    "no_accounts": true
+}

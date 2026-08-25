@@ -171,6 +171,420 @@ var registry = map[string]any{
 	"sidebar_category_with_channels": &model.SidebarCategoryWithChannels{},
 	"ordered_sidebar_categories":     &model.OrderedSidebarCategories{},
 	"sidebar_channel":                &model.SidebarChannel{},
+
+	// ------------------------------------------------------------------------------------
+	// The 2026-08-24 sweep of the rest of `model/`. Every json-tagged type in the files
+	// ported that day, grouped by source file. Types with no json tag are absent on purpose:
+	// they are store rows or option bags with no wire format to pin.
+	// ------------------------------------------------------------------------------------
+
+	// access.go
+	"access_data":     &model.AccessData{},
+	"access_response": &model.AccessResponse{},
+
+	// access_policy.go
+	"access_control_attribute":                    &model.AccessControlAttribute{},
+	"access_control_policy_test_response":         &model.AccessControlPolicyTestResponse{},
+	"get_access_control_policy_options":           &model.GetAccessControlPolicyOptions{},
+	"access_control_policy_search":                &model.AccessControlPolicySearch{},
+	"access_control_policy_cursor":                &model.AccessControlPolicyCursor{},
+	"access_control_policies_with_count":          &model.AccessControlPoliciesWithCount{},
+	"access_control_policy":                       &model.AccessControlPolicy{},
+	"access_control_policy_rule":                  &model.AccessControlPolicyRule{},
+	"cel_expression_error":                        &model.CELExpressionError{},
+	"access_control_query_result":                 &model.AccessControlQueryResult{},
+	"access_control_policy_active_update":         &model.AccessControlPolicyActiveUpdate{},
+	"access_control_policy_active_update_request": &model.AccessControlPolicyActiveUpdateRequest{},
+
+	// access_request.go
+	"scoped_role":                       &model.ScopedRole{},
+	"subject":                           &model.Subject{},
+	"subject_search_options":            &model.SubjectSearchOptions{},
+	"subject_cursor":                    &model.SubjectCursor{},
+	"resource":                          &model.Resource{},
+	"access_request":                    &model.AccessRequest{},
+	"access_decision":                   &model.AccessDecision{},
+	"query_expression_params":           &model.QueryExpressionParams{},
+	"policy_simulation_blame":           &model.PolicySimulationBlame{},
+	"policy_simulation_merged_rule":     &model.PolicySimulationMergedRule{},
+	"policy_simulation_evaluation_node": &model.PolicySimulationEvaluationNode{},
+	"policy_simulation_action_decision": &model.PolicySimulationActionDecision{},
+	"policy_simulation_session":         &model.PolicySimulationSession{},
+	"policy_simulation_user_result":     &model.PolicySimulationUserResult{},
+	"policy_simulation_response":        &model.PolicySimulationResponse{},
+	"policy_simulation_user_override":   &model.PolicySimulationUserOverride{},
+	"policy_simulation_by_users_params": &model.PolicySimulationByUsersParams{},
+
+	// agents.go
+	"bridge_agent_info":         &model.BridgeAgentInfo{},
+	"bridge_service_info":       &model.BridgeServiceInfo{},
+	"agents_integrity_response": &model.AgentsIntegrityResponse{},
+
+	// ai_recap_limits.go
+	"effective_recap_limits": &model.EffectiveRecapLimits{},
+	"recap_limit_status":     &model.RecapLimitStatus{},
+	"daily_usage_status":     &model.DailyUsageStatus{},
+	"cooldown_status":        &model.CooldownStatus{},
+
+	// autotranslation.go
+	"translation": &model.Translation{},
+
+	// cel.go
+	"condition":         &model.Condition{},
+	"visual_expression": &model.VisualExpression{},
+
+	// channel_bookmark.go
+	"channel_bookmark":                     &model.ChannelBookmark{},
+	"channel_bookmark_patch":               &model.ChannelBookmarkPatch{},
+	"channel_bookmark_with_file_info":      &model.ChannelBookmarkWithFileInfo{},
+	"channel_with_bookmarks":               &model.ChannelWithBookmarks{},
+	"channel_with_team_data_and_bookmarks": &model.ChannelWithTeamDataAndBookmarks{},
+	"update_channel_bookmark_response":     &model.UpdateChannelBookmarkResponse{},
+
+	// channel_join_request.go
+	"channel_join_request":       &model.ChannelJoinRequest{},
+	"channel_join_request_list":  &model.ChannelJoinRequestList{},
+	"channel_join_request_patch": &model.ChannelJoinRequestPatch{},
+
+	// cloud.go
+	"product":                                         &model.Product{},
+	"user_facing_product":                             &model.UserFacingProduct{},
+	"add_on":                                          &model.AddOn{},
+	"stripe_setup_intent":                             &model.StripeSetupIntent{},
+	"confirm_payment_method_request":                  &model.ConfirmPaymentMethodRequest{},
+	"cloud_customer":                                  &model.CloudCustomer{},
+	"start_cloud_trial_request":                       &model.StartCloudTrialRequest{},
+	"validate_business_email_request":                 &model.ValidateBusinessEmailRequest{},
+	"validate_business_email_response":                &model.ValidateBusinessEmailResponse{},
+	"subscription_license_self_serve_status_response": &model.SubscriptionLicenseSelfServeStatusResponse{},
+	"cloud_customer_info":                             &model.CloudCustomerInfo{},
+	"address":                                         &model.Address{},
+	"payment_method":                                  &model.PaymentMethod{},
+	"subscription":                                    &model.Subscription{},
+	"subscription_history":                            &model.SubscriptionHistory{},
+	"subscription_history_change":                     &model.SubscriptionHistoryChange{},
+	"invoice":                                         &model.Invoice{},
+	"invoice_line_item":                               &model.InvoiceLineItem{},
+	"delinquency_email_trigger":                       &model.DelinquencyEmailTrigger{},
+	"cws_webhook_payload":                             &model.CWSWebhookPayload{},
+	"failed_payment":                                  &model.FailedPayment{},
+	"cloud_workspace_owner":                           &model.CloudWorkspaceOwner{},
+	"subscription_change":                             &model.SubscriptionChange{},
+	"files_limits":                                    &model.FilesLimits{},
+	"messages_limits":                                 &model.MessagesLimits{},
+	"teams_limits":                                    &model.TeamsLimits{},
+	"product_limits":                                  &model.ProductLimits{},
+	"create_subscription_request":                     &model.CreateSubscriptionRequest{},
+	"installation":                                    &model.Installation{},
+	"feedback":                                        &model.Feedback{},
+	"workspace_deletion_request":                      &model.WorkspaceDeletionRequest{},
+	"message_descriptor":                              &model.MessageDescriptor{},
+	"preview_modal_content_data":                      &model.PreviewModalContentData{},
+
+	// cluster_discovery.go
+	"cluster_discovery": &model.ClusterDiscovery{},
+
+	// cluster_message.go
+	"cluster_message": &model.ClusterMessage{},
+
+	// command.go
+	"command": &model.Command{},
+
+	// command_args.go
+	"command_args": &model.CommandArgs{},
+
+	// command_request.go
+	"command_move_request": &model.CommandMoveRequest{},
+
+	// command_response.go
+	"command_response": &model.CommandResponse{},
+
+	// compliance.go
+	"compliance": &model.Compliance{},
+
+	// config.go
+	"cluster_settings":       &model.ClusterSettings{},
+	"elasticsearch_settings": &model.ElasticsearchSettings{},
+	"config":                 &model.Config{},
+
+	// content_flagging.go
+	"flag_content_request":        &model.FlagContentRequest{},
+	"flag_content_action_request": &model.FlagContentActionRequest{},
+
+	// content_flagging_settings.go
+	"content_flagging_reporting_config": &model.ContentFlaggingReportingConfig{},
+
+	// custom_profile_attributes.go
+	"custom_profile_attributes_select_option": &model.CustomProfileAttributesSelectOption{},
+	"cpa_field": &model.CPAField{},
+	"cpa_attrs": &model.CPAAttrs{},
+
+	// data_retention_policy.go
+	"global_retention_policy":                            &model.GlobalRetentionPolicy{},
+	"retention_policy":                                   &model.RetentionPolicy{},
+	"retention_policy_with_team_and_channel_i_ds":        &model.RetentionPolicyWithTeamAndChannelIDs{},
+	"retention_policy_with_team_and_channel_counts":      &model.RetentionPolicyWithTeamAndChannelCounts{},
+	"retention_policy_with_team_and_channel_counts_list": &model.RetentionPolicyWithTeamAndChannelCountsList{},
+	"retention_policy_for_team":                          &model.RetentionPolicyForTeam{},
+	"retention_policy_for_team_list":                     &model.RetentionPolicyForTeamList{},
+	"retention_policy_for_channel":                       &model.RetentionPolicyForChannel{},
+	"retention_policy_for_channel_list":                  &model.RetentionPolicyForChannelList{},
+
+	// email_notification.go
+	"email_notification_content": &model.EmailNotificationContent{},
+	"email_notification":         &model.EmailNotification{},
+
+	// github_release.go
+	"github_release_info": &model.GithubReleaseInfo{},
+
+	// group.go
+	"group":                   &model.Group{},
+	"group_with_user_ids":     &model.GroupWithUserIds{},
+	"group_with_scheme_admin": &model.GroupWithSchemeAdmin{},
+	"groups_associated_to_channel_with_scheme_admin": &model.GroupsAssociatedToChannelWithSchemeAdmin{},
+	"groups_associated_to_channel":                   &model.GroupsAssociatedToChannel{},
+	"group_patch":                                    &model.GroupPatch{},
+	"group_stats":                                    &model.GroupStats{},
+	"group_modify_members":                           &model.GroupModifyMembers{},
+	"groups_with_count":                              &model.GroupsWithCount{},
+
+	// group_member.go
+	"group_member":      &model.GroupMember{},
+	"group_member_list": &model.GroupMemberList{},
+
+	// group_syncable.go
+	// GroupSyncable is deliberately absent. Five of the keys its MarshalJSON writes come from
+	// fields tagged `json:"-"` — SyncableId becomes team_id or channel_id, and Type decides
+	// which — and the reflective filler skips `json:"-"` fields by design, so a fixture built
+	// here would carry an empty team_id and no display fields at all: a green Rust test proving
+	// nothing about the half of the type that is interesting. Both shapes are recorded in
+	// behaviour_sweep_models.go instead, fully populated.
+	"group_syncable_patch": &model.GroupSyncablePatch{},
+
+	// guest_invite.go
+	"guests_invite": &model.GuestsInvite{},
+
+	// incoming_webhook.go
+	"incoming_webhook":             &model.IncomingWebhook{},
+	"incoming_webhook_request":     &model.IncomingWebhookRequest{},
+	"incoming_webhooks_with_count": &model.IncomingWebhooksWithCount{},
+
+	// initial_load.go
+	"initial_load": &model.InitialLoad{},
+
+	// integrity.go
+	"orphaned_record":                 &model.OrphanedRecord{},
+	"relational_integrity_check_data": &model.RelationalIntegrityCheckData{},
+	"integrity_check_result":          &model.IntegrityCheckResult{},
+
+	// ip_filtering.go
+	"allowed_ip_range":        &model.AllowedIPRange{},
+	"get_ip_address_response": &model.GetIPAddressResponse{},
+
+	// ldap.go
+	"ldap_diagnostic_result": &model.LdapDiagnosticResult{},
+	"ldap_sample_entry":      &model.LdapSampleEntry{},
+
+	// license.go
+	"license_record":        &model.LicenseRecord{},
+	"license_limits":        &model.LicenseLimits{},
+	"license":               &model.License{},
+	"customer":              &model.Customer{},
+	"trial_license_request": &model.TrialLicenseRequest{},
+	"features":              &model.Features{},
+
+	// manifest.go
+	"plugin_option":           &model.PluginOption{},
+	"plugin_setting":          &model.PluginSetting{},
+	"plugin_settings_section": &model.PluginSettingsSection{},
+	"plugin_settings_schema":  &model.PluginSettingsSchema{},
+	"manifest":                &model.Manifest{},
+	"manifest_server":         &model.ManifestServer{},
+	"manifest_webapp":         &model.ManifestWebapp{},
+
+	// marketplace_plugin.go
+	"base_marketplace_plugin":            &model.BaseMarketplacePlugin{},
+	"marketplace_label":                  &model.MarketplaceLabel{},
+	"marketplace_plugin":                 &model.MarketplacePlugin{},
+	"install_marketplace_plugin_request": &model.InstallMarketplacePluginRequest{},
+
+	// member_invite.go
+	"member_invite":         &model.MemberInvite{},
+	"member_invite_profile": &model.MemberInviteProfile{},
+
+	// metrics.go
+	"metric_sample":      &model.MetricSample{},
+	"performance_report": &model.PerformanceReport{},
+
+	// mfa_secret.go
+	"mfa_secret": &model.MfaSecret{},
+
+	// notify_admin.go
+	"notify_admin_to_upgrade_request": &model.NotifyAdminToUpgradeRequest{},
+	"notify_admin_data":               &model.NotifyAdminData{},
+
+	// oauth_metadata.go
+	"authorization_server_metadata": &model.AuthorizationServerMetadata{},
+
+	// onboarding.go
+	"complete_onboarding_request": &model.CompleteOnboardingRequest{},
+
+	// outgoing_oauth_connection.go
+	"outgoing_o_auth_connection": &model.OutgoingOAuthConnection{},
+
+	// outgoing_webhook.go
+	"outgoing_webhook":          &model.OutgoingWebhook{},
+	"outgoing_webhook_payload":  &model.OutgoingWebhookPayload{},
+	"outgoing_webhook_response": &model.OutgoingWebhookResponse{},
+
+	// plugin_key_value.go
+	"plugin_key_value": &model.PluginKeyValue{},
+
+	// plugin_status.go
+	"plugin_status": &model.PluginStatus{},
+
+	// plugin_toast.go
+	"send_toast_message_options": &model.SendToastMessageOptions{},
+
+	// plugins_response.go
+	"plugins_response": &model.PluginsResponse{},
+
+	// plugin_event_data.go
+	"plugin_event_data": &model.PluginEventData{},
+
+	// property_access.go
+	"property_owner": &model.PropertyOwner{},
+
+	// property_field.go
+	"property_field":        &model.PropertyField{},
+	"property_field_patch":  &model.PropertyFieldPatch{},
+	"property_field_search": &model.PropertyFieldSearch{},
+	// PluginPropertyOption is deliberately absent: its MarshalJSON emits the inner map
+	// *unwrapped*, so the JSON has no `data` key and the struct-keyed completeness check
+	// cannot describe it. Its parity lives in behaviour_group_syncable.go alongside the
+	// other custom-marshaller cases.
+
+	// property_group.go
+	"property_group": &model.PropertyGroup{},
+
+	// property_value.go
+	"property_value":            &model.PropertyValue{},
+	"property_value_search":     &model.PropertyValueSearch{},
+	"property_value_patch_item": &model.PropertyValuePatchItem{},
+
+	// push_notification.go
+	"push_notification_ack": &model.PushNotificationAck{},
+	"push_notification":     &model.PushNotification{},
+
+	// recap.go
+	"recap":                     &model.Recap{},
+	"recap_channel":             &model.RecapChannel{},
+	"create_recap_request":      &model.CreateRecapRequest{},
+	"ai_recap_summary_response": &model.AIRecapSummaryResponse{},
+
+	// remote_cluster.go
+	"remote_cluster":               &model.RemoteCluster{},
+	"remote_cluster_patch":         &model.RemoteClusterPatch{},
+	"remote_cluster_with_password": &model.RemoteClusterWithPassword{},
+	"remote_cluster_with_invite":   &model.RemoteClusterWithInvite{},
+	"remote_cluster_info":          &model.RemoteClusterInfo{},
+	"remote_cluster_frame":         &model.RemoteClusterFrame{},
+	"remote_cluster_msg":           &model.RemoteClusterMsg{},
+	"remote_cluster_ping":          &model.RemoteClusterPing{},
+	"remote_cluster_invite":        &model.RemoteClusterInvite{},
+	"remote_cluster_accept_invite": &model.RemoteClusterAcceptInvite{},
+
+	// report.go
+	"user_report": &model.UserReport{},
+
+	// saml.go
+	"saml_certificate_status": &model.SamlCertificateStatus{},
+	"saml_metadata_response":  &model.SamlMetadataResponse{},
+
+	// scheduled_recap.go
+	"scheduled_recap": &model.ScheduledRecap{},
+
+	// scheduled_task.go
+	"scheduled_task": &model.ScheduledTask{},
+
+	// security_bulletin.go
+	"security_bulletin": &model.SecurityBulletin{},
+
+	// session_attributes.go
+	"session_attributes_cluster_payload": &model.SessionAttributesClusterPayload{},
+	"sa_field":                           &model.SAField{},
+	"sa_attrs":                           &model.SAAttrs{},
+	"session_attribute_manifest_entry":   &model.SessionAttributeManifestEntry{},
+
+	// shared_channel.go
+	"shared_channel":               &model.SharedChannel{},
+	"shared_channel_remote":        &model.SharedChannelRemote{},
+	"shared_channel_remote_status": &model.SharedChannelRemoteStatus{},
+	"shared_channel_user":          &model.SharedChannelUser{},
+	"shared_channel_attachment":    &model.SharedChannelAttachment{},
+	"membership_change_msg":        &model.MembershipChangeMsg{},
+	"sync_msg":                     &model.SyncMsg{},
+	"sync_response":                &model.SyncResponse{},
+
+	// suggest_command.go
+	"suggest_command": &model.SuggestCommand{},
+
+	// support_packet.go
+	"support_packet_config":      &model.SupportPacketConfig{},
+	"support_packet_plugin_list": &model.SupportPacketPluginList{},
+
+	// switch_request.go
+	"switch_request": &model.SwitchRequest{},
+
+	// system.go
+	"system":                           &model.System{},
+	"system_post_action_cookie_secret": &model.SystemPostActionCookieSecret{},
+	"system_asymmetric_signing_key":    &model.SystemAsymmetricSigningKey{},
+	"system_ecdsa_key":                 &model.SystemECDSAKey{},
+	"server_busy_state":                &model.ServerBusyState{},
+	"applied_migration":                &model.AppliedMigration{},
+	"log_filter":                       &model.LogFilter{},
+
+	// temporary_post.go
+	"temporary_post": &model.TemporaryPost{},
+
+	// terms_of_service.go
+	"terms_of_service": &model.TermsOfService{},
+
+	// thread.go
+	"thread":                       &model.Thread{},
+	"thread_response":              &model.ThreadResponse{},
+	"threads":                      &model.Threads{},
+	"thread_membership":            &model.ThreadMembership{},
+	"thread_membership_for_export": &model.ThreadMembershipForExport{},
+
+	// typing_request.go
+	"typing_request": &model.TypingRequest{},
+
+	// upload_session.go
+	"upload_session": &model.UploadSession{},
+
+	// usage.go
+	"posts_usage":           &model.PostsUsage{},
+	"storage_usage":         &model.StorageUsage{},
+	"teams_usage":           &model.TeamsUsage{},
+	"installed_integration": &model.InstalledIntegration{},
+
+	// user_access_token.go
+	"non_compliant_user_access_token_result": &model.NonCompliantUserAccessTokenResult{},
+	"user_access_token":                      &model.UserAccessToken{},
+
+	// user_search.go
+	"user_search": &model.UserSearch{},
+
+	// websocket_message.go
+	"active_queue_item":   &model.ActiveQueueItem{},
+	"ws_queues":           &model.WSQueues{},
+	"websocket_broadcast": &model.WebsocketBroadcast{},
+	"web_socket_response": &model.WebSocketResponse{},
+
+	// websocket_request.go
+	"web_socket_request": &model.WebSocketRequest{},
 }
 
 // overrides pins specific fields to semantically valid values, keyed by the
@@ -244,6 +658,36 @@ var overrides = map[string]any{
 	// would make the fixture fail AreDurationAndExpirationTimeValid. "date_and_time" is the
 	// value PreSave itself writes; it is non-empty, so no parity signal is lost.
 	"customstatus.duration": "date_and_time",
+
+	// --- `any` fields the reflective filler cannot type ------------------------------------------
+	//
+	// A bare `any` gets a string from the generic filler, which is valid JSON but not a value the
+	// type's own UnmarshalJSON can read back — so the fixture pins Go's *output* while describing
+	// a document Go itself cannot round-trip. Pinning the real shape here restores the round trip
+	// on both sides. These are the only hand-populated values in the file, and each nested struct
+	// has its own fully-reflected fixture, so no field-completeness signal is lost.
+	//
+	// AutocompleteArg.Data is a discriminated union keyed by the sibling Type; an unrecognised
+	// Type leaves Data nil in Go too. Three roots reach it: the two registry entries and Command.
+	"autocompletearg.type":                       model.AutocompleteArgTypeText,
+	"autocompletearg.data":                       &model.AutocompleteTextArg{Hint: "hint-autocomplete", Pattern: "^[a-z]+$"},
+	"autocompletedata.arguments[0].type":         model.AutocompleteArgTypeText,
+	"autocompletedata.arguments[0].data":         &model.AutocompleteTextArg{Hint: "hint-autocomplete", Pattern: "^[a-z]+$"},
+	"command.autocompletedata.arguments[0].type": model.AutocompleteArgTypeText,
+	"command.autocompletedata.arguments[0].data": &model.AutocompleteTextArg{Hint: "hint-autocomplete", Pattern: "^[a-z]+$"},
+
+	// IntegrityCheckResult.Data only ever holds a RelationalIntegrityCheckData, and its
+	// UnmarshalJSON type-asserts its way through that shape.
+	"integritycheckresult.data": model.RelationalIntegrityCheckData{
+		ParentName:   "Channels",
+		ChildName:    "Posts",
+		ParentIdAttr: "Id",
+		ChildIdAttr:  "ChannelId",
+		Records: []model.OrphanedRecord{
+			{ParentId: model.NewPointer("parent-id-1"), ChildId: model.NewPointer("child-id-1")},
+			{ParentId: nil, ChildId: model.NewPointer("child-id-2")},
+		},
+	},
 }
 
 // idEncoding matches model.NewId (utils.go:378) — z-base-32, no padding. 16
@@ -734,6 +1178,17 @@ func main() {
 	}
 	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_audit.json"))
 
+	if err := writeGoStdlibBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: go stdlib behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := writeSweepModelsBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: sweep models behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_sweep_models.json"))
+
 	if err := writeSidebarCategoryBehaviourFixture(*out); err != nil {
 		fmt.Fprintf(os.Stderr, "FAIL: sidebar category behaviour fixture: %v\n", err)
 		os.Exit(1)
@@ -754,7 +1209,7 @@ func main() {
 	}
 	fmt.Printf("wrote %s\n", filepath.Join(*rustOut, "unicode_generated.rs"))
 
-	fmt.Printf("\n%d fixtures written, all top-level fields present.\n", len(names)+38)
+	fmt.Printf("\n%d fixtures written, all top-level fields present.\n", len(names)+39)
 }
 
 type populator struct {

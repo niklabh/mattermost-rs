@@ -1,0 +1,17 @@
+{
+    "requests": [
+        {
+            "id": "nsgs5x83ae5zoawmps6xuojzxy",
+            "channel_id": "oux5qm1mhdjw6p9bshzrzaqujh",
+            "user_id": "p4fr57zha4gsyeccjz5x3thpcy",
+            "message": "message-f6231b",
+            "status": "status-73229e",
+            "denial_reason": "denialreason-745b61",
+            "create_at": 1707716054000,
+            "update_at": 1704378631000,
+            "reviewed_by": "reviewedby-600534",
+            "reviewed_at": 1703657535000
+        }
+    ],
+    "total_count": 77
+}

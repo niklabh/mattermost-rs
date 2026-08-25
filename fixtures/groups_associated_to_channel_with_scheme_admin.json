@@ -1,0 +1,22 @@
+{
+    "channel_id": "oe8946iut9cw6pet9i7m8rg3jh",
+    "id": "sbpqpky95maw1a4hh4wb9s9tjr",
+    "name": "name-04140c",
+    "display_name": "displayname-6ab0bb",
+    "description": "description-f22be4",
+    "source": "source-2da8d3",
+    "remote_id": "okcxt3x6yfqxopc49d19hy1h9y",
+    "create_at": 1702405071000,
+    "update_at": 1701450578000,
+    "delete_at": 1702155428000,
+    "has_syncables": true,
+    "member_count": 32,
+    "allow_reference": true,
+    "channel_member_count": 15,
+    "channel_member_timezones_count": 41,
+    "member_ids": [
+        "memberids-d49b2d",
+        "memberids-d4b91e"
+    ],
+    "scheme_admin": true
+}

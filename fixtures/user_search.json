@@ -1,0 +1,26 @@
+{
+    "term": "term-2ce9e3",
+    "team_id": "hx6wqoehudfb4c8he7yt3f6kdw",
+    "not_in_team_id": "38ot8uxw1899ofzynxg9jr899y",
+    "in_channel_id": "wtz39pjf5yra6i5tu641msejth",
+    "not_in_channel_id": "i6ttw491ggc6j9fbdji9rcr3ho",
+    "in_group_id": "g1u8oqsw348wm378xy7pjuhxew",
+    "group_constrained": true,
+    "allow_inactive": true,
+    "without_team": true,
+    "limit": 100,
+    "role": "role-bc24c6",
+    "roles": [
+        "roles-9dc088",
+        "roles-9da297"
+    ],
+    "channel_roles": [
+        "channelroles-d2e020",
+        "channelroles-0b5d3a"
+    ],
+    "team_roles": [
+        "teamroles-4336b7",
+        "teamroles-4507a9"
+    ],
+    "not_in_group_id": "s7f41koj9qunkbnkiriyu6igrw"
+}

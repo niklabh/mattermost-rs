@@ -1,0 +1,22 @@
+{
+    "remote_cluster": {
+        "remote_id": "b5pirtyq4uunuoqhkjny7ixgfr",
+        "remote_team_id": "qh1use4mhbpzutbd8ctwzz45xr",
+        "name": "name-1d0e8c",
+        "display_name": "displayname-d377b0",
+        "site_url": "https://example.com/siteurl/5e1441",
+        "default_team_id": "8dgryb78a9ptp46peyd4x1g5na",
+        "create_at": 1703050859000,
+        "delete_at": 1703115400000,
+        "last_ping_at": 1706602899000,
+        "last_global_user_sync_at": 1701273016000,
+        "token": "9o37qis6ij4xfm3i47mp7k5w6e",
+        "remote_token": "h48qkh9gn61t7gcohi36cgffda",
+        "topics": "topics-142130",
+        "creator_id": "3b3qyk3i41aqs65whyiumipo7c",
+        "plugin_id": "tx7ixndiapz68s83k6r8mouxhc",
+        "options": 525
+    },
+    "invite": "invite-b1b048",
+    "password": "correct-horse-battery-0a4910"
+}

@@ -1,0 +1,80 @@
+{
+    "id": "puh1qrxy9pfw1895rhe6b9nmjr",
+    "create_at": 1706584675000,
+    "update_at": 1701190398000,
+    "delete_at": 1704981296000,
+    "team_id": "ws9iqc7u9bikfhi7kh35875kwe",
+    "type": "type-640409",
+    "display_name": "displayname-e83264",
+    "name": "name-cfbe43",
+    "header": "header-2b8d63",
+    "purpose": "purpose-c4b617",
+    "last_post_at": 1707144077000,
+    "total_msg_count": 69,
+    "extra_update_at": 1700380844000,
+    "creator_id": "1nozbn8a37rqro7dqnrxtwnehe",
+    "scheme_id": "thtxuk93i666zzby9gi9umi77c",
+    "props": {
+        "key0-df1e7a": "val0-8a4a34",
+        "key1-de1cc7": "val1-894881"
+    },
+    "group_constrained": true,
+    "autotranslation": true,
+    "shared": true,
+    "total_msg_count_root": 41,
+    "policy_id": "8m9cpegc3657p5x9a4oc3wfz4a",
+    "last_root_post_at": 1706760577000,
+    "banner_info": {
+        "enabled": true,
+        "text": "text-c4f83b",
+        "background_color": "backgroundcolor-6e3e69"
+    },
+    "policy_enforced": true,
+    "policy_actions": {
+        "key0-e838f8": true,
+        "key1-e93aab": true
+    },
+    "policy_is_active": true,
+    "default_category_name": "defaultcategoryname-222db6",
+    "managed_category_name": "managedcategoryname-053bdc",
+    "discoverable": true,
+    "bookmarks": [
+        {
+            "id": "c6zq4uoxdkg68pfc7i8y6gcphc",
+            "create_at": 1706945796000,
+            "update_at": 1705510461000,
+            "delete_at": 1707739643000,
+            "channel_id": "j3hyap4c81fkhym4bo5waxckia",
+            "owner_id": "iatkpp3nuw7swajrw451f8t5pe",
+            "file_id": "prgdwh5nkhxbjpok8j3srio6no",
+            "display_name": "displayname-eff50f",
+            "sort_order": 44,
+            "link_url": "https://example.com/linkurl/4b1313",
+            "image_url": "https://example.com/imageurl/96767d",
+            "emoji": "emoji-889901",
+            "type": "type-54b0be",
+            "target_id": "wm7o1ikmpoimyix7bfkws5jksy",
+            "original_id": "znnic55cw9g5n4h8k3zs3kgpsr",
+            "parent_id": "n6yfk4ffuxwoq3d6kiwkmgzjyh",
+            "file": {
+                "id": "zd5yrrtsuj5de49ayejdpg5sgo",
+                "user_id": "xucxj1qnic6h4m646urhfmb73w",
+                "post_id": "a3tgmkgrb9hiy6mrcswcer83ky",
+                "channel_id": "j613wkcytrn5t8fduewabnyfzy",
+                "create_at": 1705998695000,
+                "update_at": 1706742890000,
+                "delete_at": 1701598124000,
+                "name": "name-157444",
+                "extension": "extension-2c0914",
+                "size": 60,
+                "mime_type": "mimetype-f6832a",
+                "width": 95,
+                "height": 10,
+                "has_preview_image": true,
+                "mini_preview": "Ynl0ZXMtbWluaXByZXZpZXc=",
+                "remote_id": "7mofgugf4o5u78xnkpgcmijz8a",
+                "archived": true
+            }
+        }
+    ]
+}

@@ -1,0 +1,10 @@
+{
+    "reasons": [
+        "reasons-294c57",
+        "reasons-296a48"
+    ],
+    "reporter_comment_required": true,
+    "reviewer_comment_required": true,
+    "notify_reporter_on_dismissal": true,
+    "notify_reporter_on_removal": true
+}

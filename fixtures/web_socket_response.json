@@ -1,0 +1,15 @@
+{
+    "status": "status-42be0f",
+    "seq_reply": 71,
+    "data": {
+        "key0-b10d9a": "val0-d45350",
+        "key1-b20f4d": "val1-d55503"
+    },
+    "error": {
+        "id": "mr6zju43kg9ujjt5qu8i1wf9go",
+        "message": "message-c83948",
+        "detailed_error": "detailederror-fa24c8",
+        "request_id": "738oa86ia5hh9ektbox7mt933h",
+        "status_code": 37
+    }
+}

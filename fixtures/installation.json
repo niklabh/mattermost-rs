@@ -1,0 +1,12 @@
+{
+    "id": "e7zth57tcphq7fdpd3z5naua7a",
+    "state": "state-5bcfd3",
+    "allowed_ip_ranges": [
+        {
+            "cidr_block": "cidrblock-a45766",
+            "description": "description-997608",
+            "enabled": true,
+            "owner_id": "twe8arocnxuf8soqxojyarzgkc"
+        }
+    ]
+}
