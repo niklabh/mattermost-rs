@@ -1,0 +1,6 @@
+{
+    "message_deletion_enabled": true,
+    "file_deletion_enabled": true,
+    "message_retention_cutoff": 31,
+    "file_retention_cutoff": 58
+}

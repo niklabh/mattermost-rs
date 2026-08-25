@@ -1,0 +1,5 @@
+{
+    "idp_certificate_file": true,
+    "private_key_file": true,
+    "public_certificate_file": true
+}

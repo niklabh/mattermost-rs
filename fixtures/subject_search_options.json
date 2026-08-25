@@ -1,0 +1,19 @@
+{
+    "term": "term-667c7b",
+    "team_id": "cn4fcq9pgkhwwr7ska764c73je",
+    "query": "query-6ea395",
+    "args": [
+        "args-6c145f",
+        "args-6c3250"
+    ],
+    "limit": 95,
+    "cursor": {
+        "target_id": "ejtkcf46q3gcu7mdwamih74c3r"
+    },
+    "allow_inactive": true,
+    "ignore_count": true,
+    "exclude_members": "excludechannelmembers-969983",
+    "subject_id": "apoj7bi4jtkzgrn9u4dmw14iqc",
+    "exclude_native_attributes": true,
+    "exclude_full_names": true
+}

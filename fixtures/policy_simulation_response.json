@@ -1,0 +1,172 @@
+{
+    "results": [
+        {
+            "user": {
+                "id": "bn6o8nb4467i5q76yqrdisf5mw",
+                "create_at": 1704687671000,
+                "update_at": 1707591258000,
+                "delete_at": 1707755868000,
+                "username": "username-6a2c1a",
+                "password": "correct-horse-battery-93109a",
+                "auth_data": "authdata-1a8a8b",
+                "auth_service": "authservice-5b99f5",
+                "email": "email-e26749@example.com",
+                "email_verified": true,
+                "nickname": "nickname-9f58df",
+                "first_name": "firstname-1023c9",
+                "last_name": "lastname-355d73",
+                "position": "position-ca49cf",
+                "roles": "roles-98ba7d",
+                "allow_marketing": true,
+                "props": {
+                    "key0-255f8d": "val0-10417f",
+                    "key1-245dda": "val1-0f3fcc"
+                },
+                "notify_props": {
+                    "key0-c8e99f": "val0-6509fe",
+                    "key1-c9eb52": "val1-660bb1"
+                },
+                "last_password_update": 1703993366000,
+                "last_picture_update": 1706575313000,
+                "failed_attempts": 46,
+                "locale": "locale-155ee1",
+                "timezone": {
+                    "key0-ad819a": "val0-3af9c1",
+                    "key1-ae834d": "val1-3bfb74"
+                },
+                "mfa_active": true,
+                "mfa_secret": "mfasecret-83c541",
+                "remote_id": "xep5r6mj3yjekme7sjhsu1e1ow",
+                "last_activity_at": 1703879970000,
+                "is_bot": true,
+                "bot_description": "botdescription-04b3c1",
+                "bot_last_icon_update": 1701717391000,
+                "terms_of_service_id": "8w55tbretjbz8ntiznnetnkdqc",
+                "terms_of_service_create_at": 1703571566000,
+                "disable_welcome_email": true,
+                "last_login": 1706894879000,
+                "mfa_used_timestamps": [
+                    "mfausedtimestamps-f23ed8",
+                    "mfausedtimestamps-ec0232"
+                ]
+            },
+            "decisions": {
+                "key0-04fea6": {
+                    "decision": true,
+                    "blame": [
+                        {
+                            "source": "source-2997f9",
+                            "outcome": "outcome-4c5b73",
+                            "policy_id": "fonhhrhopnnnfzag3aj3y4crre",
+                            "policy_name": "policyname-d66990",
+                            "rule_name": "rulename-4208c8",
+                            "role": "role-7735f0",
+                            "expression": "expression-6fad7d",
+                            "evaluation_tree": {
+                                "kind": "kind-214d3c",
+                                "expression": "expression-83be31",
+                                "outcome": "outcome-a4b6dc",
+                                "error": "error-e092df",
+                                "operator": "operator-b4e72f",
+                                "attribute": "attribute-b44714",
+                                "actual_value": "actualvalue-1b7feb",
+                                "expected_value": "expectedvalue-3d7727",
+                                "children": [
+                                    {
+                                        "kind": "",
+                                        "expression": "",
+                                        "outcome": ""
+                                    }
+                                ]
+                            },
+                            "merged_rules": [
+                                {
+                                    "name": "name-f91c88",
+                                    "expression": "expression-6ee1a0",
+                                    "evaluation_tree": {
+                                        "kind": "kind-1eebf2",
+                                        "expression": "expression-f6f96f",
+                                        "outcome": "outcome-28c754",
+                                        "error": "error-c60c93",
+                                        "operator": "operator-32dbdb",
+                                        "attribute": "attribute-a8ba7f",
+                                        "actual_value": "actualvalue-ffc6dd",
+                                        "expected_value": "expectedvalue-9a3a4a",
+                                        "children": [
+                                            {
+                                                "kind": "",
+                                                "expression": "",
+                                                "outcome": ""
+                                            }
+                                        ]
+                                    }
+                                }
+                            ]
+                        }
+                    ]
+                }
+            },
+            "sessions": [
+                {
+                    "id": "rucio9x4ihrhti64mb69icyj3y",
+                    "device": "device-91d751",
+                    "network": "network-9e53a4",
+                    "last_active_at": 1702238397000,
+                    "decisions": {
+                        "key0-084f73": {
+                            "decision": true,
+                            "blame": [
+                                {
+                                    "source": "source-086d82",
+                                    "outcome": "outcome-bd7fcf",
+                                    "policy_id": "f8rw8td47ex547s8exn8i4e9zw",
+                                    "policy_name": "policyname-377f32",
+                                    "rule_name": "rulename-e3a9f8",
+                                    "role": "role-609c09",
+                                    "expression": "expression-5c0909",
+                                    "evaluation_tree": {
+                                        "kind": "kind-c0f79a",
+                                        "expression": "expression-98003f",
+                                        "outcome": "outcome-4fbc57",
+                                        "error": "error-1fb892",
+                                        "operator": "operator-42735d",
+                                        "attribute": "attribute-578f0c",
+                                        "actual_value": "actualvalue-4ebcac",
+                                        "expected_value": "expectedvalue-924aef",
+                                        "children": [
+                                            {
+                                                "kind": "",
+                                                "expression": "",
+                                                "outcome": ""
+                                            }
+                                        ]
+                                    },
+                                    "merged_rules": [
+                                        {
+                                            "name": "name-9ff896",
+                                            "expression": "expression-aa21be",
+                                            "evaluation_tree": {
+                                                "kind": "",
+                                                "expression": "",
+                                                "outcome": ""
+                                            }
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    },
+                    "attributes": {
+                        "key0-689000": "val0-6113e9",
+                        "key1-6991b3": "val1-62159c"
+                    }
+                }
+            ],
+            "attributes": {
+                "key0-c69329": "val0-fd05ee",
+                "key1-c59176": "val1-fc043b"
+            }
+        }
+    ],
+    "total": 8
+}

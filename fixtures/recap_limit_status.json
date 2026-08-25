@@ -1,0 +1,23 @@
+{
+    "effective_limits": {
+        "max_recaps_per_day": 74,
+        "max_scheduled_recaps": 2,
+        "max_channels_per_recap": 25,
+        "max_posts_per_recap": 28,
+        "max_tokens_per_recap": 67,
+        "max_posts_per_day": 7,
+        "cooldown_minutes": 87,
+        "source": "source-0989ce",
+        "source_id": "x7k3mheqzpupjunu1zao7qug4o"
+    },
+    "daily": {
+        "used": 22,
+        "limit": 16,
+        "reset_at": 1706776926000
+    },
+    "cooldown": {
+        "is_active": true,
+        "available_at": 1704237752000,
+        "retry_after_seconds": 92
+    }
+}

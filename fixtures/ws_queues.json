@@ -1,0 +1,16 @@
+{
+    "active_queue": [
+        {
+            "type": "type-06a2e6",
+            "buf": {
+                "key": "value"
+            }
+        }
+    ],
+    "dead_queue": [
+        {
+            "key": "value"
+        }
+    ],
+    "reuse_count": 73
+}

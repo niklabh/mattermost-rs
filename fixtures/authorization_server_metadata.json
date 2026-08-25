@@ -1,0 +1,26 @@
+{
+    "issuer": "issuer-1dc97f",
+    "authorization_endpoint": "authorizationendpoint-872a64",
+    "token_endpoint": "dsf53na7dzeig4wjz1ft48gtkc",
+    "response_types_supported": [
+        "responsetypessupported-b4eb2a",
+        "responsetypessupported-aeae84"
+    ],
+    "registration_endpoint": "registrationendpoint-e3a63f",
+    "scopes_supported": [
+        "scopessupported-cd5ea9",
+        "scopessupported-d39b4f"
+    ],
+    "grant_types_supported": [
+        "granttypessupported-d5849f",
+        "granttypessupported-94f9ee"
+    ],
+    "token_endpoint_auth_methods_supported": [
+        "xg781hu451n4itiaxf38ishfie",
+        "j1qohfmx8mimd9h6baks6q9ksr"
+    ],
+    "code_challenge_methods_supported": [
+        "codechallengemethodssupported-f87cfd",
+        "codechallengemethodssupported-30fa17"
+    ]
+}

@@ -1,0 +1,29 @@
+{
+    "attribute": {
+        "id": "3ejoubg31qxmh9eibgnpufr6za",
+        "group_id": "g8ixtr97xeffr9ze9nj946ekke",
+        "name": "name-39a157",
+        "type": "type-84cdc5",
+        "attrs": {
+            "key0-3067cb": "val0-31c87c",
+            "key1-2f6618": "val1-30c6c9"
+        },
+        "target_id": "wp1pqtm3jo9bthdn47nz1136dy",
+        "target_type": "targettype-8c7a6b",
+        "object_type": "objecttype-649fa7",
+        "protected": true,
+        "permission_field": "permissionfield-756ad2",
+        "permission_values": "permissionvalues-71e43e",
+        "permission_options": "permissionoptions-0120e3",
+        "linked_field_id": "o8nfte361m46fusnmntu7rxihe",
+        "create_at": 1706362197000,
+        "update_at": 1702470184000,
+        "delete_at": 1700630490000,
+        "created_by": "createdby-16d532",
+        "updated_by": "updatedby-1f3a9c"
+    },
+    "values": [
+        "values-acc50e",
+        "values-661ba8"
+    ]
+}

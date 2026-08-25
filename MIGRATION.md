@@ -4262,3 +4262,131 @@ Also worth knowing:
 - **An empty channel is not reachable through the API.** Creating a channel makes Go write a
   `system_join_channel` post for its creator, so the store test and the parity fixture both delete
   the row directly — otherwise the clock-stamped etag branch has no fixture at all.
+
+---
+
+## Experiment, 2026-08-24 — the rest of `model/` ported without running a single tool
+
+**Two phases.** Phase one was the experiment: port every remaining model file using **only file
+reads and writes** — no `cargo check`, no `cargo test`, no `cargo clippy`, no fixture generation.
+Phase two, in the same session, put the result through the normal discipline: build, fixtures,
+behaviour oracles, mutation testing. The **Verdict** below is the part worth reading; the
+experiment's own predictions are kept unedited underneath it so the two can be compared.
+
+### What landed
+
+112 new modules in `crates/mm-model/src/` — 110 ports plus two internal helpers (`go_bytes.rs`,
+`serde_helpers.rs`) — bringing the crate to 191 declared modules and ~87,500 lines. They cover
+every remaining file in `server/public/model/` except the exclusions below. Four
+files were **generated from the Go source** rather than transcribed, because a registry of that
+size is where a hand-copy silently loses an entry: `migration.rs` (61 keys), `feature_flags.rs`
+(41 flags), `audit_events.rs` (357 events), `config.rs` (53 structs, ~1,300 fields).
+
+### What is deliberately not ported
+
+| Go file | Why |
+|---|---|
+| `client4.go`, `client4_route.go`, `websocket_client.go` | Go REST/WS **client**, out of scope (CLAUDE.md) |
+| `*_serial_gen.go` (session, user, team_member, utils) | msgp/easyjson codecs — serde replaces them |
+| `ai_bridge_test_helper.go`, `map.go` | test helpers |
+| `config.go`'s `SetDefaults`/`IsValid`/`Sanitize` | thousands of lines of per-field logic; `MIGRATION_STRATEGY.md` says translate config lazily, section by section |
+| `manifest.go: FindManifest`, `packet_metadata.go: ParsePacketMetadata` | need a YAML parser |
+| `saml.go`'s metadata tree, `shared_channel.go`'s `SyncMsg` XML codec, `xml_helpers.go`'s decoder | need an XML codec |
+| `remote_cluster.go: Encrypt/Decrypt` | need AES-GCM + scrypt ([D-046]'s neighbours) |
+| `auditconv.go: AuditModelTypeConv` | a `type switch` over `any`; Rust dispatches statically |
+
+### The findings worth keeping
+
+These are in the code, in the doc comment on the thing they constrain. The ones most likely to
+bite:
+
+- **`Bitmask.IsBitSet` ignores its argument** (`remote_cluster.rs`) — `return *bm != 0`. Every
+  `IsOptionFlagSet` caller reads "has any option" as "has this option". Reproduced.
+- **`auditCommandArgs` logs `team_id` and `trigger_id` swapped** (`auditconv.rs`). Every
+  slash-command audit entry the Go server has ever written has them the wrong way round.
+- **`entry` outranks `enterprise`** (`license.rs`) — `EntryTier == EnterpriseAdvancedTier == 30`,
+  so `MinimumEnterpriseLicense` is true for the cheapest SKU.
+- **`AcceptedNetworkRequestGroups` can never match** (`metrics.rs`) — `processLabel` lower-cases
+  the value first and every accepted value is capitalised, so the label always falls back.
+- **`GetSiteURL`'s second branch is dead** (`remote_cluster.rs`): it re-tests a value the first
+  branch already rewrote.
+- **Config wire keys are Go field names**, and only three fields in 5,795 lines carry
+  `json:",omitempty"` (`config.rs`). Everything else writes `null`, which is what lets the server
+  tell "unset" from "set to zero".
+- **`PropertyValue.Value` is a `json.RawMessage`** and `serde_json::Value` is not (`property_value.rs`):
+  Go's `SanitizePropertyValue` returns the *original bytes* so callers can skip a write by
+  identity, and that identity comparison does not survive the port.
+- **`WebSocketEvent` has two encoders that disagree byte-for-byte** (`websocket_message.rs`) — the
+  precomputed path emits a space after each colon.
+- Several Go methods **panic** on inputs this port instead rejects or treats as absent
+  (`ChannelModerationPatch.Roles`, `Features.ToMap`, `MessageExport.PreviewID`,
+  `ChannelBookmarkAndFileInfo.MiniPreview`, `manifest.MeetMinServerVersion`). Each is noted at the
+  call site; all are the safe direction.
+
+### Verdict — what the tools found afterwards
+
+The draft was closer to correct than the experiment's own risk section predicted, and the errors
+it did contain were concentrated exactly where a reader would guess: hand-reimplemented Go
+standard-library behaviour, not the wire format.
+
+| Check | Result |
+|---|---|
+| `cargo check --workspace` | **2 errors** in ~21,000 new lines, both the same cause: `WebSocketResponse` derived `Clone`/`PartialEq` while holding a boxed `AppError` that is neither |
+| `cargo clippy --all-targets -- -D warnings` | 6 findings — four `collapsible_match`, one `derivable_impls`, one `ptr_arg` on a speculative helper that was deleted |
+| Fixture generation | 246 registry entries added; **2 rejected by the generator** (`GroupSyncable`, `PluginPropertyOption`) because their wire form is not their struct — see below |
+| Wire round-trip, 245 types | **3 failures**, all real: `AutocompleteData`'s nil-able slices, a `float64` serialised as `65.0` where Go writes `65`, and one `any` field the reflective filler could not type |
+| Behaviour oracles | **3 genuine translation bugs** in reimplemented Go stdlib: `path.Clean`, Masterminds' leading-zero rule, and `time.Time.String` on a 5-digit year |
+| Model behaviour oracle, 19 corpora / ~250 cases | **0 failures** — every validator, builder and custom codec answered as Go did on the first run |
+| `scripts/mutate.sh` | **15 run, 15 caught, 2 controls survived.** Each mutation died in the test that should have killed it, not in an unrelated suite |
+
+Two lessons, both worth more than the line count:
+
+1. **The wire format survived; the hand-written algorithms did not.** Every serialization bug was
+   mechanical and caught by a fixture. Every *logic* bug was in code reimplementing a Go library
+   (`path.Clean`, `semver`, `time`), where there is no fixture to compare against unless one is
+   deliberately built. That is an argument for writing the behaviour corpus **first** for anything
+   that reimplements a dependency.
+2. **A type whose `MarshalJSON` does not describe its struct cannot have a reflective fixture.**
+   `GroupSyncable` renames a `json:"-"` field per its type and errors on a third;
+   `PluginPropertyOption` emits its inner map unwrapped; `IntegrityCheckResult` and
+   `AutocompleteArg` hold an `any` the filler fills with a string that the type's own reader
+   rejects. The first two are covered by `behaviour_sweep_models.json` instead; the last two are
+   pinned by an `overrides` entry giving the `any` its real shape. **Changing those overrides
+   rewrites committed fixtures** — `autocompletearg.type`/`.data` (three paths) and
+   `integritycheckresult.data` are new and hand-populated, the only hand-written values in
+   `reference/dump/main.go`.
+
+Two parser rewrites came out of it, both in `manifest.rs`:
+
+- `StrictVersion` now follows Masterminds' actual step order (metadata, then prerelease, then the
+  numeric segments) and returns a typed `VersionParseError`, because `Manifest.IsValid` folds the
+  reason into the message a plugin developer sees. `NewVersion` is the **loose** parser in
+  v3.5.0 (`CoerceNewVersion = true`), which accepts leading zeros; `StrictNewVersion` does not.
+  That asymmetry is what `MeetMinServerVersion` depends on.
+- `ManifestError` gained `InvalidSettingsSchema`, reproducing Go's `errors.Wrap(err, "invalid
+  settings schema")` prefix.
+
+### Parity risk — the experiment's own assessment, left unedited
+
+- **Nothing here compiles-checked, ran, or was tested.** No `cargo` invocation of any kind.
+- **No fixtures were generated and no test was written.** Every wire claim in these 95 modules is
+  an unverified reading of the Go source — exactly the failure mode `fixtures/` exists to prevent.
+- Mechanical checks *were* run in place of the compiler, and they pass: every `use crate::…` and
+  inline `crate::…` path in the new files resolves to an item that exists; `lib.rs` declares all
+  191 modules with no duplicates and no orphans; brace/paren balance is clean. That is evidence of
+  **absence of one class of typo**, not of correctness.
+- Known compile risks that a mechanical check cannot see: trait bounds on derives (one was caught
+  by hand — `Channel` is `PartialEq` but not `Eq`, so `ChannelWithBookmarks` cannot derive `Eq`),
+  `#[serde(flatten)]` interactions, and closure borrow lifetimes.
+- **Anything from this section needs `cargo check`, then fixtures, then tests, before it is
+  believed.** The right next step is not another model file.
+
+### Next
+
+Route work resumes. Nothing in these 112 modules unblocks a route on its own, and per CLAUDE.md a
+model file is only worth its test suite once a route needs it — the tests written here exist
+because the draft needed *verifying*, not because a route arrived.
+
+What is still untested, and should be treated as unverified until a route needs it: the ~35
+modules with no `json:`-tagged type and no branching logic (constant tables, marker structs), and
+every method listed in "deliberately not ported" above.

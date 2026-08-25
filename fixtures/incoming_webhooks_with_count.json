@@ -1,0 +1,20 @@
+{
+    "incoming_webhooks": [
+        {
+            "id": "anyfsik6s4rdchhnmpki7phega",
+            "create_at": 1707035423000,
+            "update_at": 1705411714000,
+            "delete_at": 1701906452000,
+            "user_id": "d96bmixf7rym6584nzk6m4yyzh",
+            "channel_id": "y69rwe9kn9wshifhjet6wfzjpa",
+            "team_id": "crzyn369buyybmtcyfu76n6yyy",
+            "display_name": "displayname-c75cdf",
+            "description": "description-188a3e",
+            "username": "username-a18e9d",
+            "icon_url": "https://example.com/iconurl/39353c",
+            "channel_locked": true,
+            "last_used": 96
+        }
+    ],
+    "total_count": 30
+}

@@ -1,0 +1,20 @@
+{
+    "id": "7nu5ek4frsyxjg7jsoiwkjwy6o",
+    "name": "name-c02802",
+    "description": "description-f0e12f",
+    "price_per_seat": 41.5,
+    "add_ons": [
+        {
+            "id": "q98aprrk6q64jtgpo4eeihi7wo",
+            "name": "name-4d4ce7",
+            "display_name": "displayname-402141",
+            "price_per_seat": 76.125
+        }
+    ],
+    "sku": "sku-c29da4",
+    "price_id": "gftgn5ehpfoke9uycfsta4dywo",
+    "product_family": "family-a8b6f2",
+    "recurring_interval": "recurringinterval-e15c61",
+    "billing_scheme": "billingscheme-10086a",
+    "cross_sells_to": "crosssellsto-710d03"
+}

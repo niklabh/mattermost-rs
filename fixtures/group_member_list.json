@@ -1,0 +1,54 @@
+{
+    "members": [
+        {
+            "id": "or7pec7gr8nhiuta4o34cegf3e",
+            "create_at": 1704768890000,
+            "update_at": 1706835475000,
+            "delete_at": 1707516449000,
+            "username": "username-f56536",
+            "password": "correct-horse-battery-2e54d7",
+            "auth_data": "authdata-0d120f",
+            "auth_service": "authservice-0d61c5",
+            "email": "email-6b2e2b@example.com",
+            "email_verified": true,
+            "nickname": "nickname-602305",
+            "first_name": "firstname-f9c42c",
+            "last_name": "lastname-c97321",
+            "position": "position-d658c3",
+            "roles": "roles-b29611",
+            "allow_marketing": true,
+            "props": {
+                "key0-1ad932": "val0-bd4567",
+                "key1-1bdae5": "val1-be471a"
+            },
+            "notify_props": {
+                "key0-6c3eef": "val0-d07f5c",
+                "key1-6b3d3c": "val1-cf7da9"
+            },
+            "last_password_update": 1701997607000,
+            "last_picture_update": 1703339198000,
+            "failed_attempts": 53,
+            "locale": "locale-169353",
+            "timezone": {
+                "key0-6f43d4": "val0-369c88",
+                "key1-6e4221": "val1-359ad5"
+            },
+            "mfa_active": true,
+            "mfa_secret": "mfasecret-df0c52",
+            "remote_id": "9cjp6axtex71r1yt57o9noz5re",
+            "last_activity_at": 1700238019000,
+            "is_bot": true,
+            "bot_description": "botdescription-291595",
+            "bot_last_icon_update": 1704286044000,
+            "terms_of_service_id": "kn3aderadytdey7iogojogjngo",
+            "terms_of_service_create_at": 1701725167000,
+            "disable_welcome_email": true,
+            "last_login": 1704888892000,
+            "mfa_used_timestamps": [
+                "mfausedtimestamps-a4c6b2",
+                "mfausedtimestamps-eb7018"
+            ]
+        }
+    ],
+    "total_member_count": 16
+}

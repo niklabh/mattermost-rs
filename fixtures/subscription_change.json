@@ -1,0 +1,24 @@
+{
+    "product_id": "9ptascqn9uz8w1dntcahf69qxe",
+    "seats": 25,
+    "downgrade_feedback": {
+        "reason": "reason-d9268e",
+        "comments": "comments-2fa64c"
+    },
+    "shipping_address": {
+        "city": "city-780b60",
+        "country": "country-bc5086",
+        "line1": "line1-4e8ba5",
+        "line2": "line2-4f8d58",
+        "postal_code": "postalcode-798120",
+        "state": "state-445436"
+    },
+    "customer": {
+        "name": "name-577aea",
+        "email": "email-3b0e03@example.com",
+        "contact_first_name": "contactfirstname-7a726b",
+        "contact_last_name": "contactlastname-1a5cc4",
+        "num_employees": 58,
+        "monthly_subscription_alt_payment_method": "cloudaltpaymentmethod-79e7b4"
+    }
+}

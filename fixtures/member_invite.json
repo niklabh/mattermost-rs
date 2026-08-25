@@ -1,0 +1,19 @@
+{
+    "emails": [
+        "emails-97ec9b@example.com",
+        "emails-55aee9@example.com"
+    ],
+    "channelIds": [
+        "channelids-18cc1f",
+        "channelids-1f08c5"
+    ],
+    "message": "message-84cec2",
+    "profiles": [
+        {
+            "email": "email-66a1b0@example.com",
+            "username": "username-51992c",
+            "first_name": "firstname-9f7391",
+            "last_name": "lastname-39f3a2"
+        }
+    ]
+}

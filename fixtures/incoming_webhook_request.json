@@ -1,0 +1,73 @@
+{
+    "text": "text-eb5b0a",
+    "username": "username-1831c9",
+    "icon_url": "https://example.com/iconurl/88da7d",
+    "channel": "channelname-2b5e0e",
+    "root_id": "zrnaehurmda4aborot3gei9tio",
+    "props": {
+        "key0-a2aecc": "val0-3ecf2b",
+        "key1-a3b07f": "val1-3fd0de"
+    },
+    "attachments": [
+        {
+            "id": 87,
+            "fallback": "fallback-37809d",
+            "color": "color-ca7839",
+            "pretext": "pretext-c1d2ba",
+            "author_name": "authorname-752fb1",
+            "author_link": "https://example.com/authorlink/f9ddd0",
+            "author_icon": "authoricon-aacd75",
+            "title": "title-0609f9",
+            "title_link": "https://example.com/titlelink/63625c",
+            "text": "text-2d8fde",
+            "fields": [
+                {
+                    "title": "title-82e41e",
+                    "value": "value-cf1a79",
+                    "short": true
+                }
+            ],
+            "image_url": "https://example.com/imageurl/3c2c5f",
+            "thumb_url": "https://example.com/thumburl/3610bd",
+            "footer": "footer-b7b420",
+            "footer_icon": "footericon-27f464",
+            "ts": "timestamp-caa24c",
+            "actions": [
+                {
+                    "id": "9d95rjnrqop8tkabsc1re7e4xy",
+                    "type": "type-1ebf6f",
+                    "name": "name-ae1286",
+                    "tooltip": "tooltip-41a804",
+                    "disabled": true,
+                    "style": "style-177a8e",
+                    "data_source": "datasource-db5af0",
+                    "options": [
+                        {
+                            "text": "text-f2fede",
+                            "value": "value-a97018"
+                        }
+                    ],
+                    "default_option": "defaultoption-512b09",
+                    "integration": {
+                        "url": "https://example.com/url/1298cd",
+                        "context": {
+                            "key0-98f6ea": "val0-256f11",
+                            "key1-99f89d": "val1-2670c4"
+                        }
+                    },
+                    "cookie": "cookie-19dec5"
+                }
+            ]
+        }
+    ],
+    "type": "type-4482cc",
+    "icon_emoji": "iconemoji-fafb10",
+    "priority": {
+        "priority": "priority-dae8c0",
+        "requested_ack": true,
+        "persistent_notifications": true,
+        "PostId": "x7a8o6r6iyssiudqxbhj7j3ppe",
+        "ChannelId": "rnk1eeyr5sm1xwhsrooyjzwzrh"
+    },
+    "silent": true
+}

@@ -1,0 +1,54 @@
+{
+    "users": [
+        {
+            "id": "3zy7gpmgkbghqgsy4c4scu4pah",
+            "create_at": 1703461758000,
+            "update_at": 1701293487000,
+            "delete_at": 1700265197000,
+            "username": "username-ac03d5",
+            "password": "correct-horse-battery-9dd8d8",
+            "auth_data": "authdata-7096b6",
+            "auth_service": "authservice-f1ff3e",
+            "email": "email-16887e@example.com",
+            "email_verified": true,
+            "nickname": "nickname-02e66c",
+            "first_name": "firstname-48db6f",
+            "last_name": "lastname-0b1208",
+            "position": "position-2301ae",
+            "roles": "roles-86e799",
+            "allow_marketing": true,
+            "props": {
+                "key0-42d032": "val0-1d1913",
+                "key1-43d1e5": "val1-1e1ac6"
+            },
+            "notify_props": {
+                "key0-9be9df": "val0-9aa3f3",
+                "key1-9ae82c": "val1-99a240"
+            },
+            "last_password_update": 1703486275000,
+            "last_picture_update": 1705599330000,
+            "failed_attempts": 57,
+            "locale": "locale-9c5022",
+            "timezone": {
+                "key0-28b1bf": "val0-291270",
+                "key1-27b00c": "val1-2810bd"
+            },
+            "mfa_active": true,
+            "mfa_secret": "mfasecret-db4348",
+            "remote_id": "z7gyppyn7iq7ednmy44yf5n74o",
+            "last_activity_at": 1700364583000,
+            "is_bot": true,
+            "bot_description": "botdescription-67ceda",
+            "bot_last_icon_update": 1705833512000,
+            "terms_of_service_id": "u1imeafm7q8rsu7cstokz5rqjc",
+            "terms_of_service_create_at": 1707495507000,
+            "disable_welcome_email": true,
+            "last_login": 1700334856000,
+            "mfa_used_timestamps": [
+                "mfausedtimestamps-835255",
+                "mfausedtimestamps-8b41fc"
+            ]
+        }
+    ],
+    "total": 78
+}

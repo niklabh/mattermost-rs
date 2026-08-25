@@ -1,0 +1,11 @@
+{
+    "max_recaps_per_day": 55,
+    "max_scheduled_recaps": 9,
+    "max_channels_per_recap": 88,
+    "max_posts_per_recap": 71,
+    "max_tokens_per_recap": 50,
+    "max_posts_per_day": 100,
+    "cooldown_minutes": 38,
+    "source": "source-ca4861",
+    "source_id": "3m5e8ysfehbxy9xaoqbck1yn6y"
+}

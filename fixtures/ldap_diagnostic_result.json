@@ -1,0 +1,23 @@
+{
+    "test_name": "testname-44d50f",
+    "test_value": "testvalue-af1df2",
+    "total_count": 34,
+    "entries_with_value": 98,
+    "message": "message-fe8b59",
+    "error": "error-65491c",
+    "sample_results": [
+        {
+            "dn": "dn-a2a604",
+            "username": "username-6ab2e1",
+            "email": "email-020e6d@example.com",
+            "first_name": "firstname-79b976",
+            "last_name": "lastname-4cf8b2",
+            "id": "f5758xyq9ijppaxhsq6y79114a",
+            "display_name": "displayname-2a79ad",
+            "available_attributes": {
+                "key0-046047": "val0-2511d7",
+                "key1-035e94": "val1-241024"
+            }
+        }
+    ]
+}

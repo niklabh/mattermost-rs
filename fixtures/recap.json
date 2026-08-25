@@ -1,0 +1,36 @@
+{
+    "id": "xoh8tedhettdsm34xno8atmn8c",
+    "user_id": "tps177z6ijen9sdmf55x7kkofh",
+    "title": "title-3fc6df",
+    "create_at": 1701781811000,
+    "update_at": 1703951278000,
+    "delete_at": 1704656736000,
+    "read_at": 1700912127000,
+    "viewed_at": 1700740383000,
+    "total_message_count": 55,
+    "status": "status-f66d99",
+    "bot_id": "9ib51y41yeq8s11nzrbiryehxc",
+    "scheduled_recap_id": "gke9og4ir1nbp3c19ypikjcrna",
+    "skip_reason": "skipreason-86138a",
+    "channels": [
+        {
+            "id": "syond4e835b9ca3nr8woxu6d6a",
+            "recap_id": "s7rrs34orjdtobn8jpuiyek8dy",
+            "channel_id": "17818iuhw87p33nprxm83e845o",
+            "channel_name": "channelname-9b5127",
+            "highlights": [
+                "highlights-392f09",
+                "highlights-00b1f0"
+            ],
+            "action_items": [
+                "actionitems-a2461b",
+                "actionitems-dc7635"
+            ],
+            "source_post_ids": [
+                "sourcepostids-77d608",
+                "sourcepostids-359856"
+            ],
+            "create_at": 1700071631000
+        }
+    ]
+}

@@ -1,0 +1,83 @@
+{
+    "id": "cbfmqc7fdacfar4csh34k8aamo",
+    "customer_id": "zb3i1be6k7imk45imrnthsdksw",
+    "product_id": "pp51mfi6i7zq8qdirsmm7muqhc",
+    "add_ons": [
+        "addons-5f8884",
+        "addons-1efdd3"
+    ],
+    "start_at": 1704495867000,
+    "end_at": 1704768446000,
+    "create_at": 1703983039000,
+    "seats": 13,
+    "status": "status-ab45c6",
+    "dns": "dns-069a11",
+    "last_invoice": {
+        "id": "apefcfobyjpf6rnxkamynyk4mh",
+        "number": "number-a76c72",
+        "create_at": 1704429800000,
+        "total": 46,
+        "tax": 71,
+        "status": "status-275d0d",
+        "description": "description-dff884",
+        "period_start": 21,
+        "period_end": 50,
+        "subscription_id": "1moec7thdkeyotxno35daghoby",
+        "line_items": [
+            {
+                "price_id": "p37b8a7j4fjm6emhnxt4uw11zh",
+                "total": 56,
+                "quantity": 3.875,
+                "price_per_unit": 98,
+                "description": "description-dca810",
+                "type": "type-af8d4b",
+                "metadata": {
+                    "key0-db0548": "val0-ed2a8d",
+                    "key1-da0395": "val1-ec28da"
+                },
+                "period_start": 87,
+                "period_end": 88
+            }
+        ],
+        "current_product_name": "currentproductname-0b2405"
+    },
+    "upcoming_invoice": {
+        "id": "b8udk5snnp9t6izrgizcrru9dh",
+        "number": "number-9b29b1",
+        "create_at": 1702438642000,
+        "total": 76,
+        "tax": 85,
+        "status": "status-6746db",
+        "description": "description-d1e8a3",
+        "period_start": 99,
+        "period_end": 60,
+        "subscription_id": "dudy1ka99gxq8u68brit96w6hc",
+        "line_items": [
+            {
+                "price_id": "fnm7bjrcdine5sha4n1ea81rtw",
+                "total": 98,
+                "quantity": 47.625,
+                "price_per_unit": 80,
+                "description": "description-ceb3bb",
+                "type": "type-9eecdf",
+                "metadata": {
+                    "key0-7a08d8": "val0-d9c86b",
+                    "key1-790725": "val1-d8c6b8"
+                },
+                "period_start": 41,
+                "period_end": 98
+            }
+        ],
+        "current_product_name": "currentproductname-115cce"
+    },
+    "is_free_trial": "isfreetrial-cf4a07",
+    "trial_end_at": 1705814034000,
+    "delinquent_since": 84,
+    "originally_licensed_seats": 64,
+    "compliance_blocked": "complianceblocked-3bcf37",
+    "billing_type": "billingtype-cbc92d",
+    "cancel_at": 1707018961000,
+    "will_renew": "willrenew-6314b8",
+    "simulated_current_time_ms": 57,
+    "is_cloud_preview": true
+}

@@ -1,0 +1,34 @@
+{
+    "id": "k5z4dxxwn5eignxtwg69ef6tkc",
+    "name": "name-37dbd4",
+    "type": "type-ef3de8",
+    "active": true,
+    "create_at": 1700914873000,
+    "revision": 14,
+    "version": "version-b2fadd",
+    "roles": [
+        "roles-f7f464",
+        "roles-b769b3"
+    ],
+    "imports": [
+        "imports-8d25f0",
+        "imports-8ef6e2"
+    ],
+    "rules": [
+        {
+            "actions": [
+                "actions-b7fd5d",
+                "actions-b81b4e"
+            ],
+            "expression": "expression-16c2ff",
+            "name": "name-14975f",
+            "role": "role-9e7bb0"
+        }
+    ],
+    "scope": "scope-3f79d0",
+    "scope_id": "okuq9qcd18crnppe76ha8rsaer",
+    "props": {
+        "key0-ae15b5": "val0-fc1756",
+        "key1-ad1402": "val1-fb15a3"
+    }
+}

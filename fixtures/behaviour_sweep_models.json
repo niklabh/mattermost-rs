@@ -1,0 +1,2111 @@
+{
+    "access_policy_inherit": [
+        {
+            "imports": [
+                "q1a2b3c4d5e6f7g8h9i0j1k2l3"
+            ],
+            "name": "v0_1",
+            "rule_expressions": [
+                "user.attributes.team == \"Engineering\""
+            ]
+        },
+        {
+            "imports": [
+                "q1a2b3c4d5e6f7g8h9i0j1k2l3"
+            ],
+            "name": "v0_2",
+            "rule_expressions": [
+                "user.attributes.team == \"Engineering\""
+            ]
+        },
+        {
+            "error_details": "",
+            "error_id": "model.access_policy.inherit.already_imported.app_error",
+            "error_where": "AccessControlPolicy.Inherit",
+            "imports": [
+                "q1a2b3c4d5e6f7g8h9i0j1k2l3"
+            ],
+            "name": "v0_2_duplicate",
+            "rule_expressions": [
+                "user.attributes.team == \"Engineering\""
+            ]
+        },
+        {
+            "imports": [
+                "q1a2b3c4d5e6f7g8h9i0j1k2l3"
+            ],
+            "name": "v0_3_ok",
+            "rule_expressions": [
+                "user.attributes.team == \"Engineering\""
+            ]
+        },
+        {
+            "error_details": "imports must target a parent-type policy",
+            "error_id": "model.access_policy.inherit.parent_type.app_error",
+            "error_where": "AccessControlPolicy.Inherit",
+            "imports": null,
+            "name": "v0_3_parent_is_channel",
+            "rule_expressions": [
+                "user.attributes.team == \"Engineering\""
+            ]
+        },
+        {
+            "error_details": "",
+            "error_id": "model.access_policy.inherit.version.app_error",
+            "error_where": "AccessControlPolicy.Inherit",
+            "imports": null,
+            "name": "v0_3_parent_wrong_version",
+            "rule_expressions": [
+                "user.attributes.team == \"Engineering\""
+            ]
+        },
+        {
+            "error_details": "",
+            "error_id": "model.access_policy.inherit.permission.app_error",
+            "error_where": "AccessControlPolicy.Inherit",
+            "imports": null,
+            "name": "v0_3_permission_child",
+            "rule_expressions": [
+                "user.attributes.team == \"Engineering\""
+            ]
+        },
+        {
+            "imports": [
+                "q1a2b3c4d5e6f7g8h9i0j1k2l3"
+            ],
+            "name": "v0_4_ok",
+            "rule_expressions": [
+                "user.attributes.team == \"Engineering\""
+            ]
+        },
+        {
+            "imports": [
+                "q1a2b3c4d5e6f7g8h9i0j1k2l3"
+            ],
+            "name": "v0_4_parent_v0_3",
+            "rule_expressions": [
+                "user.attributes.team == \"Engineering\""
+            ]
+        },
+        {
+            "error_details": "",
+            "error_id": "model.access_policy.inherit.version.app_error",
+            "error_where": "AccessControlPolicy.Inherit",
+            "imports": null,
+            "name": "v0_5_unsupported",
+            "rule_expressions": [
+                "user.attributes.team == \"Engineering\""
+            ]
+        }
+    ],
+    "access_policy_is_valid": [
+        {
+            "has_permission_action": false,
+            "name": "v0_3_channel_ok"
+        },
+        {
+            "error_details": "",
+            "error_id": "model.access_policy.is_valid.version.app_error",
+            "error_where": "AccessControlPolicy.IsValid",
+            "has_permission_action": false,
+            "name": "unknown_version"
+        },
+        {
+            "error_details": "",
+            "error_id": "model.access_policy.is_valid.version.app_error",
+            "error_where": "AccessControlPolicy.IsValid",
+            "has_permission_action": false,
+            "name": "empty_version"
+        },
+        {
+            "error_details": "",
+            "error_id": "model.access_policy.is_valid.id.app_error",
+            "error_where": "AccessControlPolicy.IsValid",
+            "has_permission_action": false,
+            "name": "bad_id"
+        },
+        {
+            "error_details": "",
+            "error_id": "model.access_policy.is_valid.revision.app_error",
+            "error_where": "AccessControlPolicy.IsValid",
+            "has_permission_action": false,
+            "name": "negative_revision"
+        },
+        {
+            "error_details": "",
+            "error_id": "model.access_policy.is_valid.type.app_error",
+            "error_where": "AccessControlPolicy.IsValid",
+            "has_permission_action": false,
+            "name": "unknown_type"
+        },
+        {
+            "has_permission_action": false,
+            "name": "v0_1_channel_rules_only"
+        },
+        {
+            "error_details": "",
+            "error_id": "model.access_policy.is_valid.rules.app_error",
+            "error_where": "AccessControlPolicy.IsValid",
+            "has_permission_action": false,
+            "name": "v0_1_channel_imports_only"
+        },
+        {
+            "error_details": "",
+            "error_id": "model.access_policy.is_valid.imports.app_error",
+            "error_where": "AccessControlPolicy.IsValid",
+            "has_permission_action": false,
+            "name": "v0_1_channel_two_imports"
+        },
+        {
+            "has_permission_action": false,
+            "name": "v0_2_channel_imports_only"
+        },
+        {
+            "error_details": "",
+            "error_id": "model.access_policy.is_valid.rules_imports.app_error",
+            "error_where": "AccessControlPolicy.IsValid",
+            "has_permission_action": false,
+            "name": "v0_2_channel_neither"
+        },
+        {
+            "has_permission_action": false,
+            "name": "v0_3_parent_ok"
+        },
+        {
+            "error_details": "",
+            "error_id": "model.access_policy.is_valid.name.app_error",
+            "error_where": "AccessControlPolicy.IsValid",
+            "has_permission_action": false,
+            "name": "v0_3_parent_no_name"
+        },
+        {
+            "error_details": "",
+            "error_id": "model.access_policy.is_valid.imports.app_error",
+            "error_where": "AccessControlPolicy.IsValid",
+            "has_permission_action": false,
+            "name": "v0_3_parent_with_imports"
+        },
+        {
+            "has_permission_action": false,
+            "name": "v0_3_channel_no_name"
+        },
+        {
+            "has_permission_action": false,
+            "name": "v0_3_permission_one_role"
+        },
+        {
+            "error_details": "",
+            "error_id": "model.access_policy.is_valid.roles.app_error",
+            "error_where": "AccessControlPolicy.IsValid",
+            "has_permission_action": false,
+            "name": "v0_3_permission_no_roles"
+        },
+        {
+            "error_details": "",
+            "error_id": "model.access_policy.is_valid.roles.app_error",
+            "error_where": "AccessControlPolicy.IsValid",
+            "has_permission_action": false,
+            "name": "v0_3_permission_two_roles"
+        },
+        {
+            "error_details": "",
+            "error_id": "model.access_policy.is_valid.roles.app_error",
+            "error_where": "AccessControlPolicy.IsValid",
+            "has_permission_action": false,
+            "name": "v0_3_permission_blank_role"
+        },
+        {
+            "error_details": "actions must not be empty",
+            "error_id": "model.access_policy.is_valid.actions.app_error",
+            "error_where": "AccessControlPolicy.IsValid",
+            "has_permission_action": false,
+            "name": "v0_3_no_actions"
+        },
+        {
+            "error_details": "unrecognized action: teleport",
+            "error_id": "model.access_policy.is_valid.actions.app_error",
+            "error_where": "AccessControlPolicy.IsValid",
+            "has_permission_action": false,
+            "name": "v0_3_unknown_action"
+        },
+        {
+            "error_details": "",
+            "error_id": "model.access_policy.is_valid.session_attribute_on_membership.app_error",
+            "error_where": "AccessControlPolicy.IsValid",
+            "has_permission_action": false,
+            "name": "v0_3_session_on_membership"
+        },
+        {
+            "has_permission_action": false,
+            "name": "v0_4_session_on_membership"
+        },
+        {
+            "has_permission_action": true,
+            "name": "v0_4_permission_rule_ok"
+        },
+        {
+            "error_details": "permission rules require a non-empty name within the policy max length",
+            "error_id": "model.access_policy.is_valid.rule_name.app_error",
+            "error_where": "AccessControlPolicy.IsValid",
+            "has_permission_action": true,
+            "name": "v0_4_permission_rule_no_name"
+        },
+        {
+            "error_details": "invalid channel role: \"system_user\"",
+            "error_id": "model.access_policy.is_valid.rule_role.app_error",
+            "error_where": "AccessControlPolicy.IsValid",
+            "has_permission_action": true,
+            "name": "v0_4_permission_rule_bad_role"
+        },
+        {
+            "error_details": "duplicate rule name: \"Uploads\"",
+            "error_id": "model.access_policy.is_valid.rule_name_unique.app_error",
+            "error_where": "AccessControlPolicy.IsValid",
+            "has_permission_action": true,
+            "name": "v0_4_duplicate_rule_names_after_trim"
+        },
+        {
+            "error_details": "membership rules must not have a role",
+            "error_id": "model.access_policy.is_valid.rule_role.app_error",
+            "error_where": "AccessControlPolicy.IsValid",
+            "has_permission_action": false,
+            "name": "v0_4_membership_with_role"
+        },
+        {
+            "error_details": "membership cannot be combined with other actions in the same rule",
+            "error_id": "model.access_policy.is_valid.actions.membership_combined.app_error",
+            "error_where": "AccessControlPolicy.IsValid",
+            "has_permission_action": true,
+            "name": "v0_4_membership_and_permission_in_one_rule"
+        },
+        {
+            "error_details": "permission action rules are only allowed on channel policies",
+            "error_id": "model.access_policy.is_valid.actions.permission_type.app_error",
+            "error_where": "AccessControlPolicy.IsValid",
+            "has_permission_action": true,
+            "name": "v0_4_permission_rule_on_parent"
+        },
+        {
+            "has_permission_action": false,
+            "name": "v0_5_ok"
+        },
+        {
+            "error_details": "",
+            "error_id": "model.access_policy.is_valid.plugin_type.app_error",
+            "error_where": "AccessControlPolicy.IsValid",
+            "has_permission_action": false,
+            "name": "v0_5_core_type"
+        },
+        {
+            "error_details": "malformed action: Invoke_Agent",
+            "error_id": "model.access_policy.is_valid.actions.app_error",
+            "error_where": "AccessControlPolicy.IsValid",
+            "has_permission_action": false,
+            "name": "v0_5_malformed_action"
+        },
+        {
+            "error_details": "malformed action: *",
+            "error_id": "model.access_policy.is_valid.actions.app_error",
+            "error_where": "AccessControlPolicy.IsValid",
+            "has_permission_action": false,
+            "name": "v0_5_wildcard_action"
+        },
+        {
+            "error_details": "",
+            "error_id": "model.access_policy.is_valid.roles.app_error",
+            "error_where": "AccessControlPolicy.IsValid",
+            "has_permission_action": false,
+            "name": "v0_5_with_role"
+        },
+        {
+            "error_details": "",
+            "error_id": "model.access_policy.is_valid.scope.app_error",
+            "error_where": "AccessControlPolicy.IsValid",
+            "has_permission_action": false,
+            "name": "v0_5_team_scope"
+        },
+        {
+            "error_details": "",
+            "error_id": "model.access_policy.is_valid.scope_id_without_scope.app_error",
+            "error_where": "AccessControlPolicy.IsValid",
+            "has_permission_action": false,
+            "name": "scope_id_without_scope"
+        },
+        {
+            "error_details": "",
+            "error_id": "model.access_policy.is_valid.scope_id.app_error",
+            "error_where": "AccessControlPolicy.IsValid",
+            "has_permission_action": false,
+            "name": "team_scope_bad_id"
+        },
+        {
+            "error_details": "",
+            "error_id": "model.access_policy.is_valid.scope.app_error",
+            "error_where": "AccessControlPolicy.IsValid",
+            "has_permission_action": false,
+            "name": "unknown_scope"
+        },
+        {
+            "has_permission_action": false,
+            "name": "team_scope_ok"
+        }
+    ],
+    "channel_bookmark_is_valid": [
+        {
+            "name": "link_ok"
+        },
+        {
+            "error_details": "id=b1a2b3c4d5e6f7g8h9i0j1k2l3",
+            "error_id": "model.channel_bookmark.is_valid.file_id.missing_or_invalid.app_error",
+            "name": "link_with_file"
+        },
+        {
+            "error_details": "id=b1a2b3c4d5e6f7g8h9i0j1k2l3",
+            "error_id": "model.channel_bookmark.is_valid.link_url.missing_or_invalid.app_error",
+            "name": "link_no_url"
+        },
+        {
+            "error_details": "id=b1a2b3c4d5e6f7g8h9i0j1k2l3",
+            "error_id": "model.channel_bookmark.is_valid.link_url.missing_or_invalid.app_error",
+            "name": "link_relative_url"
+        },
+        {
+            "name": "link_with_image"
+        },
+        {
+            "error_details": "id=b1a2b3c4d5e6f7g8h9i0j1k2l3",
+            "error_id": "model.channel_bookmark.is_valid.image_url.app_error",
+            "name": "link_with_bad_image"
+        },
+        {
+            "error_details": "id=b1a2b3c4d5e6f7g8h9i0j1k2l3",
+            "error_id": "model.channel_bookmark.is_valid.target_id.app_error",
+            "name": "link_with_target"
+        },
+        {
+            "name": "file_ok"
+        },
+        {
+            "error_details": "id=b1a2b3c4d5e6f7g8h9i0j1k2l3",
+            "error_id": "model.channel_bookmark.is_valid.link_url.missing_or_invalid.app_error",
+            "name": "file_with_link"
+        },
+        {
+            "error_details": "id=b1a2b3c4d5e6f7g8h9i0j1k2l3",
+            "error_id": "model.channel_bookmark.is_valid.file_id.missing_or_invalid.app_error",
+            "name": "file_no_file"
+        },
+        {
+            "name": "board_ok"
+        },
+        {
+            "error_details": "id=b1a2b3c4d5e6f7g8h9i0j1k2l3",
+            "error_id": "model.channel_bookmark.is_valid.board.link_url.app_error",
+            "name": "board_absolute_url"
+        },
+        {
+            "error_details": "id=b1a2b3c4d5e6f7g8h9i0j1k2l3",
+            "error_id": "model.channel_bookmark.is_valid.board.link_url.app_error",
+            "name": "board_protocol_relative"
+        },
+        {
+            "error_details": "id=b1a2b3c4d5e6f7g8h9i0j1k2l3",
+            "error_id": "model.channel_bookmark.is_valid.board.link_url.app_error",
+            "name": "board_scheme_inside"
+        },
+        {
+            "error_details": "id=b1a2b3c4d5e6f7g8h9i0j1k2l3",
+            "error_id": "model.channel_bookmark.is_valid.board.target_id.app_error",
+            "name": "board_no_target"
+        },
+        {
+            "error_details": "id=b1a2b3c4d5e6f7g8h9i0j1k2l3",
+            "error_id": "model.channel_bookmark.is_valid.board.file_id.app_error",
+            "name": "board_with_file"
+        },
+        {
+            "error_details": "id=b1a2b3c4d5e6f7g8h9i0j1k2l3",
+            "error_id": "model.channel_bookmark.is_valid.link_file.app_error",
+            "name": "image_and_file"
+        },
+        {
+            "error_details": "id=b1a2b3c4d5e6f7g8h9i0j1k2l3",
+            "error_id": "model.channel_bookmark.is_valid.type.app_error",
+            "name": "unknown_type"
+        },
+        {
+            "error_details": "",
+            "error_id": "model.channel_bookmark.is_valid.display_name.app_error",
+            "name": "empty_display_name"
+        },
+        {
+            "error_details": "",
+            "error_id": "model.channel_bookmark.is_valid.display_name.app_error",
+            "name": "long_display_name"
+        },
+        {
+            "name": "display_name_at_cap"
+        },
+        {
+            "error_details": "",
+            "error_id": "model.channel_bookmark.is_valid.original_id.app_error",
+            "name": "bad_original_id"
+        },
+        {
+            "error_details": "",
+            "error_id": "model.channel_bookmark.is_valid.parent_id.app_error",
+            "name": "bad_parent_id"
+        },
+        {
+            "create_at_retained": true,
+            "emoji_after": "",
+            "name": "presave_emoji:",
+            "update_at_equals": true
+        },
+        {
+            "create_at_retained": true,
+            "emoji_after": "tada",
+            "name": "presave_emoji::tada:",
+            "update_at_equals": true
+        },
+        {
+            "create_at_retained": true,
+            "emoji_after": "tada",
+            "name": "presave_emoji:tada",
+            "update_at_equals": true
+        },
+        {
+            "create_at_retained": true,
+            "emoji_after": "tada",
+            "name": "presave_emoji:::tada::",
+            "update_at_equals": true
+        },
+        {
+            "create_at_retained": true,
+            "emoji_after": "",
+            "name": "presave_emoji::::",
+            "update_at_equals": true
+        },
+        {
+            "create_at_retained": true,
+            "emoji_after": "a:b",
+            "name": "presave_emoji:a:b",
+            "update_at_equals": true
+        }
+    ],
+    "compliance_post_row": [
+        {
+            "header": [
+                "TeamName",
+                "TeamDisplayName",
+                "ChannelName",
+                "ChannelDisplayName",
+                "ChannelType",
+                "UserUsername",
+                "UserEmail",
+                "UserNickname",
+                "UserType",
+                "PostId",
+                "PostCreateAt",
+                "PostUpdateAt",
+                "PostDeleteAt",
+                "PostRootId",
+                "PostOriginalId",
+                "PostMessage",
+                "PostType",
+                "PostProps",
+                "PostHashtags",
+                "PostFileIds"
+            ],
+            "name": "header"
+        },
+        {
+            "name": "plain",
+            "row": [
+                "core",
+                "Core",
+                "town-square",
+                "Town Square",
+                "O",
+                "parity-user",
+                "parity@example.com",
+                "PU",
+                "user",
+                "p1a2b3c4d5e6f7g8h9i0j1k2l3",
+                "2023-11-15T03:43:20+05:30",
+                "",
+                "",
+                "",
+                "",
+                "hello",
+                "",
+                "{\"key\":\"value\"}",
+                "#tag",
+                "f1 f2"
+            ]
+        },
+        {
+            "name": "edited",
+            "row": [
+                "core",
+                "Core",
+                "town-square",
+                "Town Square",
+                "O",
+                "parity-user",
+                "parity@example.com",
+                "PU",
+                "user",
+                "p1a2b3c4d5e6f7g8h9i0j1k2l3",
+                "2023-11-15T03:43:20+05:30",
+                "2023-11-15T03:43:25+05:30",
+                "",
+                "",
+                "",
+                "hello",
+                "",
+                "{\"key\":\"value\"}",
+                "#tag",
+                "f1 f2"
+            ]
+        },
+        {
+            "name": "deleted",
+            "row": [
+                "core",
+                "Core",
+                "town-square",
+                "Town Square",
+                "O",
+                "parity-user",
+                "parity@example.com",
+                "PU",
+                "user",
+                "p1a2b3c4d5e6f7g8h9i0j1k2l3",
+                "2023-11-15T03:43:20+05:30",
+                "",
+                "2023-11-15T03:43:29+05:30",
+                "",
+                "",
+                "hello",
+                "",
+                "{\"key\":\"value\"}",
+                "#tag",
+                "f1 f2"
+            ]
+        },
+        {
+            "name": "bot",
+            "row": [
+                "core",
+                "Core",
+                "town-square",
+                "Town Square",
+                "O",
+                "parity-user",
+                "parity@example.com",
+                "PU",
+                "bot",
+                "p1a2b3c4d5e6f7g8h9i0j1k2l3",
+                "2023-11-15T03:43:20+05:30",
+                "",
+                "",
+                "",
+                "",
+                "hello",
+                "",
+                "{\"key\":\"value\"}",
+                "#tag",
+                "f1 f2"
+            ]
+        },
+        {
+            "name": "formula_message",
+            "row": [
+                "core",
+                "Core",
+                "town-square",
+                "Town Square",
+                "O",
+                "parity-user",
+                "parity@example.com",
+                "PU",
+                "user",
+                "p1a2b3c4d5e6f7g8h9i0j1k2l3",
+                "2023-11-15T03:43:20+05:30",
+                "",
+                "",
+                "",
+                "",
+                "'=SUM(A1:A2)",
+                "",
+                "{\"key\":\"value\"}",
+                "#tag",
+                "f1 f2"
+            ]
+        },
+        {
+            "name": "plus_message",
+            "row": [
+                "core",
+                "Core",
+                "town-square",
+                "Town Square",
+                "O",
+                "parity-user",
+                "parity@example.com",
+                "PU",
+                "user",
+                "p1a2b3c4d5e6f7g8h9i0j1k2l3",
+                "2023-11-15T03:43:20+05:30",
+                "",
+                "",
+                "",
+                "",
+                "'+1",
+                "",
+                "{\"key\":\"value\"}",
+                "#tag",
+                "f1 f2"
+            ]
+        },
+        {
+            "name": "minus_message",
+            "row": [
+                "core",
+                "Core",
+                "town-square",
+                "Town Square",
+                "O",
+                "parity-user",
+                "parity@example.com",
+                "PU",
+                "user",
+                "p1a2b3c4d5e6f7g8h9i0j1k2l3",
+                "2023-11-15T03:43:20+05:30",
+                "",
+                "",
+                "",
+                "",
+                "'-1",
+                "",
+                "{\"key\":\"value\"}",
+                "#tag",
+                "f1 f2"
+            ]
+        },
+        {
+            "name": "leading_space_formula",
+            "row": [
+                "core",
+                "Core",
+                "town-square",
+                "Town Square",
+                "O",
+                "parity-user",
+                "parity@example.com",
+                "PU",
+                "user",
+                "p1a2b3c4d5e6f7g8h9i0j1k2l3",
+                "2023-11-15T03:43:20+05:30",
+                "",
+                "",
+                "",
+                "",
+                "'  =cmd",
+                "",
+                "{\"key\":\"value\"}",
+                "#tag",
+                "f1 f2"
+            ]
+        },
+        {
+            "name": "tab_formula",
+            "row": [
+                "core",
+                "Core",
+                "town-square",
+                "Town Square",
+                "O",
+                "parity-user",
+                "parity@example.com",
+                "PU",
+                "user",
+                "p1a2b3c4d5e6f7g8h9i0j1k2l3",
+                "2023-11-15T03:43:20+05:30",
+                "",
+                "",
+                "",
+                "",
+                "'\t=cmd",
+                "",
+                "{\"key\":\"value\"}",
+                "#tag",
+                "f1 f2"
+            ]
+        },
+        {
+            "name": "nbsp_formula",
+            "row": [
+                "core",
+                "Core",
+                "town-square",
+                "Town Square",
+                "O",
+                "parity-user",
+                "parity@example.com",
+                "PU",
+                "user",
+                "p1a2b3c4d5e6f7g8h9i0j1k2l3",
+                "2023-11-15T03:43:20+05:30",
+                "",
+                "",
+                "",
+                "",
+                " =cmd",
+                "",
+                "{\"key\":\"value\"}",
+                "#tag",
+                "f1 f2"
+            ]
+        },
+        {
+            "name": "formula_username",
+            "row": [
+                "core",
+                "Core",
+                "town-square",
+                "Town Square",
+                "O",
+                "'=evil",
+                "parity@example.com",
+                "PU",
+                "user",
+                "p1a2b3c4d5e6f7g8h9i0j1k2l3",
+                "2023-11-15T03:43:20+05:30",
+                "",
+                "",
+                "",
+                "",
+                "hello",
+                "",
+                "{\"key\":\"value\"}",
+                "#tag",
+                "f1 f2"
+            ]
+        },
+        {
+            "name": "formula_props_untouched",
+            "row": [
+                "core",
+                "Core",
+                "town-square",
+                "Town Square",
+                "O",
+                "parity-user",
+                "parity@example.com",
+                "PU",
+                "user",
+                "p1a2b3c4d5e6f7g8h9i0j1k2l3",
+                "2023-11-15T03:43:20+05:30",
+                "",
+                "",
+                "",
+                "",
+                "hello",
+                "",
+                "=notcleaned",
+                "#tag",
+                "f1 f2"
+            ]
+        },
+        {
+            "name": "fractional_millis",
+            "row": [
+                "core",
+                "Core",
+                "town-square",
+                "Town Square",
+                "O",
+                "parity-user",
+                "parity@example.com",
+                "PU",
+                "user",
+                "p1a2b3c4d5e6f7g8h9i0j1k2l3",
+                "2023-11-15T03:43:20+05:30",
+                "2023-11-15T03:43:20+05:30",
+                "",
+                "",
+                "",
+                "hello",
+                "",
+                "{\"key\":\"value\"}",
+                "#tag",
+                "f1 f2"
+            ]
+        }
+    ],
+    "feature_flags_to_map": {
+        "defaults": {
+            "AggregatePluginMetrics": "false",
+            "AppsEnabled": "false",
+            "AttributeValueMasking": "true",
+            "AutoTranslation": "true",
+            "BurnOnRead": "true",
+            "CJKSearch": "true",
+            "ChannelBookmarks": "true",
+            "ChannelPermissionPolicies": "true",
+            "ClassificationMarkings": "true",
+            "ClusterGracefulDrain": "true",
+            "ContentFlagging": "true",
+            "DiscoverableChannels": "false",
+            "EnableAIPluginBridge": "false",
+            "EnableAIRecaps": "false",
+            "EnableConcurrentReact": "false",
+            "EnableDocs": "false",
+            "EnableExportDirectDownload": "false",
+            "EnableMFIPluginSignaturePublicKey": "true",
+            "EnableMattermostEntry": "true",
+            "EnableSharedChannelsDMs": "false",
+            "EnableShiftEscapeToMarkAllRead": "false",
+            "EnableSyncAllUsersForRemoteCluster": "false",
+            "GlobalAttributes": "false",
+            "IntegratedBoards": "false",
+            "ManagedChannelCategories": "false",
+            "MmBlocksEnabled": "true",
+            "MobileEphemeralMode": "false",
+            "MobileSSOCodeExchange": "false",
+            "MoveThreadsEnabled": "false",
+            "NormalizeLdapDNs": "false",
+            "NotificationMonitoring": "true",
+            "PermissionPolicies": "true",
+            "PolicySimulation": "true",
+            "PostAttributes": "false",
+            "PropertyFieldRank": "true",
+            "RecurringScheduledPosts": "false",
+            "SessionAttributes": "false",
+            "TeamMembershipAccessControl": "true",
+            "TestBoolFeature": "false",
+            "TestFeature": "off",
+            "WysiwygEditor": "false"
+        },
+        "defaults_channel_policies": true,
+        "defaults_cluster_graceful_drain": true,
+        "defaults_policy_simulation": true,
+        "defaults_test_feature": "off",
+        "umbrella_off_channel_policies": false,
+        "umbrella_off_policy_simulation": false,
+        "zero_value_map": {
+            "AggregatePluginMetrics": "false",
+            "AppsEnabled": "false",
+            "AttributeValueMasking": "false",
+            "AutoTranslation": "false",
+            "BurnOnRead": "false",
+            "CJKSearch": "false",
+            "ChannelBookmarks": "false",
+            "ChannelPermissionPolicies": "false",
+            "ClassificationMarkings": "false",
+            "ClusterGracefulDrain": "false",
+            "ContentFlagging": "false",
+            "DiscoverableChannels": "false",
+            "EnableAIPluginBridge": "false",
+            "EnableAIRecaps": "false",
+            "EnableConcurrentReact": "false",
+            "EnableDocs": "false",
+            "EnableExportDirectDownload": "false",
+            "EnableMFIPluginSignaturePublicKey": "false",
+            "EnableMattermostEntry": "false",
+            "EnableSharedChannelsDMs": "false",
+            "EnableShiftEscapeToMarkAllRead": "false",
+            "EnableSyncAllUsersForRemoteCluster": "false",
+            "GlobalAttributes": "false",
+            "IntegratedBoards": "false",
+            "ManagedChannelCategories": "false",
+            "MmBlocksEnabled": "false",
+            "MobileEphemeralMode": "false",
+            "MobileSSOCodeExchange": "false",
+            "MoveThreadsEnabled": "false",
+            "NormalizeLdapDNs": "false",
+            "NotificationMonitoring": "false",
+            "PermissionPolicies": "false",
+            "PolicySimulation": "false",
+            "PostAttributes": "false",
+            "PropertyFieldRank": "false",
+            "RecurringScheduledPosts": "false",
+            "SessionAttributes": "false",
+            "TeamMembershipAccessControl": "false",
+            "TestBoolFeature": "false",
+            "TestFeature": "",
+            "WysiwygEditor": "false"
+        }
+    },
+    "group_syncable_marshal": [
+        {
+            "name": "team_full",
+            "out": "{\"team_id\":\"s7k2waa4hqm28fj5j7d8k4abcd\",\"team_display_name\":\"Team Display\",\"team_type\":\"O\",\"type\":\"Team\",\"group_id\":\"g5m1zdc3jpn19eh4h6c9j3xyzz\",\"auto_add\":true,\"scheme_admin\":true,\"create_at\":1700000000000,\"delete_at\":1700000000001,\"update_at\":1700000000002}"
+        },
+        {
+            "name": "channel_full",
+            "out": "{\"channel_id\":\"s7k2waa4hqm28fj5j7d8k4abcd\",\"channel_display_name\":\"Channel Display\",\"channel_type\":\"P\",\"type\":\"Channel\",\"team_id\":\"t9j3xbb5irn39gk6k8e9l5efgh\",\"team_display_name\":\"Team Display\",\"team_type\":\"O\",\"group_id\":\"g5m1zdc3jpn19eh4h6c9j3xyzz\",\"auto_add\":true,\"scheme_admin\":true,\"create_at\":1700000000000,\"delete_at\":1700000000001,\"update_at\":1700000000002}"
+        },
+        {
+            "name": "team_minimal",
+            "out": "{\"team_id\":\"s7k2waa4hqm28fj5j7d8k4abcd\",\"type\":\"Team\",\"group_id\":\"g5m1zdc3jpn19eh4h6c9j3xyzz\",\"auto_add\":false,\"scheme_admin\":false,\"create_at\":0,\"delete_at\":0,\"update_at\":0}"
+        },
+        {
+            "name": "channel_minimal",
+            "out": "{\"channel_id\":\"s7k2waa4hqm28fj5j7d8k4abcd\",\"type\":\"Channel\",\"group_id\":\"g5m1zdc3jpn19eh4h6c9j3xyzz\",\"auto_add\":false,\"scheme_admin\":false,\"create_at\":0,\"delete_at\":0,\"update_at\":0}"
+        },
+        {
+            "error": "json: error calling MarshalJSON for type *model.GroupSyncable: unknown syncable type: ",
+            "name": "unset_type"
+        },
+        {
+            "error": "json: error calling MarshalJSON for type *model.GroupSyncable: unknown syncable type: Nope",
+            "name": "unknown_type"
+        }
+    ],
+    "group_syncable_unmarshal": [
+        {
+            "auto_add": true,
+            "create_at": 0,
+            "group_id": "g5m1zdc3jpn19eh4h6c9j3xyzz",
+            "in": "{\"team_id\":\"t9j3xbb5irn39gk6k8e9l5efgh\",\"group_id\":\"g5m1zdc3jpn19eh4h6c9j3xyzz\",\"auto_add\":true}",
+            "remarshalled": "{\"team_id\":\"t9j3xbb5irn39gk6k8e9l5efgh\",\"type\":\"Team\",\"group_id\":\"g5m1zdc3jpn19eh4h6c9j3xyzz\",\"auto_add\":true,\"scheme_admin\":false,\"create_at\":0,\"delete_at\":0,\"update_at\":0}",
+            "scheme_admin": false,
+            "syncable_id": "t9j3xbb5irn39gk6k8e9l5efgh",
+            "team_id": "",
+            "type": "Team"
+        },
+        {
+            "auto_add": false,
+            "create_at": 0,
+            "group_id": "g5m1zdc3jpn19eh4h6c9j3xyzz",
+            "in": "{\"channel_id\":\"c1a2b3c4d5e6f7g8h9i0j1k2l3\",\"group_id\":\"g5m1zdc3jpn19eh4h6c9j3xyzz\",\"auto_add\":false}",
+            "remarshalled": "{\"channel_id\":\"c1a2b3c4d5e6f7g8h9i0j1k2l3\",\"type\":\"Channel\",\"group_id\":\"g5m1zdc3jpn19eh4h6c9j3xyzz\",\"auto_add\":false,\"scheme_admin\":false,\"create_at\":0,\"delete_at\":0,\"update_at\":0}",
+            "scheme_admin": false,
+            "syncable_id": "c1a2b3c4d5e6f7g8h9i0j1k2l3",
+            "team_id": "",
+            "type": "Channel"
+        },
+        {
+            "auto_add": false,
+            "create_at": 0,
+            "group_id": "g5m1zdc3jpn19eh4h6c9j3xyzz",
+            "in": "{\"channel_id\":\"c1a2b3c4d5e6f7g8h9i0j1k2l3\",\"team_id\":\"t9j3xbb5irn39gk6k8e9l5efgh\",\"group_id\":\"g5m1zdc3jpn19eh4h6c9j3xyzz\"}",
+            "remarshalled": "{\"channel_id\":\"c1a2b3c4d5e6f7g8h9i0j1k2l3\",\"type\":\"Channel\",\"team_id\":\"t9j3xbb5irn39gk6k8e9l5efgh\",\"group_id\":\"g5m1zdc3jpn19eh4h6c9j3xyzz\",\"auto_add\":false,\"scheme_admin\":false,\"create_at\":0,\"delete_at\":0,\"update_at\":0}",
+            "scheme_admin": false,
+            "syncable_id": "c1a2b3c4d5e6f7g8h9i0j1k2l3",
+            "team_id": "t9j3xbb5irn39gk6k8e9l5efgh",
+            "type": "Channel"
+        },
+        {
+            "auto_add": false,
+            "create_at": 0,
+            "group_id": "g5m1zdc3jpn19eh4h6c9j3xyzz",
+            "in": "{\"team_id\":\"\",\"channel_id\":\"\",\"group_id\":\"g5m1zdc3jpn19eh4h6c9j3xyzz\"}",
+            "remarshalled": "{\"team_id\":\"\",\"type\":\"Team\",\"group_id\":\"g5m1zdc3jpn19eh4h6c9j3xyzz\",\"auto_add\":false,\"scheme_admin\":false,\"create_at\":0,\"delete_at\":0,\"update_at\":0}",
+            "scheme_admin": false,
+            "syncable_id": "",
+            "team_id": "",
+            "type": "Team"
+        },
+        {
+            "auto_add": false,
+            "create_at": 0,
+            "group_id": "g5m1zdc3jpn19eh4h6c9j3xyzz",
+            "in": "{\"team_id\":\"t9j3xbb5irn39gk6k8e9l5efgh\",\"group_id\":\"g5m1zdc3jpn19eh4h6c9j3xyzz\",\"scheme_admin\":true,\"create_at\":123,\"update_at\":456,\"delete_at\":789,\"type\":\"Channel\"}",
+            "remarshalled": "{\"team_id\":\"t9j3xbb5irn39gk6k8e9l5efgh\",\"type\":\"Team\",\"group_id\":\"g5m1zdc3jpn19eh4h6c9j3xyzz\",\"auto_add\":false,\"scheme_admin\":false,\"create_at\":0,\"delete_at\":0,\"update_at\":0}",
+            "scheme_admin": false,
+            "syncable_id": "t9j3xbb5irn39gk6k8e9l5efgh",
+            "team_id": "",
+            "type": "Team"
+        },
+        {
+            "auto_add": false,
+            "create_at": 0,
+            "group_id": "",
+            "in": "{}",
+            "remarshalled": "{\"team_id\":\"\",\"type\":\"Team\",\"group_id\":\"\",\"auto_add\":false,\"scheme_admin\":false,\"create_at\":0,\"delete_at\":0,\"update_at\":0}",
+            "scheme_admin": false,
+            "syncable_id": "",
+            "team_id": "",
+            "type": "Team"
+        }
+    ],
+    "license_features": {
+        "auto_translation_unset": true,
+        "defaults": {
+            "advanced_logging": true,
+            "announcement": true,
+            "auto_translation": null,
+            "cloud": false,
+            "cluster": true,
+            "compliance": true,
+            "custom_permissions_schemes": true,
+            "custom_terms_of_service": true,
+            "data_retention": true,
+            "elastic_search": true,
+            "email_notification_contents": true,
+            "enterprise_plugins": true,
+            "future_features": true,
+            "google_oauth": true,
+            "guest_accounts": true,
+            "guest_accounts_permissions": true,
+            "id_loaded": true,
+            "ldap": true,
+            "ldap_groups": true,
+            "lock_teammate_name_display": true,
+            "message_export": true,
+            "metrics": true,
+            "mfa": true,
+            "mhpns": true,
+            "office365_oauth": true,
+            "openid": true,
+            "outgoing_oauth_connections": true,
+            "remote_cluster_service": true,
+            "saml": true,
+            "shared_channels": true,
+            "theme_management": true,
+            "users": 0
+        },
+        "defaults_map": {
+            "advanced_logging": true,
+            "cloud": false,
+            "cluster": true,
+            "compliance": true,
+            "custom_permissions_schemes": true,
+            "data_retention": true,
+            "elastic_search": true,
+            "email_notification_contents": true,
+            "enterprise_plugins": true,
+            "future": true,
+            "google": true,
+            "guest_accounts": true,
+            "guest_accounts_permissions": true,
+            "id_loaded": true,
+            "ldap": true,
+            "ldap_groups": true,
+            "lock_teammate_name_display": true,
+            "message_export": true,
+            "metrics": true,
+            "mfa": true,
+            "mhpns": true,
+            "office365": true,
+            "openid": true,
+            "outgoing_oauth_connections": true,
+            "remote_cluster_service": true,
+            "saml": true,
+            "shared_channels": true
+        },
+        "future_false": {
+            "advanced_logging": false,
+            "announcement": true,
+            "auto_translation": null,
+            "cloud": false,
+            "cluster": false,
+            "compliance": false,
+            "custom_permissions_schemes": false,
+            "custom_terms_of_service": false,
+            "data_retention": false,
+            "elastic_search": false,
+            "email_notification_contents": false,
+            "enterprise_plugins": false,
+            "future_features": false,
+            "google_oauth": false,
+            "guest_accounts": false,
+            "guest_accounts_permissions": false,
+            "id_loaded": false,
+            "ldap": false,
+            "ldap_groups": false,
+            "lock_teammate_name_display": false,
+            "message_export": false,
+            "metrics": false,
+            "mfa": false,
+            "mhpns": false,
+            "office365_oauth": false,
+            "openid": false,
+            "outgoing_oauth_connections": false,
+            "remote_cluster_service": false,
+            "saml": false,
+            "shared_channels": false,
+            "theme_management": true,
+            "users": 0
+        },
+        "future_false_map": {
+            "advanced_logging": false,
+            "cloud": false,
+            "cluster": false,
+            "compliance": false,
+            "custom_permissions_schemes": false,
+            "data_retention": false,
+            "elastic_search": false,
+            "email_notification_contents": false,
+            "enterprise_plugins": false,
+            "future": false,
+            "google": false,
+            "guest_accounts": false,
+            "guest_accounts_permissions": false,
+            "id_loaded": false,
+            "ldap": false,
+            "ldap_groups": false,
+            "lock_teammate_name_display": false,
+            "message_export": false,
+            "metrics": false,
+            "mfa": false,
+            "mhpns": false,
+            "office365": false,
+            "openid": false,
+            "outgoing_oauth_connections": false,
+            "remote_cluster_service": false,
+            "saml": false,
+            "shared_channels": false
+        }
+    },
+    "manifest_client": [
+        {
+            "description": "",
+            "has_client": false,
+            "has_server": false,
+            "name": "no_webapp"
+        },
+        {
+            "bundle_path": "/static/com.example.plugin/com.example.plugin__bundle.js",
+            "description": "",
+            "has_client": true,
+            "has_server": false,
+            "name": "webapp_no_hash"
+        },
+        {
+            "bundle_path": "/static/com.example.plugin/com.example.plugin_0aff01_bundle.js",
+            "description": "",
+            "has_client": true,
+            "has_server": false,
+            "name": "webapp_with_hash"
+        }
+    ],
+    "manifest_executable": [
+        {
+            "name": "no_server",
+            "out": ""
+        },
+        {
+            "name": "single",
+            "out": "plugin"
+        },
+        {
+            "name": "map_hit",
+            "out": "dist/linux"
+        },
+        {
+            "name": "map_miss",
+            "out": "fallback"
+        },
+        {
+            "name": "map_empty",
+            "out": "fallback"
+        },
+        {
+            "name": "map_hit_empty_value",
+            "out": "fallback"
+        }
+    ],
+    "manifest_is_valid": [
+        {
+            "name": "ok"
+        },
+        {
+            "name": "no_version"
+        },
+        {
+            "error": "failed to parse Version: invalid semantic version",
+            "name": "loose_version"
+        },
+        {
+            "error": "failed to parse Version: invalid characters in version",
+            "name": "v_prefixed_version"
+        },
+        {
+            "error": "invalid plugin ID",
+            "name": "short_id"
+        },
+        {
+            "error": "invalid plugin ID",
+            "name": "bad_id_chars"
+        },
+        {
+            "error": "a plugin name is needed",
+            "name": "blank_name"
+        },
+        {
+            "error": "invalid HomepageURL",
+            "name": "bad_homepage"
+        },
+        {
+            "name": "good_homepage"
+        },
+        {
+            "error": "failed to parse MinServerVersion: invalid semantic version",
+            "name": "bad_min_server_version"
+        },
+        {
+            "name": "good_min_server_version"
+        },
+        {
+            "error": "invalid settings schema: should not set RegenerateHelpText for setting type that is not generated",
+            "name": "regenerate_on_text"
+        },
+        {
+            "error": "invalid settings schema: should not set Placeholder for setting type not in text, generated, number, username, or custom",
+            "name": "placeholder_on_bool"
+        },
+        {
+            "error": "invalid settings schema: should not set Options for setting type not in radio or dropdown",
+            "name": "options_on_bool"
+        },
+        {
+            "error": "invalid settings schema: should not have empty Displayname or Value for any option",
+            "name": "empty_option"
+        },
+        {
+            "error": "invalid settings schema: invalid setting type: colour",
+            "name": "unknown_setting_type"
+        },
+        {
+            "error": "invalid settings schema: invalid empty Key",
+            "name": "section_without_key"
+        },
+        {
+            "meets": true,
+            "name": "meet:5.6.0|5.7.0"
+        },
+        {
+            "meets": true,
+            "name": "meet:5.6.0|5.6.0"
+        },
+        {
+            "meets": false,
+            "name": "meet:5.7.0|5.6.0"
+        },
+        {
+            "meets": true,
+            "name": "meet:5.6.0|5.6"
+        },
+        {
+            "meets": true,
+            "name": "meet:5.6.0|v5.7.0"
+        },
+        {
+            "error": "failed to parse MinServerVersion",
+            "name": "meet:5.6|5.7.0"
+        }
+    ],
+    "outgoing_webhook_triggers": [
+        {
+            "empty_trigger_set": false,
+            "exact": false,
+            "get_exact": "",
+            "get_starts_with": "",
+            "starts_with": false,
+            "word": ""
+        },
+        {
+            "empty_trigger_set": false,
+            "exact": true,
+            "get_exact": "deploy",
+            "get_starts_with": "deploy",
+            "starts_with": true,
+            "word": "deploy"
+        },
+        {
+            "empty_trigger_set": false,
+            "exact": true,
+            "get_exact": "dep",
+            "get_starts_with": "dep",
+            "starts_with": true,
+            "word": "dep"
+        },
+        {
+            "empty_trigger_set": false,
+            "exact": false,
+            "get_exact": "",
+            "get_starts_with": "deploy",
+            "starts_with": true,
+            "word": "deployment"
+        },
+        {
+            "empty_trigger_set": false,
+            "exact": false,
+            "get_exact": "",
+            "get_starts_with": "",
+            "starts_with": false,
+            "word": "de"
+        },
+        {
+            "empty_trigger_set": false,
+            "exact": true,
+            "get_exact": "status",
+            "get_starts_with": "status",
+            "starts_with": true,
+            "word": "status"
+        },
+        {
+            "empty_trigger_set": false,
+            "exact": false,
+            "get_exact": "",
+            "get_starts_with": "status",
+            "starts_with": true,
+            "word": "statuses"
+        },
+        {
+            "empty_trigger_set": false,
+            "exact": false,
+            "get_exact": "",
+            "get_starts_with": "",
+            "starts_with": false,
+            "word": "unrelated"
+        },
+        {
+            "empty_trigger_set": false,
+            "exact": false,
+            "get_exact": "",
+            "get_starts_with": "",
+            "starts_with": false,
+            "word": "DEPLOY"
+        }
+    ],
+    "plugin_property_option": [
+        {
+            "get_id": "",
+            "get_name": "",
+            "is_valid_error": "data cannot be nil",
+            "name": "nil_data",
+            "out": "{}",
+            "round_trip_id": "",
+            "round_trip_name": ""
+        },
+        {
+            "get_id": "",
+            "get_name": "",
+            "is_valid_error": "id cannot be empty",
+            "name": "empty_data",
+            "out": "{}",
+            "round_trip_id": "",
+            "round_trip_name": ""
+        },
+        {
+            "get_id": "o99t9rfydganbi87d6ekygfory",
+            "get_name": "Engineering",
+            "name": "id_and_name",
+            "out": "{\"id\":\"o99t9rfydganbi87d6ekygfory\",\"name\":\"Engineering\"}",
+            "round_trip_id": "o99t9rfydganbi87d6ekygfory",
+            "round_trip_name": "Engineering"
+        },
+        {
+            "get_id": "o99t9rfydganbi87d6ekygfory",
+            "get_name": "Engineering",
+            "name": "extra_keys",
+            "out": "{\"color\":\"#112233\",\"id\":\"o99t9rfydganbi87d6ekygfory\",\"name\":\"Engineering\"}",
+            "round_trip_id": "o99t9rfydganbi87d6ekygfory",
+            "round_trip_name": "Engineering"
+        }
+    ],
+    "remote_cluster_names": [
+        {
+            "cleaned_is_new_id": true,
+            "cleaned_length": 26,
+            "cleaned_valid": true,
+            "in": "",
+            "is_valid": false,
+            "normalized": ""
+        },
+        {
+            "cleaned": "a",
+            "cleaned_length": 1,
+            "cleaned_valid": true,
+            "in": "a",
+            "is_valid": true,
+            "normalized": "a"
+        },
+        {
+            "cleaned": "a",
+            "cleaned_length": 1,
+            "cleaned_valid": true,
+            "in": "A",
+            "is_valid": true,
+            "normalized": "a"
+        },
+        {
+            "cleaned": "remote-one",
+            "cleaned_length": 10,
+            "cleaned_valid": true,
+            "in": "Remote One",
+            "is_valid": false,
+            "normalized": "remote one"
+        },
+        {
+            "cleaned": "remote_one",
+            "cleaned_length": 10,
+            "cleaned_valid": true,
+            "in": "remote_one",
+            "is_valid": true,
+            "normalized": "remote_one"
+        },
+        {
+            "cleaned": "remote.one",
+            "cleaned_length": 10,
+            "cleaned_valid": true,
+            "in": "remote.one",
+            "is_valid": true,
+            "normalized": "remote.one"
+        },
+        {
+            "cleaned": "remote-one",
+            "cleaned_length": 10,
+            "cleaned_valid": true,
+            "in": "remote-one",
+            "is_valid": true,
+            "normalized": "remote-one"
+        },
+        {
+            "cleaned": "spaced",
+            "cleaned_length": 6,
+            "cleaned_valid": true,
+            "in": "  spaced  ",
+            "is_valid": false,
+            "normalized": "  spaced  "
+        },
+        {
+            "cleaned": "dashes",
+            "cleaned_length": 6,
+            "cleaned_valid": true,
+            "in": "--dashes--",
+            "is_valid": true,
+            "normalized": "--dashes--"
+        },
+        {
+            "cleaned": "n-c-de",
+            "cleaned_length": 6,
+            "cleaned_valid": true,
+            "in": "Ünïcøde",
+            "is_valid": false,
+            "normalized": "ünïcøde"
+        },
+        {
+            "cleaned": "mixed-case",
+            "cleaned_length": 10,
+            "cleaned_valid": true,
+            "in": "MiXeD CaSe",
+            "is_valid": false,
+            "normalized": "mixed case"
+        },
+        {
+            "cleaned": "a-b-c",
+            "cleaned_length": 5,
+            "cleaned_valid": true,
+            "in": "a b c",
+            "is_valid": false,
+            "normalized": "a b c"
+        },
+        {
+            "cleaned": "tab-here",
+            "cleaned_length": 8,
+            "cleaned_valid": true,
+            "in": "tab\there",
+            "is_valid": false,
+            "normalized": "tab\there"
+        },
+        {
+            "cleaned": "sym-bols-here",
+            "cleaned_length": 13,
+            "cleaned_valid": true,
+            "in": "sym!bols@here",
+            "is_valid": false,
+            "normalized": "sym!bols@here"
+        },
+        {
+            "cleaned": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "cleaned_length": 64,
+            "cleaned_valid": true,
+            "in": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "is_valid": true,
+            "normalized": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "cleaned": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "cleaned_length": 64,
+            "cleaned_valid": true,
+            "in": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "is_valid": false,
+            "normalized": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+            "cleaned": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "cleaned_length": 64,
+            "cleaned_valid": true,
+            "in": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa tail",
+            "is_valid": false,
+            "normalized": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa tail"
+        },
+        {
+            "cleaned": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "cleaned_length": 63,
+            "cleaned_valid": true,
+            "in": "-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-",
+            "is_valid": false,
+            "normalized": "-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-"
+        }
+    ],
+    "remote_cluster_site_url": [
+        {
+            "display": "",
+            "is_confirmed": false,
+            "is_plugin": false,
+            "plugin_id": "",
+            "site_url": ""
+        },
+        {
+            "display": "https://remote.example.com",
+            "is_confirmed": true,
+            "is_plugin": false,
+            "plugin_id": "",
+            "site_url": "https://remote.example.com"
+        },
+        {
+            "display": "...",
+            "is_confirmed": false,
+            "is_plugin": false,
+            "plugin_id": "",
+            "site_url": "pending_https://remote.example.com"
+        },
+        {
+            "display": "plugin",
+            "is_confirmed": true,
+            "is_plugin": false,
+            "plugin_id": "",
+            "site_url": "plugin_com.example"
+        },
+        {
+            "display": "",
+            "is_confirmed": true,
+            "is_plugin": true,
+            "plugin_id": "com.example",
+            "site_url": ""
+        },
+        {
+            "display": "https://remote.example.com",
+            "is_confirmed": true,
+            "is_plugin": true,
+            "plugin_id": "com.example",
+            "site_url": "https://remote.example.com"
+        },
+        {
+            "display": "...",
+            "is_confirmed": false,
+            "is_plugin": false,
+            "plugin_id": "",
+            "site_url": "pending_"
+        }
+    ],
+    "remote_cluster_topics": [
+        {
+            "in": "",
+            "out": ""
+        },
+        {
+            "in": " ",
+            "out": ""
+        },
+        {
+            "in": "*",
+            "out": "*"
+        },
+        {
+            "in": " * ",
+            "out": "*"
+        },
+        {
+            "in": "a",
+            "out": " a "
+        },
+        {
+            "in": "a b",
+            "out": " a b "
+        },
+        {
+            "in": "  a   b  ",
+            "out": " a b "
+        },
+        {
+            "in": "a\tb",
+            "out": " a\tb "
+        },
+        {
+            "in": "\na\n",
+            "out": " a "
+        },
+        {
+            "in": "a  b  c",
+            "out": " a b c "
+        },
+        {
+            "in": "sharedchannel",
+            "out": " sharedchannel "
+        },
+        {
+            "in": " sharedchannel dm ",
+            "out": " sharedchannel dm "
+        }
+    ],
+    "sanitize_property_value": [
+        {
+            "in": "\"\"",
+            "out": "\"\"",
+            "unchanged": true
+        },
+        {
+            "in": "\"  \"",
+            "out": "\"\"",
+            "unchanged": false
+        },
+        {
+            "in": "\" a \"",
+            "out": "\"a\"",
+            "unchanged": false
+        },
+        {
+            "in": "\"a\"",
+            "out": "\"a\"",
+            "unchanged": true
+        },
+        {
+            "in": "\"\\ta\\n\"",
+            "out": "\"a\"",
+            "unchanged": false
+        },
+        {
+            "in": "[]",
+            "out": "[]",
+            "unchanged": true
+        },
+        {
+            "in": "[\"a\"]",
+            "out": "[\"a\"]",
+            "unchanged": true
+        },
+        {
+            "in": "[\" a \"]",
+            "out": "[\"a\"]",
+            "unchanged": false
+        },
+        {
+            "in": "[\"\", \"a\"]",
+            "out": "[\"a\"]",
+            "unchanged": false
+        },
+        {
+            "in": "[\"  \", \"b\"]",
+            "out": "[\"b\"]",
+            "unchanged": false
+        },
+        {
+            "in": "[\" a \", \" \", \"b \"]",
+            "out": "[\"a\",\"b\"]",
+            "unchanged": false
+        },
+        {
+            "in": "[1, 2]",
+            "out": "[1, 2]",
+            "unchanged": true
+        },
+        {
+            "in": "[\"a\", 1]",
+            "out": "[\"a\", 1]",
+            "unchanged": true
+        },
+        {
+            "in": "{\"k\":\"v\"}",
+            "out": "{\"k\":\"v\"}",
+            "unchanged": true
+        },
+        {
+            "in": "null",
+            "out": "null",
+            "unchanged": true
+        },
+        {
+            "in": "42",
+            "out": "42",
+            "unchanged": true
+        },
+        {
+            "in": "true",
+            "out": "true",
+            "unchanged": true
+        },
+        {
+            "in": "1.5",
+            "out": "1.5",
+            "unchanged": true
+        },
+        {
+            "in": "[\"already\",\"clean\"]",
+            "out": "[\"already\",\"clean\"]",
+            "unchanged": true
+        }
+    ],
+    "scheduled_recap_time_valid": [
+        {
+            "error_id": "model.scheduled_recap.is_valid.time_of_day.app_error",
+            "in": ""
+        },
+        {
+            "error_id": "model.scheduled_recap.is_valid.time_of_day.app_error",
+            "in": "0"
+        },
+        {
+            "error_id": "model.scheduled_recap.is_valid.time_of_day.app_error",
+            "in": "00"
+        },
+        {
+            "error_id": "model.scheduled_recap.is_valid.time_of_day.app_error",
+            "in": "0:00"
+        },
+        {
+            "error_id": "model.scheduled_recap.is_valid.time_of_day.app_error",
+            "in": "9:00"
+        },
+        {
+            "in": "09:00"
+        },
+        {
+            "in": "23:59"
+        },
+        {
+            "error_id": "model.scheduled_recap.is_valid.time_of_day.app_error",
+            "in": "24:00"
+        },
+        {
+            "error_id": "model.scheduled_recap.is_valid.time_of_day.app_error",
+            "in": "23:60"
+        },
+        {
+            "in": "00:00"
+        },
+        {
+            "in": "19:05"
+        },
+        {
+            "error_id": "model.scheduled_recap.is_valid.time_of_day.app_error",
+            "in": "1:5"
+        },
+        {
+            "error_id": "model.scheduled_recap.is_valid.time_of_day.app_error",
+            "in": "011:00"
+        },
+        {
+            "error_id": "model.scheduled_recap.is_valid.time_of_day.app_error",
+            "in": "09:0"
+        },
+        {
+            "error_id": "model.scheduled_recap.is_valid.time_of_day.app_error",
+            "in": "09:000"
+        },
+        {
+            "error_id": "model.scheduled_recap.is_valid.time_of_day.app_error",
+            "in": "0900"
+        },
+        {
+            "error_id": "model.scheduled_recap.is_valid.time_of_day.app_error",
+            "in": "09-00"
+        },
+        {
+            "error_id": "model.scheduled_recap.is_valid.time_of_day.app_error",
+            "in": "٠٩:٠٠"
+        },
+        {
+            "error_id": "model.scheduled_recap.is_valid.time_of_day.app_error",
+            "in": "09:00 "
+        },
+        {
+            "error_id": "model.scheduled_recap.is_valid.time_of_day.app_error",
+            "in": " 09:00"
+        },
+        {
+            "dedup_in": null,
+            "dedup_out": null
+        },
+        {
+            "dedup_in": [],
+            "dedup_out": []
+        },
+        {
+            "dedup_in": [
+                "a"
+            ],
+            "dedup_out": [
+                "a"
+            ]
+        },
+        {
+            "dedup_in": [
+                "a",
+                "a"
+            ],
+            "dedup_out": [
+                "a"
+            ]
+        },
+        {
+            "dedup_in": [
+                "a",
+                "b",
+                "a"
+            ],
+            "dedup_out": [
+                "a",
+                "b"
+            ]
+        },
+        {
+            "dedup_in": [
+                "b",
+                "a",
+                "b",
+                "c"
+            ],
+            "dedup_out": [
+                "b",
+                "a",
+                "c"
+            ]
+        }
+    ],
+    "subject_scoped_roles": [
+        {
+            "channel_role": "",
+            "channel_roles": null,
+            "name": "legacy_only:read",
+            "system_role": "system_admin",
+            "system_roles": null,
+            "unknown_scope": ""
+        },
+        {
+            "channel_role": "channel_guest",
+            "name": "legacy_only:set(channel,channel_guest)",
+            "scoped_roles": [
+                {
+                    "scope": "channel",
+                    "role": "channel_guest"
+                }
+            ],
+            "system_role": "system_admin"
+        },
+        {
+            "channel_role": "",
+            "name": "legacy_only:set(channel,)",
+            "scoped_roles": [],
+            "system_role": "system_admin"
+        },
+        {
+            "channel_role": "",
+            "name": "legacy_only:set(,ignored)",
+            "scoped_roles": null,
+            "system_role": "system_admin"
+        },
+        {
+            "channel_role": "",
+            "name": "legacy_only:set(system,system_guest)",
+            "scoped_roles": [
+                {
+                    "scope": "system",
+                    "role": "system_guest"
+                }
+            ],
+            "system_role": "system_guest"
+        },
+        {
+            "channel_role": "channel_admin",
+            "channel_roles": [
+                "channel_admin"
+            ],
+            "name": "channel_only:read",
+            "system_role": "system_admin",
+            "system_roles": null,
+            "unknown_scope": ""
+        },
+        {
+            "channel_role": "channel_guest",
+            "name": "channel_only:set(channel,channel_guest)",
+            "scoped_roles": [
+                {
+                    "scope": "channel",
+                    "role": "channel_guest"
+                }
+            ],
+            "system_role": "system_admin"
+        },
+        {
+            "channel_role": "",
+            "name": "channel_only:set(channel,)",
+            "scoped_roles": [],
+            "system_role": "system_admin"
+        },
+        {
+            "channel_role": "channel_admin",
+            "name": "channel_only:set(,ignored)",
+            "scoped_roles": [
+                {
+                    "scope": "channel",
+                    "role": "channel_admin"
+                }
+            ],
+            "system_role": "system_admin"
+        },
+        {
+            "channel_role": "channel_admin",
+            "name": "channel_only:set(system,system_guest)",
+            "scoped_roles": [
+                {
+                    "scope": "channel",
+                    "role": "channel_admin"
+                },
+                {
+                    "scope": "system",
+                    "role": "system_guest"
+                }
+            ],
+            "system_role": "system_guest"
+        },
+        {
+            "channel_role": "channel_user",
+            "channel_roles": [
+                "channel_user"
+            ],
+            "name": "both:read",
+            "system_role": "system_user",
+            "system_roles": [
+                "system_user"
+            ],
+            "unknown_scope": ""
+        },
+        {
+            "channel_role": "channel_guest",
+            "name": "both:set(channel,channel_guest)",
+            "scoped_roles": [
+                {
+                    "scope": "system",
+                    "role": "system_user"
+                },
+                {
+                    "scope": "channel",
+                    "role": "channel_guest"
+                }
+            ],
+            "system_role": "system_user"
+        },
+        {
+            "channel_role": "",
+            "name": "both:set(channel,)",
+            "scoped_roles": [
+                {
+                    "scope": "system",
+                    "role": "system_user"
+                }
+            ],
+            "system_role": "system_user"
+        },
+        {
+            "channel_role": "channel_user",
+            "name": "both:set(,ignored)",
+            "scoped_roles": [
+                {
+                    "scope": "system",
+                    "role": "system_user"
+                },
+                {
+                    "scope": "channel",
+                    "role": "channel_user"
+                }
+            ],
+            "system_role": "system_user"
+        },
+        {
+            "channel_role": "channel_user",
+            "name": "both:set(system,system_guest)",
+            "scoped_roles": [
+                {
+                    "scope": "system",
+                    "role": "system_guest"
+                },
+                {
+                    "scope": "channel",
+                    "role": "channel_user"
+                }
+            ],
+            "system_role": "system_guest"
+        },
+        {
+            "channel_role": "channel_user",
+            "channel_roles": [
+                "channel_user",
+                "channel_admin"
+            ],
+            "name": "duplicate_scopes:read",
+            "system_role": "",
+            "system_roles": null,
+            "unknown_scope": ""
+        },
+        {
+            "channel_role": "channel_guest",
+            "name": "duplicate_scopes:set(channel,channel_guest)",
+            "scoped_roles": [
+                {
+                    "scope": "channel",
+                    "role": "channel_guest"
+                }
+            ],
+            "system_role": ""
+        },
+        {
+            "channel_role": "",
+            "name": "duplicate_scopes:set(channel,)",
+            "scoped_roles": [],
+            "system_role": ""
+        },
+        {
+            "channel_role": "channel_user",
+            "name": "duplicate_scopes:set(,ignored)",
+            "scoped_roles": [
+                {
+                    "scope": "channel",
+                    "role": "channel_user"
+                },
+                {
+                    "scope": "channel",
+                    "role": "channel_admin"
+                }
+            ],
+            "system_role": ""
+        },
+        {
+            "channel_role": "channel_user",
+            "name": "duplicate_scopes:set(system,system_guest)",
+            "scoped_roles": [
+                {
+                    "scope": "channel",
+                    "role": "channel_user"
+                },
+                {
+                    "scope": "channel",
+                    "role": "channel_admin"
+                },
+                {
+                    "scope": "system",
+                    "role": "system_guest"
+                }
+            ],
+            "system_role": "system_guest"
+        }
+    ]
+}

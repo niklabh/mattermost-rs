@@ -1,0 +1,49 @@
+{
+    "id": "nai8ek7m187wd1jmqoi4zrz5er",
+    "group_id": "zzam4tupedrmrnzxzidg4x6ese",
+    "name": "name-772ae1",
+    "type": "type-4906ef",
+    "target_id": "39mb85p194c5q8ginxs5f9c3sh",
+    "target_type": "targettype-8caccf",
+    "object_type": "objecttype-84a4f8",
+    "protected": true,
+    "permission_field": "permissionfield-113374",
+    "permission_values": "permissionvalues-2b13e0",
+    "permission_options": "permissionoptions-20feef",
+    "linked_field_id": "1s5o9zyojgno5aiib9qby1rfbw",
+    "create_at": 1703137145000,
+    "update_at": 1701460132000,
+    "delete_at": 1706715014000,
+    "created_by": "createdby-9c620c",
+    "updated_by": "updatedby-13635d",
+    "attrs": {
+        "visibility": "visibility-5591bf",
+        "sort_order": 65,
+        "options": [
+            {
+                "id": "o99t9rfydganbi87d6ekygfory",
+                "name": "name-6db209",
+                "color": "color-0d1b7c",
+                "rank": 92
+            }
+        ],
+        "value_type": "valuetype-5026d1",
+        "ldap": "ldap-3096f1",
+        "saml": "saml-c6befa",
+        "managed": "managed-822a55",
+        "protected": true,
+        "source_plugin_id": "ufxg6mzqcohdi31hphzqha3a8e",
+        "access_mode": "accessmode-9b6bad",
+        "display_name": "displayname-c1b1b4",
+        "owners": [
+            {
+                "id": "b9hfo1bo6cd4oz8smbrdbho8iy",
+                "type": "type-b8ab8d",
+                "scopes": [
+                    "scopes-650db9",
+                    "scopes-5ed113"
+                ]
+            }
+        ]
+    }
+}

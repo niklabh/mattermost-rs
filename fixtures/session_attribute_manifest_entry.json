@@ -1,0 +1,11 @@
+{
+    "name": "name-3038c7",
+    "type": "type-8fb7ed",
+    "ttl_seconds": 24,
+    "grace_period_seconds": 29,
+    "platforms": [
+        "platforms-850523",
+        "platforms-852314"
+    ],
+    "display_name": "displayname-50f67c"
+}

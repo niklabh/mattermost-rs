@@ -1,0 +1,14 @@
+{
+    "Enable": true,
+    "ClusterName": "clustername-e9a7a8",
+    "OverrideHostname": "overridehostname-e7a3b7",
+    "NetworkInterface": "networkinterface-e64b97",
+    "BindAddress": "bindaddress-9e3c81",
+    "AdvertiseAddress": "advertiseaddress-5c35ee",
+    "UseIPAddress": true,
+    "EnableGossipCompression": true,
+    "EnableExperimentalGossipEncryption": true,
+    "EnableGossipEncryption": true,
+    "ReadOnlyConfig": true,
+    "GossipPort": 5
+}

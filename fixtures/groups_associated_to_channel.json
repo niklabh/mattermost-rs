@@ -1,0 +1,26 @@
+{
+    "channel_id": "sk51zx4z56gi13p3fq9ixarpmr",
+    "groups": [
+        {
+            "id": "zdysss13m1iao46dpppf1zpmty",
+            "name": "name-3fb6c1",
+            "display_name": "displayname-bd5dc5",
+            "description": "description-d04f84",
+            "source": "source-1dd73e",
+            "remote_id": "7ej4zr3zfwtd98eiiqjuqmtn8h",
+            "create_at": 1704682855000,
+            "update_at": 1705427050000,
+            "delete_at": 1704490668000,
+            "has_syncables": true,
+            "member_count": 56,
+            "allow_reference": true,
+            "channel_member_count": 39,
+            "channel_member_timezones_count": 29,
+            "member_ids": [
+                "memberids-39206f",
+                "memberids-3af161"
+            ],
+            "scheme_admin": true
+        }
+    ]
+}
