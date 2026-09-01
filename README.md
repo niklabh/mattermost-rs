@@ -153,7 +153,7 @@ user to log in as, and it is skipped unless explicitly enabled, so `cargo test` 
 machine with no Docker:
 
 ```sh
-MM_PARITY_STACK=1 cargo test -p mm-api --test parity_users_me
+MM_PARITY_STACK=1 cargo test -p mm-api --test parity users_me
 ```
 
 The store tests need only Postgres, not the Go server, and are gated separately. They read the

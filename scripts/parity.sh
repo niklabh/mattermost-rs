@@ -2,8 +2,9 @@
 # Run the stack-backed suites against a freshly built mm-api from THIS checkout, under the stack
 # lock (see stack-lock.sh).
 #
-#   scripts/parity.sh                                   cargo test --workspace (unit + store + api)
-#   scripts/parity.sh -p mm-api --test parity_team_get  any `cargo test` args
+#   scripts/parity.sh                               cargo test --workspace (unit + store + api)
+#   scripts/parity.sh -p mm-api --test parity      just the parity suite
+#   scripts/parity.sh --test parity users_me       one module's tests
 #
 # Builds mm-api from this tree, replaces whatever is bound to :8066 with it, runs the tests with
 # MM_STORE_DB=1 MM_PARITY_STACK=1, and leaves the server running. Whoever runs next rebuilds and
