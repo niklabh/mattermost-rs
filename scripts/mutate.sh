@@ -22,8 +22,11 @@
 # For `api`, narrow to the suite(s) under test — leaving this unset lets an unrelated suite
 # decide the verdict, which has twice produced a whole run of false CAUGHTs:
 #
-#   MUTATE_API_SUITE=parity_post_get scripts/mutate.sh ...            # one binary
-#   MUTATE_API_TARGETS='--test parity_a --test parity_b' scripts/mutate.sh ...   # several
+#   MUTATE_FILTER='sidebar_categories' scripts/mutate.sh ...     # one module's tests
+#   MUTATE_FILTER='sidebar' scripts/mutate.sh ...                # multiple modules
+#
+# Previously separate --test binaries (MUTATE_API_SUITE=parity_foo, MUTATE_API_TARGETS) are
+# now converted automatically: `parity_foo` → `foo` in MUTATE_FILTER.
 #
 # `unit` without a filter runs the 47-second PBKDF2 suite on every single mutation, which is the
 # whole cost of a fifteen-mutation run. Filtering to the module under test cuts each one to
@@ -101,30 +104,24 @@ case "$SUITE" in
   store) cargo test -p mm-store ${=MUTATE_STORE_TARGETS:---tests} ${=MUTATE_FILTER} > "$LOG" 2>&1 || RC=$? ;;
   app)   cargo test -p mm-app --tests ${MUTATE_FILTER:+$MUTATE_FILTER} > "$LOG" 2>&1 || RC=$? ;;
   api)   if restart_server; then
-           # `--tests` runs EVERY parity binary, which is slow *and* wrong: a suite that never
-           # saw the change decides the verdict. Both failure modes below were measured, in
-           # separate sessions, before this narrowing existed.
+           # The parity tests are now in a single `--test parity` binary. Filter by test name
+           # to narrow the suite under test — otherwise an unrelated failure decides the verdict:
            #
-           #   - `--test X` **replaces** `--tests` rather than narrowing it, so passing both is
-           #     a union and cargo builds all 32 targets. A whole 25-mutation run came back
-           #     "25 caught, 0 survived" with both no-op controls caught, because every verdict
-           #     was really some other suite failing.
-           #   - One suite broken by a sibling worktree's fixtures (`parity_users_list` failing
-           #     against the *Go* server, D-157) likewise "caught" a no-op control.
+           #   MUTATE_FILTER='sidebar_categories' scripts/mutate.sh ...  # one module's tests
+           #   MUTATE_FILTER='sidebar' scripts/mutate.sh ...             # multiple modules
            #
-           # A no-op control reporting CAUGHT is the signature of both. Narrow the *targets*:
-           #
-           #   MUTATE_API_TARGETS='--test parity_sidebar_categories --test parity_sidebar_router'
-           #   MUTATE_API_SUITE=parity_post_get      # older single-suite spelling, still honoured
-           #
-           # A test-*name* filter goes in MUTATE_FILTER as everywhere else, but note that an
-           # integration test's name is its function alone — the file name is not part of it,
-           # so selecting a suite means selecting its target, not filtering by name.
-           # `${=…}` is zsh's explicit word-splitting; without it the whole value is one word.
-           if [ -z "$MUTATE_API_TARGETS" ] && [ -n "$MUTATE_API_SUITE" ]; then
-             MUTATE_API_TARGETS="--test $MUTATE_API_SUITE"
+           # Legacy MUTATE_API_SUITE and MUTATE_API_TARGETS (from the 35-binary era) are
+           # converted for compatibility: `parity_foo` in either variable maps to `foo` in
+           # MUTATE_FILTER.
+           if [ -z "$MUTATE_FILTER" ]; then
+             if [ -n "$MUTATE_API_SUITE" ]; then
+               MUTATE_FILTER="${MUTATE_API_SUITE#parity_}"
+             elif [ -n "$MUTATE_API_TARGETS" ]; then
+               # Convert --test parity_X --test parity_Y to "X|Y" filter pattern
+               MUTATE_FILTER=$(echo "$MUTATE_API_TARGETS" | sed 's/--test parity_//g' | tr ' ' '|')
+             fi
            fi
-           cargo test -p mm-api ${=MUTATE_API_TARGETS:---tests} ${=MUTATE_FILTER} > "$LOG" 2>&1 || RC=$?
+           cargo test -p mm-api --test parity ${=MUTATE_FILTER:+$MUTATE_FILTER} > "$LOG" 2>&1 || RC=$?
          else
            RC=1; echo "does not compile, or the server never came up" > "$LOG"
          fi ;;
