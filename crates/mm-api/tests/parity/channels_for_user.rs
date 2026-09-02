@@ -319,7 +319,13 @@ async fn the_pages_join_seamlessly_and_an_exact_multiple_terminates_cleanly() {
 
     let client = client();
     let token = go_minted_token(&client).await;
-    let team_id = create_team(&client, &token, "pageteam").await;
+    // The tag has to be unique across **every** module in this binary, not just within this
+    // one: `create_team` names the team `mmrs-parity-<tag>` and Mattermost enforces that name.
+    // When these suites were 35 separate binaries a shared tag was invisible; consolidating them
+    // into one process (127f104) made the two creates concurrent, and whichever lost got
+    // `store.sql_team.save_team.existing.app_error`. This one collided with
+    // `team_channel_lists`.
+    let team_id = create_team(&client, &token, "cfupageteam").await;
     let plain = create_plain_user(&client, &token, &team_id, "pages").await;
     let path = format!("/api/v4/users/{}/channels", plain.id);
 

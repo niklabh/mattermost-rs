@@ -5504,3 +5504,40 @@ cluster-invalidation channel or accept and document a staleness window. Not befo
 **Where the pin lives:** the doc on `mm_app::App::get_posts_etag` and the test named above.
 
 ---
+
+## D-160 · The consolidated parity binary shares one database with no isolation between suites
+
+**Status** OPEN · **Severity** test-harness flake · **Raised** 2026-09-02 (phase 2, getPostThread)
+
+Commit 6c156a2 merged 35 `parity_*.rs` integration binaries into one `--test parity`. Build times
+fell sharply and that was the right trade — but the 35 processes had been an isolation boundary as
+well as a compilation unit, and nothing replaced it. All 296 tests now run as threads in **one**
+process against **one** shared Mattermost database.
+
+Two distinct consequences, and only the first is fixed:
+
+- **Duplicate fixture names across modules became reachable and are now deterministic failures.**
+  `team_channel_lists` and `channels_for_user` both created `mmrs-parity-pageteam`;
+  `team_channel_lists` and `channels_for_team_for_user` both created `mmrs-parity-delteam`. As
+  separate binaries they never overlapped; as threads the loser gets
+  `store.sql_team.save_team.existing.app_error` and two or three tests fail on every run. **Fixed
+  2026-09-02** by renaming the two non-`team_channel_lists` tags; a full-suite grep confirms these
+  were the only duplicate pair. Any new suite must pick a tag unique across the whole binary — the
+  note now sits at both call sites.
+- **Residual cross-suite interference remains, and it is intermittent.** Over three consecutive
+  full runs after that fix: one run fully green (296/296), one with three `sessions_for_user`
+  failures, one with a single `teams_for_user` failure — a different suite each time. These read
+  *global* lists (a user's sessions, a user's teams) that other suites mutate concurrently by
+  logging fixture users in and creating teams. It is the same class as the tied-sort-key flake
+  behind the `mmrs-parity-` DM purge, one level up: the fixture is no longer just leaked rows, it
+  is another suite running right now.
+
+**What is owed:** give the suites back an isolation boundary. The cheapest option that preserves
+the build-time win is to mark the globally-scoped suites `#[serial]` (or gate them behind one
+shared mutex) rather than re-splitting the binary; the thorough option is a per-suite fixture user
+so no two suites read the same user's sessions or teams.
+
+**Why it is not fixed here:** it is not this route's bug and the diagnosis crosses six suites.
+`post_thread`'s own 16 tests passed in all three runs and in every mutation run.
+
+**Where the pin lives:** the comments at the two renamed `create_team` call sites.
