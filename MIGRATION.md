@@ -4390,3 +4390,103 @@ because the draft needed *verifying*, not because a route arrived.
 What is still untested, and should be treated as unverified until a route needs it: the ~35
 modules with no `json:`-tagged type and no branching logic (constant tables, marker structs), and
 every method listed in "deliberately not ported" above.
+
+---
+
+## `GET /api/v4/posts/{post_id}/thread` — `getPostThread` (2026-09-02)
+
+| Layer | File | Status |
+|---|---|---|
+| api | `crates/mm-api/src/posts.rs` — `get_post_thread` | PARTIAL, everything but a negative `perPage` and `collapsedThreadsExtended` |
+| app | `crates/mm-app/src/post.rs` — `get_post_thread` | PARTIAL |
+| store | `crates/mm-store/src/post_store.rs` — `get_thread`, `get_thread_root`, `get_thread_replies`, `get_collapsed_thread_root`, `get_collapsed_thread_replies`, `shave_extra_row`, `GetPostThreadOptions`, `ThreadDirection` | PARTIAL |
+
+Served: both store branches, all nine validation 400s, both cursors in both directions with and
+without the `fromPost` tie-break, `perPage` with `has_next`, the etag and its 304. Forwarded:
+`collapsedThreadsExtended=true` (needs `SanitizeProfile`), a **negative** `perPage`, and any
+thread carrying a burn-on-read post.
+
+Tests: 16 cross-server (`crates/mm-api/tests/parity/post_thread.rs`).
+Mutations: **29 run, 27 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/post-thread.plan`). Five of the 27 survived the first pass and each was a
+gap in the fixture — see below.
+
+Each finding lives in the doc comment on the thing it constrains. The ones a reader would
+otherwise get wrong:
+
+1. **The two sibling handlers parse the same flags differently.** `getPostThread` compares
+   `r.URL.Query().Get(f) == "true"`; `getPostsForChannel`, forty lines earlier in the same file,
+   calls `strconv.ParseBool`. So `?skipFetchThreads=1` is **true** for the channel page and
+   **false** for the thread, and likewise `t`, `T`, `TRUE`. Measured on all five spellings —
+   reusing `query_flag_is_true` here is the shortcut that would have looked right.
+2. **`has_next` has three states from one handler.** The collapsed branch always assigns it, so
+   `collapsedThreads=true` emits `"has_next":false` even unpaginated; the non-collapsed branch
+   assigns it *inside* the `!skipFetchThreads` block, so `skipFetchThreads=true` **omits the key**
+   (`*bool` + `omitempty`); everything else emits a real boolean.
+3. **Asking for a reply's thread means two different things.** The non-collapsed branch resolves
+   `RootId` and returns the whole thread; the collapsed branch uses the requested id *literally*
+   as the root, so it returns the reply **alone**. Measured: 5 posts against 1.
+4. **`fromUpdateAt` is direction-gated on one branch only.** The collapsed query applies it only
+   when `direction == "down"` (post_store.go:697); the non-collapsed one applies it in both
+   directions (:845). An `up` request with a cursor is therefore unfiltered on one branch and
+   filtered on the other.
+5. **A negative `perPage` panics the Go server, and that is now measured rather than reasoned.**
+   `Limit(uint64(perPage + 1))` turns `-1` into `LIMIT 0`; zero rows then match `perPage+1 == 0`,
+   `hasNext` is set, and `posts[:len(posts)-1]` panics — the connection closes with no response
+   and the log says `slice bounds out of range [:-1]` at post_store.go:895. `-2` and below render
+   a `uint64` too large for a Postgres `LIMIT` and come back 500 (`pq: bigint out of range`).
+   Forwarded, so a client keeps getting Go's answer, panic included.
+6. **The permission check runs after the query**, the reverse of `getPost`. A missing post is a
+   404 for a caller with no rights to it, where `getPost` would have answered 403 — Go reads the
+   thread first (api4/post.go:893) and calls `GetPostIfAuthorized` second (:918).
+7. **Every reply in a non-collapsed thread reports the *root's* `reply_count`.** It comes from a
+   `WITH replycount` CTE cross-joined into the select, not a correlated subquery, so one number is
+   stamped on every row. On the collapsed branch the replies report `0`, because `postsQuery` has
+   no such column at all.
+8. **The nine validation 400s share one id and are still distinguishable — through `message`.**
+   `WipeDetailed` blanks `detailed_error` and the params map is `json:"-"`, which reads like the
+   nine are one response; but `Translate` interpolates `params["Name"]`, so Go answers `Invalid or
+   missing perPage in request body.` and, for the `fromPost` branch whose "parameter name" is a
+   whole sentence, `Invalid or missing if fromPost is set, then fromCreateAt must also be set in
+   request body.` Ours is the untranslated id ([D-092]); the suite asserts Go's nine messages so a
+   branch wired to the wrong name is caught now rather than when i18n lands.
+
+### The five survivors, and what each one was
+
+`mutate.sh` replaces the **first** occurrence of a pattern, and for all three thread queries that
+is the `direction == ""` statement — the one this port keeps separate because Go emits no
+`ORDER BY` for it. No test paired an absent direction with `perPage` or a cursor, so three
+mutations landed on a live code path with no oracle. The same shape as the `before`-half survivors
+in the `getPostsForChannel` session; worth expecting the next time a query is split in two.
+
+| Survivor | What the suite could not see | Fixture added |
+|---|---|---|
+| `thread-limit-off-by-one` | `LIMIT perPage` instead of `perPage + 1`, unordered statement only | `?perPage=2` with no `direction` |
+| `thread-updateat-cursor-direction` | `>`/`<` swapped, unordered statement only | `?fromUpdateAt=…` with no `direction` |
+| `ct-updateat-direction-gate` | the collapsed branch's `direction == "down"` gate inverted, unordered statement only | `?collapsedThreads=true&fromUpdateAt=…` |
+| `thread-has-next-ge` | `len == perPage + 1` weakened to `len >= perPage` | `?perPage=4` — a page **exactly** the window's size, the only value that separates the two |
+| `app-notfound-status-swapped` | the app layer's 500 branch, which nothing reached | a post whose `props` column is a jsonb **array**, planted directly; both servers 500 |
+
+All six re-ran caught after the fixtures landed. One mutation in the first pass was a **harness
+fault of the plan's making** — it dropped a bind parameter, so sqlx's arity check refused to
+compile it; rewritten to keep `$2` bound, it is caught.
+
+### One repair outside this route
+
+The full parity binary was failing two `team_channel_lists` tests on every run, and it was not
+this route. Commit 6c156a2 merged 35 test binaries into one process without replacing the
+isolation those processes provided: `team_channel_lists` and `channels_for_user` both created a
+team named `mmrs-parity-pageteam`, and `team_channel_lists` and `channels_for_team_for_user` both
+created `mmrs-parity-delteam`. Concurrent creates, one winner. Renamed the two non-owning tags;
+those were the only duplicates in the binary. Residual intermittent cross-suite interference
+remains and is [D-160].
+
+Two things about the port's shape, since they are decisions rather than findings:
+
+- **`direction == ""` gets its own SQL statement.** Go emits **no** `ORDER BY` for it, and a
+  degenerate sort key is not the same thing — it lets Postgres reorder rows Go returns in scan
+  order. The cursor predicates and the `LIMIT` *are* parameterised into one literal (identical
+  truth tables, still visible to a mutation); only the `ORDER BY` could not be.
+- **`GetPostThreadOptions` is a second struct** rather than more fields on `GetPostsOptions`. Go
+  has one type serving both queries; they overlap in three fields and disagree about two of them,
+  and keeping them apart is what lets each one's documentation say what its own query does.

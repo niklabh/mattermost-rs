@@ -1,4 +1,6 @@
-//! Port of `api4/post.go`'s `getPost` — `GET /api/v4/posts/{post_id}`.
+//! Port of `api4/post.go`'s post reads: `getPost` (`GET /api/v4/posts/{post_id}`),
+//! `getPostsForChannel` (`GET /api/v4/channels/{channel_id}/posts`) and `getPostThread`
+//! (`GET /api/v4/posts/{post_id}/thread`).
 
 use axum::extract::{Path, Request, State};
 use axum::http::StatusCode;
@@ -10,7 +12,7 @@ use mm_model::permission::{
     make_permission_error,
 };
 use mm_model::utils::is_valid_id;
-use mm_store::post_store::GetPostsOptions;
+use mm_store::post_store::{GetPostThreadOptions, GetPostsOptions, ThreadDirection};
 
 use crate::AppState;
 use crate::auth::AuthenticatedSession;
@@ -415,6 +417,311 @@ async fn serve_channel_posts(
             StatusCode::OK,
             [
                 (HEADER_ETAG_SERVER, etag.as_str()),
+                ("Content-Type", "application/json"),
+                ("x-mmrs-served-by", "rust"),
+            ],
+            body,
+        )
+            .into_response(),
+    )
+}
+
+/// `getPostThread`'s six query parameters (api4/post.go:812).
+const PER_PAGE_PARAM: &str = "perPage";
+const FROM_CREATE_AT_PARAM: &str = "fromCreateAt";
+const FROM_POST_PARAM: &str = "fromPost";
+const FROM_UPDATE_AT_PARAM: &str = "fromUpdateAt";
+const UPDATES_ONLY_PARAM: &str = "updatesOnly";
+const DIRECTION_PARAM: &str = "direction";
+
+/// `web.PerPageMaximum` (channels/web/params.go:20).
+///
+/// This route **rejects** a larger value with a 400 where every paginated route ported so far
+/// clamps it silently. `parse_per_page` is therefore the wrong helper here, and reusing it
+/// would turn Go's 400 into a 200.
+const PER_PAGE_MAXIMUM: i64 = 200;
+
+/// `r.URL.Query().Get(flag) == "true"` — and that is **not** [`query_flag_is_true`].
+///
+/// `getPostThread` compares the raw string; its neighbour `getPostsForChannel` calls
+/// `strconv.ParseBool` on the same four parameter names, forty lines earlier in the same file.
+/// So `?skipFetchThreads=1` is **true** for the channel page and **false** for the thread, and
+/// the same goes for `t`, `TRUE` and `T`. Measured against the running 11.11.0 server on all
+/// four spellings, because a shared helper here is exactly the shortcut that would look right.
+fn query_flag_is_literally_true(query: Option<&str>, flag: &str) -> bool {
+    query_first(query, flag).is_some_and(|value| value == "true")
+}
+
+/// Go's `SetInvalidParam` argument at api4/post.go:843, where the whole sentence is passed as
+/// the *parameter name*.
+///
+/// It reaches `AppError.params["Name"]`, which is unexported in Go and `#[serde(skip)]` here —
+/// and then reaches the client anyway, interpolated into the translated `message`. Go really does
+/// answer `Invalid or missing if fromPost is set, then fromCreateAt must also be set in request
+/// body.`; the sentence is not internal. See [`get_post_thread`].
+const FROM_POST_NEEDS_FROM_CREATE_AT: &str =
+    "if fromPost is set, then fromCreateAt must also be set";
+
+/// Port of `getPostThread` (api4/post.go:812) — `GET /api/v4/posts/{post_id}/thread`.
+///
+/// # Nine validation branches, one error id — and the parameter name is on the wire
+///
+/// Go spells its 400s three ways — `SetInvalidParam`, `SetInvalidParamWithErr` and
+/// `SetInvalidParamWithDetails` — and all three build `api.context.invalid_body_param.app_error`,
+/// differing only in `DetailedError` and in the unexported params map. `handleContextError` wipes
+/// `DetailedError` unless `EnableDeveloper` is set, and the map is `json:"-"`, so it is tempting
+/// to conclude the nine failures are indistinguishable. **They are not.** `Translate` interpolates
+/// `params["Name"]` into `message`, so Go answers `Invalid or missing perPage in request body.`
+/// and, for the branch below whose "parameter" is a whole sentence, `Invalid or missing if
+/// fromPost is set, then fromCreateAt must also be set in request body.` — measured on all nine.
+///
+/// Our `message` is the untranslated id for every one of them, which is [D-092] and not specific
+/// to this route. That makes the name each branch passes a **latent wire value**: it is wrong
+/// today only in the way every id on this server is wrong, and it becomes right the day i18n
+/// lands. `parity/post_thread.rs` asserts Go's nine messages so a branch wired to the wrong name
+/// is caught now rather than then.
+///
+/// # The permission check runs after the query
+///
+/// `GetPostThread` is called first and `GetPostIfAuthorized` second (api4/post.go:893 against
+/// :918), so a caller with no access to the channel still causes the thread to be read, and a
+/// **missing** post is a 404 for everyone rather than a 403 — the reverse of the ordering
+/// [`get_post`] documents. That is Go's, not an oversight to tidy: swapping them would change
+/// the status a client sees.
+///
+/// # Three forwards
+///
+/// - `collapsedThreadsExtended=true`, for the reason it is forwarded from
+///   [`get_posts_for_channel`]: it replaces each stub participant with a `SanitizeProfile`d
+///   user, whose output depends on config this server does not read.
+/// - A **negative** `perPage`. `Limit(uint64(perPage + 1))` makes `-1` a `LIMIT 0`, whereupon
+///   Go matches zero rows against `perPage+1 == 0`, sets `has_next` and panics on
+///   `posts[:len(posts)-1]` — measured: the connection is closed with no response, and the
+///   server logs `slice bounds out of range [:-1]` at post_store.go:895. `-2` and below render
+///   a `uint64` too large for a Postgres `LIMIT` and come back as a 500 (`pq: bigint out of
+///   range`). Forwarding is how a client keeps getting Go's answer, panic included; a port that
+///   "fixed" either one would diverge.
+/// - Any thread carrying a burn-on-read post, refused by the metadata pipeline as in
+///   [`get_posts_for_channel`]. Unlike the channel page, `SqlPostStore.Get` really does populate
+///   `BurnOnReadPosts` — see [`mm_app::App::get_post_thread`].
+///
+/// # Two etags, computed from two different lists
+///
+/// `HandleEtag` compares `If-None-Match` against the **raw** list's etag and the 200's header
+/// carries the **sanitized** list's. Nothing in `PreparePostListForClient` or
+/// `SanitizePostListMetadataForUser` touches `order`, an id or an `update_at`, so the two agree
+/// — but they are two calls in Go and they are two calls here, because the day one of those
+/// stages drops a post the header has to move with it.
+///
+/// # `FirstInaccessiblePostTime` and the missing-post 400 are both dead here
+///
+/// Go answers a truncated list with a bare `{"order":[],...}` body and a 200. The field is only
+/// ever set by `filterInaccessiblePosts`, which returns immediately without a licence carrying a
+/// `PostHistory` limit, so it is always `0` on this deployment and the branch cannot be reached
+/// — not reproduced, for the reason [`get_post`] gives about its `First-Inaccessible-Post-Time`
+/// header. The `list.Posts[postId]` miss below it is likewise unreachable: both store branches
+/// add the requested post before anything else can filter it. It is ported because it is
+/// cheap and because it is the handler's only `SetInvalidURLParam` after the router has run.
+///
+/// # The audit record is not ported
+///
+/// As in [`get_post`]: `isMember` and `isMemberForAllPreviews` are computed and dropped
+/// ([D-028]).
+#[tracing::instrument(skip_all, fields(post_id = %post_id))]
+pub async fn get_post_thread(
+    State(state): State<AppState>,
+    Path(post_id): Path<String>,
+    session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    let query = request.uri().query().map(str::to_owned);
+    let if_none_match = request
+        .headers()
+        .get(IF_NONE_MATCH)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned);
+
+    match serve_post_thread(&state, &post_id, &session, query.as_deref(), if_none_match).await {
+        Outcome::Served(response) => response,
+        Outcome::Failed(err) => err.into_response(),
+        Outcome::Forward => proxy::forward_to_go(State(state), request).await,
+    }
+}
+
+async fn serve_post_thread(
+    state: &AppState,
+    post_id: &str,
+    session: &AuthenticatedSession,
+    query: Option<&str>,
+    if_none_match: Option<String>,
+) -> Outcome {
+    // `c.RequirePostId()` (web/context.go:411).
+    if !is_valid_id(post_id) {
+        return Outcome::Failed(ApiError::invalid_url_param("post_id"));
+    }
+
+    // `perPage := 0` and the comment above it: the default is **all items**, kept for mobile.
+    // Note the guard is `err != nil || perPage > PerPageMaximum` — a *negative* value passes
+    // validation here and is dealt with below.
+    let mut per_page = 0_i64;
+    if let Some(raw) = query_first(query, PER_PAGE_PARAM).filter(|v| !v.is_empty()) {
+        match raw.parse::<i64>() {
+            Ok(value) if value <= PER_PAGE_MAXIMUM => per_page = value,
+            _ => return Outcome::Failed(ApiError::invalid_param(PER_PAGE_PARAM)),
+        }
+    }
+
+    let mut from_create_at = 0_i64;
+    if let Some(raw) = query_first(query, FROM_CREATE_AT_PARAM).filter(|v| !v.is_empty()) {
+        match raw.parse::<i64>() {
+            Ok(value) => from_create_at = value,
+            Err(_) => return Outcome::Failed(ApiError::invalid_param(FROM_CREATE_AT_PARAM)),
+        }
+    }
+
+    // `fromPost` has no validation of its own — it is not required to be an id, and an
+    // unknown one simply matches nothing in the cursor's tie-break.
+    let from_post = query_first(query, FROM_POST_PARAM).unwrap_or_default();
+    if !from_post.is_empty() && from_create_at == 0 {
+        return Outcome::Failed(ApiError::invalid_param(FROM_POST_NEEDS_FROM_CREATE_AT));
+    }
+
+    let mut from_update_at = 0_i64;
+    if let Some(raw) = query_first(query, FROM_UPDATE_AT_PARAM).filter(|v| !v.is_empty()) {
+        match raw.parse::<i64>() {
+            Ok(value) => from_update_at = value,
+            Err(_) => return Outcome::Failed(ApiError::invalid_param(FROM_UPDATE_AT_PARAM)),
+        }
+    }
+
+    // The two cursors are mutually exclusive — the store would apply both predicates.
+    if from_update_at != 0 && from_create_at != 0 {
+        return Outcome::Failed(ApiError::invalid_param(FROM_UPDATE_AT_PARAM));
+    }
+
+    let updates_only = query_flag_is_literally_true(query, UPDATES_ONLY_PARAM);
+    if updates_only && from_update_at == 0 {
+        return Outcome::Failed(ApiError::invalid_param(FROM_UPDATE_AT_PARAM));
+    }
+
+    // An empty `direction` is absent, not invalid — `if dir := q.Get(...); dir != ""`.
+    let direction = match query_first(query, DIRECTION_PARAM).filter(|v| !v.is_empty()) {
+        None => ThreadDirection::Unset,
+        Some(value) if value == "up" => ThreadDirection::Up,
+        Some(value) if value == "down" => ThreadDirection::Down,
+        Some(_) => return Outcome::Failed(ApiError::invalid_param(DIRECTION_PARAM)),
+    };
+
+    // Scrolling up means reading backwards, and "what changed since" only runs forwards.
+    if updates_only && direction == ThreadDirection::Up {
+        return Outcome::Failed(ApiError::invalid_param(UPDATES_ONLY_PARAM));
+    }
+
+    // Both forwards sit **after** validation, which costs nothing and keeps the two servers
+    // agreed on a request that is invalid *and* forwarded: Go re-runs every check above before
+    // it reaches either of these, so a bad `direction` beside `perPage=-1` is a 400 on both
+    // sides rather than a panic on one.
+    if query_flag_is_literally_true(query, COLLAPSED_THREADS_EXTENDED_PARAM) {
+        return Outcome::Forward;
+    }
+    if per_page < 0 {
+        return Outcome::Forward;
+    }
+
+    let collapsed_threads = query_flag_is_literally_true(query, COLLAPSED_THREADS_PARAM);
+    let skip_fetch_threads = query_flag_is_literally_true(query, SKIP_FETCH_THREADS_PARAM);
+
+    let opts = GetPostThreadOptions {
+        user_id: &session.0.user_id,
+        skip_fetch_threads,
+        collapsed_threads,
+        updates_only,
+        per_page,
+        direction,
+        from_post: &from_post,
+        from_create_at,
+        from_update_at,
+    };
+
+    let list = match state.app.get_post_thread(post_id, opts).await {
+        Ok(list) => list,
+        Err(err) => return Outcome::Failed(ApiError(err)),
+    };
+
+    // `post, ok := list.Posts[c.Params.PostId]` — see the doc comment on why `ok` cannot be
+    // false through this route.
+    if !list
+        .posts
+        .as_ref()
+        .is_some_and(|posts| posts.contains_key(post_id))
+    {
+        return Outcome::Failed(ApiError::invalid_url_param("post_id"));
+    }
+
+    // `includeDeleted` is hard-coded `false` here, so this second fetch of the same post cannot
+    // see a row the thread query did not.
+    let (_post, _is_member) = match state
+        .app
+        .get_post_if_authorized(post_id, &session.0, false)
+        .await
+    {
+        Ok(found) => found,
+        Err(err) => return Outcome::Failed(ApiError(*err)),
+    };
+
+    let etag = list.etag();
+    if if_none_match.as_deref() == Some(etag.as_str()) {
+        return Outcome::Served(
+            (
+                StatusCode::NOT_MODIFIED,
+                [(ETAG.as_str(), etag.as_str()), ("x-mmrs-served-by", "rust")],
+            )
+                .into_response(),
+        );
+    }
+
+    let prepared = match state.app.prepare_post_list_for_client(&list).await {
+        Ok(prepared) => prepared,
+        Err(PrepareError::Unreproducible(reason)) => {
+            tracing::debug!(reason, post_id, "forwarding to Go");
+            return Outcome::Forward;
+        }
+        Err(PrepareError::App(err)) => return Outcome::Failed(ApiError(*err)),
+    };
+
+    let (mut sanitized, _all_previews_have_membership) = match state
+        .app
+        .sanitize_post_list_metadata_for_user(prepared, &session.0.user_id)
+        .await
+    {
+        Ok(sanitized) => sanitized,
+        Err(PrepareError::Unreproducible(reason)) => {
+            tracing::debug!(reason, post_id, "forwarding to Go");
+            return Outcome::Forward;
+        }
+        Err(PrepareError::App(err)) => return Outcome::Failed(ApiError(*err)),
+    };
+
+    // Deliberately the sanitized list's own etag rather than the one compared above.
+    let response_etag = sanitized.etag();
+
+    let mut body = Vec::new();
+    if let Err(err) = sanitized.encode_json(&mut body) {
+        tracing::error!(error = %err, "failed to serialise PostList");
+        return Outcome::Failed(ApiError(mm_model::utils::AppError::new(
+            "getPostThread",
+            "api.marshal_error",
+            None,
+            String::new(),
+            500,
+        )));
+    }
+
+    Outcome::Served(
+        (
+            StatusCode::OK,
+            [
+                (HEADER_ETAG_SERVER, response_etag.as_str()),
                 ("Content-Type", "application/json"),
                 ("x-mmrs-served-by", "rust"),
             ],

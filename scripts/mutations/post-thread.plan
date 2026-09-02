@@ -1,0 +1,40 @@
+# getPostThread — store, app and api mutations. All run against the `post_thread` parity suite.
+#
+# Two no-op controls at the end: if a control FAILS, the harness is noisy and every verdict above
+# it is meaningless.
+#
+# Five of these survived the first run and each one was a gap in the fixture, not a shrug:
+# `mutate.sh` replaces the FIRST occurrence of a pattern, and for the three thread queries that
+# is the `direction == ""` statement — which no test paired with `perPage` or a cursor. The
+# `has_next` boundary needed a page exactly the size of the window, and the app layer's 500
+# branch needed a post the store cannot decode. See `parity/post_thread.rs`.
+thread-window-drops-root	crates/mm-store/src/post_store.rs	WHERE (p.id = $1 OR p.rootid = $1)	WHERE (p.rootid = $1)	api
+thread-window-deleted	crates/mm-store/src/post_store.rs	AND p.deleteat = 0\n                   AND ($2::bigint = 0	AND p.deleteat >= 0\n                   AND ($2::bigint = 0	api
+thread-root-resolution	crates/mm-store/src/post_store.rs	let root_id = if post.root_id.is_empty() {	let root_id = if !post.root_id.is_empty() {	api
+thread-createat-cursor-direction	crates/mm-store/src/post_store.rs	OR CASE WHEN $3 THEN p.createat > $2 ELSE p.createat < $2 END	OR CASE WHEN $3 THEN p.createat < $2 ELSE p.createat > $2 END	api
+thread-updateat-cursor-direction	crates/mm-store/src/post_store.rs	OR CASE WHEN $3 THEN p.updateat > $5 ELSE p.updateat < $5 END	OR CASE WHEN $3 THEN p.updateat < $5 ELSE p.updateat > $5 END	api
+thread-limit-off-by-one	crates/mm-store/src/post_store.rs	LIMIT CASE WHEN $6::bigint <> 0 THEN $6::bigint + 1 END\n                "#,\n                root_id,	LIMIT CASE WHEN $6::bigint <> 0 THEN $6::bigint END\n                "#,\n                root_id,	api
+thread-no-shave	crates/mm-store/src/post_store.rs	if has_next {\n        posts.pop();\n    }	if has_next {\n    }	api
+thread-has-next-ge	crates/mm-store/src/post_store.rs	let has_next = per_page != 0 && posts.len() as i64 == per_page + 1;	let has_next = per_page != 0 && posts.len() as i64 >= per_page;	api
+ct-updateat-direction-gate	crates/mm-store/src/post_store.rs	AND (NOT $3\n                        OR $5::bigint = 0	AND ($3\n                        OR $5::bigint = 0	api
+ct-reply-count-constant	crates/mm-store/src/post_store.rs	0::bigint          AS "reply_count!"	1::bigint          AS "reply_count!"	api
+ct-has-next-dropped	crates/mm-store/src/post_store.rs	list.has_next = Some(has_next);\n            return Ok(list);	return Ok(list);	api
+ct-thread-reply-count-column	crates/mm-store/src/post_store.rs	COALESCE(threads.replycount, 0)             AS "thread_reply_count!"	COALESCE(threads.lastreplyat, 0)             AS "thread_reply_count!"	api
+ct-membership-join-key	crates/mm-store/src/post_store.rs	LEFT JOIN threadmemberships ON threadmemberships.postid = posts.id\n                                         AND threadmemberships.userid = $2\n             WHERE posts.deleteat = 0\n               AND posts.id = $1	LEFT JOIN threadmemberships ON threadmemberships.postid = posts.rootid\n                                         AND threadmemberships.userid = $2\n             WHERE posts.deleteat = 0\n               AND posts.id = $1	api
+direction-descending-is-up	crates/mm-store/src/post_store.rs	fn descending(self) -> bool {\n        self == ThreadDirection::Up	fn descending(self) -> bool {\n        self == ThreadDirection::Down	api
+direction-is-down-includes-unset	crates/mm-store/src/post_store.rs	fn is_down(self) -> bool {\n        self == ThreadDirection::Down	fn is_down(self) -> bool {\n        self != ThreadDirection::Up	api
+skip-fetch-threads-ignored	crates/mm-store/src/post_store.rs	if opts.skip_fetch_threads {\n            return Ok(list);	if false {\n            return Ok(list);	api
+app-notfound-status-swapped	crates/mm-app/src/post.rs	tracing::error!(error = %err, "post thread lookup failed");\n                    500	tracing::error!(error = %err, "post thread lookup failed");\n                    404	api
+api-per-page-maximum-boundary	crates/mm-api/src/posts.rs	Ok(value) if value <= PER_PAGE_MAXIMUM => per_page = value,	Ok(value) if value < PER_PAGE_MAXIMUM => per_page = value,	api
+api-per-page-maximum-constant	crates/mm-api/src/posts.rs	const PER_PAGE_MAXIMUM: i64 = 200;	const PER_PAGE_MAXIMUM: i64 = 100;	api
+api-flag-not-literal-true	crates/mm-api/src/posts.rs	query_first(query, flag).is_some_and(|value| value == "true")	query_first(query, flag).is_some_and(|value| value.starts_with('t'))	api
+api-updates-only-direction	crates/mm-api/src/posts.rs	if updates_only && direction == ThreadDirection::Up {	if updates_only && direction == ThreadDirection::Down {	api
+api-cursors-exclusive-or	crates/mm-api/src/posts.rs	if from_update_at != 0 && from_create_at != 0 {	if from_update_at != 0 || from_create_at != 0 {	api
+api-from-post-needs-create-at	crates/mm-api/src/posts.rs	if !from_post.is_empty() && from_create_at == 0 {	if !from_post.is_empty() && from_create_at != 0 {	api
+api-updates-only-needs-cursor	crates/mm-api/src/posts.rs	if updates_only && from_update_at == 0 {	if updates_only && from_update_at != 0 {	api
+api-etag-comparison	crates/mm-api/src/posts.rs	if if_none_match.as_deref() == Some(etag.as_str()) {\n        return Outcome::Served(\n            (\n                StatusCode::NOT_MODIFIED,\n                [(ETAG.as_str(), etag.as_str()), ("x-mmrs-served-by", "rust")],\n            )\n                .into_response(),\n        );\n    }\n\n    let prepared = match state.app.prepare_post_list_for_client(&list).await {	if if_none_match.as_deref() != Some(etag.as_str()) {\n        return Outcome::Served(\n            (\n                StatusCode::NOT_MODIFIED,\n                [(ETAG.as_str(), etag.as_str()), ("x-mmrs-served-by", "rust")],\n            )\n                .into_response(),\n        );\n    }\n\n    let prepared = match state.app.prepare_post_list_for_client(&list).await {	api
+api-negative-per-page-served	crates/mm-api/src/posts.rs	if per_page < 0 {\n        return Outcome::Forward;\n    }	if per_page < i64::MIN {\n        return Outcome::Forward;\n    }	api
+api-direction-parse-up	crates/mm-api/src/posts.rs	Some(value) if value == "up" => ThreadDirection::Up,	Some(value) if value == "up" => ThreadDirection::Down,	api
+# ---- no-op controls: these must be CAUGHT-free, i.e. they must SURVIVE ----
+control-rename-binding	crates/mm-store/src/post_store.rs	let has_next = shave_extra_row(&mut replies, opts.per_page);\n\n            let mut list = PostList::new();	let next_page_exists = shave_extra_row(&mut replies, opts.per_page);\n            let has_next = next_page_exists;\n\n            let mut list = PostList::new();	api
+control-reorder-select-columns	crates/mm-store/src/post_store.rs	posts.hashtags     AS "hashtags!",\n                       posts.filenames    AS "filenames?",\n                       posts.fileids      AS "file_ids?",\n                       posts.hasreactions AS "has_reactions!",\n                       posts.remoteid     AS "remote_id?",\n                       0::bigint          AS "reply_count!"	posts.filenames    AS "filenames?",\n                       posts.hashtags     AS "hashtags!",\n                       posts.fileids      AS "file_ids?",\n                       posts.remoteid     AS "remote_id?",\n                       posts.hasreactions AS "has_reactions!",\n                       0::bigint          AS "reply_count!"	api
