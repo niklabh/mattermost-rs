@@ -38,6 +38,7 @@ mod parity {
     pub mod channels_for_team_for_user;
     pub mod channels_for_user;
     pub mod post_get;
+    pub mod post_thread;
     pub mod preference_reads;
     pub mod preferences;
     pub mod roles;

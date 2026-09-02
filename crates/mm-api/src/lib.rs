@@ -428,6 +428,15 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/posts/{post_id}",
             partially_migrated_with_ids(&state, get(posts::get_post)),
         )
+        // `BaseRoutes.Post.Handle("/thread")` (api4/post.go:31) — one segment deeper than the
+        // route above, so neither shadows the other. Its literal siblings under `{post_id}`
+        // (`/edit_history`, `/info`, `/files/info`, `/reveal`, `/patch`, `/pin`, …) are not
+        // registered here at all and fall to `Router::fallback` whole; `partially_migrated`
+        // keeps every non-GET method on this exact path going to Go.
+        .route(
+            "/api/v4/posts/{post_id}/thread",
+            partially_migrated_with_ids(&state, get(posts::get_post_thread)),
+        )
         // `BaseRoutes.ChannelCategories` (api.go:231), the three GETs. The five writes on
         // these same paths fall to `partially_migrated`'s method fallback and stay forwarded —
         // asserted over HTTP in `tests/parity_sidebar_router.rs`.

@@ -303,7 +303,9 @@ async fn include_deleted_and_last_delete_at_select_the_archived_channels() {
 
     let client = client();
     let token = go_minted_token(&client).await;
-    let team_id = create_team(&client, &token, "delteam").await;
+    // Unique across the whole binary — see the note in `channels_for_user`. This one collided
+    // with `team_channel_lists`'s team of the same name.
+    let team_id = create_team(&client, &token, "cftfudelteam").await;
     let archived =
         create_named_channel(&client, &token, &team_id, "delarch", "archived one", "O").await;
     delete_channel(&client, &token, &archived).await;

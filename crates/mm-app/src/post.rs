@@ -53,7 +53,7 @@ use mm_model::post_metadata::PostMetadata;
 use mm_model::reaction::Reaction;
 use mm_model::session::Session;
 use mm_model::utils::{AppError, etag, get_millis, remove_duplicate_strings};
-use mm_store::post_store::GetPostsOptions;
+use mm_store::post_store::{GetPostThreadOptions, GetPostsOptions};
 use mm_store::{EmojiStore, FileInfoStore, PostStore, ReactionStore, StoreError};
 
 use crate::App;
@@ -531,6 +531,57 @@ impl App {
                 500,
             )
         })
+    }
+
+    /// Port of `app.App.GetPostThread` (post.go:1555).
+    ///
+    /// The four stages Go runs after the store are the same four
+    /// [`App::get_posts_page`] documents, and they are inert or unreachable for the same
+    /// reasons — with one difference worth naming: `revealBurnOnReadPostsForUser` is **not**
+    /// inert here, because `SqlPostStore.Get` really does populate `BurnOnReadPosts` where the
+    /// channel-page query never does. It stays unported anyway, because any list carrying a
+    /// burn-on-read post is refused a moment later by
+    /// [`App::prepare_post_list_for_client`] and `mm_api::posts` forwards the whole request.
+    /// Forwarding is the safe direction: Go's reveal can *remove* a post whose receipt has
+    /// expired, so a port that skipped the stage would over-report.
+    ///
+    /// `filterInaccessiblePosts` is handed a `filterPostOptions{assumeSortedCreatedAt: true}`
+    /// when `collapsedThreads` **and** a direction are both set. That flag only chooses between
+    /// a linear scan and a binary search inside a function that returns immediately without a
+    /// licence carrying a `PostHistory` limit, so it changes nothing observable and is not
+    /// ported.
+    ///
+    /// # The error id is shared with `GetSinglePost` and the status is the only difference
+    ///
+    /// All three branches are `app.post.get.app_error`; `ErrInvalidInput` is a 400, `ErrNotFound`
+    /// a 404, anything else a 500. `Where` differs (`GetPostThread` against `GetSinglePost`) and
+    /// `Where` is `json:"-"`, so a client cannot tell the two functions apart at all. The 400 is
+    /// unreachable — see [`mm_store::PostStore::get_thread`].
+    #[tracing::instrument(skip(self), fields(post_id = %post_id, collapsed = opts.collapsed_threads))]
+    pub async fn get_post_thread(
+        &self,
+        post_id: &str,
+        opts: GetPostThreadOptions<'_>,
+    ) -> Result<PostList, AppError> {
+        self.store()
+            .post()
+            .get_thread(post_id, opts)
+            .await
+            .map_err(|err| {
+                let status = if err.is_not_found() {
+                    404
+                } else {
+                    tracing::error!(error = %err, "post thread lookup failed");
+                    500
+                };
+                AppError::new(
+                    "GetPostThread",
+                    "app.post.get.app_error",
+                    None,
+                    String::new(),
+                    status,
+                )
+            })
     }
 
     /// Port of `app.App.GetPostsEtag` (post.go:1421) and the string half of the store's

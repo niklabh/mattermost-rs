@@ -147,6 +147,19 @@ pub trait PostStore {
         &self,
         post_ids: &[String],
     ) -> impl std::future::Future<Output = Result<Vec<PostAcknowledgement>, StoreError>> + Send;
+
+    /// Port of `SqlPostStore.Get` (post_store.go:746) and the
+    /// `getPostWithCollapsedThreads` (:620) it delegates to — the thread behind
+    /// `GET /posts/{post_id}/thread`.
+    ///
+    /// Go names this `Get`, beside a `GetSingle` that really does return one post. It returns a
+    /// whole [`PostList`], and which posts are in it depends on three of the options in ways
+    /// that are not symmetric between the two branches — see [`GetPostThreadOptions`].
+    fn get_thread(
+        &self,
+        id: &str,
+        opts: GetPostThreadOptions<'_>,
+    ) -> impl std::future::Future<Output = Result<PostList, StoreError>> + Send;
 }
 
 /// Port of `model.GetPostsOptions` (post.go:456), narrowed to the fields the page branch of
@@ -178,6 +191,84 @@ impl GetPostsOptions<'_> {
     fn offset(&self) -> i64 {
         self.per_page.wrapping_mul(self.page)
     }
+}
+
+/// `model.GetPostsOptions.Direction` (post.go:456), which only ever holds three values.
+///
+/// Go carries it as a bare `string` and compares it twice per query — once to pick the sort
+/// order and once to pick the cursor's comparison operator. Modelling it as an enum makes the
+/// query selection total: `getPostThread` has already rejected everything that is not `""`,
+/// `"up"` or `"down"` with a 400, so a fourth spelling cannot reach the store.
+///
+/// **The mapping is the reverse of the intuitive one.** `"up"` sorts **descending** and
+/// `"down"` sorts **ascending** (post_store.go:659) — the names describe which way the client
+/// is scrolling, not which way the rows come back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ThreadDirection {
+    /// Go's `""`: **no `ORDER BY` at all**, so the row order is whatever Postgres returns. Not
+    /// "ascending by default" — the clause is simply absent, which is why this port has a
+    /// separate statement for it rather than a degenerate sort key.
+    #[default]
+    Unset,
+    /// `"up"` — `ORDER BY … DESC`, and the cursor comparisons are `<`.
+    Up,
+    /// `"down"` — `ORDER BY … ASC`, and the cursor comparisons are `>`.
+    Down,
+}
+
+impl ThreadDirection {
+    /// Go's `sort == "DESC"`.
+    fn descending(self) -> bool {
+        self == ThreadDirection::Up
+    }
+
+    /// Go's `opts.Direction == "down"`, the test both cursor blocks make. Note that `Unset`
+    /// answers `false` here and therefore takes the **same** branch as `Up`: an unordered
+    /// request carrying `fromCreateAt` still filters with `<`.
+    fn is_down(self) -> bool {
+        self == ThreadDirection::Down
+    }
+}
+
+/// Port of `model.GetPostsOptions` (post.go:456) for the fields `SqlPostStore.Get` reads.
+///
+/// A second struct rather than more fields on [`GetPostsOptions`]: Go has one type serving both
+/// queries, but the two overlap in only three fields and disagree about two of those. Keeping
+/// them apart is what lets each struct's documentation say what its own query does with the
+/// value.
+///
+/// # The two branches disagree about three of these
+///
+/// | | non-collapsed (`Get`) | collapsed (`getPostWithCollapsedThreads`) |
+/// |---|---|---|
+/// | `skip_fetch_threads` | skips the reply query **and** `has_next` entirely | ignored |
+/// | `from_update_at` | filters in **both** directions | filters **only** when `direction == Down` |
+/// | reply `reply_count` | the thread's count, from a CTE | always `0` — `postsQuery` has no such column |
+///
+/// `collapsed_threads_extended` is absent for the reason it is absent from [`GetPostsOptions`]:
+/// it replaces each stub participant with a `SanitizeProfile`d user, and `mm_api::posts`
+/// forwards that request rather than reproducing config-dependent output.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GetPostThreadOptions<'a> {
+    /// The **session's** user — the `ThreadMemberships` join key that decides `is_following`,
+    /// read on the collapsed branch only, exactly as in [`GetPostsOptions`].
+    pub user_id: &'a str,
+    pub skip_fetch_threads: bool,
+    pub collapsed_threads: bool,
+    /// Swaps `CreateAt` for `UpdateAt` **in the `ORDER BY` only**. Neither cursor predicate
+    /// consults it: `from_create_at` always compares `CreateAt` and `from_update_at` always
+    /// compares `UpdateAt`, whatever this says.
+    pub updates_only: bool,
+    /// `0` means **no limit** — the clause is not emitted. Go then fetches `per_page + 1` rows
+    /// and uses the extra one to set `has_next`.
+    pub per_page: i64,
+    pub direction: ThreadDirection,
+    /// The tie-break for a cursor whose timestamp is not unique. Empty means the cursor is the
+    /// timestamp alone, and Go's test is on this field being non-empty rather than on the
+    /// request carrying the key.
+    pub from_post: &'a str,
+    pub from_create_at: i64,
+    pub from_update_at: i64,
 }
 
 /// Port of `SqlPostStore` plus the priority and acknowledgement stores.
@@ -404,6 +495,395 @@ impl SqlPostStore {
             list.add_order(id);
         }
         Ok(list)
+    }
+
+    /// The single-post fetch at the head of `SqlPostStore.Get` (post_store.go:754).
+    ///
+    /// Its `ReplyCount` subquery resolves the **thread's** root before counting
+    /// (`CASE WHEN p.RootId = '' THEN p.Id ELSE p.RootId END`), so asking for a reply's thread
+    /// reports the number of posts in the thread it belongs to, not the number of answers to
+    /// that reply. `GetSingle`'s column is the same expression.
+    ///
+    /// `DeleteAt = 0` is unconditional here: this route has no `include_deleted`, so a
+    /// soft-deleted post is a 404 even for an administrator.
+    async fn get_thread_root(&self, id: &str) -> Result<Option<Post>, StoreError> {
+        let row = sqlx::query_as!(
+            PostRow,
+            r#"
+            SELECT p.id,
+                   p.createat     AS "create_at!",
+                   p.updateat     AS "update_at!",
+                   p.editat       AS "edit_at!",
+                   p.deleteat     AS "delete_at!",
+                   p.ispinned     AS "is_pinned!",
+                   p.userid       AS "user_id!",
+                   p.channelid    AS "channel_id!",
+                   p.rootid       AS "root_id!",
+                   p.originalid   AS "original_id!",
+                   p.message      AS "message!",
+                   p.type         AS "post_type!",
+                   p.props        AS "props?",
+                   p.hashtags     AS "hashtags!",
+                   p.filenames    AS "filenames?",
+                   p.fileids      AS "file_ids?",
+                   p.hasreactions AS "has_reactions!",
+                   p.remoteid     AS "remote_id?",
+                   (SELECT COUNT(*)
+                      FROM posts sub
+                     WHERE sub.rootid = (CASE WHEN p.rootid = '' THEN p.id ELSE p.rootid END)
+                       AND sub.deleteat = 0) AS "reply_count!"
+              FROM posts p
+             WHERE p.id = $1
+               AND p.deleteat = 0
+            "#,
+            id
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to get Post with id={id}"),
+            source,
+        })?;
+
+        row.map(post_from_row).transpose()
+    }
+
+    /// The single-post fetch at the head of `getPostWithCollapsedThreads` (post_store.go:637).
+    ///
+    /// The same row as [`Self::get_thread_root`] with the three `Threads` columns and the
+    /// caller's `ThreadMemberships.Following` joined on — and **no `ReplyCount` subquery**, so
+    /// the count comes from `Threads.ReplyCount` instead. The two counts are not the same
+    /// number: the subquery counts rows and `Threads.ReplyCount` is a maintained counter.
+    async fn get_collapsed_thread_root(
+        &self,
+        id: &str,
+        user_id: &str,
+    ) -> Result<Option<Post>, StoreError> {
+        let row = sqlx::query_as!(
+            ThreadedPostRow,
+            r#"
+            SELECT posts.id,
+                   posts.createat     AS "create_at!",
+                   posts.updateat     AS "update_at!",
+                   posts.editat       AS "edit_at!",
+                   posts.deleteat     AS "delete_at!",
+                   posts.ispinned     AS "is_pinned!",
+                   posts.userid       AS "user_id!",
+                   posts.channelid    AS "channel_id!",
+                   posts.rootid       AS "root_id!",
+                   posts.originalid   AS "original_id!",
+                   posts.message      AS "message!",
+                   posts.type         AS "post_type!",
+                   posts.props        AS "props?",
+                   posts.hashtags     AS "hashtags!",
+                   posts.filenames    AS "filenames?",
+                   posts.fileids      AS "file_ids?",
+                   posts.hasreactions AS "has_reactions!",
+                   posts.remoteid     AS "remote_id?",
+                   COALESCE(threads.replycount, 0)             AS "thread_reply_count!",
+                   COALESCE(threads.lastreplyat, 0)            AS "last_reply_at!",
+                   COALESCE(threads.participants, '[]'::jsonb) AS "thread_participants!",
+                   threadmemberships.following                 AS "is_following?"
+              FROM posts
+              LEFT JOIN threads ON threads.postid = posts.id
+              LEFT JOIN threadmemberships ON threadmemberships.postid = posts.id
+                                         AND threadmemberships.userid = $2
+             WHERE posts.deleteat = 0
+               AND posts.id = $1
+            "#,
+            id,
+            user_id
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to get Post with id={id}"),
+            source,
+        })?;
+
+        row.map(threaded_post_from_row).transpose()
+    }
+
+    /// The reply fetch in `SqlPostStore.Get` (post_store.go:779), the branch behind
+    /// `!skipFetchThreads`.
+    ///
+    /// # The window is the whole thread, root included
+    ///
+    /// `p.Id = rootId OR p.RootId = rootId`, so the root post comes back here as well as from
+    /// [`Self::get_thread_root`]. Go drops the duplicate by id afterwards — but only **after**
+    /// it has counted the rows for `has_next`, which is why the caller must not filter it here.
+    ///
+    /// # `ReplyCount` is one number for every row
+    ///
+    /// It comes from a `WITH replycount` CTE cross-joined into the select, not from a
+    /// correlated subquery, so **every post in the thread reports the same count** — the root's.
+    /// A reply therefore carries a `reply_count` describing its parent, which is Go's answer and
+    /// not an obvious one.
+    ///
+    /// # Three dynamic clauses, expressed as two statements
+    ///
+    /// Go builds the SQL with squirrel and this needs one literal per statement, so the cursor
+    /// predicates and the limit are parameterised (identical truth tables, and each predicate
+    /// stays visible to a mutation) while the `ORDER BY` is not. It cannot be: `direction == ""`
+    /// emits **no** `ORDER BY` in Go, and a degenerate sort key is not the same thing — it would
+    /// let Postgres reorder rows that Go returns in scan order. Hence the two statements below,
+    /// which differ only in that clause. Within the ordered one, `descending` and `updates_only`
+    /// select the key with `CASE`, which is safe because both arms are real columns.
+    async fn get_thread_replies(
+        &self,
+        root_id: &str,
+        opts: &GetPostThreadOptions<'_>,
+    ) -> Result<Vec<Post>, StoreError> {
+        let rows = if opts.direction == ThreadDirection::Unset {
+            sqlx::query_as!(
+                PostRow,
+                r#"
+                WITH replycount AS (
+                    SELECT COUNT(*) AS num
+                      FROM posts
+                     WHERE posts.rootid = $1
+                       AND posts.deleteat = 0
+                )
+                SELECT p.id,
+                       p.createat     AS "create_at!",
+                       p.updateat     AS "update_at!",
+                       p.editat       AS "edit_at!",
+                       p.deleteat     AS "delete_at!",
+                       p.ispinned     AS "is_pinned!",
+                       p.userid       AS "user_id!",
+                       p.channelid    AS "channel_id!",
+                       p.rootid       AS "root_id!",
+                       p.originalid   AS "original_id!",
+                       p.message      AS "message!",
+                       p.type         AS "post_type!",
+                       p.props        AS "props?",
+                       p.hashtags     AS "hashtags!",
+                       p.filenames    AS "filenames?",
+                       p.fileids      AS "file_ids?",
+                       p.hasreactions AS "has_reactions!",
+                       p.remoteid     AS "remote_id?",
+                       replycount.num AS "reply_count!"
+                  FROM posts p, replycount
+                 WHERE (p.id = $1 OR p.rootid = $1)
+                   AND p.deleteat = 0
+                   AND ($2::bigint = 0
+                        OR CASE WHEN $3 THEN p.createat > $2 ELSE p.createat < $2 END
+                        OR ($4 <> '' AND p.createat = $2
+                            AND CASE WHEN $3 THEN p.id > $4 ELSE p.id < $4 END))
+                   AND ($5::bigint = 0
+                        OR CASE WHEN $3 THEN p.updateat > $5 ELSE p.updateat < $5 END
+                        OR ($4 <> '' AND p.updateat = $5
+                            AND CASE WHEN $3 THEN p.id > $4 ELSE p.id < $4 END))
+                 LIMIT CASE WHEN $6::bigint <> 0 THEN $6::bigint + 1 END
+                "#,
+                root_id,
+                opts.from_create_at,
+                opts.direction.is_down(),
+                opts.from_post,
+                opts.from_update_at,
+                opts.per_page,
+            )
+            .fetch_all(&self.pool)
+            .await
+        } else {
+            sqlx::query_as!(
+                PostRow,
+                r#"
+                WITH replycount AS (
+                    SELECT COUNT(*) AS num
+                      FROM posts
+                     WHERE posts.rootid = $1
+                       AND posts.deleteat = 0
+                )
+                SELECT p.id,
+                       p.createat     AS "create_at!",
+                       p.updateat     AS "update_at!",
+                       p.editat       AS "edit_at!",
+                       p.deleteat     AS "delete_at!",
+                       p.ispinned     AS "is_pinned!",
+                       p.userid       AS "user_id!",
+                       p.channelid    AS "channel_id!",
+                       p.rootid       AS "root_id!",
+                       p.originalid   AS "original_id!",
+                       p.message      AS "message!",
+                       p.type         AS "post_type!",
+                       p.props        AS "props?",
+                       p.hashtags     AS "hashtags!",
+                       p.filenames    AS "filenames?",
+                       p.fileids      AS "file_ids?",
+                       p.hasreactions AS "has_reactions!",
+                       p.remoteid     AS "remote_id?",
+                       replycount.num AS "reply_count!"
+                  FROM posts p, replycount
+                 WHERE (p.id = $1 OR p.rootid = $1)
+                   AND p.deleteat = 0
+                   AND ($2::bigint = 0
+                        OR CASE WHEN $3 THEN p.createat > $2 ELSE p.createat < $2 END
+                        OR ($4 <> '' AND p.createat = $2
+                            AND CASE WHEN $3 THEN p.id > $4 ELSE p.id < $4 END))
+                   AND ($5::bigint = 0
+                        OR CASE WHEN $3 THEN p.updateat > $5 ELSE p.updateat < $5 END
+                        OR ($4 <> '' AND p.updateat = $5
+                            AND CASE WHEN $3 THEN p.id > $4 ELSE p.id < $4 END))
+                 ORDER BY CASE WHEN $7 THEN NULL
+                               ELSE (CASE WHEN $8 THEN p.updateat ELSE p.createat END) END ASC,
+                          CASE WHEN $7 THEN NULL ELSE p.id END ASC,
+                          CASE WHEN $7 THEN (CASE WHEN $8 THEN p.updateat ELSE p.createat END)
+                               END DESC,
+                          CASE WHEN $7 THEN p.id END DESC
+                 LIMIT CASE WHEN $6::bigint <> 0 THEN $6::bigint + 1 END
+                "#,
+                root_id,
+                opts.from_create_at,
+                opts.direction.is_down(),
+                opts.from_post,
+                opts.from_update_at,
+                opts.per_page,
+                opts.direction.descending(),
+                opts.updates_only,
+            )
+            .fetch_all(&self.pool)
+            .await
+        };
+
+        rows.map_err(|source| StoreError::Db {
+            context: "failed to find Posts".to_owned(),
+            source,
+        })?
+        .into_iter()
+        .map(post_from_row)
+        .collect()
+    }
+
+    /// The reply fetch in `getPostWithCollapsedThreads` (post_store.go:652).
+    ///
+    /// Three differences from [`Self::get_thread_replies`], all of them on the wire:
+    ///
+    /// 1. **The window is `RootId = id` only.** The requested post is not in it — it was
+    ///    fetched separately — and, more importantly, `id` is used *literally* rather than
+    ///    resolved to a thread root. Asking for a **reply**'s thread with
+    ///    `collapsedThreads=true` therefore returns the reply and nothing else, where the
+    ///    non-collapsed branch returns the whole thread it belongs to.
+    /// 2. **There is no `ReplyCount` column.** `postsQuery` selects the eighteen post columns
+    ///    and stops, so every reply reports `reply_count: 0` — hard-coded here rather than
+    ///    computed, because that is what Go puts on the wire.
+    /// 3. **`from_update_at` is ignored unless `direction == Down`.** The non-collapsed branch
+    ///    applies it in both directions. That is the `NOT $3 OR` below, and dropping it would
+    ///    make an `up` request with `fromUpdateAt` return a filtered list where Go returns an
+    ///    unfiltered one.
+    async fn get_collapsed_thread_replies(
+        &self,
+        id: &str,
+        opts: &GetPostThreadOptions<'_>,
+    ) -> Result<Vec<Post>, StoreError> {
+        let rows = if opts.direction == ThreadDirection::Unset {
+            sqlx::query_as!(
+                PostRow,
+                r#"
+                SELECT posts.id,
+                       posts.createat     AS "create_at!",
+                       posts.updateat     AS "update_at!",
+                       posts.editat       AS "edit_at!",
+                       posts.deleteat     AS "delete_at!",
+                       posts.ispinned     AS "is_pinned!",
+                       posts.userid       AS "user_id!",
+                       posts.channelid    AS "channel_id!",
+                       posts.rootid       AS "root_id!",
+                       posts.originalid   AS "original_id!",
+                       posts.message      AS "message!",
+                       posts.type         AS "post_type!",
+                       posts.props        AS "props?",
+                       posts.hashtags     AS "hashtags!",
+                       posts.filenames    AS "filenames?",
+                       posts.fileids      AS "file_ids?",
+                       posts.hasreactions AS "has_reactions!",
+                       posts.remoteid     AS "remote_id?",
+                       0::bigint          AS "reply_count!"
+                  FROM posts
+                 WHERE posts.rootid = $1
+                   AND posts.deleteat = 0
+                   AND ($2::bigint = 0
+                        OR CASE WHEN $3 THEN posts.createat > $2 ELSE posts.createat < $2 END
+                        OR ($4 <> '' AND posts.createat = $2
+                            AND CASE WHEN $3 THEN posts.id > $4 ELSE posts.id < $4 END))
+                   AND (NOT $3
+                        OR $5::bigint = 0
+                        OR posts.updateat > $5
+                        OR ($4 <> '' AND posts.updateat = $5 AND posts.id > $4))
+                 LIMIT CASE WHEN $6::bigint <> 0 THEN $6::bigint + 1 END
+                "#,
+                id,
+                opts.from_create_at,
+                opts.direction.is_down(),
+                opts.from_post,
+                opts.from_update_at,
+                opts.per_page,
+            )
+            .fetch_all(&self.pool)
+            .await
+        } else {
+            sqlx::query_as!(
+                PostRow,
+                r#"
+                SELECT posts.id,
+                       posts.createat     AS "create_at!",
+                       posts.updateat     AS "update_at!",
+                       posts.editat       AS "edit_at!",
+                       posts.deleteat     AS "delete_at!",
+                       posts.ispinned     AS "is_pinned!",
+                       posts.userid       AS "user_id!",
+                       posts.channelid    AS "channel_id!",
+                       posts.rootid       AS "root_id!",
+                       posts.originalid   AS "original_id!",
+                       posts.message      AS "message!",
+                       posts.type         AS "post_type!",
+                       posts.props        AS "props?",
+                       posts.hashtags     AS "hashtags!",
+                       posts.filenames    AS "filenames?",
+                       posts.fileids      AS "file_ids?",
+                       posts.hasreactions AS "has_reactions!",
+                       posts.remoteid     AS "remote_id?",
+                       0::bigint          AS "reply_count!"
+                  FROM posts
+                 WHERE posts.rootid = $1
+                   AND posts.deleteat = 0
+                   AND ($2::bigint = 0
+                        OR CASE WHEN $3 THEN posts.createat > $2 ELSE posts.createat < $2 END
+                        OR ($4 <> '' AND posts.createat = $2
+                            AND CASE WHEN $3 THEN posts.id > $4 ELSE posts.id < $4 END))
+                   AND (NOT $3
+                        OR $5::bigint = 0
+                        OR posts.updateat > $5
+                        OR ($4 <> '' AND posts.updateat = $5 AND posts.id > $4))
+                 ORDER BY CASE WHEN $7 THEN NULL
+                               ELSE (CASE WHEN $8 THEN posts.updateat
+                                          ELSE posts.createat END) END ASC,
+                          CASE WHEN $7 THEN NULL ELSE posts.id END ASC,
+                          CASE WHEN $7 THEN (CASE WHEN $8 THEN posts.updateat
+                                                  ELSE posts.createat END) END DESC,
+                          CASE WHEN $7 THEN posts.id END DESC
+                 LIMIT CASE WHEN $6::bigint <> 0 THEN $6::bigint + 1 END
+                "#,
+                id,
+                opts.from_create_at,
+                opts.direction.is_down(),
+                opts.from_post,
+                opts.from_update_at,
+                opts.per_page,
+                opts.direction.descending(),
+                opts.updates_only,
+            )
+            .fetch_all(&self.pool)
+            .await
+        };
+
+        rows.map_err(|source| StoreError::Db {
+            context: format!("failed to find Posts for thread {id}"),
+            source,
+        })?
+        .into_iter()
+        .map(post_from_row)
+        .collect()
     }
 }
 
@@ -1032,6 +1512,126 @@ impl PostStore for SqlPostStore {
             })
             .collect())
     }
+
+    /// # `has_next` has three states and only two of them are a boolean
+    ///
+    /// The collapsed branch always sets it, so `collapsedThreads=true` puts `"has_next":false`
+    /// on the wire even for an unpaginated request. The non-collapsed branch sets it **inside**
+    /// the `!skipFetchThreads` block, so `skipFetchThreads=true` omits the key entirely — the
+    /// field is a `*bool` with `omitempty`. Same route, same list type, three answers.
+    ///
+    /// # The `id == ""` guard is not ported
+    ///
+    /// Go opens both branches with `store.NewErrInvalidInput("Post", "id", "")`, which the app
+    /// layer turns into a 400. `RequirePostId` has already answered that with its own 400 before
+    /// the handler runs, so the branch is unreachable through this route and reproducing it
+    /// would need a `StoreError` variant with no other caller — the same call
+    /// [`PostStore::get_posts`] makes about `PerPage > 1000`.
+    ///
+    /// # Go's explicit `BurnOnReadPosts` filing is redundant and is not reproduced
+    ///
+    /// The non-collapsed loop files a burn-on-read reply into `pl.BurnOnReadPosts` **before**
+    /// skipping the duplicate at `p.Id == id` (post_store.go:891). The only post that skip can
+    /// reach is the requested one, and it was filed a few lines earlier by `AddPost` — which
+    /// files burn-on-read posts itself. So the explicit line can only ever re-file a post that
+    /// is already there. The map is `json:"-"` in any case, and `mm_api::posts` forwards every
+    /// list carrying a burn-on-read post because the metadata pipeline refuses it.
+    #[tracing::instrument(skip(self), fields(post_id = %id, collapsed = opts.collapsed_threads))]
+    async fn get_thread(
+        &self,
+        id: &str,
+        opts: GetPostThreadOptions<'_>,
+    ) -> Result<PostList, StoreError> {
+        let not_found = || StoreError::NotFound {
+            entity: "Post",
+            criteria: format!("id={id}"),
+        };
+
+        if opts.collapsed_threads {
+            let root = self
+                .get_collapsed_thread_root(id, opts.user_id)
+                .await?
+                .ok_or_else(not_found)?;
+
+            // Go runs this query before it builds the list, and the order matters only because
+            // a failure here must not leave a half-built response. Both are reads.
+            let mut replies = self.get_collapsed_thread_replies(id, &opts).await?;
+            let has_next = shave_extra_row(&mut replies, opts.per_page);
+
+            let mut list = PostList::new();
+            let root_id = root.id.clone();
+            list.add_post(root);
+            list.add_order(root_id);
+            for reply in replies {
+                let reply_id = reply.id.clone();
+                list.add_post(reply);
+                list.add_order(reply_id);
+            }
+            list.has_next = Some(has_next);
+            return Ok(list);
+        }
+
+        let post = self.get_thread_root(id).await?.ok_or_else(not_found)?;
+
+        let mut list = PostList::new();
+        // `rootId := post.RootId; if rootId == "" { rootId = post.Id }` — a root post is its own
+        // thread. Go then guards `rootId == ""` a second time and returns `errors.Wrapf(err,
+        // ...)` on a **nil** `err`, which `Wrapf` turns into a nil error: the branch is
+        // unreachable (an id that fetched a row is not empty) and would return `nil, nil` if it
+        // were.
+        let root_id = if post.root_id.is_empty() {
+            post.id.clone()
+        } else {
+            post.root_id.clone()
+        };
+        let post_id = post.id.clone();
+        list.add_post(post);
+        list.add_order(post_id);
+
+        if opts.skip_fetch_threads {
+            return Ok(list);
+        }
+
+        let mut replies = self.get_thread_replies(&root_id, &opts).await?;
+        // Counted before the duplicate is dropped, because Go counts it too: a page whose extra
+        // row *is* the requested post still reports `has_next: true` while returning one fewer
+        // reply than asked for.
+        let has_next = shave_extra_row(&mut replies, opts.per_page);
+
+        for reply in replies {
+            // The window is `p.Id = rootId OR p.RootId = rootId`, so it contains the requested
+            // post whenever that post is the thread root — already added above.
+            if reply.id == id {
+                continue;
+            }
+            let reply_id = reply.id.clone();
+            list.add_post(reply);
+            list.add_order(reply_id);
+        }
+        list.has_next = Some(has_next);
+
+        Ok(list)
+    }
+}
+
+/// Go's `hasNext` block, which both branches of `SqlPostStore.Get` repeat verbatim
+/// (post_store.go:723 and :880).
+///
+/// The query asked for `per_page + 1` rows; getting exactly that many means there is another
+/// page. Note the test is `==` and not `>=`, and that `per_page == 0` — which emitted no `LIMIT`
+/// at all — reports `false` however many rows came back.
+///
+/// **A negative `per_page` is where this and Go part company.** `Limit(uint64(perPage + 1))`
+/// makes `-1` a `LIMIT 0`, so Go matches zero rows against `perPage+1 == 0`, sets `hasNext` and
+/// then panics on `posts[:len(posts)-1]`. `Vec::pop` on an empty vector is `None`, so this
+/// returns an empty list instead. `mm_api::posts` forwards a negative `perPage` rather than
+/// answering a request Go cannot.
+fn shave_extra_row(posts: &mut Vec<Post>, per_page: i64) -> bool {
+    let has_next = per_page != 0 && posts.len() as i64 == per_page + 1;
+    if has_next {
+        posts.pop();
+    }
+    has_next
 }
 
 #[cfg(test)]
