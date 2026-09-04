@@ -5457,3 +5457,41 @@ Mutation run: **20 run, 18 caught, 2 controls survived, 0 harness faults**
   only what both servers do promise: that two pages of two cover the whole membership, per server,
   and that the two coverings agree — retrying when they do not. The byte-for-byte wire check lives
   on the unpaged read, where there is no window to disagree about.
+
+## `GET /api/v4/emoji/autocomplete` — `autocompleteEmojis` (2026-09-05)
+
+Served. `crates/mm-api/src/emoji.rs` (`autocomplete_emojis`), `crates/mm-app/src/emoji.rs`
+(`search_emoji`), `crates/mm-store/src/emoji_store.rs` (`search` and
+`sanitize_emoji_search_term`); 9 parity tests in
+`crates/mm-api/tests/parity/emoji_autocomplete.rs` plus 2 unit tests. The `:` picker, so it fires
+once per keystroke.
+
+**The one thing a reader would otherwise get wrong: the match is case-sensitive.** There is no
+`LOWER` on either side of the `LIKE`, unlike the channel autocomplete ported one session earlier —
+so `?name=MMRS` finds nothing while `?name=mmrs` finds the list. Two more: it is a **prefix**
+match (`prefixOnly` is hardcoded `true`, so the pattern is `name%` and never `%name%`), and
+`?name=\` matches **everything**, because `sanitizeSearchTerm` strips the escape character before
+escaping `%` and `_` with it, leaving the bare `%`. Go's escape character here is a **backslash**,
+not the `*` the channel search uses, and `sq.Like` emits no `ESCAPE` clause — Postgres' default is
+what makes it work.
+
+This handler is also the only emoji read with **no `EnableCustomEmoji` gate of its own**. Its
+siblings answer 501 and shadow the app layer's 403; here the 403 is what a client would see, which
+is why it is pinned by a unit test rather than by the parity suite — nothing over HTTP can turn
+the setting off.
+
+Mutation run: **18 run, 16 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/emoji-autocomplete.plan`). Two survivors of the first run: the disabled-gate
+status, fixed with the unit test above; and, twice over, a `LIMIT` mutation that has to stay
+`LEAST($2, 2::bigint)` — a bare `2` drops the bind and an untyped `2` fails sqlx's type check, and
+both surface as a harness fault rather than a verdict.
+
+### Three stale assertions the route retired
+
+`emoji_get::the_autocomplete_literal_is_forwarded`, an assertion inside `emoji_list`, and the
+unit test `only_the_get_literals_are_shadowed` all encoded "gorilla's registration order owns
+this literal, so we forward it". axum owns it now, for the same reason and in the same direction.
+The first is kept — renamed to `the_autocomplete_literal_does_not_land_on_get_emoji`, because what
+it guards is `getEmoji`'s routing rather than autocomplete's behaviour — and
+`EMOJI_SHADOWED_LITERALS` is now empty but retained, since it is the only thing between a future
+`GET /emoji/<literal>` of Go's and a 400 from a handler that thought it had an id.

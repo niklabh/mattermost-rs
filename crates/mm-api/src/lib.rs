@@ -637,6 +637,13 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/emoji/name/{emoji_name}",
             partially_migrated(get(emoji::get_emoji_by_name)),
         )
+        // `BaseRoutes.Emojis.Handle("/autocomplete")` (api4/emoji.go:22) — a literal sibling of
+        // `{emoji_id}`, which axum prefers. Registered GET-only; `/emoji/names` and
+        // `/emoji/search` are POST in Go and stay forwarded.
+        .route(
+            "/api/v4/emoji/autocomplete",
+            partially_migrated(get(emoji::autocomplete_emojis)),
+        )
         // `BaseRoutes.ChannelCategories` (api.go:231), the three GETs. The five writes on
         // these same paths fall to `partially_migrated`'s method fallback and stay forwarded —
         // asserted over HTTP in `tests/parity_sidebar_router.rs`.

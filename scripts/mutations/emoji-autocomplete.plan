@@ -1,0 +1,44 @@
+# Mutation plan for GET /api/v4/emoji/autocomplete (autocompleteEmojis).
+#
+#   scripts/mutate-batch.sh scripts/mutations/emoji-autocomplete.plan
+#
+# Tab-separated: name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter.  `\n` becomes a newline.
+#
+# emoji_store.rs holds three queries over the same six columns; every anchor below reaches into
+# this one's `name LIKE $1`, which the others do not have.
+#
+# The sanitiser runs against the **unit** suite: it is a pure function with its own test, and a
+# mutation in it dies in milliseconds rather than in a stack round trip.
+#
+# `LIMIT $2` is mutated to a number smaller than the fixture rather than removed: the fixture
+# carries five matching emoji, so a limit of two is visible where dropping the clause entirely
+# would need a hundred-and-one-emoji fixture to notice. It must stay `LEAST($2, 2::bigint)`
+# rather than a bare `2` — dropping the parameter fails sqlx's bind count, and an untyped `2`
+# fails its type check; both surface as a harness fault instead of a verdict.
+#
+# `app-disabled-status` runs against the **unit** suite. Nothing reachable over HTTP turns
+# `EnableCustomEmoji` off, so the parity suite cannot tell the app layer's 403 from a 501 — it
+# survived a run for exactly that reason, and the fix was a unit test in mm-app that also pins
+# the *absence* of a file-driver check on this path.
+#
+# The last two lines are the no-op controls and must SURVIVE.
+store-deleted-filter	crates/mm-store/src/emoji_store.rs	             WHERE deleteat = 0\n               AND name LIKE $1	             WHERE deleteat >= 0\n               AND name LIKE $1	api	emoji_autocomplete
+store-wrong-column	crates/mm-store/src/emoji_store.rs	               AND name LIKE $1\n             ORDER BY name\n             LIMIT $2	               AND creatorid LIKE $1\n             ORDER BY name\n             LIMIT $2	api	emoji_autocomplete
+store-order-by	crates/mm-store/src/emoji_store.rs	               AND name LIKE $1\n             ORDER BY name\n             LIMIT $2	               AND name LIKE $1\n             ORDER BY createat\n             LIMIT $2	api	emoji_autocomplete
+store-limit	crates/mm-store/src/emoji_store.rs	             ORDER BY name\n             LIMIT $2\n            "#,\n            pattern,	             ORDER BY name\n             LIMIT LEAST($2, 2::bigint)\n            "#,\n            pattern,	api	emoji_autocomplete
+store-prefix-only	crates/mm-store/src/emoji_store.rs	        let pattern = if prefix_only {\n            format!("{sanitized}%")	        let pattern = if prefix_only {\n            format!("%{sanitized}%")	api	emoji_autocomplete
+store-case-folded	crates/mm-store/src/emoji_store.rs	               AND name LIKE $1\n             ORDER BY name	               AND LOWER(name) LIKE LOWER($1)\n             ORDER BY name	api	emoji_autocomplete
+helper-sanitize-order	crates/mm-store/src/emoji_store.rs	    let mut out = term.replace('\\\\', "");\n    for c in ['%', '_'] {	    let mut out = term.to_owned();\n    for c in ['%', '_'] {	unit	emoji_store::tests
+helper-sanitize-chars	crates/mm-store/src/emoji_store.rs	    for c in ['%', '_'] {	    for c in ['%'] {	unit	emoji_store::tests
+helper-escape-char	crates/mm-store/src/emoji_store.rs	out = out.replace(c, &format!("\\\\{c}"));	out = out.replace(c, &format!("*{c}"));	unit	emoji_store::tests
+app-prefix-only-flag	crates/mm-api/src/emoji.rs	.search_emoji(&name, true, EMOJI_MAX_AUTOCOMPLETE_ITEMS)	.search_emoji(&name, false, EMOJI_MAX_AUTOCOMPLETE_ITEMS)	api	emoji_autocomplete
+api-max-items	crates/mm-api/src/emoji.rs	const EMOJI_MAX_AUTOCOMPLETE_ITEMS: i64 = 100;	const EMOJI_MAX_AUTOCOMPLETE_ITEMS: i64 = 2;	api	emoji_autocomplete
+api-empty-name-check	crates/mm-api/src/emoji.rs	    if name.is_empty() {\n        return Err(ApiError::invalid_url_param("name"));	    if false {\n        return Err(ApiError::invalid_url_param("name"));	api	emoji_autocomplete
+api-refusal-kind	crates/mm-api/src/emoji.rs	return Err(ApiError::invalid_url_param("name"));	return Err(ApiError::invalid_param("name"));	api	emoji_autocomplete
+api-query-parameter	crates/mm-api/src/emoji.rs	let name = query_first(query.as_deref(), "name").unwrap_or_default();	let name = query_first(query.as_deref(), "term").unwrap_or_default();	api	emoji_autocomplete
+api-trailing-newline	crates/mm-api/src/emoji.rs	    body.push(b'\\n');\n\n    Ok((\n        StatusCode::OK,\n        [\n            ("Content-Type", "application/json"),\n            ("x-mmrs-served-by", "rust"),\n        ],\n        body,\n    )\n        .into_response())\n}\n\n#[cfg(test)]	    Ok((\n        StatusCode::OK,\n        [\n            ("Content-Type", "application/json"),\n            ("x-mmrs-served-by", "rust"),\n        ],\n        body,\n    )\n        .into_response())\n}\n\n#[cfg(test)]	api	emoji_autocomplete
+app-disabled-status	crates/mm-app/src/emoji.rs	                "SearchEmoji",\n                "api.emoji.disabled.app_error",\n                None,\n                String::new(),\n                403,	                "SearchEmoji",\n                "api.emoji.disabled.app_error",\n                None,\n                String::new(),\n                501,	unit	search_emoji_refuses
+#
+# --- no-op controls: these must SURVIVE ---
+control-rename-binding	crates/mm-api/src/emoji.rs	    let mut body = serde_json::to_vec(&emojis).map_err(|err| {\n        tracing::error!(error = %err, "failed to serialise the emoji completions");	    let mut body = serde_json::to_vec(&emojis).map_err(|cause| {\n        tracing::error!(error = %cause, "failed to serialise the emoji completions");	api	emoji_autocomplete
+control-reorder-columns	crates/mm-store/src/emoji_store.rs	            SELECT id        AS "id!",\n                   createat  AS "create_at!",\n                   updateat  AS "update_at!",\n                   deleteat  AS "delete_at!",\n                   creatorid AS "creator_id!",\n                   name      AS "name!"\n              FROM emoji\n             WHERE deleteat = 0\n               AND name LIKE $1	            SELECT id        AS "id!",\n                   createat  AS "create_at!",\n                   updateat  AS "update_at!",\n                   deleteat  AS "delete_at!",\n                   name      AS "name!",\n                   creatorid AS "creator_id!"\n              FROM emoji\n             WHERE deleteat = 0\n               AND name LIKE $1	api	emoji_autocomplete

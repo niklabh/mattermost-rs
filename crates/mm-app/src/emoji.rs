@@ -130,6 +130,52 @@ impl App {
             })
     }
 
+    /// Port of `app.App.SearchEmoji` (app/emoji.go:294).
+    ///
+    /// **One gate, not two.** Unlike [`Self::get_emoji`] and its by-name twin, this checks only
+    /// `EnableCustomEmoji` and never `FileSettings.DriverName` — so it cannot answer
+    /// `api.emoji.storage.app_error` at all. And unlike them, its handler
+    /// (`autocompleteEmojis`, api4/emoji.go:331) carries **no gate of its own**, so this 403 is
+    /// the one a client actually sees when custom emoji are off, rather than being shadowed by a
+    /// handler-level 501.
+    ///
+    /// The 500's `detailed_error` carries `name=<term>` — the only place in the emoji app layer
+    /// that puts a caller's input into an error. `detailed_error` is on the wire but Go leaves it
+    /// empty unless the server is in developer mode, so this is reproduced for the log rather
+    /// than for the response.
+    #[tracing::instrument(skip(self), fields(prefix_only, limit))]
+    pub async fn search_emoji(
+        &self,
+        name: &str,
+        prefix_only: bool,
+        limit: i64,
+    ) -> AppResult<Vec<Emoji>> {
+        if !self.config().enable_custom_emoji {
+            return Err(AppError::boxed(
+                "SearchEmoji",
+                "api.emoji.disabled.app_error",
+                None,
+                String::new(),
+                403,
+            ));
+        }
+
+        self.store()
+            .emoji()
+            .search(name, prefix_only, limit)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "emoji search failed");
+                AppError::boxed(
+                    "SearchEmoji",
+                    "app.emoji.get_by_name.app_error",
+                    None,
+                    format!("name={name}"),
+                    500,
+                )
+            })
+    }
+
     /// The two config gates both single-emoji reads open with, in Go's order.
     ///
     /// `where_` is threaded through because it is on the wire — `AppError.where` is serialised
@@ -204,6 +250,48 @@ mod tests {
     async fn gos_defaults_pass_both_gates() {
         let app = crate::App::with_config(unreachable_store(), Config::default());
         assert!(app.emoji_storage_available("GetEmoji").is_ok());
+    }
+
+    /// `SearchEmoji`'s gate is **its own**, not the shared `emoji_storage_available` — it checks
+    /// only `EnableCustomEmoji` and never the file driver, and its handler carries no 501 of its
+    /// own. So this 403 is the status a client of `GET /emoji/autocomplete` would actually see,
+    /// and nothing over HTTP can reach it on a server with the setting on. Asserted here for the
+    /// same reason the gate order above is: the parity suite cannot turn the setting off.
+    #[tokio::test]
+    async fn search_emoji_refuses_with_a_403_and_never_asks_about_the_file_driver() {
+        let config = Config {
+            enable_custom_emoji: false,
+            ..Config::default()
+        };
+        let app = crate::App::with_config(unreachable_store(), config);
+        let err = app
+            .search_emoji("anything", true, 100)
+            .await
+            .expect_err("custom emoji are off");
+        assert_eq!(err.id, "api.emoji.disabled.app_error");
+        assert_eq!(
+            err.status_code, 403,
+            "the app layer's 403, not a handler 501"
+        );
+        assert_eq!(err.where_, "SearchEmoji");
+
+        // An empty file driver is *not* a refusal here, unlike every other emoji read. With the
+        // setting back on, the gate opens and the call goes on to the store — which is
+        // unreachable in this test, so it fails as a 500 rather than as a 403.
+        let config = Config {
+            file_driver_name: String::new(),
+            ..Config::default()
+        };
+        let app = crate::App::with_config(unreachable_store(), config);
+        let err = app
+            .search_emoji("anything", true, 100)
+            .await
+            .expect_err("the store is not connected");
+        assert_eq!(
+            err.id, "app.emoji.get_by_name.app_error",
+            "it got past the gate: no file-driver check on this path"
+        );
+        assert_eq!(err.status_code, 500);
     }
 
     /// A pool that is never connected: these three tests never reach the store, and a real

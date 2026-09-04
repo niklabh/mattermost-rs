@@ -306,20 +306,9 @@ async fn the_collection_does_not_shadow_the_single_reads() {
         "only GET /emoji is migrated"
     );
 
-    // And `/emoji/autocomplete`, which gorilla's ordering owns, is still forwarded.
-    let response = client
-        .get(format!("{RUST}/api/v4/emoji/autocomplete?name=mmrs"))
-        .header("Authorization", format!("Bearer {token}"))
-        .send()
-        .await
-        .expect("reachable");
-    assert_eq!(
-        response
-            .headers()
-            .get("x-mmrs-served-by")
-            .and_then(|v| v.to_str().ok()),
-        Some("go")
-    );
+    // `/emoji/autocomplete` used to be asserted here as forwarded. It is a route of its own
+    // now — see `parity/emoji_autocomplete.rs`. `/emoji/names` and `/emoji/search` are POST in
+    // Go and are still nobody's here, which the GET above already covers.
 
     let _ = GO;
 }

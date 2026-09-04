@@ -1,6 +1,7 @@
-//! Port of `getEmojiList`, `getEmoji` and `getEmojiByName` (channels/api4/emoji.go:116, :207,
-//! :229), reached as `GET /api/v4/emoji`, `GET /api/v4/emoji/{emoji_id}` and
-//! `GET /api/v4/emoji/name/{emoji_name}`.
+//! Port of `getEmojiList`, `getEmoji`, `getEmojiByName` and `autocompleteEmojis`
+//! (channels/api4/emoji.go:116, :207, :229, :331), reached as `GET /api/v4/emoji`,
+//! `GET /api/v4/emoji/{emoji_id}`, `GET /api/v4/emoji/name/{emoji_name}` and
+//! `GET /api/v4/emoji/autocomplete`.
 //!
 //! # The two config gates are not the same gate
 //!
@@ -40,7 +41,11 @@ use crate::error::ApiError;
 /// `emoji_id = "names"` — a 400 both servers produce, pinned by the parity suite rather than
 /// papered over here. The bare `/emoji` collection is one segment shorter and is not this
 /// route's problem at all.
-const EMOJI_SHADOWED_LITERALS: &[&str] = &["autocomplete"];
+/// Empty since `/emoji/autocomplete` became a route of its own: axum prefers a registered
+/// literal over `{emoji_id}`, so the list that used to sit here is now the router's job. Kept
+/// rather than deleted because `getEmoji`'s forwarding branch is the only thing standing between
+/// a future `/emoji/<literal>` route of Go's and a 400 from this handler.
+const EMOJI_SHADOWED_LITERALS: &[&str] = &[];
 
 /// Port of `getEmoji` (api4/emoji.go:207).
 ///
@@ -272,6 +277,80 @@ async fn serve_emoji_list(state: &AppState, query: Option<&str>) -> Result<Respo
         .into_response())
 }
 
+/// `EmojiMaxAutocompleteItems` (api4/emoji.go:18).
+const EMOJI_MAX_AUTOCOMPLETE_ITEMS: i64 = 100;
+
+/// Port of `autocompleteEmojis` (api4/emoji.go:331), reached as
+/// `GET /api/v4/emoji/autocomplete` — the `:` picker, which fires once per keystroke.
+///
+/// # It is the shortest handler in the file, and every line of it is a divergence from its
+/// siblings
+///
+/// 1. **No `RequireEmojiId`**, because there is no path parameter.
+/// 2. **No `EnableCustomEmoji` gate.** `getEmoji` and `getEmojiList` both open with one and
+///    answer 501; this one does not, so the *app layer's* 403 (`api.emoji.disabled.app_error`,
+///    same id, different status) is the one a client sees here. Unreachable on this deployment,
+///    where the setting is on — see [`mm_app::App::search_emoji`].
+/// 3. **An empty or absent `name` is a 400** `api.context.invalid_url_param.app_error` naming
+///    `name` — `SetInvalidURLParam`, not the body-param variant, even though the value comes
+///    from the query string.
+/// 4. `SearchEmoji(name, prefixOnly = true, limit = 100)`.
+///
+/// # Prefix, case-sensitive, and `\` matches everything
+///
+/// `prefixOnly` makes the pattern `name%` rather than `%name%`, there is no `LOWER` on either
+/// side, and the sanitiser strips backslashes before escaping — so `?name=MMRS` finds nothing
+/// while `?name=mmrs` finds the list, and `?name=\` matches every emoji. All three measured; see
+/// [`mm_store::emoji_store`].
+///
+/// # Wire format
+///
+/// `json.NewEncoder(w).Encode` over a `[]*model.Emoji` the store initialises to `[]`, so the
+/// empty answer is `[]` and never `null`, with a trailing newline.
+#[tracing::instrument(skip_all, fields(count))]
+pub async fn autocomplete_emojis(
+    State(state): State<AppState>,
+    axum::extract::RawQuery(query): axum::extract::RawQuery,
+    session: AuthenticatedSession,
+) -> Result<Response, ApiError> {
+    let _ = session;
+
+    // `r.URL.Query().Get("name")` — absent and present-but-empty are the same empty string, and
+    // Go tests the string rather than the presence.
+    let name = query_first(query.as_deref(), "name").unwrap_or_default();
+    if name.is_empty() {
+        return Err(ApiError::invalid_url_param("name"));
+    }
+
+    let emojis = state
+        .app
+        .search_emoji(&name, true, EMOJI_MAX_AUTOCOMPLETE_ITEMS)
+        .await?;
+    tracing::Span::current().record("count", emojis.len());
+
+    let mut body = serde_json::to_vec(&emojis).map_err(|err| {
+        tracing::error!(error = %err, "failed to serialise the emoji completions");
+        ApiError::from(AppError::new(
+            "autocompleteEmojis",
+            "api.marshal_error",
+            None,
+            String::new(),
+            500,
+        ))
+    })?;
+    body.push(b'\n');
+
+    Ok((
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
+    )
+        .into_response())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -305,12 +384,20 @@ mod tests {
         assert!(sixty_five.len() > EMOJI_NAME_MAX_LENGTH);
     }
 
-    /// The literal list is exactly the `GET`-registered siblings of `{emoji_id}`. `names` and
-    /// `search` must **not** be in it: they are POST-only in Go, so a GET falls through to
-    /// `getEmoji` and 400s, which is what our `{emoji_id}` handler does too.
+    /// The literal list holds the `GET`-registered siblings of `{emoji_id}` that this router does
+    /// **not** register itself. `autocomplete` left it when it became a route here — axum prefers
+    /// a registered literal, so the router does the shadowing now — and `names` and `search` were
+    /// never in it: they are POST-only in Go, so a GET falls through to `getEmoji` and 400s,
+    /// which is what our `{emoji_id}` handler does too.
+    ///
+    /// Empty today. The list stays because it is the only thing standing between a future
+    /// `GET /emoji/<literal>` of Go's and a 400 from a handler that thought it had an id.
     #[test]
-    fn only_the_get_literals_are_shadowed() {
-        assert!(EMOJI_SHADOWED_LITERALS.contains(&"autocomplete"));
+    fn no_get_literal_is_both_shadowed_and_registered() {
+        assert!(
+            !EMOJI_SHADOWED_LITERALS.contains(&"autocomplete"),
+            "autocomplete is a route of its own now; shadowing it would forward what we serve"
+        );
         assert!(!EMOJI_SHADOWED_LITERALS.contains(&"names"));
         assert!(!EMOJI_SHADOWED_LITERALS.contains(&"search"));
     }

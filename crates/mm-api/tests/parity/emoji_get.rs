@@ -11,7 +11,7 @@
 //! Both handlers are three lines around one store read. What is not obvious is which requests
 //! reach them: gorilla registers the `/emoji` subrouter **before** `/emoji/{emoji_id}`, so its
 //! literals win, while axum only prefers literals it has been given. So the suite spends most of
-//! its assertions on the siblings — `autocomplete` must be forwarded, `names` and `search` must
+//! its assertions on the siblings — `autocomplete` is served by its own route, `names` and `search` must
 //! *not* be (they are POST-only in Go and fall through to `getEmoji`, which 400s), and
 //! `/emoji/name/x` must not be read as an emoji with the id `name`.
 //!
@@ -188,9 +188,14 @@ async fn a_bad_id_is_the_same_400_on_both_including_the_post_only_literals() {
     }
 }
 
-/// The one literal gorilla's registration order takes away from `{emoji_id}`.
+/// The one literal gorilla's registration order takes away from `{emoji_id}` — now registered
+/// here too, so axum takes it away for the same reason and answers it from Rust.
+///
+/// Kept in *this* file because what it guards is `getEmoji`'s routing, not autocomplete's
+/// behaviour: if `/emoji/autocomplete` ever landed on `{emoji_id}` again it would 400 where Go
+/// returns a list. The route's own contract lives in `parity/emoji_autocomplete.rs`.
 #[tokio::test]
-async fn the_autocomplete_literal_is_forwarded() {
+async fn the_autocomplete_literal_does_not_land_on_get_emoji() {
     if !stack_enabled() {
         return;
     }
@@ -218,13 +223,13 @@ async fn the_autocomplete_literal_is_forwarded() {
         rs.headers()
             .get("x-mmrs-served-by")
             .and_then(|v| v.to_str().ok()),
-        Some("go"),
-        "{path} is answered by Go's own literal route and must be forwarded"
+        Some("rust"),
+        "{path} must reach the autocomplete handler, not `getEmoji` with emoji_id=autocomplete"
     );
     assert_eq!(
         go.status(),
         200,
-        "if Go stops serving autocomplete, the shadow list is wrong for a new reason"
+        "if Go stops serving autocomplete, this test is wrong for a new reason"
     );
     assert_eq!(go.status(), rs.status());
     assert_eq!(
