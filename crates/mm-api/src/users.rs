@@ -8,7 +8,7 @@ use axum::extract::{Path, State};
 use axum::http::header::{ETAG, IF_NONE_MATCH};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use mm_app::user::UserPage;
+use mm_app::user::{UserPage, ViewUsersRestriction};
 use mm_model::permission::{
     PERMISSION_MANAGE_SYSTEM, PERMISSION_READ_CHANNEL, PERMISSION_VIEW_MEMBERS,
     PERMISSION_VIEW_TEAM, make_permission_error,
@@ -1183,6 +1183,192 @@ async fn serve_autocomplete(
         tracing::error!(error = %err, "failed to serialise UserAutocomplete");
         ApiError::from(AppError::new(
             "autocompleteUser",
+            "api.marshal_error",
+            None,
+            String::new(),
+            500,
+        ))
+    })?;
+    body.push(b'\n');
+
+    Ok((
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
+    )
+        .into_response())
+}
+
+/// Port of `getUserTermsOfService` (api4/user.go:3487), reached as
+/// `GET /api/v4/users/{user_id}/terms_of_service`.
+///
+/// # The path parameter is read by the router and by nothing else
+///
+/// The handler's first line is `userId := c.AppContext.Session().UserId`. There is no
+/// `RequireUserId`, no `me` resolution, and no comparison against `c.Params.UserId` — so
+/// `GET /users/<somebody else's id>/terms_of_service` answers **your own** acceptance record,
+/// and a well-formed id naming nobody answers it too. The segment still has to match gorilla's
+/// `[A-Za-z0-9]+` to reach the handler at all, which is the only thing it is used for.
+///
+/// That is worth stating plainly because it looks like an authorization hole and is not: the
+/// route cannot disclose another user's record, because it never looks one up. A port that
+/// "fixed" the parameter by honouring it would create the hole.
+///
+/// # A 404 is the ordinary answer
+///
+/// Most accounts have never accepted a terms of service — on Team Edition none can, since
+/// authoring one is licensed — so `app.user_terms_of_service.get_by_user.no_rows.app_error` is
+/// what this route says on a stock server. `getUser` treats the same 404 as a normal outcome and
+/// ignores it.
+///
+/// # Wire format
+///
+/// `json.NewEncoder(w).Encode(result)` — **trailing newline** ([D-086]).
+#[tracing::instrument(skip_all)]
+pub async fn get_user_terms_of_service(
+    State(state): State<AppState>,
+    Path(user_id): Path<String>,
+    session: AuthenticatedSession,
+) -> Result<Response, ApiError> {
+    // Bound so the shape of the route is visible, then deliberately dropped: Go reads the
+    // session's id here, never this one. See the doc comment.
+    let _ = user_id;
+
+    let record = state
+        .app
+        .get_user_terms_of_service(&session.0.user_id)
+        .await?;
+
+    let mut body = serde_json::to_vec(&record).map_err(|err| {
+        tracing::error!(error = %err, "failed to serialise UserTermsOfService");
+        ApiError::from(AppError::new(
+            "getUserTermsOfService",
+            "api.marshal_error",
+            None,
+            String::new(),
+            500,
+        ))
+    })?;
+    body.push(b'\n');
+
+    Ok((
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
+    )
+        .into_response())
+}
+
+/// Port of `getKnownUsers` (api4/user.go:1264), reached as `GET /api/v4/users/known`.
+///
+/// # No permission check at all, and it is safe for a structural reason
+///
+/// The handler is four lines around one store call and neither it nor the app layer asks
+/// anything about permissions. It does not need to: the answer is derived from the caller's own
+/// channel memberships, so it can only name people the caller already shares a channel with.
+/// Every other user-listing route in the port is gated; this one is the exception and the reason
+/// is worth keeping next to it.
+///
+/// # It is a list of **ids**, not of users
+///
+/// `[]string` — no sanitisation question, because no profile is returned. A direct message
+/// counts as a shared channel, and an archived one does too: the store filters neither.
+///
+/// # Wire format
+///
+/// `json.NewEncoder(w).Encode(userIDs)` — trailing newline, and `[]` rather than `null` when
+/// nothing matches, because Go's store initialises the slice before scanning into it.
+///
+/// The row order is **not** a parity property: the query carries no `ORDER BY`.
+#[tracing::instrument(skip_all)]
+pub async fn get_known_users(
+    State(state): State<AppState>,
+    session: AuthenticatedSession,
+) -> Result<Response, ApiError> {
+    let ids = state.app.get_known_users(&session.0.user_id).await?;
+
+    let mut body = serde_json::to_vec(&ids).map_err(|err| {
+        tracing::error!(error = %err, "failed to serialise the known-user ids");
+        ApiError::from(AppError::new(
+            "getKnownUsers",
+            "api.marshal_error",
+            None,
+            String::new(),
+            500,
+        ))
+    })?;
+    body.push(b'\n');
+
+    Ok((
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
+    )
+        .into_response())
+}
+
+/// Port of `getTotalUsersStats` (api4/user.go:739), reached as `GET /api/v4/users/stats`.
+///
+/// # One number, and the two things that decide it
+///
+/// `GetViewUsersRestrictions` first, then `Count`. The count includes **bots** and excludes
+/// deactivated and remote users, so this number is larger than any member list on a server with
+/// plugins installed and smaller than the raw `Users` table on one with deactivated accounts.
+///
+/// # The restricted caller is forwarded
+///
+/// A caller without `view_members` sends Go off to build a team-and-channel filter and apply it
+/// as two inner joins — which, without `DISTINCT`, counts a user once per matching (team,
+/// channel) pair. None of that is ported: `system_user` grants `view_members`, so the branch is
+/// unreachable on a stock server, and shipping unreachable SQL is the thing this project exists
+/// to avoid. The request is forwarded instead, so a deployment that has edited `system_user`
+/// still gets Go's answer. See [`mm_app::App::get_view_users_restrictions`].
+///
+/// # Wire format
+///
+/// `json.NewEncoder(w).Encode(stats)` — trailing newline. There is no etag and no `Cache-Control`.
+#[tracing::instrument(skip_all, fields(forwarded))]
+pub async fn get_total_users_stats(
+    State(state): State<AppState>,
+    session: AuthenticatedSession,
+    request: axum::extract::Request,
+) -> Response {
+    match state
+        .app
+        .get_view_users_restrictions(&session.0.user_id)
+        .await
+    {
+        ViewUsersRestriction::None => {
+            tracing::Span::current().record("forwarded", false);
+        }
+        ViewUsersRestriction::Restricted => {
+            tracing::Span::current().record("forwarded", true);
+            return crate::proxy::forward_to_go(State(state), request).await;
+        }
+    }
+
+    match serve_total_users_stats(&state).await {
+        Ok(response) => response,
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn serve_total_users_stats(state: &AppState) -> Result<Response, ApiError> {
+    let stats = state.app.get_total_users_stats().await?;
+
+    let mut body = serde_json::to_vec(&stats).map_err(|err| {
+        tracing::error!(error = %err, "failed to serialise UsersStats");
+        ApiError::from(AppError::new(
+            "getTotalUsersStats",
             "api.marshal_error",
             None,
             String::new(),

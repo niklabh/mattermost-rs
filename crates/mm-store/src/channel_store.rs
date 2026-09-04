@@ -31,11 +31,13 @@ use std::collections::HashMap;
 use mm_model::channel::{Channel, ChannelBannerInfo, ChannelSearchOpts};
 use mm_model::channel_list::ChannelList;
 use mm_model::channel_member::{ChannelMember, ChannelUnread};
+use mm_model::post_list::PostList;
 use mm_model::role::{CHANNEL_ADMIN_ROLE_ID, CHANNEL_GUEST_ROLE_ID, CHANNEL_USER_ROLE_ID};
 use mm_model::utils::StringMap;
 use sqlx::PgPool;
 
 use crate::error::StoreError;
+use crate::post_store::{PostRow, post_from_row};
 use crate::team_store::RolesInfo;
 
 /// Port of `getChannelRoles` (channel_store.go:248).
@@ -291,6 +293,39 @@ pub trait ChannelStore {
         team_id: &str,
         user_id: &str,
     ) -> impl std::future::Future<Output = Result<Vec<ChannelMember>, StoreError>> + Send;
+
+    /// Port of `SqlChannelStore.GetMemberLastViewedAt` (channel_store.go:2462).
+    ///
+    /// A single scalar rather than [`ChannelStore::get_member`], because Go reads it that way and
+    /// the difference is observable: `GetMember` computes scheme roles through two joins and
+    /// raises `MissingChannelMemberError` for a missing row, while this reads one `COALESCE`d
+    /// column and raises `LastViewedAt` not-found. The app layers above them report **different
+    /// error ids** as a result.
+    fn get_member_last_viewed_at(
+        &self,
+        channel_id: &str,
+        user_id: &str,
+    ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
+
+    /// Port of `SqlChannelStore.GetChannelMembersTimezones` (channel_store.go:2214).
+    ///
+    /// Returns the raw `Users.Timezone` maps, one per member row, **unfiltered and
+    /// undeduplicated** — the app layer does both. A `LEFT JOIN`, so a membership whose user row
+    /// is gone contributes a NULL that becomes an empty map here.
+    fn get_channel_members_timezones(
+        &self,
+        channel_id: &str,
+    ) -> impl std::future::Future<Output = Result<Vec<StringMap>, StoreError>> + Send;
+
+    /// Port of `SqlChannelStore.GetPinnedPosts` (channel_store.go:959).
+    ///
+    /// A `Posts` query living on the **channel** store, which is Go's placement and not an
+    /// accident of this port — `getPinnedPosts` reaches it through `App.GetPinnedPosts`
+    /// (app/channel.go:3992), not through the post store.
+    fn get_pinned_posts(
+        &self,
+        channel_id: &str,
+    ) -> impl std::future::Future<Output = Result<PostList, StoreError>> + Send;
 }
 
 /// Postgres-backed implementation.
@@ -478,6 +513,28 @@ impl ChannelStore for SqlChannelStore {
         user_id: &str,
     ) -> Result<Vec<ChannelMember>, StoreError> {
         get_members_for_user(&self.pool, team_id, user_id).await
+    }
+
+    #[tracing::instrument(skip_all, fields(channel_id = %channel_id, user_id = %user_id))]
+    async fn get_member_last_viewed_at(
+        &self,
+        channel_id: &str,
+        user_id: &str,
+    ) -> Result<i64, StoreError> {
+        get_member_last_viewed_at(&self.pool, channel_id, user_id).await
+    }
+
+    #[tracing::instrument(skip_all, fields(channel_id = %channel_id, count))]
+    async fn get_channel_members_timezones(
+        &self,
+        channel_id: &str,
+    ) -> Result<Vec<StringMap>, StoreError> {
+        get_channel_members_timezones(&self.pool, channel_id).await
+    }
+
+    #[tracing::instrument(skip_all, fields(channel_id = %channel_id, count))]
+    async fn get_pinned_posts(&self, channel_id: &str) -> Result<PostList, StoreError> {
+        get_pinned_posts(&self.pool, channel_id).await
     }
 }
 
@@ -2138,6 +2195,191 @@ pub async fn get_file_count(pool: &PgPool, channel_id: &str) -> Result<i64, Stor
         context: format!("failed to count files with channelId={channel_id}"),
         source,
     })
+}
+
+/// Port of `SqlChannelStore.GetMemberLastViewedAt` (channel_store.go:2462).
+///
+/// `COALESCE(LastViewedAt, 0)` is Go's, and the column really is nullable. The zero it produces
+/// is **not** distinguishable from a member who has genuinely never viewed the channel, and
+/// `GetPostsForChannelAroundLastUnread` treats both as "nothing is unread" and answers an empty
+/// list — so a NULL here is a silently empty response rather than an error.
+///
+/// No row at all is a different thing entirely: `ErrNotFound`, which the app layer turns into a
+/// **404** `api.channel.get_channel_member.missing.app_error`.
+pub async fn get_member_last_viewed_at(
+    pool: &PgPool,
+    channel_id: &str,
+    user_id: &str,
+) -> Result<i64, StoreError> {
+    sqlx::query_scalar!(
+        r#"
+        SELECT COALESCE(channelmembers.lastviewedat, 0) AS "last_viewed_at!"
+          FROM channelmembers
+         WHERE channelmembers.channelid = $1
+           AND channelmembers.userid = $2
+        "#,
+        channel_id,
+        user_id
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: format!(
+            "failed to get lastViewedAt with channelId={channel_id} and userId={user_id}"
+        ),
+        source,
+    })?
+    .ok_or_else(|| StoreError::NotFound {
+        entity: "LastViewedAt",
+        criteria: format!("channelId={channel_id}, userId={user_id}"),
+    })
+}
+
+/// Port of `SqlChannelStore.GetChannelMembersTimezones` (channel_store.go:2214).
+///
+/// # Every filter belongs to the app layer, and there is no `ORDER BY`
+///
+/// One row per membership, in whatever order the scan yields, including rows whose timezone is
+/// empty and rows that repeat a timezone another member already has. `App.GetChannelMembersTimezones`
+/// drops the empty ones and deduplicates what is left — which is why this returning a bag rather
+/// than a set is not sloppiness to tidy up here.
+///
+/// # The join is a `LEFT JOIN` and the column is nullable
+///
+/// A membership whose `Users` row has been hard-deleted contributes a NULL, and `StringMap.Scan`
+/// leaves the map at its zero value for one. That row then fails the app layer's
+/// empty-timezone test and is dropped, so it never reaches a client — but the query must not
+/// turn it into an error on the way.
+pub async fn get_channel_members_timezones(
+    pool: &PgPool,
+    channel_id: &str,
+) -> Result<Vec<StringMap>, StoreError> {
+    let rows = sqlx::query_scalar!(
+        r#"
+        SELECT users.timezone AS "timezone?"
+          FROM channelmembers
+          LEFT JOIN users ON channelmembers.userid = users.id
+         WHERE channelmembers.channelid = $1
+        "#,
+        channel_id
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: format!(
+            "failed to find user timezones for users in channels with channelId={channel_id}"
+        ),
+        source,
+    })?;
+
+    tracing::Span::current().record("count", rows.len());
+
+    rows.into_iter()
+        .map(|value| match value {
+            // `StringMap.Scan` returns early on a NULL, leaving the zero value.
+            None => Ok(StringMap::new()),
+            Some(serde_json::Value::Object(map)) => map
+                .into_iter()
+                .map(|(key, value)| match value {
+                    serde_json::Value::String(text) => Ok((key, text)),
+                    other => Err(StoreError::Decode {
+                        entity: "User",
+                        column: "timezone",
+                        source: serde::de::Error::custom(format!(
+                            "timezone value for {key} is {other}, not a string"
+                        )),
+                    }),
+                })
+                .collect(),
+            Some(other) => Err(StoreError::Decode {
+                entity: "User",
+                column: "timezone",
+                source: serde::de::Error::custom(format!("timezone is {other}, not an object")),
+            }),
+        })
+        .collect()
+}
+
+/// Port of `SqlChannelStore.GetPinnedPosts` (channel_store.go:959).
+///
+/// # Three predicates, and every one of them is fixed
+///
+/// `IsPinned = true`, `ChannelId = $1` and `DeleteAt = 0`. There is no `includeDeleted`
+/// parameter and no caller that could supply one, so a pinned post that was later deleted is
+/// gone from this list — which is what makes the pinned count on `getChannelStats`
+/// ([`get_pinned_post_count`]) and this list agree.
+///
+/// # `ORDER BY CreateAt ASC` — oldest first, and it is the only list read that goes this way
+///
+/// Every other post list in this store is `CreateAt DESC`. The order reaches the client as
+/// `order`, so flipping it is a wire change and not a detail; `getPostsForChannel` and this
+/// route disagree on purpose.
+///
+/// # The `ReplyCount` subquery is unconditional here
+///
+/// `getRootPosts` computes it only when `skip_fetch_threads` is set; this query has no such
+/// flag, so every pinned post reports its thread's live reply count. `DeleteAt = 0` inside the
+/// subquery counts only undeleted replies, matching the `replyCountSubQuery` the post store
+/// uses.
+///
+/// # Both maps, and `order` too
+///
+/// Go calls `AddPost` **and** `AddOrder` for each row, unlike `getParentsPosts`, so nothing
+/// lands in `posts` without appearing in `order`. `NewPostList` has already materialised both
+/// collections, which is why a channel with nothing pinned answers `{"order":[],"posts":{}}`
+/// and not `null`s — and why this function does **not** call `MakeNonNil`, which Go does not
+/// call either.
+pub async fn get_pinned_posts(pool: &PgPool, channel_id: &str) -> Result<PostList, StoreError> {
+    let rows = sqlx::query_as!(
+        PostRow,
+        r#"
+        SELECT p.id,
+               p.createat     AS "create_at!",
+               p.updateat     AS "update_at!",
+               p.editat       AS "edit_at!",
+               p.deleteat     AS "delete_at!",
+               p.ispinned     AS "is_pinned!",
+               p.userid       AS "user_id!",
+               p.channelid    AS "channel_id!",
+               p.rootid       AS "root_id!",
+               p.originalid   AS "original_id!",
+               p.message      AS "message!",
+               p.type         AS "post_type!",
+               p.props        AS "props?",
+               p.hashtags     AS "hashtags!",
+               p.filenames    AS "filenames?",
+               p.fileids      AS "file_ids?",
+               p.hasreactions AS "has_reactions!",
+               p.remoteid     AS "remote_id?",
+               (SELECT COUNT(sub.id)
+                  FROM posts sub
+                 WHERE sub.rootid = (CASE WHEN p.rootid = '' THEN p.id ELSE p.rootid END)
+                   AND sub.deleteat = 0) AS "reply_count!"
+          FROM posts p
+         WHERE p.ispinned = TRUE
+           AND p.channelid = $1
+           AND p.deleteat = 0
+         ORDER BY p.createat ASC
+        "#,
+        channel_id
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: "failed to find Posts".to_owned(),
+        source,
+    })?;
+
+    tracing::Span::current().record("count", rows.len());
+
+    let mut list = PostList::new();
+    for row in rows {
+        let post = post_from_row(row)?;
+        let id = post.id.clone();
+        list.add_post(post);
+        list.add_order(id);
+    }
+    Ok(list)
 }
 
 #[cfg(test)]

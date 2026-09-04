@@ -21,9 +21,9 @@ use crate::common;
 
 use common::{
     GO, RUST, add_user_to_channel, assert_error_bodies_match_except_known_gaps, client,
-    create_channel, create_plain_user, delete_channel, delete_plain_user, fetch_both_raw,
-    fetch_both_stable, go_minted_token, logged_in_user_id, post_message, purge_api_fixtures,
-    set_member_notify_prop, stack_enabled, username_of, view_channel,
+    create_channel, create_plain_user, create_team, delete_channel, delete_plain_user,
+    fetch_both_raw, fetch_both_stable, go_minted_token, logged_in_user_id, post_message,
+    purge_api_fixtures, set_member_notify_prop, stack_enabled, username_of, view_channel,
 };
 
 /// Go's own per-channel answer, `GET /users/{id}/channels/{id}/unread` — one term of the sum.
@@ -50,27 +50,6 @@ async fn go_channel_unread(
 /// [`common::purge_api_fixtures`] clears, and the team is deliberately **not** archived at the
 /// end of a test: other tests in this binary run concurrently and pick a team out of the admin's
 /// list, and archiving one mid-run archives its channels under them.
-async fn create_team(client: &reqwest::Client, admin_token: &str, tag: &str) -> String {
-    let response = client
-        .post(format!("{GO}/api/v4/teams"))
-        .header("Authorization", format!("Bearer {admin_token}"))
-        .json(&serde_json::json!({
-            "name": format!("mmrs-parity-{tag}"),
-            "display_name": format!("mmrs parity {tag}"),
-            "type": "O",
-        }))
-        .send()
-        .await
-        .expect("Go answers");
-    assert!(
-        response.status().is_success(),
-        "creating the team failed: {}",
-        response.text().await.unwrap_or_default()
-    );
-    let team: serde_json::Value = response.json().await.expect("the team decodes");
-    team["id"].as_str().expect("an id").to_owned()
-}
-
 struct Fixture {
     team_id: String,
     loud: String,

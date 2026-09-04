@@ -90,6 +90,46 @@ impl App {
             })
     }
 
+    /// Port of `app.App.GetEmojiList` (app/emoji.go:99).
+    ///
+    /// # It has none of the gates the single reads have
+    ///
+    /// No `EnableCustomEmoji` check and no `FileSettings.DriverName` check —
+    /// [`Self::emoji_storage_available`] is not called here at all. The handler's own 501 is the
+    /// *only* thing standing between a disabled server and this query, which is the reverse of
+    /// `getEmoji`, where the app layer would refuse even if the handler did not.
+    ///
+    /// # `page * per_page` is computed here, in `int`
+    ///
+    /// Go multiplies before the store sees either number and passes the product as `offset`.
+    /// `web.ParamsFromRequest` floors `page` at 0 and clamps `per_page` to 200, so the product
+    /// cannot be negative and cannot overflow an `i64`.
+    ///
+    /// One error id, `app.emoji.get_list.internal_error`, and no not-found branch: an offset
+    /// past the end of the table is an empty list, not a 404.
+    #[tracing::instrument(skip(self), fields(page, per_page, sort_by_name))]
+    pub async fn get_emoji_list(
+        &self,
+        page: i64,
+        per_page: i64,
+        sort_by_name: bool,
+    ) -> AppResult<Vec<Emoji>> {
+        self.store()
+            .emoji()
+            .get_list(page * per_page, per_page, sort_by_name)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "emoji list lookup failed");
+                AppError::boxed(
+                    "GetEmojiList",
+                    "app.emoji.get_list.internal_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })
+    }
+
     /// The two config gates both single-emoji reads open with, in Go's order.
     ///
     /// `where_` is threaded through because it is on the wire — `AppError.where` is serialised

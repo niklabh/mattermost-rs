@@ -155,6 +155,23 @@ pub trait PostStore {
     /// Go names this `Get`, beside a `GetSingle` that really does return one post. It returns a
     /// whole [`PostList`], and which posts are in it depends on three of the options in ways
     /// that are not symmetric between the two branches — see [`GetPostThreadOptions`].
+    /// Port of `SqlPostStore.GetEditHistoryForPost` (post_store.go:2610).
+    ///
+    /// **Zero rows is `ErrNotFound`, not an empty list** — a post that has never been edited is
+    /// a 404 through this route, not a `[]`.
+    fn get_edit_history_for_post(
+        &self,
+        post_id: &str,
+    ) -> impl std::future::Future<Output = Result<Vec<Post>, StoreError>> + Send;
+
+    /// Port of `SqlPostStore.GetPostsBefore`/`GetPostsAfter` (post_store.go:1578, :1582), which
+    /// are one function, `getPostsAround` (:1701), with a flag.
+    fn get_posts_around(
+        &self,
+        opts: GetPostsAroundOptions<'_>,
+        before: bool,
+    ) -> impl std::future::Future<Output = Result<PostList, StoreError>> + Send;
+
     fn get_thread(
         &self,
         id: &str,
@@ -269,6 +286,46 @@ pub struct GetPostThreadOptions<'a> {
     pub from_post: &'a str,
     pub from_create_at: i64,
     pub from_update_at: i64,
+}
+
+/// Port of the `model.GetPostsOptions` fields `getPostsAround` (post_store.go:1701) reads.
+///
+/// A third options struct, for the reason the second one exists: this query overlaps
+/// [`GetPostsOptions`] in four fields and disagrees with it about two more, and one struct
+/// serving all three would have to document every field three times.
+///
+/// # `include_deleted` is absent, and that is a claim about the caller
+///
+/// `getPostsForChannelAroundLastUnread` builds its `GetPostsOptions` literals without it
+/// (app/post.go:1961, :1968), so `DeleteAt = 0` is unconditional on both the window and the
+/// parents query, and the reply-count subquery keeps its own `DeleteAt = 0` too. A second caller
+/// that needs the flag adds it here **and** to all three places, not to one.
+///
+/// # `collapsed_threads_extended` is absent for the usual reason
+///
+/// It replaces each stub participant with a `SanitizeProfile`d user; `mm_api::posts` forwards
+/// that request rather than reproducing config-dependent output.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GetPostsAroundOptions<'a> {
+    pub channel_id: &'a str,
+    /// The cursor. Its own `CreateAt` is read by a subquery inside the predicate, so a `post_id`
+    /// naming nothing yields `CreateAt <> NULL` — which matches no row and returns an empty
+    /// list rather than an error.
+    pub post_id: &'a str,
+    /// The **session's** user, used by the burn-on-read visibility predicate and, on the
+    /// collapsed branch, as the `ThreadMemberships` join key.
+    pub user_id: &'a str,
+    pub page: i64,
+    pub per_page: i64,
+    pub skip_fetch_threads: bool,
+    pub collapsed_threads: bool,
+}
+
+impl GetPostsAroundOptions<'_> {
+    /// Go's `options.Page * options.PerPage`, computed before either reaches the SQL.
+    fn offset(&self) -> i64 {
+        self.page * self.per_page
+    }
 }
 
 /// Port of `SqlPostStore` plus the priority and acknowledgement stores.
@@ -403,6 +460,70 @@ impl SqlPostStore {
             opts.offset(),
             opts.skip_fetch_threads,
             opts.include_deleted,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to find Posts with channelId={}", opts.channel_id),
+            source,
+        })?;
+
+        rows.into_iter().map(post_from_row).collect()
+    }
+
+    /// The second half of `getPostsAround` (post_store.go:1773): the *threads* the window's
+    /// posts belong to.
+    ///
+    /// # `skip_fetch_threads` decides how much of each thread comes back
+    ///
+    /// With it off, `Id IN (ids) OR RootId IN (ids)` pulls in every sibling reply of every thread
+    /// the window touched. With it on, only the posts named by `ids` themselves — which is to say
+    /// the window's own posts and the roots of any replies in it. The `ids` list is built from
+    /// each post's own id **and** its `RootId`, so a reply in the window brings its root back
+    /// either way.
+    ///
+    /// `ORDER BY CreateAt DESC` and nothing reaches `order`, so the ordering decides only which
+    /// duplicate wins the `posts` map — and ids are unique, so nothing does. It is here because
+    /// it is in Go's query.
+    async fn get_posts_around_parents(
+        &self,
+        opts: &GetPostsAroundOptions<'_>,
+        root_ids: &[String],
+    ) -> Result<Vec<Post>, StoreError> {
+        let rows = sqlx::query_as!(
+            PostRow,
+            r#"
+            SELECT p.id,
+                   p.createat     AS "create_at!",
+                   p.updateat     AS "update_at!",
+                   p.editat       AS "edit_at!",
+                   p.deleteat     AS "delete_at!",
+                   p.ispinned     AS "is_pinned!",
+                   p.userid       AS "user_id!",
+                   p.channelid    AS "channel_id!",
+                   p.rootid       AS "root_id!",
+                   p.originalid   AS "original_id!",
+                   p.message      AS "message!",
+                   p.type         AS "post_type!",
+                   p.props        AS "props?",
+                   p.hashtags     AS "hashtags!",
+                   p.filenames    AS "filenames?",
+                   p.fileids      AS "file_ids?",
+                   p.hasreactions AS "has_reactions!",
+                   p.remoteid     AS "remote_id?",
+                   (SELECT COUNT(*)
+                      FROM posts sub
+                     WHERE sub.rootid = (CASE WHEN p.rootid = '' THEN p.id ELSE p.rootid END)
+                       AND sub.deleteat = 0) AS "reply_count!"
+              FROM posts p
+             WHERE (p.id = ANY($2) OR (NOT $3 AND p.rootid = ANY($2)))
+               AND p.channelid = $1
+               AND p.deleteat = 0
+             ORDER BY p.createat DESC
+            "#,
+            opts.channel_id,
+            root_ids,
+            opts.skip_fetch_threads,
         )
         .fetch_all(&self.pool)
         .await
@@ -889,26 +1010,30 @@ impl SqlPostStore {
 
 /// The eighteen selected columns plus the `ReplyCount` subquery, before the JSON columns are
 /// decoded.
-struct PostRow {
-    id: String,
-    create_at: i64,
-    update_at: i64,
-    edit_at: i64,
-    delete_at: i64,
-    is_pinned: bool,
-    user_id: String,
-    channel_id: String,
-    root_id: String,
-    original_id: String,
-    message: String,
-    post_type: String,
-    props: Option<serde_json::Value>,
-    hashtags: String,
-    filenames: Option<String>,
-    file_ids: Option<String>,
-    has_reactions: bool,
-    remote_id: Option<String>,
-    reply_count: i64,
+///
+/// `pub(crate)` because Go hangs one more query returning exactly these columns off the
+/// **channel** store — `SqlChannelStore.GetPinnedPosts` (channel_store.go:959) — and that port
+/// follows Go's placement rather than moving the query here to keep the row type private.
+pub(crate) struct PostRow {
+    pub(crate) id: String,
+    pub(crate) create_at: i64,
+    pub(crate) update_at: i64,
+    pub(crate) edit_at: i64,
+    pub(crate) delete_at: i64,
+    pub(crate) is_pinned: bool,
+    pub(crate) user_id: String,
+    pub(crate) channel_id: String,
+    pub(crate) root_id: String,
+    pub(crate) original_id: String,
+    pub(crate) message: String,
+    pub(crate) post_type: String,
+    pub(crate) props: Option<serde_json::Value>,
+    pub(crate) hashtags: String,
+    pub(crate) filenames: Option<String>,
+    pub(crate) file_ids: Option<String>,
+    pub(crate) has_reactions: bool,
+    pub(crate) remote_id: Option<String>,
+    pub(crate) reply_count: i64,
 }
 
 /// Port of `postWithExtra` (post_store.go:43): the seventeen post columns plus the four the
@@ -1021,7 +1146,7 @@ fn decode_string_array(
         })
 }
 
-fn post_from_row(row: PostRow) -> Result<Post, StoreError> {
+pub(crate) fn post_from_row(row: PostRow) -> Result<Post, StoreError> {
     // `StringInterface.Scan` on a JSON value that is not an object is an error in Go too —
     // `json.Unmarshal` into a `map[string]any` rejects an array or a scalar.
     let props = match row.props {
@@ -1340,6 +1465,409 @@ impl PostStore for SqlPostStore {
                 source,
             })?
             .unwrap_or_default())
+    }
+
+    /// Port of `SqlPostStore.GetEditHistoryForPost` (post_store.go:2610).
+    ///
+    /// # The link is `OriginalId`, not `RootId`
+    ///
+    /// Editing a post in Mattermost **inserts a copy of the old version** carrying
+    /// `OriginalId = <the live post's id>`, so the history is a set of tombstoned siblings rather
+    /// than a chain. `postsQuery` selects the eighteen plain columns and no reply-count subquery,
+    /// so every row comes back with `reply_count: 0`.
+    ///
+    /// # Zero rows is a 404, not an empty list
+    ///
+    /// Go raises `store.NewErrNotFound` for an empty result, which the app layer turns into a
+    /// 404. A post that has simply never been edited is therefore indistinguishable, over HTTP,
+    /// from one that does not exist — and the handler's own permission block has already made
+    /// sure the caller could have seen it either way.
+    ///
+    /// `ORDER BY EditAt DESC` — most recent edit first. There is no `DeleteAt = 0` here: the
+    /// history rows are themselves deleted copies, so filtering them out would empty every
+    /// answer.
+    #[tracing::instrument(skip(self), fields(post_id = %post_id, count))]
+    async fn get_edit_history_for_post(&self, post_id: &str) -> Result<Vec<Post>, StoreError> {
+        let rows = sqlx::query_as!(
+            PostRow,
+            r#"
+            SELECT posts.id,
+                   posts.createat     AS "create_at!",
+                   posts.updateat     AS "update_at!",
+                   posts.editat       AS "edit_at!",
+                   posts.deleteat     AS "delete_at!",
+                   posts.ispinned     AS "is_pinned!",
+                   posts.userid       AS "user_id!",
+                   posts.channelid    AS "channel_id!",
+                   posts.rootid       AS "root_id!",
+                   posts.originalid   AS "original_id!",
+                   posts.message      AS "message!",
+                   posts.type         AS "post_type!",
+                   posts.props        AS "props?",
+                   posts.hashtags     AS "hashtags!",
+                   posts.filenames    AS "filenames?",
+                   posts.fileids      AS "file_ids?",
+                   posts.hasreactions AS "has_reactions!",
+                   posts.remoteid     AS "remote_id?",
+                   0::bigint          AS "reply_count!"
+              FROM posts
+             WHERE posts.originalid = $1
+             ORDER BY posts.editat DESC
+            "#,
+            post_id
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("error getting posts edit history with postId={post_id}"),
+            source,
+        })?;
+
+        tracing::Span::current().record("count", rows.len());
+
+        if rows.is_empty() {
+            return Err(StoreError::NotFound {
+                entity: "failed to find post history",
+                criteria: post_id.to_owned(),
+            });
+        }
+
+        rows.into_iter().map(post_from_row).collect()
+    }
+
+    /// Port of `SqlPostStore.getPostsAround` (post_store.go:1701), reached as `GetPostsBefore`
+    /// and `GetPostsAfter`.
+    ///
+    /// # `before` decides three things, and they cancel out
+    ///
+    /// The comparison (`<` / `>`), the `ORDER BY` (`DESC` / `ASC`) — and then
+    /// `prepareThreadedResponse`'s `reversed` flag, which Go passes as **`!before`**. So the
+    /// *after* window is selected oldest-first and then walked backwards, and both directions
+    /// hand back a list ordered newest-first. Getting any one of the three wrong flips the
+    /// response's `order`.
+    ///
+    /// # The cursor is a subquery, so an unknown `post_id` is empty rather than an error
+    ///
+    /// `CreateAt < (SELECT CreateAt FROM Posts WHERE Id = ?)` yields NULL for an id that names
+    /// nothing, the comparison is NULL, no row matches, and the answer is an empty list.
+    ///
+    /// # `reply_count` is computed, zeroed, and then restored — all three steps are Go's
+    ///
+    /// `getPostsAround` scans into `postWithExtra`, which embeds `model.Post`; the non-collapsed
+    /// query aliases its subquery `ReplyCount`, which sqlx maps onto the **embedded**
+    /// `Post.ReplyCount`. Then `processPost` runs `p.Post.ReplyCount = p.ThreadReplyCount`
+    /// unconditionally (post_store.go:1288), and `ThreadReplyCount` is selected only on the
+    /// *collapsed* branch — so every non-collapsed window post leaves that function reporting
+    /// zero replies.
+    ///
+    /// And then the parents pass puts it back. [`Self::get_posts_around_parents`] re-fetches
+    /// every window post — its id list is built from each post's **own** id, not just its root —
+    /// into a plain row type `processPost` never touches, and `AddPost` overwrites the map entry.
+    /// So the zeroing is **unobservable through this route**, and a client sees real counts.
+    ///
+    /// All three steps are reproduced rather than cancelled out on paper, because only the third
+    /// one is load-bearing by accident: narrow the parents query and the zero becomes visible.
+    /// Measured against the running server — the parity suite predicted zeroes and Go answered
+    /// the real count.
+    #[tracing::instrument(skip(self), fields(channel_id = %opts.channel_id, before, collapsed = opts.collapsed_threads))]
+    async fn get_posts_around(
+        &self,
+        opts: GetPostsAroundOptions<'_>,
+        before: bool,
+    ) -> Result<PostList, StoreError> {
+        // `burnOnReadVisibleCondition` (post_store.go:1869) stamps `model.GetMillis()` into the
+        // SQL as a literal; binding it is the same value read at the same moment. Go applies the
+        // condition whenever `isBurnOnReadEnabled()`, which is the default — see
+        // `crate::post_store`'s sibling `get_visible_post_id_around_time`.
+        let now = mm_model::utils::get_millis();
+        let burn_on_read = mm_model::post::POST_TYPE_BURN_ON_READ;
+
+        let mut list = PostList::new();
+
+        if opts.collapsed_threads {
+            let rows = if before {
+                sqlx::query_as!(
+                    ThreadedPostRow,
+                    r#"
+                SELECT
+                       p.id,
+                       p.createat     AS "create_at!",
+                       p.updateat     AS "update_at!",
+                       p.editat       AS "edit_at!",
+                       p.deleteat     AS "delete_at!",
+                       p.ispinned     AS "is_pinned!",
+                       p.userid       AS "user_id!",
+                       p.channelid    AS "channel_id!",
+                       p.rootid       AS "root_id!",
+                       p.originalid   AS "original_id!",
+                       p.message      AS "message!",
+                       p.type         AS "post_type!",
+                       p.props        AS "props?",
+                       p.hashtags     AS "hashtags!",
+                       p.filenames    AS "filenames?",
+                       p.fileids      AS "file_ids?",
+                       p.hasreactions AS "has_reactions!",
+                       p.remoteid     AS "remote_id?",
+                       COALESCE(threads.replycount, 0)     AS "thread_reply_count!",
+                       COALESCE(threads.lastreplyat, 0)    AS "last_reply_at!",
+                       COALESCE(threads.participants, '[]') AS "thread_participants!",
+                       threadmemberships.following         AS "is_following?"
+                  FROM posts p
+                  LEFT JOIN threads ON threads.postid = p.id
+                  LEFT JOIN threadmemberships
+                         ON threadmemberships.postid = p.id
+                        AND threadmemberships.userid = $3
+                 WHERE p.createat < (SELECT createat FROM posts WHERE id = $2)
+                   AND p.channelid = $1
+                   AND (p.type <> $4 OR p.userid = $3
+                        OR NOT EXISTS (SELECT 1
+                                         FROM readreceipts rr
+                                        WHERE rr.postid = p.id
+                                          AND rr.userid = $3
+                                          AND rr.expireat < $5))
+                   AND p.deleteat = 0
+                   AND p.rootid = ''
+                 ORDER BY p.createat DESC
+                 LIMIT $6 OFFSET $7
+                "#,
+                    opts.channel_id,
+                    opts.post_id,
+                    opts.user_id,
+                    burn_on_read,
+                    now,
+                    opts.per_page,
+                    opts.offset(),
+                )
+                .fetch_all(&self.pool)
+                .await
+            } else {
+                sqlx::query_as!(
+                    ThreadedPostRow,
+                    r#"
+                SELECT
+                       p.id,
+                       p.createat     AS "create_at!",
+                       p.updateat     AS "update_at!",
+                       p.editat       AS "edit_at!",
+                       p.deleteat     AS "delete_at!",
+                       p.ispinned     AS "is_pinned!",
+                       p.userid       AS "user_id!",
+                       p.channelid    AS "channel_id!",
+                       p.rootid       AS "root_id!",
+                       p.originalid   AS "original_id!",
+                       p.message      AS "message!",
+                       p.type         AS "post_type!",
+                       p.props        AS "props?",
+                       p.hashtags     AS "hashtags!",
+                       p.filenames    AS "filenames?",
+                       p.fileids      AS "file_ids?",
+                       p.hasreactions AS "has_reactions!",
+                       p.remoteid     AS "remote_id?",
+                       COALESCE(threads.replycount, 0)     AS "thread_reply_count!",
+                       COALESCE(threads.lastreplyat, 0)    AS "last_reply_at!",
+                       COALESCE(threads.participants, '[]') AS "thread_participants!",
+                       threadmemberships.following         AS "is_following?"
+                  FROM posts p
+                  LEFT JOIN threads ON threads.postid = p.id
+                  LEFT JOIN threadmemberships
+                         ON threadmemberships.postid = p.id
+                        AND threadmemberships.userid = $3
+                 WHERE p.createat > (SELECT createat FROM posts WHERE id = $2)
+                   AND p.channelid = $1
+                   AND (p.type <> $4 OR p.userid = $3
+                        OR NOT EXISTS (SELECT 1
+                                         FROM readreceipts rr
+                                        WHERE rr.postid = p.id
+                                          AND rr.userid = $3
+                                          AND rr.expireat < $5))
+                   AND p.deleteat = 0
+                   AND p.rootid = ''
+                 ORDER BY p.createat ASC
+                 LIMIT $6 OFFSET $7
+                "#,
+                    opts.channel_id,
+                    opts.post_id,
+                    opts.user_id,
+                    burn_on_read,
+                    now,
+                    opts.per_page,
+                    opts.offset(),
+                )
+                .fetch_all(&self.pool)
+                .await
+            }
+            .map_err(|source| StoreError::Db {
+                context: format!("failed to find Posts with channelId={}", opts.channel_id),
+                source,
+            })?;
+
+            // `prepareThreadedResponse`'s `reversed` is `!before`, so the *after* window — read
+            // oldest-first — is walked backwards and both directions end newest-first.
+            let mut posts = rows
+                .into_iter()
+                .map(threaded_post_from_row)
+                .collect::<Result<Vec<_>, _>>()?;
+            if !before {
+                posts.reverse();
+            }
+            for post in posts {
+                let id = post.id.clone();
+                list.add_post(post);
+                list.add_order(id);
+            }
+            return Ok(list);
+        }
+
+        let rows = if before {
+            sqlx::query_as!(
+                PostRow,
+                r#"
+                SELECT
+                       p.id,
+                       p.createat     AS "create_at!",
+                       p.updateat     AS "update_at!",
+                       p.editat       AS "edit_at!",
+                       p.deleteat     AS "delete_at!",
+                       p.ispinned     AS "is_pinned!",
+                       p.userid       AS "user_id!",
+                       p.channelid    AS "channel_id!",
+                       p.rootid       AS "root_id!",
+                       p.originalid   AS "original_id!",
+                       p.message      AS "message!",
+                       p.type         AS "post_type!",
+                       p.props        AS "props?",
+                       p.hashtags     AS "hashtags!",
+                       p.filenames    AS "filenames?",
+                       p.fileids      AS "file_ids?",
+                       p.hasreactions AS "has_reactions!",
+                       p.remoteid     AS "remote_id?",
+                       (SELECT COUNT(*)
+                          FROM posts sub
+                         WHERE sub.rootid = (CASE WHEN p.rootid = '' THEN p.id ELSE p.rootid END)
+                           AND sub.deleteat = 0) AS "reply_count!"
+                  FROM posts p
+                 WHERE p.createat < (SELECT createat FROM posts WHERE id = $2)
+                   AND p.channelid = $1
+                   AND (p.type <> $4 OR p.userid = $3
+                        OR NOT EXISTS (SELECT 1
+                                         FROM readreceipts rr
+                                        WHERE rr.postid = p.id
+                                          AND rr.userid = $3
+                                          AND rr.expireat < $5))
+                   AND p.deleteat = 0
+                 ORDER BY p.createat DESC
+                 LIMIT $6 OFFSET $7
+                "#,
+                opts.channel_id,
+                opts.post_id,
+                opts.user_id,
+                burn_on_read,
+                now,
+                opts.per_page,
+                opts.offset(),
+            )
+            .fetch_all(&self.pool)
+            .await
+        } else {
+            sqlx::query_as!(
+                PostRow,
+                r#"
+                SELECT
+                       p.id,
+                       p.createat     AS "create_at!",
+                       p.updateat     AS "update_at!",
+                       p.editat       AS "edit_at!",
+                       p.deleteat     AS "delete_at!",
+                       p.ispinned     AS "is_pinned!",
+                       p.userid       AS "user_id!",
+                       p.channelid    AS "channel_id!",
+                       p.rootid       AS "root_id!",
+                       p.originalid   AS "original_id!",
+                       p.message      AS "message!",
+                       p.type         AS "post_type!",
+                       p.props        AS "props?",
+                       p.hashtags     AS "hashtags!",
+                       p.filenames    AS "filenames?",
+                       p.fileids      AS "file_ids?",
+                       p.hasreactions AS "has_reactions!",
+                       p.remoteid     AS "remote_id?",
+                       (SELECT COUNT(*)
+                          FROM posts sub
+                         WHERE sub.rootid = (CASE WHEN p.rootid = '' THEN p.id ELSE p.rootid END)
+                           AND sub.deleteat = 0) AS "reply_count!"
+                  FROM posts p
+                 WHERE p.createat > (SELECT createat FROM posts WHERE id = $2)
+                   AND p.channelid = $1
+                   AND (p.type <> $4 OR p.userid = $3
+                        OR NOT EXISTS (SELECT 1
+                                         FROM readreceipts rr
+                                        WHERE rr.postid = p.id
+                                          AND rr.userid = $3
+                                          AND rr.expireat < $5))
+                   AND p.deleteat = 0
+                 ORDER BY p.createat ASC
+                 LIMIT $6 OFFSET $7
+                "#,
+                opts.channel_id,
+                opts.post_id,
+                opts.user_id,
+                burn_on_read,
+                now,
+                opts.per_page,
+                opts.offset(),
+            )
+            .fetch_all(&self.pool)
+            .await
+        }
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to find Posts with channelId={}", opts.channel_id),
+            source,
+        })?;
+
+        let mut posts = rows
+            .into_iter()
+            .map(post_from_row)
+            .collect::<Result<Vec<_>, _>>()?;
+        // `processPost` overwrites the count the subquery just produced with the zero
+        // `ThreadReplyCount` — and the parents pass below puts it back. See the doc comment;
+        // neither step is a simplification to remove.
+        for post in &mut posts {
+            post.reply_count = 0;
+        }
+        if !before {
+            posts.reverse();
+        }
+
+        // The window's ids, in the order `AddOrder` will see them.
+        let mut root_ids: Vec<String> = Vec::with_capacity(posts.len() * 2);
+        for post in &posts {
+            root_ids.push(post.id.clone());
+            if !post.root_id.is_empty() {
+                root_ids.push(post.root_id.clone());
+            }
+        }
+
+        for post in posts {
+            let id = post.id.clone();
+            list.add_post(post);
+            list.add_order(id);
+        }
+
+        // `if !options.CollapsedThreads && len(posts) > 0` — the parents query does not run for
+        // an empty window, which matters because `Id IN ()` would otherwise match nothing and
+        // cost a round trip.
+        if root_ids.is_empty() {
+            return Ok(list);
+        }
+
+        let parents = self.get_posts_around_parents(&opts, &root_ids).await?;
+        // `AddPost` and **not** `AddOrder`: these land in `posts` without appearing in `order`,
+        // exactly as in `getParentsPosts`.
+        for post in parents {
+            list.add_post(post);
+        }
+
+        Ok(list)
     }
 
     #[tracing::instrument(skip(self), fields(channel_id = %channel_id, time, before, collapsed_threads))]

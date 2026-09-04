@@ -106,8 +106,23 @@ async fn the_member_list_is_byte_identical_and_sanitised_around_the_caller() {
     }
 }
 
-/// Pagination: two pages of two cover the four rows exactly, a page past the end is `[]`, and
-/// every page is byte-identical across servers.
+/// Pagination: two pages of two cover the four rows, a page past the end is `[]`, and every page
+/// is byte-identical across servers.
+///
+/// # The pages cover the list as a **set**, not in order, and that is Go's doing
+///
+/// `SqlChannelStore.GetMembers` (channel_store.go:2181) adds an `ORDER BY` **only** when
+/// `UpdatedAfter > 0`. This route never sets that, so `LIMIT`/`OFFSET` runs against an unordered
+/// scan on both servers: two identical queries may return the rows in different orders, and a row
+/// can therefore appear on two pages while another appears on none.
+///
+/// This assertion used to be "the two pages cover the full list **in the same order**", and it
+/// held only while the `channelmembers` table was quiet enough for Postgres to repeat itself. It
+/// began failing once four more fixture channels landed in the table — page 0 came back
+/// `[a, b]` and page 1 `[c, a]` against a full list of `[a, b, c, d]`, with both servers agreeing
+/// byte for byte on every page. Same class as the `teams_for_user` repair: the test was asserting
+/// something neither server promises. The Go-against-us comparison is untouched, because it was
+/// never exposed to the problem.
 #[tokio::test]
 async fn pages_split_cover_and_run_out_identically() {
     if !stack_enabled() {
@@ -121,25 +136,41 @@ async fn pages_split_cover_and_run_out_identically() {
     let (channel_id, users) = members_fixture(&client, &token, "mempage").await;
 
     let full = format!("/api/v4/channels/{channel_id}/members");
-    let (_, full_body) = fetch_both_stable(&client, &token, &full).await;
-    let all_ids = member_ids(&full_body);
 
+    // Re-read the whole sequence until the pages agree with the unpaged list as a set. An
+    // unordered scan is allowed to disagree with itself; what it is not allowed to do is
+    // disagree between the two servers, which is asserted inside the loop and unconditionally.
     let mut paged_ids = Vec::new();
-    for page in 0..2 {
-        let path = format!("/api/v4/channels/{channel_id}/members?page={page}&per_page=2");
-        let (go_body, rs_body) = fetch_both_stable(&client, &token, &path).await;
-        assert_eq!(
-            String::from_utf8_lossy(&rs_body),
-            String::from_utf8_lossy(&go_body),
-            "page {page} must agree byte for byte"
-        );
-        let ids = member_ids(&rs_body);
-        assert_eq!(ids.len(), 2, "page {page} holds exactly two rows");
-        paged_ids.extend(ids);
+    let mut all_ids = Vec::new();
+    for attempt in 1..=12_u64 {
+        let (_, full_body) = fetch_both_stable(&client, &token, &full).await;
+        all_ids = member_ids(&full_body);
+        all_ids.sort();
+
+        paged_ids.clear();
+        for page in 0..2 {
+            let path = format!("/api/v4/channels/{channel_id}/members?page={page}&per_page=2");
+            let (go_body, rs_body) = fetch_both_stable(&client, &token, &path).await;
+            assert_eq!(
+                String::from_utf8_lossy(&rs_body),
+                String::from_utf8_lossy(&go_body),
+                "page {page} must agree byte for byte"
+            );
+            let ids = member_ids(&rs_body);
+            assert_eq!(ids.len(), 2, "page {page} holds exactly two rows");
+            paged_ids.extend(ids);
+        }
+        paged_ids.sort();
+
+        if paged_ids == all_ids {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50 * attempt)).await;
     }
     assert_eq!(
         paged_ids, all_ids,
-        "two pages of two must cover the full list in the same order"
+        "two pages of two must cover the full membership; an unordered scan may reshuffle \
+         between reads, but it must not lose or duplicate a member once it has settled"
     );
 
     let past_the_end = format!("/api/v4/channels/{channel_id}/members?page=5&per_page=2");

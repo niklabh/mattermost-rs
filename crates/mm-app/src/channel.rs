@@ -7,8 +7,9 @@ use std::collections::HashMap;
 use mm_model::channel::{Channel, ChannelSearchOpts};
 use mm_model::channel_list::ChannelList;
 use mm_model::channel_member::{CHANNEL_MARK_UNREAD_MENTION, ChannelMember, ChannelUnread};
+use mm_model::post_list::PostList;
 use mm_model::user::MARK_UNREAD_NOTIFY_PROP;
-use mm_model::utils::{AppError, AppResult};
+use mm_model::utils::{AppError, AppResult, get_preferred_timezone, remove_duplicate_strings};
 use mm_store::ChannelStore;
 
 use crate::App;
@@ -591,6 +592,133 @@ impl App {
             })?;
         tracing::Span::current().record("count", channels.0.len());
         Ok(channels)
+    }
+
+    /// Port of `app.Server.getChannelMemberLastViewedAt` (app/channel.go:2563).
+    ///
+    /// # Two not-found ids for one missing row, and this is the other one
+    ///
+    /// A missing membership here is `api.channel.get_channel_member.missing.app_error` (404) —
+    /// `MissingChannelMemberError`, the same constant [`App::get_channel_member`] uses. What is
+    /// **not** shared is the 500: this one is `app.channel.get_member.app_error` where
+    /// `GetChannelMember`'s is the same string, so the two really do agree on both ids and
+    /// differ only in `Where`, which is `json:"-"`.
+    ///
+    /// A `LastViewedAt` of zero is a successful read, not an error: the caller treats it as
+    /// "nothing is unread" and answers an empty list.
+    #[tracing::instrument(skip(self), fields(channel_id = %channel_id, user_id = %user_id))]
+    pub async fn get_channel_member_last_viewed_at(
+        &self,
+        channel_id: &str,
+        user_id: &str,
+    ) -> AppResult<i64> {
+        self.store()
+            .channel()
+            .get_member_last_viewed_at(channel_id, user_id)
+            .await
+            .map_err(|err| {
+                if err.is_not_found() {
+                    AppError::boxed(
+                        "getChannelMemberLastViewedAt",
+                        // `app.MissingChannelMemberError` (app/constants.go:6) — the same
+                        // constant `GetChannelMember` uses, spelled out for the reason that
+                        // function's doc comment gives.
+                        "app.channel.get_member.missing.app_error",
+                        None,
+                        String::new(),
+                        404,
+                    )
+                } else {
+                    tracing::error!(error = %err, "lastViewedAt lookup failed");
+                    AppError::boxed(
+                        "getChannelMemberLastViewedAt",
+                        "app.channel.get_member.app_error",
+                        None,
+                        String::new(),
+                        500,
+                    )
+                }
+            })
+    }
+
+    /// Port of `app.App.GetChannelMembersTimezones` (app/channel.go:2592).
+    ///
+    /// # Three transformations, and the order of the first two is on the wire
+    ///
+    /// 1. **Drop** any member whose `automaticTimezone` *and* `manualTimezone` are both empty.
+    ///    Note the test is on those two fields only — a member with
+    ///    `useAutomaticTimezone: "true"` and an empty `automaticTimezone` but a non-empty
+    ///    `manualTimezone` survives this filter and then contributes the **empty string**,
+    ///    because step 2 reads the automatic one.
+    /// 2. **`GetPreferredTimezone`**: the automatic one when `useAutomaticTimezone` is the
+    ///    string `"true"`, the manual one otherwise. The flag is a *string* in the map, so
+    ///    anything but the exact five characters `true` means manual.
+    /// 3. **`RemoveDuplicateStrings`**, which **sorts** before deduplicating — so the response is
+    ///    alphabetical, not membership order, and that is the only thing giving this route a
+    ///    stable order at all (the query has no `ORDER BY`).
+    ///
+    /// An empty result stays a **nil** slice: Go declares `var timezones []string` and appends,
+    /// and `RemoveDuplicateStrings` of a nil slice is nil. The handler's `ArrayToJSON` renders
+    /// that as `null`.
+    #[tracing::instrument(skip(self), fields(channel_id = %channel_id, count))]
+    pub async fn get_channel_members_timezones(&self, channel_id: &str) -> AppResult<Vec<String>> {
+        let members = self
+            .store()
+            .channel()
+            .get_channel_members_timezones(channel_id)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "member timezone lookup failed");
+                AppError::boxed(
+                    "GetChannelMembersTimezones",
+                    "app.channel.get_members.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })?;
+
+        let mut timezones: Vec<String> = Vec::new();
+        for member in &members {
+            let automatic = member.get("automaticTimezone").map(String::as_str);
+            let manual = member.get("manualTimezone").map(String::as_str);
+            if automatic.unwrap_or_default().is_empty() && manual.unwrap_or_default().is_empty() {
+                continue;
+            }
+            timezones.push(get_preferred_timezone(member).to_owned());
+        }
+        remove_duplicate_strings(&mut timezones);
+        tracing::Span::current().record("count", timezones.len());
+
+        Ok(timezones)
+    }
+
+    /// Port of `app.App.GetPinnedPosts` (app/channel.go:3992).
+    ///
+    /// One store call, one error id, and **no not-found branch**: a channel id that names
+    /// nothing is a successful read of zero rows. The 404 a client sees for a bad channel comes
+    /// from `getPinnedPosts`'s own `GetChannel` call, two lines earlier in the handler.
+    ///
+    /// `filterInaccessiblePosts` sits between the read and the return in Go. It exits
+    /// immediately without a licence carrying a `PostHistory` limit, so it cannot change the
+    /// list on this deployment and is not reproduced — the same call, and the same reasoning, as
+    /// in `mm_api::posts::get_post_thread`.
+    #[tracing::instrument(skip(self), fields(channel_id = %channel_id))]
+    pub async fn get_pinned_posts(&self, channel_id: &str) -> AppResult<PostList> {
+        self.store()
+            .channel()
+            .get_pinned_posts(channel_id)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "pinned post lookup failed");
+                AppError::boxed(
+                    "GetPinnedPosts",
+                    "app.channel.pinned_posts.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })
     }
 
     /// Port of `app.App.FillInChannelProps` (channel.go:4091): the one-element case of

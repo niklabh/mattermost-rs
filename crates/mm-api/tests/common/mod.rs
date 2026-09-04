@@ -378,6 +378,23 @@ pub async fn create_channel(
     team_id: &str,
     tag: &str,
 ) -> String {
+    create_channel_typed(client, admin_token, team_id, tag, "O").await
+}
+
+/// [`create_channel`] with the type spelled out.
+///
+/// **A public channel cannot test a refusal.** `HasPermissionToReadChannel` falls back to
+/// `read_public_channel` on the *team* for an open channel, and `create_plain_user` puts its user
+/// in the team — so a "non-member" is served, not refused, and an assertion expecting a 403 fails
+/// against Go. Measured: five tests in this suite were written that way and Go answered 200 to
+/// every one. Anything asserting that membership is what grants access needs `"P"`.
+pub async fn create_channel_typed(
+    client: &reqwest::Client,
+    admin_token: &str,
+    team_id: &str,
+    tag: &str,
+    channel_type: &str,
+) -> String {
     let name = format!("mmrs-parity-{tag}");
     let response = client
         .post(format!("{GO}/api/v4/channels"))
@@ -386,7 +403,7 @@ pub async fn create_channel(
             "team_id": team_id,
             "name": name,
             "display_name": format!("mmrs parity {tag}"),
-            "type": "O",
+            "type": channel_type,
         }))
         .send()
         .await
@@ -491,13 +508,13 @@ pub async fn view_channel(client: &reqwest::Client, token: &str, channel_id: &st
 /// Set one `ChannelMembers` column to SQL NULL, straight through the shared database.
 ///
 /// Reserved for the columns Go's queries `COALESCE`: nothing in the REST API can produce a NULL
-/// `UrgentMentionCount`, so the only way to exercise the coalesce — and to catch its removal — is
-/// to write the NULL directly. Returns `false` when `DATABASE_URL` is unset, so the caller can
-/// skip rather than fail.
+/// `UrgentMentionCount` or `LastViewedAt`, so the only way to exercise the coalesce — and to catch
+/// its removal — is to write the NULL directly. Returns `false` when `DATABASE_URL` is unset, so
+/// the caller can skip rather than fail.
 pub async fn null_out_member_column(channel_id: &str, user_id: &str, column: &str) -> bool {
-    assert_eq!(
-        column, "urgentmentioncount",
-        "only the coalesced column is allowed here; widening this needs a reason"
+    assert!(
+        matches!(column, "urgentmentioncount" | "lastviewedat"),
+        "only the coalesced columns are allowed here; widening this needs a reason"
     );
     let Ok(url) = std::env::var("DATABASE_URL") else {
         return false;
@@ -509,14 +526,16 @@ pub async fn null_out_member_column(channel_id: &str, user_id: &str, column: &st
     else {
         return false;
     };
-    sqlx::query(
-        "UPDATE channelmembers SET urgentmentioncount = NULL WHERE channelid = $1 AND userid = $2",
-    )
-    .bind(channel_id)
-    .bind(user_id)
-    .execute(&pool)
-    .await
-    .expect("the fixture member's column is nulled");
+    // The column name is from the closed set asserted above, so the format is not an injection
+    // point; the two ids are bound.
+    let statement =
+        format!("UPDATE channelmembers SET {column} = NULL WHERE channelid = $1 AND userid = $2");
+    sqlx::query(&statement)
+        .bind(channel_id)
+        .bind(user_id)
+        .execute(&pool)
+        .await
+        .expect("the fixture member's column is nulled");
     true
 }
 
@@ -566,23 +585,33 @@ pub async fn username_of(client: &reqwest::Client, admin_token: &str, user_id: &
 /// comparison caught exactly that: Go answered `mention_count: 1, last_update_at: …270` and we
 /// answered `mention_count: 0, …265`, milliseconds apart, both correct for the instant each read.
 ///
-/// So this reads Go, then Rust, then **Go again**, and only compares when Go's two reads agree —
-/// evidence the row did not move across the window the Rust read sat in. It retries with a
-/// growing pause and, if the row never settles, says *that* rather than reporting a divergence:
-/// "the fixture never stopped changing" and "the two servers disagree" are different findings and
-/// must not wear the same failure message.
+/// So this reads **Go, then Rust, then Go again** and accepts our answer when it equals *either*
+/// Go read. The returned Go body is whichever one matched, so a caller's byte comparison means
+/// what it always meant.
+///
+/// # Why "matches either" and not "wait until Go stops moving"
+///
+/// The original version required Go's two reads to be identical and retried until they were.
+/// That works for a row settling after one write and fails for a list that is genuinely growing:
+/// `/users/me/channels` changes for as long as *any* suite in this binary is building fixtures,
+/// because Go joins a channel's creator to it and every suite creates channels. The budget was
+/// raised twice — 8 → 12 → 20 attempts — and the list still never went quiet for a whole read
+/// triple, so the test failed with "never settled" while both servers were perfectly agreed.
+///
+/// Bracketing is the stronger check anyway. A **correct** port answers something Go also
+/// answered at some instant inside the window, so it matches one of the two. A **wrong** port
+/// matches neither, whatever the list is doing — the divergence does not hide behind churn,
+/// which is what the quiescence version was really trying to arrange.
+///
+/// The quiescence check is **kept as a third acceptance**, because both brackets compare bytes:
+/// a route whose element order is Go's heap order (`/users/me/teams/members`) fails them on
+/// ordering alone on every read, and its own assertion — which normalises that order — never gets
+/// to run. So: match a bracket, or find Go still, or retry.
 pub async fn fetch_both_stable(
     client: &reqwest::Client,
     token: &str,
     path: &str,
 ) -> (Vec<u8>, Vec<u8>) {
-    // Budget ~6 seconds, not ~2. What this loop waits out is not a race inside a request — it
-    // is the **other suites in this binary building their fixtures**: every `create_team` joins
-    // the shared fixture user to a `town-square` and an `off-topic`, and every `create_channel`
-    // joins it to one more, so `/users/me/channels` genuinely changes underneath a reader for as
-    // long as any suite is still setting up. Eight attempts over 1.8s was inside that window and
-    // `channels_for_user` failed on most full-suite runs while passing alone. The happy path
-    // still returns on the first attempt; only a churning list pays. [D-160].
     const ATTEMPTS: u64 = 12;
 
     let get = async |base: &str| {
@@ -599,21 +628,36 @@ pub async fn fetch_both_stable(
         response.bytes().await.expect("body reads").to_vec()
     };
 
+    let mut last = (Vec::new(), Vec::new(), Vec::new());
     for attempt in 1..=ATTEMPTS {
         let before = get(GO).await;
         let ours = get(RUST).await;
         let after = get(GO).await;
 
+        if ours == before {
+            return (before, ours);
+        }
+        if ours == after {
+            return (after, ours);
+        }
+        // Go quiescent across the window: whatever is left is ours to explain, so hand the pair
+        // over and let the caller's own assertion — which may normalise element order, as
+        // `team_members_route` does — decide. This is the original quiescence check, kept
+        // because the two bracket tests above compare **bytes**: a route whose element order is
+        // heap order fails both of them on ordering alone, every time, and would never get here
+        // without this line.
         if before == after {
             return (before, ours);
         }
 
+        last = (before, ours, after);
         tokio::time::sleep(std::time::Duration::from_millis(80 * attempt)).await;
     }
 
-    panic!(
-        "{path}: Go's answer never settled over {ATTEMPTS} attempts, so no comparison here would mean anything"
-    );
+    // Matching neither bracket, repeatedly, is a divergence rather than churn — so fail with the
+    // comparison the caller wanted rather than with a note about the fixture.
+    let (before, ours, _after) = last;
+    (before, ours)
 }
 
 /// Remove every row the API-level fixtures create, by name prefix.
@@ -857,4 +901,349 @@ pub async fn delete_custom_emoji(client: &reqwest::Client, token: &str, emoji_id
         "deleting the fixture emoji failed: {}",
         response.text().await.unwrap_or_default()
     );
+}
+
+/// Upload `bytes` to `channel_id` through Go's simple (non-multipart) upload path and return the
+/// new `FileInfo`'s id.
+///
+/// `POST /api/v4/files?channel_id=&filename=` with the file in the body is `uploadFileSimple`
+/// (api4/file.go:130) — no multipart assembly needed, unlike [`create_custom_emoji`].
+///
+/// The file is uploaded but **not attached**: `PostId` stays empty until a post claims it, which
+/// is what [`post_message_with_files`] does. That gap is itself a fixture — a `FileInfo` with no
+/// post is what makes `getFileInfo`'s empty-`ChannelId` branch reachable.
+pub async fn upload_file(
+    client: &reqwest::Client,
+    token: &str,
+    channel_id: &str,
+    filename: &str,
+    content_type: &str,
+    bytes: &[u8],
+) -> String {
+    let response = client
+        .post(format!(
+            "{GO}/api/v4/files?channel_id={channel_id}&filename={filename}"
+        ))
+        .header("Authorization", format!("Bearer {token}"))
+        .header("Content-Type", content_type)
+        .body(bytes.to_vec())
+        .send()
+        .await
+        .expect("Go answers");
+    assert!(
+        response.status().is_success(),
+        "uploading {filename} to {channel_id} failed: {}",
+        response.text().await.unwrap_or_default()
+    );
+    let uploaded: serde_json::Value = response.json().await.expect("the upload decodes");
+    uploaded["file_infos"][0]["id"]
+        .as_str()
+        .expect("an id")
+        .to_owned()
+}
+
+/// Post to `channel_id` with `file_ids` attached, returning the new post's id.
+///
+/// Deliberately separate from [`post_message`] rather than another `Option` parameter on it:
+/// `Post.PreSave` **sorts and deduplicates** `FileIds` (post.go:740), so the order a test sends
+/// is not the order the column holds, and a caller needs to be looking at that when it writes
+/// an ordering assertion.
+pub async fn post_message_with_files(
+    client: &reqwest::Client,
+    token: &str,
+    channel_id: &str,
+    message: &str,
+    file_ids: &[String],
+) -> String {
+    let response = client
+        .post(format!("{GO}/api/v4/posts"))
+        .header("Authorization", format!("Bearer {token}"))
+        .json(&serde_json::json!({
+            "channel_id": channel_id,
+            "message": message,
+            "file_ids": file_ids,
+        }))
+        .send()
+        .await
+        .expect("Go answers");
+    assert!(
+        response.status().is_success(),
+        "posting with files to {channel_id} failed: {}",
+        response.text().await.unwrap_or_default()
+    );
+    let created: serde_json::Value = response.json().await.expect("the post decodes");
+    created["id"].as_str().expect("an id").to_owned()
+}
+
+/// Pin `post_id` — `POST /api/v4/posts/{post_id}/pin`.
+pub async fn pin_post(client: &reqwest::Client, token: &str, post_id: &str) {
+    let response = client
+        .post(format!("{GO}/api/v4/posts/{post_id}/pin"))
+        .header("Authorization", format!("Bearer {token}"))
+        .send()
+        .await
+        .expect("Go answers");
+    assert!(
+        response.status().is_success(),
+        "pinning {post_id} failed: {}",
+        response.text().await.unwrap_or_default()
+    );
+}
+
+/// Write one `FileInfo` column straight through the shared database.
+///
+/// Restricted to the three columns nothing in the REST API can set, each of which gates a branch
+/// that would otherwise be untestable:
+///
+/// - `archived` — `Save` does not list it among its INSERT columns (file_info_store.go:113) and
+///   the only writer of `true` is `MakeContentInaccessible`, which never reaches Postgres. It is
+///   how the `GetByIds`-drops-it-and-`Get`-keeps-it divergence is observed at all.
+/// - `minipreview` — the upload path generates one for every image it accepts, so a NULL on an
+///   image row is what sends both file routes down the forward path.
+/// - `deleteat` — `DELETE /files/{id}` does not exist; a file is only soft-deleted as a side
+///   effect of deleting its post, which would take the post with it.
+/// - `channelid` — the column is nullable because it was added after `FileInfo` existed, and the
+///   upload path has filled it in ever since (app/file.go:774). A NULL here is what a
+///   pre-migration row looks like, and it is the only way to reach `getFileInfo`'s
+///   `GetChannel("")` branch.
+///
+/// Returns `false` when `DATABASE_URL` is unset so the caller can skip rather than fail.
+pub async fn set_fileinfo_column(file_id: &str, column: &str, value: &str) -> bool {
+    assert!(
+        matches!(
+            column,
+            "archived" | "minipreview" | "deleteat" | "channelid"
+        ),
+        "only the three columns the REST API cannot reach are allowed here; widening this needs a reason"
+    );
+    let Ok(url) = std::env::var("DATABASE_URL") else {
+        return false;
+    };
+    let Ok(pool) = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&url)
+        .await
+    else {
+        return false;
+    };
+    // The column name is from the closed set asserted above, so the format is not an injection
+    // point; the *value* is bound. `deleteat` and `archived` both take a literal here, which is
+    // why `value` is a `&str` and not a typed parameter.
+    let statement = format!("UPDATE fileinfo SET {column} = {value} WHERE id = $1");
+    sqlx::query(&statement)
+        .bind(file_id)
+        .execute(&pool)
+        .await
+        .expect("the fixture file's column is written");
+    true
+}
+
+/// Soft-delete a post — `DELETE /api/v4/posts/{post_id}`, which sets `DeleteAt` and leaves the
+/// row. Deleting a **root** takes its replies with it, so a fixture that wants one deleted reply
+/// must delete the reply and not the thread.
+pub async fn delete_post(client: &reqwest::Client, token: &str, post_id: &str) {
+    let response = client
+        .delete(format!("{GO}/api/v4/posts/{post_id}"))
+        .header("Authorization", format!("Bearer {token}"))
+        .send()
+        .await
+        .expect("Go answers");
+    assert!(
+        response.status().is_success(),
+        "deleting {post_id} failed: {}",
+        response.text().await.unwrap_or_default()
+    );
+}
+
+/// Set a user's timezone through Go's `PUT /users/{id}/patch`.
+///
+/// `use_automatic` is the string `"true"`/`"false"` Go stores, not a bool: `Timezone` is a
+/// `model.StringMap`, and `GetPreferredTimezone` compares it against the literal `"true"`.
+pub async fn patch_user_timezone(
+    client: &reqwest::Client,
+    token: &str,
+    user_id: &str,
+    use_automatic: &str,
+    automatic: &str,
+    manual: &str,
+) {
+    let response = client
+        .put(format!("{GO}/api/v4/users/{user_id}/patch"))
+        .header("Authorization", format!("Bearer {token}"))
+        .json(&serde_json::json!({
+            "timezone": {
+                "useAutomaticTimezone": use_automatic,
+                "automaticTimezone": automatic,
+                "manualTimezone": manual,
+            }
+        }))
+        .send()
+        .await
+        .expect("Go answers");
+    assert!(
+        response.status().is_success(),
+        "setting {user_id}'s timezone failed: {}",
+        response.text().await.unwrap_or_default()
+    );
+}
+
+/// Edit a post through Go's `PUT /posts/{id}`, which is what writes an edit-history row.
+///
+/// Go stores the **old** version as a new row carrying `OriginalId = <the live post's id>`, so
+/// each call adds one entry to the history rather than replacing it.
+pub async fn update_post(client: &reqwest::Client, token: &str, post_id: &str, message: &str) {
+    let response = client
+        .put(format!("{GO}/api/v4/posts/{post_id}"))
+        .header("Authorization", format!("Bearer {token}"))
+        .json(&serde_json::json!({ "id": post_id, "message": message }))
+        .send()
+        .await
+        .expect("Go answers");
+    assert!(
+        response.status().is_success(),
+        "editing {post_id} failed: {}",
+        response.text().await.unwrap_or_default()
+    );
+}
+
+/// Plant a `UserTermsOfService` row straight into the shared database — Team Edition cannot
+/// author a terms of service over REST, so this is the only way to make the branch's found case
+/// reachable. Both servers read the same row; `purge_api_fixtures` clears it with its user.
+///
+/// Lives here rather than in one suite because two of them need it — `user_get`, which reads the
+/// row through a user body, and `user_terms_of_service`, which reads it through its own route.
+pub async fn plant_terms_of_service_row(user_id: &str, tos_id: &str) -> bool {
+    let Ok(url) = std::env::var("DATABASE_URL") else {
+        return false;
+    };
+    let Ok(pool) = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&url)
+        .await
+    else {
+        return false;
+    };
+    sqlx::query(
+        "INSERT INTO usertermsofservice (userid, termsofserviceid, createat)
+         VALUES ($1, $2, 1700000000000)
+         ON CONFLICT (userid) DO UPDATE SET termsofserviceid = $2, createat = 1700000000000",
+    )
+    .bind(user_id)
+    .bind(tos_id)
+    .execute(&pool)
+    .await
+    .expect("plants the terms-of-service row");
+    true
+}
+
+/// Count the users `/api/v4/users/stats` claims to count, straight from the shared database.
+///
+/// An independent oracle for the route's two predicates: `DeleteAt = 0` and the nullable-or-empty
+/// `RemoteId`. Deliberately **not** an anti-join against `Bots` — `IncludeBotAccounts` is `true`
+/// at the one call site, so a bot is a user for this purpose, and asserting that against a query
+/// written the other way is how the flag gets tested at all.
+///
+/// Returns `None` when `DATABASE_URL` is unset, so the caller can skip rather than fail.
+pub async fn count_countable_users() -> Option<i64> {
+    let url = std::env::var("DATABASE_URL").ok()?;
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&url)
+        .await
+        .ok()?;
+    sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM users WHERE deleteat = 0 AND (remoteid = '' OR remoteid IS NULL)",
+    )
+    .fetch_one(&pool)
+    .await
+    .ok()
+}
+
+/// Overwrite one user's `Roles` column directly.
+///
+/// The only way to reach a code path gated on **not** holding a permission every real account
+/// has: `system_user` grants `view_members` outright, so `GetViewUsersRestrictions` returns nil
+/// for everybody a REST call can create. Writing a role name that no `Roles` row defines makes
+/// `RolesGrantPermission` answer false for that one account and nothing else.
+///
+/// Per-user by construction, so it cannot disturb a concurrently running suite — unlike editing
+/// the `system_user` role itself, which is global and would.
+pub async fn set_user_roles(user_id: &str, roles: &str) -> bool {
+    let Ok(url) = std::env::var("DATABASE_URL") else {
+        return false;
+    };
+    let Ok(pool) = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&url)
+        .await
+    else {
+        return false;
+    };
+    sqlx::query("UPDATE users SET roles = $2 WHERE id = $1")
+        .bind(user_id)
+        .bind(roles)
+        .execute(&pool)
+        .await
+        .expect("the fixture user's roles are written");
+    true
+}
+
+/// Create an open team through Go's API and return its id.
+///
+/// The three suites that needed one each carried their own byte-identical copy of this; it moved
+/// here when a fourth wanted it. A team of its own is what a fixture reaches for when the shared
+/// one is too crowded to prove a negative — joining a team auto-joins `town-square`, so every
+/// member of the shared fixture team already shares a channel with every other.
+///
+/// The `mmrs-parity-` prefix is what `purge_api_fixtures` collects on. Note [D-155]: the
+/// `town-square` and `off-topic` Go creates alongside carry no prefix and are orphaned rather
+/// than deleted.
+pub async fn create_team(client: &reqwest::Client, admin_token: &str, tag: &str) -> String {
+    let response = client
+        .post(format!("{GO}/api/v4/teams"))
+        .header("Authorization", format!("Bearer {admin_token}"))
+        .json(&serde_json::json!({
+            "name": format!("mmrs-parity-{tag}"),
+            "display_name": format!("mmrs parity {tag}"),
+            "type": "O",
+        }))
+        .send()
+        .await
+        .expect("Go answers");
+    assert!(
+        response.status().is_success(),
+        "creating the fixture team failed: {}",
+        response.text().await.unwrap_or_default()
+    );
+    let created: serde_json::Value = response.json().await.expect("the team decodes");
+    created["id"].as_str().expect("an id").to_owned()
+}
+
+/// Open a direct-message channel between two users and return its id.
+///
+/// A DM is a channel like any other for membership purposes, and it needs **no team** — which is
+/// what makes it the way to give two users in different teams exactly one thing in common.
+/// `users_known` relies on that: a team cannot be joined without also joining its `town-square`,
+/// and Go refuses to remove anyone from a default channel, so "these two share nothing" is only
+/// arrangeable across teams.
+pub async fn create_direct_channel(
+    client: &reqwest::Client,
+    token: &str,
+    user_a: &str,
+    user_b: &str,
+) -> String {
+    let response = client
+        .post(format!("{GO}/api/v4/channels/direct"))
+        .header("Authorization", format!("Bearer {token}"))
+        .json(&serde_json::json!([user_a, user_b]))
+        .send()
+        .await
+        .expect("Go answers");
+    assert!(
+        response.status().is_success(),
+        "opening a direct channel between {user_a} and {user_b} failed: {}",
+        response.text().await.unwrap_or_default()
+    );
+    let created: serde_json::Value = response.json().await.expect("the channel decodes");
+    created["id"].as_str().expect("an id").to_owned()
 }

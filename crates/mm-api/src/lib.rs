@@ -9,6 +9,8 @@ pub mod auth;
 pub mod channels;
 pub mod emoji;
 pub mod error;
+/// `getFileInfo` — the one `/files/` route that returns JSON rather than bytes.
+pub mod files;
 pub mod posts;
 pub mod preferences;
 pub mod proxy;
@@ -357,6 +359,21 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/users/{user_id}/channels/{channel_id}/unread",
             partially_migrated_with_ids(&state, get(channels::get_channel_unread)),
         )
+        // `BaseRoutes.ChannelForUser.Handle("/posts/unread")` (api4/post.go:37) — one segment
+        // deeper than `/unread` above and its only sibling under `ChannelForUser` besides the
+        // three writes (`/view`, `/notify_props`, `/roles`), which are POST/PUT and fall to
+        // `partially_migrated`'s method fallback.
+        //
+        // The `Path` tuple is `(user_id, channel_id)`, matching the segment order — but the
+        // *handler* validates the user first, where `get_channel_unread` validates the channel
+        // first. Both orders are Go's; see `posts::get_posts_for_channel_around_last_unread`.
+        .route(
+            "/api/v4/users/{user_id}/channels/{channel_id}/posts/unread",
+            partially_migrated_with_ids(
+                &state,
+                get(posts::get_posts_for_channel_around_last_unread),
+            ),
+        )
         // `BaseRoutes.ChannelsForTeam` (api.go:212) — the browse-channels list and its two
         // siblings. Unlike `/teams/name/{team_name}` above there is **no precedence puzzle
         // here**: every route gorilla registers under `/teams/{team_id}/channels/` is a static
@@ -387,6 +404,30 @@ pub fn router(state: AppState) -> Router {
         // match here, and nothing here could have matched them. Only `GET` is migrated; `POST`
         // (createUser) and the rest fall to `partially_migrated`'s method fallback.
         .route("/api/v4/users", partially_migrated(get(users::get_users)))
+        // `BaseRoutes.Users.Handle("/known")` and `("/stats")` (api4/user.go:34, :37) — two more
+        // literals beside `{user_id}`, so the same reasoning as `ids` and `autocomplete` above:
+        // axum prefers a registered literal, and the `{user_id}` handler's exact-26-character
+        // rule was forwarding both of these anyway. `/users/stats/filtered` is one segment
+        // deeper, unregistered, and falls to `Router::fallback` whole.
+        .route(
+            "/api/v4/users/known",
+            partially_migrated(get(users::get_known_users)),
+        )
+        .route(
+            "/api/v4/users/stats",
+            partially_migrated(get(users::get_total_users_stats)),
+        )
+        // `BaseRoutes.User.Handle("/terms_of_service")` (api4/user.go:61) — one segment deeper
+        // than `{user_id}`. Registered GET only: the `POST` on the same path
+        // (`saveUserTermsOfService`, :60) falls to `partially_migrated`'s method fallback.
+        //
+        // The handler ignores `{user_id}` entirely and answers for the session's user; the id
+        // middleware still applies, because gorilla's `[A-Za-z0-9]+` still has to match for the
+        // request to reach a handler at all.
+        .route(
+            "/api/v4/users/{user_id}/terms_of_service",
+            partially_migrated_with_ids(&state, get(users::get_user_terms_of_service)),
+        )
         // `BaseRoutes.Teams.Handle("", ...)` (api4/team.go:35) — the bare `/teams` collection,
         // and the same non-question as `/api/v4/users` above: it is one segment shorter than
         // every `/api/v4/teams/...` route registered earlier, so axum sees a distinct path and
@@ -449,6 +490,45 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/posts/{post_id}/reactions",
             partially_migrated_with_ids(&state, get(reactions::get_reactions)),
         )
+        // `BaseRoutes.Post.Handle("/edit_history")` (api4/post.go:30) — another sibling of
+        // `/thread` and `/reactions`, one segment deeper than `/posts/{post_id}`.
+        .route(
+            "/api/v4/posts/{post_id}/edit_history",
+            partially_migrated_with_ids(&state, get(posts::get_edit_history_for_post)),
+        )
+        // `BaseRoutes.Post.Handle("/files/info")` (api4/post.go:33) — two segments deeper than
+        // `/posts/{post_id}`, so it shadows nothing and nothing shadows it. `POST /files` and
+        // `GET /files/{file_id}/info` are a different subtree entirely (`BaseRoutes.Files`,
+        // api.go:244); this route hangs off the *post*.
+        .route(
+            "/api/v4/posts/{post_id}/files/info",
+            partially_migrated_with_ids(&state, get(posts::get_file_infos_for_post)),
+        )
+        // `BaseRoutes.File.Handle("/info")` (api4/file.go:39). `{file_id}` is id-shaped —
+        // gorilla's class is `[A-Za-z0-9]+` (api.go:245) — so the id-charset middleware applies.
+        //
+        // Its five siblings under `/files/{file_id}` (`""`, `/thumbnail`, `/preview`, `/link`)
+        // and the `POST /files` collection are unregistered and fall to `Router::fallback`; all
+        // of them read the file backend, which this port does not have.
+        .route(
+            "/api/v4/files/{file_id}/info",
+            partially_migrated_with_ids(&state, get(files::get_file_info)),
+        )
+        // `BaseRoutes.Channel.Handle("/pinned")` (api4/channel.go:60) — one segment deeper than
+        // `/channels/{channel_id}` and a sibling of `/stats`, `/members` and `/posts`, all of
+        // which are static at that position. Nothing to prefer, in either router.
+        .route(
+            "/api/v4/channels/{channel_id}/pinned",
+            partially_migrated_with_ids(&state, get(channels::get_pinned_posts)),
+        )
+        // `BaseRoutes.Channel.Handle("/timezones")` (api4/channel.go:94) — a sibling of
+        // `/pinned`, `/stats` and `/members`, all static at that position. Note the *system*
+        // route `/api/v4/system/timezones` (api4/system.go:44) is a different subtree entirely
+        // and stays forwarded.
+        .route(
+            "/api/v4/channels/{channel_id}/timezones",
+            partially_migrated_with_ids(&state, get(channels::get_channel_members_timezones)),
+        )
         // `BaseRoutes.Emoji` (api.go:286). The precedence question here is the *reverse* of
         // axum's instinct and it matters: gorilla adds the `PathPrefix("/emoji")` subrouter
         // (api.go:285) **before** the `PathPrefix("/emoji/{emoji_id}")` one, so `/emoji/
@@ -459,6 +539,14 @@ pub fn router(state: AppState) -> Router {
         //
         // `/emoji/{emoji_id}/image` is one segment deeper and unregistered, so it falls to
         // `Router::fallback` whole.
+        // `BaseRoutes.Emojis.Handle("")` (api4/emoji.go:15) — the bare `/emoji` collection, one
+        // segment shorter than `{emoji_id}` below, so axum sees a distinct path and there is no
+        // precedence question of the kind that route's comment describes. `GET` only; `POST`
+        // (createEmoji) falls to `partially_migrated`'s method fallback.
+        .route(
+            "/api/v4/emoji",
+            partially_migrated(get(emoji::get_emoji_list)),
+        )
         .route(
             "/api/v4/emoji/{emoji_id}",
             partially_migrated_with_ids(&state, get(emoji::get_emoji)),

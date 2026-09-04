@@ -44,6 +44,18 @@ pub trait EmojiStore {
         &self,
         name: &str,
     ) -> impl std::future::Future<Output = Result<Emoji, StoreError>> + Send;
+
+    /// Port of `SqlEmojiStore.GetList` (emoji_store.go:74).
+    ///
+    /// `sort_by_name` is Go's `sort == model.EmojiSortByName`, resolved to a bool by the caller
+    /// because that is the only value the string can usefully take — the handler 400s anything
+    /// else and the empty string means "no ORDER BY at all".
+    fn get_list(
+        &self,
+        offset: i64,
+        limit: i64,
+        sort_by_name: bool,
+    ) -> impl std::future::Future<Output = Result<Vec<Emoji>, StoreError>> + Send;
 }
 
 #[derive(Debug, Clone)]
@@ -195,4 +207,95 @@ impl EmojiStore for SqlEmojiStore {
             name: row.name,
         })
     }
+
+    /// # Two statements, because the `ORDER BY` is the behaviour
+    ///
+    /// Go builds one `SelectBuilder` and appends `OrderBy("Name")` only when the caller asked
+    /// for it, so the unsorted case really does reach Postgres with **no ordering clause** and
+    /// the row order is whatever the plan yields. A parameterised `ORDER BY CASE WHEN $3 …`
+    /// would collapse both halves into one statement a mutation could no longer flip, and would
+    /// also impose an order Go does not ask for.
+    ///
+    /// # `LIMIT` and `OFFSET` are unconditional
+    ///
+    /// There is no `if limit > 0` guard here, unlike the channel and post pagination helpers:
+    /// `?per_page=0` is `LIMIT 0` and answers the empty list rather than everything. Go casts
+    /// both to `uint64`, so a negative value would wrap to something enormous — unreachable,
+    /// because `web.ParamsFromRequest` floors both at zero before the app layer multiplies them.
+    #[tracing::instrument(skip(self), fields(offset, limit, sort_by_name))]
+    async fn get_list(
+        &self,
+        offset: i64,
+        limit: i64,
+        sort_by_name: bool,
+    ) -> Result<Vec<Emoji>, StoreError> {
+        let rows = if sort_by_name {
+            sqlx::query_as!(
+                EmojiRow,
+                r#"
+                SELECT id        AS "id!",
+                       createat  AS "create_at!",
+                       updateat  AS "update_at!",
+                       deleteat  AS "delete_at!",
+                       creatorid AS "creator_id!",
+                       name      AS "name!"
+                  FROM emoji
+                 WHERE deleteat = 0
+                 ORDER BY name
+                 LIMIT $1 OFFSET $2
+                "#,
+                limit,
+                offset
+            )
+            .fetch_all(&self.pool)
+            .await
+        } else {
+            sqlx::query_as!(
+                EmojiRow,
+                r#"
+                SELECT id        AS "id!",
+                       createat  AS "create_at!",
+                       updateat  AS "update_at!",
+                       deleteat  AS "delete_at!",
+                       creatorid AS "creator_id!",
+                       name      AS "name!"
+                  FROM emoji
+                 WHERE deleteat = 0
+                 LIMIT $1 OFFSET $2
+                "#,
+                limit,
+                offset
+            )
+            .fetch_all(&self.pool)
+            .await
+        }
+        .map_err(|source| StoreError::Db {
+            context: "could not get list of emojis".to_owned(),
+            source,
+        })?;
+
+        Ok(rows
+            .into_iter()
+            .map(|row| Emoji {
+                id: row.id,
+                create_at: row.create_at,
+                update_at: row.update_at,
+                delete_at: row.delete_at,
+                creator_id: row.creator_id,
+                name: row.name,
+            })
+            .collect())
+    }
+}
+
+/// The six columns of `emojiSelectQuery` (emoji_store.go:27), named so the two `GetList`
+/// statements — which differ only in their `ORDER BY` — share one row type. `sqlx::query!`
+/// would give each branch its own anonymous record and they would not unify.
+struct EmojiRow {
+    id: String,
+    create_at: i64,
+    update_at: i64,
+    delete_at: i64,
+    creator_id: String,
+    name: String,
 }
