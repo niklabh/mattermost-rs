@@ -461,7 +461,7 @@ pub async fn get_team_stats(
 /// plus `_` and `-`, one character narrower than the username class (no `.`). A segment outside
 /// it never matches Go's route and falls to the mux 404, so it is forwarded rather than
 /// answered — [D-150]'s rule under a third alphabet.
-fn segment_matches_team_name_mux(value: &str) -> bool {
+pub(crate) fn segment_matches_team_name_mux(value: &str) -> bool {
     !value.is_empty()
         && value
             .bytes()

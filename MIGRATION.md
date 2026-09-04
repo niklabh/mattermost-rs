@@ -5382,3 +5382,33 @@ field under comparison and gives up only the ordering claim neither server makes
 assertion that both servers page over the same membership. The unpaged byte-for-byte check is
 untouched. **The rule, again: an unordered read may not be byte-compared as a sequence — and a
 paginated one may not be byte-compared at all.**
+
+## `GET /teams/name/{team_name}/channels/name/{channel_name}` — `getChannelByNameForTeamName` (2026-09-05)
+
+Served. `crates/mm-api/src/channels.rs` (`get_channel_by_name_for_team_name`,
+`validate_team_name_then_channel_name`, and the extracted `serve_named_channel`),
+`crates/mm-app/src/channel.rs` (`get_channel_by_name_for_team_name`); 10 parity tests in
+`crates/mm-api/tests/parity/channel_by_name_for_team_name.rs` plus 1 unit test. The webapp
+resolves permalinks this way, because a link carries names and not ids.
+
+**The one thing a reader would otherwise get wrong: the team lookup's *failure* branch is also a
+404.** Go writes `app.team.get_by_name.app_error` with `http.StatusNotFound` (channel.go:2368),
+so a genuine database failure resolving the team answers 404 where every sibling answers 500.
+Beyond that this is `getChannelByName` with the team named: same permission block, same
+`FillInChannelProps`, same trailing newline — now shared rather than copied, since the two
+handlers differed only in the `where` they stamp on a refusal, and `where` is not a field of the
+JSON error body.
+
+### The survivor was a validator whose gap is one character wide
+
+Disabling `IsValidChannelIdentifier` on this path survived the first run. The obvious probe — a
+one-character channel name — does **not** 400: there is no minimum-length rule on a channel name,
+measured, unlike the two-character minimum on a team name. The reachable gap is the *first*
+character: the mux class `[A-Za-z0-9_-]+` accepts a leading `-` or `_` and the validator requires
+alphanumeric. The suite now asks for both, and for the one-character name that must still be a
+404, so the test cannot pass against a validator that simply rejects everything short.
+
+Mutation run: **12 run, 10 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/channel-by-team-name.plan`). Two of those mutations land in the shared tail
+and are caught by the older `channel_by_name` suite, which is why the plan filters on both module
+names — narrowing to one would let the other decide the verdict.

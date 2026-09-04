@@ -416,6 +416,35 @@ impl App {
             })
     }
 
+    /// Port of `app.App.GetChannelByNameForTeamName` (channel.go:2358).
+    ///
+    /// [`Self::get_channel_by_name`] with the team resolved by **name** first, and the same two
+    /// channel error ids after it. Two things about the team half are worth stating:
+    ///
+    /// - **Both team branches are 404**, including the default one. Go writes
+    ///   `app.team.get_by_name.app_error` with `http.StatusNotFound` (channel.go:2368), so a
+    ///   genuine database failure resolving the team answers 404 here where every sibling
+    ///   answers 500. Reproduced by delegating to [`crate::App::get_team_by_name`], which
+    ///   already carries that shape.
+    /// - **`where` differs from Go's** — this delegates, so the team errors say `GetTeamByName`
+    ///   where Go says `GetChannelByNameForTeamName`. `where` is not a field of the JSON error
+    ///   body (`id`, `message`, `detailed_error`, `request_id`, `status_code`), so nothing on
+    ///   the wire moves; duplicating the function to change an invisible string would not.
+    ///
+    /// The team is used only for its id. Its own permissions are checked by the handler against
+    /// `channel.TeamId`, which for a DM or GM is the empty string and not this team's id.
+    #[tracing::instrument(skip_all, fields(team_name = %team_name, name = %channel_name, include_deleted))]
+    pub async fn get_channel_by_name_for_team_name(
+        &self,
+        channel_name: &str,
+        team_name: &str,
+        include_deleted: bool,
+    ) -> AppResult<Channel> {
+        let team = self.get_team_by_name(team_name).await?;
+        self.get_channel_by_name(channel_name, &team.id, include_deleted)
+            .await
+    }
+
     /// Port of `app.App.GetChannelsForTeamForUser` (channel.go:2409) through the
     /// `Server.getChannelsForTeamForUser` (:2394) it delegates to.
     ///
