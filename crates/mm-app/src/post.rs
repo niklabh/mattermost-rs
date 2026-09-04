@@ -52,7 +52,7 @@ use mm_model::post_list::{PostList, PostMap};
 use mm_model::post_metadata::PostMetadata;
 use mm_model::reaction::Reaction;
 use mm_model::session::Session;
-use mm_model::utils::{AppError, etag, get_millis, remove_duplicate_strings};
+use mm_model::utils::{AppError, AppResult, etag, get_millis, remove_duplicate_strings};
 use mm_store::post_store::{GetPostThreadOptions, GetPostsOptions};
 use mm_store::{EmojiStore, FileInfoStore, PostStore, ReactionStore, StoreError};
 
@@ -147,11 +147,7 @@ impl App {
     /// The cloud-limit check that follows in Go is a no-op without a licence carrying a post
     /// history limit; see the module docs.
     #[tracing::instrument(skip(self), fields(post_id = %post_id, incl_deleted))]
-    pub async fn get_single_post(
-        &self,
-        post_id: &str,
-        incl_deleted: bool,
-    ) -> Result<Post, AppError> {
+    pub async fn get_single_post(&self, post_id: &str, incl_deleted: bool) -> AppResult<Post> {
         self.store()
             .post()
             .get_single(post_id, incl_deleted)
@@ -163,7 +159,7 @@ impl App {
                     tracing::error!(error = %err, "post lookup failed");
                     500
                 };
-                AppError::new(
+                AppError::boxed(
                     "GetSinglePost",
                     "app.post.get.app_error",
                     None,
@@ -193,13 +189,10 @@ impl App {
         post_id: &str,
         session: &Session,
         incl_deleted: bool,
-    ) -> Result<(Post, bool), Box<AppError>> {
-        let post = self
-            .get_single_post(post_id, incl_deleted)
-            .await
-            .map_err(Box::new)?;
+    ) -> AppResult<(Post, bool)> {
+        let post = self.get_single_post(post_id, incl_deleted).await?;
 
-        let channel = self.get_channel(&post.channel_id).await.map_err(Box::new)?;
+        let channel = self.get_channel(&post.channel_id).await?;
 
         let (ok, is_member) = self
             .session_has_permission_to_read_channel(session, &channel)
@@ -520,10 +513,10 @@ impl App {
     /// (`app.post.get_posts.app_error`) is raised for `ErrInvalidInput`, which the store returns
     /// for `PerPage > 1000` — a value `parse_per_page` clamps away before the handler runs.
     #[tracing::instrument(skip(self), fields(channel_id = %opts.channel_id))]
-    pub async fn get_posts_page(&self, opts: GetPostsOptions<'_>) -> Result<PostList, AppError> {
+    pub async fn get_posts_page(&self, opts: GetPostsOptions<'_>) -> AppResult<PostList> {
         self.store().post().get_posts(opts).await.map_err(|err| {
             tracing::error!(error = %err, "post page lookup failed");
-            AppError::new(
+            AppError::boxed(
                 "GetPostsPage",
                 "app.post.get_root_posts.app_error",
                 None,
@@ -562,7 +555,7 @@ impl App {
         &self,
         post_id: &str,
         opts: GetPostThreadOptions<'_>,
-    ) -> Result<PostList, AppError> {
+    ) -> AppResult<PostList> {
         self.store()
             .post()
             .get_thread(post_id, opts)
@@ -574,7 +567,7 @@ impl App {
                     tracing::error!(error = %err, "post thread lookup failed");
                     500
                 };
-                AppError::new(
+                AppError::boxed(
                     "GetPostThread",
                     "app.post.get.app_error",
                     None,
@@ -726,7 +719,7 @@ impl App {
         let mut all_previews_have_membership = true;
 
         if let Some(posts) = sanitized.posts.as_mut() {
-            for (_, post) in posts.iter_mut() {
+            for post in posts.values_mut() {
                 let (clean, is_member) = self
                     .sanitize_post_metadata_for_user(std::mem::take(post), user_id)
                     .await?;

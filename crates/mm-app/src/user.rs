@@ -2,7 +2,7 @@
 
 use mm_model::user::User;
 use mm_model::user_autocomplete::{UserAutocompleteInChannel, UserAutocompleteInTeam};
-use mm_model::utils::AppError;
+use mm_model::utils::{AppError, AppResult};
 use mm_store::user_store::UserSearchOptions;
 use mm_store::{StoreError, UserStore};
 
@@ -20,7 +20,7 @@ impl App {
     /// exists — so no test could reach the branch until `GET /users/{user_id}` landed and its
     /// parity suite compared the 404 against the running server.
     #[tracing::instrument(skip_all, fields(user_id = %id))]
-    pub async fn get_user(&self, id: &str) -> Result<User, AppError> {
+    pub async fn get_user(&self, id: &str) -> AppResult<User> {
         self.store().user().get(id).await.map_err(get_user_error)
     }
 }
@@ -34,7 +34,7 @@ impl App {
     /// `MissingAccountError` either; a client cannot correlate "no such id" with "no such
     /// username" by error id, and that is Go's wire.
     #[tracing::instrument(skip_all, fields(username = %username))]
-    pub async fn get_user_by_username(&self, username: &str) -> Result<User, AppError> {
+    pub async fn get_user_by_username(&self, username: &str) -> AppResult<User> {
         self.store()
             .user()
             .get_by_username(username)
@@ -46,7 +46,7 @@ impl App {
                     tracing::error!(error = %err, "user-by-username lookup failed");
                     500
                 };
-                AppError::new(
+                AppError::boxed(
                     "GetUserByUsername",
                     "app.user.get_by_username.app_error",
                     None,
@@ -69,18 +69,14 @@ impl App {
     /// cache. One error branch, one id — `app.user.get_profiles.app_error`, 500 — for any store
     /// failure; there is no not-found, an unknown id is simply absent from the list.
     #[tracing::instrument(skip_all, fields(count = ids.len(), since))]
-    pub async fn get_users_by_ids(
-        &self,
-        ids: &[String],
-        since: i64,
-    ) -> Result<Vec<User>, AppError> {
+    pub async fn get_users_by_ids(&self, ids: &[String], since: i64) -> AppResult<Vec<User>> {
         self.store()
             .user()
             .get_profile_by_ids(ids, since)
             .await
             .map_err(|err| {
                 tracing::error!(error = %err, "users-by-ids lookup failed");
-                AppError::new(
+                AppError::boxed(
                     "GetUsersByIds",
                     "app.user.get_profiles.app_error",
                     None,
@@ -119,9 +115,9 @@ impl UserPage {
 /// `app.user.get_profiles.app_error`. Only `where` separates them, and `where` is `json:"-"`,
 /// so on the wire all five are the same response — the parameter exists to keep the *logs*
 /// honest, not the clients.
-fn get_profiles_error(where_: &'static str, err: StoreError) -> AppError {
+fn get_profiles_error(where_: &'static str, err: StoreError) -> Box<AppError> {
     tracing::error!(error = %err, where_, "user profile listing failed");
-    AppError::new(
+    AppError::boxed(
         where_,
         "app.user.get_profiles.app_error",
         None,
@@ -143,7 +139,7 @@ impl App {
     /// (`u.Sanitize(map[string]bool{})`) and once in `sanitizeProfiles`; the first is wholly
     /// subsumed by the second, which clears the same four fields plus more, so it is not ported.
     #[tracing::instrument(skip_all, fields(page = page.page, per_page = page.per_page))]
-    pub async fn get_users_page(&self, page: UserPage) -> Result<Vec<User>, AppError> {
+    pub async fn get_users_page(&self, page: UserPage) -> AppResult<Vec<User>> {
         self.store()
             .user()
             .get_all_profiles(page.page, page.per_page, page.deleted())
@@ -157,7 +153,7 @@ impl App {
         &self,
         team_id: &str,
         page: UserPage,
-    ) -> Result<Vec<User>, AppError> {
+    ) -> AppResult<Vec<User>> {
         self.store()
             .user()
             .get_profiles_in_team(team_id, page.page, page.per_page, page.deleted())
@@ -175,7 +171,7 @@ impl App {
         &self,
         channel_id: &str,
         page: UserPage,
-    ) -> Result<Vec<User>, AppError> {
+    ) -> AppResult<Vec<User>> {
         self.store()
             .user()
             .get_profiles_in_channel(channel_id, page.page, page.per_page, page.deleted())
@@ -194,7 +190,7 @@ impl App {
         team_id: &str,
         channel_id: &str,
         page: UserPage,
-    ) -> Result<Vec<User>, AppError> {
+    ) -> AppResult<Vec<User>> {
         self.store()
             .user()
             .get_profiles_not_in_channel(team_id, channel_id, page.offset(), page.per_page)
@@ -208,7 +204,7 @@ impl App {
         &self,
         team_id: &str,
         page: UserPage,
-    ) -> Result<Vec<User>, AppError> {
+    ) -> AppResult<Vec<User>> {
         self.store()
             .user()
             .get_profiles_not_in_team(team_id, page.offset(), page.per_page)
@@ -282,9 +278,9 @@ impl App {
 /// [`get_profiles_error`] — is `json:"-"` and therefore invisible to a client. It is reachable
 /// from a real client: `?limit=-1` casts to a `uint64` on Go's side and to a negative `LIMIT` on
 /// ours, and Postgres refuses both. Measured, not inferred.
-fn search_error(where_: &'static str, err: StoreError) -> AppError {
+fn search_error(where_: &'static str, err: StoreError) -> Box<AppError> {
     tracing::error!(error = %err, where_, "user search failed");
-    AppError::new(
+    AppError::boxed(
         where_,
         "app.user.search.app_error",
         None,
@@ -309,7 +305,7 @@ impl App {
         team_id: &str,
         term: &str,
         options: &UserSearchOptions,
-    ) -> Result<Vec<User>, AppError> {
+    ) -> AppResult<Vec<User>> {
         let users = self
             .store()
             .user()
@@ -331,7 +327,7 @@ impl App {
         team_id: &str,
         term: &str,
         options: &UserSearchOptions,
-    ) -> Result<UserAutocompleteInTeam, AppError> {
+    ) -> AppResult<UserAutocompleteInTeam> {
         let users = self
             .store()
             .user()
@@ -372,7 +368,7 @@ impl App {
         channel_id: &str,
         term: &str,
         options: &UserSearchOptions,
-    ) -> Result<UserAutocompleteInChannel, AppError> {
+    ) -> AppResult<UserAutocompleteInChannel> {
         let term = term.trim();
         let store = self.store().user();
 
@@ -395,9 +391,9 @@ impl App {
 /// The store-error-to-`AppError` mapping for `GetUser`, split out so it is reachable from a test
 /// without a database. A miss and a broken query are different HTTP statuses, and collapsing them
 /// would report a server fault to the client as a missing account.
-fn get_user_error(err: StoreError) -> AppError {
+fn get_user_error(err: StoreError) -> Box<AppError> {
     match err {
-        StoreError::NotFound { .. } => AppError::new(
+        StoreError::NotFound { .. } => AppError::boxed(
             "GetUser",
             "app.user.missing_account.const",
             None,
@@ -406,7 +402,7 @@ fn get_user_error(err: StoreError) -> AppError {
         ),
         other => {
             tracing::error!(error = %other, "user lookup failed");
-            AppError::new(
+            AppError::boxed(
                 "GetUser",
                 "app.user.get.app_error",
                 None,

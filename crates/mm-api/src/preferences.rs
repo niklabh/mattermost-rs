@@ -55,7 +55,7 @@ fn require_alpha_num_hyphen_underscore(value: &str, parameter: &str) -> Result<(
 fn encode_with_newline<T: serde::Serialize>(where_: &str, value: &T) -> Result<Response, ApiError> {
     let mut body = serde_json::to_vec(value).map_err(|err| {
         tracing::error!(error = %err, "failed to serialise {where_} response");
-        ApiError(mm_model::utils::AppError::new(
+        ApiError::from(mm_model::utils::AppError::new(
             where_,
             "api.marshal_error",
             None,
@@ -138,7 +138,7 @@ async fn serve_preference_read(
         .session_has_permission_to_user(&session.0, user_id)
         .await
     {
-        return Err(ApiError(*make_permission_error(
+        return Err(ApiError::from(make_permission_error(
             &session.0,
             &[&PERMISSION_EDIT_OTHER_USERS],
         )));
@@ -334,7 +334,7 @@ pub async fn update_preferences_me(
         .update_preferences(&session.0.user_id, &preferences)
         .await
     {
-        return ApiError(app_error).into_response();
+        return ApiError::from(app_error).into_response();
     }
 
     // `ReturnStatusOK` — `{"status":"OK"}` written with `w.Write`, so no trailing newline

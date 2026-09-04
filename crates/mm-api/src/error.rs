@@ -15,8 +15,13 @@ pub const SERVED_BY: axum::http::HeaderName =
     axum::http::HeaderName::from_static("x-mmrs-served-by");
 
 /// An error on its way to a client, carrying the `AppError` Go would have written.
+///
+/// The `AppError` is **boxed**. It carries five `String`s and is 192 bytes, which is larger than
+/// most of the `T`s it shares a `Result` with, so an unboxed newtype makes every handler's
+/// success path carry the failure path's width. `mm_model::utils::AppResult` boxes for the same
+/// reason; this is the `mm-api` end of that decision.
 #[derive(Debug)]
-pub struct ApiError(pub AppError);
+pub struct ApiError(pub Box<AppError>);
 
 impl ApiError {
     /// Port of the `ApiSessionRequired` rejection when no usable session is present.
@@ -25,13 +30,13 @@ impl ApiError {
     /// detail — the same answer for a missing token and an expired one, which is deliberate on
     /// their side: it tells an attacker nothing about which tokens exist.
     pub fn unauthenticated() -> Self {
-        ApiError(AppError::new(
+        ApiError(Box::new(AppError::new(
             "ServeHTTP",
             "api.context.session_expired.app_error",
             None,
             "token not found or expired",
             401,
-        ))
+        )))
     }
 
     /// Port of `NewInvalidParamError` (web/context.go:254) — the answer for a body that will not
@@ -43,13 +48,13 @@ impl ApiError {
             "Name".to_owned(),
             serde_json::Value::String(parameter.to_owned()),
         );
-        ApiError(AppError::new(
+        ApiError(Box::new(AppError::new(
             "Context",
             "api.context.invalid_body_param.app_error",
             Some(params),
             String::new(),
             400,
-        ))
+        )))
     }
 
     /// Port of `NewInvalidURLParamError` (web/context.go:259) — a path segment that is not a
@@ -62,18 +67,25 @@ impl ApiError {
             "Name".to_owned(),
             serde_json::Value::String(parameter.to_owned()),
         );
-        ApiError(AppError::new(
+        ApiError(Box::new(AppError::new(
             "Context",
             "api.context.invalid_url_param.app_error",
             Some(params),
             String::new(),
             400,
-        ))
+        )))
     }
 }
 
 impl From<AppError> for ApiError {
     fn from(err: AppError) -> Self {
+        ApiError(Box::new(err))
+    }
+}
+
+/// The app layer returns `AppResult`, which is already boxed — take it without re-allocating.
+impl From<Box<AppError>> for ApiError {
+    fn from(err: Box<AppError>) -> Self {
         ApiError(err)
     }
 }
@@ -166,7 +178,7 @@ mod tests {
     /// A code outside the HTTP range must not take the process down.
     #[test]
     fn an_impossible_status_code_degrades_to_500() {
-        let err = ApiError(AppError::new("X", "some.id", None, "", 9_999));
+        let err = ApiError(Box::new(AppError::new("X", "some.id", None, "", 9_999)));
         assert_eq!(
             err.into_response().status(),
             StatusCode::INTERNAL_SERVER_ERROR

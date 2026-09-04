@@ -8,7 +8,7 @@ use mm_model::channel::{Channel, ChannelSearchOpts};
 use mm_model::channel_list::ChannelList;
 use mm_model::channel_member::{CHANNEL_MARK_UNREAD_MENTION, ChannelMember, ChannelUnread};
 use mm_model::user::MARK_UNREAD_NOTIFY_PROP;
-use mm_model::utils::AppError;
+use mm_model::utils::{AppError, AppResult};
 use mm_store::ChannelStore;
 
 use crate::App;
@@ -29,7 +29,7 @@ impl App {
     /// **Not ported:** `HydrateChannelPolicyActions`, which Go calls next and whose failure it only
     /// logs. See [D-141].
     #[tracing::instrument(skip_all, fields(channel_id = %channel_id))]
-    pub async fn get_channel(&self, channel_id: &str) -> Result<Channel, AppError> {
+    pub async fn get_channel(&self, channel_id: &str) -> AppResult<Channel> {
         self.store().channel().get(channel_id).await.map_err(|err| {
             let params = HashMap::from([(
                 "channel_id".to_owned(),
@@ -37,7 +37,7 @@ impl App {
             )]);
 
             if err.is_not_found() {
-                AppError::new(
+                AppError::boxed(
                     "GetChannel",
                     "app.channel.get.existing.app_error",
                     Some(params),
@@ -46,7 +46,7 @@ impl App {
                 )
             } else {
                 tracing::error!(error = %err, "channel lookup failed");
-                AppError::new(
+                AppError::boxed(
                     "GetChannel",
                     "app.channel.get.find.app_error",
                     Some(params),
@@ -74,14 +74,14 @@ impl App {
         &self,
         channel_id: &str,
         user_id: &str,
-    ) -> Result<ChannelMember, AppError> {
+    ) -> AppResult<ChannelMember> {
         self.store()
             .channel()
             .get_member(channel_id, user_id)
             .await
             .map_err(|err| {
                 if err.is_not_found() {
-                    AppError::new(
+                    AppError::boxed(
                         "GetChannelMember",
                         "app.channel.get_member.missing.app_error",
                         None,
@@ -90,7 +90,7 @@ impl App {
                     )
                 } else {
                     tracing::error!(error = %err, "channel member lookup failed");
-                    AppError::new(
+                    AppError::boxed(
                         "GetChannelMember",
                         "app.channel.get_member.app_error",
                         None,
@@ -126,7 +126,7 @@ impl App {
         &self,
         channel_id: &str,
         user_id: &str,
-    ) -> Result<ChannelUnread, AppError> {
+    ) -> AppResult<ChannelUnread> {
         let mut unread = self
             .store()
             .channel()
@@ -139,7 +139,7 @@ impl App {
                     tracing::error!(error = %err, "channel unread lookup failed");
                     500
                 };
-                AppError::new(
+                AppError::boxed(
                     "GetChannelUnread",
                     "app.channel.get_unread.app_error",
                     None,
@@ -170,14 +170,14 @@ impl App {
         channel_id: &str,
         page: i64,
         per_page: i64,
-    ) -> Result<Vec<ChannelMember>, AppError> {
+    ) -> AppResult<Vec<ChannelMember>> {
         self.store()
             .channel()
             .get_members(channel_id, page.wrapping_mul(per_page), per_page)
             .await
             .map_err(|err| {
                 tracing::error!(error = %err, "channel members page lookup failed");
-                AppError::new(
+                AppError::boxed(
                     "GetChannelMembersPage",
                     "app.channel.get_members.app_error",
                     None,
@@ -198,7 +198,7 @@ impl App {
         &self,
         team_id: &str,
         user_id: &str,
-    ) -> Result<Vec<ChannelMember>, AppError> {
+    ) -> AppResult<Vec<ChannelMember>> {
         let members = self
             .store()
             .channel()
@@ -206,7 +206,7 @@ impl App {
             .await
             .map_err(|err| {
                 tracing::error!(error = %err, "channel members for user lookup failed");
-                AppError::new(
+                AppError::boxed(
                     "GetChannelMembersForUser",
                     "app.channel.get_members.app_error",
                     None,
@@ -226,14 +226,14 @@ impl App {
     /// any grant branch, the admin's included — **measured**, after a first draft of the parity
     /// suite asserted the opposite and both servers refused.
     #[tracing::instrument(skip_all, fields(channel_id = %channel_id))]
-    pub async fn get_channel_member_count(&self, channel_id: &str) -> Result<i64, AppError> {
+    pub async fn get_channel_member_count(&self, channel_id: &str) -> AppResult<i64> {
         self.store()
             .channel()
             .get_member_count(channel_id)
             .await
             .map_err(|err| {
                 tracing::error!(error = %err, "channel member count failed");
-                AppError::new(
+                AppError::boxed(
                     "GetChannelMemberCount",
                     "app.channel.get_member_count.app_error",
                     None,
@@ -249,14 +249,14 @@ impl App {
     /// this function's. A copy-paste in Go, reproduced because the string is on the wire when
     /// `EnableDeveloper` exposes it, and because "fix" and "drift" are indistinguishable later.
     #[tracing::instrument(skip_all, fields(channel_id = %channel_id))]
-    pub async fn get_channel_file_count(&self, channel_id: &str) -> Result<i64, AppError> {
+    pub async fn get_channel_file_count(&self, channel_id: &str) -> AppResult<i64> {
         self.store()
             .channel()
             .get_file_count(channel_id)
             .await
             .map_err(|err| {
                 tracing::error!(error = %err, "channel file count failed");
-                AppError::new(
+                AppError::boxed(
                     "SqlChannelStore.GetFileCount",
                     "app.channel.get_file_count.app_error",
                     None,
@@ -273,14 +273,14 @@ impl App {
     /// **reuses `app.channel.get_member_count.app_error`** — there is no `get_guest_count` id
     /// anywhere in Go. A reader tidying either one changes the wire.
     #[tracing::instrument(skip_all, fields(channel_id = %channel_id))]
-    pub async fn get_channel_guest_count(&self, channel_id: &str) -> Result<i64, AppError> {
+    pub async fn get_channel_guest_count(&self, channel_id: &str) -> AppResult<i64> {
         self.store()
             .channel()
             .get_guest_count(channel_id)
             .await
             .map_err(|err| {
                 tracing::error!(error = %err, "channel guest count failed");
-                AppError::new(
+                AppError::boxed(
                     "SqlChannelStore.GetGuestCount",
                     "app.channel.get_member_count.app_error",
                     None,
@@ -296,14 +296,14 @@ impl App {
     /// `pinnedpost`, the same missing underscore as the wire tag on
     /// [`mm_model::channel_stats::ChannelStats::pinned_post_count`].
     #[tracing::instrument(skip_all, fields(channel_id = %channel_id))]
-    pub async fn get_channel_pinned_post_count(&self, channel_id: &str) -> Result<i64, AppError> {
+    pub async fn get_channel_pinned_post_count(&self, channel_id: &str) -> AppResult<i64> {
         self.store()
             .channel()
             .get_pinned_post_count(channel_id)
             .await
             .map_err(|err| {
                 tracing::error!(error = %err, "channel pinned post count failed");
-                AppError::new(
+                AppError::boxed(
                     "GetChannelPinnedPostCount",
                     "app.channel.get_pinnedpost_count.app_error",
                     None,
@@ -323,14 +323,14 @@ impl App {
         &self,
         channel_names: &[String],
         team_id: &str,
-    ) -> Result<Vec<Channel>, AppError> {
+    ) -> AppResult<Vec<Channel>> {
         self.store()
             .channel()
             .get_by_names(team_id, channel_names)
             .await
             .map_err(|err| {
                 tracing::error!(error = %err, "channels-by-names lookup failed");
-                AppError::new(
+                AppError::boxed(
                     "GetChannelsByNames",
                     "app.channel.get_by_name.existing.app_error",
                     None,
@@ -354,14 +354,14 @@ impl App {
         channel_name: &str,
         team_id: &str,
         include_deleted: bool,
-    ) -> Result<Channel, AppError> {
+    ) -> AppResult<Channel> {
         self.store()
             .channel()
             .get_by_name(team_id, channel_name, include_deleted)
             .await
             .map_err(|err| {
                 if err.is_not_found() {
-                    AppError::new(
+                    AppError::boxed(
                         "GetChannelByName",
                         "app.channel.get_by_name.missing.app_error",
                         None,
@@ -370,7 +370,7 @@ impl App {
                     )
                 } else {
                     tracing::error!(error = %err, "channel-by-name lookup failed");
-                    AppError::new(
+                    AppError::boxed(
                         "GetChannelByName",
                         "app.channel.get_by_name.existing.app_error",
                         None,
@@ -398,7 +398,7 @@ impl App {
         team_id: &str,
         user_id: &str,
         opts: &ChannelSearchOpts,
-    ) -> Result<ChannelList, AppError> {
+    ) -> AppResult<ChannelList> {
         let channels = self
             .store()
             .channel()
@@ -406,7 +406,7 @@ impl App {
             .await
             .map_err(|err| {
                 if err.is_not_found() {
-                    AppError::new(
+                    AppError::boxed(
                         "GetChannelsForUser",
                         "app.channel.get_channels.not_found.app_error",
                         None,
@@ -415,7 +415,7 @@ impl App {
                     )
                 } else {
                     tracing::error!(error = %err, "channels-for-team-for-user lookup failed");
-                    AppError::new(
+                    AppError::boxed(
                         "GetChannelsForUser",
                         "app.channel.get_channels.get.app_error",
                         None,
@@ -445,7 +445,7 @@ impl App {
         last_delete_at: i64,
         page_size: i64,
         from_channel_id: &str,
-    ) -> Result<ChannelList, AppError> {
+    ) -> AppResult<ChannelList> {
         let channels = self
             .store()
             .channel()
@@ -459,7 +459,7 @@ impl App {
             .await
             .map_err(|err| {
                 if err.is_not_found() {
-                    AppError::new(
+                    AppError::boxed(
                         "GetChannelsForUser",
                         "app.channel.get_channels.not_found.app_error",
                         None,
@@ -468,7 +468,7 @@ impl App {
                     )
                 } else {
                     tracing::error!(error = %err, "channels-for-user lookup failed");
-                    AppError::new(
+                    AppError::boxed(
                         "GetChannelsForUser",
                         "app.channel.get_channels.get.app_error",
                         None,
@@ -495,7 +495,7 @@ impl App {
         team_id: &str,
         offset: i64,
         limit: i64,
-    ) -> Result<ChannelList, AppError> {
+    ) -> AppResult<ChannelList> {
         let channels = self
             .store()
             .channel()
@@ -503,7 +503,7 @@ impl App {
             .await
             .map_err(|err| {
                 tracing::error!(error = %err, "public-channels-for-team lookup failed");
-                AppError::new(
+                AppError::boxed(
                     "GetPublicChannelsForTeam",
                     "app.channel.get_public_channels.get.app_error",
                     None,
@@ -527,7 +527,7 @@ impl App {
         team_id: &str,
         offset: i64,
         limit: i64,
-    ) -> Result<ChannelList, AppError> {
+    ) -> AppResult<ChannelList> {
         let channels = self
             .store()
             .channel()
@@ -535,7 +535,7 @@ impl App {
             .await
             .map_err(|err| {
                 tracing::error!(error = %err, "private-channels-for-team lookup failed");
-                AppError::new(
+                AppError::boxed(
                     "GetPrivateChannelsForTeam",
                     "app.channel.get_private_channels.get.app_error",
                     None,
@@ -563,7 +563,7 @@ impl App {
         limit: i64,
         user_id: &str,
         skip_team_membership_check: bool,
-    ) -> Result<ChannelList, AppError> {
+    ) -> AppResult<ChannelList> {
         let channels = self
             .store()
             .channel()
@@ -571,7 +571,7 @@ impl App {
             .await
             .map_err(|err| {
                 if err.is_not_found() {
-                    AppError::new(
+                    AppError::boxed(
                         "GetDeletedChannels",
                         "app.channel.get_deleted.missing.app_error",
                         None,
@@ -580,7 +580,7 @@ impl App {
                     )
                 } else {
                     tracing::error!(error = %err, "deleted-channels lookup failed");
-                    AppError::new(
+                    AppError::boxed(
                         "GetDeletedChannels",
                         "app.channel.get_deleted.existing.app_error",
                         None,
@@ -596,7 +596,7 @@ impl App {
     /// Port of `app.App.FillInChannelProps` (channel.go:4091): the one-element case of
     /// [`App::fill_in_channels_props`], which is exactly how Go defines it.
     #[tracing::instrument(skip_all, fields(channel_id = %channel.id))]
-    pub async fn fill_in_channel_props(&self, channel: &mut Channel) -> Result<(), AppError> {
+    pub async fn fill_in_channel_props(&self, channel: &mut Channel) -> AppResult<()> {
         self.fill_in_channels_props(std::slice::from_mut(channel))
             .await
     }
@@ -622,7 +622,7 @@ impl App {
     /// team", exactly as Go's omitted predicate does. Only `Type == "O"` mentions render; a
     /// private channel's existence is not leaked into a prop anyone in the channel can read.
     #[tracing::instrument(skip_all, fields(channels = channels.len()))]
-    pub async fn fill_in_channels_props(&self, channels: &mut [Channel]) -> Result<(), AppError> {
+    pub async fn fill_in_channels_props(&self, channels: &mut [Channel]) -> AppResult<()> {
         // Go groups with a map keyed by team; iteration order over a map is unspecified there
         // and irrelevant here, since each group is independent. A `BTreeMap` keeps the lookups
         // in a stable order for the logs.

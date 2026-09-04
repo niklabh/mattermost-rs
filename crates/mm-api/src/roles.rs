@@ -221,7 +221,7 @@ fn json_ok(body: Vec<u8>) -> Response {
 
 /// `model.NewAppError(where, "api.marshal_error", nil, "", 500)`.
 fn marshal_error(where_: &str) -> ApiError {
-    ApiError(AppError::new(
+    ApiError::from(AppError::new(
         where_,
         "api.marshal_error",
         None,
@@ -232,7 +232,7 @@ fn marshal_error(where_: &str) -> ApiError {
 
 /// `model.NewAppError("getRolesByNames", model.PayloadParseError, nil, "", 400)`.
 fn payload_parse_error() -> ApiError {
-    ApiError(AppError::new(
+    ApiError::from(AppError::new(
         "getRolesByNames",
         PAYLOAD_PARSE_ERROR,
         None,
@@ -280,7 +280,7 @@ fn parse_role_names(body: &[u8]) -> Result<Vec<String>, ApiError> {
             "MaxNames".to_owned(),
             serde_json::Value::from(GET_ROLES_BY_NAMES_MAX),
         );
-        return Err(ApiError(AppError::new(
+        return Err(ApiError::from(AppError::new(
             "getRolesByNames",
             "api.roles.get_multiple_by_name_too_many.request_error",
             Some(params),
@@ -302,7 +302,7 @@ fn parse_role_names(body: &[u8]) -> Result<Vec<String>, ApiError> {
 mod tests {
     use super::*;
 
-    fn error_of(body: &str) -> AppError {
+    fn error_of(body: &str) -> Box<AppError> {
         parse_role_names(body.as_bytes())
             .expect_err("this body must be rejected")
             .0

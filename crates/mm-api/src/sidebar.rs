@@ -133,7 +133,7 @@ fn json_body(body: Vec<u8>) -> Response {
 }
 
 fn marshal_error(where_: &'static str) -> Response {
-    ApiError(mm_model::utils::AppError::new(
+    ApiError::from(mm_model::utils::AppError::new(
         where_,
         "api.marshal_error",
         None,
@@ -200,7 +200,7 @@ pub async fn get_categories_for_team_for_user(
     )
     .await;
     if let Some(permission) = denial {
-        return ApiError(*make_permission_error(&session.0, &[permission])).into_response();
+        return ApiError::from(make_permission_error(&session.0, &[permission])).into_response();
     }
 
     let categories = match state
@@ -216,7 +216,7 @@ pub async fn get_categories_for_team_for_user(
             );
             return crate::proxy::forward_to_go(State(state), request).await;
         }
-        Err(err) => return ApiError(err).into_response(),
+        Err(err) => return ApiError::from(err).into_response(),
     };
     tracing::Span::current().record("forwarded", false);
 
@@ -279,7 +279,7 @@ pub async fn get_category_order_for_team_for_user(
     )
     .await;
     if let Some(permission) = denial {
-        return ApiError(*make_permission_error(&session.0, &[permission])).into_response();
+        return ApiError::from(make_permission_error(&session.0, &[permission])).into_response();
     }
 
     let order = match state
@@ -288,7 +288,7 @@ pub async fn get_category_order_for_team_for_user(
         .await
     {
         Ok(order) => order,
-        Err(err) => return ApiError(err).into_response(),
+        Err(err) => return ApiError::from(err).into_response(),
     };
     tracing::Span::current().record("count", order.len());
 
@@ -373,12 +373,12 @@ pub async fn get_category_for_team_for_user(
     )
     .await;
     if let Some(permission) = denial {
-        return ApiError(*make_permission_error(&session.0, &[permission])).into_response();
+        return ApiError::from(make_permission_error(&session.0, &[permission])).into_response();
     }
 
     let category = match state.app.get_sidebar_category(&category).await {
         Ok(category) => category,
-        Err(err) => return ApiError(err).into_response(),
+        Err(err) => return ApiError::from(err).into_response(),
     };
 
     match serde_json::to_vec(&category) {

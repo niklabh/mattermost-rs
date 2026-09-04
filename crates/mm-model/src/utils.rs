@@ -1353,6 +1353,23 @@ impl AppError {
         }
     }
 
+    /// [`AppError::new`], boxed — the constructor for anything returning [`AppResult`].
+    ///
+    /// `AppError` is 192 bytes, so an unboxed `Result<T, AppError>` makes every success path as
+    /// wide as the failure path; that is why [`AppResult`] boxes. This exists so a call site
+    /// producing an error for such a `Result` is a single expression rather than
+    /// `Box::new(AppError::new(..))` wrapped around five arguments. The argument list is
+    /// [`AppError::new`]'s, unchanged.
+    pub fn boxed(
+        where_: impl Into<String>,
+        id: impl Into<String>,
+        params: Option<HashMap<String, serde_json::Value>>,
+        details: impl Into<String>,
+        status: i32,
+    ) -> Box<Self> {
+        Box::new(Self::new(where_, id, params, details, status))
+    }
+
     /// Port of `(*AppError).Wrap` (utils.go:334).
     #[must_use]
     pub fn wrap(mut self, err: impl std::error::Error + Send + Sync + 'static) -> Self {
@@ -2112,6 +2129,29 @@ mod tests {
         // non-omitempty fields, present even when empty
         assert!(object.contains_key("detailed_error"));
         assert_eq!(object.len(), 3);
+    }
+
+    /// `boxed` must differ from `new` in exactly one way: the box. A divergence here would let
+    /// the two constructors build different errors for the same arguments, and `mm-app` picks
+    /// between them by return type alone.
+    #[test]
+    fn app_error_boxed_is_new_in_a_box() {
+        let mut params = HashMap::new();
+        params.insert("Name".to_owned(), serde_json::Value::String("n".to_owned()));
+
+        let plain = AppError::new("W.F", "an.id", Some(params.clone()), "detail", 418);
+        let boxed = AppError::boxed("W.F", "an.id", Some(params), "detail", 418);
+
+        assert_eq!(boxed.id, plain.id);
+        assert_eq!(boxed.message, plain.message);
+        assert_eq!(boxed.where_, plain.where_);
+        assert_eq!(boxed.detailed_error, plain.detailed_error);
+        assert_eq!(boxed.status_code, plain.status_code);
+        assert_eq!(boxed.params, plain.params);
+        assert_eq!(
+            serde_json::to_value(&*boxed).unwrap(),
+            serde_json::to_value(&plain).unwrap()
+        );
     }
 
     #[test]

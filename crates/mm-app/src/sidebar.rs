@@ -13,7 +13,7 @@
 
 use mm_model::session::Session;
 use mm_model::sidebar_category::{OrderedSidebarCategories, SidebarCategoryWithChannels};
-use mm_model::utils::AppError;
+use mm_model::utils::{AppError, AppResult};
 use mm_store::{SidebarCategoryStore, StoreError};
 
 use crate::App;
@@ -59,7 +59,7 @@ impl App {
         &self,
         user_id: &str,
         team_id: &str,
-    ) -> Result<SidebarCategoriesResult, AppError> {
+    ) -> AppResult<SidebarCategoriesResult> {
         match self
             .store()
             .sidebar_category()
@@ -95,7 +95,7 @@ impl App {
         &self,
         user_id: &str,
         team_id: &str,
-    ) -> Result<Vec<String>, AppError> {
+    ) -> AppResult<Vec<String>> {
         self.store()
             .sidebar_category()
             .get_sidebar_category_order(user_id, team_id)
@@ -111,7 +111,7 @@ impl App {
     pub async fn get_sidebar_category(
         &self,
         category_id: &str,
-    ) -> Result<SidebarCategoryWithChannels, AppError> {
+    ) -> AppResult<SidebarCategoryWithChannels> {
         self.store()
             .sidebar_category()
             .get_sidebar_category(category_id)
@@ -169,7 +169,7 @@ impl App {
 
 /// The `AppError` every function in this module produces, with only the status code and the
 /// (unwired) `where_` varying. Go's `switch` is `errors.As(err, &nfErr)` → 404, `default` → 500.
-fn sidebar_categories_error(where_: &str, err: &StoreError) -> AppError {
+fn sidebar_categories_error(where_: &str, err: &StoreError) -> Box<AppError> {
     let not_found = err.is_not_found();
     if !not_found {
         // `?err` and not the `%err` the rest of this crate uses: `StoreError::Db`'s `Display` is
@@ -179,7 +179,7 @@ fn sidebar_categories_error(where_: &str, err: &StoreError) -> AppError {
         // diagnosable failure and an afternoon.
         tracing::error!(caller = where_, error = ?err, "sidebar category lookup failed");
     }
-    AppError::new(
+    AppError::boxed(
         where_,
         SIDEBAR_CATEGORIES_ERROR,
         None,

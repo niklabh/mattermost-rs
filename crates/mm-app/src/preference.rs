@@ -3,7 +3,7 @@
 //! and `UpdatePreferences` (:44).
 
 use mm_model::preference::{Preference, Preferences};
-use mm_model::utils::AppError;
+use mm_model::utils::{AppError, AppResult};
 use mm_store::{PreferenceStore, StoreError};
 
 use crate::App;
@@ -15,14 +15,14 @@ impl App {
     /// broken read here, not a 500. An empty result is not a failure; see
     /// `SqlPreferenceStore::get_all` for what it becomes on the wire.
     #[tracing::instrument(skip_all, fields(user_id = %user_id))]
-    pub async fn get_preferences_for_user(&self, user_id: &str) -> Result<Preferences, AppError> {
+    pub async fn get_preferences_for_user(&self, user_id: &str) -> AppResult<Preferences> {
         self.store()
             .preference()
             .get_all(user_id)
             .await
             .map_err(|err| {
                 tracing::error!(error = %err, "preference get_all failed");
-                AppError::new(
+                AppError::boxed(
                     "GetPreferencesForUser",
                     "app.preference.get_all.app_error",
                     None,
@@ -46,7 +46,7 @@ impl App {
         &self,
         user_id: &str,
         category: &str,
-    ) -> Result<Preferences, AppError> {
+    ) -> AppResult<Preferences> {
         let preferences = self
             .store()
             .preference()
@@ -54,7 +54,7 @@ impl App {
             .await
             .map_err(|err| {
                 tracing::error!(error = %err, "preference get_category failed");
-                AppError::new(
+                AppError::boxed(
                     "GetPreferenceByCategoryForUser",
                     "app.preference.get_category.app_error",
                     None,
@@ -64,7 +64,7 @@ impl App {
             })?;
 
         if preferences.is_empty() {
-            return Err(AppError::new(
+            return Err(AppError::boxed(
                 "GetPreferenceByCategoryForUser",
                 "api.preference.preferences_category.get.app_error",
                 None,
@@ -90,7 +90,7 @@ impl App {
         user_id: &str,
         category: &str,
         name: &str,
-    ) -> Result<Preference, AppError> {
+    ) -> AppResult<Preference> {
         self.store()
             .preference()
             .get(user_id, category, name)
@@ -99,7 +99,7 @@ impl App {
                 if !err.is_not_found() {
                     tracing::error!(error = %err, "preference get failed");
                 }
-                AppError::new(
+                AppError::boxed(
                     "GetPreferenceByCategoryAndNameForUser",
                     "app.preference.get.app_error",
                     None,
@@ -133,10 +133,10 @@ impl App {
         &self,
         user_id: &str,
         preferences: &Preferences,
-    ) -> Result<(), AppError> {
+    ) -> AppResult<()> {
         for preference in preferences.iter() {
             if preference.user_id != user_id {
-                return Err(AppError::new(
+                return Err(AppError::boxed(
                     // Go's `Where` here is "savePreferences", not "UpdatePreferences" — the name
                     // of an older caller. Reproduced: it is on the wire in the error body.
                     "savePreferences",
@@ -156,10 +156,10 @@ impl App {
                 // Go unwraps a *model.AppError from the store with errors.As and returns it
                 // verbatim, so a validation failure keeps its own id and status rather than
                 // becoming a generic 400.
-                StoreError::Invalid { app_error, .. } => *app_error,
+                StoreError::Invalid { app_error, .. } => app_error,
                 other => {
                     tracing::error!(error = %other, "preference save failed");
-                    AppError::new(
+                    AppError::boxed(
                         "UpdatePreferences",
                         "app.preference.save.updating.app_error",
                         None,

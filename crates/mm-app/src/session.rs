@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 
 use mm_model::session::Session;
-use mm_model::utils::AppError;
+use mm_model::utils::{AppError, AppResult};
 use mm_store::SessionStore;
 
 use crate::App;
@@ -30,7 +30,7 @@ impl App {
     /// here yet. Each is recorded in `docs/TECH_DEBT.md`; the idle timeout is the one with a
     /// behavioural consequence, since an idle session this accepts is one Go would revoke.
     #[tracing::instrument(skip_all, fields(session_id, user_id))]
-    pub async fn get_session(&self, token: &str) -> Result<Session, AppError> {
+    pub async fn get_session(&self, token: &str) -> AppResult<Session> {
         let session = match self.store().session().get(token).await {
             Ok(session) => session,
             Err(err) => {
@@ -40,7 +40,7 @@ impl App {
                 // client as a bad token.
                 if !err.is_not_found() {
                     tracing::error!(error = %err, "session lookup failed");
-                    return Err(AppError::new(
+                    return Err(AppError::boxed(
                         "GetSession",
                         "app.session.get.app_error",
                         None,
@@ -72,10 +72,10 @@ impl App {
 /// credential and `AppError`'s params are not serialised (`json:"-"`), but they do reach the i18n
 /// layer and any logger that formats the struct — so the token is omitted rather than carried.
 /// See D-079.
-fn invalid_token(details: &str) -> AppError {
+fn invalid_token(details: &str) -> Box<AppError> {
     let mut params: HashMap<String, serde_json::Value> = HashMap::new();
     params.insert("Error".to_owned(), serde_json::Value::String(String::new()));
-    AppError::new("GetSession", INVALID_TOKEN, Some(params), details, 401)
+    AppError::boxed("GetSession", INVALID_TOKEN, Some(params), details, 401)
 }
 
 impl App {
@@ -85,14 +85,14 @@ impl App {
     /// `app.session.get_sessions.app_error` with a 500. There is no not-found branch, because a
     /// user with no sessions is an empty list rather than a miss.
     #[tracing::instrument(skip_all, fields(user_id = %user_id))]
-    pub async fn get_sessions(&self, user_id: &str) -> Result<Vec<Session>, AppError> {
+    pub async fn get_sessions(&self, user_id: &str) -> AppResult<Vec<Session>> {
         self.store()
             .session()
             .get_sessions(user_id)
             .await
             .map_err(|err| {
                 tracing::error!(error = %err, "sessions lookup failed");
-                AppError::new(
+                AppError::boxed(
                     "GetSessions",
                     "app.session.get_sessions.app_error",
                     None,

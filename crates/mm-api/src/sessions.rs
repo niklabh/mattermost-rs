@@ -54,7 +54,7 @@ pub async fn get_sessions(
         .session_has_permission_to_user(&session.0, &user_id)
         .await
     {
-        return Err(ApiError(*make_permission_error(
+        return Err(ApiError::from(make_permission_error(
             &session.0,
             &[&PERMISSION_EDIT_OTHER_USERS],
         )));
@@ -73,7 +73,7 @@ pub async fn get_sessions(
     // `json.Marshal` then `w.Write` — no newline appended. Deliberate; see the note above.
     let body = serde_json::to_vec(&sessions).map_err(|err| {
         tracing::error!(error = %err, "failed to serialise sessions");
-        ApiError(mm_model::utils::AppError::new(
+        ApiError::from(mm_model::utils::AppError::new(
             "getSessions",
             "api.marshal_error",
             None,

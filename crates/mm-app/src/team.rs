@@ -9,7 +9,7 @@ use mm_model::team::{Team, TeamsWithCount};
 use mm_model::team_member::{TeamMember, TeamUnread};
 use mm_model::team_search::TeamSearch;
 use mm_model::user::MARK_UNREAD_NOTIFY_PROP;
-use mm_model::utils::AppError;
+use mm_model::utils::{AppError, AppResult};
 use mm_store::TeamStore;
 use mm_store::team_store::TeamMembersGetOptions;
 
@@ -27,14 +27,14 @@ impl App {
         user_id: &str,
         exclude_team_id: &str,
         include_deleted: bool,
-    ) -> Result<Vec<TeamMember>, AppError> {
+    ) -> AppResult<Vec<TeamMember>> {
         self.store()
             .team()
             .get_teams_for_user(user_id, exclude_team_id, include_deleted)
             .await
             .map_err(|err| {
                 tracing::error!(error = %err, "team members lookup failed");
-                AppError::new(
+                AppError::boxed(
                     "GetTeamMembersForUser",
                     "app.team.get_members.app_error",
                     None,
@@ -53,10 +53,10 @@ impl App {
     /// last word (`existing`/`find`). Neither branch carries `params`; Go passes `nil` here,
     /// unlike `GetChannel`'s `errCtx`.
     #[tracing::instrument(skip_all, fields(team_id = %team_id))]
-    pub async fn get_team(&self, team_id: &str) -> Result<Team, AppError> {
+    pub async fn get_team(&self, team_id: &str) -> AppResult<Team> {
         self.store().team().get(team_id).await.map_err(|err| {
             if err.is_not_found() {
-                AppError::new(
+                AppError::boxed(
                     "GetTeam",
                     "app.team.get.find.app_error",
                     None,
@@ -65,7 +65,7 @@ impl App {
                 )
             } else {
                 tracing::error!(error = %err, "team lookup failed");
-                AppError::new(
+                AppError::boxed(
                     "GetTeam",
                     "app.team.get.finding.app_error",
                     None,
@@ -85,10 +85,10 @@ impl App {
     /// database therefore answers this route as a 404, and a port that "fixed" that would
     /// drift on the wire. Neither branch carries `params`.
     #[tracing::instrument(skip_all, fields(name = %name))]
-    pub async fn get_team_by_name(&self, name: &str) -> Result<Team, AppError> {
+    pub async fn get_team_by_name(&self, name: &str) -> AppResult<Team> {
         self.store().team().get_by_name(name).await.map_err(|err| {
             if err.is_not_found() {
-                AppError::new(
+                AppError::boxed(
                     "GetTeamByName",
                     "app.team.get_by_name.missing.app_error",
                     None,
@@ -97,7 +97,7 @@ impl App {
                 )
             } else {
                 tracing::error!(error = %err, "team lookup by name failed");
-                AppError::new(
+                AppError::boxed(
                     "GetTeamByName",
                     "app.team.get_by_name.app_error",
                     None,
@@ -115,18 +115,14 @@ impl App {
     /// the fallback really is a 500, unlike [`App::get_team_by_name`]'s. Go wraps the store
     /// call in `RequestContextWithMaster`; one pool here, so already true ([D-140]).
     #[tracing::instrument(skip_all, fields(team_id = %team_id, user_id = %user_id))]
-    pub async fn get_team_member(
-        &self,
-        team_id: &str,
-        user_id: &str,
-    ) -> Result<TeamMember, AppError> {
+    pub async fn get_team_member(&self, team_id: &str, user_id: &str) -> AppResult<TeamMember> {
         self.store()
             .team()
             .get_member(team_id, user_id)
             .await
             .map_err(|err| {
                 if err.is_not_found() {
-                    AppError::new(
+                    AppError::boxed(
                         "GetTeamMember",
                         "app.team.get_member.missing.app_error",
                         None,
@@ -135,7 +131,7 @@ impl App {
                     )
                 } else {
                     tracing::error!(error = %err, "team member lookup failed");
-                    AppError::new(
+                    AppError::boxed(
                         "GetTeamMember",
                         "app.team.get_member.app_error",
                         None,
@@ -160,14 +156,14 @@ impl App {
         offset: i64,
         limit: i64,
         options: &TeamMembersGetOptions,
-    ) -> Result<Vec<TeamMember>, AppError> {
+    ) -> AppResult<Vec<TeamMember>> {
         self.store()
             .team()
             .get_members(team_id, offset, limit, options)
             .await
             .map_err(|err| {
                 tracing::error!(error = %err, "team members lookup failed");
-                AppError::new(
+                AppError::boxed(
                     "GetTeamMembers",
                     "app.team.get_members.app_error",
                     None,
@@ -187,10 +183,7 @@ impl App {
     /// `app.team.get_active_member_count.app_error` — and the first is also the id
     /// `GetChannelGuestCount` borrows in `channel.rs`, so three call sites now share it.
     #[tracing::instrument(skip_all, fields(team_id = %team_id))]
-    pub async fn get_team_stats(
-        &self,
-        team_id: &str,
-    ) -> Result<mm_model::stats::TeamStats, AppError> {
+    pub async fn get_team_stats(&self, team_id: &str) -> AppResult<mm_model::stats::TeamStats> {
         let total_member_count = self
             .store()
             .team()
@@ -198,7 +191,7 @@ impl App {
             .await
             .map_err(|err| {
                 tracing::error!(error = %err, "total member count failed");
-                AppError::new(
+                AppError::boxed(
                     "GetTeamStats",
                     "app.team.get_member_count.app_error",
                     None,
@@ -214,7 +207,7 @@ impl App {
             .await
             .map_err(|err| {
                 tracing::error!(error = %err, "active member count failed");
-                AppError::new(
+                AppError::boxed(
                     "GetTeamStats",
                     "app.team.get_active_member_count.app_error",
                     None,
@@ -236,14 +229,14 @@ impl App {
     /// error id: any failure is `app.team.get_all.app_error` at 500, and a user in no teams is
     /// an empty list, not a miss.
     #[tracing::instrument(skip_all, fields(user_id = %user_id))]
-    pub async fn get_teams_for_user(&self, user_id: &str) -> Result<Vec<Team>, AppError> {
+    pub async fn get_teams_for_user(&self, user_id: &str) -> AppResult<Vec<Team>> {
         self.store()
             .team()
             .get_teams_by_user_id(user_id)
             .await
             .map_err(|err| {
                 tracing::error!(error = %err, "teams lookup failed");
-                AppError::new(
+                AppError::boxed(
                     "GetTeamsForUser",
                     "app.team.get_all.app_error",
                     None,
@@ -262,14 +255,14 @@ impl App {
         offset: i64,
         limit: i64,
         opts: &TeamSearch,
-    ) -> Result<Vec<Team>, AppError> {
+    ) -> AppResult<Vec<Team>> {
         self.store()
             .team()
             .get_all_page(offset, limit, opts)
             .await
             .map_err(|err| {
                 tracing::error!(error = %err, "the team listing failed");
-                AppError::new(
+                AppError::boxed(
                     "GetAllTeamsPage",
                     "app.team.get_all.app_error",
                     None,
@@ -292,7 +285,7 @@ impl App {
         offset: i64,
         limit: i64,
         opts: &TeamSearch,
-    ) -> Result<TeamsWithCount, AppError> {
+    ) -> AppResult<TeamsWithCount> {
         let total_count = self
             .store()
             .team()
@@ -300,7 +293,7 @@ impl App {
             .await
             .map_err(|err| {
                 tracing::error!(error = %err, "the team count failed");
-                AppError::new(
+                AppError::boxed(
                     "GetAllTeamsPageWithCount",
                     "app.team.analytics_team_count.app_error",
                     None,
@@ -317,7 +310,7 @@ impl App {
             .await
             .map_err(|err| {
                 tracing::error!(error = %err, "the team listing failed");
-                AppError::new(
+                AppError::boxed(
                     "GetAllTeamsPageWithCount",
                     "app.team.get_all.app_error",
                     None,
@@ -396,7 +389,7 @@ impl App {
         &self,
         exclude_team_id: &str,
         user_id: &str,
-    ) -> Result<Vec<TeamUnread>, AppError> {
+    ) -> AppResult<Vec<TeamUnread>> {
         let data = self
             .store()
             .team()
@@ -404,7 +397,7 @@ impl App {
             .await
             .map_err(|err| {
                 tracing::error!(error = %err, "channel unreads lookup failed");
-                AppError::new(
+                AppError::boxed(
                     "GetTeamsUnreadForUser",
                     "app.team.get_unread.app_error",
                     None,
@@ -437,11 +430,7 @@ impl App {
     /// The per-row accumulation is [`accumulate_channel_unread`], shared with the plural fold
     /// because Go's two copies are the same four lines.
     #[tracing::instrument(skip_all, fields(user_id = %user_id, team_id = %team_id, channels))]
-    pub async fn get_team_unread(
-        &self,
-        team_id: &str,
-        user_id: &str,
-    ) -> Result<TeamUnread, AppError> {
+    pub async fn get_team_unread(&self, team_id: &str, user_id: &str) -> AppResult<TeamUnread> {
         let channel_unreads = self
             .store()
             .team()
@@ -449,7 +438,7 @@ impl App {
             .await
             .map_err(|err| {
                 tracing::error!(error = %err, "channel unreads lookup failed");
-                AppError::new(
+                AppError::boxed(
                     "GetTeamUnread",
                     "app.team.get_unread.app_error",
                     None,
