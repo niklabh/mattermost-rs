@@ -5548,4 +5548,17 @@ so no two suites read the same user's sessions or teams.
 **Why it is not fixed here:** it is not this route's bug and the diagnosis crosses six suites.
 `post_thread`'s own 16 tests passed in all three runs and in every mutation run.
 
-**Where the pin lives:** the comments at the two renamed `create_team` call sites.
+**Partial mitigation, 2026-09-04 (reactions/emoji session).** `common::fetch_both_stable`'s
+retry budget went from 8 attempts over ~1.8s to 12 over ~6s. What it waits out is not a race
+inside one request but *the other suites in this binary still building their fixtures*: every
+`create_team` joins the shared fixture user to a `town-square` and an `off-topic` and every
+`create_channel` joins it to one more, so a global list genuinely changes underneath a reader for
+as long as any suite is still setting up. The old budget sat inside that window. This narrows the
+flake; it does not give the suites an isolation boundary, so the entry stays OPEN — measured the
+same day across three full runs at 318 tests: one green, one losing
+`channel_members_list::pages_split_cover_and_run_out_identically`, one losing
+`teams_for_user::me_and_the_explicit_id_answer_the_same_teams`. A different suite each time, each
+green in isolation, and neither of the two suites added that day ever among them.
+
+**Where the pin lives:** the comments at the two renamed `create_team` call sites, and the
+`ATTEMPTS` constant in `crates/mm-api/tests/common/mod.rs`.

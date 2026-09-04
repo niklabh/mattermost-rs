@@ -4503,3 +4503,119 @@ expression. `clippy` 1.97 separately started flagging `for_kv_map` at `post.rs:7
 format moved; the 296-test parity suite and 2,154 unit tests are the guard. The rationale lives on
 `AppError::boxed` and on `ApiError`. Environment note for a fresh machine: fixtures render in
 local time, so the suite needs `TZ=Asia/Kolkata`.
+
+## `GET /posts/{post_id}/reactions`, `GET /emoji/{emoji_id}`, `GET /emoji/name/{emoji_name}` (2026-09-04)
+
+Three routes in one session because they share a stack lock, a rebuild and a mutation plan;
+splitting them would have paid for all three twice.
+
+| Layer | File | Status |
+|---|---|---|
+| api | `crates/mm-api/src/reactions.rs` — `get_reactions` | DONE |
+| api | `crates/mm-api/src/emoji.rs` — `get_emoji`, `get_emoji_by_name` | DONE |
+| app | `crates/mm-app/src/reaction.rs` — `get_reactions_for_post` | DONE |
+| app | `crates/mm-app/src/emoji.rs` — `get_emoji`, `get_emoji_by_name`, `emoji_storage_available` | DONE |
+| store | `crates/mm-store/src/emoji_store.rs` — `get`, `get_by_name` | DONE |
+| config | `crates/mm-app/src/config.rs` — `file_driver_name` | DONE |
+
+`reaction_store.rs::get_for_post` already existed, ported for `metadata.reactions` on `getPost`,
+so `getReactions` needed no new store code. Forwarded and unchanged: `POST /reactions`,
+`DELETE .../reactions/{emoji_name}`, `/emoji/{emoji_id}/image`, the `/emoji` collection, and
+`/emoji/autocomplete`.
+
+Tests: 22 cross-server (8 in `parity/post_reactions.rs`, 14 in `parity/emoji_get.rs`); the parity
+binary goes 296 → 318.
+Mutations: **17 run, 15 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/reactions-emoji.plan`), after one plan line was repaired — see below.
+
+Each finding lives in the doc comment on the thing it constrains. The ones a reader would
+otherwise get wrong:
+
+1. **`getReactions` answers `null`, not `[]`, and that is the common case.** Go's store leaves
+   `[]*model.Reaction` nil when nothing matches and the handler marshals it straight through; a
+   nil slice marshals to `null`. Most posts carry no reactions, so the four bytes `null` are what
+   this route mostly returns. Every other list route in this port answers `[]`, which is why the
+   empty case is spelled out in the handler rather than left to `serde_json`.
+2. **`getReactions` has no 404, and an unknown post is a *403*.** The app layer has no not-found
+   branch — zero rows is a successful read. But `SessionHasPermissionToReadPost` cannot resolve a
+   channel for an id that names nothing and falls back to a bare system-level
+   `read_channel_content` check, which an ordinary user fails. An unknown post id is therefore
+   403 for a plain user and `null`/200 for a system admin; both halves are asserted.
+3. **The permission check runs *before* the query here**, the reverse of `getPostThread` — which
+   is precisely why the two routes disagree about what an unknown post looks like.
+4. **The two emoji config gates are not the same gate.** The handler checks `EnableCustomEmoji`
+   and answers **501**; `App.GetEmoji` checks it again, same error id, and answers **403**. The
+   handler runs first, so the 403 is unreachable through these routes. Ported anyway: a non-REST
+   caller would see it, and a port that dropped it would answer 200 where Go fails.
+5. **`FileSettings.DriverName` is a `String`, not a `bool`, and its default is `"local"`.** The
+   app layer refuses with `api.emoji.storage.app_error` (403) when it is the **empty string** —
+   not when it names a driver we do not implement. A default of `""` would 403 every emoji read.
+6. **The shadowing problem is the reverse of axum's instinct.** gorilla registers the
+   `PathPrefix("/emoji")` subrouter *before* `PathPrefix("/emoji/{emoji_id}")`, so
+   `/emoji/autocomplete` never reaches `getEmoji`. axum prefers a literal too — but only a
+   *registered* one, and this router does not register it. `EMOJI_SHADOWED_LITERALS` forwards the
+   one literal that ordering owns. `names` and `search` are deliberately **not** in the list: they
+   are POST-only in Go, so a GET falls past them and does reach `getEmoji` with
+   `emoji_id = "names"` — a 400 on both servers, pinned rather than papered over.
+7. **`{emoji_name}` is not id-shaped**, so the id-charset middleware must not apply. Go's mux class
+   `[A-Za-z0-9\_\-\+]+` and `RequireEmojiName`'s `^[a-zA-Z0-9\-\+_]+$` are the same character set,
+   so the only thing the validator adds is the length limit. A segment outside the charset is a Go
+   mux 404 and is forwarded; a segment inside it but too long reaches the handler on both servers
+   and 400s on both. The boundary is **bytes**, and it is `> 64` — not `>=`.
+8. **Two sibling routes, two different terminators.** `getEmoji` ends with
+   `json.NewEncoder(w).Encode` (**trailing newline**); `getReactions` ends with `json.Marshal` +
+   `w.Write` (**none**).
+
+### The harness fault, and why the first tally was wrong
+
+`emoji-byname-column` (`AND name = $1` → `AND id = $1`) was scored **SURVIVED** on the first pass.
+It was not a test gap: `mutate.sh` replaces the **first** occurrence of the pattern, and
+`get_by_name`'s own doc comment quotes the predicate — `` `WHERE deleteat = 0 AND name = $1` `` —
+eleven lines above the SQL. The mutation rewrote prose, changed no behaviour, and could not have
+been caught by anything. Re-anchored on the newline and the block's 15-space indent so it can only
+match the statement; it is CAUGHT by `an_emoji_by_name_is_byte_identical`.
+
+**The general rule this earns:** a mutation pattern that also appears in a comment is a harness
+fault, not a finding. An audit of all seventeen lines found this was the only one; the check is
+cheap — for each pattern, confirm its first occurrence in the file is not inside a `//`.
+
+### Three repairs outside these routes
+
+- **The power outage left a mutation applied.** `mutate.sh` restores the source from a `TERM INT
+  HUP` trap, and a hard power loss runs no trap. `crates/mm-api/src/emoji.rs` was found holding
+  `emoji_name.len() >= EMOJI_NAME_MAX_LENGTH` where Go (`web/context.go:600`) has `>` — mutation
+  12 of 17, frozen mid-run. Restored, and the re-run confirms
+  `a_name_over_sixty_four_bytes_is_a_400_on_both` catches it. Auditing every plan line's `from`
+  against the working tree is how it was found, and is worth doing after any interrupted run.
+- **A NULL-column fixture made `db_user_search` match everything.** `db_authorization::insert_user`
+  omitted `nickname`, `firstname` and `lastname`, and the schema permits NULL in all three. The
+  search's `NOT EXISTS (… WHERE NOT (…))` is then three-valued: a NULL column makes the chain NULL
+  rather than false, the row is never excluded, and it matches **every** search term. That suite
+  purges at the start and never at the end, so the row outlived it and failed 9 of 12
+  `db_user_search` tests — intermittently, since which test ran last decides whether the row is
+  left behind at all. The Go server never writes one (148 rows in the development database, zero
+  NULLs), so the **fixture** was fixed to write `''`; the query is Go's shape and stays untouched,
+  because a `COALESCE` there would make us diverge from Go rather than agree with it.
+- **A parity test asserted an ordering neither server promises.**
+  `teams_for_user::me_and_the_explicit_id_are_byte_identical` compared `/users/me/teams` against
+  `/users/{id}/teams` **byte for byte** — two separate reads of `get_teams_by_user_id`, which
+  carries no `ORDER BY` precisely because Go's does not and its callers do not sort. Row order is
+  whatever Postgres returns. The assertion held only while the fixture user belonged to few teams;
+  once six leaked fixture teams had accumulated (`mmrssidebarmain`, `mmrspostthreadteam` and
+  friends — none of them matching the `mmrs-parity-%` purge prefix), it failed on **every** run and
+  in isolation, with the same six ids in two different orders. The claim the test owes is that
+  `me` resolves to the session's id, which is about *which* teams come back; it now asserts that
+  over sorted ids and is renamed `me_and_the_explicit_id_answer_the_same_teams`. Sorting alone was
+  not enough: thirteen suites in this binary create teams with that same token, so a team can be
+  born *between* the two reads and belong to the second alone — the full-suite run still failed on
+  a set difference of one. The pair is therefore re-read until the two agree, the tactic
+  `fetch_both_stable` already uses one level down. The Go-against-us half stays byte for byte,
+  since that comparison was never exposed to either problem.
+
+### Parity risk
+
+`LocalCacheEmojiStore` is not reproduced — Go can answer `GetByName` from a thirty-minute cache
+entry for a row that has since changed, and we always read the row. The difference is staleness,
+not wire format, and the suite asserts against a settled database. It bites the *tests* rather
+than a client: the SQL purges delete rows the Go server never hears about, which is why every
+fixture emoji is named with a timestamp.

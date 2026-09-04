@@ -1,0 +1,34 @@
+# getReactions + getEmoji + getEmojiByName — 2026-09-04.
+#
+# One plan for all three routes: they share a stack lock and a rebuild, and splitting them would
+# pay for both twice. Every line's `suite` is `api` because all three routes' oracles are the
+# cross-server comparison — there is no store-level test binary for reactions or emoji.
+#
+# name<TAB>file<TAB>from<TAB>to<TAB>suite
+
+# --- getReactions -----------------------------------------------------------------------------
+react-null-vs-empty-array	crates/mm-api/src/reactions.rs	b"null".to_vec()	b"[]".to_vec()	api
+react-permission-gate	crates/mm-api/src/reactions.rs	if !allowed {	if false {	api
+react-requireid	crates/mm-api/src/reactions.rs	require_id(&post_id, "post_id")?;	let _ = &post_id;	api
+react-order-by	crates/mm-store/src/reaction_store.rs	ORDER BY createat	ORDER BY emojiname	api
+react-soft-delete	crates/mm-store/src/reaction_store.rs	AND COALESCE(deleteat, 0) = 0	AND COALESCE(deleteat, 0) >= 0	api
+
+# --- getEmoji / getEmojiByName ----------------------------------------------------------------
+emoji-get-deleteat	crates/mm-store/src/emoji_store.rs	WHERE deleteat = 0\n               AND id = $1	WHERE deleteat >= 0\n               AND id = $1	api
+emoji-byname-deleteat	crates/mm-store/src/emoji_store.rs	WHERE deleteat = 0\n               AND name = $1	WHERE deleteat >= 0\n               AND name = $1	api
+# Anchored on the newline and the SQL block's 15-space indent. The bare `AND name = $1`
+# matched the *doc comment* above the query first — `mutate.sh` replaces the first
+# occurrence — so the mutation rewrote prose, changed no behaviour, and was scored a
+# survivor. A pattern that also appears in a comment is a harness fault, not a finding.
+emoji-byname-column	crates/mm-store/src/emoji_store.rs	\n               AND name = $1	\n               AND id = $1	api
+emoji-notfound-status	crates/mm-app/src/emoji.rs	"app.emoji.get.no_result",\n                    None,\n                    String::new(),\n                    404,	"app.emoji.get.no_result",\n                    None,\n                    String::new(),\n                    500,	api
+emoji-byname-error-id	crates/mm-app/src/emoji.rs	"app.emoji.get_by_name.no_result"	"app.emoji.get.no_result"	api
+emoji-shadowed-literals	crates/mm-api/src/emoji.rs	&["autocomplete"]	&[]	api
+emoji-name-length-boundary	crates/mm-api/src/emoji.rs	|| emoji_name.len() > EMOJI_NAME_MAX_LENGTH	|| emoji_name.len() >= EMOJI_NAME_MAX_LENGTH	api
+emoji-charset-forward	crates/mm-api/src/emoji.rs	if !segment_matches_emoji_name_mux(&emoji_name) {	if false {	api
+emoji-trailing-newline	crates/mm-api/src/emoji.rs	body.push(b'\\n');	let _ = &mut body;	api
+emoji-file-driver-default	crates/mm-app/src/config.rs	file_driver_name: "local".to_owned(),	file_driver_name: String::new(),	api
+
+# --- controls: both must be CAUGHT-free, or every verdict above is noise ----------------------
+control-select-column-order	crates/mm-store/src/emoji_store.rs	SELECT id        AS "id!",\n                   createat  AS "create_at!",\n                   updateat  AS "update_at!",	SELECT id        AS "id!",\n                   updateat  AS "update_at!",\n                   createat  AS "create_at!",	api
+control-binding-rename	crates/mm-api/src/emoji.rs	fn segment_matches_emoji_name_mux(value: &str) -> bool {\n    is_valid_alpha_num_hyphen_underscore_plus(value)\n}	fn segment_matches_emoji_name_mux(segment: &str) -> bool {\n    is_valid_alpha_num_hyphen_underscore_plus(segment)\n}	api

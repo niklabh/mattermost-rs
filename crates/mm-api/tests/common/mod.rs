@@ -576,7 +576,14 @@ pub async fn fetch_both_stable(
     token: &str,
     path: &str,
 ) -> (Vec<u8>, Vec<u8>) {
-    const ATTEMPTS: u64 = 8;
+    // Budget ~6 seconds, not ~2. What this loop waits out is not a race inside a request — it
+    // is the **other suites in this binary building their fixtures**: every `create_team` joins
+    // the shared fixture user to a `town-square` and an `off-topic`, and every `create_channel`
+    // joins it to one more, so `/users/me/channels` genuinely changes underneath a reader for as
+    // long as any suite is still setting up. Eight attempts over 1.8s was inside that window and
+    // `channels_for_user` failed on most full-suite runs while passing alone. The happy path
+    // still returns on the first attempt; only a churning list pays. [D-160].
+    const ATTEMPTS: u64 = 12;
 
     let get = async |base: &str| {
         let response = client
@@ -601,7 +608,7 @@ pub async fn fetch_both_stable(
             return (before, ours);
         }
 
-        tokio::time::sleep(std::time::Duration::from_millis(50 * attempt)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(80 * attempt)).await;
     }
 
     panic!(
@@ -654,6 +661,21 @@ async fn purge_api_fixtures_once() {
         "DELETE FROM channelmembers WHERE userid IN (SELECT id FROM users WHERE username LIKE 'mmrsplain%')",
         "DELETE FROM teammembers WHERE userid IN (SELECT id FROM users WHERE username LIKE 'mmrsplain%')",
         "DELETE FROM sessions WHERE userid IN (SELECT id FROM users WHERE username LIKE 'mmrsplain%')",
+        // Rows keyed on a *post* id, which nothing below reaches — the channel subquery is the
+        // only handle on them, and it stops resolving once the posts are gone. These used to
+        // live in each suite's own purge, which is a race rather than a cleanup: the parity
+        // tests share one binary and one database, so a purge running inside suite A's fixture
+        // deletes suite B's rows if B built its fixture first. Measured — `emoji_get` and
+        // `post_get` each dropped the other's custom emoji, one run in two. Anything that
+        // deletes by a shared prefix belongs here, in the `OnceCell` that runs before any
+        // fixture is built.
+        "DELETE FROM reactions WHERE emojiname LIKE 'mmrsparity%'",
+        "DELETE FROM reactions WHERE postid IN (SELECT id FROM posts WHERE channelid IN (SELECT id FROM channels WHERE name LIKE 'mmrs-parity-%'))",
+        "DELETE FROM postspriority WHERE postid IN (SELECT id FROM posts WHERE channelid IN (SELECT id FROM channels WHERE name LIKE 'mmrs-parity-%'))",
+        "DELETE FROM postacknowledgements WHERE postid IN (SELECT id FROM posts WHERE channelid IN (SELECT id FROM channels WHERE name LIKE 'mmrs-parity-%'))",
+        // Go's DELETE on an emoji is a **soft** delete and the name stays taken, so the row has
+        // to go or the next run cannot create one.
+        "DELETE FROM emoji WHERE name LIKE 'mmrsparity%'",
         // Before the posts they attach to, while the channel subquery still resolves either way.
         "DELETE FROM fileinfo WHERE channelid IN (SELECT id FROM channels WHERE name LIKE 'mmrs-parity-%')",
         "DELETE FROM posts WHERE channelid IN (SELECT id FROM channels WHERE name LIKE 'mmrs-parity-%')",
@@ -749,4 +771,90 @@ pub async fn set_user_status(
         response.text().await.unwrap_or_default()
     );
     response.bytes().await.expect("body reads").to_vec()
+}
+
+/// A 1x1 PNG, small enough to inline and real enough for Go's image decoder — which both the
+/// emoji endpoint and the file uploader run before accepting the bytes.
+pub const TINY_PNG: &[u8] = &[
+    137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 2, 0,
+    0, 0, 144, 119, 83, 222, 0, 0, 0, 12, 73, 68, 65, 84, 120, 156, 99, 248, 207, 192, 0, 0, 3, 1,
+    1, 0, 201, 254, 146, 239, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
+];
+
+/// `POST /api/v4/emoji` takes multipart and nothing else, so the body is assembled by hand
+/// rather than by pulling reqwest's `multipart` feature — and a Cargo feature change — into the
+/// tree for one call. Returns the new emoji's id.
+///
+/// **Name the emoji uniquely per run.** `LocalCacheEmojiStore` memoises `GetByName` for thirty
+/// minutes, and the SQL purges these suites run delete the row straight from Postgres, which the
+/// Go server never hears about. A reused name then fails the next create with
+/// `api.emoji.create.duplicate.app_error` against a row that no longer exists — measured, not
+/// theorised. [`unique_emoji_name`] is the tag-plus-timestamp form the suites use.
+pub async fn create_custom_emoji(
+    client: &reqwest::Client,
+    token: &str,
+    creator_id: &str,
+    name: &str,
+) -> String {
+    const BOUNDARY: &str = "mmrsparityemojiboundary";
+    let mut body: Vec<u8> = Vec::new();
+    body.extend_from_slice(
+        format!(
+            "--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"image\"; filename=\"e.png\"\r\nContent-Type: image/png\r\n\r\n"
+        )
+        .as_bytes(),
+    );
+    body.extend_from_slice(TINY_PNG);
+    body.extend_from_slice(
+        format!(
+            "\r\n--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"emoji\"\r\n\r\n\
+             {{\"name\":\"{name}\",\"creator_id\":\"{creator_id}\"}}\r\n--{BOUNDARY}--\r\n"
+        )
+        .as_bytes(),
+    );
+
+    let response = client
+        .post(format!("{GO}/api/v4/emoji"))
+        .header("Authorization", format!("Bearer {token}"))
+        .header(
+            "Content-Type",
+            format!("multipart/form-data; boundary={BOUNDARY}"),
+        )
+        .body(body)
+        .send()
+        .await
+        .expect("Go answers");
+    assert!(
+        response.status().is_success(),
+        "creating the fixture emoji failed: {}",
+        response.text().await.unwrap_or_default()
+    );
+    let created: serde_json::Value = response.json().await.expect("the emoji decodes");
+    created["id"].as_str().expect("an id").to_owned()
+}
+
+/// `mmrsparity<tag><millis>` — the `mmrsparity` prefix is what the SQL purges collect on, and
+/// the timestamp is what keeps Go's thirty-minute name cache from rejecting the next run. Only
+/// lower-case letters and digits, so it is inside both the emoji-name validator and the mux.
+pub fn unique_emoji_name(tag: &str) -> String {
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or_default();
+    format!("mmrsparity{tag}{stamp}")
+}
+
+/// Go's emoji delete is a **soft** delete — it sets `DeleteAt` and leaves the row and its name.
+pub async fn delete_custom_emoji(client: &reqwest::Client, token: &str, emoji_id: &str) {
+    let response = client
+        .delete(format!("{GO}/api/v4/emoji/{emoji_id}"))
+        .header("Authorization", format!("Bearer {token}"))
+        .send()
+        .await
+        .expect("Go answers");
+    assert!(
+        response.status().is_success(),
+        "deleting the fixture emoji failed: {}",
+        response.text().await.unwrap_or_default()
+    );
 }

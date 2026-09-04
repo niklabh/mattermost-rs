@@ -7,10 +7,12 @@
 
 pub mod auth;
 pub mod channels;
+pub mod emoji;
 pub mod error;
 pub mod posts;
 pub mod preferences;
 pub mod proxy;
+pub mod reactions;
 pub mod roles;
 pub mod sessions;
 pub mod sidebar;
@@ -436,6 +438,38 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/posts/{post_id}/thread",
             partially_migrated_with_ids(&state, get(posts::get_post_thread)),
+        )
+        // `BaseRoutes.Post.Handle("/reactions")` (api4/reaction.go:16) — a sibling of
+        // `/thread` above and one segment deeper than `/posts/{post_id}`, so nothing here
+        // shadows anything. Registered GET only: `POST /api/v4/reactions` is a different path
+        // entirely (`saveReaction` hangs off `BaseRoutes.Reactions`, not off the post), and
+        // `DELETE .../reactions/{emoji_name}` is one segment deeper still — both fall to
+        // `Router::fallback` and stay forwarded.
+        .route(
+            "/api/v4/posts/{post_id}/reactions",
+            partially_migrated_with_ids(&state, get(reactions::get_reactions)),
+        )
+        // `BaseRoutes.Emoji` (api.go:286). The precedence question here is the *reverse* of
+        // axum's instinct and it matters: gorilla adds the `PathPrefix("/emoji")` subrouter
+        // (api.go:285) **before** the `PathPrefix("/emoji/{emoji_id}")` one, so `/emoji/
+        // autocomplete` is answered by that subrouter's own literal and never reaches
+        // `getEmoji`. axum prefers a literal too — but only one that is registered, and this
+        // router does not register it. The handler forwards the literals that ordering owns;
+        // see `emoji::EMOJI_SHADOWED_LITERALS` for why the list has exactly one entry.
+        //
+        // `/emoji/{emoji_id}/image` is one segment deeper and unregistered, so it falls to
+        // `Router::fallback` whole.
+        .route(
+            "/api/v4/emoji/{emoji_id}",
+            partially_migrated_with_ids(&state, get(emoji::get_emoji)),
+        )
+        // `BaseRoutes.EmojiByName` (api.go:287). One segment deeper than `{emoji_id}` above, so
+        // neither shadows the other, and `emoji_name` is **not** id-shaped — Go's class is
+        // `[A-Za-z0-9\_\-\+]+` — so the id-charset middleware must not apply. The handler
+        // carries its own mux forward, like `username`, `role_name` and `channel_name`.
+        .route(
+            "/api/v4/emoji/name/{emoji_name}",
+            partially_migrated(get(emoji::get_emoji_by_name)),
         )
         // `BaseRoutes.ChannelCategories` (api.go:231), the three GETs. The five writes on
         // these same paths fall to `partially_migrated`'s method fallback and stay forwarded —

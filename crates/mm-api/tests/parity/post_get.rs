@@ -27,30 +27,14 @@
 use crate::common;
 
 use common::{
-    GO, RUST, add_user_to_channel, assert_error_bodies_match_except_known_gaps, client,
-    create_channel, create_plain_user, delete_plain_user, fetch_both_raw, fetch_both_stable,
-    go_minted_token, logged_in_user_id, post_message, purge_api_fixtures, stack_enabled,
+    GO, RUST, TINY_PNG, add_user_to_channel, assert_error_bodies_match_except_known_gaps, client,
+    create_channel, create_custom_emoji, create_plain_user, delete_custom_emoji, delete_plain_user,
+    fetch_both_raw, fetch_both_stable, go_minted_token, logged_in_user_id, post_message,
+    purge_api_fixtures, stack_enabled,
 };
 
-/// A 1x1 PNG, small enough to inline and real enough for Go's image decoder — which both the
-/// emoji endpoint and the file uploader run before accepting the bytes.
-const TINY_PNG: &[u8] = &[
-    137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 2, 0,
-    0, 0, 144, 119, 83, 222, 0, 0, 0, 12, 73, 68, 65, 84, 120, 156, 99, 248, 207, 192, 0, 0, 3, 1,
-    1, 0, 201, 254, 146, 239, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
-];
-
-/// The two custom emoji the rich-post case needs, named **uniquely per run**.
-///
-/// A fixed name does not work, and the reason is a cache rather than a leak: `LocalCacheEmojiStore`
-/// memoises `GetByName` for thirty minutes, and `purge_post_fixtures` deletes the row straight
-/// from Postgres — which the Go server never hears about. The next run's `POST /emoji` then finds
-/// the stale cache entry and answers `api.emoji.create.duplicate.app_error` against a row that no
-/// longer exists. Measured, not theorised.
-///
-/// Deleting through Go's API instead would invalidate the cache, but only on a run that reaches
-/// its teardown; an assertion panics past it, and then every later run is poisoned. A fresh name
-/// each run sidesteps both, and the prefix keeps the purge able to collect the rows.
+/// The two custom emoji the rich-post case needs, named **uniquely per run** — see
+/// `common::create_custom_emoji` for why a fixed name cannot work.
 ///
 /// The second name is soft-deleted before use: `emojiSelectQuery` carries `DeleteAt = 0` in Go's
 /// **shared** select builder rather than in `GetMultipleByName`'s own body, so a port that read
@@ -59,13 +43,9 @@ static EMOJI_NAMES: std::sync::OnceLock<(String, String)> = std::sync::OnceLock:
 
 fn emoji_names() -> &'static (String, String) {
     EMOJI_NAMES.get_or_init(|| {
-        let stamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis())
-            .unwrap_or_default();
         (
-            format!("mmrsparitypostlive{stamp}"),
-            format!("mmrsparitypostgone{stamp}"),
+            common::unique_emoji_name("postlive"),
+            common::unique_emoji_name("postgone"),
         )
     })
 }
@@ -89,37 +69,6 @@ async fn fixture_pool() -> Option<sqlx::PgPool> {
         .ok()
 }
 
-/// Rows the api-level purge in `common` does not reach: it clears `posts` and `fileinfo` for a
-/// `mmrs-parity-%` channel, but nothing keyed on a post id, and nothing in `Emoji`.
-///
-/// Runs **before** the fixtures are created, for the reason `common::purge_api_fixtures`
-/// documents: an assertion panics past any trailing cleanup, so the only teardown that is
-/// certain to run is the next run's.
-async fn purge_post_fixtures() {
-    let Ok(url) = std::env::var("DATABASE_URL") else {
-        return;
-    };
-    let Ok(pool) = sqlx::postgres::PgPoolOptions::new()
-        .max_connections(1)
-        .acquire_timeout(std::time::Duration::from_secs(5))
-        .connect(&url)
-        .await
-    else {
-        return;
-    };
-
-    for statement in [
-        "DELETE FROM reactions WHERE emojiname LIKE 'mmrsparity%'",
-        "DELETE FROM reactions WHERE postid IN (SELECT id FROM posts WHERE channelid IN (SELECT id FROM channels WHERE name LIKE 'mmrs-parity-%'))",
-        "DELETE FROM postspriority WHERE postid IN (SELECT id FROM posts WHERE channelid IN (SELECT id FROM channels WHERE name LIKE 'mmrs-parity-%'))",
-        "DELETE FROM postacknowledgements WHERE postid IN (SELECT id FROM posts WHERE channelid IN (SELECT id FROM channels WHERE name LIKE 'mmrs-parity-%'))",
-        // Go's DELETE on an emoji is a soft delete and the name stays taken, so the row has to go.
-        "DELETE FROM emoji WHERE name LIKE 'mmrsparity%'",
-    ] {
-        let _ = sqlx::query(statement).execute(&pool).await;
-    }
-}
-
 /// One team and one channel per test **binary**.
 ///
 /// The tests are read-only against posts they each create, so they do not need a channel apiece —
@@ -131,7 +80,6 @@ async fn team_and_channel(client: &reqwest::Client, token: &str) -> (String, Str
     FIXTURE
         .get_or_init(|| async {
             purge_api_fixtures().await;
-            purge_post_fixtures().await;
             let team_id = create_team(client, token, "posts").await;
             let channel_id = create_channel(client, token, &team_id, "posts").await;
             (team_id, channel_id)
@@ -212,67 +160,6 @@ async fn upload_file(client: &reqwest::Client, token: &str, channel_id: &str) ->
         .as_str()
         .expect("an id")
         .to_owned()
-}
-
-/// `POST /api/v4/emoji` takes multipart and nothing else, so the body is assembled by hand
-/// rather than by pulling reqwest's `multipart` feature — and a Cargo feature change — into the
-/// tree for one call.
-async fn create_custom_emoji(
-    client: &reqwest::Client,
-    token: &str,
-    creator_id: &str,
-    name: &str,
-) -> String {
-    const BOUNDARY: &str = "mmrsparitypostboundary";
-    let mut body: Vec<u8> = Vec::new();
-    body.extend_from_slice(
-        format!(
-            "--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"image\"; filename=\"e.png\"\r\nContent-Type: image/png\r\n\r\n"
-        )
-        .as_bytes(),
-    );
-    body.extend_from_slice(TINY_PNG);
-    body.extend_from_slice(
-        format!(
-            "\r\n--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"emoji\"\r\n\r\n\
-             {{\"name\":\"{name}\",\"creator_id\":\"{creator_id}\"}}\r\n--{BOUNDARY}--\r\n"
-        )
-        .as_bytes(),
-    );
-
-    let response = client
-        .post(format!("{GO}/api/v4/emoji"))
-        .header("Authorization", format!("Bearer {token}"))
-        .header(
-            "Content-Type",
-            format!("multipart/form-data; boundary={BOUNDARY}"),
-        )
-        .body(body)
-        .send()
-        .await
-        .expect("Go answers");
-    assert!(
-        response.status().is_success(),
-        "creating the fixture emoji failed: {}",
-        response.text().await.unwrap_or_default()
-    );
-    let created: serde_json::Value = response.json().await.expect("the emoji decodes");
-    created["id"].as_str().expect("an id").to_owned()
-}
-
-/// Go's emoji delete is a **soft** delete — it sets `DeleteAt` and leaves the row and its name.
-async fn delete_custom_emoji(client: &reqwest::Client, token: &str, emoji_id: &str) {
-    let response = client
-        .delete(format!("{GO}/api/v4/emoji/{emoji_id}"))
-        .header("Authorization", format!("Bearer {token}"))
-        .send()
-        .await
-        .expect("Go answers");
-    assert!(
-        response.status().is_success(),
-        "deleting the fixture emoji failed: {}",
-        response.text().await.unwrap_or_default()
-    );
 }
 
 async fn add_reaction(

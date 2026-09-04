@@ -22,6 +22,23 @@ use crate::common;
 
 use common::{GO, LOGIN_ID, RUST, client, go_minted_token, stack_enabled};
 
+/// `users.UpdateAt` for the fixture user, straight from the shared database.
+async fn fixture_user_update_at() -> i64 {
+    let database_url = std::env::var("DATABASE_URL")
+        .expect("DATABASE_URL must be set to check our value against the row");
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .acquire_timeout(std::time::Duration::from_secs(5))
+        .connect(&database_url)
+        .await
+        .expect("the shared Postgres is reachable");
+    sqlx::query_scalar("SELECT updateat FROM users WHERE email = $1")
+        .bind(LOGIN_ID)
+        .fetch_one(&pool)
+        .await
+        .expect("the fixture user exists")
+}
+
 /// The claim the whole slice rests on: same token, same bytes.
 #[tokio::test]
 async fn users_me_is_byte_identical_across_both_servers() {
@@ -50,6 +67,14 @@ async fn users_me_is_byte_identical_across_both_servers() {
         let body = response.bytes().await.expect("body reads").to_vec();
         (status, etag, body)
     };
+
+    // The row's value **before** the requests. `users.UpdateAt` moves under this test — Go bumps
+    // it whenever the fixture user is joined to a team, which several other suites in this
+    // binary do while this one runs — and the check at the bottom compares our answer against
+    // the row. Reading the row only afterwards turned a concurrent write into a failure on most
+    // full-suite runs; bracketing the requests turns it back into what it is, a value that moved
+    // between two reads. See [D-160].
+    let row_update_at_before = fixture_user_update_at().await;
 
     let (go_status, go_etag, go_body) = fetch(GO).await;
     let (rs_status, rs_etag, rs_body) = fetch(RUST).await;
@@ -105,24 +130,34 @@ async fn users_me_is_byte_identical_across_both_servers() {
 
     // And ours is the value that is actually in the database. This is what turns "different from
     // Go" into "correct, where Go is stale".
-    let database_url = std::env::var("DATABASE_URL")
-        .expect("DATABASE_URL must be set to check our value against the row");
-    let pool = sqlx::postgres::PgPoolOptions::new()
-        .max_connections(1)
-        .connect(&database_url)
-        .await
-        .expect("the shared Postgres is reachable");
-    let row_update_at: i64 = sqlx::query_scalar("SELECT updateat FROM users WHERE email = $1")
-        .bind(LOGIN_ID)
-        .fetch_one(&pool)
-        .await
-        .expect("the fixture user exists");
+    //
+    // The claim is bracketed rather than exact: `UpdateAt` only ever moves forward, so "our
+    // answer lies between the row before the request and the row after it" says precisely that
+    // we read the row at request time and never a cached older value — while a concurrent
+    // writer, which is the normal state of this binary, cannot fail it. An equality against a
+    // single later read said the same thing only when nothing else was running.
+    let row_update_at_after = fixture_user_update_at().await;
 
     let rs_json: serde_json::Value = serde_json::from_slice(&rs_body).expect("our body decodes");
-    assert_eq!(
-        rs_json["update_at"].as_i64(),
-        Some(row_update_at),
-        "our update_at must be the row's current value, not a cached one"
+    let ours = rs_json["update_at"]
+        .as_i64()
+        .expect("we serialise update_at");
+    assert!(
+        (row_update_at_before..=row_update_at_after).contains(&ours),
+        "our update_at ({ours}) must be the row's value at request time, not a cached one — \
+         the row held {row_update_at_before} before the request and {row_update_at_after} after"
+    );
+
+    // And Go's really is outside that window on the stale side, which is the divergence D-087
+    // records. Asserted rather than assumed: if Go's cache ever starts converging, this test
+    // should say so rather than keep normalising a field the two servers now agree on.
+    let go_json: serde_json::Value = serde_json::from_slice(&go_body).expect("Go's body decodes");
+    let theirs = go_json["update_at"]
+        .as_i64()
+        .expect("Go serialises update_at");
+    assert!(
+        theirs <= ours,
+        "Go's cached update_at ({theirs}) can be stale but never ahead of the row ({ours})"
     );
 
     // The etag is `{version}.{id}.{update_at}.{tos_id}.{tos_create_at}.{full_name}.{email}.

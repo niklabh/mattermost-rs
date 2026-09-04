@@ -121,7 +121,14 @@ case "$SUITE" in
                MUTATE_FILTER=$(echo "$MUTATE_API_TARGETS" | sed 's/--test parity_//g' | tr ' ' '|')
              fi
            fi
-           cargo test -p mm-api --test parity ${=MUTATE_FILTER:+$MUTATE_FILTER} > "$LOG" 2>&1 || RC=$?
+           # `--` before the filters: cargo takes at most one positional TESTNAME, so a plan
+           # naming two suites (`'post_reactions emoji_get'`) fails with `unexpected argument`
+           # unless the words go to libtest, which accepts any number and matches on any.
+           if [ -n "$MUTATE_FILTER" ]; then
+             cargo test -p mm-api --test parity -- ${=MUTATE_FILTER} > "$LOG" 2>&1 || RC=$?
+           else
+             cargo test -p mm-api --test parity > "$LOG" 2>&1 || RC=$?
+           fi
          else
            RC=1; echo "does not compile, or the server never came up" > "$LOG"
          fi ;;

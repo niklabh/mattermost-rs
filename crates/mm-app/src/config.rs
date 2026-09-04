@@ -102,6 +102,18 @@ pub struct Config {
     /// that disables only the setting — the same value, reached two ways, is exactly the sort of
     /// coincidence that hides a wrong read.
     pub feature_flag_burn_on_read: bool,
+
+    /// `FileSettings.DriverName` (config.go:1814). Go default **`"local"`**
+    /// (`model.ImageDriverLocal`, config.go:1900).
+    ///
+    /// Read by [`crate::App::get_emoji`] and [`crate::App::get_emoji_by_name`], which refuse
+    /// with `api.emoji.storage.app_error` (403) when it is the **empty string** — not when it
+    /// is some driver we do not implement. A `String` rather than a `bool` because the value is
+    /// what Go compares, and because `FileSettings.isValid` (config.go:4645) restricts it to
+    /// `local`/`amazons3`/`azure`: an empty driver only ever arrives through a config that
+    /// would fail Go's own validation, which is why the branch it gates is close to
+    /// unreachable and is ported for fidelity rather than for coverage.
+    pub file_driver_name: String,
 }
 
 impl Config {
@@ -128,6 +140,7 @@ impl Default for Config {
             post_priority: true,
             enable_burn_on_read: true,
             feature_flag_burn_on_read: true,
+            file_driver_name: "local".to_owned(),
         }
     }
 }
@@ -166,6 +179,10 @@ impl Config {
                 "MM_FEATUREFLAGS_BURNONREAD",
                 default.feature_flag_burn_on_read,
             ),
+            // Not `env_bool`'s fallback rule: a string setting has no unparseable value, so an
+            // override of `""` is a deliberate empty driver and must survive as one.
+            file_driver_name: std::env::var("MM_FILESETTINGS_DRIVERNAME")
+                .unwrap_or(default.file_driver_name),
         }
     }
 }
@@ -224,6 +241,12 @@ mod tests {
         assert!(
             config.burn_on_read(),
             "post_helpers.go:270 — both halves true"
+        );
+        // The one string setting. `model.ImageDriverLocal` is the literal `"local"`; the emoji
+        // reads compare it against `""`, so a default of `""` here would 403 every one of them.
+        assert_eq!(
+            config.file_driver_name, "local",
+            "config.go:1900 — new(ImageDriverLocal)"
         );
     }
 

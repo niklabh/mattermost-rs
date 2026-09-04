@@ -6,9 +6,11 @@
 pub mod authorization;
 pub mod channel;
 pub mod config;
+pub mod emoji;
 pub mod password;
 pub mod post;
 pub mod preference;
+pub mod reaction;
 pub mod role;
 pub mod session;
 /// The read side of `app/channel_category.go`.
