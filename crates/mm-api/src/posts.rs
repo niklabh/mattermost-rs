@@ -110,7 +110,7 @@ async fn serve(
             .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)
             .await
     {
-        return Outcome::Failed(ApiError(*make_permission_error(
+        return Outcome::Failed(ApiError::from(make_permission_error(
             &session.0,
             &[&PERMISSION_MANAGE_SYSTEM],
         )));
@@ -122,7 +122,7 @@ async fn serve(
         .await
     {
         Ok(found) => found,
-        Err(err) => return Outcome::Failed(ApiError(*err)),
+        Err(err) => return Outcome::Failed(ApiError::from(err)),
     };
 
     // `&model.PreparePostForClientOpts{IncludePriority: true}` — every other field is false, and
@@ -143,7 +143,7 @@ async fn serve(
             tracing::debug!(reason, post_id = %post_id, "forwarding to Go");
             return Outcome::Forward;
         }
-        Err(PrepareError::App(err)) => return Outcome::Failed(ApiError(*err)),
+        Err(PrepareError::App(err)) => return Outcome::Failed(ApiError::from(err)),
     };
 
     let (mut post, _preview_is_member) = match state
@@ -156,7 +156,7 @@ async fn serve(
             tracing::debug!(reason, post_id = %post_id, "forwarding to Go");
             return Outcome::Forward;
         }
-        Err(PrepareError::App(err)) => return Outcome::Failed(ApiError(*err)),
+        Err(PrepareError::App(err)) => return Outcome::Failed(ApiError::from(err)),
     };
 
     // `c.HandleEtag(post.Etag(), ...)`: an exact string compare, no weak comparison and no
@@ -177,7 +177,7 @@ async fn serve(
     let mut body = Vec::new();
     if let Err(err) = post.encode_json(&mut body) {
         tracing::error!(error = %err, "failed to serialise Post");
-        return Outcome::Failed(ApiError(mm_model::utils::AppError::new(
+        return Outcome::Failed(ApiError::from(mm_model::utils::AppError::new(
             "getPost",
             "api.marshal_error",
             None,
@@ -316,7 +316,7 @@ async fn serve_channel_posts(
             .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)
             .await
     {
-        return Outcome::Failed(ApiError(*make_permission_error(
+        return Outcome::Failed(ApiError::from(make_permission_error(
             &session.0,
             &[&PERMISSION_READ_DELETED_POSTS],
         )));
@@ -324,7 +324,7 @@ async fn serve_channel_posts(
 
     let channel = match state.app.get_channel(channel_id).await {
         Ok(channel) => channel,
-        Err(err) => return Outcome::Failed(ApiError(err)),
+        Err(err) => return Outcome::Failed(ApiError::from(err)),
     };
 
     // Unlike `GetPostIfAuthorized`, there is **no second `read_public_channel` fallback** here,
@@ -334,7 +334,7 @@ async fn serve_channel_posts(
         .session_has_permission_to_read_channel(&session.0, &channel)
         .await;
     if !has_permission {
-        return Outcome::Failed(ApiError(*make_permission_error(
+        return Outcome::Failed(ApiError::from(make_permission_error(
             &session.0,
             &[&PERMISSION_READ_CHANNEL_CONTENT],
         )));
@@ -362,7 +362,7 @@ async fn serve_channel_posts(
     };
     let list = match state.app.get_posts_page(opts).await {
         Ok(list) => list,
-        Err(err) => return Outcome::Failed(ApiError(err)),
+        Err(err) => return Outcome::Failed(ApiError::from(err)),
     };
 
     let mut prepared = match state.app.prepare_post_list_for_client(&list).await {
@@ -371,7 +371,7 @@ async fn serve_channel_posts(
             tracing::debug!(reason, channel_id, "forwarding to Go");
             return Outcome::Forward;
         }
-        Err(PrepareError::App(err)) => return Outcome::Failed(ApiError(*err)),
+        Err(PrepareError::App(err)) => return Outcome::Failed(ApiError::from(err)),
     };
 
     // `AddCursorIdsForPostList(list, userID, afterPost, beforePost, since, page, perPage, ...)`
@@ -397,13 +397,13 @@ async fn serve_channel_posts(
             tracing::debug!(reason, channel_id, "forwarding to Go");
             return Outcome::Forward;
         }
-        Err(PrepareError::App(err)) => return Outcome::Failed(ApiError(*err)),
+        Err(PrepareError::App(err)) => return Outcome::Failed(ApiError::from(err)),
     };
 
     let mut body = Vec::new();
     if let Err(err) = sanitized.encode_json(&mut body) {
         tracing::error!(error = %err, "failed to serialise PostList");
-        return Outcome::Failed(ApiError(mm_model::utils::AppError::new(
+        return Outcome::Failed(ApiError::from(mm_model::utils::AppError::new(
             "getPostsForChannel",
             "api.marshal_error",
             None,
@@ -645,7 +645,7 @@ async fn serve_post_thread(
 
     let list = match state.app.get_post_thread(post_id, opts).await {
         Ok(list) => list,
-        Err(err) => return Outcome::Failed(ApiError(err)),
+        Err(err) => return Outcome::Failed(ApiError::from(err)),
     };
 
     // `post, ok := list.Posts[c.Params.PostId]` — see the doc comment on why `ok` cannot be
@@ -666,7 +666,7 @@ async fn serve_post_thread(
         .await
     {
         Ok(found) => found,
-        Err(err) => return Outcome::Failed(ApiError(*err)),
+        Err(err) => return Outcome::Failed(ApiError::from(err)),
     };
 
     let etag = list.etag();
@@ -686,7 +686,7 @@ async fn serve_post_thread(
             tracing::debug!(reason, post_id, "forwarding to Go");
             return Outcome::Forward;
         }
-        Err(PrepareError::App(err)) => return Outcome::Failed(ApiError(*err)),
+        Err(PrepareError::App(err)) => return Outcome::Failed(ApiError::from(err)),
     };
 
     let (mut sanitized, _all_previews_have_membership) = match state
@@ -699,7 +699,7 @@ async fn serve_post_thread(
             tracing::debug!(reason, post_id, "forwarding to Go");
             return Outcome::Forward;
         }
-        Err(PrepareError::App(err)) => return Outcome::Failed(ApiError(*err)),
+        Err(PrepareError::App(err)) => return Outcome::Failed(ApiError::from(err)),
     };
 
     // Deliberately the sanitized list's own etag rather than the one compared above.
@@ -708,7 +708,7 @@ async fn serve_post_thread(
     let mut body = Vec::new();
     if let Err(err) = sanitized.encode_json(&mut body) {
         tracing::error!(error = %err, "failed to serialise PostList");
-        return Outcome::Failed(ApiError(mm_model::utils::AppError::new(
+        return Outcome::Failed(ApiError::from(mm_model::utils::AppError::new(
             "getPostThread",
             "api.marshal_error",
             None,

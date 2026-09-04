@@ -4490,3 +4490,16 @@ Two things about the port's shape, since they are decisions rather than findings
 - **`GetPostThreadOptions` is a second struct** rather than more fields on `GetPostsOptions`. Go
   has one type serving both queries; they overlap in three fields and disagree about two of them,
   and keeping them apart is what lets each one's documentation say what its own query does.
+
+## `AppError` boxed across `mm-app` and `mm-api` (2026-09-03) — toolchain, not a route
+
+No route work. `rustc`/`clippy` 1.98 turns on `result_large_err` for `AppError`, which is 192
+bytes against the lint's 128-byte threshold: 84 functions across `mm-app` and `mm-api` returned it
+unboxed, so every success path was as wide as the failure path. `mm-model` had already made this
+decision and documented it — `AppResult<T> = Result<T, Box<AppError>>` — and the two crates simply
+never adopted it. They do now: app-layer signatures are `AppResult<T>`, `ApiError` holds a
+`Box<AppError>`, and `AppError::boxed` (utils.rs) is `new` in a box so a call site stays one
+expression. `clippy` 1.97 separately started flagging `for_kv_map` at `post.rs:729`. No wire
+format moved; the 296-test parity suite and 2,154 unit tests are the guard. The rationale lives on
+`AppError::boxed` and on `ApiError`. Environment note for a fresh machine: fixtures render in
+local time, so the suite needs `TZ=Asia/Kolkata`.

@@ -97,7 +97,7 @@ async fn respond_with_user(
             // `err.StatusCode != http.StatusNotFound` is the propagation guard (user.go:330):
             // a missing row is the common case, not a failure.
             Err(err) if err.status_code == 404 => {}
-            Err(err) => return Err(ApiError(err)),
+            Err(err) => return Err(ApiError::from(err)),
         }
     }
 
@@ -130,7 +130,7 @@ async fn respond_with_user(
     // difference between this response and Go's — see D-086.
     let mut body = serde_json::to_vec(&user).map_err(|err| {
         tracing::error!(error = %err, "failed to serialise User");
-        ApiError(mm_model::utils::AppError::new(
+        ApiError::from(mm_model::utils::AppError::new(
             "getUser",
             "api.marshal_error",
             None,
@@ -218,7 +218,7 @@ pub async fn get_user(
 
     let user = match state.app.get_user(&user_id).await {
         Ok(user) => user,
-        Err(err) => return ApiError(err).into_response(),
+        Err(err) => return ApiError::from(err).into_response(),
     };
 
     match respond_with_user(&state, &headers, &session, user).await {
@@ -303,7 +303,7 @@ pub async fn get_user_by_username(
         Ok(user) => user,
         // Restrictions are nil for this caller, so Go surfaces the fetch error as-is
         // (api4/user.go:376) — the same 404 id as the 500, only the status differing.
-        Err(err) => return ApiError(err).into_response(),
+        Err(err) => return ApiError::from(err).into_response(),
     };
 
     // `UserCanSeeOtherUser(session.UserId, user.Id)`: self is its first branch, and nil
@@ -342,7 +342,7 @@ fn parse_users_by_ids_request(
 ) -> Result<UsersByIdsRequest, ApiError> {
     let user_ids = sorted_array_from_json(body).map_err(|err| {
         tracing::debug!(error = %err, "user_ids body did not decode");
-        ApiError(AppError::new(
+        ApiError::from(AppError::new(
             "getUsersByIds",
             PAYLOAD_PARSE_ERROR,
             None,
@@ -430,7 +430,7 @@ async fn serve_users_by_ids(
         .await
         .map_err(|err| {
             tracing::warn!(error = %err, "could not read the request body");
-            ApiError(AppError::new(
+            ApiError::from(AppError::new(
                 "getUsersByIds",
                 PAYLOAD_PARSE_ERROR,
                 None,
@@ -458,7 +458,7 @@ async fn serve_users_by_ids(
 
     let body = serde_json::to_vec(&users).map_err(|err| {
         tracing::error!(error = %err, "failed to serialise users");
-        ApiError(AppError::new(
+        ApiError::from(AppError::new(
             "getUsersByIds",
             "api.marshal_error",
             None,
@@ -756,7 +756,7 @@ async fn serve_users(
                 )
                 .await;
             if !allowed {
-                return Err(ApiError(*make_permission_error(
+                return Err(ApiError::from(make_permission_error(
                     &session.0,
                     &[&PERMISSION_READ_CHANNEL],
                 )));
@@ -777,7 +777,7 @@ async fn serve_users(
                 )
                 .await
             {
-                return Err(ApiError(*make_permission_error(
+                return Err(ApiError::from(make_permission_error(
                     &session.0,
                     &[&PERMISSION_VIEW_TEAM],
                 )));
@@ -806,7 +806,7 @@ async fn serve_users(
                 .session_has_permission_to_team(&session.0, &query.in_team, &PERMISSION_VIEW_TEAM)
                 .await
             {
-                return Err(ApiError(*make_permission_error(
+                return Err(ApiError::from(make_permission_error(
                     &session.0,
                     &[&PERMISSION_VIEW_TEAM],
                 )));
@@ -838,7 +838,7 @@ async fn serve_users(
                 )
                 .await;
             if !allowed {
-                return Err(ApiError(*make_permission_error(
+                return Err(ApiError::from(make_permission_error(
                     &session.0,
                     &[&PERMISSION_READ_CHANNEL],
                 )));
@@ -855,7 +855,7 @@ async fn serve_users(
         // Forwarded by `forward_reason`; forwarding again rather than panicking keeps the
         // impossible case a working request instead of a 500.
         Branch::WithoutTeam | Branch::InGroup | Branch::NotInGroup => {
-            return Err(ApiError(AppError::new(
+            return Err(ApiError::from(AppError::new(
                 "getUsers",
                 "api.context.404.app_error",
                 None,
@@ -881,7 +881,7 @@ async fn serve_users(
 
     let body = serde_json::to_vec(&users).map_err(|err| {
         tracing::error!(error = %err, "failed to serialise the user list");
-        ApiError(AppError::new(
+        ApiError::from(AppError::new(
             "getUsers",
             "api.marshal_error",
             None,
@@ -1075,7 +1075,7 @@ pub async fn autocomplete_users(
             )
             .await;
         if !allowed {
-            return ApiError(*make_permission_error(
+            return ApiError::from(make_permission_error(
                 &session.0,
                 &[&PERMISSION_READ_CHANNEL],
             ))
@@ -1089,7 +1089,7 @@ pub async fn autocomplete_users(
             .session_has_permission_to_team(&session.0, &parsed.in_team, &PERMISSION_VIEW_TEAM)
             .await
     {
-        return ApiError(*make_permission_error(&session.0, &[&PERMISSION_VIEW_TEAM]))
+        return ApiError::from(make_permission_error(&session.0, &[&PERMISSION_VIEW_TEAM]))
             .into_response();
     }
 
@@ -1127,7 +1127,7 @@ async fn serve_autocomplete(
         // what makes the *out of channel* half answerable, and Go calls that a server error
         // (500) rather than a bad request. Reproduced, status and id both.
         if query.in_team.is_empty() {
-            return Err(ApiError(AppError::new(
+            return Err(ApiError::from(AppError::new(
                 "autocompleteUser",
                 "api.user.autocomplete_users.missing_team_id.app_error",
                 None,
@@ -1181,7 +1181,7 @@ async fn serve_autocomplete(
     // handlers are eleven lines apart in the same Go file and differ by this one byte.
     let mut body = serde_json::to_vec(&autocomplete).map_err(|err| {
         tracing::error!(error = %err, "failed to serialise UserAutocomplete");
-        ApiError(AppError::new(
+        ApiError::from(AppError::new(
             "autocompleteUser",
             "api.marshal_error",
             None,

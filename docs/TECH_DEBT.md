@@ -5532,6 +5532,14 @@ Two distinct consequences, and only the first is fixed:
   behind the `mmrs-parity-` DM purge, one level up: the fixture is no longer just leaked rows, it
   is another suite running right now.
 
+Re-measured 2026-09-03 on an unmodified `cffe86d`, two consecutive full runs: 2 failures then
+3, hitting `users_me`, `channels_for_user` and `channels_for_team_for_user` — a different set
+again, and none of the suites named above. `users_me` fails on a *timestamp* rather than a list
+(`update_at` 33 ms newer in the row than in the body it just fetched), which widens the class:
+any suite that logs a fixture user in moves that user's `UpdateAt` under any suite reading it.
+The single-module invocation the workflow actually uses — `scripts/parity.sh -p mm-api --test
+parity users_me` — is green on every run.
+
 **What is owed:** give the suites back an isolation boundary. The cheapest option that preserves
 the build-time win is to mark the globally-scoped suites `#[serial]` (or gate them behind one
 shared mutex) rather than re-splitting the binary; the thorough option is a per-suite fixture user

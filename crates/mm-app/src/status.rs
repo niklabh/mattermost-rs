@@ -2,7 +2,7 @@
 //! `PlatformService.GetUserStatusesByIds` (channels/app/platform/status.go:136).
 
 use mm_model::status::{STATUS_OFFLINE, Status};
-use mm_model::utils::AppError;
+use mm_model::utils::{AppError, AppResult};
 use mm_store::StatusStore;
 
 use crate::App;
@@ -47,10 +47,7 @@ impl App {
     /// route therefore answers 200 for an unknown id, and its 404 branch fires only when the
     /// feature is disabled.
     #[tracing::instrument(skip_all, fields(asked = user_ids.len()))]
-    pub async fn get_user_statuses_by_ids(
-        &self,
-        user_ids: &[String],
-    ) -> Result<Vec<Status>, AppError> {
+    pub async fn get_user_statuses_by_ids(&self, user_ids: &[String]) -> AppResult<Vec<Status>> {
         if !ENABLE_USER_STATUSES {
             return Ok(Vec::new());
         }
@@ -62,7 +59,7 @@ impl App {
             .await
             .map_err(|err| {
                 tracing::error!(error = %err, "status lookup failed");
-                AppError::new(
+                AppError::boxed(
                     "GetUserStatusesByIds",
                     "app.status.get.app_error",
                     None,

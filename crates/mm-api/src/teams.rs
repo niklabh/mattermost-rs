@@ -80,7 +80,7 @@ pub async fn get_team_members_for_user_me(
 
     let body = serde_json::to_vec(&members).map_err(|err| {
         tracing::error!(error = %err, "failed to serialise team members");
-        ApiError(mm_model::utils::AppError::new(
+        ApiError::from(mm_model::utils::AppError::new(
             "getTeamMembersForUser",
             "api.marshal_error",
             None,
@@ -175,7 +175,7 @@ pub async fn get_teams_for_user(
     .await;
 
     if denied {
-        return Err(ApiError(*make_permission_error(
+        return Err(ApiError::from(make_permission_error(
             &session.0,
             &[&PERMISSION_SYSCONSOLE_READ_USER_MANAGEMENT_USERS],
         )));
@@ -188,7 +188,7 @@ pub async fn get_teams_for_user(
 
     let body = serde_json::to_vec(&teams).map_err(|err| {
         tracing::error!(error = %err, "failed to serialise the team list");
-        ApiError(mm_model::utils::AppError::new(
+        ApiError::from(mm_model::utils::AppError::new(
             "getTeamsForUser",
             "api.marshal_error",
             None,
@@ -255,7 +255,7 @@ where
 /// `get_channel_denial`, and for the same reason: the permission's name reaches a client only
 /// through the wiped `detailed_error` ([D-092]).
 fn get_team_denial(session: &mm_model::session::Session) -> ApiError {
-    ApiError(*make_permission_error(
+    ApiError::from(make_permission_error(
         session,
         &[&mm_model::permission::PERMISSION_VIEW_TEAM],
     ))
@@ -301,7 +301,7 @@ pub async fn get_team(
 
     let mut team = match state.app.get_team(&team_id).await {
         Ok(team) => team,
-        Err(err) => return ApiError(err).into_response(),
+        Err(err) => return ApiError::from(err).into_response(),
     };
 
     // Unconditional, as Go's assignment is — even when the team is public and the fallback could
@@ -336,7 +336,7 @@ pub async fn get_team(
         Ok(body) => body,
         Err(err) => {
             tracing::error!(error = %err, "failed to serialise Team");
-            return ApiError(mm_model::utils::AppError::new(
+            return ApiError::from(mm_model::utils::AppError::new(
                 "getTeam",
                 "api.marshal_error",
                 None,
@@ -426,14 +426,14 @@ pub async fn get_team_stats(
 
     let stats = match state.app.get_team_stats(&team_id).await {
         Ok(stats) => stats,
-        Err(err) => return ApiError(err).into_response(),
+        Err(err) => return ApiError::from(err).into_response(),
     };
 
     let mut body = match serde_json::to_vec(&stats) {
         Ok(body) => body,
         Err(err) => {
             tracing::error!(error = %err, "failed to serialise TeamStats");
-            return ApiError(mm_model::utils::AppError::new(
+            return ApiError::from(mm_model::utils::AppError::new(
                 "getTeamStats",
                 "api.marshal_error",
                 None,
@@ -551,7 +551,7 @@ pub async fn get_team_by_name(
 
     let mut team = match state.app.get_team_by_name(&team_name).await {
         Ok(team) => team,
-        Err(err) => return ApiError(err).into_response(),
+        Err(err) => return ApiError::from(err).into_response(),
     };
 
     let denied = team_by_name_denied(team_is_public(&team), || async {
@@ -576,7 +576,7 @@ pub async fn get_team_by_name(
         Ok(body) => body,
         Err(err) => {
             tracing::error!(error = %err, "failed to serialise Team");
-            return ApiError(mm_model::utils::AppError::new(
+            return ApiError::from(mm_model::utils::AppError::new(
                 "getTeamByName",
                 "api.marshal_error",
                 None,
@@ -709,7 +709,7 @@ pub async fn get_team_member(
 
     let mut member = match state.app.get_team_member(&team_id, &user_id).await {
         Ok(member) => member,
-        Err(err) => return ApiError(err).into_response(),
+        Err(err) => return ApiError::from(err).into_response(),
     };
 
     let can_manage_roles = state
@@ -728,7 +728,7 @@ pub async fn get_team_member(
         Ok(body) => body,
         Err(err) => {
             tracing::error!(error = %err, "failed to serialise TeamMember");
-            return ApiError(mm_model::utils::AppError::new(
+            return ApiError::from(mm_model::utils::AppError::new(
                 "getTeamMember",
                 "api.marshal_error",
                 None,
@@ -847,7 +847,7 @@ pub async fn get_team_members(
         .await
     {
         Ok(members) => members,
-        Err(err) => return ApiError(err).into_response(),
+        Err(err) => return ApiError::from(err).into_response(),
     };
 
     let can_manage_roles = state
@@ -868,7 +868,7 @@ pub async fn get_team_members(
         Ok(body) => body,
         Err(err) => {
             tracing::error!(error = %err, "failed to serialise the member list");
-            return ApiError(mm_model::utils::AppError::new(
+            return ApiError::from(mm_model::utils::AppError::new(
                 "getTeamMembers",
                 "api.marshal_error",
                 None,
@@ -948,7 +948,7 @@ pub async fn get_teams_unread_for_user(
     })
     .await;
     if denied {
-        return ApiError(*make_permission_error(
+        return ApiError::from(make_permission_error(
             &session.0,
             &[&PERMISSION_MANAGE_SYSTEM],
         ))
@@ -970,7 +970,7 @@ pub async fn get_teams_unread_for_user(
         .await
     {
         Ok(unreads) => unreads,
-        Err(err) => return ApiError(err).into_response(),
+        Err(err) => return ApiError::from(err).into_response(),
     };
     tracing::Span::current().record("count", unreads.len());
 
@@ -978,7 +978,7 @@ pub async fn get_teams_unread_for_user(
         Ok(body) => body,
         Err(err) => {
             tracing::error!(error = %err, "failed to serialise the team unread list");
-            return ApiError(mm_model::utils::AppError::new(
+            return ApiError::from(mm_model::utils::AppError::new(
                 "getTeamsUnreadForUser",
                 "api.marshal_error",
                 None,
@@ -1090,19 +1090,19 @@ pub async fn get_team_unread(
     )
     .await;
     if let Some(permission) = denial {
-        return ApiError(*make_permission_error(&session.0, &[permission])).into_response();
+        return ApiError::from(make_permission_error(&session.0, &[permission])).into_response();
     }
 
     let unread = match state.app.get_team_unread(&team_id, &user_id).await {
         Ok(unread) => unread,
-        Err(err) => return ApiError(err).into_response(),
+        Err(err) => return ApiError::from(err).into_response(),
     };
 
     let mut body = match serde_json::to_vec(&unread) {
         Ok(body) => body,
         Err(err) => {
             tracing::error!(error = %err, "failed to serialise the team unread");
-            return ApiError(mm_model::utils::AppError::new(
+            return ApiError::from(mm_model::utils::AppError::new(
                 "getTeamUnread",
                 "api.marshal_error",
                 None,
@@ -1271,11 +1271,11 @@ pub async fn get_all_teams(
         state.app.team_membership_access_control_enabled(),
     )
     .map_err(|denial| match denial {
-        AllTeamsDenial::RetentionPolicyRead => ApiError(*make_permission_error(
+        AllTeamsDenial::RetentionPolicyRead => ApiError::from(make_permission_error(
             &session.0,
             &[&PERMISSION_SYSCONSOLE_READ_COMPLIANCE_DATA_RETENTION_POLICY],
         )),
-        AllTeamsDenial::NeitherListPermission => ApiError(mm_model::utils::AppError::new(
+        AllTeamsDenial::NeitherListPermission => ApiError::from(mm_model::utils::AppError::new(
             "getAllTeams",
             "api.team.get_all_teams.insufficient_permissions",
             None,
@@ -1328,7 +1328,7 @@ pub async fn get_all_teams(
 fn serialised_team_listing<T: serde::Serialize>(value: &T) -> Result<Vec<u8>, ApiError> {
     serde_json::to_vec(value).map_err(|err| {
         tracing::error!(error = %err, "failed to serialise the team listing");
-        ApiError(mm_model::utils::AppError::new(
+        ApiError::from(mm_model::utils::AppError::new(
             "getAllTeams",
             "api.marshal_error",
             None,

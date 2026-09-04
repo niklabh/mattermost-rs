@@ -33,7 +33,7 @@
 //! not worth doing in a session whose sibling worktrees are editing that file.
 
 use mm_model::role::Role;
-use mm_model::utils::AppError;
+use mm_model::utils::{AppError, AppResult};
 use mm_store::RoleStore;
 
 use crate::App;
@@ -46,10 +46,10 @@ impl App {
     /// status distinguishes them, so a port that invents a second id breaks any client branching
     /// on `id`.
     #[tracing::instrument(skip(self))]
-    pub async fn get_role(&self, id: &str) -> Result<Role, AppError> {
+    pub async fn get_role(&self, id: &str) -> AppResult<Role> {
         let role = self.store().role().get(id).await.map_err(|err| {
             tracing::error!(error = %err, "role lookup failed");
-            AppError::new(
+            AppError::boxed(
                 "GetRole",
                 "app.role.get.app_error",
                 None,
@@ -61,7 +61,7 @@ impl App {
         let mut roles = match role {
             Some(role) => vec![role],
             None => {
-                return Err(AppError::new(
+                return Err(AppError::boxed(
                     "GetRole",
                     "app.role.get.app_error",
                     None,
@@ -76,7 +76,7 @@ impl App {
 
         roles.pop().ok_or_else(|| {
             // Unreachable: the vector holds exactly one element and the merge never removes one.
-            AppError::new(
+            AppError::boxed(
                 "GetRole",
                 "app.role.get.app_error",
                 None,
@@ -91,10 +91,10 @@ impl App {
     /// Note the error id differs from [`App::get_role`]'s by one word — `get_by_name` rather than
     /// `get` — while the status codes (404 missing, 500 broken) are the same pair.
     #[tracing::instrument(skip(self))]
-    pub async fn get_role_by_name(&self, name: &str) -> Result<Role, AppError> {
+    pub async fn get_role_by_name(&self, name: &str) -> AppResult<Role> {
         let role = self.store().role().get_by_name(name).await.map_err(|err| {
             tracing::error!(error = %err, "role lookup by name failed");
-            AppError::new(
+            AppError::boxed(
                 "GetRoleByName",
                 "app.role.get_by_name.app_error",
                 None,
@@ -106,7 +106,7 @@ impl App {
         let mut roles = match role {
             Some(role) => vec![role],
             None => {
-                return Err(AppError::new(
+                return Err(AppError::boxed(
                     "GetRoleByName",
                     "app.role.get_by_name.app_error",
                     None,
@@ -120,7 +120,7 @@ impl App {
             .await?;
 
         roles.pop().ok_or_else(|| {
-            AppError::new(
+            AppError::boxed(
                 "GetRoleByName",
                 "app.role.get_by_name.app_error",
                 None,
@@ -136,10 +136,10 @@ impl App {
     /// error. Go's own `where` for it is `GetAllRoles` and the id `app.role.get_all.app_error`,
     /// which nothing else uses.
     #[tracing::instrument(skip(self))]
-    pub async fn get_all_roles(&self) -> Result<Vec<Role>, AppError> {
+    pub async fn get_all_roles(&self) -> AppResult<Vec<Role>> {
         let mut roles = self.store().role().get_all().await.map_err(|err| {
             tracing::error!(error = %err, "reading every role failed");
-            AppError::new(
+            AppError::boxed(
                 "GetAllRoles",
                 "app.role.get_all.app_error",
                 None,
@@ -172,10 +172,7 @@ impl App {
     ///
     /// The error is Go's: `where` is the *merge*'s name, never the caller's, and the id is
     /// `app.role.get_by_names.app_error` even when the caller was `GetRole`.
-    async fn merge_channel_higher_scoped_permissions(
-        &self,
-        roles: &mut [Role],
-    ) -> Result<(), AppError> {
+    async fn merge_channel_higher_scoped_permissions(&self, roles: &mut [Role]) -> AppResult<()> {
         let scheme_managed: Vec<String> = roles
             .iter()
             .filter(|role| role.scheme_managed)
@@ -193,7 +190,7 @@ impl App {
             .await
             .map_err(|err| {
                 tracing::error!(error = %err, "higher-scoped permission lookup failed");
-                AppError::new(
+                AppError::boxed(
                     "mergeChannelHigherScopedPermissions",
                     "app.role.get_by_names.app_error",
                     None,

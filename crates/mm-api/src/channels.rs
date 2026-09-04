@@ -141,7 +141,7 @@ pub async fn get_channel_member(
         // `c.SetPermissionError(model.PermissionReadChannel)` — 403, with the session's user id
         // and the permission name in the detail. The detail is wiped before the body is written
         // unless developer mode is on, which `ApiError::into_response` already reproduces.
-        return Err(ApiError(*make_permission_error(
+        return Err(ApiError::from(make_permission_error(
             &session.0,
             &[&PERMISSION_READ_CHANNEL],
         )));
@@ -153,7 +153,7 @@ pub async fn get_channel_member(
 
     let mut body = serde_json::to_vec(&member).map_err(|err| {
         tracing::error!(error = %err, "failed to serialise ChannelMember");
-        ApiError(mm_model::utils::AppError::new(
+        ApiError::from(mm_model::utils::AppError::new(
             "getChannelMember",
             "api.marshal_error",
             None,
@@ -265,14 +265,17 @@ pub async fn get_channel_unread(
     .await;
 
     if let Some(permission) = denied {
-        return Err(ApiError(*make_permission_error(&session.0, &[permission])));
+        return Err(ApiError::from(make_permission_error(
+            &session.0,
+            &[permission],
+        )));
     }
 
     let unread = state.app.get_channel_unread(&channel_id, &user_id).await?;
 
     let mut body = serde_json::to_vec(&unread).map_err(|err| {
         tracing::error!(error = %err, "failed to serialise ChannelUnread");
-        ApiError(mm_model::utils::AppError::new(
+        ApiError::from(mm_model::utils::AppError::new(
             "getChannelUnread",
             "api.marshal_error",
             None,
@@ -407,7 +410,7 @@ where
 /// survived every cross-server test when it was inline. Same in-process pinning as
 /// [`validate_ids`] and [`first_denied_permission`].
 fn get_channel_denial(session: &mm_model::session::Session) -> ApiError {
-    ApiError(*make_permission_error(session, &[&PERMISSION_READ_CHANNEL]))
+    ApiError::from(make_permission_error(session, &[&PERMISSION_READ_CHANNEL]))
 }
 
 /// Port of `getChannel` (api4/channel.go:827), reached as `GET /api/v4/channels/{channel_id}`.
@@ -454,7 +457,7 @@ pub async fn get_channel(
 
     let mut channel = match state.app.get_channel(&channel_id).await {
         Ok(channel) => channel,
-        Err(err) => return ApiError(err).into_response(),
+        Err(err) => return ApiError::from(err).into_response(),
     };
 
     let denied = channel_read_denied(
@@ -488,14 +491,14 @@ pub async fn get_channel(
     }
 
     if let Err(err) = state.app.fill_in_channel_props(&mut channel).await {
-        return ApiError(err).into_response();
+        return ApiError::from(err).into_response();
     }
 
     let mut body = match serde_json::to_vec(&channel) {
         Ok(body) => body,
         Err(err) => {
             tracing::error!(error = %err, "failed to serialise Channel");
-            return ApiError(mm_model::utils::AppError::new(
+            return ApiError::from(mm_model::utils::AppError::new(
                 "getChannel",
                 "api.marshal_error",
                 None,
@@ -530,10 +533,10 @@ pub async fn get_channel(
 async fn files_count_unless_excluded<F, Fut>(
     exclude_files_count: bool,
     fetch: F,
-) -> Result<i64, mm_model::utils::AppError>
+) -> mm_model::utils::AppResult<i64>
 where
     F: FnOnce() -> Fut,
-    Fut: std::future::Future<Output = Result<i64, mm_model::utils::AppError>>,
+    Fut: std::future::Future<Output = mm_model::utils::AppResult<i64>>,
 {
     if exclude_files_count {
         return Ok(-1);
@@ -588,7 +591,7 @@ pub async fn get_channel_stats(
         .session_has_permission_to_channel(&session.0, &channel_id, &PERMISSION_READ_CHANNEL)
         .await;
     if !allowed {
-        return Err(ApiError(*make_permission_error(
+        return Err(ApiError::from(make_permission_error(
             &session.0,
             &[&PERMISSION_READ_CHANNEL],
         )));
@@ -612,7 +615,7 @@ pub async fn get_channel_stats(
 
     let mut body = serde_json::to_vec(&stats).map_err(|err| {
         tracing::error!(error = %err, "failed to serialise ChannelStats");
-        ApiError(mm_model::utils::AppError::new(
+        ApiError::from(mm_model::utils::AppError::new(
             "getChannelStats",
             "api.marshal_error",
             None,
@@ -673,7 +676,7 @@ pub async fn get_channel_members(
         .session_has_permission_to_channel(&session.0, &channel_id, &PERMISSION_READ_CHANNEL)
         .await;
     if !allowed {
-        return Err(ApiError(*make_permission_error(
+        return Err(ApiError::from(make_permission_error(
             &session.0,
             &[&PERMISSION_READ_CHANNEL],
         )));
@@ -690,7 +693,7 @@ pub async fn get_channel_members(
 
     let mut body = serde_json::to_vec(&members).map_err(|err| {
         tracing::error!(error = %err, "failed to serialise the member list");
-        ApiError(mm_model::utils::AppError::new(
+        ApiError::from(mm_model::utils::AppError::new(
             "getChannelMembers",
             "api.marshal_error",
             None,
@@ -792,11 +795,11 @@ fn channel_by_name_denial(
     channel: &mm_model::channel::Channel,
 ) -> ApiError {
     match refusal {
-        ByNameRefusal::Forbidden => ApiError(*make_permission_error(
+        ByNameRefusal::Forbidden => ApiError::from(make_permission_error(
             session,
             &[&PERMISSION_READ_PUBLIC_CHANNEL],
         )),
-        ByNameRefusal::NotFound => ApiError(mm_model::utils::AppError::new(
+        ByNameRefusal::NotFound => ApiError::from(mm_model::utils::AppError::new(
             "getChannelByName",
             "app.channel.get_by_name.missing.app_error",
             None,
@@ -861,7 +864,7 @@ pub async fn get_channel_by_name(
         .await
     {
         Ok(channel) => channel,
-        Err(err) => return ApiError(err).into_response(),
+        Err(err) => return ApiError::from(err).into_response(),
     };
 
     let refusal = channel_by_name_refusal(
@@ -891,14 +894,14 @@ pub async fn get_channel_by_name(
     }
 
     if let Err(err) = state.app.fill_in_channel_props(&mut channel).await {
-        return ApiError(err).into_response();
+        return ApiError::from(err).into_response();
     }
 
     let mut body = match serde_json::to_vec(&channel) {
         Ok(body) => body,
         Err(err) => {
             tracing::error!(error = %err, "failed to serialise Channel");
-            return ApiError(mm_model::utils::AppError::new(
+            return ApiError::from(mm_model::utils::AppError::new(
                 "getChannelByName",
                 "api.marshal_error",
                 None,
@@ -1034,7 +1037,10 @@ pub async fn get_channels_for_team_for_user(
     })
     .await;
     if let Some(permission) = denied {
-        return Err(ApiError(*make_permission_error(&session.0, &[permission])));
+        return Err(ApiError::from(make_permission_error(
+            &session.0,
+            &[permission],
+        )));
     }
 
     let last_delete_at = parse_last_delete_at(query.as_deref())?;
@@ -1064,7 +1070,7 @@ pub async fn get_channels_for_team_for_user(
 
     let mut body = serde_json::to_vec(&channels).map_err(|err| {
         tracing::error!(error = %err, "failed to serialise the channel list");
-        ApiError(mm_model::utils::AppError::new(
+        ApiError::from(mm_model::utils::AppError::new(
             "getChannelsForTeamForUser",
             "api.marshal_error",
             None,
@@ -1217,7 +1223,7 @@ pub async fn get_channels_for_user(
         .session_has_permission_to_user(&session.0, &user_id)
         .await
     {
-        return Err(ApiError(*make_permission_error(
+        return Err(ApiError::from(make_permission_error(
             &session.0,
             &[&PERMISSION_EDIT_OTHER_USERS],
         )));
@@ -1328,7 +1334,10 @@ pub async fn get_channel_members_for_team_for_user(
     )
     .await;
     if let Some(permission) = denied {
-        return Err(ApiError(*make_permission_error(&session.0, &[permission])));
+        return Err(ApiError::from(make_permission_error(
+            &session.0,
+            &[permission],
+        )));
     }
 
     let mut members = state
@@ -1343,7 +1352,7 @@ pub async fn get_channel_members_for_team_for_user(
 
     let mut body = serde_json::to_vec(&members).map_err(|err| {
         tracing::error!(error = %err, "failed to serialise the member list");
-        ApiError(mm_model::utils::AppError::new(
+        ApiError::from(mm_model::utils::AppError::new(
             "getChannelMembersForTeamForUser",
             "api.marshal_error",
             None,
@@ -1394,7 +1403,7 @@ fn encoded_channel_list(
 ) -> Result<Vec<u8>, ApiError> {
     let mut body = serde_json::to_vec(channels).map_err(|err| {
         tracing::error!(error = %err, "failed to serialise the channel list");
-        ApiError(mm_model::utils::AppError::new(
+        ApiError::from(mm_model::utils::AppError::new(
             where_,
             "api.marshal_error",
             None,
@@ -1456,7 +1465,7 @@ pub async fn get_public_channels_for_team(
         .session_has_permission_to_team(&session.0, &team_id, &PERMISSION_LIST_TEAM_CHANNELS)
         .await
     {
-        return Err(ApiError(*make_permission_error(
+        return Err(ApiError::from(make_permission_error(
             &session.0,
             &[&PERMISSION_LIST_TEAM_CHANNELS],
         )));
@@ -1506,7 +1515,7 @@ pub async fn get_private_channels_for_team(
         .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)
         .await
     {
-        return Err(ApiError(*make_permission_error(
+        return Err(ApiError::from(make_permission_error(
             &session.0,
             &[&PERMISSION_MANAGE_SYSTEM],
         )));
@@ -1559,7 +1568,7 @@ pub async fn get_deleted_channels_for_team(
         .session_has_permission_to_team(&session.0, &team_id, &PERMISSION_LIST_TEAM_CHANNELS)
         .await
     {
-        return Err(ApiError(*make_permission_error(
+        return Err(ApiError::from(make_permission_error(
             &session.0,
             &[&PERMISSION_LIST_TEAM_CHANNELS],
         )));
@@ -1955,7 +1964,7 @@ mod tests {
         assert_eq!(count.expect("fetch succeeded"), 7);
 
         let err = files_count_unless_excluded(false, || async {
-            Err(mm_model::utils::AppError::new(
+            Err(mm_model::utils::AppError::boxed(
                 "SqlChannelStore.GetFileCount",
                 "app.channel.get_file_count.app_error",
                 None,
@@ -2200,7 +2209,7 @@ mod tests {
     }
 
     fn not_found() -> ApiError {
-        ApiError(mm_model::utils::AppError::new(
+        ApiError::from(mm_model::utils::AppError::new(
             "GetChannelsForUser",
             CHANNELS_NOT_FOUND_ID,
             None,
@@ -2330,7 +2339,7 @@ mod tests {
             if from.is_empty() {
                 Ok(channel_page(0..page))
             } else {
-                Err(ApiError(mm_model::utils::AppError::new(
+                Err(ApiError::from(mm_model::utils::AppError::new(
                     "GetChannelsForUser",
                     "app.channel.get_channels.get.app_error",
                     None,

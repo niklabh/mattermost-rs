@@ -56,7 +56,7 @@ pub async fn get_user_status(
     // `statusMap[0]`: the platform layer answers every id it is asked about, so the list is
     // never empty while statuses are enabled.
     let Some(status) = statuses.drain(..).next() else {
-        return Err(ApiError(AppError::new(
+        return Err(ApiError::from(AppError::new(
             "UserStatus",
             "api.status.user_not_found.app_error",
             None,
@@ -67,7 +67,7 @@ pub async fn get_user_status(
 
     let mut body = serde_json::to_vec(&status).map_err(|err| {
         tracing::error!(error = %err, "failed to serialise Status");
-        ApiError(AppError::new(
+        ApiError::from(AppError::new(
             "getUserStatus",
             "api.marshal_error",
             None,
@@ -106,7 +106,7 @@ pub async fn get_user_statuses_by_ids(
 
     let body = serde_json::to_vec(&statuses).map_err(|err| {
         tracing::error!(error = %err, "failed to serialise statuses");
-        ApiError(AppError::new(
+        ApiError::from(AppError::new(
             "getUserStatusesByIds",
             "api.marshal_error",
             None,
@@ -132,7 +132,7 @@ fn json_ok(body: Vec<u8>) -> Response {
 
 /// `model.NewAppError("getUserStatusesByIds", model.PayloadParseError, nil, "", 400)`.
 fn payload_parse_error() -> ApiError {
-    ApiError(AppError::new(
+    ApiError::from(AppError::new(
         "getUserStatusesByIds",
         PAYLOAD_PARSE_ERROR,
         None,
@@ -183,7 +183,7 @@ mod tests {
     const A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaa";
     const B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbb";
 
-    fn error_of(body: &str) -> AppError {
+    fn error_of(body: &str) -> Box<AppError> {
         parse_user_ids(body.as_bytes())
             .expect_err("this body must be rejected")
             .0

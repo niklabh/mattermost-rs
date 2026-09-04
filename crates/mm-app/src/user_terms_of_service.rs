@@ -1,7 +1,7 @@
 //! Port of `app/user_terms_of_service.go`, `GetUserTermsOfService` only.
 
 use mm_model::user_terms_of_service::UserTermsOfService;
-use mm_model::utils::AppError;
+use mm_model::utils::{AppError, AppResult};
 use mm_store::UserTermsOfServiceStore;
 
 use crate::App;
@@ -15,17 +15,14 @@ impl App {
     /// The 404 id inserts `no_rows.` into the 500's id, the same one-word-apart shape as
     /// `GetChannelMember`'s `missing.`.
     #[tracing::instrument(skip_all, fields(user_id = %user_id))]
-    pub async fn get_user_terms_of_service(
-        &self,
-        user_id: &str,
-    ) -> Result<UserTermsOfService, AppError> {
+    pub async fn get_user_terms_of_service(&self, user_id: &str) -> AppResult<UserTermsOfService> {
         self.store()
             .user_terms_of_service()
             .get_by_user(user_id)
             .await
             .map_err(|err| {
                 if err.is_not_found() {
-                    AppError::new(
+                    AppError::boxed(
                         "GetUserTermsOfService",
                         "app.user_terms_of_service.get_by_user.no_rows.app_error",
                         None,
@@ -34,7 +31,7 @@ impl App {
                     )
                 } else {
                     tracing::error!(error = %err, "user terms of service lookup failed");
-                    AppError::new(
+                    AppError::boxed(
                         "GetUserTermsOfService",
                         "app.user_terms_of_service.get_by_user.app_error",
                         None,

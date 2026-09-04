@@ -46,7 +46,7 @@ use mm_model::channel::Channel;
 use mm_model::permission::Permission;
 use mm_model::role::Role;
 use mm_model::session::Session;
-use mm_model::utils::AppError;
+use mm_model::utils::{AppError, AppResult};
 use mm_store::{ChannelStore, RoleStore, UserStore};
 
 use crate::App;
@@ -66,7 +66,7 @@ impl App {
     /// # Errors
     /// A store failure becomes `app.role.get_by_names.app_error`, 500, as in Go.
     #[tracing::instrument(skip(self))]
-    pub async fn get_roles_by_names(&self, names: &[String]) -> Result<Vec<Role>, AppError> {
+    pub async fn get_roles_by_names(&self, names: &[String]) -> AppResult<Vec<Role>> {
         let mut roles = self
             .store()
             .role()
@@ -74,7 +74,7 @@ impl App {
             .await
             .map_err(|err| {
                 tracing::error!(error = %err, "role lookup failed");
-                AppError::new(
+                AppError::boxed(
                     "GetRolesByNames",
                     "app.role.get_by_names.app_error",
                     None,
@@ -100,7 +100,7 @@ impl App {
             .await
             .map_err(|err| {
                 tracing::error!(error = %err, "higher-scoped permission lookup failed");
-                AppError::new(
+                AppError::boxed(
                     "mergeChannelHigherScopedPermissions",
                     "app.role.get_by_names.app_error",
                     None,
