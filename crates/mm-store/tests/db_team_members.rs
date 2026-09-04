@@ -1,4 +1,5 @@
-//! `SqlTeamStore.GetByName`, `GetMember` and `GetMembers` against a real Postgres.
+//! `SqlTeamStore.GetByName`, `GetMember`, `GetMembers` and `GetMembersByIds` against a real
+//! Postgres.
 //!
 //! ```sh
 //! docker compose up -d
@@ -11,7 +12,10 @@
 //! `exclude_deleted_users`, the three-way sort (`UserId`, `Username`, nothing), the unguarded
 //! `LIMIT 0`, and `GetByName`'s exact-match-no-folding lookup that still serves an archived team.
 
-use mm_store::team_store::{TeamMembersGetOptions, get_by_name, get_member, get_members};
+use mm_store::StoreError;
+use mm_store::team_store::{
+    TeamMembersGetOptions, get_by_name, get_member, get_members, get_members_by_ids,
+};
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 
@@ -279,6 +283,70 @@ async fn the_member_reads_match_gos_sql() {
         .await
         .expect_err("missing");
     assert!(nosuch.is_not_found(), "{nosuch:?}");
+
+    // GetMembersByIds: the same select with the paging gone, and three predicates to separate.
+    //
+    // `TeamMembers.DeleteAt = 0` is applied — the departed member is asked for by id and is
+    // still absent, which is the opposite of `SqlChannelStore.GetMembersByIds`, whose query
+    // filters nothing.
+    let by_ids = get_members_by_ids(
+        &pool,
+        TEAM,
+        &[
+            USER_A.to_owned(),
+            USER_B.to_owned(),
+            USER_DEPARTED.to_owned(),
+        ],
+    )
+    .await
+    .expect("the query runs");
+    let mut found = ids(&by_ids);
+    found.sort_unstable();
+    assert_eq!(found, vec![USER_A, USER_B], "a departed member is filtered");
+
+    // The `TeamId` predicate: `USER_A` is a member of `OTHER_TEAM` too, and asking this team for
+    // it must not bring that membership along.
+    let scoped = get_members_by_ids(&pool, TEAM, std::slice::from_ref(&USER_A.to_owned()))
+        .await
+        .expect("the query runs");
+    assert_eq!(ids(&scoped), vec![USER_A]);
+    assert_eq!(scoped[0].team_id, TEAM, "this team's row, not the other's");
+
+    // **No `Users.DeleteAt` filter at all.** `USER_C` is a deactivated user with a living
+    // membership and it is returned — the paginated sibling only hides it when
+    // `exclude_deleted_users` is set, and this query has no such option to set.
+    let deactivated = get_members_by_ids(&pool, TEAM, std::slice::from_ref(&USER_C.to_owned()))
+        .await
+        .expect("the query runs");
+    assert_eq!(ids(&deactivated), vec![USER_C]);
+
+    // An id that names nobody is silently absent, and a list of only such ids is an empty
+    // result rather than a miss — unlike `GetPublicChannelsByIdsForTeam`, whose zero rows are a
+    // `NotFound` the app layer turns into a 404.
+    let unmatched = get_members_by_ids(&pool, TEAM, &["mmrstmuser000000000000none".to_owned()])
+        .await
+        .expect("the query runs");
+    assert!(unmatched.is_empty(), "{:?}", ids(&unmatched));
+
+    // **The guard the REST route can never reach.** `getTeamMembersByIds` answers
+    // `invalid_body_param` for an empty array long before the store is called, so this branch
+    // has no oracle over HTTP — a mutation deleting it survived the whole parity suite. Go
+    // raises a bare `errors.New` here, which its app layer wraps into a **500**, not a 400; the
+    // point of keeping it is that an empty slice would otherwise be `= ANY('{}')` and a silently
+    // empty success.
+    let empty = get_members_by_ids(&pool, TEAM, &[])
+        .await
+        .expect_err("an empty id list is an error, not an empty answer");
+    assert!(
+        matches!(
+            empty,
+            StoreError::Argument {
+                entity: "TeamMember",
+                detail: "invalid list of user ids",
+            }
+        ),
+        "{empty:?}"
+    );
 
     purge(&pool).await;
 }

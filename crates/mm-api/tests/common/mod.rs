@@ -1219,6 +1219,31 @@ pub async fn create_team(client: &reqwest::Client, admin_token: &str, tag: &str)
     created["id"].as_str().expect("an id").to_owned()
 }
 
+/// Remove `user_id` from `team_id` through Go's API.
+///
+/// Go **soft-deletes**: the `TeamMembers` row survives with a non-zero `DeleteAt`, which is the
+/// only way to build a departed member — the row has to still be there for a `DeleteAt = 0`
+/// predicate to be worth asserting. Deleting the user instead would remove it from every answer
+/// for a different reason and prove nothing about the predicate.
+pub async fn remove_user_from_team(
+    client: &reqwest::Client,
+    admin_token: &str,
+    team_id: &str,
+    user_id: &str,
+) {
+    let response = client
+        .delete(format!("{GO}/api/v4/teams/{team_id}/members/{user_id}"))
+        .header("Authorization", format!("Bearer {admin_token}"))
+        .send()
+        .await
+        .expect("Go answers");
+    assert!(
+        response.status().is_success(),
+        "removing {user_id} from {team_id} failed: {}",
+        response.text().await.unwrap_or_default()
+    );
+}
+
 /// Open a direct-message channel between two users and return its id.
 ///
 /// A DM is a channel like any other for membership purposes, and it needs **no team** — which is

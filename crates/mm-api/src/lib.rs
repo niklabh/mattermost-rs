@@ -273,6 +273,14 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/teams/{team_id}/members",
             partially_migrated_with_ids(&state, get(teams::get_team_members)),
         )
+        // `BaseRoutes.TeamMembers.Handle("/ids")` (api4/team.go:57) — the same literal-in-the-
+        // parameter-slot shape as `/channels/{id}/members/ids` above, with the same answer in
+        // both routers and for the same reason: POST-only here and there, so a GET keeps
+        // reaching `getTeamMember` with `user_id = "ids"` and its 400.
+        .route(
+            "/api/v4/teams/{team_id}/members/ids",
+            partially_migrated_with_ids(&state, post(teams::get_team_members_by_ids)),
+        )
         .route(
             "/api/v4/teams/{team_id}/members/{user_id}",
             partially_migrated_with_ids(&state, get(teams::get_team_member)),
@@ -329,6 +337,16 @@ pub fn router(state: AppState) -> Router {
         )
         // The first migrated path with parameters. axum's `{name}` segments bind by position in
         // the handler's `Path` tuple, so the order here is the order there.
+        // The literal `ids` in the `{user_id}` slot of the route below. gorilla registers
+        // `ChannelMembers.Handle("/ids")` POST-only (api4/channel.go:108), so a **GET** to this
+        // path there falls through to `getChannelMember` with `user_id = "ids"` and 400s;
+        // registered POST-only here, a GET lands on `partially_migrated`'s method fallback and
+        // Go answers exactly that 400 as before. axum prefers the literal for POST, which is the
+        // route gorilla's method matcher picks too — same answer, both methods.
+        .route(
+            "/api/v4/channels/{channel_id}/members/ids",
+            partially_migrated_with_ids(&state, post(channels::get_channel_members_by_ids)),
+        )
         .route(
             "/api/v4/channels/{channel_id}/members/{user_id}",
             partially_migrated_with_ids(&state, get(channels::get_channel_member)),
@@ -393,6 +411,18 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/teams/{team_id}/channels/private",
             partially_migrated_with_ids(&state, get(channels::get_private_channels_for_team)),
         )
+        // `BaseRoutes.ChannelsForTeam.Handle("/ids")` (api4/channel.go:66), POST-only — a third
+        // static literal beside `/private` and `/deleted`, so the "no precedence puzzle here"
+        // note above covers it unchanged. It was in that note's list of unregistered literals
+        // until this route existed; `tests/parity/team_channel_lists.rs` moved it from the
+        // forwarded set to the served one rather than dropping the assertion.
+        .route(
+            "/api/v4/teams/{team_id}/channels/ids",
+            partially_migrated_with_ids(
+                &state,
+                post(channels::get_public_channels_by_ids_for_team),
+            ),
+        )
         .route(
             "/api/v4/teams/{team_id}/channels/deleted",
             partially_migrated_with_ids(&state, get(channels::get_deleted_channels_for_team)),
@@ -454,9 +484,16 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/roles/name/{role_name}",
             partially_migrated(get(roles::get_role_by_name)),
         )
-        // `[A-Za-z0-9]+` matches the id middleware's rule exactly. `GET /api/v4/roles` (one
-        // segment shorter, `getAllRoles`) and `.../{role_id}/patch` (one longer) both fall to
-        // `Router::fallback` and stay forwarded.
+        // `BaseRoutes.Roles.Handle("", ...)` (api4/role.go:24) — the bare `/roles` collection,
+        // one segment shorter than every `/api/v4/roles/...` route below, so axum sees a
+        // distinct path and there is no literal-versus-parameter precedence to settle. `GET`
+        // only; nothing else is registered on it in Go either.
+        .route(
+            "/api/v4/roles",
+            partially_migrated(get(roles::get_all_roles)),
+        )
+        // `[A-Za-z0-9]+` matches the id middleware's rule exactly. `.../{role_id}/patch` (one
+        // segment longer) falls to `Router::fallback` and stays forwarded.
         .route(
             "/api/v4/roles/{role_id}",
             partially_migrated_with_ids(&state, get(roles::get_role)),

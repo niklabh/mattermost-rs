@@ -1,5 +1,5 @@
-//! Cross-server parity for `POST /api/v4/roles/names`, `GET /api/v4/roles/name/{role_name}` and
-//! `GET /api/v4/roles/{role_id}`.
+//! Cross-server parity for `GET /api/v4/roles`, `POST /api/v4/roles/names`,
+//! `GET /api/v4/roles/name/{role_name}` and `GET /api/v4/roles/{role_id}`.
 //!
 //! ```sh
 //! scripts/parity.sh -p mm-api --test parity_roles
@@ -959,10 +959,6 @@ async fn the_unmigrated_role_routes_are_still_forwarded() {
     let client = client();
     let token = go_minted_token(&client).await;
 
-    let (_, (rs_status, _), served_by) = fetch_forwarded(&client, &token, "/api/v4/roles").await;
-    assert_eq!(served_by, "go", "getAllRoles is not migrated");
-    assert_eq!(rs_status, 200, "and the fixture user is a system_admin");
-
     // Aimed at an id that is **no role**, so Go 404s before `PatchRole` can touch anything. A
     // patch at a real role — even with an empty body — calls `Store().Save()` and rewrites the
     // row's `UpdateAt` and `Permissions`; doing that to a fixture here cost a debugging session.
@@ -984,4 +980,192 @@ async fn the_unmigrated_role_routes_are_still_forwarded() {
         Some("go"),
         "patchRole is not migrated"
     );
+}
+
+/// `GET /api/v4/roles` — `getAllRoles`, every row of the `Roles` table in one answer.
+///
+/// # Why this is not a plain byte comparison
+///
+/// It answers with the **whole `Roles` table**, and this suite writes to that table: two tests
+/// insert and remove synthetic rows and one patches `system_post_all`. So the row *set* under
+/// this comparison genuinely changes while it runs, and a byte assertion fails on a fixture the
+/// test does not own — which is what the first version of it did. `fetch_both_stable` brackets
+/// our fetch with two of Go's and retries while they disagree, and the comparison below is
+/// row-wise by name so an insert landing mid-window is visible as a set difference rather than a
+/// diff of two 30 KB bodies.
+///
+/// Bytes are still asserted where they mean something: when the two name lists **do** match —
+/// the ordinary case — the bodies must be identical, which is what pins the heap row order and
+/// every field of every row at once. And the two normalised properties get their own assertions
+/// on our side, the `users_known` rule: there is **no trailing newline** (`json.Marshal` +
+/// `w.Write`, role.go:43-49, unlike the two single-role routes), and the shared names appear in
+/// the same relative order.
+///
+/// The higher-scoped merge runs over every scheme-managed row here rather than over one, so this
+/// is the widest exercise of `merge_channel_higher_scoped_permissions` in the suite.
+#[tokio::test]
+async fn all_roles_matches_go_byte_for_byte() {
+    if !stack_enabled() {
+        return;
+    }
+    let client = client();
+    let token = go_minted_token(&client).await;
+
+    // **A soft-deleted role of this test's own.** `SqlRoleStore.GetAll` has no `WHERE` clause at
+    // all, so a deleted role is on the wire — and nothing the migration seeds has a non-zero
+    // `DeleteAt`, which made a mutation adding `WHERE deleteat = 0` invisible to the whole
+    // suite. The row is written here rather than borrowed from the synthetic fixture below,
+    // because that fixture is planted by a different test and may not exist yet when this one
+    // runs; an assertion that depends on another test's timing is not an oracle.
+    let deleted_role = plant_deleted_role().await;
+
+    let (go, rs) = common::fetch_both_stable(&client, &token, "/api/v4/roles").await;
+    assert!(
+        !rs.ends_with(b"\n"),
+        "role.go:49 writes the marshalled bytes; there is no encoder and no newline"
+    );
+    assert!(!go.ends_with(b"\n"), "and Go really does not write one");
+
+    let go_rows: Vec<serde_json::Value> = serde_json::from_slice(&go).expect("Go's roles decode");
+    let rs_rows: Vec<serde_json::Value> = serde_json::from_slice(&rs).expect("our roles decode");
+
+    let names = |rows: &[serde_json::Value]| -> Vec<String> {
+        rows.iter()
+            .map(|r| r["name"].as_str().expect("a name").to_owned())
+            .collect()
+    };
+    let go_names = names(&go_rows);
+    let rs_names = names(&rs_rows);
+
+    assert!(
+        go_names.len() > 20,
+        "the migration seeds dozens of built-in roles; Go returned {}",
+        go_names.len()
+    );
+    assert!(
+        go_names.contains(&"system_admin".to_owned())
+            && go_names.contains(&"system_user".to_owned()),
+        "the two roles every server has"
+    );
+    assert!(
+        rs_names.contains(&deleted_role),
+        "a soft-deleted role is in the answer — GetAll has no DeleteAt filter: {rs_names:?}"
+    );
+    assert!(
+        go_names.contains(&deleted_role),
+        "…and Go agrees, which is what makes the line above a parity claim"
+    );
+
+    // Row-wise over every name both servers returned. A name only one of them has is a row this
+    // suite's own writes moved between the two fetches, and is reported rather than compared.
+    let go_by_name: std::collections::HashMap<&str, &serde_json::Value> = go_rows
+        .iter()
+        .map(|r| (r["name"].as_str().expect("a name"), r))
+        .collect();
+    let shared: Vec<&String> = rs_names
+        .iter()
+        .filter(|n| go_by_name.contains_key(n.as_str()))
+        .collect();
+    assert!(
+        shared.len() + 2 >= go_names.len(),
+        "at most a couple of rows may be in flight; go={go_names:?} rust={rs_names:?}"
+    );
+    for row in &rs_rows {
+        let name = row["name"].as_str().expect("a name");
+        if let Some(theirs) = go_by_name.get(name) {
+            assert_eq!(*theirs, row, "role {name} differs");
+        }
+    }
+
+    // Relative order of the shared names, which the row-wise comparison above cannot see.
+    let go_shared: Vec<&str> = go_names
+        .iter()
+        .map(String::as_str)
+        .filter(|n| shared.iter().any(|s| s.as_str() == *n))
+        .collect();
+    let rs_shared: Vec<&str> = rs_names
+        .iter()
+        .map(String::as_str)
+        .filter(|n| shared.iter().any(|s| s.as_str() == *n))
+        .collect();
+    assert_eq!(go_shared, rs_shared, "the heap order both servers read");
+
+    // And where the two answers cover the same rows — the ordinary case, with nothing else
+    // writing — the bodies must be byte-identical. This is the assertion that actually pins the
+    // encoding; everything above exists so a concurrent fixture cannot make it lie.
+    if go_names == rs_names {
+        assert_eq!(go, rs, "same rows, so the bytes must agree exactly");
+    }
+
+    remove_deleted_role().await;
+}
+
+/// The prefix this test owns. Distinct from the `mmrsparity%` the synthetic fixture purges, so
+/// neither clears the other's row out from under it.
+const DELETED_ROLE_ID: &str = "mmrsdelrole00000000000000a";
+
+async fn roles_pool() -> sqlx::PgPool {
+    let url = std::env::var("DATABASE_URL")
+        .expect("DATABASE_URL must be set for the stack-backed suites; scripts/parity.sh sets it");
+    sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .acquire_timeout(std::time::Duration::from_secs(5))
+        .connect(&url)
+        .await
+        .expect("the shared database is reachable")
+}
+
+/// Write a role with a non-zero `DeleteAt` and return its name.
+///
+/// Straight into the table, because the REST API cannot produce one: `DELETE /roles/{id}` does
+/// not exist, and nothing else sets the column.
+async fn plant_deleted_role() -> String {
+    let pool = roles_pool().await;
+    let name = "mmrs_deleted_role";
+    sqlx::query("DELETE FROM roles WHERE id LIKE 'mmrsdelrole%'")
+        .execute(&pool)
+        .await
+        .expect("an earlier run's row is cleared");
+    sqlx::query(
+        "INSERT INTO roles
+            (id, name, displayname, description, createat, updateat, deleteat,
+             permissions, schememanaged, builtin, schemeid)
+         VALUES ($1, $2, 'mmrs deleted role', 'soft-deleted on purpose',
+                 1701355050000, 1701355051000, 1701355052000, 'create_post', false, false, NULL)",
+    )
+    .bind(DELETED_ROLE_ID)
+    .bind(name)
+    .execute(&pool)
+    .await
+    .expect("the deleted role is written");
+    name.to_owned()
+}
+
+async fn remove_deleted_role() {
+    let pool = roles_pool().await;
+    let _ = sqlx::query("DELETE FROM roles WHERE id LIKE 'mmrsdelrole%'")
+        .execute(&pool)
+        .await;
+}
+
+/// The gate is `manage_system` on the **session**, and it is the only thing between an ordinary
+/// user and every permission on the server. Every other route in this file is ungated, so a port
+/// that dropped this one would look consistent with its neighbours.
+#[tokio::test]
+async fn all_roles_refuses_a_plain_user() {
+    if !stack_enabled() {
+        return;
+    }
+    let client = client();
+    let token = go_minted_token(&client).await;
+    let (team_id, _) = common::a_team_and_channel_the_user_is_in(&client, &token).await;
+    let plain = common::create_plain_user(&client, &token, &team_id, "allroles").await;
+
+    let ((go_status, go), (rs_status, rs)) =
+        fetch_both_raw(&client, &plain.token, "/api/v4/roles").await;
+    assert_eq!((go_status, rs_status), (403, 403));
+    let body = assert_error_bodies_match_except_known_gaps(&go, &rs, "a plain user");
+    assert_eq!(body["id"], "api.context.permissions.app_error");
+
+    common::delete_plain_user(&client, &token, &plain.id).await;
 }

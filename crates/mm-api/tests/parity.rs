@@ -27,6 +27,7 @@
 mod common;
 
 mod parity {
+    pub mod by_ids_lists;
     pub mod channel_by_name;
     pub mod channel_get;
     pub mod channel_member;

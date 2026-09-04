@@ -42,6 +42,19 @@ pub enum StoreError {
         app_error: Box<mm_model::utils::AppError>,
     },
 
+    /// A store function refused its arguments before building a query.
+    ///
+    /// Go writes these as a bare `errors.New` inside the store — `SqlTeamStore.GetMembersByIds`
+    /// on an empty id list is the first one ported — and the app layer wraps them into the same
+    /// **500** it gives a driver failure, because `errors.As` finds no `*store.ErrNotFound`. So
+    /// this is deliberately *not* a 400: the guard exists for a caller that bypassed the api4
+    /// handler's own bounds check, and reproducing Go means reproducing its status too.
+    #[error("{entity}: {detail}")]
+    Argument {
+        entity: &'static str,
+        detail: &'static str,
+    },
+
     /// A `jsonb` column held something the model type cannot represent.
     ///
     /// Go decodes these columns into `model.StringMap` with `encoding/json` and surfaces a

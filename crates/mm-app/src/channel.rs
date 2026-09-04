@@ -188,6 +188,40 @@ impl App {
             })
     }
 
+    /// Port of `app.App.GetChannelMembersByIds` (channel.go:2609).
+    ///
+    /// One branch, 500-only, with an id of its own —
+    /// `app.channel.get_members_by_ids.app_error`, which is neither
+    /// [`App::get_channel_members_page`]'s nor [`App::get_channel_members_for_user`]'s shared
+    /// `app.channel.get_members.app_error`. Three sibling member lookups, three `where` values,
+    /// two ids; a copy-paste that kept the shared one would be invisible until a client branched.
+    ///
+    /// No miss branch: an id list matching nothing is `[]` with a 200, not a 404.
+    #[tracing::instrument(skip_all, fields(channel_id = %channel_id, asked = user_ids.len(), count))]
+    pub async fn get_channel_members_by_ids(
+        &self,
+        channel_id: &str,
+        user_ids: &[String],
+    ) -> AppResult<Vec<ChannelMember>> {
+        let members = self
+            .store()
+            .channel()
+            .get_members_by_ids(channel_id, user_ids)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "channel members by ids lookup failed");
+                AppError::boxed(
+                    "GetChannelMembersByIds",
+                    "app.channel.get_members_by_ids.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })?;
+        tracing::Span::current().record("count", members.len());
+        Ok(members)
+    }
+
     /// Port of `app.App.GetChannelMembersForUser` (channel.go:2618).
     ///
     /// One branch, 500-only, and the id is **shared with [`App::get_channel_members_page`]**
@@ -511,6 +545,51 @@ impl App {
                     String::new(),
                     500,
                 )
+            })?;
+        tracing::Span::current().record("count", channels.0.len());
+        Ok(channels)
+    }
+
+    /// Port of `app.App.GetPublicChannelsByIdsForTeam` (channel.go:2511).
+    ///
+    /// **The one two-branch member of this family.** Its siblings map every store failure to a
+    /// 500; this one splits on `store.ErrNotFound` and answers **404**
+    /// (`app.channel.get_channels_by_ids.not_found.app_error`) against the 500's
+    /// `app.channel.get_channels_by_ids.get.app_error` — the two ids differ by one infix, and
+    /// the store raises the miss for *zero rows*, not for a missing team. So a request naming
+    /// only private, archived, or other-team channels is a 404 with no channel involved, and a
+    /// non-existent team id is a 404 for the same reason rather than as a team lookup.
+    #[tracing::instrument(skip_all, fields(team_id = %team_id, asked = channel_ids.len(), count))]
+    pub async fn get_public_channels_by_ids_for_team(
+        &self,
+        team_id: &str,
+        channel_ids: &[String],
+    ) -> AppResult<ChannelList> {
+        let channels = self
+            .store()
+            .channel()
+            .get_public_channels_by_ids_for_team(team_id, channel_ids)
+            .await
+            .map_err(|err| {
+                let not_found = err.is_not_found();
+                tracing::error!(error = %err, "public-channels-by-ids lookup failed");
+                if not_found {
+                    AppError::boxed(
+                        "GetPublicChannelsByIdsForTeam",
+                        "app.channel.get_channels_by_ids.not_found.app_error",
+                        None,
+                        String::new(),
+                        404,
+                    )
+                } else {
+                    AppError::boxed(
+                        "GetPublicChannelsByIdsForTeam",
+                        "app.channel.get_channels_by_ids.get.app_error",
+                        None,
+                        String::new(),
+                        500,
+                    )
+                }
             })?;
         tracing::Span::current().record("count", channels.0.len());
         Ok(channels)

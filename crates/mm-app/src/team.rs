@@ -173,6 +173,41 @@ impl App {
             })
     }
 
+    /// Port of `app.App.GetTeamMembersByIds` (team.go:1135), restrictions-free — the route
+    /// forwards any caller that has a `ViewUsersRestrictions`, the same rule as
+    /// [`App::get_team_stats`].
+    ///
+    /// One branch, 500-only, id `app.team.get_members_by_ids.app_error` — distinct from
+    /// [`App::get_team_members`]'s `app.team.get_members.app_error` by one infix.
+    ///
+    /// The store's empty-id-list guard surfaces **here as a 500**, not as a 400: Go's
+    /// `errors.New` carries no `*store.ErrNotFound`, so `GetTeamMembersByIds` wraps it like any
+    /// driver failure. Unreachable through api4, which answers `invalid_body_param` first.
+    #[tracing::instrument(skip_all, fields(team_id = %team_id, asked = user_ids.len(), count))]
+    pub async fn get_team_members_by_ids(
+        &self,
+        team_id: &str,
+        user_ids: &[String],
+    ) -> AppResult<Vec<TeamMember>> {
+        let members = self
+            .store()
+            .team()
+            .get_members_by_ids(team_id, user_ids)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "team members by ids lookup failed");
+                AppError::boxed(
+                    "GetTeamMembersByIds",
+                    "app.team.get_members_by_ids.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })?;
+        tracing::Span::current().record("count", members.len());
+        Ok(members)
+    }
+
     /// Port of `app.App.GetTeamStats` (team.go:2234), restrictions-free — the caller forwards
     /// any restricted request to Go, so this port never sees a `ViewUsersRestrictions`.
     ///
