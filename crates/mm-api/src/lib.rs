@@ -527,6 +527,16 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/posts/{post_id}/reactions",
             partially_migrated_with_ids(&state, get(reactions::get_reactions)),
         )
+        // `BaseRoutes.Posts.Handle("/ids/reactions")` (api4/reaction.go:19). The literal `ids`
+        // sits where `{post_id}` sits above and axum prefers the literal, so this wins for the
+        // one path that spells it. Nothing that used to be answered stops being answered: the
+        // route above is wrapped in the exact-26-char id middleware and `ids` is three
+        // characters, so `POST /posts/ids/reactions` was being forwarded to Go, not served.
+        // Registered POST-only — Go has no other method on this path.
+        .route(
+            "/api/v4/posts/ids/reactions",
+            partially_migrated(post(reactions::get_bulk_reactions)),
+        )
         // `BaseRoutes.Post.Handle("/edit_history")` (api4/post.go:30) — another sibling of
         // `/thread` and `/reactions`, one segment deeper than `/posts/{post_id}`.
         .route(

@@ -5262,3 +5262,36 @@ wrong, a slow start means the verdict was lost to load. Two faults in this sessi
 and were investigated as the first. A build failure now prints the compiler's own lines, and the
 start is retried once with a 30-second budget rather than 10 — this machine carries Postgres, the
 Go server and a concurrent cargo alongside it.
+
+## `POST /api/v4/posts/ids/reactions` — `getBulkReactions` (2026-09-04)
+
+Served. `crates/mm-api/src/reactions.rs` (`get_bulk_reactions`),
+`crates/mm-app/src/reaction.rs` (`get_bulk_reactions_for_posts`),
+`crates/mm-store/src/reaction_store.rs` (`bulk_get_for_posts`); 12 parity tests in
+`crates/mm-api/tests/parity/post_bulk_reactions.rs`. The webapp posts this once per channel load
+with the ids of every post it just rendered.
+
+**The one thing a reader would otherwise get wrong: an empty request is a 500, not a 400.**
+`getBulkReactions` has no length check — alone among api4's by-ids handlers — so `[]` and `null`
+both reach `constructArrayArgs`, which emits the literal `PostId IN ()`, which Postgres will not
+parse. Measured against the running Go server, both bodies answer 500
+`app.reaction.bulk_get_for_post_ids.app_error`. The refusal is ported into the *store*, where
+Go's lives, because hoisting it into a tidy 400 in the handler would change the status. The
+second thing: this route's empty value is `[]` where its neighbour `GET /posts/{id}/reactions`
+answers `null` — `populateEmptyReactions` (app/reaction.go:148) writes a literal empty slice for
+every requested id, including ids that name no post at all. Both are documented on the code.
+
+### The `COALESCE` survivors from the `getReactions` session are now reachable
+
+That session recorded two mutations it could not kill: `COALESCE(UpdateAt, CreateAt)` and
+`COALESCE(DeleteAt, 0)` exist for rows written before a backfill migration, and nothing reachable
+over REST produces the NULL they defend against — Go's `SaveReaction` always writes both columns.
+The fixture here plants the NULLs directly (`plant_nulls`, guarded by a re-check that fails loudly
+if the planting did not happen), so both coalesces are live branches and both mutations die. The
+same trick applies to the sibling route's suite, which still has the survivors.
+
+Mutation run: **14 run, 12 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/bulk-reactions.plan`). Every anchor in that plan runs down to
+`WHERE postid = ANY($1::text[])`: the two queries in `reaction_store.rs` have byte-identical
+SELECT lists and differ only in their WHERE, so any anchor inside the column list alone is
+ambiguous and would mutate whichever query comes first.
