@@ -35,6 +35,47 @@ if [ -z "$MMRS_STACK_LOCKED" ]; then
   exec "$ROOT/scripts/stack-lock.sh" "$0" "$@"
 fi
 
+# Pre-flight: every `from` pattern must occur **exactly once** in its file before anything runs.
+#
+# `mutate.sh` exits 3 when a pattern is missing, and `set -e` then aborts the whole batch — so a
+# single stale anchor throws away every mutation after it. That cost a twenty-minute run to a
+# `\'` that `printf %b` does not unescape (it passes `\n` and `\\` through, and leaves an
+# unknown escape like `\'` alone), which a Python-side check had already read as fine. Checking
+# with the *same* `printf %b` the loop uses is the point: a validator that decodes differently
+# from the runner is not a validator.
+#
+# A pattern occurring **twice** is just as bad and silent: `mutate.sh` replaces the first
+# occurrence, so an ambiguous anchor mutates whichever copy comes first in the file and the
+# verdict belongs to a function nobody meant to test.
+PREFLIGHT=0
+while IFS=$'\t' read -r NAME FILE FROM TO SUITE FILTER; do
+  case "$NAME" in ''|'#'*) continue ;; esac
+  if [ ! -f "$FILE" ]; then
+    echo "plan: $NAME names a file that does not exist: $FILE"; PREFLIGHT=1; continue
+  fi
+  # An escape `printf %b` does not know is passed through as backslash-plus-character, which in
+  # a Rust or SQL pattern is almost always a typo. `\'` is the one that keeps happening: a quote
+  # needs no escaping in a tab-separated field, and `b\'\n\'` reaches rustc as an unterminated
+  # character literal. That cost two full runs — once undiagnosed, once diagnosed — before this
+  # check existed. Checked on `to` as well as `from`, because a broken `to` is the expensive
+  # half: the pattern applies, the crate does not compile, and the verdict is lost.
+  for FIELD in "$FROM" "$TO"; do
+    BADESC=$(FIELD="$FIELD" python3 -c '
+import os, re, sys
+bad = sorted(set(re.findall(r"\\(.)", os.environ["FIELD"])) - set("abefnrtv\\0x"))
+print(" ".join("\\" + c for c in bad))
+')
+    [ -z "$BADESC" ] || { echo "plan: $NAME has escapes printf %b will not expand: $BADESC"; PREFLIGHT=1; }
+  done
+
+  HITS=$(FROM=$(printf '%b' "$FROM") python3 -c '
+import io, os, sys
+print(io.open(sys.argv[1], encoding="utf-8").read().count(os.environ["FROM"]))
+' "$FILE")
+  [ "$HITS" = "1" ] || { echo "plan: $NAME matches $HITS times in $FILE (want exactly 1)"; PREFLIGHT=1; }
+done < "$PLAN"
+[ "$PREFLIGHT" -eq 0 ] || { echo "plan does not apply to this tree — nothing was run."; exit 2; }
+
 RUN=0
 CAUGHT=0
 SURVIVED=0

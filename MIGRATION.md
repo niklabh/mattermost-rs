@@ -5086,3 +5086,179 @@ same reason. `common::create_direct_channel` is new.
 
 `parity/user_get.rs` listed `stats` among the `/users/` literals that must be forwarded; it is
 ours now, and the list keeps two entries so it still asserts what it was written to assert.
+
+## `POST /channels/{id}/members/ids`, `POST /teams/{id}/members/ids`, `POST /teams/{id}/channels/ids`, `GET /roles` (2026-09-04)
+
+Four routes. The first three are one shape — `model.SortedArrayFromJSON` over the body, a gate,
+one store call — which is why they share a test file and one mutation plan; the fourth needed only
+a handler, because `App::get_all_roles` and `role_store::get_all` had landed with
+`getRolesByNames` and had no caller until now.
+
+| Layer | File | Status |
+|---|---|---|
+| api | `crates/mm-api/src/channels.rs` — `get_channel_members_by_ids`, `get_public_channels_by_ids_for_team`, `ids_from_body`, `read_body`, `malformed_channel_id_parameter` | DONE |
+| api | `crates/mm-api/src/teams.rs` — `get_team_members_by_ids` | DONE |
+| api | `crates/mm-api/src/roles.rs` — `get_all_roles` | DONE |
+| app | `crates/mm-app/src/channel.rs` — `get_channel_members_by_ids`, `get_public_channels_by_ids_for_team` | DONE |
+| app | `crates/mm-app/src/team.rs` — `get_team_members_by_ids` | DONE |
+| store | `crates/mm-store/src/channel_store.rs` — `get_members_by_ids`, `get_public_channels_by_ids_for_team` | DONE |
+| store | `crates/mm-store/src/team_store.rs` — `get_members_by_ids` | DONE |
+| store | `crates/mm-store/src/error.rs` — `StoreError::Argument`, a new variant | DONE |
+
+Forwarded and unchanged: a **guest** session on `POST /teams/{id}/channels/ids` (below), any caller
+without `view_members` on `POST /teams/{id}/members/ids`, every non-POST method on the three new
+POST paths, and `PUT /roles/{id}/patch`.
+
+Two existing parity tests asserted these paths were forwarded and now assert they are served:
+`parity/team_channel_lists.rs` for `/teams/{id}/channels/ids` and `parity/roles.rs` for `/roles`.
+Both moved to the served side rather than losing the assertion.
+
+Tests: 14 cross-server (12 in `parity/by_ids_lists.rs`, 2 in `parity/roles.rs`), one unit test in
+`mm-api::channels`, and five store-level assertions folded into
+`mm-store/tests/db_team_members.rs`; the parity binary goes 400 → 414.
+Mutations: **36 run, 33 caught, 3 controls survived, 0 harness faults**
+(`scripts/mutations/by-ids-and-all-roles.plan`) — on the third run. The first two are below; both
+were the harness, and three real survivors from the first run are below that.
+
+Each finding lives in the doc comment on the thing it constrains. The ones a reader would
+otherwise get wrong:
+
+1. **Three sibling routes, three different answers to "nothing matched".** Channel members and
+   team members both serve `[]` with a 200. `getPublicChannelsByIdsForTeam` serves a **404**, and
+   it comes from `SqlChannelStore`'s `len(data) == 0` rather than from any lookup of the team — so
+   a request naming only private, archived or other-team channels is a 404 with no channel
+   involved, and a well-formed team id that names no team is a 404 for the same reason rather than
+   as a missing team. Asserted together in one test so neither reads as a fixture accident.
+
+2. **`DeleteAt = 0` is on the team query and not the channel one.** A departed team member is
+   absent; a deactivated user's channel membership is returned. Structural rather than
+   inconsistent: `TeamMembers` is a tombstone table where leaving sets `DeleteAt`, while
+   `ChannelMembers` rows are deleted outright, so the channel query has nothing to filter.
+
+3. **The same request shape, one byte apart.** `getChannelMembersByIds` and
+   `getPublicChannelsByIdsForTeam` use `json.NewEncoder(w).Encode` and end in a newline;
+   `getTeamMembersByIds` marshals and calls `w.Write`, and does not — as does `getAllRoles`.
+   [D-086] again, now with two handlers a reader would expect to agree.
+
+4. **The gate is last in all three by-ids routes.** Both body 400s precede the permission check,
+   the reverse of `getChannelMembers` and of every paginated sibling. Over HTTP that is only
+   visible by asking the same refused caller twice — once with a good body, once with `[]` — which
+   is what the tests do.
+
+5. **`null` is not a parse error.** `SortedArrayFromJSON` returns `(nil, nil)` when the body
+   decodes to a nil slice, so `null` lands on `invalid_body_param` beside `[]`, while `{}`, `[1]`,
+   `"x"` and an empty body land on `api.payload.parse.error`. Reading `err != nil || obj == nil`
+   as "a nil decode is a failure" — the obvious reading — swaps the two ids.
+
+6. **`getPublicChannelsByIdsForTeam` names two different parameters in its two 400s**, two lines
+   apart: `channel_ids` for an empty array, `channel_id` — singular — for an id failing
+   `IsValidId`. Neither name reaches the wire (`AppError.params` is `json:"-"`; our `message` is
+   the untranslated id, [D-092]), so no cross-server test can tell them apart: the [D-149] shape.
+   Rather than accept an unfalsifiable mutation, the loop was split into
+   `malformed_channel_id_parameter` and a unit test pins the name in-process.
+
+7. **`SanitizeForCurrentUser` blanks two fields, not "the sensitive ones".** `LastViewedAt` and
+   `LastUpdateAt` become `-1` on every row but the caller's own; `msg_count`, `mention_count` and
+   `notify_props` are all on the wire for other members. The first draft of the parity test
+   asserted the counters were blanked too, and Go disagreed — the name is wider than the method.
+
+8. **The guest branch is forwarded rather than ported.** Go re-checks `read_channel` on every
+   returned channel when `session.IsGuest()`, and one denial fails the whole request. `IsGuest`
+   reads a session prop written at login for a guest account, and guests are licence-gated here,
+   so the loop is unreachable — the rule that forwards `ViewUsersRestrictions` rather than
+   shipping SQL no test can reach.
+
+9. **Go builds a `props` map and an `idQuery` string in `GetPublicChannelsByIdsForTeam` and then
+   uses neither.** The live query is squirrel's `sq.Eq{"pc.Id": channelIds}`. Dead code, not a
+   second code path — worth saying because it reads like the query being built.
+
+10. **`getAllRoles` would answer `[]` where `getRolesByNames` answers `null`.** That route's
+    `null` is `LocalCacheRoleStore.GetByNames`'s nil slice; there is no
+    `LocalCacheRoleStore.GetAll`, so this one reaches `SqlRoleStore.GetAll`, which builds
+    `[]*model.Role{}` before appending. Unobservable — the `Roles` table is seeded by the
+    migration and never empties — so it is recorded rather than tested.
+
+### A whole-table route cannot be byte-compared while its own suite writes to that table
+
+`all_roles_matches_go_byte_for_byte` failed on its first run and the port was not the reason.
+`GET /roles` returns the entire `Roles` table, and `parity/roles.rs` writes to it: two tests
+insert and remove synthetic rows, one patches `system_post_all`. So the row *set* changes under
+the comparison.
+
+The fix is the `users_known` rule applied to a table rather than an actor. The test now brackets
+its fetch with `fetch_both_stable`, compares **row-wise by name** over the rows both servers
+returned, and asserts the two normalised properties separately on our own body — no trailing
+newline, and the shared names in the same relative order. Byte equality is still asserted, but
+only when the two name lists match, which is the ordinary case; that is the assertion that
+actually pins the encoding, and everything above it exists so a concurrent fixture cannot make it
+lie.
+
+### Three survivors, and what each one was
+
+Every one was a gap in the tests rather than a shrug, and two of the three are shapes worth
+expecting again.
+
+- **`tm-ids-empty-guard`** — deleting `SqlTeamStore.GetMembersByIds`'s empty-id-list guard changed
+  nothing the parity suite could see, because `getTeamMembersByIds` answers `invalid_body_param`
+  for an empty array long before the store is called. The guard is unreachable through its own
+  route, the [D-151] shape; it now has a store-level oracle in `db_team_members.rs`, and the
+  mutation moved to the `store` suite. That test also pins the three other things the query does
+  that REST cannot isolate: the `DeleteAt` filter, the `TeamId` scoping against a user who is a
+  member of two teams, and the *absence* of a `Users.DeleteAt` filter.
+- **`pc-ids-validation-before-gate`** — moving the per-id `IsValidId` loop past the `view_team`
+  gate. Invisible to every caller the gate admits, and the test used the admin, who is never
+  refused. **Only a refused caller can see the order of a check that precedes a refusal**, which
+  generalises: any "A runs before B" claim where B is a denial needs an actor B actually denies.
+- **`roles-all-drops-deleted`** — adding `WHERE deleteat = 0` to `SqlRoleStore.GetAll` changed
+  nothing, because nothing the migration seeds has a non-zero `DeleteAt`. The test now plants a
+  soft-deleted role of its own and asserts both servers return it. The first draft leaned on a
+  synthetic row another test in the same file plants; an assertion that depends on another test's
+  timing is not an oracle.
+
+### Two fixture collisions the full-suite run exposed, both cross-suite
+
+Neither was in the routes, and neither shows up unless every test runs at once.
+
+- **A store fixture tripped an api tripwire, from another crate.** `parity/teams_all.rs` opens by
+  scanning the whole `Teams` table for a tied `DisplayName`, because its route orders by that
+  column with no tiebreak — and `mm-store/tests/db_team_members.rs` seeded three teams all named
+  `mmrs team members`. `cargo test --workspace` runs both crates together, so the rows were
+  visible to it; and because that store test purges on the way *out*, a **failing** run left the
+  tie behind, which then failed all fifteen of `teams_all` until the next store run cleaned up.
+  A mutation deliberately breaking the store test is enough to trigger it, which is how this was
+  found. The three teams now derive distinct display names from their `name`.
+- **[D-160] again, on the test next to the one that was fixed.** The previous session gave
+  `channels_for_user::include_deleted_...` its own user so nothing else in the binary could grow
+  the list it byte-compares. Its sibling `the_list_is_byte_identical_in_id_order` compares the
+  *same* shared list and did not get the same treatment; it failed one full-suite run and passed
+  in isolation, the signature. It now builds every fixture row as a dedicated owner too. **The
+  rule is the fix, not the instance:** any test byte-comparing a globally-growing collection
+  needs an actor nobody else writes to, and applying that to one test in a file is not applying
+  it to the file.
+
+### `scripts/mutate-batch.sh` now validates a plan before running any of it
+
+A twenty-minute run died on its eighth line with `SKIPPED (pattern not found)`, and `set -e` threw
+away the twenty-eight mutations after it. The cause was `\'` in a plan pattern: `printf %b`
+unescapes `\n` and `\\` but passes an unknown escape like `\'` through untouched, so the pattern
+looked for `b\'\n\'` in a file that contains `b'\n'`. A Python-side check had already read the
+plan as fine, because `unicode_escape` *does* unescape `\'` — a validator that decodes differently
+from the runner is not a validator.
+
+`mutate-batch.sh` now walks the whole plan first, decoding each `from` with the same `printf %b`
+the loop uses, and refuses to start unless every pattern occurs **exactly once** in its file. Once
+matters as much as at-least-once: `mutate.sh` replaces the first occurrence, so an ambiguous
+anchor silently mutates whichever copy comes first and returns a verdict about a function nobody
+meant to test. Three anchors in this session's plan were ambiguous and were caught this way.
+
+A second run then lost a line to the *same* escape in a **`to`** field, which pre-flight was not
+reading — the expensive half, because the pattern applies, the crate does not compile, and the
+verdict is gone. Both fields are now scanned for any escape `printf %b` will not expand.
+
+`scripts/mutate.sh` gained the other half of that lesson. Its `restart_server` reported a build
+failure and a server that never came up as one **HARNESS FAULT** reading "does not compile, or the
+server never came up", and the two need opposite responses: a compile error means the plan is
+wrong, a slow start means the verdict was lost to load. Two faults in this session were the second
+and were investigated as the first. A build failure now prints the compiler's own lines, and the
+start is retried once with a 30-second budget rather than 10 — this machine carries Postgres, the
+Go server and a concurrent cargo alongside it.

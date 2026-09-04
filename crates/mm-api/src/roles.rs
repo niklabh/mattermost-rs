@@ -1,5 +1,6 @@
-//! Port of `getRolesByNames`, `getRoleByName` and `getRole` (channels/api4/role.go:87, :70,
-//! :56), reached as `POST /api/v4/roles/names`, `GET /api/v4/roles/name/{role_name}` and
+//! Port of `getAllRoles`, `getRolesByNames`, `getRoleByName` and `getRole`
+//! (channels/api4/role.go:31, :87, :70, :56), reached as `GET /api/v4/roles`,
+//! `POST /api/v4/roles/names`, `GET /api/v4/roles/name/{role_name}` and
 //! `GET /api/v4/roles/{role_id}`.
 //!
 //! # `APISessionRequiredTrustRequester`, and what it actually changes
@@ -24,14 +25,15 @@
 //! decision: **when CSRF lands, these three routes must be exempt**, and this note is where a
 //! reader adding it will look.
 //!
-//! # No permission check
+//! # No permission check on three of the four
 //!
-//! Unlike `getAllRoles` (which gates on `manage_system`) and `patchRole`, none of these three
-//! asks a permission question. Any authenticated session may read any role by id or by name.
+//! `getAllRoles` gates on `manage_system`. The other three ask nothing: any authenticated
+//! session may read any role by id or by name.
 
 use axum::extract::{Path, Request, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
+use mm_model::permission::{PERMISSION_MANAGE_SYSTEM, make_permission_error};
 use mm_model::role::{Role, clean_role_names, is_valid_role_name};
 use mm_model::utils::{AppError, is_valid_id, sorted_array_from_json};
 
@@ -55,6 +57,69 @@ fn segment_matches_role_name_mux(value: &str) -> bool {
         && value
             .bytes()
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+}
+
+/// Port of `getAllRoles` (api4/role.go:31) — `GET /api/v4/roles`, the admin console's whole
+/// permission scheme in one call.
+///
+/// # The gate is the whole handler
+///
+/// `SessionHasPermissionTo(manage_system)` — a **system**-scope check on the session's roles, not
+/// on a team or a channel, so no fetch precedes it and there is nothing for it to leak. Every
+/// other route in this file is ungated; this one refuses everybody but an admin.
+///
+/// # Wire format, and the two ways it differs from its neighbours
+///
+/// `json.Marshal` + `w.Write` (role.go:43, :49) — **no trailing newline**, like
+/// [`get_roles_by_names`] and unlike the two single-role routes. And unlike
+/// [`get_roles_by_names`] an empty answer would be **`[]`, not `null`**: that route's `null` is
+/// the *cache layer's* nil slice (`LocalCacheRoleStore.GetByNames`), and there is no
+/// `LocalCacheRoleStore.GetAll` — this one reaches `SqlRoleStore.GetAll`, which builds
+/// `[]*model.Role{}` before appending. Unobservable in practice, since the `Roles` table is
+/// populated by the migration and never empties, so the difference is recorded rather than
+/// tested.
+///
+/// # Order is the heap's, and both servers share it
+///
+/// `SqlRoleStore.GetAll` has no `ORDER BY` (role_store.go:235) and no cache in front of it, so
+/// the row order is whatever Postgres hands back. The two servers read one table, so they agree
+/// byte-for-byte today; neither promises it, which is why the parity suite asserts the set as
+/// well as the bytes.
+#[tracing::instrument(skip_all, fields(user_id = %session.0.user_id, count))]
+pub async fn get_all_roles(
+    State(state): State<AppState>,
+    session: AuthenticatedSession,
+) -> Response {
+    match serve_all_roles(&state, &session).await {
+        Ok(response) => response,
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn serve_all_roles(
+    state: &AppState,
+    session: &AuthenticatedSession,
+) -> Result<Response, ApiError> {
+    if !state
+        .app
+        .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)
+        .await
+    {
+        return Err(ApiError::from(make_permission_error(
+            &session.0,
+            &[&PERMISSION_MANAGE_SYSTEM],
+        )));
+    }
+
+    let roles = state.app.get_all_roles().await?;
+    tracing::Span::current().record("count", roles.len());
+
+    let body = serde_json::to_vec(&roles).map_err(|err| {
+        tracing::error!(error = %err, "failed to serialise roles");
+        marshal_error("getAllRoles")
+    })?;
+
+    Ok(json_ok(body))
 }
 
 /// Port of `getRolesByNames` (api4/role.go:87) — `POST /api/v4/roles/names`.

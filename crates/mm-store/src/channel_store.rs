@@ -229,6 +229,15 @@ pub trait ChannelStore {
         limit: i64,
     ) -> impl std::future::Future<Output = Result<ChannelList, StoreError>> + Send;
 
+    /// Port of `SqlChannelStore.GetPublicChannelsByIdsForTeam` (channel_store.go:1527): a named
+    /// set of a team's living public channels, display-name order, `ErrNotFound` when none of
+    /// the ids match.
+    fn get_public_channels_by_ids_for_team(
+        &self,
+        team_id: &str,
+        channel_ids: &[String],
+    ) -> impl std::future::Future<Output = Result<ChannelList, StoreError>> + Send;
+
     /// Port of `SqlChannelStore.GetPrivateChannelsForTeam` (channel_store.go:1476): one
     /// offset/limit page of a team's living private channels, straight off `Channels`.
     fn get_private_channels_for_team(
@@ -284,6 +293,15 @@ pub trait ChannelStore {
         channel_id: &str,
         offset: i64,
         limit: i64,
+    ) -> impl std::future::Future<Output = Result<Vec<ChannelMember>, StoreError>> + Send;
+
+    /// Port of `SqlChannelStore.GetMembersByIds` (channel_store.go:3992): the memberships of a
+    /// named set of users in one channel, unpaginated and unordered. Zero matches is an empty
+    /// list, not a miss.
+    fn get_members_by_ids(
+        &self,
+        channel_id: &str,
+        user_ids: &[String],
     ) -> impl std::future::Future<Output = Result<Vec<ChannelMember>, StoreError>> + Send;
 
     /// Port of `SqlChannelStore.GetMembersForUser` (channel_store.go:3261): every membership
@@ -446,6 +464,15 @@ impl ChannelStore for SqlChannelStore {
         get_public_channels_for_team(&self.pool, team_id, offset, limit).await
     }
 
+    #[tracing::instrument(skip_all, fields(team_id = %team_id, asked = channel_ids.len()))]
+    async fn get_public_channels_by_ids_for_team(
+        &self,
+        team_id: &str,
+        channel_ids: &[String],
+    ) -> Result<ChannelList, StoreError> {
+        get_public_channels_by_ids_for_team(&self.pool, team_id, channel_ids).await
+    }
+
     #[tracing::instrument(skip_all, fields(team_id = %team_id, offset, limit, count))]
     async fn get_private_channels_for_team(
         &self,
@@ -504,6 +531,15 @@ impl ChannelStore for SqlChannelStore {
         limit: i64,
     ) -> Result<Vec<ChannelMember>, StoreError> {
         get_members(&self.pool, channel_id, offset, limit).await
+    }
+
+    #[tracing::instrument(skip_all, fields(channel_id = %channel_id, asked = user_ids.len()))]
+    async fn get_members_by_ids(
+        &self,
+        channel_id: &str,
+        user_ids: &[String],
+    ) -> Result<Vec<ChannelMember>, StoreError> {
+        get_members_by_ids(&self.pool, channel_id, user_ids).await
     }
 
     #[tracing::instrument(skip_all, fields(team_id = %team_id, user_id = %user_id))]
@@ -926,6 +962,79 @@ pub async fn get_members(
     .await
     .map_err(|source| StoreError::Db {
         context: format!("failed to get ChannelMembers with channelId={channel_id}"),
+        source,
+    })?;
+
+    tracing::Span::current().record("found", rows.len());
+
+    rows.into_iter().map(channel_member_from_row).collect()
+}
+
+/// Port of `SqlChannelStore.GetMembersByIds` (channel_store.go:3992), the body of
+/// `POST /api/v4/channels/{channel_id}/members/ids`.
+///
+/// The same `channelMembersForTeamWithSchemeSelectQuery` as [`get_members`], with the channel
+/// predicate joined by a second one on `ChannelMembers.UserId`. What a reader would otherwise
+/// get wrong is what is *absent*:
+///
+/// - **No `LIMIT`, no `OFFSET` and no `ORDER BY`** — the route is unpaginated and the row order
+///   is the heap's, shared with Go through the shared table and promised by neither. The api4
+///   caller's list is capped only by `SortedArrayFromJSON`'s de-duplication, so this is the one
+///   ported member query a client can ask for a thousand rows from in one call.
+/// - **No `DeleteAt` filter on anything** — not the channel's and not the user's, exactly as in
+///   [`get_members`]. A deactivated user's membership and an archived channel's memberships are
+///   both returned.
+/// - **Unknown ids are silently absent rather than an error**, and an id list that matches
+///   nothing is an **empty list, not a 404** — the opposite of
+///   [`get_public_channels_by_ids_for_team`], whose Go twin raises `ErrNotFound` on zero rows.
+///   Two sibling by-ids queries, opposite answers to the same shape; both pinned.
+#[tracing::instrument(skip(pool, user_ids), fields(channel_id = %channel_id, asked = user_ids.len(), found))]
+pub async fn get_members_by_ids(
+    pool: &PgPool,
+    channel_id: &str,
+    user_ids: &[String],
+) -> Result<Vec<ChannelMember>, StoreError> {
+    let rows = sqlx::query_as!(
+        ChannelMemberRow,
+        r#"
+        SELECT cm.channelid,
+               cm.userid,
+               cm.roles,
+               cm.lastviewedat,
+               cm.msgcount,
+               cm.mentioncount,
+               cm.mentioncountroot,
+               COALESCE(cm.urgentmentioncount, 0) AS "urgentmentioncount!",
+               cm.msgcountroot,
+               cm.notifyprops,
+               cm.lastupdateat,
+               cm.schemeuser,
+               cm.schemeadmin,
+               cm.schemeguest,
+               teamscheme.defaultchannelguestrole    AS teamschemedefaultguestrole,
+               teamscheme.defaultchanneluserrole     AS teamschemedefaultuserrole,
+               teamscheme.defaultchanneladminrole    AS teamschemedefaultadminrole,
+               channelscheme.defaultchannelguestrole AS channelschemedefaultguestrole,
+               channelscheme.defaultchanneluserrole  AS channelschemedefaultuserrole,
+               channelscheme.defaultchanneladminrole AS channelschemedefaultadminrole,
+               cm.autotranslationdisabled
+          FROM channelmembers cm
+          INNER JOIN channels c ON cm.channelid = c.id
+          LEFT JOIN schemes channelscheme ON c.schemeid = channelscheme.id
+          LEFT JOIN teams t ON c.teamid = t.id
+          LEFT JOIN schemes teamscheme ON t.schemeid = teamscheme.id
+         WHERE cm.channelid = $1
+           AND cm.userid = ANY($2::text[])
+        "#,
+        channel_id,
+        user_ids
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: format!(
+            "failed to find ChannelMembers with channelId={channel_id} and userId in {user_ids:?}"
+        ),
         source,
     })?;
 
@@ -1641,6 +1750,101 @@ pub async fn get_public_channels_for_team(
     })?;
 
     tracing::Span::current().record("count", rows.len());
+    let channels = rows
+        .into_iter()
+        .map(channel_from_row)
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(ChannelList(channels))
+}
+
+/// Port of `SqlChannelStore.GetPublicChannelsByIdsForTeam` (channel_store.go:1527), the body of
+/// `POST /api/v4/teams/{team_id}/channels/ids`.
+///
+/// [`get_public_channels_for_team`] with the paging clause traded for an id list, and three
+/// things a reader would plausibly write differently:
+///
+/// - **Zero rows is a `NotFound`, not an empty list.** Go's `len(data) == 0` check raises
+///   `store.NewErrNotFound` and the app layer turns it into a **404**
+///   (`app.channel.get_channels_by_ids.not_found.app_error`) — so asking for one id that is not
+///   a public channel of this team is a 404 where the paginated sibling would have served `[]`.
+///   Its by-ids twin [`get_members_by_ids`] does the opposite for the same shape.
+/// - **Every predicate is on `PublicChannels`, not on `Channels`** — team, `DeleteAt` and even
+///   the id. The shadow table holds a row only for a channel that is public and not archived, so
+///   there is no `Type` predicate anywhere: a private channel's id simply matches nothing. A
+///   port that filtered `Channels.DeleteAt` instead would still answer for an archived channel
+///   whose shadow row Go deletes.
+/// - **`ORDER BY pc.DisplayName`**, the shadow table's copy — kept in sync by the same triggers
+///   that maintain the row, and the same column the paginated sibling orders by.
+///
+/// Go builds a `props` map and an `idQuery` string above the builder and then uses neither; the
+/// live query is squirrel's `sq.Eq{"pc.Id": channelIds}`. Dead code, not a second code path.
+#[tracing::instrument(skip(pool, channel_ids), fields(team_id = %team_id, asked = channel_ids.len(), found))]
+pub async fn get_public_channels_by_ids_for_team(
+    pool: &PgPool,
+    team_id: &str,
+    channel_ids: &[String],
+) -> Result<ChannelList, StoreError> {
+    let rows = sqlx::query_as!(
+        ChannelRow,
+        r#"
+        SELECT channels.id,
+               channels.createat,
+               channels.updateat,
+               channels.deleteat,
+               channels.teamid,
+               channels.type::text AS "channel_type!",
+               channels.displayname,
+               channels.name,
+               channels.header,
+               channels.purpose,
+               channels.lastpostat,
+               channels.totalmsgcount,
+               channels.extraupdateat,
+               channels.creatorid,
+               channels.schemeid,
+               channels.groupconstrained,
+               channels.autotranslation,
+               channels.shared,
+               channels.totalmsgcountroot,
+               channels.lastrootpostat,
+               channels.bannerinfo,
+               channels.defaultcategoryname,
+               channels.discoverable,
+               EXISTS (
+                   SELECT 1 FROM accesscontrolpolicies acp
+                    WHERE acp.id = channels.id AND acp.type = 'channel'
+               ) AS "policy_enforced!",
+               COALESCE((
+                   SELECT acp.active FROM accesscontrolpolicies acp
+                    WHERE acp.id = channels.id AND acp.type = 'channel' AND acp.active = TRUE
+                    LIMIT 1
+               ), false) AS "policy_is_active!"
+          FROM channels
+          JOIN publicchannels pc ON (pc.id = channels.id)
+         WHERE pc.teamid = $1
+           AND pc.deleteat = 0
+           AND pc.id = ANY($2::text[])
+         ORDER BY pc.displayname
+        "#,
+        team_id,
+        channel_ids
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: format!("failed to find Channels with teamId={team_id}"),
+        source,
+    })?;
+
+    tracing::Span::current().record("found", rows.len());
+
+    if rows.is_empty() {
+        return Err(StoreError::NotFound {
+            entity: "Channel",
+            criteria: format!("teamId={team_id}, channelIds={channel_ids:?}"),
+        });
+    }
+
     let channels = rows
         .into_iter()
         .map(channel_from_row)

@@ -175,6 +175,14 @@ pub trait TeamStore {
         options: &TeamMembersGetOptions,
     ) -> impl std::future::Future<Output = Result<Vec<TeamMember>, StoreError>> + Send;
 
+    /// Port of `SqlTeamStore.GetMembersByIds` (team_store.go:1156), restrictions-free: the
+    /// living memberships of a named set of users in one team, unpaginated and unordered.
+    fn get_members_by_ids(
+        &self,
+        team_id: &str,
+        user_ids: &[String],
+    ) -> impl std::future::Future<Output = Result<Vec<TeamMember>, StoreError>> + Send;
+
     /// Port of `SqlTeamStore.GetTotalMemberCount` (team_store.go:1106), restrictions-free.
     ///
     /// Go's second parameter is a `*model.ViewUsersRestrictions` that splices extra joins into
@@ -277,6 +285,15 @@ impl TeamStore for SqlTeamStore {
         options: &TeamMembersGetOptions,
     ) -> Result<Vec<TeamMember>, StoreError> {
         get_members(&self.pool, team_id, offset, limit, options).await
+    }
+
+    #[tracing::instrument(skip_all, fields(team_id = %team_id, asked = user_ids.len()))]
+    async fn get_members_by_ids(
+        &self,
+        team_id: &str,
+        user_ids: &[String],
+    ) -> Result<Vec<TeamMember>, StoreError> {
+        get_members_by_ids(&self.pool, team_id, user_ids).await
     }
 
     #[tracing::instrument(skip_all, fields(team_id = %team_id))]
@@ -795,6 +812,76 @@ pub async fn get_members(
         limit,
         options.exclude_deleted_users,
         options.sort
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: format!("failed to find TeamMembers with teamId={team_id}"),
+        source,
+    })?;
+
+    tracing::Span::current().record("found", rows.len());
+
+    Ok(rows.into_iter().map(team_member_from_row).collect())
+}
+
+/// Port of `SqlTeamStore.GetMembersByIds` (team_store.go:1156), the body of
+/// `POST /api/v4/teams/{team_id}/members/ids`.
+///
+/// [`get_members`]'s select with the paging and sorting clauses gone. Three differences from its
+/// channel twin [`crate::channel_store::get_members_by_ids`], each one Go's:
+///
+/// - **`TeamMembers.DeleteAt = 0` is applied here**, so a departed member is absent from the
+///   answer — where the channel query filters nothing and returns every row it finds. Same
+///   route shape, opposite answer, and the reason is that `TeamMembers` is a tombstone table
+///   (`DeleteAt` marks a leave) while `ChannelMembers` rows are deleted outright.
+/// - **`len(userIds) == 0` is a store-level error** — `errors.New("invalid list of user ids")`,
+///   which the app layer renders as a **500**, not a 400. Unreachable through the api4 route
+///   (the handler's `len(userIDs) == 0` answers 400 first), so this port keeps the guard where
+///   Go has it rather than moving it up: an empty slice would otherwise be `= ANY('{}')` and a
+///   silently empty 200.
+/// - **No `ORDER BY`** — heap order, like the channel twin.
+///
+/// `restrictions` is dropped rather than ported. `applyTeamMemberViewRestrictionsFilter` needs
+/// the caller's team-and-channel filter, and the api4 route forwards any caller that has one —
+/// see `App::get_view_users_restrictions`. A parameter no caller of this port can set is a lie
+/// at the call site, the same rule that dropped `allowFromCache`.
+#[tracing::instrument(skip(pool, user_ids), fields(team_id = %team_id, asked = user_ids.len(), found))]
+pub async fn get_members_by_ids(
+    pool: &PgPool,
+    team_id: &str,
+    user_ids: &[String],
+) -> Result<Vec<TeamMember>, StoreError> {
+    if user_ids.is_empty() {
+        return Err(StoreError::Argument {
+            entity: "TeamMember",
+            detail: "invalid list of user ids",
+        });
+    }
+
+    let rows = sqlx::query_as!(
+        TeamMemberRow,
+        r#"
+        SELECT tm.teamid,
+               tm.userid,
+               tm.roles,
+               tm.deleteat,
+               tm.schemeuser,
+               tm.schemeadmin,
+               tm.schemeguest,
+               tm.createat,
+               ts.defaultteamguestrole,
+               ts.defaultteamuserrole,
+               ts.defaultteamadminrole
+          FROM teammembers tm
+          LEFT JOIN teams t ON tm.teamid = t.id
+          LEFT JOIN schemes ts ON t.schemeid = ts.id
+         WHERE tm.teamid = $1
+           AND tm.userid = ANY($2::text[])
+           AND tm.deleteat = 0
+        "#,
+        team_id,
+        user_ids
     )
     .fetch_all(pool)
     .await

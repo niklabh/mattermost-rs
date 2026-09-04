@@ -211,7 +211,20 @@ async fn the_list_is_byte_identical_in_id_order() {
     purge_api_fixtures().await;
 
     let client = client();
-    let token = go_minted_token(&client).await;
+    let admin_token = go_minted_token(&client).await;
+
+    // **A user of its own, for the reason the sibling test below spells out in full.** This one
+    // byte-compares `/users/me/channels` too, and that list grows whenever anything anywhere in
+    // this binary creates a team or a channel as the shared admin — so `fetch_both_stable` can
+    // retry twelve times against a list that never settles. It failed in a full-suite run and
+    // never in isolation, which is the signature. The dedicated actor removes the concurrency
+    // rather than waiting it out; joining the shared team costs two defaults that nothing else
+    // adds to.
+    let (shared_team_id, _) =
+        common::a_team_and_channel_the_user_is_in(&client, &admin_token).await;
+    let owner = create_plain_user(&client, &admin_token, &shared_team_id, "allowner").await;
+    let token = owner.token.clone();
+
     let team_id = create_team(&client, &token, "allteam").await;
     let other_team = create_team(&client, &token, "allteam2").await;
 
@@ -231,17 +244,19 @@ async fn the_list_is_byte_identical_in_id_order() {
     )
     .await;
 
-    let other = create_plain_user(&client, &token, &team_id, "alldm").await;
+    // Creating a user is an admin permission, so this one call keeps the admin token; the DM
+    // itself is opened **as the owner**, which is what puts it in the list under comparison.
+    let other = create_plain_user(&client, &admin_token, &team_id, "alldm").await;
     let dm = client
         .post(format!("{GO}/api/v4/channels/direct"))
         .header("Authorization", format!("Bearer {token}"))
-        .json(&serde_json::json!([logged_in_user_id(), other.id]))
+        .json(&serde_json::json!([owner.id, other.id]))
         .send()
         .await
         .expect("Go answers");
     assert!(dm.status().is_success());
 
-    let me = logged_in_user_id();
+    let me = owner.id.as_str();
     for path in [
         "/api/v4/users/me/channels".to_owned(),
         format!("/api/v4/users/{me}/channels"),
@@ -293,7 +308,8 @@ async fn the_list_is_byte_identical_in_id_order() {
     for id in [&zeta, &alpha, &private, &elsewhere] {
         delete_channel(&client, &token, id).await;
     }
-    delete_plain_user(&client, &token, &other.id).await;
+    delete_plain_user(&client, &admin_token, &other.id).await;
+    delete_plain_user(&client, &admin_token, &owner.id).await;
 }
 
 /// The page loop, on a plain user whose total is known exactly: a team's two defaults plus

@@ -551,7 +551,6 @@ async fn the_sibling_literals_are_still_forwarded_to_go() {
     // POST-only siblings, plus a POST to a path we serve for GET: the method fallback in
     // `partially_migrated` has to forward, or migrating GET would have broken POST.
     for (literal, body) in [
-        ("ids", serde_json::json!([])),
         ("search", serde_json::json!({ "term": "town" })),
         ("", serde_json::json!({})),
     ] {
@@ -576,6 +575,26 @@ async fn the_sibling_literals_are_still_forwarded_to_go() {
             "POST {path} must stay forwarded"
         );
     }
+
+    // `/ids` was in the list above until `getPublicChannelsByIdsForTeam` landed. It is asserted
+    // here rather than dropped, because "which router claims this path" is exactly what this
+    // test exists to pin — and it now has to say `rust`.
+    let ids_path = format!("/api/v4/teams/{team_id}/channels/ids");
+    let response = client
+        .post(format!("{RUST}{ids_path}"))
+        .header("Authorization", format!("Bearer {token}"))
+        .json(&serde_json::json!([]))
+        .send()
+        .await
+        .expect("the server answers");
+    assert_eq!(
+        response
+            .headers()
+            .get("x-mmrs-served-by")
+            .and_then(|v| v.to_str().ok()),
+        Some("rust"),
+        "POST {ids_path} is ours now"
+    );
 
     // And the deeper by-name route, which we do serve, still is — proof that adding the two
     // literals above it did not change which route claims that path.

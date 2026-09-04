@@ -12,6 +12,8 @@
 //! - `getPublicChannelsForTeam` — `GET /api/v4/teams/{team_id}/channels`
 //! - `getPrivateChannelsForTeam` — `GET /api/v4/teams/{team_id}/channels/private`
 //! - `getDeletedChannelsForTeam` — `GET /api/v4/teams/{team_id}/channels/deleted`
+//! - `getChannelMembersByIds` — `POST /api/v4/channels/{channel_id}/members/ids`
+//! - `getPublicChannelsByIdsForTeam` — `POST /api/v4/teams/{team_id}/channels/ids`
 //!
 //! # The first route migrated *through* a permission check
 //!
@@ -46,7 +48,7 @@ use mm_model::permission::{
     PERMISSION_MANAGE_TEAM, PERMISSION_READ_CHANNEL, PERMISSION_READ_CHANNEL_CONTENT,
     PERMISSION_READ_PUBLIC_CHANNEL, PERMISSION_VIEW_TEAM, Permission, make_permission_error,
 };
-use mm_model::utils::{is_valid_id, parse_go_bool};
+use mm_model::utils::{is_valid_id, parse_go_bool, sorted_array_from_json};
 
 use crate::AppState;
 use crate::auth::AuthenticatedSession;
@@ -1807,8 +1809,313 @@ pub async fn get_channel_members_timezones(
         .into_response())
 }
 
+/// Read `[]string` out of a request body the way `model.SortedArrayFromJSON` (utils.go:546)
+/// does, and answer the two 400s every by-ids handler shares.
+///
+/// The pair is deliberately one function because the **order** is the wire contract and it is
+/// the same in all four Go handlers: a body that will not decode is `api.payload.parse.error`
+/// with the *handler's own* `where`; a body that decodes to nothing is
+/// `api.context.invalid_body_param.app_error` naming the parameter. Three body shapes make the
+/// distinction concrete, and only the first is obvious:
+///
+/// - `[]` decodes fine and is **empty**, so it is `invalid_body_param`.
+/// - `null` decodes fine to a nil slice, and Go's `err != nil || obj == nil` returns
+///   `(nil, nil)` — no error — so it lands on the *same* `invalid_body_param` branch, not the
+///   parse one. A port that treated a nil decode as a parse failure would swap the two ids.
+/// - `{}`, `"x"`, `[1]` and an empty body are decode failures and get `payload.parse`.
+///
+/// De-duplication is Go's and it is load-bearing rather than tidiness: `RemoveDuplicateStrings`
+/// **sorts in place and then dedups**, so the ids reach the store sorted and a repeated id is
+/// one row, not two. That is why the wire order of a by-ids answer never tracks request order.
+pub(crate) fn ids_from_body(
+    body: &[u8],
+    parameter: &str,
+    where_: &'static str,
+) -> Result<Vec<String>, ApiError> {
+    let ids = sorted_array_from_json(body).map_err(|err| {
+        tracing::debug!(error = %err, "{parameter} body did not decode");
+        ApiError::from(mm_model::utils::AppError::new(
+            where_,
+            mm_model::utils::PAYLOAD_PARSE_ERROR,
+            None,
+            String::new(),
+            400,
+        ))
+    })?;
+    if ids.is_empty() {
+        return Err(ApiError::invalid_param(parameter));
+    }
+    Ok(ids)
+}
+
+/// Port of `getChannelMembersByIds` (api4/channel.go:1915), reached as
+/// `POST /api/v4/channels/{channel_id}/members/ids` — the webapp's bulk membership lookup.
+///
+/// # Order of operations
+///
+/// 1. `RequireChannelId` — the path 400 comes **before** the body is read, so a malformed
+///    channel id beats a malformed body.
+/// 2. `SortedArrayFromJSON` then the empty check — see [`ids_from_body`] for the two ids and
+///    which body shape earns which.
+/// 3. `SessionHasPermissionToChannel(read_channel)` → 403 naming `read_channel`. **The gate is
+///    last**, after both 400s, which is the reverse of [`get_channel_members`]: a caller with no
+///    rights to the channel still gets a 400 for a bad body rather than the 403. Nothing about
+///    the channel leaks either way, since both answers are the same for a channel that does not
+///    exist.
+/// 4. `GetChannelMembersByIds` — no 404 branch at all. **An id list matching nothing is `[]`
+///    with a 200**, and a well-formed channel id that names no channel is `[]` too for anyone
+///    the gate admits, exactly as `getChannelStats` is a 403 for everyone else.
+///
+/// # Sanitisation, and the one field it moves
+///
+/// `SanitizeForCurrentUser` over every element — the same mid-list blanking as
+/// [`get_channel_members`]. It moves **two fields and no others**: `LastViewedAt` and
+/// `LastUpdateAt` become `-1` on every row but the caller's own (channel_member.go:95). The name
+/// suggests a wider sweep, and it is not one — another member's `msg_count`, `mention_count` and
+/// `notify_props` are all on the wire. Asking for only your own id returns an unsanitised row.
+///
+/// # Wire format
+///
+/// `json.NewEncoder(w).Encode` — **with** the trailing newline ([D-086]), unlike its team twin
+/// `getTeamMembersByIds`, which marshals and writes. Same request shape, same day, two encoders.
+#[tracing::instrument(skip_all, fields(channel_id = %channel_id, asked))]
+pub async fn get_channel_members_by_ids(
+    State(state): State<AppState>,
+    Path(channel_id): Path<String>,
+    session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    match serve_channel_members_by_ids(&state, &channel_id, &session, request).await {
+        Ok(response) => response,
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn serve_channel_members_by_ids(
+    state: &AppState,
+    channel_id: &str,
+    session: &AuthenticatedSession,
+    request: Request,
+) -> Result<Response, ApiError> {
+    require_id(channel_id, "channel_id")?;
+
+    let bytes = read_body(request, "getChannelMembersByIds").await?;
+    let user_ids = ids_from_body(&bytes, "user_ids", "getChannelMembersByIds")?;
+    tracing::Span::current().record("asked", user_ids.len());
+
+    let (allowed, _is_member) = state
+        .app
+        .session_has_permission_to_channel(&session.0, channel_id, &PERMISSION_READ_CHANNEL)
+        .await;
+    if !allowed {
+        return Err(ApiError::from(make_permission_error(
+            &session.0,
+            &[&PERMISSION_READ_CHANNEL],
+        )));
+    }
+
+    let mut members = state
+        .app
+        .get_channel_members_by_ids(channel_id, &user_ids)
+        .await?;
+
+    for member in &mut members {
+        member.sanitize_for_current_user(&session.0.user_id);
+    }
+
+    let mut body = serde_json::to_vec(&members).map_err(|err| {
+        tracing::error!(error = %err, "failed to serialise the member list");
+        ApiError::from(mm_model::utils::AppError::new(
+            "getChannelMembersByIds",
+            "api.marshal_error",
+            None,
+            String::new(),
+            500,
+        ))
+    })?;
+    body.push(b'\n');
+
+    Ok((
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
+    )
+        .into_response())
+}
+
+/// Drain a request body into bytes, answering Go's `PayloadParseError` if the transport fails.
+///
+/// Go never reaches this branch separately — `json.NewDecoder(r.Body)` folds a read error into
+/// the same decode error — so the id and status here are the ones a truncated body would earn
+/// there.
+pub(crate) async fn read_body(
+    request: Request,
+    where_: &'static str,
+) -> Result<axum::body::Bytes, ApiError> {
+    axum::body::to_bytes(request.into_body(), usize::MAX)
+        .await
+        .map_err(|err| {
+            tracing::warn!(error = %err, "could not read the request body");
+            ApiError::from(mm_model::utils::AppError::new(
+                where_,
+                mm_model::utils::PAYLOAD_PARSE_ERROR,
+                None,
+                String::new(),
+                400,
+            ))
+        })
+}
+
+/// Go's per-id loop in `getPublicChannelsByIdsForTeam` (api4/channel.go:1348-1352), returning
+/// the parameter name to refuse with rather than the refusal itself.
+///
+/// A function so the **name** is unit-testable. It is `channel_id` — *singular* — while the empty
+/// body two lines earlier in the same handler names `channel_ids`, and neither name reaches the
+/// wire: `AppError.params` is `json:"-"` and our `message` is the untranslated id ([D-092]), so
+/// over HTTP the two 400s are byte-identical apart from `request_id`. A mutation swapping the
+/// names is therefore invisible to every cross-server test — the [D-149] shape. Splitting the
+/// loop out gives it an oracle that does not need i18n to land first.
+fn malformed_channel_id_parameter(channel_ids: &[String]) -> Option<&'static str> {
+    channel_ids
+        .iter()
+        .any(|id| !is_valid_id(id))
+        .then_some("channel_id")
+}
+
+/// Port of `getPublicChannelsByIdsForTeam` (api4/channel.go:1331), reached as
+/// `POST /api/v4/teams/{team_id}/channels/ids`.
+///
+/// # Order of operations, and the third 400 nothing else in this family has
+///
+/// 1. `RequireTeamId`, then the body and the empty check — parameter name `channel_ids`.
+/// 2. **Every id is validated with `model.IsValidId` before the gate**, and the failing one is
+///    reported as `channel_id` — *singular*, a different parameter name from the one the empty
+///    body earns. So `["x"]` is `invalid_body_param` naming `channel_id` while `[]` names
+///    `channel_ids`, from two lines of the same handler. Its three siblings skip this loop
+///    entirely and hand a malformed id straight to the store, where it simply matches nothing.
+/// 3. `SessionHasPermissionToTeam(view_team)` → 403 naming `view_team`; the team is never
+///    fetched, so a well-formed team id that names nothing is a 404 from the *store's* empty
+///    result for an admit-ed caller, and a 403 for everyone else.
+/// 4. `GetPublicChannelsByIdsForTeam` — **404 when nothing matches**, the one member of this
+///    family that does not answer an empty list. See
+///    [`mm_app::App::get_public_channels_by_ids_for_team`].
+/// 5. `FillInChannelsProps` — the same per-channel props pass as [`get_public_channels_for_team`].
+///
+/// # The guest branch is forwarded
+///
+/// Between the store and `FillInChannelsProps`, Go re-checks `read_channel` on **every returned
+/// channel** when `session.IsGuest()`, and a single denial fails the whole request with a 403.
+/// `IsGuest` reads the session prop written at login for a guest account, and guest accounts are
+/// licence-gated on this deployment — so the branch cannot be reached, and shipping an
+/// unreachable loop is what the `ViewUsersRestrictions` rule already refuses elsewhere. A guest
+/// session is forwarded whole instead, before the body is consumed.
+///
+/// # Wire format
+///
+/// `json.NewEncoder(w).Encode` — trailing newline.
+#[tracing::instrument(skip_all, fields(team_id = %team_id, asked, forwarded))]
+pub async fn get_public_channels_by_ids_for_team(
+    State(state): State<AppState>,
+    Path(team_id): Path<String>,
+    session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    if session.0.is_guest() {
+        tracing::Span::current().record("forwarded", true);
+        return crate::proxy::forward_to_go(State(state), request).await;
+    }
+    tracing::Span::current().record("forwarded", false);
+
+    match serve_public_channels_by_ids(&state, &team_id, &session, request).await {
+        Ok(response) => response,
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn serve_public_channels_by_ids(
+    state: &AppState,
+    team_id: &str,
+    session: &AuthenticatedSession,
+    request: Request,
+) -> Result<Response, ApiError> {
+    require_id(team_id, "team_id")?;
+
+    let bytes = read_body(request, "getPublicChannelsByIdsForTeam").await?;
+    let channel_ids = ids_from_body(&bytes, "channel_ids", "getPublicChannelsByIdsForTeam")?;
+    tracing::Span::current().record("asked", channel_ids.len());
+
+    if let Some(parameter) = malformed_channel_id_parameter(&channel_ids) {
+        return Err(ApiError::invalid_param(parameter));
+    }
+
+    if !state
+        .app
+        .session_has_permission_to_team(&session.0, team_id, &PERMISSION_VIEW_TEAM)
+        .await
+    {
+        return Err(ApiError::from(make_permission_error(
+            &session.0,
+            &[&PERMISSION_VIEW_TEAM],
+        )));
+    }
+
+    let mut channels = state
+        .app
+        .get_public_channels_by_ids_for_team(team_id, &channel_ids)
+        .await?;
+
+    state.app.fill_in_channels_props(&mut channels.0).await?;
+
+    let mut body = serde_json::to_vec(&channels).map_err(|err| {
+        tracing::error!(error = %err, "failed to serialise the channel list");
+        ApiError::from(mm_model::utils::AppError::new(
+            "getPublicChannelsByIdsForTeam",
+            "api.marshal_error",
+            None,
+            String::new(),
+            500,
+        ))
+    })?;
+    body.push(b'\n');
+
+    Ok((
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
+    )
+        .into_response())
+}
+
 #[cfg(test)]
 mod tests {
+    /// The name in the 400 for a malformed id, pinned in-process because HTTP cannot see it —
+    /// see [`malformed_channel_id_parameter`].
+    #[test]
+    fn a_malformed_channel_id_is_refused_as_the_singular_parameter() {
+        let good = "abcdefghijklmnopqrstuvwxyz".to_owned();
+        assert_eq!(
+            super::malformed_channel_id_parameter(std::slice::from_ref(&good)),
+            None,
+            "a well-formed id is not a refusal"
+        );
+        assert_eq!(
+            super::malformed_channel_id_parameter(&[good, "not-an-id".to_owned()]),
+            Some("channel_id"),
+            "singular — the empty-array branch names `channel_ids`"
+        );
+        assert_eq!(
+            super::malformed_channel_id_parameter(&[]),
+            None,
+            "an empty slice never reaches this loop; `ids_from_body` refuses it first"
+        );
+    }
+
     use super::*;
     use mm_model::channel_member::ChannelMember;
 

@@ -10,6 +10,7 @@
 //! - `getTeamsUnreadForUser` — `GET /api/v4/users/{user_id}/teams/unread`
 //! - `getTeamUnread` — `GET /api/v4/users/{user_id}/teams/{team_id}/unread`
 //! - `getAllTeams` — `GET /api/v4/teams`
+//! - `getTeamMembersByIds` — `POST /api/v4/teams/{team_id}/members/ids`
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -1336,6 +1337,124 @@ fn serialised_team_listing<T: serde::Serialize>(value: &T) -> Result<Vec<u8>, Ap
             500,
         ))
     })
+}
+
+/// Port of `getTeamMembersByIds` (api4/team.go:926), reached as
+/// `POST /api/v4/teams/{team_id}/members/ids`.
+///
+/// [`get_team_members`] with the page swapped for a body, and the same three gates in the same
+/// order — but two of its answers differ, both in the store:
+///
+/// - **`DeleteAt = 0` is applied**, as it is for the paginated list, so a departed member is
+///   absent rather than present-and-blanked.
+/// - **No `LIMIT`, no `ORDER BY`** — the `per_page=0`-is-empty trap that separates this route's
+///   paginated sibling from `getChannelMembers` has no analogue here, because there is no limit
+///   clause to guard.
+///
+/// # Order of operations
+///
+/// 1. `RequireTeamId`, then `SortedArrayFromJSON` and the empty check naming `user_ids`.
+/// 2. `SessionHasPermissionToTeam(view_team)` → 403 naming `view_team`, **after** both 400s.
+/// 3. `GetViewUsersRestrictions` — nil iff the caller holds user-based `view_members`; a
+///    restricted caller is forwarded whole, the same rule as `getTeamStats`, `getTeamMembers`
+///    and `getUsersByIds`. The forward happens **first** here, before the body is read, because
+///    forwarding needs the body intact; Go re-runs both 400s and the gate itself, so nothing
+///    observable moves.
+/// 4. `SanitizeRoleData` over every element unless the caller holds `manage_team_roles` — the
+///    same mid-list blanking as the paginated sibling, `delete_at: -1` on every row but the
+///    caller's own.
+///
+/// # Wire format
+///
+/// `json.Marshal` + `w.Write` (team.go:966) — **no trailing newline**, matching
+/// [`get_team_members`] and diverging from its channel counterpart
+/// `mm_api::channels::get_channel_members_by_ids`, which encodes. Two handlers with the same
+/// request shape and a one-byte difference in the reply; [D-086].
+#[tracing::instrument(skip_all, fields(team_id = %team_id, asked, forwarded))]
+pub async fn get_team_members_by_ids(
+    State(state): State<AppState>,
+    Path(team_id): Path<String>,
+    session: AuthenticatedSession,
+    request: axum::extract::Request,
+) -> Response {
+    if !state
+        .app
+        .has_permission_to(
+            &session.0.user_id,
+            &mm_model::permission::PERMISSION_VIEW_MEMBERS,
+        )
+        .await
+    {
+        tracing::Span::current().record("forwarded", true);
+        return crate::proxy::forward_to_go(State(state), request).await;
+    }
+    tracing::Span::current().record("forwarded", false);
+
+    match serve_team_members_by_ids(&state, &team_id, &session, request).await {
+        Ok(response) => response,
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn serve_team_members_by_ids(
+    state: &AppState,
+    team_id: &str,
+    session: &AuthenticatedSession,
+    request: axum::extract::Request,
+) -> Result<Response, ApiError> {
+    require_id(team_id, "team_id")?;
+
+    let bytes = crate::channels::read_body(request, "getTeamMembersByIds").await?;
+    let user_ids = crate::channels::ids_from_body(&bytes, "user_ids", "getTeamMembersByIds")?;
+    tracing::Span::current().record("asked", user_ids.len());
+
+    if !state
+        .app
+        .session_has_permission_to_team(&session.0, team_id, &PERMISSION_VIEW_TEAM)
+        .await
+    {
+        return Err(get_team_denial(&session.0));
+    }
+
+    let mut members = state
+        .app
+        .get_team_members_by_ids(team_id, &user_ids)
+        .await?;
+
+    let can_manage_roles = state
+        .app
+        .session_has_permission_to_team(
+            &session.0,
+            team_id,
+            &mm_model::permission::PERMISSION_MANAGE_TEAM_ROLES,
+        )
+        .await;
+    if !can_manage_roles {
+        for member in &mut members {
+            member.sanitize_role_data(&session.0.user_id);
+        }
+    }
+
+    let body = serde_json::to_vec(&members).map_err(|err| {
+        tracing::error!(error = %err, "failed to serialise the member list");
+        ApiError::from(mm_model::utils::AppError::new(
+            "getTeamMembersByIds",
+            "api.marshal_error",
+            None,
+            String::new(),
+            500,
+        ))
+    })?;
+
+    Ok((
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
+    )
+        .into_response())
 }
 
 #[cfg(test)]
