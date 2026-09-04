@@ -5330,3 +5330,55 @@ That mutation's plan line runs against the `unit` suite for the same reason.
 
 Mutation run: **17 run, 15 caught, 2 controls survived, 0 harness faults**
 (`scripts/mutations/posts-by-ids.plan`).
+
+## `GET /api/v4/users/{user_id}/posts/flagged` — `getFlaggedPostsForUser` (2026-09-05)
+
+Served. `crates/mm-api/src/posts.rs` (`get_flagged_posts_for_user`), `crates/mm-app/src/post.rs`
+(`get_flagged_posts`), `crates/mm-store/src/post_store.rs` (`get_flagged_posts`); 12 parity tests
+in `crates/mm-api/tests/parity/flagged_posts.rs`. The webapp's "Saved messages" panel.
+
+**The one thing a reader would otherwise get wrong: Go's team filter is missing its
+parentheses.** `buildFlaggedPostTeamFilterClause` emits `AND B.TeamId = ? OR B.TeamId = ''`
+(post_store.go:609) onto a `WHERE ChannelId IN (members…)`, and `AND` binds tighter — so the
+predicate that runs is `(members AND TeamId = ?) OR TeamId = ''`, whose second disjunct has **no
+membership check at all**. Every DM and GM has an empty `TeamId`, so a flagged DM post answers for
+*any* team id, including one that names nothing. Measured, and reproduced as
+`(members AND ($4 = '' OR teamid = $4)) OR ($4 <> '' AND teamid = '')`, the same truth table in
+one statement. Second: **`page` is an offset.** The handler hands `c.Params.Page` to the store's
+`offset` with no multiplication (api4/post.go:493), so `?page=1&per_page=1` skips one post.
+
+One divergence, deliberate: the handler skips the `GetChannels` call when no post survived the
+store, because our `get_many` raises `ErrNotFound` for zero rows and Go answers that request
+`200 {"order":[],"posts":{},…}`. The channel map cannot be observed when no post consults it.
+
+### Three survivors, and only one of them was unfixable
+
+- **`page * per_page` is indistinguishable from `page` when `per_page` is 1**, which every
+  pagination case used. The suite now also pages two at a time.
+- **The handler's per-channel read gate looked unreachable**: the store already requires a
+  `ChannelMembers` row, and an ordinary member can always read the channel. The fixture now plants
+  a membership row with **no roles** — which `POST /channels/{id}/members` cannot create — so the
+  subquery matches, `read_channel` does not, and the gate is what refuses. Go agrees.
+- **`app.post.get_flagged_posts.app_error` is only produced by a store failure**, which nothing
+  reachable over HTTP causes. Dropped from the plan rather than tolerated silently.
+
+`Posts.DeleteAt = 0` needed the same treatment: `DeletePost` deletes the post's flagged-post
+preferences with it, so over REST no flag ever points at a deleted post. The fixture plants the
+preference row back.
+
+Mutation run: **15 run, 13 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/flagged-posts.plan`).
+
+### [D-160] a third time, now on a *paginated* unordered scan
+
+`channel_members_list::pages_split_cover_and_run_out_identically` compared each page of
+`GET /channels/{id}/members` byte for byte between the two servers. That query has no `ORDER BY`,
+so a page is a window onto a scan whose order Postgres does not promise to repeat between two
+executions — and `fetch_both_stable`'s third acceptance (Go quiescent across the window) lets a
+stable-but-different window through. It held while `channelmembers` was quiet and failed in the
+full-suite run once this session's fixtures began writing to that table; it passed in isolation,
+the signature. Pages are now compared as **sets of rows** sorted by `user_id`, which keeps every
+field under comparison and gives up only the ordering claim neither server makes, plus a new
+assertion that both servers page over the same membership. The unpaged byte-for-byte check is
+untouched. **The rule, again: an unordered read may not be byte-compared as a sequence — and a
+paginated one may not be byte-compared at all.**

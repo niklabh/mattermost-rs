@@ -713,6 +713,12 @@ async fn purge_api_fixtures_once() {
         // `post_get` each dropped the other's custom emoji, one run in two. Anything that
         // deletes by a shared prefix belongs here, in the `OnceCell` that runs before any
         // fixture is built.
+        // Flagged-post preferences. These are keyed on a *post* id with no prefix to select on,
+        // and they are written against the shared admin user as well as the `mmrsplain%` ones —
+        // so a leftover flag from a previous run, or from a hand-run probe, silently joins the
+        // next run's flagged-post list and breaks any assertion about its contents. Deleting the
+        // whole category is safe because `flagged_post` is authored by exactly one suite.
+        "DELETE FROM preferences WHERE category = 'flagged_post'",
         "DELETE FROM reactions WHERE emojiname LIKE 'mmrsparity%'",
         "DELETE FROM reactions WHERE postid IN (SELECT id FROM posts WHERE channelid IN (SELECT id FROM channels WHERE name LIKE 'mmrs-parity-%'))",
         "DELETE FROM postspriority WHERE postid IN (SELECT id FROM posts WHERE channelid IN (SELECT id FROM channels WHERE name LIKE 'mmrs-parity-%'))",

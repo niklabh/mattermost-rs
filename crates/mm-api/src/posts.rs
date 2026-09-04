@@ -3,8 +3,9 @@
 //! (`GET /api/v4/posts/{post_id}/thread`), `getFileInfosForPost`
 //! (`GET /api/v4/posts/{post_id}/files/info`), `getEditHistoryForPost`
 //! (`GET /api/v4/posts/{post_id}/edit_history`), `getPostsForChannelAroundLastUnread`
-//! (`GET /api/v4/users/{user_id}/channels/{channel_id}/posts/unread`) and `getPostsByIds`
-//! (`POST /api/v4/posts/ids`).
+//! (`GET /api/v4/users/{user_id}/channels/{channel_id}/posts/unread`), `getPostsByIds`
+//! (`POST /api/v4/posts/ids`) and `getFlaggedPostsForUser`
+//! (`GET /api/v4/users/{user_id}/posts/flagged`).
 
 use axum::extract::{Path, Request, State};
 use axum::http::StatusCode;
@@ -1508,6 +1509,220 @@ async fn serve_posts_by_ids(
                     HEADER_FIRST_INACCESSIBLE_POST_TIME,
                     first_inaccessible_post_time.to_string().as_str(),
                 ),
+                ("Content-Type", "application/json"),
+                ("x-mmrs-served-by", "rust"),
+            ],
+            body,
+        )
+            .into_response(),
+    )
+}
+
+/// Port of `getFlaggedPostsForUser` (api4/post.go:475) —
+/// `GET /api/v4/users/{user_id}/posts/flagged`.
+///
+/// The webapp's "Saved messages" panel. Three query shapes, chosen in this order: `channel_id`
+/// wins if present, then `team_id`, then neither — so passing both filters by channel and
+/// ignores the team.
+///
+/// # `page` is an offset, not a page
+///
+/// `c.Params.Page` is handed straight to the store's `offset` (api4/post.go:493) with no
+/// multiplication by `per_page`. `?page=1&per_page=1` skips **one post**; `?page=2` skips two.
+/// Measured against the running server. See [`mm_store::PostStore::get_flagged_posts`], which
+/// also documents the missing parentheses in Go's team filter.
+///
+/// # The permission gate is `edit_other_users`, and it runs before anything else
+///
+/// `SessionHasPermissionToUser` — self, or a system admin. The refusal names
+/// `PermissionEditOtherUsers`, which is a *write* permission guarding a read, and it is what
+/// Go reports whatever the real reason.
+///
+/// # Then a second, per-channel gate, and it is silent
+///
+/// Each post's channel is looked up and `SessionHasPermissionToReadChannel`'d; a post whose
+/// channel is missing from that lookup, or unreadable, is `continue`d past. So this route can
+/// answer 200 with an empty list where the caller genuinely has flags — the same silent
+/// filtering as [`get_posts_by_ids`]. The permission answer is **cached per channel id** for the
+/// duration of the request, which is only a performance detail here because the answer cannot
+/// change mid-list.
+///
+/// # Wire format
+///
+/// `clientPostList.EncodeJSON(w)` — a `PostList` with a trailing newline, and `NewPostList`
+/// gives it a non-nil `order` and `posts`, so an empty answer is `{"order":[],"posts":{},…}`
+/// rather than nulls.
+#[tracing::instrument(skip_all, fields(user_id = %user_id, kept))]
+pub async fn get_flagged_posts_for_user(
+    State(state): State<AppState>,
+    Path(user_id): Path<String>,
+    session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    let query = request.uri().query().map(str::to_owned);
+
+    match serve_flagged_posts(&state, &user_id, &session, query.as_deref()).await {
+        Outcome::Served(response) => response,
+        Outcome::Failed(err) => err.into_response(),
+        Outcome::Forward => proxy::forward_to_go(State(state), request).await,
+    }
+}
+
+async fn serve_flagged_posts(
+    state: &AppState,
+    user_id: &str,
+    session: &AuthenticatedSession,
+    query: Option<&str>,
+) -> Outcome {
+    // `c.RequireUserId()` (web/context.go:397).
+    if !is_valid_id(user_id) {
+        return Outcome::Failed(ApiError::invalid_url_param("user_id"));
+    }
+
+    if !state
+        .app
+        .session_has_permission_to_user(&session.0, user_id)
+        .await
+    {
+        return Outcome::Failed(ApiError::from(make_permission_error(
+            &session.0,
+            &[&PERMISSION_EDIT_OTHER_USERS],
+        )));
+    }
+
+    // Go reads both, then branches on `channelId != ""` first. A blank `?channel_id=` is the
+    // same as absent, because it compares against the empty string rather than testing presence.
+    let channel_id = query_first(query, "channel_id").unwrap_or_default();
+    let team_id = query_first(query, "team_id").unwrap_or_default();
+    let (channel_filter, team_filter) = if !channel_id.is_empty() {
+        (channel_id.as_str(), "")
+    } else {
+        ("", team_id.as_str())
+    };
+
+    // `c.Params.Page` into the store's `offset` — see the doc comment above.
+    let list = match state
+        .app
+        .get_flagged_posts(
+            user_id,
+            channel_filter,
+            team_filter,
+            parse_page(query),
+            parse_per_page(query),
+        )
+        .await
+    {
+        Ok(list) => list,
+        Err(err) => return Outcome::Failed(ApiError::from(err)),
+    };
+
+    // Borrowed, not cloned: the whole point of the loop below is to copy the few posts that
+    // survive the gate, and cloning the map first would copy the ones that do not.
+    let no_posts = mm_model::post_list::PostMap::new();
+    let posts = list.posts.as_ref().unwrap_or(&no_posts);
+    let channel_ids: Vec<String> = list
+        .order
+        .iter()
+        .flatten()
+        .filter_map(|id| posts.get(id))
+        .map(|post| post.channel_id.clone())
+        .collect();
+    // **Skipped when there is nothing to look up.** `SqlChannelStore.GetMany` raises
+    // `ErrNotFound` for zero rows, which [`mm_app::App::get_channels`] turns into a 404 — and a
+    // user with no visible flagged posts reaches here with an empty id list. Go answers that
+    // request `200 {"order":[],"posts":{},…}`, measured; whatever squirrel does with an empty
+    // `IN`, the channel map cannot be observed when no post survives to consult it. Calling the
+    // store anyway would turn Go's empty list into our 404, which is what the first run did.
+    let channels = if channel_ids.is_empty() {
+        Vec::new()
+    } else {
+        match state.app.get_channels(&channel_ids).await {
+            Ok(channels) => channels,
+            Err(err) => return Outcome::Failed(ApiError::from(err)),
+        }
+    };
+    let channels_by_id: std::collections::HashMap<&str, &mm_model::channel::Channel> =
+        channels.iter().map(|c| (c.id.as_str(), c)).collect();
+
+    // Go rebuilds the list from scratch rather than filtering in place, so a post whose channel
+    // is unreadable leaves neither an `order` entry nor a `posts` key behind.
+    let mut kept = mm_model::post_list::PostList::new();
+    let mut channel_read_permission: std::collections::HashMap<String, bool> =
+        std::collections::HashMap::new();
+    for id in list.order.iter().flatten() {
+        let Some(post) = posts.get(id) else {
+            continue;
+        };
+        let allowed = match channel_read_permission.get(&post.channel_id) {
+            Some(allowed) => *allowed,
+            None => {
+                let allowed = match channels_by_id.get(post.channel_id.as_str()) {
+                    // Go's `channelMap` miss is a bare `continue` that never writes the cache —
+                    // so a missing channel is re-looked-up for every post that names it. Same
+                    // answer either way; the cache write is skipped here for the same reason.
+                    None => continue,
+                    Some(channel) => {
+                        let (has_permission, _is_member) = state
+                            .app
+                            .session_has_permission_to_read_channel(&session.0, channel)
+                            .await;
+                        has_permission
+                    }
+                };
+                channel_read_permission.insert(post.channel_id.clone(), allowed);
+                allowed
+            }
+        };
+        if !allowed {
+            continue;
+        }
+        kept.add_post(post.clone());
+        kept.add_order(id.clone());
+    }
+
+    // `pl.SortByCreateAt()` — the store already ordered by `CreateAt DESC`, and this sorts the
+    // same way, but it is Go's and a filtered list is not obliged to have kept the order.
+    kept.sort_by_create_at();
+    tracing::Span::current().record("kept", kept.order.as_ref().map_or(0, Vec::len));
+
+    let prepared = match state.app.prepare_post_list_for_client(&kept).await {
+        Ok(prepared) => prepared,
+        Err(PrepareError::Unreproducible(reason)) => {
+            tracing::debug!(reason, user_id, "forwarding to Go");
+            return Outcome::Forward;
+        }
+        Err(PrepareError::App(err)) => return Outcome::Failed(ApiError::from(err)),
+    };
+
+    let (mut sanitized, _all_previews_have_membership) = match state
+        .app
+        .sanitize_post_list_metadata_for_user(prepared, &session.0.user_id)
+        .await
+    {
+        Ok(sanitized) => sanitized,
+        Err(PrepareError::Unreproducible(reason)) => {
+            tracing::debug!(reason, user_id, "forwarding to Go");
+            return Outcome::Forward;
+        }
+        Err(PrepareError::App(err)) => return Outcome::Failed(ApiError::from(err)),
+    };
+
+    let mut body = Vec::new();
+    if let Err(err) = sanitized.encode_json(&mut body) {
+        tracing::error!(error = %err, "failed to serialise the flagged PostList");
+        return Outcome::Failed(ApiError::from(mm_model::utils::AppError::new(
+            "getFlaggedPostsForUser",
+            "api.marshal_error",
+            None,
+            String::new(),
+            500,
+        )));
+    }
+
+    Outcome::Served(
+        (
+            StatusCode::OK,
+            [
                 ("Content-Type", "application/json"),
                 ("x-mmrs-served-by", "rust"),
             ],

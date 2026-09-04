@@ -45,6 +45,18 @@ async fn teardown(
     }
 }
 
+/// The rows of a member list, ordered by `user_id` so two windows of an unordered scan can be
+/// compared for content without asserting an order neither server promises.
+fn sorted_rows(body: &[u8]) -> Vec<serde_json::Value> {
+    let mut rows: Vec<serde_json::Value> = serde_json::from_slice::<serde_json::Value>(body)
+        .expect("decodes")
+        .as_array()
+        .expect("an array")
+        .clone();
+    rows.sort_by(|a, b| a["user_id"].as_str().cmp(&b["user_id"].as_str()));
+    rows
+}
+
 fn member_ids(body: &[u8]) -> Vec<String> {
     serde_json::from_slice::<serde_json::Value>(body)
         .expect("decodes")
@@ -148,19 +160,39 @@ async fn pages_split_cover_and_run_out_identically() {
         all_ids.sort();
 
         paged_ids.clear();
+        let mut go_paged_ids = Vec::new();
         for page in 0..2 {
             let path = format!("/api/v4/channels/{channel_id}/members?page={page}&per_page=2");
             let (go_body, rs_body) = fetch_both_stable(&client, &token, &path).await;
+
+            // **Compared as a set of rows, not as bytes.** The store's query has no `ORDER BY`,
+            // so a *page* of it is a window onto a scan whose order Postgres does not promise to
+            // repeat — not between two executions, and therefore not between Go's request and
+            // ours. The byte comparison held while `channelmembers` was quiet and started
+            // failing once another suite began writing to that table; the same class as the
+            // paged-versus-full reshuffle this loop already retries for, one level up.
+            //
+            // Sorting by `user_id` keeps every field of every row under comparison — what is
+            // given up is only the ordering claim, which neither server makes. The unpaged
+            // byte-for-byte check lives in
+            // [`the_member_list_is_byte_identical_and_sanitised_around_the_caller`].
             assert_eq!(
-                String::from_utf8_lossy(&rs_body),
-                String::from_utf8_lossy(&go_body),
-                "page {page} must agree byte for byte"
+                sorted_rows(&rs_body),
+                sorted_rows(&go_body),
+                "page {page} must hold the same rows on both servers"
             );
+
             let ids = member_ids(&rs_body);
             assert_eq!(ids.len(), 2, "page {page} holds exactly two rows");
             paged_ids.extend(ids);
+            go_paged_ids.extend(member_ids(&go_body));
         }
         paged_ids.sort();
+        go_paged_ids.sort();
+        assert_eq!(
+            paged_ids, go_paged_ids,
+            "however the scan reshuffles, both servers must page over the same membership"
+        );
 
         if paged_ids == all_ids {
             break;

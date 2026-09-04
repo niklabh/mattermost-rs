@@ -191,6 +191,14 @@ pub fn router(state: AppState) -> Router {
         // Was the literal `/users/me/sessions`; now the parameterised route, with `me` resolved
         // in the handler like every other alias. The `me` bytes are unchanged — pinned by the
         // parity suite — and the gate that was `true` by construction is now evaluated.
+        // `BaseRoutes.PostsForUser.Handle("/flagged")` (api4/post.go:35) —
+        // `/users/{user_id}/posts/flagged`. Two segments deeper than `/users/{user_id}`, so it
+        // shadows nothing; `partially_migrated_with_ids` keeps the exact-26-char rule the
+        // handler's own `RequireUserId` would otherwise have to answer for.
+        .route(
+            "/api/v4/users/{user_id}/posts/flagged",
+            partially_migrated_with_ids(&state, get(posts::get_flagged_posts_for_user)),
+        )
         .route(
             "/api/v4/users/{user_id}/sessions",
             partially_migrated_with_ids(&state, get(sessions::get_sessions)),
