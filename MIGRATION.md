@@ -5550,3 +5550,50 @@ rebuild has reported a couple of parity failures and aborted early, with two imm
 clean. The failure output was not captured either time, so there is nothing here but the pattern:
 first run after `cargo` rebuilds, a handful of parity tests, never reproducible. Capture the log
 on the first run rather than the third when it next happens.
+
+## `GET /users/{user_id}/channel_members` — `getChannelMembersForUser` (2026-09-05)
+
+Served. `crates/mm-api/src/users.rs` (`get_channel_members_for_user`,
+`parse_page_allowing_negative`), `crates/mm-app/src/channel.rs`
+(`get_channel_members_with_team_data_for_user_with_pagination`),
+`crates/mm-store/src/channel_store.rs` (`get_members_for_user_with_pagination`,
+`get_members_for_user_with_cursor_pagination`); 13 parity tests in
+`crates/mm-api/tests/parity/channel_members_for_user.rs`. Every channel the caller belongs to,
+across every team — the webapp asks once per load. First route to reach
+`model.ChannelMemberWithTeamData`, which was ported earlier and had no caller.
+
+**The one thing a reader would otherwise get wrong: `?page=-1` is a sentinel, not a page.** It
+selects a **newline-delimited stream** (`application/x-ndjson`, one member object per line) that
+the handler walks a hundred rows at a time; anything else — including no `page` at all, which
+parses to `0` — selects the ordinary JSON array. The shared `parse_page` clamps negatives to the
+default because every other route treats them as garbage, so this route needs its own parser.
+
+**And the stream stops on a 404 it only sometimes swallows.** The cursor store call raises
+`ErrNotFound` for an empty page rather than returning `[]`, and the loop reads that as "done" —
+but Go's guard is `fromChannelID != "" && err.Id == MissingChannelMemberError`, so a caller whose
+*first* page is empty gets the 404 itself, with `Content-Type: application/x-ndjson` already set
+on it. A user with no channel memberships is the only shape that reaches it, and the REST API
+cannot create one (Go joins every new team member to the default channels), so the fixture deletes
+the rows directly.
+
+One divergence, not on the wire: Go writes each page to the socket as it reads it; this collects
+the walk and answers in one body. The bytes are identical — the tests compare them — but Go's
+first line arrives sooner and holds less memory. Recorded at the call site rather than hidden.
+
+Mutation run: **22 run, 20 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/channel-members-for-user.plan`).
+
+### Five survivors, one cause
+
+The fixture user held fewer memberships than a single page, so the streaming loop ran **exactly
+once** — and its cursor (`ChannelId > ?`), its page-size test (`len < 100`) and its cursor advance
+(`.last()`) were all dead code. Three mutations survived on that one gap: widening `>` to `>=`
+repeats a row, widening `<` to `<=` stops after the first page, and `.first()` walks the same page
+forever. `cmfupaged` now carries **150 planted memberships** — one `INSERT … SELECT`, because
+creating that many channels over REST would dominate the suite — so the first page comes back
+exactly full and the walk takes two turns. The other two survivors were narrower: the three team
+`COALESCE`s need a channel with **no team** (the plain user now has a DM), and the streaming
+branch's sanitiser needs a caller reading somebody *else's* list.
+
+**The lesson generalises past this route:** a loop whose fixture fits in one iteration is not
+tested, it is only executed. Any paginated walk needs a fixture that crosses a page boundary.

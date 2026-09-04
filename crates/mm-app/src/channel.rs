@@ -6,7 +6,9 @@ use std::collections::HashMap;
 
 use mm_model::channel::{Channel, ChannelSearchOpts};
 use mm_model::channel_list::ChannelList;
-use mm_model::channel_member::{CHANNEL_MARK_UNREAD_MENTION, ChannelMember, ChannelUnread};
+use mm_model::channel_member::{
+    CHANNEL_MARK_UNREAD_MENTION, ChannelMember, ChannelMembersWithTeamData, ChannelUnread,
+};
 use mm_model::post_list::PostList;
 use mm_model::user::MARK_UNREAD_NOTIFY_PROP;
 use mm_model::utils::{AppError, AppResult, get_preferred_timezone, remove_duplicate_strings};
@@ -414,6 +416,73 @@ impl App {
                     )
                 }
             })
+    }
+
+    /// Port of `app.App.GetChannelMembersWithTeamDataForUserWithPagination` (channel.go:2640).
+    ///
+    /// `page == -1` selects the cursor walk and anything else the offset page — Go's
+    /// `ChannelMemberCursor` carries both shapes in one struct and branches on the sentinel.
+    ///
+    /// # The `where` field names the *store* method, not this function
+    ///
+    /// Go assigns `method` from whichever branch it took and passes that to `NewAppError`, so a
+    /// failure reports `GetMembersForUserWithCursorPagination` or `GetMembersForUserWithPagination`
+    /// rather than the caller. Reproduced: `where` is not on the wire, but it is what a log
+    /// reader uses to tell the two branches apart, which is the only reason Go bothers.
+    ///
+    /// # The 404 is a control-flow signal
+    ///
+    /// Only the cursor branch can raise it — its store call treats an empty page as
+    /// `ErrNotFound` — and the streaming handler above reads that 404 as "the walk is done".
+    /// The error id is `app.channel.get_member.missing.app_error`.
+    #[tracing::instrument(skip(self), fields(user_id = %user_id, page, per_page, found))]
+    pub async fn get_channel_members_with_team_data_for_user_with_pagination(
+        &self,
+        user_id: &str,
+        page: i64,
+        per_page: i64,
+        from_channel_id: &str,
+    ) -> AppResult<ChannelMembersWithTeamData> {
+        let (result, method) = if page == -1 {
+            (
+                self.store()
+                    .channel()
+                    .get_members_for_user_with_cursor_pagination(user_id, per_page, from_channel_id)
+                    .await,
+                "GetMembersForUserWithCursorPagination",
+            )
+        } else {
+            (
+                self.store()
+                    .channel()
+                    .get_members_for_user_with_pagination(user_id, page, per_page)
+                    .await,
+                "GetMembersForUserWithPagination",
+            )
+        };
+
+        let members = result.map_err(|err| {
+            if err.is_not_found() {
+                AppError::boxed(
+                    method,
+                    "app.channel.get_member.missing.app_error",
+                    None,
+                    String::new(),
+                    404,
+                )
+            } else {
+                tracing::error!(error = %err, "paginated channel-member lookup failed");
+                AppError::boxed(
+                    method,
+                    "app.channel.get_members.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            }
+        })?;
+        tracing::Span::current().record("found", members.len());
+        Ok(members)
     }
 
     /// Port of `app.App.AutocompleteChannelsForSearch` (channel.go:3434).

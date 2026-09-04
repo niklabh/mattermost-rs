@@ -1,0 +1,46 @@
+# Mutation plan for GET /users/{user_id}/channel_members (getChannelMembersForUser).
+#
+#   scripts/mutate-batch.sh scripts/mutations/channel-members-for-user.plan
+#
+# Tab-separated: name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter.  `\n` becomes a newline.
+#
+# channel_store.rs holds several channel-member queries over the same columns; the two here are
+# the only ones selecting `teamdisplayname` or ordering by `cm.channelid ASC`.
+#
+# `LIMIT`/`OFFSET` mutations must keep every bind: sqlx refuses a statement with an unused
+# parameter, and the harness reports that as a fault rather than a verdict. `LEAST($2, n::bigint)`
+# is the shape that works.
+#
+# Five survivors on the first run, and every one of them was the same gap: the fixture user held
+# fewer memberships than one page, so the streaming walk ran exactly once and its cursor
+# (`ChannelId >`), its page-size test (`len < 100`) and its cursor advance (`.last()`) were all
+# dead code. `cmfupaged` now carries 150 planted memberships, so the first page comes back exactly
+# full and the walk takes two turns. The other two were narrower: the three team `COALESCE`s need
+# a channel with no team (a DM now), and the streaming branch's sanitiser needs a caller reading
+# somebody else's list.
+#
+# The last two lines are the no-op controls and must SURVIVE.
+store-page-offset	crates/mm-store/src/channel_store.rs	    let offset = page * per_page;	    let offset = page;	api	channel_members_for_user
+store-order-direction	crates/mm-store/src/channel_store.rs	         ORDER BY cm.channelid ASC\n         LIMIT $2 OFFSET $3	         ORDER BY cm.channelid DESC\n         LIMIT $2 OFFSET $3	api	channel_members_for_user
+store-space-filter	crates/mm-store/src/channel_store.rs	           AND c.type NOT IN ('S')\n         ORDER BY cm.channelid ASC\n         LIMIT $2 OFFSET $3	           AND c.type NOT IN ('O')\n         ORDER BY cm.channelid ASC\n         LIMIT $2 OFFSET $3	api	channel_members_for_user
+store-page-limit	crates/mm-store/src/channel_store.rs	         ORDER BY cm.channelid ASC\n         LIMIT $2 OFFSET $3	         ORDER BY cm.channelid ASC\n         LIMIT LEAST($2, 1::bigint) OFFSET $3	api	channel_members_for_user
+store-team-coalesce	crates/mm-store/src/channel_store.rs	               COALESCE(t.displayname, '') AS "teamdisplayname!",\n               COALESCE(t.name, '')        AS "teamname!",\n               COALESCE(t.updateat, 0)     AS "teamupdateat!"\n          FROM channelmembers cm\n          INNER JOIN channels c ON cm.channelid = c.id\n          LEFT JOIN schemes channelscheme ON c.schemeid = channelscheme.id\n          LEFT JOIN teams t ON c.teamid = t.id\n          LEFT JOIN schemes teamscheme ON t.schemeid = teamscheme.id\n         WHERE cm.userid = $1\n           AND c.type NOT IN ('S')\n         ORDER BY cm.channelid ASC\n         LIMIT $2 OFFSET $3	               COALESCE(t.displayname, '') AS "teamdisplayname!",\n               COALESCE(t.name, 'x')       AS "teamname!",\n               COALESCE(t.updateat, 0)     AS "teamupdateat!"\n          FROM channelmembers cm\n          INNER JOIN channels c ON cm.channelid = c.id\n          LEFT JOIN schemes channelscheme ON c.schemeid = channelscheme.id\n          LEFT JOIN teams t ON c.teamid = t.id\n          LEFT JOIN schemes teamscheme ON t.schemeid = teamscheme.id\n         WHERE cm.userid = $1\n           AND c.type NOT IN ('S')\n         ORDER BY cm.channelid ASC\n         LIMIT $2 OFFSET $3	api	channel_members_for_user
+store-cursor-predicate	crates/mm-store/src/channel_store.rs	           AND cm.channelid > $2\n	           AND cm.channelid >= $2\n	api	channel_members_for_user
+store-cursor-notfound	crates/mm-store/src/channel_store.rs	    if rows.is_empty() {\n        return Err(StoreError::NotFound {\n            entity: "ChannelMembers",	    if false {\n        return Err(StoreError::NotFound {\n            entity: "ChannelMembers",	api	channel_members_for_user
+app-sentinel	crates/mm-app/src/channel.rs	        let (result, method) = if page == -1 {	        let (result, method) = if page == 1 {	api	channel_members_for_user
+app-notfound-status	crates/mm-app/src/channel.rs	                    method,\n                    "app.channel.get_member.missing.app_error",\n                    None,\n                    String::new(),\n                    404,	                    method,\n                    "app.channel.get_member.missing.app_error",\n                    None,\n                    String::new(),\n                    500,	api	channel_members_for_user
+api-sentinel-branch	crates/mm-api/src/users.rs	    if page != -1 {	    if page != -2 {	api	channel_members_for_user
+api-ndjson-content-type	crates/mm-api/src/users.rs	            ("Content-Type", "application/x-ndjson"),	            ("Content-Type", "application/json"),	api	channel_members_for_user
+api-stream-newline	crates/mm-api/src/users.rs	            body.push(b'\\n');\n            count += 1;	            count += 1;	api	channel_members_for_user
+api-first-page-guard	crates/mm-api/src/users.rs	                if !from_channel_id.is_empty()\n                    && err.id == "app.channel.get_member.missing.app_error"	                if err.id == "app.channel.get_member.missing.app_error"	api	channel_members_for_user
+api-stream-page-size	crates/mm-api/src/users.rs	        if (members.len() as i64) < CHANNEL_MEMBERS_STREAM_PAGE_SIZE {	        if (members.len() as i64) <= CHANNEL_MEMBERS_STREAM_PAGE_SIZE {	api	channel_members_for_user
+api-cursor-advance	crates/mm-api/src/users.rs	        from_channel_id = members\n            .last()	        from_channel_id = members\n            .first()	api	channel_members_for_user
+api-sanitise-array	crates/mm-api/src/users.rs	        for member in &mut members {\n            member\n                .channel_member\n                .sanitize_for_current_user(&session.0.user_id);\n        }	        for member in &mut members {\n            let _ = member;\n        }	api	channel_members_for_user
+api-sanitise-stream	crates/mm-api/src/users.rs	            member\n                .channel_member\n                .sanitize_for_current_user(&session.0.user_id);\n            serde_json::to_writer(&mut body, &member)	            serde_json::to_writer(&mut body, &member)	api	channel_members_for_user
+api-permission-gate	crates/mm-api/src/users.rs	    if !state\n        .app\n        .session_has_permission_to_user(&session.0, &user_id)\n        .await\n    {\n        return Err(ApiError::from(make_permission_error(\n            &session.0,\n            &[&PERMISSION_EDIT_OTHER_USERS],\n        )));\n    }\n\n    let page = parse_page_allowing_negative(query.as_deref());	    if false {\n        return Err(ApiError::from(make_permission_error(\n            &session.0,\n            &[&PERMISSION_EDIT_OTHER_USERS],\n        )));\n    }\n\n    let page = parse_page_allowing_negative(query.as_deref());	api	channel_members_for_user
+api-require-user-id	crates/mm-api/src/users.rs	    is_valid_id(&user_id)\n        .then_some(())\n        .ok_or_else(|| ApiError::invalid_url_param("user_id"))?;	    let _ = &user_id;	api	channel_members_for_user
+api-negative-page-parser	crates/mm-api/src/users.rs	        Some(val) if val >= -1 => val,	        Some(val) if val >= 0 => val,	api	channel_members_for_user
+#
+# --- no-op controls: these must SURVIVE ---
+control-rename-binding	crates/mm-store/src/channel_store.rs	    .map_err(|source| StoreError::Db {\n        context: format!("failed to find ChannelMembers data with and userId={user_id}"),\n        source,\n    })?;\n\n    tracing::Span::current().record("found", rows.len());\n\n    if rows.is_empty() {	    .map_err(|cause| StoreError::Db {\n        context: format!("failed to find ChannelMembers data with and userId={user_id}"),\n        source: cause,\n    })?;\n\n    tracing::Span::current().record("found", rows.len());\n\n    if rows.is_empty() {	api	channel_members_for_user
+control-reorder-team-columns	crates/mm-store/src/channel_store.rs	               COALESCE(t.displayname, '') AS "teamdisplayname!",\n               COALESCE(t.name, '')        AS "teamname!",\n               COALESCE(t.updateat, 0)     AS "teamupdateat!"\n          FROM channelmembers cm\n          INNER JOIN channels c ON cm.channelid = c.id\n          LEFT JOIN schemes channelscheme ON c.schemeid = channelscheme.id\n          LEFT JOIN teams t ON c.teamid = t.id\n          LEFT JOIN schemes teamscheme ON t.schemeid = teamscheme.id\n         WHERE cm.userid = $1\n           AND cm.channelid > $2	               COALESCE(t.displayname, '') AS "teamdisplayname!",\n               COALESCE(t.name, '')        AS "teamname!",\n               COALESCE(t.updateat, 0)     AS "teamupdateat!"\n          FROM channelmembers cm\n          INNER JOIN channels c ON cm.channelid = c.id\n          LEFT JOIN teams t ON c.teamid = t.id\n          LEFT JOIN schemes channelscheme ON c.schemeid = channelscheme.id\n          LEFT JOIN schemes teamscheme ON t.schemeid = teamscheme.id\n         WHERE cm.userid = $1\n           AND cm.channelid > $2	api	channel_members_for_user

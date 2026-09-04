@@ -30,7 +30,9 @@ use std::collections::HashMap;
 
 use mm_model::channel::{Channel, ChannelBannerInfo, ChannelSearchOpts};
 use mm_model::channel_list::ChannelList;
-use mm_model::channel_member::{ChannelMember, ChannelUnread};
+use mm_model::channel_member::{
+    ChannelMember, ChannelMemberWithTeamData, ChannelMembersWithTeamData, ChannelUnread,
+};
 use mm_model::post_list::PostList;
 use mm_model::role::{CHANNEL_ADMIN_ROLE_ID, CHANNEL_GUEST_ROLE_ID, CHANNEL_USER_ROLE_ID};
 use mm_model::utils::StringMap;
@@ -196,6 +198,24 @@ pub trait ChannelStore {
         name: &str,
         include_deleted: bool,
     ) -> impl std::future::Future<Output = Result<Channel, StoreError>> + Send;
+
+    /// Port of `SqlChannelStore.GetMembersForUserWithPagination` (channel_store.go:3285): the
+    /// caller's memberships across every team, page/offset paginated.
+    fn get_members_for_user_with_pagination(
+        &self,
+        user_id: &str,
+        page: i64,
+        per_page: i64,
+    ) -> impl std::future::Future<Output = Result<ChannelMembersWithTeamData, StoreError>> + Send;
+
+    /// Port of `SqlChannelStore.GetMembersForUserWithCursorPagination` (channel_store.go:3299):
+    /// the same list walked by a `ChannelId >` cursor, and `ErrNotFound` when the page is empty.
+    fn get_members_for_user_with_cursor_pagination(
+        &self,
+        user_id: &str,
+        per_page: i64,
+        from_channel_id: &str,
+    ) -> impl std::future::Future<Output = Result<ChannelMembersWithTeamData, StoreError>> + Send;
 
     /// Port of `SqlChannelStore.AutocompleteInTeamForSearch` (channel_store.go:3464), including
     /// the direct-message pass it appends and the sort that merges the two.
@@ -405,6 +425,27 @@ impl ChannelStore for SqlChannelStore {
         is_guest: bool,
     ) -> Result<ChannelList, StoreError> {
         autocomplete_in_team(&self.pool, team_id, user_id, term, is_guest).await
+    }
+
+    #[tracing::instrument(skip_all, fields(user_id = %user_id, page, per_page, found))]
+    async fn get_members_for_user_with_pagination(
+        &self,
+        user_id: &str,
+        page: i64,
+        per_page: i64,
+    ) -> Result<ChannelMembersWithTeamData, StoreError> {
+        get_members_for_user_with_pagination(&self.pool, user_id, page, per_page).await
+    }
+
+    #[tracing::instrument(skip_all, fields(user_id = %user_id, per_page, found))]
+    async fn get_members_for_user_with_cursor_pagination(
+        &self,
+        user_id: &str,
+        per_page: i64,
+        from_channel_id: &str,
+    ) -> Result<ChannelMembersWithTeamData, StoreError> {
+        get_members_for_user_with_cursor_pagination(&self.pool, user_id, per_page, from_channel_id)
+            .await
     }
 
     #[tracing::instrument(skip_all, fields(team_id = %team_id, user_id = %user_id, found))]
@@ -1892,6 +1933,236 @@ async fn autocomplete_in_team_for_search_direct_messages(
     tracing::Span::current().record("found", rows.len());
 
     rows.into_iter().map(channel_from_row).collect()
+}
+
+/// One row of `channelMembersWithSchemeSelectQuery` (channel_store.go:1776) — the same shape
+/// [`ChannelMemberRow`] carries, plus the three team columns the `Teams` join adds.
+///
+/// A separate struct rather than an `Option`-tailed variant of the other because `query_as!`
+/// binds columns positionally: the two queries genuinely have different result shapes, and
+/// sharing a type would put the team columns on every member lookup in the file.
+struct ChannelMemberWithTeamRow {
+    channelid: String,
+    userid: String,
+    roles: Option<String>,
+    lastviewedat: Option<i64>,
+    msgcount: Option<i64>,
+    mentioncount: Option<i64>,
+    mentioncountroot: Option<i64>,
+    urgentmentioncount: i64,
+    msgcountroot: Option<i64>,
+    notifyprops: Option<serde_json::Value>,
+    lastupdateat: Option<i64>,
+    schemeuser: Option<bool>,
+    schemeadmin: Option<bool>,
+    schemeguest: Option<bool>,
+    teamschemedefaultguestrole: Option<String>,
+    teamschemedefaultuserrole: Option<String>,
+    teamschemedefaultadminrole: Option<String>,
+    channelschemedefaultguestrole: Option<String>,
+    channelschemedefaultuserrole: Option<String>,
+    channelschemedefaultadminrole: Option<String>,
+    autotranslationdisabled: bool,
+    teamdisplayname: String,
+    teamname: String,
+    teamupdateat: i64,
+}
+
+/// Port of `channelMemberWithTeamWithSchemeRoles.ToModel` (channel_store.go:376): the member
+/// mapping every other lookup shares, with the three team fields laid beside it.
+///
+/// **The three `COALESCE`s are load-bearing.** `Teams` is a `LEFT JOIN`, and a direct or group
+/// message has no team — so without them a DM's row would carry SQL NULLs where Go puts `""`,
+/// `""` and `0`. Measured: the first membership the admin has is a DM, and it answers with all
+/// three blank rather than absent.
+fn channel_member_with_team_from_row(
+    row: ChannelMemberWithTeamRow,
+) -> Result<ChannelMemberWithTeamData, StoreError> {
+    let (team_display_name, team_name, team_update_at) =
+        (row.teamdisplayname, row.teamname, row.teamupdateat);
+    let member = channel_member_from_row(ChannelMemberRow {
+        channelid: row.channelid,
+        userid: row.userid,
+        roles: row.roles,
+        lastviewedat: row.lastviewedat,
+        msgcount: row.msgcount,
+        mentioncount: row.mentioncount,
+        mentioncountroot: row.mentioncountroot,
+        urgentmentioncount: row.urgentmentioncount,
+        msgcountroot: row.msgcountroot,
+        notifyprops: row.notifyprops,
+        lastupdateat: row.lastupdateat,
+        schemeuser: row.schemeuser,
+        schemeadmin: row.schemeadmin,
+        schemeguest: row.schemeguest,
+        teamschemedefaultguestrole: row.teamschemedefaultguestrole,
+        teamschemedefaultuserrole: row.teamschemedefaultuserrole,
+        teamschemedefaultadminrole: row.teamschemedefaultadminrole,
+        channelschemedefaultguestrole: row.channelschemedefaultguestrole,
+        channelschemedefaultuserrole: row.channelschemedefaultuserrole,
+        channelschemedefaultadminrole: row.channelschemedefaultadminrole,
+        autotranslationdisabled: row.autotranslationdisabled,
+    })?;
+
+    Ok(ChannelMemberWithTeamData {
+        channel_member: member,
+        team_display_name,
+        team_name,
+        team_update_at,
+    })
+}
+
+/// Port of `SqlChannelStore.GetMembersForUserWithPagination` (channel_store.go:3285).
+///
+/// Every channel the user is a member of, **across every team**, ordered by channel id and cut
+/// with `LIMIT`/`OFFSET`. Three things to know:
+///
+/// - **`Channels.Type NOT IN ('S')`** — `nonMessageBackingChannelTypes` (channel_store.go:52) is
+///   spaces only, so this list is wider than the `messageChannelTypes` filter most of this file
+///   uses: a board channel (`BO`/`BP`) *is* listed here and is not listed by `GetMany`.
+/// - **`ORDER BY ChannelId ASC`**, which is what makes the cursor variant below able to walk it.
+/// - **Zero rows is an empty list**, not `ErrNotFound` — unlike the cursor variant, whose miss is
+///   how the streaming handler learns to stop.
+#[tracing::instrument(skip(pool), fields(user_id = %user_id, page, per_page, found))]
+pub async fn get_members_for_user_with_pagination(
+    pool: &PgPool,
+    user_id: &str,
+    page: i64,
+    per_page: i64,
+) -> Result<ChannelMembersWithTeamData, StoreError> {
+    let offset = page * per_page;
+
+    let rows = sqlx::query_as!(
+        ChannelMemberWithTeamRow,
+        r#"
+        SELECT
+               cm.channelid,
+               cm.userid,
+               cm.roles,
+               cm.lastviewedat,
+               cm.msgcount,
+               cm.mentioncount,
+               cm.mentioncountroot,
+               COALESCE(cm.urgentmentioncount, 0) AS "urgentmentioncount!",
+               cm.msgcountroot,
+               cm.notifyprops,
+               cm.lastupdateat,
+               cm.schemeuser,
+               cm.schemeadmin,
+               cm.schemeguest,
+               teamscheme.defaultchannelguestrole    AS teamschemedefaultguestrole,
+               teamscheme.defaultchanneluserrole     AS teamschemedefaultuserrole,
+               teamscheme.defaultchanneladminrole    AS teamschemedefaultadminrole,
+               channelscheme.defaultchannelguestrole AS channelschemedefaultguestrole,
+               channelscheme.defaultchanneluserrole  AS channelschemedefaultuserrole,
+               channelscheme.defaultchanneladminrole AS channelschemedefaultadminrole,
+               cm.autotranslationdisabled,
+               COALESCE(t.displayname, '') AS "teamdisplayname!",
+               COALESCE(t.name, '')        AS "teamname!",
+               COALESCE(t.updateat, 0)     AS "teamupdateat!"
+          FROM channelmembers cm
+          INNER JOIN channels c ON cm.channelid = c.id
+          LEFT JOIN schemes channelscheme ON c.schemeid = channelscheme.id
+          LEFT JOIN teams t ON c.teamid = t.id
+          LEFT JOIN schemes teamscheme ON t.schemeid = teamscheme.id
+         WHERE cm.userid = $1
+           AND c.type NOT IN ('S')
+         ORDER BY cm.channelid ASC
+         LIMIT $2 OFFSET $3
+        "#,
+        user_id,
+        per_page,
+        offset,
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: format!("failed to find ChannelMembers data with and userId={user_id}"),
+        source,
+    })?;
+
+    tracing::Span::current().record("found", rows.len());
+
+    rows.into_iter()
+        .map(channel_member_with_team_from_row)
+        .collect()
+}
+
+/// Port of `SqlChannelStore.GetMembersForUserWithCursorPagination` (channel_store.go:3299).
+///
+/// [`get_members_for_user_with_pagination`]'s query with `ChannelId > ?` in place of the offset —
+/// and **an empty page is `ErrNotFound`**, not an empty list. That is not a quirk to iron out:
+/// the api4 handler's streaming branch loops until it sees exactly that error, so a port
+/// returning `[]` here would spin forever.
+#[tracing::instrument(skip(pool), fields(user_id = %user_id, per_page, found))]
+pub async fn get_members_for_user_with_cursor_pagination(
+    pool: &PgPool,
+    user_id: &str,
+    per_page: i64,
+    from_channel_id: &str,
+) -> Result<ChannelMembersWithTeamData, StoreError> {
+    let rows = sqlx::query_as!(
+        ChannelMemberWithTeamRow,
+        r#"
+        SELECT
+               cm.channelid,
+               cm.userid,
+               cm.roles,
+               cm.lastviewedat,
+               cm.msgcount,
+               cm.mentioncount,
+               cm.mentioncountroot,
+               COALESCE(cm.urgentmentioncount, 0) AS "urgentmentioncount!",
+               cm.msgcountroot,
+               cm.notifyprops,
+               cm.lastupdateat,
+               cm.schemeuser,
+               cm.schemeadmin,
+               cm.schemeguest,
+               teamscheme.defaultchannelguestrole    AS teamschemedefaultguestrole,
+               teamscheme.defaultchanneluserrole     AS teamschemedefaultuserrole,
+               teamscheme.defaultchanneladminrole    AS teamschemedefaultadminrole,
+               channelscheme.defaultchannelguestrole AS channelschemedefaultguestrole,
+               channelscheme.defaultchanneluserrole  AS channelschemedefaultuserrole,
+               channelscheme.defaultchanneladminrole AS channelschemedefaultadminrole,
+               cm.autotranslationdisabled,
+               COALESCE(t.displayname, '') AS "teamdisplayname!",
+               COALESCE(t.name, '')        AS "teamname!",
+               COALESCE(t.updateat, 0)     AS "teamupdateat!"
+          FROM channelmembers cm
+          INNER JOIN channels c ON cm.channelid = c.id
+          LEFT JOIN schemes channelscheme ON c.schemeid = channelscheme.id
+          LEFT JOIN teams t ON c.teamid = t.id
+          LEFT JOIN schemes teamscheme ON t.schemeid = teamscheme.id
+         WHERE cm.userid = $1
+           AND cm.channelid > $2
+           AND c.type NOT IN ('S')
+         ORDER BY cm.channelid ASC
+         LIMIT $3
+        "#,
+        user_id,
+        from_channel_id,
+        per_page,
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: format!("failed to find ChannelMembers data with and userId={user_id}"),
+        source,
+    })?;
+
+    tracing::Span::current().record("found", rows.len());
+
+    if rows.is_empty() {
+        return Err(StoreError::NotFound {
+            entity: "ChannelMembers",
+            criteria: format!("userId={user_id}"),
+        });
+    }
+
+    rows.into_iter()
+        .map(channel_member_with_team_from_row)
+        .collect()
 }
 
 /// Port of `SqlChannelStore.getByNames` (channel_store.go:1638) as its exported non-archived

@@ -10,14 +10,15 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use mm_app::user::{UserPage, ViewUsersRestriction};
 use mm_model::permission::{
-    PERMISSION_MANAGE_SYSTEM, PERMISSION_READ_CHANNEL, PERMISSION_VIEW_MEMBERS,
-    PERMISSION_VIEW_TEAM, make_permission_error,
+    PERMISSION_EDIT_OTHER_USERS, PERMISSION_MANAGE_SYSTEM, PERMISSION_READ_CHANNEL,
+    PERMISSION_VIEW_MEMBERS, PERMISSION_VIEW_TEAM, make_permission_error,
 };
 use mm_model::user::User;
 use mm_model::utils::{AppError, PAYLOAD_PARSE_ERROR, is_valid_id, sorted_array_from_json};
 
 use crate::AppState;
 use crate::auth::AuthenticatedSession;
+use crate::channels::{parse_page, parse_per_page, query_first};
 use crate::error::ApiError;
 
 /// `model.HeaderEtagServer`.
@@ -1388,6 +1389,174 @@ async fn serve_total_users_stats(state: &AppState) -> Result<Response, ApiError>
         .into_response())
 }
 
+/// The page size the streaming branch walks with (api4/user.go:3773).
+const CHANNEL_MEMBERS_STREAM_PAGE_SIZE: i64 = 100;
+
+/// Port of `getChannelMembersForUser` (api4/user.go:3737), reached as
+/// `GET /api/v4/users/{user_id}/channel_members` — every channel the caller belongs to, across
+/// every team. The webapp asks for it once per load.
+///
+/// # Two responses behind one path, chosen by a sentinel
+///
+/// `?page=-1` selects a **newline-delimited stream** (`application/x-ndjson`, one member object
+/// per line) that the handler walks a hundred rows at a time; anything else — including no
+/// `page` at all, which parses to `0` — selects the ordinary paginated **JSON array**. Both are
+/// measured against the running server.
+///
+/// # The streaming branch stops on a 404
+///
+/// Its store call raises `ErrNotFound` for an empty page rather than returning `[]`, and the loop
+/// reads that as "done" — but **only once it has a cursor**. Go's guard is
+/// `fromChannelID != "" && err.Id == MissingChannelMemberError`, so a caller whose *first* page
+/// is empty gets the 404 itself, with `Content-Type: application/x-ndjson` already set on it. A
+/// user with no channel memberships at all is the one shape that reaches it.
+///
+/// # Sanitisation is per row and it is the caller's own that survives
+///
+/// `SanitizeForCurrentUser` blanks `LastViewedAt`, `LastUpdateAt` and the mention counts to `-1`
+/// for every member that is not the requesting session's user — the same helper the channel
+/// member list uses, applied here to rows spanning every team.
+///
+/// # One divergence, and it is not on the wire
+///
+/// Go writes each page to the socket as it reads it; this collects the whole walk and answers in
+/// one body. The bytes are identical — the tests compare them — but a caller with a very large
+/// membership sees Go's first line sooner and holds less of our memory. Recorded rather than
+/// hidden: streaming through `axum::body::Body` would reproduce it if it ever matters.
+#[tracing::instrument(skip_all, fields(user_id = %user_id, streaming, count))]
+pub async fn get_channel_members_for_user(
+    State(state): State<AppState>,
+    Path(user_id): Path<String>,
+    axum::extract::RawQuery(query): axum::extract::RawQuery,
+    session: AuthenticatedSession,
+) -> Result<Response, ApiError> {
+    is_valid_id(&user_id)
+        .then_some(())
+        .ok_or_else(|| ApiError::invalid_url_param("user_id"))?;
+
+    if !state
+        .app
+        .session_has_permission_to_user(&session.0, &user_id)
+        .await
+    {
+        return Err(ApiError::from(make_permission_error(
+            &session.0,
+            &[&PERMISSION_EDIT_OTHER_USERS],
+        )));
+    }
+
+    let page = parse_page_allowing_negative(query.as_deref());
+    let per_page = parse_per_page(query.as_deref());
+    tracing::Span::current().record("streaming", page == -1);
+
+    if page != -1 {
+        let mut members = state
+            .app
+            .get_channel_members_with_team_data_for_user_with_pagination(
+                &user_id, page, per_page, "",
+            )
+            .await?;
+        for member in &mut members {
+            member
+                .channel_member
+                .sanitize_for_current_user(&session.0.user_id);
+        }
+        tracing::Span::current().record("count", members.len());
+
+        let mut body = serde_json::to_vec(&members).map_err(|err| {
+            tracing::error!(error = %err, "failed to serialise the channel members");
+            marshal_error("getChannelMembersForUser")
+        })?;
+        body.push(b'\n');
+
+        return Ok((
+            StatusCode::OK,
+            [
+                ("Content-Type", "application/json"),
+                ("x-mmrs-served-by", "rust"),
+            ],
+            body,
+        )
+            .into_response());
+    }
+
+    let mut body: Vec<u8> = Vec::new();
+    let mut from_channel_id = String::new();
+    let mut count = 0usize;
+    loop {
+        let members = match state
+            .app
+            .get_channel_members_with_team_data_for_user_with_pagination(
+                &user_id,
+                -1,
+                CHANNEL_MEMBERS_STREAM_PAGE_SIZE,
+                &from_channel_id,
+            )
+            .await
+        {
+            Ok(members) => members,
+            Err(err) => {
+                // Go: `if fromChannelID != "" && err.Id == MissingChannelMemberError { break }`.
+                // Without a cursor the 404 is the answer, not the terminator.
+                if !from_channel_id.is_empty()
+                    && err.id == "app.channel.get_member.missing.app_error"
+                {
+                    break;
+                }
+                return Err(ApiError::from(err));
+            }
+        };
+
+        for mut member in members.iter().cloned() {
+            // Go sanitises the loop's *copy* and encodes that, leaving the slice untouched —
+            // which is unobservable here, but it is why the clone is Go's shape and not a
+            // borrow-checker concession.
+            member
+                .channel_member
+                .sanitize_for_current_user(&session.0.user_id);
+            serde_json::to_writer(&mut body, &member).map_err(|err| {
+                tracing::error!(error = %err, "failed to serialise a channel member");
+                marshal_error("getChannelMembersForUser")
+            })?;
+            body.push(b'\n');
+            count += 1;
+        }
+
+        if (members.len() as i64) < CHANNEL_MEMBERS_STREAM_PAGE_SIZE {
+            break;
+        }
+        from_channel_id = members
+            .last()
+            .map(|member| member.channel_member.channel_id.clone())
+            .unwrap_or_default();
+    }
+    tracing::Span::current().record("count", count);
+
+    Ok((
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/x-ndjson"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
+    )
+        .into_response())
+}
+
+/// `parse_page` with the `-1` sentinel let through.
+///
+/// `web.ParamsFromRequest` (params.go:222) reads `page` with `strconv.Atoi` and keeps whatever it
+/// gets, including negatives; the shared [`parse_page`] clamps those to the default because every
+/// other route treats a negative page as garbage. This one route gives `-1` a meaning, so it
+/// needs the raw value — and only `-1`, since `-2` reaches Go's offset arithmetic as a negative
+/// `OFFSET` and errors there just as it does here.
+fn parse_page_allowing_negative(query: Option<&str>) -> i64 {
+    match query_first(query, "page").and_then(|v| v.parse::<i64>().ok()) {
+        Some(val) if val >= -1 => val,
+        _ => parse_page(query),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use mm_model::user::User;
@@ -1959,4 +2128,15 @@ mod autocomplete_tests {
         assert_eq!(admin.get("authservice"), Some(&true));
         assert_eq!(admin.get("authdata"), Some(&true));
     }
+}
+
+/// `model.NewAppError(where, "api.marshal_error", nil, "", 500)`.
+fn marshal_error(where_: &'static str) -> ApiError {
+    ApiError::from(AppError::new(
+        where_,
+        "api.marshal_error",
+        None,
+        String::new(),
+        500,
+    ))
 }

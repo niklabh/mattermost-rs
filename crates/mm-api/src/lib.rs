@@ -195,6 +195,12 @@ pub fn router(state: AppState) -> Router {
         // `/users/{user_id}/posts/flagged`. Two segments deeper than `/users/{user_id}`, so it
         // shadows nothing; `partially_migrated_with_ids` keeps the exact-26-char rule the
         // handler's own `RequireUserId` would otherwise have to answer for.
+        // `BaseRoutes.User.Handle("/channel_members")` (api4/user.go:107) — one segment deeper
+        // than `/users/{user_id}`, so it shadows nothing.
+        .route(
+            "/api/v4/users/{user_id}/channel_members",
+            partially_migrated_with_ids(&state, get(users::get_channel_members_for_user)),
+        )
         .route(
             "/api/v4/users/{user_id}/posts/flagged",
             partially_migrated_with_ids(&state, get(posts::get_flagged_posts_for_user)),
