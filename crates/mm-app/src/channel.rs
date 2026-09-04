@@ -416,6 +416,44 @@ impl App {
             })
     }
 
+    /// Port of `app.App.AutocompleteChannelsForSearch` (channel.go:3434).
+    ///
+    /// The thinnest of the three autocompletes: trim the term, one store call, one error id.
+    /// **No `GetUser`** — so no guest branch, and an unknown user id is not an error here — and
+    /// **no `FilterChannelListForUserVisibility`**, which its sibling calls and which is a no-op
+    /// on this build anyway. `includeDeleted` is hardcoded `true` as it is there, so archived
+    /// channels are listed.
+    ///
+    /// The error id is the same `app.channel.search.app_error` the sibling uses, but the `where`
+    /// is this function's own name rather than the sibling's `AutocompleteChannels`.
+    #[tracing::instrument(skip(self), fields(team_id = %team_id, user_id = %user_id, found))]
+    pub async fn autocomplete_channels_for_search(
+        &self,
+        team_id: &str,
+        user_id: &str,
+        term: &str,
+    ) -> AppResult<ChannelList> {
+        let term = term.trim();
+
+        let channels = self
+            .store()
+            .channel()
+            .autocomplete_in_team_for_search(team_id, user_id, term)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "channel search autocomplete failed");
+                AppError::boxed(
+                    "AutocompleteChannelsForSearch",
+                    "app.channel.search.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })?;
+        tracing::Span::current().record("found", channels.0.len());
+        Ok(channels)
+    }
+
     /// Port of `app.App.AutocompleteChannelsForTeam` (channel.go:3400).
     ///
     /// `includeDeleted` is hardcoded to **true** there, so archived channels are in the answer;

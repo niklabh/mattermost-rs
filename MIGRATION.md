@@ -5495,3 +5495,58 @@ The first is kept — renamed to `the_autocomplete_literal_does_not_land_on_get_
 it guards is `getEmoji`'s routing rather than autocomplete's behaviour — and
 `EMOJI_SHADOWED_LITERALS` is now empty but retained, since it is the only thing between a future
 `GET /emoji/<literal>` of Go's and a 400 from a handler that thought it had an id.
+
+## `GET /teams/{team_id}/channels/search_autocomplete` — `autocompleteChannelsForTeamForSearch` (2026-09-05)
+
+Served. `crates/mm-api/src/channels.rs` (`autocomplete_channels_for_team_for_search`),
+`crates/mm-app/src/channel.rs` (`autocomplete_channels_for_search`),
+`crates/mm-store/src/channel_store.rs` (`autocomplete_in_team_for_search` and
+`autocomplete_in_team_for_search_direct_messages`); 14 parity tests in
+`crates/mm-api/tests/parity/channel_search_autocomplete.rs`. The search box's channel suggestions.
+
+**The one thing a reader would otherwise get wrong: a direct message is listed under the *other
+user's username*.** Go selects `channelSliceColumns(true, "C")` — which already contains
+`C.DisplayName` — and then appends `OtherUsers.Username AS DisplayName`. Two output columns of
+the same name, and the scan takes the last, so the `Channel` handed back carries a display name
+the `Channels` row does not have. A DM's stored display name is empty, so a port that used it
+would list a blank. Reproduced by selecting the username into that position rather than by
+relying on a duplicate-column rule.
+
+Three more, none of them shared with the `/autocomplete` sibling one literal away:
+
+- **No permission gate at all.** The sibling asks for `list_team_channels` and 403s a non-member;
+  this route has nothing, and a foreign team answers **200 with an empty list** — the
+  `ChannelMembers` join does the work. A port that shared a gate between the two would refuse
+  requests Go serves.
+- **Membership is required for every channel, public ones included**, so the switcher lists
+  channels this does not.
+- **It can return more than fifty.** Two fifty-row queries are `UNION`ed, the union is limited to
+  fifty again, and then up to fifty direct messages are *appended*. Measured: 58 rows for an empty
+  term.
+
+**Parity risk, stated plainly:** Go merges the two passes and sorts with `sort.Slice`, which is
+**unstable**. Two channels whose lower-cased display names are equal come back in an order Go
+itself does not repeat, and no port can match that. `sort_by` here is stable and keeps
+union-then-DM order for ties — *an* order Go could have produced, but not one it promises. Every
+fixture in the suite has a distinct display name so the question never arises; a caller with two
+identically-named channels is outside what this port can guarantee.
+
+Mutation run: **18 run, 16 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/channel-search-autocomplete.plan`). Four survivors on the first run, and one
+of them was a **weak mutation rather than a fixture gap**: turning the membership `JOIN` into a
+`LEFT JOIN` plus `cm.userid IS NULL` is inert, because every channel has at least its creator as
+a member and the NULL row it looks for never exists. Dropping the predicate is the mutation that
+means something. The other three were real gaps — every fixture's name and display name said the
+same words, so the `LIKE` list could be narrowed to `Name` alone, the full-text branch could be
+neutered, and the term's trim could be dropped, all unnoticed. `mmrs-parity-sadisp` is now
+displayed as `Zephyrine Quokka`, and the suite asks for a mid-word fragment (only `LIKE` finds
+it), the two words reversed (only `to_tsquery` finds it), and a padded mid-word term (only a
+trimmed `LIKE` finds it).
+
+### An observation, not yet a diagnosis
+
+Twice now — this session and the emoji-autocomplete one — the **first** full-suite run after a
+rebuild has reported a couple of parity failures and aborted early, with two immediate re-runs
+clean. The failure output was not captured either time, so there is nothing here but the pattern:
+first run after `cargo` rebuilds, a handful of parity tests, never reproducible. Capture the log
+on the first run rather than the third when it next happens.

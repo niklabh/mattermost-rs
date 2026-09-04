@@ -1593,6 +1593,55 @@ pub async fn autocomplete_channels_for_team(
     )?))
 }
 
+/// Port of `autocompleteChannelsForTeamForSearch` (api4/channel.go:1542), reached as
+/// `GET /api/v4/teams/{team_id}/channels/search_autocomplete` — the search box's channel
+/// suggestions.
+///
+/// # It has no permission gate
+///
+/// `RequireTeamId()` and then straight to the app layer — no `SessionHasPermissionToTeam`, where
+/// [`autocomplete_channels_for_team`] one route over asks for `list_team_channels`. **This route
+/// can never answer 403.** It is safe because the store joins `ChannelMembers` on the caller, so
+/// a team the caller has nothing to do with answers an empty list rather than a refusal; but the
+/// asymmetry is Go's and a port that shared a gate between the two siblings would refuse
+/// requests Go serves.
+///
+/// # It can return more than fifty channels
+///
+/// The store unions two fifty-row queries, limits the union to fifty, and then **appends** up to
+/// fifty direct messages. Measured against the running server: 58 rows for an empty term. Any
+/// client paginating on a fifty-row assumption is wrong about this route, and so is any port
+/// that adds a tidy outer limit.
+///
+/// # And what it lists is not what the switcher lists
+///
+/// Every channel here needs a `ChannelMembers` row, public ones included; group messages arrive
+/// from outside the team; direct messages arrive through a second query that replaces the
+/// display name with the other user's username. See
+/// [`mm_store::channel_store::autocomplete_in_team_for_search`].
+#[tracing::instrument(skip_all, fields(team_id = %team_id, count))]
+pub async fn autocomplete_channels_for_team_for_search(
+    State(state): State<AppState>,
+    Path(team_id): Path<String>,
+    axum::extract::RawQuery(query): axum::extract::RawQuery,
+    session: AuthenticatedSession,
+) -> Result<Response, ApiError> {
+    require_id(&team_id, "team_id")?;
+
+    let name = query_first(query.as_deref(), "name").unwrap_or_default();
+
+    let channels = state
+        .app
+        .autocomplete_channels_for_search(&team_id, &session.0.user_id, &name)
+        .await?;
+    tracing::Span::current().record("count", channels.0.len());
+
+    Ok(channel_list_response(encoded_channel_list(
+        "autocompleteChannelsForTeamForSearch",
+        &channels,
+    )?))
+}
+
 /// Port of `getPublicChannelsForTeam` (api4/channel.go:1221), reached as
 /// `GET /api/v4/teams/{team_id}/channels` — the "Browse channels" list.
 ///

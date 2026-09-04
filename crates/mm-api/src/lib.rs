@@ -433,6 +433,16 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/teams/{team_id}/channels/autocomplete",
             partially_migrated_with_ids(&state, get(channels::autocomplete_channels_for_team)),
         )
+        // `BaseRoutes.ChannelsForTeam.Handle("/search_autocomplete")` (api4/channel.go:69) — the
+        // literal beside `/autocomplete`, and a different handler with a different query and no
+        // permission gate at all.
+        .route(
+            "/api/v4/teams/{team_id}/channels/search_autocomplete",
+            partially_migrated_with_ids(
+                &state,
+                get(channels::autocomplete_channels_for_team_for_search),
+            ),
+        )
         // `BaseRoutes.ChannelsForTeam.Handle("/ids")` (api4/channel.go:66), POST-only — a third
         // static literal beside `/private` and `/deleted`, so the "no precedence puzzle here"
         // note above covers it unchanged. It was in that note's list of unregistered literals

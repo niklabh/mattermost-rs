@@ -197,6 +197,15 @@ pub trait ChannelStore {
         include_deleted: bool,
     ) -> impl std::future::Future<Output = Result<Channel, StoreError>> + Send;
 
+    /// Port of `SqlChannelStore.AutocompleteInTeamForSearch` (channel_store.go:3464), including
+    /// the direct-message pass it appends and the sort that merges the two.
+    fn autocomplete_in_team_for_search(
+        &self,
+        team_id: &str,
+        user_id: &str,
+        term: &str,
+    ) -> impl std::future::Future<Output = Result<ChannelList, StoreError>> + Send;
+
     /// Port of `SqlChannelStore.AutocompleteInTeam` (channel_store.go:3443) through the
     /// `buildAutocompleteInTeamQuery` (:3405) and `performSearch` (:3904) it is made of.
     /// `include_deleted` is not a parameter: its only caller passes `true`.
@@ -396,6 +405,16 @@ impl ChannelStore for SqlChannelStore {
         is_guest: bool,
     ) -> Result<ChannelList, StoreError> {
         autocomplete_in_team(&self.pool, team_id, user_id, term, is_guest).await
+    }
+
+    #[tracing::instrument(skip_all, fields(team_id = %team_id, user_id = %user_id, found))]
+    async fn autocomplete_in_team_for_search(
+        &self,
+        team_id: &str,
+        user_id: &str,
+        term: &str,
+    ) -> Result<ChannelList, StoreError> {
+        autocomplete_in_team_for_search(&self.pool, team_id, user_id, term).await
     }
 
     #[tracing::instrument(skip_all, fields(post_id = %post_id, found))]
@@ -1600,6 +1619,279 @@ pub async fn autocomplete_in_team(
             .map(channel_from_row)
             .collect::<Result<Vec<_>, _>>()?,
     ))
+}
+
+/// Port of `SqlChannelStore.AutocompleteInTeamForSearch` (channel_store.go:3464) — the search
+/// box's channel suggestions, and the sibling of [`autocomplete_in_team`] that shares almost
+/// nothing with it.
+///
+/// Four differences from that route, every one of them observable:
+///
+/// 1. **Membership is required for *every* channel**, public ones included, because the base
+///    query `JOIN`s `ChannelMembers`. The switcher lists public channels you have never joined;
+///    this lists only what is already in your sidebar.
+/// 2. **Group messages come in from outside the team.** The team predicate is
+///    `TeamId = ? OR (TeamId = '' AND Type = 'G')`, so a GM — which belongs to no team — answers
+///    under every team's path. A DM does not reach the base query at all; it arrives through the
+///    second pass below.
+/// 3. **`LIKE` and full text are a `UNION`, not an `OR`.** Go builds the base query twice, adds
+///    one clause to each, and unions the two with an outer `LIMIT 50` — with the comment that
+///    the `OR` form produced a much worse plan. Reproduced literally: `UNION` also de-duplicates,
+///    which an `OR` would not have needed to.
+/// 4. **Both `LIMIT 50`s are inner, and there is a third pass.** Each side of the union is
+///    limited, the union is limited again, and then up to 50 direct messages are **appended** —
+///    so this route can answer **more than 50 channels**. Measured: 58 for an empty term.
+///
+/// See [`autocomplete_in_team_for_search_direct_messages`] for the display-name substitution,
+/// which is the strangest thing here.
+///
+/// The `$5` flag is the same "search clause present or absent" bit [`autocomplete_in_team`] uses,
+/// and for the same reason: an empty or all-`*` term makes `buildLIKEClauseX` return nil, and Go
+/// then runs the **base query alone** — no union, no full text. With `$5` false the second
+/// branch below contributes nothing and the `UNION` collapses to that base query.
+#[tracing::instrument(skip(pool), fields(team_id = %team_id, user_id = %user_id, found))]
+pub async fn autocomplete_in_team_for_search(
+    pool: &PgPool,
+    team_id: &str,
+    user_id: &str,
+    term: &str,
+) -> Result<ChannelList, StoreError> {
+    let sanitized = sanitize_search_term(term);
+    let has_search = !sanitized.is_empty();
+    let like_term = if has_search {
+        wildcard_search_term(&sanitized)
+    } else {
+        String::new()
+    };
+    let fulltext_term = build_fulltext_term(term);
+    let text_config = default_text_search_config(pool).await?;
+
+    let rows = sqlx::query_as!(
+        ChannelRow,
+        r#"
+        (SELECT
+               c.id AS "id!",
+               c.createat,
+               c.updateat,
+               c.deleteat,
+               c.teamid,
+               c.type::text AS "channel_type!",
+               c.displayname,
+               c.name,
+               c.header,
+               c.purpose,
+               c.lastpostat,
+               c.totalmsgcount,
+               c.extraupdateat,
+               c.creatorid,
+               c.schemeid,
+               c.groupconstrained,
+               c.autotranslation AS "autotranslation!",
+               c.shared,
+               c.totalmsgcountroot,
+               c.lastrootpostat,
+               c.bannerinfo,
+               c.defaultcategoryname AS "defaultcategoryname!",
+               c.discoverable AS "discoverable!",
+               EXISTS (
+                   SELECT 1 FROM accesscontrolpolicies acp
+                    WHERE acp.id = c.id AND acp.type = 'channel'
+               ) AS "policy_enforced!",
+               COALESCE((
+                   SELECT acp.active FROM accesscontrolpolicies acp
+                    WHERE acp.id = c.id AND acp.type = 'channel' AND acp.active = TRUE
+                    LIMIT 1
+               ), false) AS "policy_is_active!"
+           FROM channels c
+           JOIN channelmembers cm ON cm.channelid = c.id
+          WHERE (c.teamid = $1 OR (c.teamid = '' AND c.type = 'G'))
+            AND cm.userid = $2
+            AND c.type IN ('O', 'P', 'D', 'G')
+            AND (NOT $3
+                 OR LOWER(c.name) LIKE LOWER($4) ESCAPE '*'
+                 OR LOWER(c.displayname) LIKE LOWER($4) ESCAPE '*'
+                 OR LOWER(c.purpose) LIKE LOWER($4) ESCAPE '*')
+          LIMIT 50)
+        UNION
+        (SELECT
+               c.id AS "id!",
+               c.createat,
+               c.updateat,
+               c.deleteat,
+               c.teamid,
+               c.type::text AS "channel_type!",
+               c.displayname,
+               c.name,
+               c.header,
+               c.purpose,
+               c.lastpostat,
+               c.totalmsgcount,
+               c.extraupdateat,
+               c.creatorid,
+               c.schemeid,
+               c.groupconstrained,
+               c.autotranslation AS "autotranslation!",
+               c.shared,
+               c.totalmsgcountroot,
+               c.lastrootpostat,
+               c.bannerinfo,
+               c.defaultcategoryname AS "defaultcategoryname!",
+               c.discoverable AS "discoverable!",
+               EXISTS (
+                   SELECT 1 FROM accesscontrolpolicies acp
+                    WHERE acp.id = c.id AND acp.type = 'channel'
+               ) AS "policy_enforced!",
+               COALESCE((
+                   SELECT acp.active FROM accesscontrolpolicies acp
+                    WHERE acp.id = c.id AND acp.type = 'channel' AND acp.active = TRUE
+                    LIMIT 1
+               ), false) AS "policy_is_active!"
+           FROM channels c
+           JOIN channelmembers cm ON cm.channelid = c.id
+          WHERE (c.teamid = $1 OR (c.teamid = '' AND c.type = 'G'))
+            AND cm.userid = $2
+            AND c.type IN ('O', 'P', 'D', 'G')
+            AND $3
+            AND to_tsvector($6::text::regconfig,
+                            c.name || ' ' || c.displayname || ' ' || c.purpose)
+                @@ to_tsquery($6::text::regconfig, $5)
+          LIMIT 50)
+        LIMIT 50
+        "#,
+        team_id,
+        user_id,
+        has_search,
+        like_term,
+        fulltext_term,
+        text_config,
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: format!("failed to find Channels with term='{term}'"),
+        source,
+    })?;
+
+    let mut channels = rows
+        .into_iter()
+        .map(channel_from_row)
+        .collect::<Result<Vec<_>, _>>()?;
+
+    channels.extend(
+        autocomplete_in_team_for_search_direct_messages(pool, user_id, has_search, &like_term)
+            .await?,
+    );
+
+    // `sort.Slice(..., ToLower(a.DisplayName) < ToLower(b.DisplayName))` (channel_store.go:3543).
+    //
+    // **Go's sort is unstable and this one is not.** `sort.Slice` makes no promise about equal
+    // keys, so two channels whose lower-cased display names are equal come back in an order Go
+    // itself does not repeat — no port can match that, and a fixture with such a tie cannot be
+    // byte-compared. `sort_by` keeps the union-then-direct-messages order for ties, which is at
+    // least *an* order Go could have produced.
+    //
+    // `go_to_lower`, not `str::to_lowercase`: Go applies Unicode's simple mapping and Rust the
+    // full one, and the two disagree on a handful of characters — which here would move a row.
+    channels.sort_by(|a, b| {
+        mm_model::utils::go_to_lower(&a.display_name)
+            .cmp(&mm_model::utils::go_to_lower(&b.display_name))
+    });
+
+    tracing::Span::current().record("found", channels.len());
+    Ok(ChannelList(channels))
+}
+
+/// Port of `SqlChannelStore.autocompleteInTeamForSearchDirectMessages` (channel_store.go:3550).
+///
+/// # It returns the *other user's username* in the display-name field
+///
+/// Go selects `channelSliceColumns(true, "C")` — which already contains `C.DisplayName` — and
+/// then appends `OtherUsers.Username AS DisplayName`. Two output columns of the same name, and
+/// `sqlx`'s scan takes the **last**, so the `Channel` handed back carries a display name the
+/// `Channels` row does not have. That is deliberate: a direct message's stored display name is
+/// empty, and the search box needs something to show. Reproduced by selecting the username into
+/// that position rather than by relying on a duplicate-column rule.
+///
+/// # The other three things about it
+///
+/// - **No team predicate and no `DeleteAt` filter.** A direct message belongs to no team and is
+///   listed whatever its state.
+/// - **The search term is matched against the other user's `Username` and `Nickname`**, never
+///   against the channel. So typing a colleague's name finds the DM, and typing the channel's
+///   own name — a pair of user ids joined by `__` — finds nothing.
+/// - **A self-DM is invisible.** The subquery requires `IU.Id <> userID`, and a channel whose
+///   only member is the caller has no other user to join against, so the `INNER JOIN` drops it.
+#[tracing::instrument(skip(pool), fields(user_id = %user_id, found))]
+async fn autocomplete_in_team_for_search_direct_messages(
+    pool: &PgPool,
+    user_id: &str,
+    has_search: bool,
+    like_term: &str,
+) -> Result<Vec<Channel>, StoreError> {
+    let rows = sqlx::query_as!(
+        ChannelRow,
+        r#"
+        SELECT
+               c.id AS "id!",
+               c.createat,
+               c.updateat,
+               c.deleteat,
+               c.teamid,
+               c.type::text AS "channel_type!",
+               otherusers.username AS "displayname?",
+               c.name,
+               c.header,
+               c.purpose,
+               c.lastpostat,
+               c.totalmsgcount,
+               c.extraupdateat,
+               c.creatorid,
+               c.schemeid,
+               c.groupconstrained,
+               c.autotranslation AS "autotranslation!",
+               c.shared,
+               c.totalmsgcountroot,
+               c.lastrootpostat,
+               c.bannerinfo,
+               c.defaultcategoryname AS "defaultcategoryname!",
+               c.discoverable AS "discoverable!",
+               EXISTS (
+                   SELECT 1 FROM accesscontrolpolicies acp
+                    WHERE acp.id = c.id AND acp.type = 'channel'
+               ) AS "policy_enforced!",
+               COALESCE((
+                   SELECT acp.active FROM accesscontrolpolicies acp
+                    WHERE acp.id = c.id AND acp.type = 'channel' AND acp.active = TRUE
+                    LIMIT 1
+               ), false) AS "policy_is_active!"
+          FROM channels c
+          JOIN channelmembers cm ON cm.channelid = c.id
+         INNER JOIN (SELECT icm.channelid, iu.username
+                       FROM users iu
+                       JOIN channelmembers icm ON icm.userid = iu.id
+                      WHERE iu.id <> $1
+                        AND (NOT $2
+                             OR LOWER(iu.username) LIKE LOWER($3) ESCAPE '*'
+                             OR LOWER(iu.nickname) LIKE LOWER($3) ESCAPE '*')
+                    ) AS otherusers ON otherusers.channelid = c.id
+         WHERE c.type = 'D'
+           AND cm.userid = $1
+         LIMIT 50
+        "#,
+        user_id,
+        has_search,
+        like_term,
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: "failed to find direct-message Channels".to_owned(),
+        source,
+    })?;
+
+    tracing::Span::current().record("found", rows.len());
+
+    rows.into_iter().map(channel_from_row).collect()
 }
 
 /// Port of `SqlChannelStore.getByNames` (channel_store.go:1638) as its exported non-archived
