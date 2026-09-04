@@ -5,7 +5,13 @@
 #
 # The plan is one mutation per line, **tab**-separated:
 #
-#   name<TAB>file<TAB>from<TAB>to<TAB>suite
+#   name<TAB>file<TAB>from<TAB>to<TAB>suite[<TAB>filter]
+#
+# The optional sixth field is the `MUTATE_FILTER` for that one line, overriding the environment.
+# It exists because a plan covering several routes has no single filter that fits: the `api`
+# suites are named after their routes, libtest takes one filter, and leaving it unset lets an
+# unrelated suite decide every verdict — the failure mode `mutate.sh` warns about. Before this
+# field, a four-route plan had to be split into four files, each with its own control.
 #
 # Tab rather than a printable separator because the patterns are Rust and SQL, which contain `|`,
 # `&`, `%` and `,` freely but never a literal tab — rustfmt emits spaces. `\n` in `from`/`to`
@@ -33,12 +39,13 @@ RUN=0
 CAUGHT=0
 SURVIVED=0
 FAULTS=0
-while IFS=$'\t' read -r NAME FILE FROM TO SUITE; do
+while IFS=$'\t' read -r NAME FILE FROM TO SUITE FILTER; do
   case "$NAME" in ''|'#'*) continue ;; esac
   RUN=$((RUN + 1))
   FROM=$(printf '%b' "$FROM")
   TO=$(printf '%b' "$TO")
-  OUT=$("$ROOT/scripts/mutate.sh" "$NAME" "$FILE" "$FROM" "$TO" "${SUITE:-unit}")
+  OUT=$(MUTATE_FILTER="${FILTER:-$MUTATE_FILTER}" \
+    "$ROOT/scripts/mutate.sh" "$NAME" "$FILE" "$FROM" "$TO" "${SUITE:-unit}")
   echo "$OUT"
   case "$OUT" in
     *SURVIVED*)       SURVIVED=$((SURVIVED + 1)) ;;
