@@ -85,10 +85,24 @@ fn team_ids(body: &[u8]) -> Vec<String> {
         .collect()
 }
 
-/// The `me` alias and the explicit id answer with the same bytes, and the body is
+/// The `me` alias and the explicit id answer with the same **teams**, and the body is
 /// `json.Marshal` + `w.Write`: no trailing newline ([D-086]).
+///
+/// # Why the two reads are compared as a set and not byte for byte
+///
+/// `get_teams_by_user_id` carries **no `ORDER BY`** — deliberately, because Go's does not either
+/// and its callers do not sort. Row order is therefore whatever Postgres returns, and two
+/// identical queries may legitimately disagree about it. Comparing the two reads byte for byte
+/// asserts an ordering neither server promises: it held only while the fixture user belonged to
+/// few teams, and once six leaked fixture teams had accumulated it failed on every run, in
+/// isolation, with the same six ids in two different orders. The claim this test actually owes
+/// is that `me` resolves to the session's id — which is about *which* teams come back, not the
+/// order — so it is asserted over sorted ids.
+///
+/// The Go-against-us comparison below stays byte for byte: `fetch_both_stable` retries until the
+/// two servers agree, so it is not exposed to the same instability.
 #[tokio::test]
-async fn me_and_the_explicit_id_are_byte_identical() {
+async fn me_and_the_explicit_id_answer_the_same_teams() {
     if !stack_enabled() {
         eprintln!("skipping: set MM_PARITY_STACK=1 with the stack running");
         return;
@@ -98,17 +112,37 @@ async fn me_and_the_explicit_id_are_byte_identical() {
     let client = client();
     let token = go_minted_token(&client).await;
 
-    let (go_me, rs_me) = fetch_both_stable(&client, &token, "/api/v4/users/me/teams").await;
     let explicit = format!("/api/v4/users/{}/teams", logged_in_user_id());
-    let (_, rs_explicit) = fetch_both_stable(&client, &token, &explicit).await;
+
+    // Re-read the pair until the two agree, the same tactic `fetch_both_stable` uses one level
+    // down. Thirteen suites in this binary create teams with this very token, so a team can be
+    // born *between* the two reads and belong to the second alone — a difference that says
+    // nothing about how `me` resolves. Retrying converges as soon as no suite is mid-setup; the
+    // happy path takes the first attempt.
+    let mut attempt = 0;
+    let (go_me, rs_me, me_ids, explicit_ids) = loop {
+        attempt += 1;
+        let (go_me, rs_me) = fetch_both_stable(&client, &token, "/api/v4/users/me/teams").await;
+        let (_, rs_explicit) = fetch_both_stable(&client, &token, &explicit).await;
+
+        let (mut a, mut b) = (team_ids(&rs_me), team_ids(&rs_explicit));
+        a.sort();
+        b.sort();
+        if a == b || attempt == 12 {
+            break (go_me, rs_me, a, b);
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(80 * attempt)).await;
+    };
 
     assert_eq!(
         String::from_utf8_lossy(&rs_me),
         String::from_utf8_lossy(&go_me),
         "the two servers must agree byte for byte"
     );
+    // Both were sorted inside the loop, because `get_teams_by_user_id` carries no `ORDER BY`
+    // — see the note above.
     assert_eq!(
-        rs_me, rs_explicit,
+        me_ids, explicit_ids,
         "`me` resolves to the session's id before anything else looks at it"
     );
 
