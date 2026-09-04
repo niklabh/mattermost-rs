@@ -5412,3 +5412,48 @@ Mutation run: **12 run, 10 caught, 2 controls survived, 0 harness faults**
 (`scripts/mutations/channel-by-team-name.plan`). Two of those mutations land in the shared tail
 and are caught by the older `channel_by_name` suite, which is why the plan filters on both module
 names — narrowing to one would let the other decide the verdict.
+
+## `GET /teams/{team_id}/channels/autocomplete` — `autocompleteChannelsForTeam` (2026-09-05)
+
+Served. `crates/mm-api/src/channels.rs` (`autocomplete_channels_for_team`),
+`crates/mm-app/src/channel.rs` (`autocomplete_channels_for_team`),
+`crates/mm-store/src/channel_store.rs` (`autocomplete_in_team` plus the three term helpers);
+13 parity tests in `crates/mm-api/tests/parity/channel_autocomplete.rs` and 3 unit tests. The
+Ctrl+K quick switcher, so it fires once per keystroke — the busiest channel read in the app.
+
+**The one thing a reader would otherwise get wrong: `?name=*` is not a wildcard.**
+`sanitizeSearchTerm` strips the escape character `*` *before* escaping `%` and `_`, so a term of
+`*` sanitises to the empty string — and an empty sanitised term makes `searchClause` return nil,
+which Go **omits from the query** rather than adding as an always-false predicate. `?name=*` and
+`?name=` return the same 50 channels. Two more: `includeDeleted` is hardcoded `true` in the app
+layer, so archived channels are listed; and `FillInChannelsProps` is deliberately *not* called
+here, alone among the channel lists, with Go's own comment saying why.
+
+The search clause is `LIKE … OR to_tsquery(…)` and **both halves are load-bearing**: `?name=town
+square` matches `town-square` only through the full-text half (no column holds the string with a
+space in it), and `?name=copen` matches `mmrs-parity-acopen` only through the LIKE half
+(`to_tsquery` matches lexeme *prefixes*, and `copen` starts no lexeme). Go interpolates
+`default_text_search_config` into the SQL text; this passes it as a parameter cast to `regconfig`,
+which keeps the statement a single compile-checked literal.
+
+Mutation run: **20 run, 18 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/channel-autocomplete.plan`). Both survivors of the first run were terms the
+*other* half of the clause could also match — the fix was a mid-word term, not a weaker assertion.
+
+### Three repairs the full-suite run forced, all cross-suite
+
+- **A fixture tag is a shared namespace.** `create_plain_user(.., "autoc")` builds the username
+  `mmrsplainautoc`, which is exactly the prefix `parity/users_autocomplete.rs` searches for — so
+  this suite put an extra user in the middle of that one's corpus and failed three of its tests
+  while passing in isolation. Renamed to `chanac`.
+- `team_channel_lists::the_sibling_literals_are_still_forwarded_to_go` asserted `/autocomplete`
+  was forwarded. It no longer is; `/search_autocomplete` still is, and is a different handler.
+- **[D-160], fourth instance, and the previous fix was not enough.**
+  `channel_members_list::pages_split_cover_and_run_out_identically` was changed last session to
+  compare each page as a *set of rows* instead of bytes. It failed again, and the diff showed the
+  two servers had selected **genuinely different members** — not the same ones reordered. A page
+  of an `ORDER BY`-less query is a window onto a scan Postgres does not promise to repeat between
+  executions, so no per-page comparison across the two servers can hold. The test now asserts
+  only what both servers do promise: that two pages of two cover the whole membership, per server,
+  and that the two coverings agree — retrying when they do not. The byte-for-byte wire check lives
+  on the unpaged read, where there is no window to disagree about.

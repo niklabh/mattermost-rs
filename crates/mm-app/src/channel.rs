@@ -416,6 +416,52 @@ impl App {
             })
     }
 
+    /// Port of `app.App.AutocompleteChannelsForTeam` (channel.go:3400).
+    ///
+    /// `includeDeleted` is hardcoded to **true** there, so archived channels are in the answer;
+    /// the term is trimmed of surrounding whitespace before it reaches the store.
+    ///
+    /// The user is fetched for one bit — `IsGuest()` — and its own error is returned unwrapped,
+    /// so an unknown user id answers `GetUser`'s 404 rather than a search error.
+    ///
+    /// **`FilterChannelListForUserVisibility` is not ported.** It returns its input untouched
+    /// unless `FeatureFlags.DiscoverableChannels` is on
+    /// (app/channel_discoverable_visibility.go:182), and that flag is false at the pinned SHA —
+    /// the same gate [D-153] records for `serveDiscoverableNonMember`. The store's
+    /// `Discoverable = true` disjunct is still ported, because it is a column predicate rather
+    /// than a feature-flagged code path.
+    #[tracing::instrument(skip(self), fields(team_id = %team_id, user_id = %user_id, found))]
+    pub async fn autocomplete_channels_for_team(
+        &self,
+        team_id: &str,
+        user_id: &str,
+        term: &str,
+    ) -> AppResult<ChannelList> {
+        // `strings.TrimSpace` — Go trims Unicode whitespace, which is `str::trim`.
+        let term = term.trim();
+
+        let user = self.get_user(user_id).await?;
+
+        let channels = self
+            .store()
+            .channel()
+            .autocomplete_in_team(team_id, user_id, term, user.is_guest())
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "channel autocomplete failed");
+                // Go's `where` is `AutocompleteChannels`, not the function's own name.
+                AppError::boxed(
+                    "AutocompleteChannels",
+                    "app.channel.search.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })?;
+        tracing::Span::current().record("found", channels.0.len());
+        Ok(channels)
+    }
+
     /// Port of `app.App.GetChannelByNameForTeamName` (channel.go:2358).
     ///
     /// [`Self::get_channel_by_name`] with the team resolved by **name** first, and the same two

@@ -197,6 +197,17 @@ pub trait ChannelStore {
         include_deleted: bool,
     ) -> impl std::future::Future<Output = Result<Channel, StoreError>> + Send;
 
+    /// Port of `SqlChannelStore.AutocompleteInTeam` (channel_store.go:3443) through the
+    /// `buildAutocompleteInTeamQuery` (:3405) and `performSearch` (:3904) it is made of.
+    /// `include_deleted` is not a parameter: its only caller passes `true`.
+    fn autocomplete_in_team(
+        &self,
+        team_id: &str,
+        user_id: &str,
+        term: &str,
+        is_guest: bool,
+    ) -> impl std::future::Future<Output = Result<ChannelList, StoreError>> + Send;
+
     /// Port of `SqlChannelStore.GetMany` (channel_store.go:1043): [`ChannelStore::get`]'s
     /// query with an id **list**, and the same `ErrNotFound` when nothing matches.
     fn get_many(
@@ -374,6 +385,17 @@ impl ChannelStore for SqlChannelStore {
     #[tracing::instrument(skip_all, fields(asked = ids.len(), found))]
     async fn get_many(&self, ids: &[String]) -> Result<Vec<Channel>, StoreError> {
         get_many(&self.pool, ids).await
+    }
+
+    #[tracing::instrument(skip_all, fields(team_id = %team_id, user_id = %user_id, is_guest, found))]
+    async fn autocomplete_in_team(
+        &self,
+        team_id: &str,
+        user_id: &str,
+        term: &str,
+        is_guest: bool,
+    ) -> Result<ChannelList, StoreError> {
+        autocomplete_in_team(&self.pool, team_id, user_id, term, is_guest).await
     }
 
     #[tracing::instrument(skip_all, fields(post_id = %post_id, found))]
@@ -1366,6 +1388,218 @@ pub async fn get_many(pool: &PgPool, ids: &[String]) -> Result<Vec<Channel>, Sto
     }
 
     rows.into_iter().map(channel_from_row).collect()
+}
+
+/// The characters `buildFulltextClause` (channel_store.go:3878) turns into spaces before
+/// building a `tsquery`. Copied verbatim, including the order, because it is a membership test.
+const SPACE_FULLTEXT_SEARCH_CHARS: &str = "<>+-()~:*\"!@&";
+
+/// Postgres' `default_text_search_config`, which Go reads once at startup with
+/// `SHOW default_text_search_config` (store.go:409) and then **interpolates into the SQL text**.
+///
+/// Passed as a `regconfig` parameter here instead of pasted into the statement: same operator,
+/// same dictionary, and it keeps the query a single compile-checked literal. The value is read
+/// from the same database at connect time, so a deployment that changes the setting changes both
+/// servers together.
+async fn default_text_search_config(pool: &PgPool) -> Result<String, StoreError> {
+    let row: (String,) = sqlx::query_as("SHOW default_text_search_config")
+        .fetch_one(pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to read default_text_search_config".to_owned(),
+            source,
+        })?;
+    Ok(row.0)
+}
+
+/// Port of `sanitizeSearchTerm` (sqlstore/utils.go:62).
+///
+/// **Order matters and is Go's**: every occurrence of the escape character is *removed* first,
+/// and only then are `%` and `_` escaped with it. So a term of `*` alone sanitises to the empty
+/// string — which is what makes `?name=*` a request with **no search clause at all** rather than
+/// a match-everything wildcard. Measured against the running server: it returns the same 50
+/// channels as `?name=`.
+fn sanitize_search_term(term: &str) -> String {
+    let mut out = term.replace('*', "");
+    for c in ['%', '_'] {
+        out = out.replace(c, &format!("*{c}"));
+    }
+    out
+}
+
+/// Port of `wildcardSearchTerm` (team_store.go:88): `%term%`, lower-cased.
+///
+/// `go_to_lower` rather than `str::to_lowercase` — Go applies Unicode's *simple* mapping and
+/// Rust's applies the full one, and they disagree on two characters. The SQL lowers both sides
+/// again, so this only matters for the handful of runes where the two mappings differ.
+fn wildcard_search_term(term: &str) -> String {
+    mm_model::utils::go_to_lower(&format!("%{term}%"))
+}
+
+/// Port of `buildFulltextClause`'s term preparation (channel_store.go:3879).
+///
+/// Three steps, in Go's order: map [`SPACE_FULLTEXT_SEARCH_CHARS`] to spaces, drop every `|`,
+/// then split on whitespace and rejoin with ` & `, suffixing each part with `:*` for prefix
+/// matching. `strings.Fields` splits on Unicode whitespace and collapses runs, which is
+/// `split_whitespace`.
+///
+/// An all-punctuation term reduces to the empty string. `to_tsquery(cfg, '')` is a **notice**,
+/// not an error — checked against Postgres — so the clause stays in the query and simply matches
+/// nothing.
+fn build_fulltext_term(term: &str) -> String {
+    let mapped: String = term
+        .chars()
+        .map(|c| {
+            if SPACE_FULLTEXT_SEARCH_CHARS.contains(c) {
+                ' '
+            } else {
+                c
+            }
+        })
+        .collect();
+    mapped
+        .replace('|', "")
+        .split_whitespace()
+        .map(|part| format!("{part}:*"))
+        .collect::<Vec<_>>()
+        .join(" & ")
+}
+
+/// Port of `SqlChannelStore.AutocompleteInTeam` (channel_store.go:3443) — the Ctrl+K switcher.
+///
+/// # The search clause is present or absent, never empty
+///
+/// `searchClause` (channel_store.go:3919) returns **nil** when `buildLIKEClauseX` does, and that
+/// happens exactly when [`sanitize_search_term`] yields the empty string — an empty term, or one
+/// made only of `*`. A nil clause is not added to the query at all, so those requests return the
+/// whole (limited, ordered) list rather than nothing. `$4` below is that presence bit; when it is
+/// false the LIKE and the `tsquery` are both short-circuited away, matching Go's *omission* of
+/// the clause rather than approximating it with an always-true predicate.
+///
+/// The full-text half is not decoration. `?name=town%20square` matches `town-square` on this
+/// deployment through `to_tsquery`, and through nothing else: no single column contains the
+/// string "town square", so every `LIKE` fails and only the concatenated `tsvector` matches.
+///
+/// # `includeDeleted` is always true, so archived channels are in the answer
+///
+/// `App.AutocompleteChannelsForTeam` hardcodes it (channel.go:3401), and the `DeleteAt = 0`
+/// predicate is therefore never added. The switcher lists archived channels; that is Go's.
+///
+/// # Visibility
+///
+/// A guest sees only channels they are a member of. Everyone else sees every non-private channel,
+/// plus the private ones they are a member of, plus private channels flagged `Discoverable`.
+/// Go writes the non-guest arm as three disjuncts with redundant `Type = 'P'` guards on the last
+/// two; they are dropped here because the first disjunct already covers every non-private row,
+/// and keeping them would only add predicates no input can distinguish.
+///
+/// # Order is wire format
+///
+/// `CASE WHEN LOWER(DisplayName) LIKE … THEN 0 ELSE 1 END, DisplayName` — display-name matches
+/// first, then alphabetical within each group, by the **database's** collation (both servers ask
+/// the same Postgres, so they agree by construction). With no search term the `CASE` is dropped
+/// in Go and short-circuits to 1 here, which is the same single-group ordering.
+#[tracing::instrument(skip(pool), fields(team_id = %team_id, user_id = %user_id, is_guest, found))]
+pub async fn autocomplete_in_team(
+    pool: &PgPool,
+    team_id: &str,
+    user_id: &str,
+    term: &str,
+    is_guest: bool,
+) -> Result<ChannelList, StoreError> {
+    let sanitized = sanitize_search_term(term);
+    let has_search = !sanitized.is_empty();
+    let like_term = if has_search {
+        wildcard_search_term(&sanitized)
+    } else {
+        String::new()
+    };
+    let fulltext_term = build_fulltext_term(term);
+    let text_config = default_text_search_config(pool).await?;
+
+    let rows = sqlx::query_as!(
+        ChannelRow,
+        r#"
+        SELECT c.id,
+               c.createat,
+               c.updateat,
+               c.deleteat,
+               c.teamid,
+               c.type::text AS "channel_type!",
+               c.displayname,
+               c.name,
+               c.header,
+               c.purpose,
+               c.lastpostat,
+               c.totalmsgcount,
+               c.extraupdateat,
+               c.creatorid,
+               c.schemeid,
+               c.groupconstrained,
+               c.autotranslation,
+               c.shared,
+               c.totalmsgcountroot,
+               c.lastrootpostat,
+               c.bannerinfo,
+               c.defaultcategoryname,
+               c.discoverable,
+               EXISTS (
+                   SELECT 1 FROM accesscontrolpolicies acp
+                    WHERE acp.id = c.id AND acp.type = 'channel'
+               ) AS "policy_enforced!",
+               COALESCE((
+                   SELECT acp.active FROM accesscontrolpolicies acp
+                    WHERE acp.id = c.id AND acp.type = 'channel' AND acp.active = TRUE
+                    LIMIT 1
+               ), false) AS "policy_is_active!"
+          FROM channels c
+         WHERE c.teamid = $1
+           AND c.type IN ('O', 'P', 'D', 'G')
+           AND (CASE
+                    WHEN $3 THEN c.id IN (SELECT cm.channelid
+                                            FROM channelmembers cm
+                                           WHERE cm.userid = $2)
+                    ELSE c.type <> 'P'
+                         OR c.id IN (SELECT cm.channelid
+                                       FROM channelmembers cm
+                                      WHERE cm.userid = $2)
+                         OR c.discoverable = TRUE
+                END)
+           AND (NOT $4
+                OR LOWER(c.name) LIKE LOWER($5) ESCAPE '*'
+                OR LOWER(c.displayname) LIKE LOWER($5) ESCAPE '*'
+                OR LOWER(c.purpose) LIKE LOWER($5) ESCAPE '*'
+                OR to_tsvector($7::text::regconfig, c.name || ' ' || c.displayname || ' ' || c.purpose)
+                   @@ to_tsquery($7::text::regconfig, $6))
+         ORDER BY CASE
+                      WHEN $4 AND LOWER(c.displayname) LIKE LOWER($5) ESCAPE '*' THEN 0
+                      ELSE 1
+                  END,
+                  c.displayname
+         LIMIT 50
+        "#,
+        team_id,
+        user_id,
+        is_guest,
+        has_search,
+        like_term,
+        fulltext_term,
+        text_config,
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: format!("failed to find Channels with term='{term}'"),
+        source,
+    })?;
+
+    tracing::Span::current().record("found", rows.len());
+
+    Ok(ChannelList(
+        rows.into_iter()
+            .map(channel_from_row)
+            .collect::<Result<Vec<_>, _>>()?,
+    ))
 }
 
 /// Port of `SqlChannelStore.getByNames` (channel_store.go:1638) as its exported non-archived
@@ -3011,5 +3245,54 @@ mod tests {
             err.to_string(),
             "ChannelMember not found: channelId=abc, userId=def"
         );
+    }
+
+    /// `sanitizeSearchTerm` removes the escape character **before** escaping `%` and `_`, so a
+    /// term made only of `*` sanitises to nothing — and a nothing term means the search clause is
+    /// omitted entirely rather than matching nothing. That is the difference between `?name=*`
+    /// returning every channel (it does, measured) and returning none.
+    #[test]
+    fn sanitize_removes_stars_then_escapes_wildcards() {
+        assert_eq!(sanitize_search_term(""), "");
+        assert_eq!(sanitize_search_term("*"), "");
+        assert_eq!(sanitize_search_term("***"), "");
+        assert_eq!(sanitize_search_term("town"), "town");
+        assert_eq!(sanitize_search_term("%"), "*%");
+        assert_eq!(sanitize_search_term("_"), "*_");
+        assert_eq!(sanitize_search_term("a%b_c"), "a*%b*_c");
+        // The star is stripped first, so it never becomes an escape for the `%` beside it.
+        assert_eq!(sanitize_search_term("*%"), "*%");
+        // A space survives, so `?name=%20` *does* carry a search clause.
+        assert_eq!(sanitize_search_term(" "), " ");
+    }
+
+    #[test]
+    fn the_like_term_is_wrapped_and_lowered() {
+        assert_eq!(wildcard_search_term("Town"), "%town%");
+        assert_eq!(wildcard_search_term(""), "%%");
+        assert_eq!(wildcard_search_term("*%"), "%*%%");
+    }
+
+    /// `buildFulltextClause`'s term: punctuation to spaces, pipes dropped, each field suffixed
+    /// with `:*` and joined by ` & `.
+    #[test]
+    fn the_fulltext_term_is_prefix_matched_and_anded() {
+        assert_eq!(build_fulltext_term("town"), "town:*");
+        assert_eq!(build_fulltext_term("town square"), "town:* & square:*");
+        // Runs of whitespace collapse, like `strings.Fields`.
+        assert_eq!(
+            build_fulltext_term("  town   square  "),
+            "town:* & square:*"
+        );
+        // Every character in the map becomes a separator, so a hyphenated name is two terms.
+        assert_eq!(build_fulltext_term("town-square"), "town:* & square:*");
+        assert_eq!(build_fulltext_term("a<b>c"), "a:* & b:* & c:*");
+        // Pipes are deleted rather than spaced, so they join their neighbours.
+        assert_eq!(build_fulltext_term("a|b"), "ab:*");
+        // All-punctuation reduces to nothing; `to_tsquery(cfg, '')` is a notice, not an error.
+        assert_eq!(build_fulltext_term("*&@"), "");
+        assert_eq!(build_fulltext_term(""), "");
+        // `%` and `_` are *not* in the map — they reach the tsquery as-is.
+        assert_eq!(build_fulltext_term("%"), "%:*");
     }
 }

@@ -1532,6 +1532,67 @@ fn channel_list_response(body: Vec<u8>) -> Response {
         .into_response()
 }
 
+/// Port of `autocompleteChannelsForTeam` (api4/channel.go:1516), reached as
+/// `GET /api/v4/teams/{team_id}/channels/autocomplete` — the Ctrl+K quick switcher, which fires
+/// once per keystroke.
+///
+/// # Order of operations
+///
+/// 1. `RequireTeamId()`.
+/// 2. **`list_team_channels` on the team**, the same gate as [`get_public_channels_for_team`]
+///    and reported the same way.
+/// 3. `?name` — read **after** the gate, and never validated. Any string is a legal term; there
+///    is no minimum length and no 400 on this route at all.
+/// 4. `AutocompleteChannelsForTeam`, then `json.NewEncoder(w).Encode`.
+///
+/// # `FillInChannelsProps` is deliberately skipped
+///
+/// Go says so in a comment (channel.go:1535): *"Don't fill in channels props, since unused by
+/// client and potentially expensive."* Every other channel-list route in this file fills them,
+/// so a port that reached for the shared helper would add a field Go omits.
+///
+/// # `?name=*` is not a wildcard — it is *no search at all*
+///
+/// The store strips `*` before escaping, so a term of `*` sanitises to the empty string and the
+/// search clause is omitted rather than emptied. `?name=*` and `?name=` return the same 50
+/// channels. See [`mm_store::channel_store::autocomplete_in_team`], which also covers why
+/// archived channels are included and why the full-text half is load-bearing.
+#[tracing::instrument(skip_all, fields(team_id = %team_id, count))]
+pub async fn autocomplete_channels_for_team(
+    State(state): State<AppState>,
+    Path(team_id): Path<String>,
+    axum::extract::RawQuery(query): axum::extract::RawQuery,
+    session: AuthenticatedSession,
+) -> Result<Response, ApiError> {
+    require_id(&team_id, "team_id")?;
+
+    if !state
+        .app
+        .session_has_permission_to_team(&session.0, &team_id, &PERMISSION_LIST_TEAM_CHANNELS)
+        .await
+    {
+        return Err(ApiError::from(make_permission_error(
+            &session.0,
+            &[&PERMISSION_LIST_TEAM_CHANNELS],
+        )));
+    }
+
+    // `r.URL.Query().Get("name")` — absent and empty are the same string to Go, and both mean
+    // "no term".
+    let name = query_first(query.as_deref(), "name").unwrap_or_default();
+
+    let channels = state
+        .app
+        .autocomplete_channels_for_team(&team_id, &session.0.user_id, &name)
+        .await?;
+    tracing::Span::current().record("count", channels.0.len());
+
+    Ok(channel_list_response(encoded_channel_list(
+        "autocompleteChannelsForTeam",
+        &channels,
+    )?))
+}
+
 /// Port of `getPublicChannelsForTeam` (api4/channel.go:1221), reached as
 /// `GET /api/v4/teams/{team_id}/channels` — the "Browse channels" list.
 ///

@@ -530,12 +530,13 @@ async fn the_sibling_literals_are_still_forwarded_to_go() {
     let token = go_minted_token(&client).await;
     let team_id = create_team(&client, &token, "sibteam").await;
 
-    // GET siblings. `/recommended` and the two autocompletes are GET routes in Go;
-    // `/managed_categories` is behind a feature flag and 404s when it is off — forwarded either
-    // way, which is the whole point.
+    // GET siblings still forwarded. `/autocomplete` used to be in this list and is now served
+    // from Rust — see `parity/channel_autocomplete.rs`; `/search_autocomplete` is a *different*
+    // handler (`autocompleteChannelsForTeamForSearch`, no permission gate and a different query)
+    // and stays Go's. `/managed_categories` is behind a feature flag and 404s when it is off,
+    // forwarded either way, which is the whole point.
     for literal in [
         "recommended",
-        "autocomplete?name=town",
         "search_autocomplete?name=town",
         "managed_categories",
     ] {
