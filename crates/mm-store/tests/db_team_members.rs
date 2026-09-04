@@ -57,10 +57,18 @@ async fn purge(pool: &PgPool) {
     }
 }
 
+/// **The display name is derived from `name` and must stay distinct across the three teams.**
+/// All three used to share the literal `'mmrs team members'`, which nothing in *this* file cares
+/// about — but `mm-api`'s `parity/teams_all.rs` opens with a tripwire that scans the whole
+/// `Teams` table for a tied `DisplayName`, because its route orders by that column with no
+/// tiebreak. `cargo test --workspace` runs both crates at once, so these rows were visible to
+/// it; and when this test **fails** its trailing `purge` never runs, so the tie outlived the
+/// run and failed all fifteen of that suite's tests until the next store run cleaned up. A
+/// mutation deliberately breaking this test is enough to trigger it.
 async fn insert_team(pool: &PgPool, id: &str, name: &str, delete_at: i64) {
     sqlx::query(
         "INSERT INTO teams (id, createat, updateat, deleteat, displayname, name, type, allowopeninvite, email, inviteid)
-         VALUES ($1, 1700000000001, 1700000000002, $3, 'mmrs team members', $2, 'O', false, 'owner@mmrs.invalid', $1)",
+         VALUES ($1, 1700000000001, 1700000000002, $3, 'mmrs team ' || $2, $2, 'O', false, 'owner@mmrs.invalid', $1)",
     )
     .bind(id)
     .bind(name)
