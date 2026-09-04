@@ -1,0 +1,62 @@
+# getPinnedPosts + getFileInfosForPost + getFileInfo + getEmojiList — 2026-09-04.
+#
+# One plan for four routes: they share a stack lock and a rebuild. Every line is `api`, because
+# all four oracles are the cross-server comparison — there is no store-level binary for any of
+# them.
+#
+# Every `from` was checked against its file for the harness fault the reactions/emoji plan found:
+# `mutate.sh` replaces the FIRST occurrence, so a pattern that also appears in a doc comment
+# rewrites prose and is scored a survivor. The SQL patterns here are all lower-case (`p.deleteat`,
+# `p.ispinned`) where the comments spell Go`s capitalisation (`DeleteAt`, `IsPinned`), which is
+# what keeps them apart.
+#
+# name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter
+#
+# The sixth field is the cargo-test filter for that line — one plan, four routes, four filters.
+# Without it this would have to be four plan files, each paying for its own control.
+
+# --- getPinnedPosts ---------------------------------------------------------------------------
+pinned-order-direction	crates/mm-store/src/channel_store.rs	ORDER BY p.createat ASC	ORDER BY p.createat DESC	api	channel_pinned
+pinned-ispinned-predicate	crates/mm-store/src/channel_store.rs	WHERE p.ispinned = TRUE	WHERE p.ispinned IS NOT NULL	api	channel_pinned
+pinned-deleteat	crates/mm-store/src/channel_store.rs	           AND p.deleteat = 0	           AND p.deleteat >= 0	api	channel_pinned
+pinned-replycount-deleteat	crates/mm-store/src/channel_store.rs	AND sub.deleteat = 0	AND sub.deleteat >= 0	api	channel_pinned
+pinned-add-order	crates/mm-store/src/channel_store.rs	list.add_order(id);	let _ = id;	api	channel_pinned
+pinned-permission-gate	crates/mm-api/src/channels.rs	if !has_permission {	if false {	api	channel_pinned
+pinned-requireid	crates/mm-api/src/channels.rs	require_id(channel_id, "channel_id")?;\n\n    let channel = state.app.get_channel(channel_id).await?;	let channel = state.app.get_channel(channel_id).await?;	api	channel_pinned
+
+# --- getFileInfosForPost ----------------------------------------------------------------------
+files-null-vs-empty-array	crates/mm-api/src/posts.rs	b"null".to_vec()	b"[]".to_vec()	api	file_info
+files-archived-dropped	crates/mm-store/src/file_info_store.rs	\n                archived: false,	\n                archived: row.archived,	api	file_info
+files-include-deleted-gate	crates/mm-api/src/posts.rs	let include_deleted = query_flag_is_true(query, INCLUDE_DELETED_PARAM);\n    if include_deleted	let include_deleted = query_flag_is_true(query, INCLUDE_DELETED_PARAM);\n    if false	api	file_info
+files-read-post-gate	crates/mm-api/src/posts.rs	if !allowed {	if false {	api	file_info
+files-getbyids-deleteat	crates/mm-store/src/file_info_store.rs	AND ($2 OR fileinfo.deleteat = 0)	AND ($2 OR fileinfo.deleteat >= 0)	api	file_info
+files-cache-control	crates/mm-api/src/posts.rs	FILE_CACHE_CONTROL: &str = "max-age=2592000, private"	FILE_CACHE_CONTROL: &str = "max-age=0, private"	api	file_info
+files-minipreview-guard	crates/mm-app/src/post.rs	if infos.iter().any(Self::mini_preview_would_be_generated) {	if false {	api	file_info
+files-order-by-fileids	crates/mm-app/src/post.rs	let infos = order_file_infos_by_id(file_ids, infos);	let infos = infos;	api	file_info
+# `files-order-by-fileids` is the one line here whose verdict is not deterministic: the store
+# order is `CreateAt DESC` and the claimed order is the sorted ids, so the two coincide for about
+# one fixture in six (three files, random ids). A SURVIVED here means the run drew that case, not
+# that the reorder is untested — `post_get`s fixture plants `FileIds` to force the two apart and
+# covers the same helper deterministically.
+
+# --- getFileInfo ------------------------------------------------------------------------------
+fileinfo-get-deleteat	crates/mm-store/src/file_info_store.rs	AND fileinfo.deleteat = 0\n            "#	AND fileinfo.deleteat >= 0\n            "#	api	file_info
+fileinfo-archived-kept	crates/mm-store/src/file_info_store.rs	archived: row.archived,	archived: false,	api	file_info
+fileinfo-own-file-shortcircuit	crates/mm-api/src/files.rs	info.creator_id != session.0.user_id && !perm	!perm	api	file_info
+fileinfo-minipreview-forward	crates/mm-app/src/file.rs	info.is_image() && !info.is_svg() && info.mini_preview.is_none()	false	api	file_info
+fileinfo-trailing-newline	crates/mm-api/src/files.rs	body.push(b'\\n');	let _ = &mut body;	api	file_info
+fileinfo-requireid	crates/mm-api/src/files.rs	require_id(file_id, "file_id")?;	let _ = file_id;	api	file_info
+
+# --- getEmojiList -----------------------------------------------------------------------------
+emojilist-sort-guard	crates/mm-api/src/emoji.rs	if !sort.is_empty() && sort != EMOJI_SORT_BY_NAME {	if false {	api	emoji_list
+emojilist-sort-applied	crates/mm-api/src/emoji.rs	sort == EMOJI_SORT_BY_NAME	false	api	emoji_list
+emojilist-offset	crates/mm-app/src/emoji.rs	get_list(page * per_page, per_page, sort_by_name)	get_list(page, per_page, sort_by_name)	api	emoji_list
+emojilist-orderby-name	crates/mm-store/src/emoji_store.rs	ORDER BY name\n                 LIMIT $1 OFFSET $2	ORDER BY createat\n                 LIMIT $1 OFFSET $2	api	emoji_list
+emojilist-unsorted-deleteat	crates/mm-store/src/emoji_store.rs	WHERE deleteat = 0\n                 LIMIT $1 OFFSET $2	WHERE deleteat >= 0\n                 LIMIT $1 OFFSET $2	api	emoji_list
+
+# --- controls: both must SURVIVE, or every verdict above is noise -----------------------------
+# Neither can be a SELECT-column reorder this time: the pinned query is `query_as!`, which maps
+# columns to struct fields **positionally**, so swapping two would be a real change (or a compile
+# error) rather than a no-op. Two pure renames instead.
+control-binding-rename-api	crates/mm-api/src/files.rs	let denied = if info.creator_id == BOOKMARK_FILE_OWNER {\n        !perm\n    } else {\n        info.creator_id != session.0.user_id && !perm\n    };\n    if denied {	let refused = if info.creator_id == BOOKMARK_FILE_OWNER {\n        !perm\n    } else {\n        info.creator_id != session.0.user_id && !perm\n    };\n    if refused {	api	file_info
+control-binding-rename-store	crates/mm-store/src/channel_store.rs	let post = post_from_row(row)?;\n        let id = post.id.clone();\n        list.add_post(post);	let row = post_from_row(row)?;\n        let id = row.id.clone();\n        list.add_post(row);	api	channel_pinned

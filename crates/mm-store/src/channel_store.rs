@@ -31,11 +31,13 @@ use std::collections::HashMap;
 use mm_model::channel::{Channel, ChannelBannerInfo, ChannelSearchOpts};
 use mm_model::channel_list::ChannelList;
 use mm_model::channel_member::{ChannelMember, ChannelUnread};
+use mm_model::post_list::PostList;
 use mm_model::role::{CHANNEL_ADMIN_ROLE_ID, CHANNEL_GUEST_ROLE_ID, CHANNEL_USER_ROLE_ID};
 use mm_model::utils::StringMap;
 use sqlx::PgPool;
 
 use crate::error::StoreError;
+use crate::post_store::{PostRow, post_from_row};
 use crate::team_store::RolesInfo;
 
 /// Port of `getChannelRoles` (channel_store.go:248).
@@ -291,6 +293,16 @@ pub trait ChannelStore {
         team_id: &str,
         user_id: &str,
     ) -> impl std::future::Future<Output = Result<Vec<ChannelMember>, StoreError>> + Send;
+
+    /// Port of `SqlChannelStore.GetPinnedPosts` (channel_store.go:959).
+    ///
+    /// A `Posts` query living on the **channel** store, which is Go's placement and not an
+    /// accident of this port — `getPinnedPosts` reaches it through `App.GetPinnedPosts`
+    /// (app/channel.go:3992), not through the post store.
+    fn get_pinned_posts(
+        &self,
+        channel_id: &str,
+    ) -> impl std::future::Future<Output = Result<PostList, StoreError>> + Send;
 }
 
 /// Postgres-backed implementation.
@@ -478,6 +490,11 @@ impl ChannelStore for SqlChannelStore {
         user_id: &str,
     ) -> Result<Vec<ChannelMember>, StoreError> {
         get_members_for_user(&self.pool, team_id, user_id).await
+    }
+
+    #[tracing::instrument(skip_all, fields(channel_id = %channel_id, count))]
+    async fn get_pinned_posts(&self, channel_id: &str) -> Result<PostList, StoreError> {
+        get_pinned_posts(&self.pool, channel_id).await
     }
 }
 
@@ -2138,6 +2155,88 @@ pub async fn get_file_count(pool: &PgPool, channel_id: &str) -> Result<i64, Stor
         context: format!("failed to count files with channelId={channel_id}"),
         source,
     })
+}
+
+/// Port of `SqlChannelStore.GetPinnedPosts` (channel_store.go:959).
+///
+/// # Three predicates, and every one of them is fixed
+///
+/// `IsPinned = true`, `ChannelId = $1` and `DeleteAt = 0`. There is no `includeDeleted`
+/// parameter and no caller that could supply one, so a pinned post that was later deleted is
+/// gone from this list — which is what makes the pinned count on `getChannelStats`
+/// ([`get_pinned_post_count`]) and this list agree.
+///
+/// # `ORDER BY CreateAt ASC` — oldest first, and it is the only list read that goes this way
+///
+/// Every other post list in this store is `CreateAt DESC`. The order reaches the client as
+/// `order`, so flipping it is a wire change and not a detail; `getPostsForChannel` and this
+/// route disagree on purpose.
+///
+/// # The `ReplyCount` subquery is unconditional here
+///
+/// `getRootPosts` computes it only when `skip_fetch_threads` is set; this query has no such
+/// flag, so every pinned post reports its thread's live reply count. `DeleteAt = 0` inside the
+/// subquery counts only undeleted replies, matching the `replyCountSubQuery` the post store
+/// uses.
+///
+/// # Both maps, and `order` too
+///
+/// Go calls `AddPost` **and** `AddOrder` for each row, unlike `getParentsPosts`, so nothing
+/// lands in `posts` without appearing in `order`. `NewPostList` has already materialised both
+/// collections, which is why a channel with nothing pinned answers `{"order":[],"posts":{}}`
+/// and not `null`s — and why this function does **not** call `MakeNonNil`, which Go does not
+/// call either.
+pub async fn get_pinned_posts(pool: &PgPool, channel_id: &str) -> Result<PostList, StoreError> {
+    let rows = sqlx::query_as!(
+        PostRow,
+        r#"
+        SELECT p.id,
+               p.createat     AS "create_at!",
+               p.updateat     AS "update_at!",
+               p.editat       AS "edit_at!",
+               p.deleteat     AS "delete_at!",
+               p.ispinned     AS "is_pinned!",
+               p.userid       AS "user_id!",
+               p.channelid    AS "channel_id!",
+               p.rootid       AS "root_id!",
+               p.originalid   AS "original_id!",
+               p.message      AS "message!",
+               p.type         AS "post_type!",
+               p.props        AS "props?",
+               p.hashtags     AS "hashtags!",
+               p.filenames    AS "filenames?",
+               p.fileids      AS "file_ids?",
+               p.hasreactions AS "has_reactions!",
+               p.remoteid     AS "remote_id?",
+               (SELECT COUNT(sub.id)
+                  FROM posts sub
+                 WHERE sub.rootid = (CASE WHEN p.rootid = '' THEN p.id ELSE p.rootid END)
+                   AND sub.deleteat = 0) AS "reply_count!"
+          FROM posts p
+         WHERE p.ispinned = TRUE
+           AND p.channelid = $1
+           AND p.deleteat = 0
+         ORDER BY p.createat ASC
+        "#,
+        channel_id
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: "failed to find Posts".to_owned(),
+        source,
+    })?;
+
+    tracing::Span::current().record("count", rows.len());
+
+    let mut list = PostList::new();
+    for row in rows {
+        let post = post_from_row(row)?;
+        let id = post.id.clone();
+        list.add_post(post);
+        list.add_order(id);
+    }
+    Ok(list)
 }
 
 #[cfg(test)]

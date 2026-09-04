@@ -39,11 +39,12 @@ use axum::extract::{Path, Request, State};
 use axum::http::header::IF_NONE_MATCH;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
+use mm_app::post::PrepareError;
 use mm_model::channel::{CHANNEL_TYPE_OPEN, ChannelSearchOpts, is_valid_channel_identifier};
 use mm_model::permission::{
     PERMISSION_EDIT_OTHER_USERS, PERMISSION_LIST_TEAM_CHANNELS, PERMISSION_MANAGE_SYSTEM,
-    PERMISSION_MANAGE_TEAM, PERMISSION_READ_CHANNEL, PERMISSION_READ_PUBLIC_CHANNEL,
-    PERMISSION_VIEW_TEAM, Permission, make_permission_error,
+    PERMISSION_MANAGE_TEAM, PERMISSION_READ_CHANNEL, PERMISSION_READ_CHANNEL_CONTENT,
+    PERMISSION_READ_PUBLIC_CHANNEL, PERMISSION_VIEW_TEAM, Permission, make_permission_error,
 };
 use mm_model::utils::{is_valid_id, parse_go_bool};
 
@@ -1600,6 +1601,143 @@ pub async fn get_deleted_channels_for_team(
         "getDeletedChannelsForTeam",
         &channels,
     )?))
+}
+
+/// Port of `getPinnedPosts` (api4/channel.go:1099), reached as
+/// `GET /api/v4/channels/{channel_id}/pinned`.
+///
+/// # Order
+///
+/// `RequireChannelId` → `GetChannel` → `SessionHasPermissionToReadChannel` → `GetPinnedPosts` →
+/// etag → prepare → sanitize. The channel is fetched **before** the permission check because the
+/// check takes the channel — so an unknown channel is a 404 for everyone, member or not, and
+/// this route leaks the existence of a channel exactly as `getChannel` does.
+///
+/// # `read_channel_content`, not `read_channel`
+///
+/// `SetPermissionError(model.PermissionReadChannelContent)` — the same permission `getPost` and
+/// `getReactions` report, and *not* the `read_channel` that `getChannel` reports for the same
+/// underlying denial. A client branching on the permission id sees two different answers for one
+/// channel depending on which route it asked.
+///
+/// # Two etags, computed from two different lists
+///
+/// `HandleEtag` compares `If-None-Match` against the **raw** list's etag; the 200's header
+/// carries the **sanitized** list's. Identical today — neither pipeline stage touches `order`,
+/// an id or an `update_at` — and kept as two calls for the reason [`crate::posts::get_post_thread`]
+/// gives.
+///
+/// # `PostList.Etag()` is not `Post.Etag()`
+///
+/// It is `<version>.<len(order)>.<max updateAt>.<max deleteAt>` over the posts in `order`, so
+/// **unpinning** a post changes the etag through the length, and editing one changes it through
+/// `update_at`. An empty list still produces a stable etag rather than a clock stamp, unlike
+/// `GetEtagForFileInfos` — so a channel with nothing pinned *can* be answered 304.
+///
+/// # Wire format
+///
+/// `clientPostList.EncodeJSON(w)` — **trailing newline**, and it strips the private action
+/// integrations in place. No `Cache-Control`.
+#[tracing::instrument(skip_all, fields(channel_id = %channel_id))]
+pub async fn get_pinned_posts(
+    State(state): State<AppState>,
+    Path(channel_id): Path<String>,
+    session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    let headers = request.headers().clone();
+
+    match serve_pinned_posts(&state, &channel_id, &session, &headers).await {
+        Ok(Some(response)) => response,
+        Ok(None) => crate::proxy::forward_to_go(State(state), request).await,
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn serve_pinned_posts(
+    state: &AppState,
+    channel_id: &str,
+    session: &AuthenticatedSession,
+    headers: &HeaderMap,
+) -> Result<Option<Response>, ApiError> {
+    // `c.RequireChannelId()` (web/context.go:395).
+    require_id(channel_id, "channel_id")?;
+
+    let channel = state.app.get_channel(channel_id).await?;
+
+    let (has_permission, _is_member) = state
+        .app
+        .session_has_permission_to_read_channel(&session.0, &channel)
+        .await;
+    if !has_permission {
+        return Err(ApiError::from(make_permission_error(
+            &session.0,
+            &[&PERMISSION_READ_CHANNEL_CONTENT],
+        )));
+    }
+
+    let list = state.app.get_pinned_posts(channel_id).await?;
+
+    let etag = list.etag();
+    if etag_matches(headers, &etag) {
+        return Ok(Some(
+            (
+                StatusCode::NOT_MODIFIED,
+                [("ETag", etag.as_str()), ("x-mmrs-served-by", "rust")],
+            )
+                .into_response(),
+        ));
+    }
+
+    let prepared = match state.app.prepare_post_list_for_client(&list).await {
+        Ok(prepared) => prepared,
+        Err(PrepareError::Unreproducible(reason)) => {
+            tracing::debug!(reason, channel_id, "forwarding to Go");
+            return Ok(None);
+        }
+        Err(PrepareError::App(err)) => return Err(ApiError::from(err)),
+    };
+
+    let (mut sanitized, _all_previews_have_membership) = match state
+        .app
+        .sanitize_post_list_metadata_for_user(prepared, &session.0.user_id)
+        .await
+    {
+        Ok(sanitized) => sanitized,
+        Err(PrepareError::Unreproducible(reason)) => {
+            tracing::debug!(reason, channel_id, "forwarding to Go");
+            return Ok(None);
+        }
+        Err(PrepareError::App(err)) => return Err(ApiError::from(err)),
+    };
+
+    // Deliberately the sanitized list's own etag rather than the one compared above.
+    let response_etag = sanitized.etag();
+
+    let mut body = Vec::new();
+    sanitized.encode_json(&mut body).map_err(|err| {
+        tracing::error!(error = %err, "failed to serialise PostList");
+        ApiError::from(mm_model::utils::AppError::new(
+            "getPinnedPosts",
+            "api.marshal_error",
+            None,
+            String::new(),
+            500,
+        ))
+    })?;
+
+    Ok(Some(
+        (
+            StatusCode::OK,
+            [
+                ("Content-Type", "application/json"),
+                ("x-mmrs-served-by", "rust"),
+                ("ETag", response_etag.as_str()),
+            ],
+            body,
+        )
+            .into_response(),
+    ))
 }
 
 #[cfg(test)]

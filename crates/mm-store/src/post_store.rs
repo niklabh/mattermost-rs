@@ -889,26 +889,30 @@ impl SqlPostStore {
 
 /// The eighteen selected columns plus the `ReplyCount` subquery, before the JSON columns are
 /// decoded.
-struct PostRow {
-    id: String,
-    create_at: i64,
-    update_at: i64,
-    edit_at: i64,
-    delete_at: i64,
-    is_pinned: bool,
-    user_id: String,
-    channel_id: String,
-    root_id: String,
-    original_id: String,
-    message: String,
-    post_type: String,
-    props: Option<serde_json::Value>,
-    hashtags: String,
-    filenames: Option<String>,
-    file_ids: Option<String>,
-    has_reactions: bool,
-    remote_id: Option<String>,
-    reply_count: i64,
+///
+/// `pub(crate)` because Go hangs one more query returning exactly these columns off the
+/// **channel** store — `SqlChannelStore.GetPinnedPosts` (channel_store.go:959) — and that port
+/// follows Go's placement rather than moving the query here to keep the row type private.
+pub(crate) struct PostRow {
+    pub(crate) id: String,
+    pub(crate) create_at: i64,
+    pub(crate) update_at: i64,
+    pub(crate) edit_at: i64,
+    pub(crate) delete_at: i64,
+    pub(crate) is_pinned: bool,
+    pub(crate) user_id: String,
+    pub(crate) channel_id: String,
+    pub(crate) root_id: String,
+    pub(crate) original_id: String,
+    pub(crate) message: String,
+    pub(crate) post_type: String,
+    pub(crate) props: Option<serde_json::Value>,
+    pub(crate) hashtags: String,
+    pub(crate) filenames: Option<String>,
+    pub(crate) file_ids: Option<String>,
+    pub(crate) has_reactions: bool,
+    pub(crate) remote_id: Option<String>,
+    pub(crate) reply_count: i64,
 }
 
 /// Port of `postWithExtra` (post_store.go:43): the seventeen post columns plus the four the
@@ -1021,7 +1025,7 @@ fn decode_string_array(
         })
 }
 
-fn post_from_row(row: PostRow) -> Result<Post, StoreError> {
+pub(crate) fn post_from_row(row: PostRow) -> Result<Post, StoreError> {
     // `StringInterface.Scan` on a JSON value that is not an object is an error in Go too —
     // `json.Unmarshal` into a `map[string]any` rejects an array or a scalar.
     let props = match row.props {

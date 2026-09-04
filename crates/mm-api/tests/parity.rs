@@ -32,12 +32,15 @@ mod parity {
     pub mod channel_member;
     pub mod channel_members_for_team_for_user;
     pub mod channel_members_list;
+    pub mod channel_pinned;
     pub mod channel_posts;
     pub mod channel_stats;
     pub mod channel_unread;
     pub mod channels_for_team_for_user;
     pub mod channels_for_user;
     pub mod emoji_get;
+    pub mod emoji_list;
+    pub mod file_info;
     pub mod post_get;
     pub mod post_reactions;
     pub mod post_thread;

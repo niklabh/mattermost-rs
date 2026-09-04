@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use mm_model::channel::{Channel, ChannelSearchOpts};
 use mm_model::channel_list::ChannelList;
 use mm_model::channel_member::{CHANNEL_MARK_UNREAD_MENTION, ChannelMember, ChannelUnread};
+use mm_model::post_list::PostList;
 use mm_model::user::MARK_UNREAD_NOTIFY_PROP;
 use mm_model::utils::{AppError, AppResult};
 use mm_store::ChannelStore;
@@ -591,6 +592,34 @@ impl App {
             })?;
         tracing::Span::current().record("count", channels.0.len());
         Ok(channels)
+    }
+
+    /// Port of `app.App.GetPinnedPosts` (app/channel.go:3992).
+    ///
+    /// One store call, one error id, and **no not-found branch**: a channel id that names
+    /// nothing is a successful read of zero rows. The 404 a client sees for a bad channel comes
+    /// from `getPinnedPosts`'s own `GetChannel` call, two lines earlier in the handler.
+    ///
+    /// `filterInaccessiblePosts` sits between the read and the return in Go. It exits
+    /// immediately without a licence carrying a `PostHistory` limit, so it cannot change the
+    /// list on this deployment and is not reproduced — the same call, and the same reasoning, as
+    /// in `mm_api::posts::get_post_thread`.
+    #[tracing::instrument(skip(self), fields(channel_id = %channel_id))]
+    pub async fn get_pinned_posts(&self, channel_id: &str) -> AppResult<PostList> {
+        self.store()
+            .channel()
+            .get_pinned_posts(channel_id)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "pinned post lookup failed");
+                AppError::boxed(
+                    "GetPinnedPosts",
+                    "app.channel.pinned_posts.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })
     }
 
     /// Port of `app.App.FillInChannelProps` (channel.go:4091): the one-element case of

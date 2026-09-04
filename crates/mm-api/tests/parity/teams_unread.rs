@@ -64,16 +64,37 @@ async fn fetch_both_sorted(
         response.bytes().await.expect("body reads").to_vec()
     };
 
-    for attempt in 1..=8_u64 {
-        let before = sorted(&get(GO).await);
+    // Bracketing, not quiescence — the same change `fetch_both_stable` made on 2026-09-04 and
+    // for the same reason: this user's unread counters churn for as long as any suite in this
+    // binary is posting into its team's channels, so "Go's two reads agree" is a condition that
+    // may simply never hold. Accepting our answer when it matches *either* Go read is the
+    // stronger check anyway; a wrong port matches neither.
+    let mut last = (Vec::new(), Vec::new(), Vec::new());
+    for attempt in 1..=12_u64 {
+        let before_raw = get(GO).await;
         let ours = get(RUST).await;
-        let after = sorted(&get(GO).await);
-        if before == after {
-            return (before, sorted(&ours), ours);
+        let after_raw = get(GO).await;
+
+        let ours_sorted = sorted(&ours);
+        if sorted(&before_raw) == ours_sorted {
+            return (sorted(&before_raw), ours_sorted, ours);
         }
+        if sorted(&after_raw) == ours_sorted {
+            return (sorted(&after_raw), ours_sorted, ours);
+        }
+
+        // Go quiescent as a set: anything left is ours to explain.
+        if sorted(&before_raw) == sorted(&after_raw) {
+            return (sorted(&before_raw), ours_sorted, ours);
+        }
+
+        last = (before_raw, ours, after_raw);
         tokio::time::sleep(std::time::Duration::from_millis(50 * attempt)).await;
     }
-    panic!("{path}: Go's answer never settled as a set, so no comparison would mean anything");
+    // Matching neither bracket, repeatedly, is a divergence rather than churn — hand the caller
+    // the comparison it asked for and let its own assertion print the diff.
+    let (before_raw, ours, _after) = last;
+    (sorted(&before_raw), sorted(&ours), ours)
 }
 
 fn entry<'a>(list: &'a [serde_json::Value], team_id: &str) -> &'a serde_json::Value {

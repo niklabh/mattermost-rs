@@ -4619,3 +4619,207 @@ entry for a row that has since changed, and we always read the row. The differen
 not wire format, and the suite asserts against a settled database. It bites the *tests* rather
 than a client: the SQL purges delete rows the Go server never hears about, which is why every
 fixture emoji is named with a timestamp.
+
+## `GET /channels/{id}/pinned`, `GET /posts/{id}/files/info`, `GET /files/{id}/info`, `GET /emoji` (2026-09-04)
+
+Four routes in one session, on the same reasoning as the previous one: they share a stack lock, a
+rebuild and a mutation plan.
+
+| Layer | File | Status |
+|---|---|---|
+| api | `crates/mm-api/src/channels.rs` — `get_pinned_posts` | DONE |
+| api | `crates/mm-api/src/posts.rs` — `get_file_infos_for_post` | DONE |
+| api | `crates/mm-api/src/files.rs` — `get_file_info` (new) | DONE |
+| api | `crates/mm-api/src/emoji.rs` — `get_emoji_list` | DONE |
+| app | `crates/mm-app/src/file.rs` — `get_file_info`, `mini_preview_would_be_generated`, `has_permission_to_file_action` (new) | DONE |
+| app | `crates/mm-app/src/post.rs` — `get_file_infos_for_post_with_migration` | DONE |
+| app | `crates/mm-app/src/channel.rs` — `get_pinned_posts` | DONE |
+| app | `crates/mm-app/src/emoji.rs` — `get_emoji_list` | DONE |
+| store | `crates/mm-store/src/channel_store.rs` — `get_pinned_posts` | DONE |
+| store | `crates/mm-store/src/file_info_store.rs` — `get`, and a repair to `get_by_ids` | DONE |
+| store | `crates/mm-store/src/emoji_store.rs` — `get_list` | DONE |
+
+Forwarded and unchanged: every other `/files/` route (`""`, `/thumbnail`, `/preview`, `/link`,
+`/public`, `POST /files`), `POST /emoji`, `/emoji/autocomplete`, and every non-GET method on the
+four migrated paths.
+
+Tests: 37 cross-server (21 in `parity/file_info.rs`, 9 in `parity/channel_pinned.rs`, 7 in
+`parity/emoji_list.rs`); the parity binary goes 318 → 355.
+Mutations: **28 run, 26 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/pinned-files-emojilist.plan`) — on the *second* run; the first was void and
+what voided it is below.
+
+Each finding lives in the doc comment on the thing it constrains. The ones a reader would
+otherwise get wrong:
+
+1. **`GetByIds` drops `archived` and `Get` keeps it — and this port had it wrong.** Both queries
+   select `FileInfo.Archived` from `fs.queryFields`. `Get` scans into `model.FileInfo`, so the
+   column reaches the wire; `GetByIds` scans into the store-private `fileInfoWithChannelID` and
+   converts with a `ToModel()` that assigns twenty of twenty-one fields and **silently omits that
+   one** (file_info_store.go:75). `archived` is `json:"archived"` with no `omitempty`, so both
+   answers are on the wire and they differ. `get_by_ids` was returning the column, which is a
+   divergence on `metadata.files` for `getPost`/`getPostThread`/`getPostsForChannel` as well as on
+   the new route. It now selects the column and throws it away, mirroring Go rather than Go's
+   intent, and both halves are asserted against the running server.
+
+   The column is `false` for every row the API can create — `Save` does not list it among its
+   INSERT columns, and the only writer of `true` is `MakeContentInaccessible`, which mutates a
+   loaded struct for the cloud file limit and never reaches Postgres. So the divergence is
+   invisible until a fixture writes it, which is what `common::set_fileinfo_column` exists for.
+
+2. **The empty file list is `null`, not `[]`, and every empty list shares one etag.** Two nils,
+   both load-bearing. `GetByIds` short-circuits `if len(items) == 0 { return nil, nil }`, and
+   neither `orderFileInfosByID` nor the two filters after it materialise a slice, so
+   `json.Marshal` renders `null` — the same trap as `getReactions`, reached by a different route.
+   And `GetEtagForFileInfos` on an empty list is a bare `model.Etag()`: **`CurrentVersion` and
+   nothing else**, no post id and no timestamp. So every post with no attachments on the whole
+   server shares one etag and a client that cached one gets a 304 for all the others. The first
+   version of that test asserted the opposite — that the empty etag was clock-stamped and could
+   never match — and Go answered 304 to it.
+
+3. **`getPinnedPosts` is the only post list in the port that is oldest-first.** `ORDER BY CreateAt
+   ASC` against every other query's `DESC`, and `order` is on the wire.
+
+4. **The `/pinned` refusal reports `read_channel_content`; `getChannel`'s reports
+   `read_channel`.** Same channel, same user, same underlying denial, two different permission
+   names — because `SetPermissionError` is passed a literal rather than whatever the check
+   decided. Only the untranslated `message` carries the name, so this is invisible over HTTP
+   today ([D-092]).
+
+5. **A public channel cannot test a refusal, and five tests were written before that was
+   measured.** `HasPermissionToReadChannel` falls back to `read_public_channel` on the *team* for
+   an open channel, and `create_plain_user` puts its user in the team — so the "non-member" is
+   served, not refused, and Go answered 200 to every assertion expecting a 403. Both suites now
+   create a **private** channel for the refusal half and keep the public one for the fallback
+   half, which is the assertion that stops the refusal test passing on a port that refuses
+   everybody. `common::create_channel_typed` carries the note.
+
+6. **Two writes on read paths, both forwarded rather than reproduced.**
+   `generateMiniPreview` reads the original out of the file backend, encodes a thumbnail, returns
+   it *and upserts it into the row*; `MigrateFilenamesToFileInfos` inserts `FileInfo` rows for a
+   pre-3.5 post. Neither is reachable without a file backend. Both are refused with
+   `PrepareError::Unreproducible` and forwarded — and one qualifying file forwards the whole
+   `files/info` array, because there is no way to serve half of a JSON list. The mini-preview
+   branch is narrower than it looks: the upload path already generates a preview for every image
+   it accepts (app/file.go:1016), so a NULL on an image means a row written before that code, by
+   a plugin, or by hand.
+
+7. **`getFileInfo`'s permission block is three branches and the middle one is the surprise.** A
+   file you uploaded is readable without any channel permission — `CreatorId == session.UserId`
+   short-circuits — but a *bookmark* file is not, because the literal owner `"bookmark"` can never
+   equal a real user id and the first branch exists solely to close that hatch. Collapsing the two
+   into one `!perm` denies a user their own file after they leave the channel; collapsing them the
+   other way hands every user every channel bookmark.
+
+8. **The channel lookup runs before the permission check, so a NULL `ChannelId` is a 404 for its
+   own uploader.** The column is nullable because it was added after `FileInfo` existed; the
+   upload path has filled it in ever since (app/file.go:774), so only a pre-migration row arrives
+   with the `COALESCE`d empty string — and `GetChannel("")` misses two lines before the
+   `CreatorId` escape hatch would have applied.
+
+9. **`FeatureFlags.PermissionPolicies` defaults to `true`, so Go's ABAC block runs — and fetches
+   the post a second time.** `HasPermissionToFileAction` returns `true` on its first line without
+   an enterprise `AccessControl` service, and the extra `GetSinglePost` raises
+   `app.post.get.app_error`/404 — *the same id and status* the app layer's own `GetSingle` raises
+   a few lines later. `AppError.Where` is `json:"-"`, so nothing distinguishes them on the wire
+   and the duplicate read is dropped. The gate itself is ported and called at both of Go's call
+   sites, so an evaluator has somewhere to land.
+
+10. **`getEmojiList` has none of the gates its siblings have.** `App.GetEmojiList` goes straight
+    to the store: no `EnableCustomEmoji` check and no `FileSettings.DriverName` check, unlike
+    `App.GetEmoji`, which would refuse even if the handler did not. The handler's 501 is the only
+    thing guarding the query. Its `where` is `getEmoji`, not `getEmojiList` — Go's own copy-paste.
+
+11. **The default emoji page has no `ORDER BY` at all**, and `?per_page=0` is `LIMIT 0` — the
+    empty list, not "no limit", which is what a zero means to the channel and post pagination
+    helpers. The unsorted page is therefore compared as a **set** across the two servers and only
+    `?sort=name` is compared as bytes; asserting byte order on an unordered query is the mistake
+    `teams_for_user` made and had to have repaired.
+
+### The first mutation run was void, and the control is what said so
+
+`control-binding-rename-api` — a pure rename of a local binding — came back **CAUGHT**, which
+means the harness was noisy and none of the other twenty-seven verdicts meant anything. The
+culprit was one test of mine failing on every single mutation, and the cause is a finding about
+the route rather than about the harness:
+
+**Forwarding to Go repairs the row.** `an_image_with_no_mini_preview_is_forwarded` asserted that
+both file routes hand a previewless image to Go — using *one* fixture file for both. Go serves the
+first forward by encoding the thumbnail **and upserting it**, so by the second request the row has
+a preview and we serve it ourselves. The fixture now carries two previewless images, one per
+route, and the assertion says why.
+
+The same fixture had a second version of the same mistake: clearing `minipreview` **before**
+creating the post that carries the file is useless, because `createPost` runs Go's own
+`PreparePostForClient`, which fetches the attachments' metadata and regenerates exactly the
+preview the fixture was removing. The column is cleared after the post exists.
+
+Three more survivors, all in `getEmojiList`, and all one fixture defect:
+
+**A fixture built in alphabetical order cannot see a sort.** With only this suite's rows in the
+table — which is what a filtered mutation run leaves behind — an unordered `SELECT` returns them
+in insertion order, so creating `lista`, `listb`, `listc` in that sequence made the *unsorted*
+page already sorted and `?sort=name` a no-op. Dropping the `ORDER BY`, swapping it for
+`createat`, and never passing the flag at all: three mutations, three survivors, one cause. The
+fixture now creates the three in reverse.
+
+**And `page * per_page` is invisible at `per_page = 1`,** because the product equals `page`. The
+pagination assertion used a page size of one; it now uses two, and checks that page 1 starts at
+offset 2.
+
+### `fetch_both_stable` stopped waiting for quiet and started bracketing instead
+
+Three suites began failing intermittently in the full run as soon as these fixtures landed —
+`channels_for_user`, `teams_unread`, `team_members_route`, and `channel_members_list` — and none
+of them was a divergence.
+
+The helper read Go, then us, then Go again, and required **Go's two reads to be identical** before
+comparing. That works for a row settling after one write and cannot work for a list that is
+genuinely growing: Go joins a channel's creator to it, so every `create_channel` anywhere in this
+binary lengthens `/users/me/channels` and `/users/me/teams/members` underneath a concurrent
+reader. Raising the budget 8 → 12 → 20 attempts did not help, because the list never went quiet
+for a whole read triple — the test failed with "never settled" while both servers were perfectly
+agreed. (The fixture user is in **55 teams**; that is its own problem, [D-155].)
+
+It now accepts our answer when it equals **either** Go read. That is the stronger check: a correct
+port answers something Go also answered at some instant inside the window, so it matches one of
+the two; a wrong port matches neither, whatever the list is doing. The quiescence test is kept as
+a *third* acceptance, because both brackets compare bytes and a route whose element order is Go's
+heap order (`/users/me/teams/members`) fails them on ordering alone every time — its own
+order-normalising assertion would never get to run. Match a bracket, or find Go still, or retry.
+`teams_unread`'s local copy of the helper got the same treatment.
+
+Five consecutive full-suite runs clean afterwards, against one failure in three before.
+
+### And one existing test was asserting an ordering neither server promises
+
+`channel_members_list::pages_split_cover_and_run_out_identically` claimed that two pages of two
+cover the full list **in the same order**. `SqlChannelStore.GetMembers` (channel_store.go:2181)
+adds an `ORDER BY` only when `UpdatedAfter > 0`, which this route never sets — so `LIMIT`/`OFFSET`
+runs against an unordered scan on both servers, and a row can appear on two pages while another
+appears on none. It did: page 0 came back `[a, b]` and page 1 `[c, a]` against a full list of
+`[a, b, c, d]`, with both servers agreeing byte for byte on every page. The claim is now about the
+**set**, retried; the Go-against-us comparison is untouched, because it was never exposed to the
+problem. Same class as the `teams_for_user` repair one session earlier — the third instance now,
+so it is worth stating as a rule: **a `LIMIT`/`OFFSET` page of an unordered query is not a
+sequence, and any test treating it as one is asserting something the database is free to break.**
+
+### The budget in `fetch_both_stable` moved before it was replaced, 12 → 20
+
+Recorded because it is the step that did not work. [D-160] had already moved this number once for
+the same symptom, and moving it again looked like the obvious repair; it bought two clean runs and
+then failed again at 20. Widening a wait is the wrong shape of fix for a list that never stops
+changing — see the bracketing entry above.
+
+### Tooling — the mutation plan format gained a sixth field
+
+`scripts/mutate-batch.sh` now takes an optional per-line `filter`, overriding `MUTATE_FILTER`.
+A plan covering four routes has no single filter that fits: the `api` suites are named after
+their routes, libtest takes one filter, and leaving it unset lets an unrelated suite decide every
+verdict. Before this, a four-route plan had to be split into four files, each paying for its own
+pair of controls.
+
+`common::delete_post` moved out of `parity/post_get.rs`, where it was private, into the shared
+harness — `channel_pinned` needs it to plant a deleted pin and a deleted reply, without which the
+two `DeleteAt = 0` predicates in the pinned query could be deleted outright and every assertion
+would still pass.

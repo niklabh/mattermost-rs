@@ -1,12 +1,14 @@
 //! Port of `api4/post.go`'s post reads: `getPost` (`GET /api/v4/posts/{post_id}`),
-//! `getPostsForChannel` (`GET /api/v4/channels/{channel_id}/posts`) and `getPostThread`
-//! (`GET /api/v4/posts/{post_id}/thread`).
+//! `getPostsForChannel` (`GET /api/v4/channels/{channel_id}/posts`), `getPostThread`
+//! (`GET /api/v4/posts/{post_id}/thread`) and `getFileInfosForPost`
+//! (`GET /api/v4/posts/{post_id}/files/info`).
 
 use axum::extract::{Path, Request, State};
 use axum::http::StatusCode;
 use axum::http::header::{ETAG, IF_NONE_MATCH};
 use axum::response::{IntoResponse, Response};
 use mm_app::post::{PrepareError, PreparePostForClientOpts};
+use mm_model::file_info::get_etag_for_file_infos;
 use mm_model::permission::{
     PERMISSION_MANAGE_SYSTEM, PERMISSION_READ_CHANNEL_CONTENT, PERMISSION_READ_DELETED_POSTS,
     make_permission_error,
@@ -722,6 +724,186 @@ async fn serve_post_thread(
             StatusCode::OK,
             [
                 (HEADER_ETAG_SERVER, response_etag.as_str()),
+                ("Content-Type", "application/json"),
+                ("x-mmrs-served-by", "rust"),
+            ],
+            body,
+        )
+            .into_response(),
+    )
+}
+
+/// `getFileInfosForPost` and `getFileInfo` both set this, and only on the 200.
+///
+/// A month, marked private so a shared cache cannot hold one user's file metadata for another.
+/// `HandleEtag` writes the 304 before either handler reaches its own header block, so a 304 from
+/// these routes carries `ETag` and **no** `Cache-Control` — which is why the constant is applied
+/// at the two 200 sites rather than folded into a shared response builder.
+pub(crate) const FILE_CACHE_CONTROL: &str = "max-age=2592000, private";
+
+/// Port of `getFileInfosForPost` (api4/post.go:1583).
+///
+/// # Order, and the one gate that is missing from it
+///
+/// `RequirePostId` → `SessionHasPermissionToReadPost` → the `include_deleted` `manage_system`
+/// gate → the file infos → etag. Note what is **not** first: unlike `getPost`, the permission
+/// check runs *before* the `include_deleted` gate, so a non-admin asking for deleted files on a
+/// post they cannot read is refused with `read_channel_content`, not `manage_system`.
+///
+/// # Go fetches the post twice and we fetch it once
+///
+/// `FeatureFlags.PermissionPolicies` defaults to **true** (feature_flags.go:172), so Go's
+/// ABAC block runs: it calls `GetSinglePost` and then `HasPermissionToFileAction`. The second
+/// of those is unconditionally `true` here — see [`mm_app::file::has_permission_to_file_action`]
+/// — and the first raises `app.post.get.app_error`/404 for a missing post, which is *the same
+/// error id and status* [`mm_app::App::get_file_infos_for_post_with_migration`] raises from its
+/// own `GetSingle` a few lines later. `AppError.Where` is `json:"-"`, so nothing distinguishes
+/// them on the wire and the duplicate read is dropped rather than reproduced.
+///
+/// # The empty answer is `null`, not `[]` — the same trap as `getReactions`
+///
+/// Follow the nil the whole way down. `SqlFileInfoStore.GetByIds` short-circuits
+/// `if len(items) == 0 { return nil, nil }` (file_info_store.go:161), so zero rows is a **nil**
+/// slice rather than an empty one. `orderFileInfosByID` returns its argument untouched for fewer
+/// than two infos, `removeInaccessibleContentFromFilesSlice` returns early on length zero, and
+/// `generateMiniPreviewForInfos` ranges over nothing — none of the three materialises a slice.
+/// `json.Marshal` of a nil `[]*model.FileInfo` is `null`.
+///
+/// So a post with no attachments answers the four bytes `null`, which is the common case for
+/// this route as it is for `getReactions`. `serde_json` would render an empty `Vec` as `[]`,
+/// which is why the empty case is spelled out below rather than left to the serialiser.
+///
+/// # Wire format
+///
+/// `json.Marshal` + `w.Write`, so **no trailing newline** — unlike `getFileInfo`, its sibling
+/// one crate over, which encodes and gets one. The 200 carries `ETag` and
+/// `Cache-Control: max-age=2592000, private`; the 304 carries `ETag` alone.
+///
+/// # The etag is the *file infos'*, not the post's — and the empty one is a global constant
+///
+/// `GetEtagForFileInfos` (model/file_info.go:231) is `<version>.<infos[0].postId>.<max updateAt
+/// across the whole list>`; note the two halves can come from different elements. For an **empty**
+/// list it is a bare `model.Etag()` with no parts at all — `CurrentVersion` and nothing else — so
+/// every post with no attachments, anywhere on the server, shares one etag and a client that
+/// cached one empty list gets a 304 for every other. Measured against Go, because the intuitive
+/// reading (an empty list must be uncacheable) is exactly backwards.
+#[tracing::instrument(skip_all, fields(post_id = %post_id))]
+pub async fn get_file_infos_for_post(
+    State(state): State<AppState>,
+    Path(post_id): Path<String>,
+    session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    let query = request.uri().query().map(str::to_owned);
+    let if_none_match = request
+        .headers()
+        .get(IF_NONE_MATCH)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned);
+
+    match serve_file_infos_for_post(&state, &post_id, &session, query.as_deref(), if_none_match)
+        .await
+    {
+        Outcome::Served(response) => response,
+        Outcome::Failed(err) => err.into_response(),
+        Outcome::Forward => proxy::forward_to_go(State(state), request).await,
+    }
+}
+
+async fn serve_file_infos_for_post(
+    state: &AppState,
+    post_id: &str,
+    session: &AuthenticatedSession,
+    query: Option<&str>,
+    if_none_match: Option<String>,
+) -> Outcome {
+    // `c.RequirePostId()` (web/context.go:411).
+    if !is_valid_id(post_id) {
+        return Outcome::Failed(ApiError::invalid_url_param("post_id"));
+    }
+
+    // Before the `include_deleted` gate, which is the reverse of `getPost`.
+    let (allowed, _is_member) = state
+        .app
+        .session_has_permission_to_read_post(&session.0, post_id)
+        .await;
+    if !allowed {
+        return Outcome::Failed(ApiError::from(make_permission_error(
+            &session.0,
+            &[&PERMISSION_READ_CHANNEL_CONTENT],
+        )));
+    }
+
+    let include_deleted = query_flag_is_true(query, INCLUDE_DELETED_PARAM);
+    if include_deleted
+        && !state
+            .app
+            .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)
+            .await
+    {
+        return Outcome::Failed(ApiError::from(make_permission_error(
+            &session.0,
+            &[&PERMISSION_MANAGE_SYSTEM],
+        )));
+    }
+
+    // `HasPermissionToFileAction` — unconditionally true on this deployment; kept at Go's call
+    // site so the gate is already in place if an evaluator ever exists.
+    if !mm_app::file::has_permission_to_file_action() {
+        return Outcome::Failed(ApiError::from(*mm_app::file::abac_denied(
+            "getFileInfosForPost",
+        )));
+    }
+
+    let infos = match state
+        .app
+        .get_file_infos_for_post_with_migration(post_id, include_deleted)
+        .await
+    {
+        Ok(infos) => infos,
+        Err(PrepareError::Unreproducible(reason)) => {
+            tracing::debug!(reason, post_id, "forwarding to Go");
+            return Outcome::Forward;
+        }
+        Err(PrepareError::App(err)) => return Outcome::Failed(ApiError::from(err)),
+    };
+
+    let etag = get_etag_for_file_infos(&infos);
+    if if_none_match.as_deref() == Some(etag.as_str()) {
+        return Outcome::Served(
+            (
+                StatusCode::NOT_MODIFIED,
+                [(ETAG.as_str(), etag.as_str()), ("x-mmrs-served-by", "rust")],
+            )
+                .into_response(),
+        );
+    }
+
+    // A nil slice, not an empty one — see the doc comment.
+    let body = if infos.is_empty() {
+        b"null".to_vec()
+    } else {
+        match serde_json::to_vec(&infos) {
+            Ok(body) => body,
+            Err(err) => {
+                tracing::error!(error = %err, "failed to serialise FileInfos");
+                return Outcome::Failed(ApiError::from(mm_model::utils::AppError::new(
+                    "getFileInfosForPost",
+                    "api.marshal_error",
+                    None,
+                    String::new(),
+                    500,
+                )));
+            }
+        }
+    };
+
+    Outcome::Served(
+        (
+            StatusCode::OK,
+            [
+                (HEADER_ETAG_SERVER, etag.as_str()),
+                ("Cache-Control", FILE_CACHE_CONTROL),
                 ("Content-Type", "application/json"),
                 ("x-mmrs-served-by", "rust"),
             ],

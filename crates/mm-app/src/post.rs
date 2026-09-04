@@ -402,6 +402,84 @@ impl App {
         Ok(order_file_infos_by_id(file_ids, infos))
     }
 
+    /// Port of `app.App.GetFileInfosForPostWithMigration` (app/post.go:2373) and the
+    /// `GetFileInfosForPost` (app/post.go:2401) under it, collapsed into one function because
+    /// this port has no second caller for the inner one.
+    ///
+    /// # Two reads of the same post, and only one of them is here
+    ///
+    /// Go fetches the post twice: once at the top of this function, and once more in the
+    /// handler when `FeatureFlags.PermissionPolicies` is on — which it is by default
+    /// (feature_flags.go:172). Both misses raise `app.post.get.app_error` with a 404, and
+    /// `AppError.Where` is `json:"-"`, so the two are indistinguishable over HTTP. The handler's
+    /// copy is dropped and this one kept, because this one also supplies `FileIds`.
+    ///
+    /// # `fromMaster` is false here, so the post is read once
+    ///
+    /// `GetFileInfosForPost` re-reads the post from the writer when `fromMaster` is set, purely
+    /// to get a `FileIds` that cannot be replica-stale. This call site passes `false`.
+    ///
+    /// # The legacy-filenames migration is a write, and it is forwarded
+    ///
+    /// When a post has `Filenames` but no `FileInfo` rows — data written before Mattermost 3.5 —
+    /// Go calls `MigrateFilenamesToFileInfos`, which walks the file backend, **inserts**
+    /// `FileInfo` rows and rewrites the post. Nothing about that is reproducible here, so the
+    /// request is refused with [`PrepareError::Unreproducible`] and the handler forwards it.
+    /// Note the guard is Go's, exactly: it fires only when the info list came back *empty*, so
+    /// a post carrying both `Filenames` and real `FileIds` is served normally.
+    ///
+    /// # And so is the mini-preview repair
+    ///
+    /// `generateMiniPreviewForInfos` runs [`App::mini_preview_would_be_generated`] over every
+    /// info. One qualifying file forwards the whole request — the response is a single JSON
+    /// array and there is no way to serve half of it.
+    #[tracing::instrument(skip(self), fields(post_id = %post_id, include_deleted))]
+    pub async fn get_file_infos_for_post_with_migration(
+        &self,
+        post_id: &str,
+        include_deleted: bool,
+    ) -> Result<Vec<FileInfo>, PrepareError> {
+        let post = self
+            .get_single_post(post_id, include_deleted)
+            .await
+            .map_err(PrepareError::App)?;
+
+        let file_ids = post.file_ids.as_deref().unwrap_or_default();
+        let infos = self
+            .store()
+            .file_info()
+            .get_by_ids(file_ids, include_deleted)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "file info lookup failed");
+                PrepareError::App(AppError::boxed(
+                    "GetFileInfosForPost",
+                    "app.file_info.get_for_post.app_error",
+                    None,
+                    String::new(),
+                    500,
+                ))
+            })?;
+
+        let infos = order_file_infos_by_id(file_ids, infos);
+
+        // `firstInaccessibleFileTime` is always 0 here — see `App::get_file_info` — so Go's
+        // three-part guard reduces to these two.
+        if infos.is_empty() && !post.filenames.is_empty() {
+            return Err(PrepareError::Unreproducible(
+                "MigrateFilenamesToFileInfos writes FileInfo rows from the file backend",
+            ));
+        }
+
+        if infos.iter().any(Self::mini_preview_would_be_generated) {
+            return Err(PrepareError::Unreproducible(
+                "generateMiniPreviewForInfos reads the file backend and writes the rows back",
+            ));
+        }
+
+        Ok(infos)
+    }
+
     /// Port of `app.App.getEmojisAndReactionsForPost` (post_metadata.go:528).
     ///
     /// **Reactions are read only when `post.HasReactions` is set.** The column is Go's own

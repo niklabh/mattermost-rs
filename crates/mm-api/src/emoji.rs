@@ -1,5 +1,6 @@
-//! Port of `getEmoji` and `getEmojiByName` (channels/api4/emoji.go:207, :229), reached as
-//! `GET /api/v4/emoji/{emoji_id}` and `GET /api/v4/emoji/name/{emoji_name}`.
+//! Port of `getEmojiList`, `getEmoji` and `getEmojiByName` (channels/api4/emoji.go:116, :207,
+//! :229), reached as `GET /api/v4/emoji`, `GET /api/v4/emoji/{emoji_id}` and
+//! `GET /api/v4/emoji/name/{emoji_name}`.
 //!
 //! # The two config gates are not the same gate
 //!
@@ -17,12 +18,12 @@
 use axum::extract::{Path, Request, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use mm_model::emoji::EMOJI_NAME_MAX_LENGTH;
+use mm_model::emoji::{EMOJI_NAME_MAX_LENGTH, EMOJI_SORT_BY_NAME};
 use mm_model::utils::{AppError, is_valid_alpha_num_hyphen_underscore_plus};
 
 use crate::AppState;
 use crate::auth::AuthenticatedSession;
-use crate::channels::require_id;
+use crate::channels::{parse_page, parse_per_page, query_first, require_id};
 use crate::error::ApiError;
 
 /// The `/emoji/` literals gorilla registers **before** `{emoji_id}` and answers with a handler
@@ -158,6 +159,100 @@ async fn serve_one_emoji(
         tracing::error!(error = %err, "failed to serialise Emoji");
         ApiError::from(AppError::new(
             "getEmoji",
+            "api.marshal_error",
+            None,
+            String::new(),
+            500,
+        ))
+    })?;
+    body.push(b'\n');
+
+    Ok((
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
+    )
+        .into_response())
+}
+
+/// `getEmojiList`'s only query parameter beyond pagination (api4/emoji.go:122).
+const SORT_PARAM: &str = "sort";
+
+/// Port of `getEmojiList` (api4/emoji.go:116), reached as `GET /api/v4/emoji`.
+///
+/// # Order, and the gate that is *not* here
+///
+/// `EnableCustomEmoji` 501 → the `sort` validation → `App.GetEmojiList`. There is no
+/// `RequireEmojiId` because there is no path parameter, and — unlike the two single reads —
+/// the **app layer has no gates of its own**: `App.GetEmojiList` (app/emoji.go:99) goes straight
+/// to the store. The handler's 501 is the only thing guarding this query.
+///
+/// # `sort` takes exactly two values and one of them is the empty string
+///
+/// `if sort != "" && sort != model.EmojiSortByName` → `SetInvalidURLParam("sort")`. So `?sort=`
+/// and an absent `sort` are the same request, `?sort=name` orders by name, and everything else —
+/// `Name`, `NAME`, `created_at` — is a 400. The comparison is case-sensitive.
+///
+/// Absent ordering is not a stable order: Go emits **no `ORDER BY` at all** for the default
+/// case, so two servers reading the same table can legitimately disagree about row order. The
+/// parity suite compares the unsorted page as a set and the sorted page byte for byte.
+///
+/// # Pagination is `web.ParamsFromRequest`'s, and it never 400s
+///
+/// `page` defaults to 0 and `per_page` to 60, both clamped rather than rejected — garbage falls
+/// to the default and `per_page` above 200 is capped. `?per_page=0` survives to the store as
+/// `LIMIT 0` and answers `[]`, which is the one place this route differs from the channel and
+/// post lists, where a zero limit means *no limit*.
+///
+/// # Wire format
+///
+/// `json.NewEncoder(w).Encode(listEmoji)` — **trailing newline** ([D-086]). The empty answer is
+/// `[]` and not `null`: Go's store initialises `emojis := []*model.Emoji{}` before the scan, the
+/// opposite of the nil `getReactions` and `getFileInfosForPost` return.
+#[tracing::instrument(skip_all, fields(page, per_page, sort))]
+pub async fn get_emoji_list(
+    State(state): State<AppState>,
+    session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    let _ = session;
+    let query = request.uri().query().map(str::to_owned);
+
+    match serve_emoji_list(&state, query.as_deref()).await {
+        Ok(response) => response,
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn serve_emoji_list(state: &AppState, query: Option<&str>) -> Result<Response, ApiError> {
+    custom_emoji_enabled(state, "getEmoji")?;
+
+    // `where` is `getEmoji`, not `getEmojiList` — Go's own copy-paste (api4/emoji.go:118), and
+    // `AppError.Where` is `json:"-"` so nothing on the wire depends on it. Reproduced anyway;
+    // it is what a log reader matches on.
+    let sort = query_first(query, SORT_PARAM).unwrap_or_default();
+    if !sort.is_empty() && sort != EMOJI_SORT_BY_NAME {
+        return Err(ApiError::invalid_url_param(SORT_PARAM));
+    }
+
+    let page = parse_page(query);
+    let per_page = parse_per_page(query);
+    tracing::Span::current().record("page", page);
+    tracing::Span::current().record("per_page", per_page);
+    tracing::Span::current().record("sort", sort.as_str());
+
+    let emojis = state
+        .app
+        .get_emoji_list(page, per_page, sort == EMOJI_SORT_BY_NAME)
+        .await?;
+
+    let mut body = serde_json::to_vec(&emojis).map_err(|err| {
+        tracing::error!(error = %err, "failed to serialise the emoji list");
+        ApiError::from(AppError::new(
+            "getEmojiList",
             "api.marshal_error",
             None,
             String::new(),

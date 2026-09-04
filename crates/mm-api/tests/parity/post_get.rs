@@ -29,8 +29,8 @@ use crate::common;
 use common::{
     GO, RUST, TINY_PNG, add_user_to_channel, assert_error_bodies_match_except_known_gaps, client,
     create_channel, create_custom_emoji, create_plain_user, delete_custom_emoji, delete_plain_user,
-    fetch_both_raw, fetch_both_stable, go_minted_token, logged_in_user_id, post_message,
-    purge_api_fixtures, stack_enabled,
+    delete_post, fetch_both_raw, fetch_both_stable, go_minted_token, logged_in_user_id,
+    post_message, purge_api_fixtures, stack_enabled,
 };
 
 /// The two custom emoji the rich-post case needs, named **uniquely per run** — see
@@ -352,20 +352,6 @@ async fn revive_file_infos_after_post_delete(post_id: &str) -> bool {
         .await
         .expect("the file infos are revived");
     true
-}
-
-async fn delete_post(client: &reqwest::Client, token: &str, post_id: &str) {
-    let response = client
-        .delete(format!("{GO}/api/v4/posts/{post_id}"))
-        .header("Authorization", format!("Bearer {token}"))
-        .send()
-        .await
-        .expect("Go answers");
-    assert!(
-        response.status().is_success(),
-        "deleting the fixture post failed: {}",
-        response.text().await.unwrap_or_default()
-    );
 }
 
 /// Assert the Rust server **forwarded** this path, and that what came back still matches Go.
