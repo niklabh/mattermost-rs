@@ -197,6 +197,13 @@ pub trait ChannelStore {
         include_deleted: bool,
     ) -> impl std::future::Future<Output = Result<Channel, StoreError>> + Send;
 
+    /// Port of `SqlChannelStore.GetMany` (channel_store.go:1043): [`ChannelStore::get`]'s
+    /// query with an id **list**, and the same `ErrNotFound` when nothing matches.
+    fn get_many(
+        &self,
+        ids: &[String],
+    ) -> impl std::future::Future<Output = Result<Vec<Channel>, StoreError>> + Send;
+
     /// Port of `SqlChannelStore.GetChannels` (channel_store.go:1208): the channels of one user
     /// in one team, display-name order, `ErrNotFound` when there are none.
     fn get_channels(
@@ -362,6 +369,11 @@ impl ChannelStore for SqlChannelStore {
     #[tracing::instrument(skip_all, fields(channel_id = %id, found))]
     async fn get(&self, id: &str) -> Result<Channel, StoreError> {
         get(&self.pool, id).await
+    }
+
+    #[tracing::instrument(skip_all, fields(asked = ids.len(), found))]
+    async fn get_many(&self, ids: &[String]) -> Result<Vec<Channel>, StoreError> {
+        get_many(&self.pool, ids).await
     }
 
     #[tracing::instrument(skip_all, fields(post_id = %post_id, found))]
@@ -1280,6 +1292,80 @@ pub async fn get(pool: &PgPool, id: &str) -> Result<Channel, StoreError> {
     tracing::Span::current().record("found", true);
 
     channel_from_row(row)
+}
+
+/// Port of `SqlChannelStore.GetMany` (channel_store.go:1043).
+///
+/// Column for column the same query as [`get`] — including both `AccessControlPolicies`
+/// subqueries and the `Type IN (O, P, D, G)` filter that makes this "the *message* channels with
+/// these ids" rather than "the channels" — with `Id = ANY(...)` in place of `Id = ?`.
+///
+/// **Zero rows is `ErrNotFound`, not an empty list** (channel_store.go:1062), and Go applies no
+/// `ORDER BY`. Its only ported caller, `App::get_posts_by_ids`, builds an id-keyed map from the
+/// result, so heap order is not wire surface there; do not assume that for the next caller.
+///
+/// `allowFromCache` is dropped, as everywhere else in this port — there is no cache layer to
+/// consult, and a parameter no caller can act on is a lie at the call site.
+#[tracing::instrument(skip(pool, ids), fields(asked = ids.len(), found))]
+pub async fn get_many(pool: &PgPool, ids: &[String]) -> Result<Vec<Channel>, StoreError> {
+    let rows = sqlx::query_as!(
+        ChannelRow,
+        r#"
+        SELECT c.id,
+               c.createat,
+               c.updateat,
+               c.deleteat,
+               c.teamid,
+               c.type::text AS "channel_type!",
+               c.displayname,
+               c.name,
+               c.header,
+               c.purpose,
+               c.lastpostat,
+               c.totalmsgcount,
+               c.extraupdateat,
+               c.creatorid,
+               c.schemeid,
+               c.groupconstrained,
+               c.autotranslation,
+               c.shared,
+               c.totalmsgcountroot,
+               c.lastrootpostat,
+               c.bannerinfo,
+               c.defaultcategoryname,
+               c.discoverable,
+               EXISTS (
+                   SELECT 1 FROM accesscontrolpolicies acp
+                    WHERE acp.id = c.id AND acp.type = 'channel'
+               ) AS "policy_enforced!",
+               COALESCE((
+                   SELECT acp.active FROM accesscontrolpolicies acp
+                    WHERE acp.id = c.id AND acp.type = 'channel' AND acp.active = TRUE
+                    LIMIT 1
+               ), false) AS "policy_is_active!"
+          FROM channels c
+         WHERE c.id = ANY($1::text[])
+           AND c.type IN ('O', 'P', 'D', 'G')
+        "#,
+        ids
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: format!("failed to get channels with ids {ids:?}"),
+        source,
+    })?;
+
+    tracing::Span::current().record("found", rows.len());
+
+    if rows.is_empty() {
+        return Err(StoreError::NotFound {
+            entity: "Channel",
+            criteria: format!("ids={ids:?}"),
+        });
+    }
+
+    rows.into_iter().map(channel_from_row).collect()
 }
 
 /// Port of `SqlChannelStore.getByNames` (channel_store.go:1638) as its exported non-archived

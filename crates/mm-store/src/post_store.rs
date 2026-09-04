@@ -65,6 +65,12 @@ pub trait PostStore {
         incl_deleted: bool,
     ) -> impl std::future::Future<Output = Result<Post, StoreError>> + Send;
 
+    /// Port of `SqlPostStore.GetPostsByIds` (post_store.go:2592).
+    fn get_posts_by_ids(
+        &self,
+        post_ids: &[String],
+    ) -> impl std::future::Future<Output = Result<Vec<Post>, StoreError>> + Send;
+
     /// Port of `SqlPostPriorityStore.GetForPostWithContext` (post_priority_store.go:29).
     fn get_priority_for_post(
         &self,
@@ -1204,6 +1210,82 @@ pub(crate) fn post_from_row(row: PostRow) -> Result<Post, StoreError> {
 }
 
 impl PostStore for SqlPostStore {
+    /// Port of `SqlPostStore.GetPostsByIds` (post_store.go:2592).
+    ///
+    /// # There is no `DeleteAt` filter
+    ///
+    /// The only predicate is `p.Id IN (…)`. Every other multi-post read in this store excludes
+    /// soft-deleted rows; this one does not, so `POST /api/v4/posts/ids` returns a deleted post
+    /// with its `delete_at` set and its message intact. That is Go's answer, verified against the
+    /// running server, and it is the single most surprising thing about the route.
+    ///
+    /// # `ReplyCount` is correlated, not a CTE
+    ///
+    /// `[`Self::get_thread_replies`]` computes one count for the whole thread; this computes one
+    /// per row, resolving each post's own thread root first — `CASE WHEN p.RootId = '' THEN p.Id
+    /// ELSE p.RootId END` — so a root reports its replies and a reply reports its parent's. The
+    /// inner count *does* exclude deleted replies even though the outer query does not exclude
+    /// deleted posts.
+    ///
+    /// # Zero rows is `ErrNotFound`
+    ///
+    /// Not an empty list (post_store.go:2604). The app layer turns it into a **404**, so a body
+    /// naming only ids that exist nowhere is `app.post.get.app_error` rather than `[]`. An empty
+    /// id list would reach the same place — squirrel renders `IN ()` as `(1=0)` here rather than
+    /// as the syntax error `constructArrayArgs` produces elsewhere — but the handler's own
+    /// `len == 0` check answers 400 first, so that path is unreachable from the wire.
+    #[tracing::instrument(skip(self, post_ids), fields(asked = post_ids.len(), found))]
+    async fn get_posts_by_ids(&self, post_ids: &[String]) -> Result<Vec<Post>, StoreError> {
+        let rows = sqlx::query_as!(
+            PostRow,
+            r#"
+            SELECT p.id,
+                   p.createat     AS "create_at!",
+                   p.updateat     AS "update_at!",
+                   p.editat       AS "edit_at!",
+                   p.deleteat     AS "delete_at!",
+                   p.ispinned     AS "is_pinned!",
+                   p.userid       AS "user_id!",
+                   p.channelid    AS "channel_id!",
+                   p.rootid       AS "root_id!",
+                   p.originalid   AS "original_id!",
+                   p.message      AS "message!",
+                   p.type         AS "post_type!",
+                   p.props        AS "props?",
+                   p.hashtags     AS "hashtags!",
+                   p.filenames    AS "filenames?",
+                   p.fileids      AS "file_ids?",
+                   p.hasreactions AS "has_reactions!",
+                   p.remoteid     AS "remote_id?",
+                   (SELECT count(*)
+                      FROM posts r
+                     WHERE r.rootid = (CASE WHEN p.rootid = '' THEN p.id ELSE p.rootid END)
+                       AND r.deleteat = 0) AS "reply_count!"
+              FROM posts p
+             WHERE p.id = ANY($1::text[])
+             ORDER BY p.createat DESC
+            "#,
+            post_ids
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to find Posts".to_owned(),
+            source,
+        })?;
+
+        tracing::Span::current().record("found", rows.len());
+
+        if rows.is_empty() {
+            return Err(StoreError::NotFound {
+                entity: "Post",
+                criteria: format!("postIds={post_ids:?}"),
+            });
+        }
+
+        rows.into_iter().map(post_from_row).collect()
+    }
+
     #[tracing::instrument(skip(self), fields(post_id = %id, incl_deleted))]
     async fn get_single(&self, id: &str, incl_deleted: bool) -> Result<Post, StoreError> {
         // Go appends `AND Posts.DeleteAt = 0` to the builder only when `!inclDeleted`. A

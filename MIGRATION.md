@@ -5295,3 +5295,38 @@ Mutation run: **14 run, 12 caught, 2 controls survived, 0 harness faults**
 `WHERE postid = ANY($1::text[])`: the two queries in `reaction_store.rs` have byte-identical
 SELECT lists and differ only in their WHERE, so any anchor inside the column list alone is
 ambiguous and would mutate whichever query comes first.
+
+## `POST /api/v4/posts/ids` — `getPostsByIds` (2026-09-04)
+
+Served. `crates/mm-api/src/posts.rs` (`get_posts_by_ids`, `parse_post_ids`),
+`crates/mm-app/src/post.rs` (`get_posts_by_ids`), `crates/mm-app/src/channel.rs`
+(`get_channels`), `crates/mm-store/src/post_store.rs` (`get_posts_by_ids`),
+`crates/mm-store/src/channel_store.rs` (`get_many`); 14 parity tests in
+`crates/mm-api/tests/parity/posts_by_ids.rs` plus 3 unit tests. The webapp calls this to hydrate
+permalinks, search hits and thread roots.
+
+**The one thing a reader would otherwise get wrong: this query has no `DeleteAt` filter.** Every
+other multi-post read in the store excludes soft-deleted rows; `GetPostsByIds`'s only predicate is
+`p.Id IN (…)`, so a deleted post is served with its `delete_at` set and its message already
+blanked by the delete. Two more that are close behind: an all-unknown id list is a **404**
+(`ErrNotFound` for zero rows) while a list with one known id among unknowns is a 200 that mentions
+the misses nowhere; and an unreadable post is **dropped silently**, where the neighbouring
+`POST /posts/ids/reactions` refuses the whole request with a 403.
+
+`StripActionIntegrations` is ported but currently unreachable: the only posts with an integration
+to strip carry an `attachments` prop, which `REFUSED_PROPS` forwards to Go before the strip runs.
+Kept, and documented at the call site, because narrowing that refusal set without it would start
+leaking `integration` blocks. `First-Inaccessible-Post-Time` is set on every 200 and is always
+`0` without a Cloud `PostHistory` licence — measured, not assumed.
+
+### A survivor the parity suite could not have caught
+
+`ApiError::invalid_param("post_ids")` → `"post_id"` survived the first run, and no fixture could
+have fixed it: the parameter reaches a client only through the translated `message`, and this port
+serves the raw error id instead ([D-092]), so both spellings are byte-identical on the wire. The
+fix was to extract `parse_post_ids` and assert the `Name` param in a unit test — which is also
+where the 1000-id cap's off-by-one and the de-duplication-before-counting rule are now pinned.
+That mutation's plan line runs against the `unit` suite for the same reason.
+
+Mutation run: **17 run, 15 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/posts-by-ids.plan`).

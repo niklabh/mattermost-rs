@@ -550,6 +550,49 @@ impl App {
         Ok(channels)
     }
 
+    /// Port of `app.App.GetChannels` (channel.go:2289) — the plural of `GetChannel`, over an
+    /// id list.
+    ///
+    /// Both error ids say **`GetChannel`**, singular, in the `where` field: Go passes the
+    /// singular name to `NewAppError` in the plural function. Kept, because `where` is the one
+    /// field of an `AppError` a client can see change without a translation file.
+    ///
+    /// `HydrateChannelsPolicyActions` is not ported. It fills `PolicyActions` on channels whose
+    /// `PolicyEnforced` is true, and Go *logs and continues* when it fails rather than
+    /// propagating — so its absence changes one unselected field on a channel this deployment
+    /// cannot create, and never changes the status.
+    #[tracing::instrument(skip_all, fields(asked = channel_ids.len(), count))]
+    pub async fn get_channels(&self, channel_ids: &[String]) -> AppResult<Vec<Channel>> {
+        let channels = self
+            .store()
+            .channel()
+            .get_many(channel_ids)
+            .await
+            .map_err(|err| {
+                let not_found = err.is_not_found();
+                tracing::error!(error = %err, "channels-by-ids lookup failed");
+                if not_found {
+                    AppError::boxed(
+                        "GetChannel",
+                        "app.channel.get.existing.app_error",
+                        None,
+                        String::new(),
+                        404,
+                    )
+                } else {
+                    AppError::boxed(
+                        "GetChannel",
+                        "app.channel.get.find.app_error",
+                        None,
+                        String::new(),
+                        500,
+                    )
+                }
+            })?;
+        tracing::Span::current().record("count", channels.len());
+        Ok(channels)
+    }
+
     /// Port of `app.App.GetPublicChannelsByIdsForTeam` (channel.go:2511).
     ///
     /// **The one two-branch member of this family.** Its siblings map every store failure to a

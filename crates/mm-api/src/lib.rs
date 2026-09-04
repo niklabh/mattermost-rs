@@ -508,6 +508,15 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/posts/{post_id}",
             partially_migrated_with_ids(&state, get(posts::get_post)),
         )
+        // `BaseRoutes.Posts.Handle("/ids")` (api4/post.go:28). The literal `ids` sits where
+        // `{post_id}` sits above; axum prefers the literal. Nothing that used to be answered
+        // stops being answered — the route above enforces exact-26-character ids and `ids` is
+        // three characters, so this path was forwarded, not served. POST-only, which is all Go
+        // registers here; `/posts/ephemeral` is a sibling this router still leaves to Go.
+        .route(
+            "/api/v4/posts/ids",
+            partially_migrated(post(posts::get_posts_by_ids)),
+        )
         // `BaseRoutes.Post.Handle("/thread")` (api4/post.go:31) — one segment deeper than the
         // route above, so neither shadows the other. Its literal siblings under `{post_id}`
         // (`/edit_history`, `/info`, `/files/info`, `/reveal`, `/patch`, `/pin`, …) are not

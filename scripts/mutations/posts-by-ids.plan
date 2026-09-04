@@ -1,0 +1,38 @@
+# Mutation plan for POST /api/v4/posts/ids (getPostsByIds).
+#
+#   scripts/mutate-batch.sh scripts/mutations/posts-by-ids.plan
+#
+# Tab-separated: name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter.  `\n` becomes a newline.
+#
+# post_store.rs holds several `= ANY($1::text[])` queries and several `ORDER BY p.createat`
+# clauses, so every anchor here carries enough of its own query to be unambiguous.
+#
+# `strip_action_integrations` is NOT mutated: `attachments` is in REFUSED_PROPS, so every post
+# that has an integration to strip is forwarded before reaching that line. See the handler.
+#
+# `api-empty-param-name` runs against the **unit** suite, not the parity one. The parameter it
+# changes reaches the client only through the i18n message, and this port serves the raw error id
+# instead ([D-092]) — so both spellings are byte-identical on the wire and the parity suite is
+# blind to them. It survived the first run for exactly that reason, and the fix was a unit test
+# in posts.rs that asserts the `Name` param directly.
+#
+# The last two lines are the no-op controls and must SURVIVE.
+store-wrong-column	crates/mm-store/src/post_store.rs	  FROM posts p\n             WHERE p.id = ANY($1::text[])\n             ORDER BY p.createat DESC	  FROM posts p\n             WHERE p.userid = ANY($1::text[])\n             ORDER BY p.createat DESC	api	posts_by_ids
+store-order-direction	crates/mm-store/src/post_store.rs	  FROM posts p\n             WHERE p.id = ANY($1::text[])\n             ORDER BY p.createat DESC	  FROM posts p\n             WHERE p.id = ANY($1::text[])\n             ORDER BY p.createat ASC	api	posts_by_ids
+store-adds-a-deleteat-filter	crates/mm-store/src/post_store.rs	  FROM posts p\n             WHERE p.id = ANY($1::text[])\n             ORDER BY p.createat DESC	  FROM posts p\n             WHERE p.id = ANY($1::text[])\n               AND p.deleteat = 0\n             ORDER BY p.createat DESC	api	posts_by_ids
+store-replycount-no-root-case	crates/mm-store/src/post_store.rs	(SELECT count(*)\n                      FROM posts r\n                     WHERE r.rootid = (CASE WHEN p.rootid = '' THEN p.id ELSE p.rootid END)\n                       AND r.deleteat = 0)	(SELECT count(*)\n                      FROM posts r\n                     WHERE r.rootid = p.id\n                       AND r.deleteat = 0)	api	posts_by_ids
+store-replycount-counts-deleted	crates/mm-store/src/post_store.rs	(SELECT count(*)\n                      FROM posts r\n                     WHERE r.rootid = (CASE WHEN p.rootid = '' THEN p.id ELSE p.rootid END)\n                       AND r.deleteat = 0)	(SELECT count(*)\n                      FROM posts r\n                     WHERE r.rootid = (CASE WHEN p.rootid = '' THEN p.id ELSE p.rootid END)\n                       AND r.deleteat >= 0)	api	posts_by_ids
+store-empty-is-not-notfound	crates/mm-store/src/post_store.rs	if rows.is_empty() {\n            return Err(StoreError::NotFound {\n                entity: "Post",	if false {\n            return Err(StoreError::NotFound {\n                entity: "Post",	api	posts_by_ids
+channel-getmany-wrong-column	crates/mm-store/src/channel_store.rs	  FROM channels c\n         WHERE c.id = ANY($1::text[])	  FROM channels c\n         WHERE c.teamid = ANY($1::text[])	api	posts_by_ids
+app-notfound-status	crates/mm-app/src/post.rs	AppError::boxed(\n                        "GetPostsByIds",\n                        "app.post.get.app_error",\n                        None,\n                        String::new(),\n                        404,	AppError::boxed(\n                        "GetPostsByIds",\n                        "app.post.get.app_error",\n                        None,\n                        String::new(),\n                        500,	api	posts_by_ids
+app-inaccessible-time	crates/mm-app/src/post.rs	Ok((posts, 0))	Ok((posts, 1))	api	posts_by_ids
+api-empty-check	crates/mm-api/src/posts.rs	if post_ids.is_empty() {\n        return Err(ApiError::invalid_param("post_ids"));	if false {\n        return Err(ApiError::invalid_param("post_ids"));	api	posts_by_ids
+api-empty-param-name	crates/mm-api/src/posts.rs	ApiError::invalid_param("post_ids")	ApiError::invalid_param("post_id")	unit	posts_by_ids_tests
+api-cap-off-by-one	crates/mm-api/src/posts.rs	if post_ids.len() > POSTS_BY_IDS_MAX {	if post_ids.len() >= POSTS_BY_IDS_MAX {	api	posts_by_ids
+api-permission-gate	crates/mm-api/src/posts.rs	if !has_permission {\n            continue;\n        }	if false {\n            continue;\n        }	api	posts_by_ids
+api-serialiser-escaping	crates/mm-api/src/posts.rs	let encoded = match go_json_marshal(&posts) {	let encoded = match serde_json::to_string(&posts) {	api	posts_by_ids
+api-trailing-newline	crates/mm-api/src/posts.rs	let mut body = encoded.into_bytes();\n    body.push(b'\\n');	let mut body = encoded.into_bytes();\n    body.truncate(body.len());	api	posts_by_ids
+#
+# --- no-op controls: these must SURVIVE ---
+control-rename-binding	crates/mm-api/src/posts.rs	Err(err) => {\n            tracing::warn!(error = %err, "could not read the request body");\n            return posts_by_ids_parse_error().into_response();	Err(cause) => {\n            tracing::warn!(error = %cause, "could not read the request body");\n            return posts_by_ids_parse_error().into_response();	api	posts_by_ids
+control-reorder-predicates	crates/mm-store/src/post_store.rs	(SELECT count(*)\n                      FROM posts r\n                     WHERE r.rootid = (CASE WHEN p.rootid = '' THEN p.id ELSE p.rootid END)\n                       AND r.deleteat = 0)	(SELECT count(*)\n                      FROM posts r\n                     WHERE r.deleteat = 0\n                       AND r.rootid = (CASE WHEN p.rootid = '' THEN p.id ELSE p.rootid END))	api	posts_by_ids
