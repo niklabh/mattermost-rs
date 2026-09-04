@@ -508,13 +508,13 @@ pub async fn view_channel(client: &reqwest::Client, token: &str, channel_id: &st
 /// Set one `ChannelMembers` column to SQL NULL, straight through the shared database.
 ///
 /// Reserved for the columns Go's queries `COALESCE`: nothing in the REST API can produce a NULL
-/// `UrgentMentionCount`, so the only way to exercise the coalesce — and to catch its removal — is
-/// to write the NULL directly. Returns `false` when `DATABASE_URL` is unset, so the caller can
-/// skip rather than fail.
+/// `UrgentMentionCount` or `LastViewedAt`, so the only way to exercise the coalesce — and to catch
+/// its removal — is to write the NULL directly. Returns `false` when `DATABASE_URL` is unset, so
+/// the caller can skip rather than fail.
 pub async fn null_out_member_column(channel_id: &str, user_id: &str, column: &str) -> bool {
-    assert_eq!(
-        column, "urgentmentioncount",
-        "only the coalesced column is allowed here; widening this needs a reason"
+    assert!(
+        matches!(column, "urgentmentioncount" | "lastviewedat"),
+        "only the coalesced columns are allowed here; widening this needs a reason"
     );
     let Ok(url) = std::env::var("DATABASE_URL") else {
         return false;
@@ -526,14 +526,16 @@ pub async fn null_out_member_column(channel_id: &str, user_id: &str, column: &st
     else {
         return false;
     };
-    sqlx::query(
-        "UPDATE channelmembers SET urgentmentioncount = NULL WHERE channelid = $1 AND userid = $2",
-    )
-    .bind(channel_id)
-    .bind(user_id)
-    .execute(&pool)
-    .await
-    .expect("the fixture member's column is nulled");
+    // The column name is from the closed set asserted above, so the format is not an injection
+    // point; the two ids are bound.
+    let statement =
+        format!("UPDATE channelmembers SET {column} = NULL WHERE channelid = $1 AND userid = $2");
+    sqlx::query(&statement)
+        .bind(channel_id)
+        .bind(user_id)
+        .execute(&pool)
+        .await
+        .expect("the fixture member's column is nulled");
     true
 }
 
@@ -1051,4 +1053,197 @@ pub async fn delete_post(client: &reqwest::Client, token: &str, post_id: &str) {
         "deleting {post_id} failed: {}",
         response.text().await.unwrap_or_default()
     );
+}
+
+/// Set a user's timezone through Go's `PUT /users/{id}/patch`.
+///
+/// `use_automatic` is the string `"true"`/`"false"` Go stores, not a bool: `Timezone` is a
+/// `model.StringMap`, and `GetPreferredTimezone` compares it against the literal `"true"`.
+pub async fn patch_user_timezone(
+    client: &reqwest::Client,
+    token: &str,
+    user_id: &str,
+    use_automatic: &str,
+    automatic: &str,
+    manual: &str,
+) {
+    let response = client
+        .put(format!("{GO}/api/v4/users/{user_id}/patch"))
+        .header("Authorization", format!("Bearer {token}"))
+        .json(&serde_json::json!({
+            "timezone": {
+                "useAutomaticTimezone": use_automatic,
+                "automaticTimezone": automatic,
+                "manualTimezone": manual,
+            }
+        }))
+        .send()
+        .await
+        .expect("Go answers");
+    assert!(
+        response.status().is_success(),
+        "setting {user_id}'s timezone failed: {}",
+        response.text().await.unwrap_or_default()
+    );
+}
+
+/// Edit a post through Go's `PUT /posts/{id}`, which is what writes an edit-history row.
+///
+/// Go stores the **old** version as a new row carrying `OriginalId = <the live post's id>`, so
+/// each call adds one entry to the history rather than replacing it.
+pub async fn update_post(client: &reqwest::Client, token: &str, post_id: &str, message: &str) {
+    let response = client
+        .put(format!("{GO}/api/v4/posts/{post_id}"))
+        .header("Authorization", format!("Bearer {token}"))
+        .json(&serde_json::json!({ "id": post_id, "message": message }))
+        .send()
+        .await
+        .expect("Go answers");
+    assert!(
+        response.status().is_success(),
+        "editing {post_id} failed: {}",
+        response.text().await.unwrap_or_default()
+    );
+}
+
+/// Plant a `UserTermsOfService` row straight into the shared database — Team Edition cannot
+/// author a terms of service over REST, so this is the only way to make the branch's found case
+/// reachable. Both servers read the same row; `purge_api_fixtures` clears it with its user.
+///
+/// Lives here rather than in one suite because two of them need it — `user_get`, which reads the
+/// row through a user body, and `user_terms_of_service`, which reads it through its own route.
+pub async fn plant_terms_of_service_row(user_id: &str, tos_id: &str) -> bool {
+    let Ok(url) = std::env::var("DATABASE_URL") else {
+        return false;
+    };
+    let Ok(pool) = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&url)
+        .await
+    else {
+        return false;
+    };
+    sqlx::query(
+        "INSERT INTO usertermsofservice (userid, termsofserviceid, createat)
+         VALUES ($1, $2, 1700000000000)
+         ON CONFLICT (userid) DO UPDATE SET termsofserviceid = $2, createat = 1700000000000",
+    )
+    .bind(user_id)
+    .bind(tos_id)
+    .execute(&pool)
+    .await
+    .expect("plants the terms-of-service row");
+    true
+}
+
+/// Count the users `/api/v4/users/stats` claims to count, straight from the shared database.
+///
+/// An independent oracle for the route's two predicates: `DeleteAt = 0` and the nullable-or-empty
+/// `RemoteId`. Deliberately **not** an anti-join against `Bots` — `IncludeBotAccounts` is `true`
+/// at the one call site, so a bot is a user for this purpose, and asserting that against a query
+/// written the other way is how the flag gets tested at all.
+///
+/// Returns `None` when `DATABASE_URL` is unset, so the caller can skip rather than fail.
+pub async fn count_countable_users() -> Option<i64> {
+    let url = std::env::var("DATABASE_URL").ok()?;
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&url)
+        .await
+        .ok()?;
+    sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM users WHERE deleteat = 0 AND (remoteid = '' OR remoteid IS NULL)",
+    )
+    .fetch_one(&pool)
+    .await
+    .ok()
+}
+
+/// Overwrite one user's `Roles` column directly.
+///
+/// The only way to reach a code path gated on **not** holding a permission every real account
+/// has: `system_user` grants `view_members` outright, so `GetViewUsersRestrictions` returns nil
+/// for everybody a REST call can create. Writing a role name that no `Roles` row defines makes
+/// `RolesGrantPermission` answer false for that one account and nothing else.
+///
+/// Per-user by construction, so it cannot disturb a concurrently running suite — unlike editing
+/// the `system_user` role itself, which is global and would.
+pub async fn set_user_roles(user_id: &str, roles: &str) -> bool {
+    let Ok(url) = std::env::var("DATABASE_URL") else {
+        return false;
+    };
+    let Ok(pool) = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&url)
+        .await
+    else {
+        return false;
+    };
+    sqlx::query("UPDATE users SET roles = $2 WHERE id = $1")
+        .bind(user_id)
+        .bind(roles)
+        .execute(&pool)
+        .await
+        .expect("the fixture user's roles are written");
+    true
+}
+
+/// Create an open team through Go's API and return its id.
+///
+/// The three suites that needed one each carried their own byte-identical copy of this; it moved
+/// here when a fourth wanted it. A team of its own is what a fixture reaches for when the shared
+/// one is too crowded to prove a negative — joining a team auto-joins `town-square`, so every
+/// member of the shared fixture team already shares a channel with every other.
+///
+/// The `mmrs-parity-` prefix is what `purge_api_fixtures` collects on. Note [D-155]: the
+/// `town-square` and `off-topic` Go creates alongside carry no prefix and are orphaned rather
+/// than deleted.
+pub async fn create_team(client: &reqwest::Client, admin_token: &str, tag: &str) -> String {
+    let response = client
+        .post(format!("{GO}/api/v4/teams"))
+        .header("Authorization", format!("Bearer {admin_token}"))
+        .json(&serde_json::json!({
+            "name": format!("mmrs-parity-{tag}"),
+            "display_name": format!("mmrs parity {tag}"),
+            "type": "O",
+        }))
+        .send()
+        .await
+        .expect("Go answers");
+    assert!(
+        response.status().is_success(),
+        "creating the fixture team failed: {}",
+        response.text().await.unwrap_or_default()
+    );
+    let created: serde_json::Value = response.json().await.expect("the team decodes");
+    created["id"].as_str().expect("an id").to_owned()
+}
+
+/// Open a direct-message channel between two users and return its id.
+///
+/// A DM is a channel like any other for membership purposes, and it needs **no team** — which is
+/// what makes it the way to give two users in different teams exactly one thing in common.
+/// `users_known` relies on that: a team cannot be joined without also joining its `town-square`,
+/// and Go refuses to remove anyone from a default channel, so "these two share nothing" is only
+/// arrangeable across teams.
+pub async fn create_direct_channel(
+    client: &reqwest::Client,
+    token: &str,
+    user_a: &str,
+    user_b: &str,
+) -> String {
+    let response = client
+        .post(format!("{GO}/api/v4/channels/direct"))
+        .header("Authorization", format!("Bearer {token}"))
+        .json(&serde_json::json!([user_a, user_b]))
+        .send()
+        .await
+        .expect("Go answers");
+    assert!(
+        response.status().is_success(),
+        "opening a direct channel between {user_a} and {user_b} failed: {}",
+        response.text().await.unwrap_or_default()
+    );
+    let created: serde_json::Value = response.json().await.expect("the channel decodes");
+    created["id"].as_str().expect("an id").to_owned()
 }

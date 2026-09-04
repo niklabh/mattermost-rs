@@ -294,6 +294,29 @@ pub trait ChannelStore {
         user_id: &str,
     ) -> impl std::future::Future<Output = Result<Vec<ChannelMember>, StoreError>> + Send;
 
+    /// Port of `SqlChannelStore.GetMemberLastViewedAt` (channel_store.go:2462).
+    ///
+    /// A single scalar rather than [`ChannelStore::get_member`], because Go reads it that way and
+    /// the difference is observable: `GetMember` computes scheme roles through two joins and
+    /// raises `MissingChannelMemberError` for a missing row, while this reads one `COALESCE`d
+    /// column and raises `LastViewedAt` not-found. The app layers above them report **different
+    /// error ids** as a result.
+    fn get_member_last_viewed_at(
+        &self,
+        channel_id: &str,
+        user_id: &str,
+    ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
+
+    /// Port of `SqlChannelStore.GetChannelMembersTimezones` (channel_store.go:2214).
+    ///
+    /// Returns the raw `Users.Timezone` maps, one per member row, **unfiltered and
+    /// undeduplicated** — the app layer does both. A `LEFT JOIN`, so a membership whose user row
+    /// is gone contributes a NULL that becomes an empty map here.
+    fn get_channel_members_timezones(
+        &self,
+        channel_id: &str,
+    ) -> impl std::future::Future<Output = Result<Vec<StringMap>, StoreError>> + Send;
+
     /// Port of `SqlChannelStore.GetPinnedPosts` (channel_store.go:959).
     ///
     /// A `Posts` query living on the **channel** store, which is Go's placement and not an
@@ -490,6 +513,23 @@ impl ChannelStore for SqlChannelStore {
         user_id: &str,
     ) -> Result<Vec<ChannelMember>, StoreError> {
         get_members_for_user(&self.pool, team_id, user_id).await
+    }
+
+    #[tracing::instrument(skip_all, fields(channel_id = %channel_id, user_id = %user_id))]
+    async fn get_member_last_viewed_at(
+        &self,
+        channel_id: &str,
+        user_id: &str,
+    ) -> Result<i64, StoreError> {
+        get_member_last_viewed_at(&self.pool, channel_id, user_id).await
+    }
+
+    #[tracing::instrument(skip_all, fields(channel_id = %channel_id, count))]
+    async fn get_channel_members_timezones(
+        &self,
+        channel_id: &str,
+    ) -> Result<Vec<StringMap>, StoreError> {
+        get_channel_members_timezones(&self.pool, channel_id).await
     }
 
     #[tracing::instrument(skip_all, fields(channel_id = %channel_id, count))]
@@ -2155,6 +2195,109 @@ pub async fn get_file_count(pool: &PgPool, channel_id: &str) -> Result<i64, Stor
         context: format!("failed to count files with channelId={channel_id}"),
         source,
     })
+}
+
+/// Port of `SqlChannelStore.GetMemberLastViewedAt` (channel_store.go:2462).
+///
+/// `COALESCE(LastViewedAt, 0)` is Go's, and the column really is nullable. The zero it produces
+/// is **not** distinguishable from a member who has genuinely never viewed the channel, and
+/// `GetPostsForChannelAroundLastUnread` treats both as "nothing is unread" and answers an empty
+/// list — so a NULL here is a silently empty response rather than an error.
+///
+/// No row at all is a different thing entirely: `ErrNotFound`, which the app layer turns into a
+/// **404** `api.channel.get_channel_member.missing.app_error`.
+pub async fn get_member_last_viewed_at(
+    pool: &PgPool,
+    channel_id: &str,
+    user_id: &str,
+) -> Result<i64, StoreError> {
+    sqlx::query_scalar!(
+        r#"
+        SELECT COALESCE(channelmembers.lastviewedat, 0) AS "last_viewed_at!"
+          FROM channelmembers
+         WHERE channelmembers.channelid = $1
+           AND channelmembers.userid = $2
+        "#,
+        channel_id,
+        user_id
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: format!(
+            "failed to get lastViewedAt with channelId={channel_id} and userId={user_id}"
+        ),
+        source,
+    })?
+    .ok_or_else(|| StoreError::NotFound {
+        entity: "LastViewedAt",
+        criteria: format!("channelId={channel_id}, userId={user_id}"),
+    })
+}
+
+/// Port of `SqlChannelStore.GetChannelMembersTimezones` (channel_store.go:2214).
+///
+/// # Every filter belongs to the app layer, and there is no `ORDER BY`
+///
+/// One row per membership, in whatever order the scan yields, including rows whose timezone is
+/// empty and rows that repeat a timezone another member already has. `App.GetChannelMembersTimezones`
+/// drops the empty ones and deduplicates what is left — which is why this returning a bag rather
+/// than a set is not sloppiness to tidy up here.
+///
+/// # The join is a `LEFT JOIN` and the column is nullable
+///
+/// A membership whose `Users` row has been hard-deleted contributes a NULL, and `StringMap.Scan`
+/// leaves the map at its zero value for one. That row then fails the app layer's
+/// empty-timezone test and is dropped, so it never reaches a client — but the query must not
+/// turn it into an error on the way.
+pub async fn get_channel_members_timezones(
+    pool: &PgPool,
+    channel_id: &str,
+) -> Result<Vec<StringMap>, StoreError> {
+    let rows = sqlx::query_scalar!(
+        r#"
+        SELECT users.timezone AS "timezone?"
+          FROM channelmembers
+          LEFT JOIN users ON channelmembers.userid = users.id
+         WHERE channelmembers.channelid = $1
+        "#,
+        channel_id
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: format!(
+            "failed to find user timezones for users in channels with channelId={channel_id}"
+        ),
+        source,
+    })?;
+
+    tracing::Span::current().record("count", rows.len());
+
+    rows.into_iter()
+        .map(|value| match value {
+            // `StringMap.Scan` returns early on a NULL, leaving the zero value.
+            None => Ok(StringMap::new()),
+            Some(serde_json::Value::Object(map)) => map
+                .into_iter()
+                .map(|(key, value)| match value {
+                    serde_json::Value::String(text) => Ok((key, text)),
+                    other => Err(StoreError::Decode {
+                        entity: "User",
+                        column: "timezone",
+                        source: serde::de::Error::custom(format!(
+                            "timezone value for {key} is {other}, not a string"
+                        )),
+                    }),
+                })
+                .collect(),
+            Some(other) => Err(StoreError::Decode {
+                entity: "User",
+                column: "timezone",
+                source: serde::de::Error::custom(format!("timezone is {other}, not an object")),
+            }),
+        })
+        .collect()
 }
 
 /// Port of `SqlChannelStore.GetPinnedPosts` (channel_store.go:959).

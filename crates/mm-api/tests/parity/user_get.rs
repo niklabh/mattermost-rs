@@ -16,36 +16,9 @@ use crate::common;
 
 use common::{
     GO, RUST, assert_error_bodies_match_except_known_gaps, client, create_plain_user,
-    delete_plain_user, fetch_both_raw, fetch_both_stable, go_minted_token, purge_api_fixtures,
-    stack_enabled,
+    delete_plain_user, fetch_both_raw, fetch_both_stable, go_minted_token,
+    plant_terms_of_service_row, purge_api_fixtures, stack_enabled,
 };
-
-/// Plant a `UserTermsOfService` row straight into the shared database — Team Edition cannot
-/// author a terms of service over REST, so this is the only way to make the branch's found case
-/// reachable. Both servers read the same row; `purge_api_fixtures` clears it with its user.
-async fn plant_terms_of_service_row(user_id: &str, tos_id: &str) -> bool {
-    let Ok(url) = std::env::var("DATABASE_URL") else {
-        return false;
-    };
-    let Ok(pool) = sqlx::postgres::PgPoolOptions::new()
-        .max_connections(1)
-        .connect(&url)
-        .await
-    else {
-        return false;
-    };
-    sqlx::query(
-        "INSERT INTO usertermsofservice (userid, termsofserviceid, createat)
-         VALUES ($1, $2, 1700000000000)
-         ON CONFLICT (userid) DO UPDATE SET termsofserviceid = $2, createat = 1700000000000",
-    )
-    .bind(user_id)
-    .bind(tos_id)
-    .execute(&pool)
-    .await
-    .expect("plants the terms-of-service row");
-    true
-}
 
 /// D-087, applied to this suite: Go answers user bodies from a cache that a login's `UpdateAt`
 /// bump does not refresh, so the two servers *stably* disagree on that one field whenever a
@@ -324,10 +297,13 @@ async fn literal_siblings_and_non_id_segments_are_forwarded_to_gos_own_answers()
     let client = client();
     let token = go_minted_token(&client).await;
 
-    // `stats` and `tokens` are real Go handlers; `abc` is Go's own invalid-id 400. All three are
-    // alphanumeric, so the charset middleware passes them; the serve-only-exact-ids rule is what
-    // forwards them.
-    for segment in ["stats", "tokens", "abc"] {
+    // `tokens` is a real Go handler; `abc` is Go's own invalid-id 400. Both are alphanumeric, so
+    // the charset middleware passes them; the serve-only-exact-ids rule is what forwards them.
+    //
+    // `stats` was in this list until it was migrated on 2026-09-04 — `parity/users_stats.rs`
+    // owns it now, and `known` beside it. The list keeps two entries so it still asserts that a
+    // literal sibling reaches Go rather than `getUser`.
+    for segment in ["tokens", "abc"] {
         let path = format!("/api/v4/users/{segment}");
         let ours = client
             .get(format!("{RUST}{path}"))

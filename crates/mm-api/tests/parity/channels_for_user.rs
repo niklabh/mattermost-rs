@@ -400,7 +400,24 @@ async fn include_deleted_and_last_delete_at_filter_channels_and_their_teams() {
     purge_api_fixtures().await;
 
     let client = client();
-    let token = go_minted_token(&client).await;
+    let admin_token = go_minted_token(&client).await;
+
+    // **A user of its own, and every fixture row created *by* it.** This test byte-compares
+    // `/users/me/channels`, and that list is shared: every `create_team` and `create_channel`
+    // anywhere in this binary joins the fixture admin to another channel, so the list is being
+    // rewritten while the comparison runs. It failed roughly one full-suite run in four — never
+    // in isolation — and no amount of retrying inside `fetch_both_stable` can settle a list that
+    // is genuinely still growing.
+    //
+    // A dedicated actor removes the concurrency instead of waiting it out: nothing else in the
+    // binary touches this user, so its channel list is quiescent by construction. Creating a
+    // team is a `system_user` permission and its creator becomes team admin, which is all the
+    // authority the archiving below needs.
+    let (shared_team_id, _) =
+        common::a_team_and_channel_the_user_is_in(&client, &admin_token).await;
+    let owner = create_plain_user(&client, &admin_token, &shared_team_id, "delall").await;
+    let token = owner.token;
+
     let team_id = create_team(&client, &token, "delallteam").await;
     let archived =
         create_named_channel(&client, &token, &team_id, "delallarch", "archived one", "O").await;
@@ -575,7 +592,10 @@ async fn deeper_sibling_routes_are_still_forwarded() {
     let token = go_minted_token(&client).await;
     let (_, channel_id) = common::a_team_and_channel_the_user_is_in(&client, &token).await;
 
-    for (suffix, expected_status) in [("/posts/unread", 200), ("", 404)] {
+    // `/posts/unread` was in this list until it was migrated on 2026-09-04; `parity/
+    // channel_posts_unread.rs` owns it now. What is left under `ChannelForUser` and still Go's is
+    // the bare `{channel_id}` path, which gorilla's prefix router 404s.
+    for (suffix, expected_status) in [("", 404)] {
         let path = format!("/api/v4/users/me/channels/{channel_id}{suffix}");
         let response = client
             .get(format!("{RUST}{path}"))

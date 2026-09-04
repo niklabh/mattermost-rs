@@ -1740,6 +1740,73 @@ async fn serve_pinned_posts(
     ))
 }
 
+/// Port of `getChannelMembersTimezones` (api4/channel.go:1893), reached as
+/// `GET /api/v4/channels/{channel_id}/timezones`.
+///
+/// # `read_channel`, and the channel is never fetched
+///
+/// `SessionHasPermissionToChannel` takes the channel **id**, so there is no `GetChannel` and no
+/// 404 from one: an unknown channel id is a **403**, because the permission check cannot find a
+/// membership for it and falls through. That is the opposite of `getPinnedPosts` two routes
+/// over, which fetches the channel first and 404s.
+///
+/// # `read_channel` refuses a non-member on a **public** channel, and its neighbours do not
+///
+/// The permission is `read_channel`, not the `read_channel_content` the post routes use, and the
+/// checker behind it is `SessionHasPermissionToChannel` rather than
+/// `HasPermissionToReadChannel`. The former falls back to the *team*, where `team_user` grants
+/// `read_public_channel` and **not** `read_channel`; the latter has an explicit open-channel
+/// fallback. So the same user, on the same public channel, is served `/pinned` and refused
+/// `/timezones`. Measured — the first version of the parity test assumed the fallback applied
+/// here too, and Go answered 403.
+///
+/// # Wire format
+///
+/// `w.Write([]byte(model.ArrayToJSON(...)))` — `json.Marshal` of a `[]string`, with **no
+/// trailing newline** and no `Content-Type` header of Go's own choosing. A nil slice marshals to
+/// `null`, and the app layer returns nil whenever no member has a timezone set — which, on a
+/// server where nobody has opened the timezone setting, is every channel.
+#[tracing::instrument(skip_all, fields(channel_id = %channel_id))]
+pub async fn get_channel_members_timezones(
+    State(state): State<AppState>,
+    Path(channel_id): Path<String>,
+    session: AuthenticatedSession,
+) -> Result<Response, ApiError> {
+    // `c.RequireChannelId()` (web/context.go:395).
+    require_id(&channel_id, "channel_id")?;
+
+    let (allowed, _is_member) = state
+        .app
+        .session_has_permission_to_channel(&session.0, &channel_id, &PERMISSION_READ_CHANNEL)
+        .await;
+    if !allowed {
+        return Err(ApiError::from(make_permission_error(
+            &session.0,
+            &[&PERMISSION_READ_CHANNEL],
+        )));
+    }
+
+    let timezones = state.app.get_channel_members_timezones(&channel_id).await?;
+
+    // `ArrayToJSON` of a **nil** slice is `null`; of an empty-but-allocated one it would be `[]`.
+    // The app layer never allocates, so the empty answer is four bytes.
+    let body = mm_model::utils::array_to_json(if timezones.is_empty() {
+        None
+    } else {
+        Some(&timezones)
+    });
+
+    Ok((
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
+    )
+        .into_response())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

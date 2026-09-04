@@ -1,0 +1,62 @@
+# getPostsForChannelAroundLastUnread + getEditHistoryForPost + getChannelMembersTimezones —
+# 2026-09-04. Every line is `api`: all three oracles are the cross-server comparison.
+#
+# Patterns were checked for the harness fault the reactions/emoji plan found — `mutate.sh`
+# replaces the FIRST occurrence, so a pattern that also appears in a doc comment rewrites prose
+# and is scored a survivor. Several of these needed multi-line anchors because the file now holds
+# four `ORDER BY p.createat DESC` and three `if !allowed {`.
+#
+# name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter
+#
+# Two behaviours are deliberately **not** in this plan, because both are unobservable through
+# their route and a mutation on either would survive for a reason that is not a test gap:
+#
+#   - `posts.reverse()` in `get_posts_around`. The after-window is read `CreateAt ASC` and walked
+#     backwards, but `SortByCreateAt` re-sorts the whole list at the end, so the intermediate
+#     order cannot reach a client.
+#   - `post.reply_count = 0` in the same function. `processPost` zeroes it and the parents pass
+#     immediately restores it — see the doc comment and
+#     `channel_posts_unread::the_parents_pass_restores_the_reply_count_processpost_zeroed`.
+
+# --- getPostsForChannelAroundLastUnread --------------------------------------------------------
+unread-lastviewed-zero	crates/mm-app/src/post.rs	if last_viewed_at == 0 {	if false {	api	channel_posts_unread
+unread-cursor-direction	crates/mm-app/src/post.rs	.get_post_id_around_time(channel_id, time, false, collapsed_threads)	.get_post_id_around_time(channel_id, time, true, collapsed_threads)	api	channel_posts_unread
+unread-order-reset	crates/mm-app/src/post.rs	list.order = Some(Vec::new());	list.order = list.order.take();	api	channel_posts_unread
+unread-before-guard	crates/mm-app/src/post.rs	.is_some_and(|posts| posts.contains_key(&last_unread_post_id))	.is_some_and(|_| false)	api	channel_posts_unread
+unread-limit-after-minus-one	crates/mm-app/src/post.rs	window(limit_after - 1)	window(limit_after)	api	channel_posts_unread
+unread-sort	crates/mm-app/src/post.rs	list.sort_by_create_at();	let _ = &mut list;	api	channel_posts_unread
+unread-window-before-direction	crates/mm-store/src/post_store.rs	AND sub.deleteat = 0) AS "reply_count!"\n                  FROM posts p\n                 WHERE p.createat < (SELECT createat FROM posts WHERE id = $2)	AND sub.deleteat = 0) AS "reply_count!"\n                  FROM posts p\n                 WHERE p.createat > (SELECT createat FROM posts WHERE id = $2)	api	channel_posts_unread
+unread-window-after-order	crates/mm-store/src/post_store.rs	AND sub.deleteat = 0) AS "reply_count!"\n                  FROM posts p\n                 WHERE p.createat > (SELECT createat FROM posts WHERE id = $2)	AND sub.deleteat = 0) AS "reply_count!"\n                  FROM posts p\n                 WHERE p.createat >= (SELECT createat FROM posts WHERE id = $2)	api	channel_posts_unread
+unread-collapsed-rootid	crates/mm-store/src/post_store.rs	WHERE p.createat < (SELECT createat FROM posts WHERE id = $2)\n                   AND p.channelid = $1\n                   AND (p.type <> $4 OR p.userid = $3\n                        OR NOT EXISTS (SELECT 1\n                                         FROM readreceipts rr\n                                        WHERE rr.postid = p.id\n                                          AND rr.userid = $3\n                                          AND rr.expireat < $5))\n                   AND p.deleteat = 0\n                   AND p.rootid = ''	WHERE p.createat < (SELECT createat FROM posts WHERE id = $2)\n                   AND p.channelid = $1\n                   AND (p.type <> $4 OR p.userid = $3\n                        OR NOT EXISTS (SELECT 1\n                                         FROM readreceipts rr\n                                        WHERE rr.postid = p.id\n                                          AND rr.userid = $3\n                                          AND rr.expireat < $5))\n                   AND p.deleteat = 0	api	channel_posts_unread
+unread-parents-skip-flag	crates/mm-store/src/post_store.rs	             WHERE (p.id = ANY($2) OR (NOT $3 AND p.rootid = ANY($2)))	             WHERE (p.id = ANY($2) OR ($3 AND p.rootid = ANY($2)))	api	channel_posts_unread
+unread-etag-branch	crates/mm-api/src/posts.rs	let list = if list.order.as_ref().is_none_or(Vec::is_empty) {	let list = if false {	api	channel_posts_unread
+unread-fallback-per-page	crates/mm-api/src/posts.rs	            per_page: limit_before,	            per_page: limit_after,	api	channel_posts_unread
+unread-limit-after-zero-400	crates/mm-api/src/posts.rs	if limit_after == 0 {	if false {	api	channel_posts_unread
+unread-user-gate	crates/mm-api/src/posts.rs	    if !state\n        .app\n        .session_has_permission_to_user(&session.0, user_id)\n        .await\n    {	    if false {	api	channel_posts_unread
+unread-channel-gate	crates/mm-api/src/posts.rs	    };\n    let (has_permission, _is_member) = state\n        .app\n        .session_has_permission_to_read_channel(&session.0, &channel)\n        .await;\n    if !has_permission {	    };\n    let (has_permission, _is_member) = state\n        .app\n        .session_has_permission_to_read_channel(&session.0, &channel)\n        .await;\n    if false {	api	channel_posts_unread
+unread-flag-literal-true	crates/mm-api/src/posts.rs	let collapsed_threads = query_flag_is_literally_true(query, COLLAPSED_THREADS_UNREAD_PARAM);	let collapsed_threads = query_flag_is_true(query, COLLAPSED_THREADS_UNREAD_PARAM);	api	channel_posts_unread
+unread-limit-clamp	crates/mm-api/src/posts.rs	        Some(val) if val > LIMIT_MAXIMUM => LIMIT_MAXIMUM,	        Some(val) if val > LIMIT_MAXIMUM => val,	api	channel_posts_unread
+unread-lastviewed-coalesce	crates/mm-store/src/channel_store.rs	SELECT COALESCE(channelmembers.lastviewedat, 0) AS "last_viewed_at!"	SELECT COALESCE(channelmembers.lastviewedat, 1) AS "last_viewed_at!"	api	channel_posts_unread
+
+# --- getEditHistoryForPost ---------------------------------------------------------------------
+edithist-order-by	crates/mm-store/src/post_store.rs	ORDER BY posts.editat DESC	ORDER BY posts.editat ASC	api	post_edit_history
+edithist-originalid	crates/mm-store/src/post_store.rs	WHERE posts.originalid = $1	WHERE posts.rootid = $1	api	post_edit_history
+edithist-empty-is-404	crates/mm-store/src/post_store.rs	        if rows.is_empty() {	        if false {	api	post_edit_history
+edithist-authorship	crates/mm-api/src/posts.rs	if session.0.user_id != original.user_id {	if false {	api	post_edit_history
+edithist-channel-gate	crates/mm-api/src/posts.rs	    let (allowed, _is_member) = state\n        .app\n        .session_has_permission_to_channel(&session.0, &original.channel_id, &PERMISSION_EDIT_POST)\n        .await;\n    if !allowed {	    let (allowed, _is_member) = state\n        .app\n        .session_has_permission_to_channel(&session.0, &original.channel_id, &PERMISSION_EDIT_POST)\n        .await;\n    if false {	api	post_edit_history
+edithist-swallowed-404	crates/mm-api/src/posts.rs	let Ok(original) = state.app.get_single_post(&post_id, false).await else {\n        return Err(permission_error());	let Ok(original) = state.app.get_single_post(&post_id, false).await else {\n        return Err(ApiError::from(mm_model::utils::AppError::new("x", "app.post.get.app_error", None, String::new(), 404)));	api	post_edit_history
+edithist-trailing-newline	crates/mm-api/src/posts.rs	    body.push(b'\\n');	    let _ = &mut body;	api	post_edit_history
+edithist-metadata-allocated	crates/mm-app/src/post.rs	let metadata = post.metadata.get_or_insert_with(Default::default);\n            metadata.files = order_file_infos_by_id(&file_ids, infos);	let ordered = order_file_infos_by_id(&file_ids, infos);\n            if !ordered.is_empty() {\n                post.metadata.get_or_insert_with(Default::default).files = ordered;\n            }	api	post_edit_history
+
+# --- getChannelMembersTimezones ----------------------------------------------------------------
+tz-filter-is-an-and	crates/mm-app/src/channel.rs	if automatic.unwrap_or_default().is_empty() && manual.unwrap_or_default().is_empty() {	if automatic.unwrap_or_default().is_empty() || manual.unwrap_or_default().is_empty() {	api	channel_timezones
+tz-preferred-field	crates/mm-model/src/utils.rs	timezone.get("useAutomaticTimezone").map(String::as_str) == Some("true")	timezone.get("useAutomaticTimezone").map(String::as_str) != Some("true")	api	channel_timezones
+tz-dedupe	crates/mm-app/src/channel.rs	remove_duplicate_strings(&mut timezones);	let _ = &mut timezones;	api	channel_timezones
+tz-null-vs-empty	crates/mm-api/src/channels.rs	let body = mm_model::utils::array_to_json(if timezones.is_empty() {\n        None\n    } else {\n        Some(&timezones)\n    });	let body = mm_model::utils::array_to_json(Some(&timezones));	api	channel_timezones
+tz-permission-gate	crates/mm-api/src/channels.rs	    if !allowed {\n        return Err(ApiError::from(make_permission_error(\n            &session.0,\n            &[&PERMISSION_READ_CHANNEL],\n        )));\n    }\n\n    let timezones = state.app.get_channel_members_timezones(&channel_id).await?;	    let _ = (allowed, &session);\n\n    let timezones = state.app.get_channel_members_timezones(&channel_id).await?;	api	channel_timezones
+tz-store-channel-filter	crates/mm-store/src/channel_store.rs	         WHERE channelmembers.channelid = $1\n        "#,\n        channel_id\n    )\n    .fetch_all(pool)	         WHERE channelmembers.channelid = $1 OR TRUE\n        "#,\n        channel_id\n    )\n    .fetch_all(pool)	api	channel_timezones
+
+# --- controls: all three must SURVIVE, or every verdict above is noise -------------------------
+control-rename-app	crates/mm-app/src/channel.rs	let mut timezones: Vec<String> = Vec::new();\n        for member in &members {\n            let automatic = member.get("automaticTimezone").map(String::as_str);\n            let manual = member.get("manualTimezone").map(String::as_str);\n            if automatic.unwrap_or_default().is_empty() && manual.unwrap_or_default().is_empty() {\n                continue;\n            }\n            timezones.push(get_preferred_timezone(member).to_owned());\n        }\n        remove_duplicate_strings(&mut timezones);\n        tracing::Span::current().record("count", timezones.len());\n\n        Ok(timezones)	let mut collected: Vec<String> = Vec::new();\n        for row in &members {\n            let automatic = row.get("automaticTimezone").map(String::as_str);\n            let manual = row.get("manualTimezone").map(String::as_str);\n            if automatic.unwrap_or_default().is_empty() && manual.unwrap_or_default().is_empty() {\n                continue;\n            }\n            collected.push(get_preferred_timezone(row).to_owned());\n        }\n        remove_duplicate_strings(&mut collected);\n        tracing::Span::current().record("count", collected.len());\n\n        Ok(collected)	api	channel_timezones
+control-rename-store	crates/mm-store/src/post_store.rs	        tracing::Span::current().record("count", rows.len());\n\n        if rows.is_empty() {	        tracing::Span::current().record("count", rows.len());\n\n        if rows.len() == 0 {	api	post_edit_history
+control-rename-api	crates/mm-api/src/posts.rs	    // `c.RequirePostId()` (web/context.go:411).\n    if !is_valid_id(&post_id) {\n        return Err(ApiError::invalid_url_param("post_id"));\n    }	    // `c.RequirePostId()` (web/context.go:411).\n    if !is_valid_id(post_id.as_str()) {\n        return Err(ApiError::invalid_url_param("post_id"));\n    }	api	post_edit_history

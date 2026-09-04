@@ -53,7 +53,9 @@ use mm_model::post_metadata::PostMetadata;
 use mm_model::reaction::Reaction;
 use mm_model::session::Session;
 use mm_model::utils::{AppError, AppResult, etag, get_millis, remove_duplicate_strings};
-use mm_store::post_store::{GetPostThreadOptions, GetPostsOptions};
+use mm_store::post_store::{
+    GetPostThreadOptions, GetPostsAroundOptions, GetPostsOptions, ThreadDirection,
+};
 use mm_store::{EmojiStore, FileInfoStore, PostStore, ReactionStore, StoreError};
 
 use crate::App;
@@ -653,6 +655,257 @@ impl App {
                     status,
                 )
             })
+    }
+
+    /// Port of `app.App.GetEditHistoryForPost` (post.go:2800), plus the
+    /// `populateEditHistoryFileMetadata` (post.go:2819) it calls.
+    ///
+    /// # This is the only post read in the port that does **not** go through
+    /// `PreparePostForClient`
+    ///
+    /// The metadata pipeline is not run at all. Instead the app layer sets exactly one field —
+    /// `metadata.files` — and leaves `embeds`, `emojis`, `reactions`, `priority` and
+    /// `acknowledgements` unset. So a history entry's `metadata` is `{"files":[…]}` and nothing
+    /// else, where the same post read through `getPost` would carry the lot. That also means
+    /// none of the refusals in [`App::prepare_post_for_client_with_embeds_and_images`] apply: a
+    /// history entry whose message holds a link is served here and forwarded there.
+    ///
+    /// # `GetByIds` is called with `includeDeleted = true`
+    ///
+    /// The literal is `true` (post.go:2821), unlike the metadata pipeline's call site. A history
+    /// entry is by construction an old version of a post, and its attachments may well have been
+    /// deleted since — filtering them out would show an edit with fewer files than it had.
+    ///
+    /// And because it is `GetByIds`, `archived` is dropped on the way through — see
+    /// [`mm_store::file_info_store`].
+    #[tracing::instrument(skip(self), fields(post_id = %post_id))]
+    pub async fn get_edit_history_for_post(&self, post_id: &str) -> AppResult<Vec<Post>> {
+        let mut posts = self
+            .store()
+            .post()
+            .get_edit_history_for_post(post_id)
+            .await
+            .map_err(|err| {
+                if err.is_not_found() {
+                    AppError::boxed(
+                        "GetEditHistoryForPost",
+                        "app.post.get.app_error",
+                        None,
+                        String::new(),
+                        404,
+                    )
+                } else {
+                    tracing::error!(error = %err, "edit history lookup failed");
+                    AppError::boxed(
+                        "GetEditHistoryForPost",
+                        "app.post.get.app_error",
+                        None,
+                        String::new(),
+                        500,
+                    )
+                }
+            })?;
+
+        for post in &mut posts {
+            let file_ids = post.file_ids.clone().unwrap_or_default();
+            let infos = self
+                .store()
+                .file_info()
+                .get_by_ids(&file_ids, true)
+                .await
+                .map_err(|err| {
+                    tracing::error!(error = %err, "edit history file lookup failed");
+                    AppError::boxed(
+                        "app.populateEditHistoryFileMetadata",
+                        "app.file_info.get_by_ids.app_error",
+                        None,
+                        String::new(),
+                        500,
+                    )
+                })?;
+
+            // Go allocates a `&model.PostMetadata{}` when the post has none, so **every** history
+            // entry comes back with a `metadata` object — `{}` for a post with no files, because
+            // `Files` is `omitempty` and `GetByIds` leaves it nil. That is the whole of the
+            // metadata on this route; nothing else is ever populated.
+            let metadata = post.metadata.get_or_insert_with(Default::default);
+            metadata.files = order_file_infos_by_id(&file_ids, infos);
+        }
+
+        Ok(posts)
+    }
+
+    /// Port of `app.App.GetPostIdAfterTime` (post.go:1833).
+    ///
+    /// Note which store method this reaches: the **plain** `GetPostIdAfterTime`, not
+    /// `GetVisiblePostIdAroundTime`. So the cursor it returns may name a burn-on-read post the
+    /// caller can no longer see — and the window queries that follow do filter those out, which
+    /// is how `getPostsForChannelAroundLastUnread` can answer a list that does not contain the
+    /// post it was built around.
+    #[tracing::instrument(skip(self), fields(channel_id = %channel_id, time, collapsed_threads))]
+    pub async fn get_post_id_after_time(
+        &self,
+        channel_id: &str,
+        time: i64,
+        collapsed_threads: bool,
+    ) -> AppResult<String> {
+        self.store()
+            .post()
+            .get_post_id_around_time(channel_id, time, false, collapsed_threads)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "post id lookup failed");
+                AppError::boxed(
+                    "GetPostIdAfterTime",
+                    "app.post.get_post_id_around.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })
+    }
+
+    /// Port of `app.App.GetPostsBeforePost` (post.go:1703) and `GetPostsAfterPost` (:1740).
+    ///
+    /// One function where Go has two, because they differ only in the flag they pass on and in
+    /// their `Where` — which is `json:"-"`. Both carry the **same** error id,
+    /// `app.post.get_posts_around.get.app_error`, and differ only in status: `ErrInvalidInput` is
+    /// a 400, anything else a 500. The 400 is unreachable from here, because
+    /// `getPostsForChannelAroundLastUnread` passes page 0 and a limit the handler has already
+    /// validated.
+    ///
+    /// The four stages Go runs after the store are the ones [`App::get_posts_page`] documents,
+    /// inert here for the same reasons.
+    #[tracing::instrument(skip(self), fields(channel_id = %opts.channel_id, before))]
+    pub async fn get_posts_around_post(
+        &self,
+        opts: GetPostsAroundOptions<'_>,
+        before: bool,
+    ) -> AppResult<PostList> {
+        self.store()
+            .post()
+            .get_posts_around(opts, before)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "post window lookup failed");
+                AppError::boxed(
+                    if before {
+                        "GetPostsBeforePost"
+                    } else {
+                        "GetPostsAfterPost"
+                    },
+                    "app.post.get_posts_around.get.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })
+    }
+
+    /// Port of `app.App.GetPostsForChannelAroundLastUnread` (post.go:1928).
+    ///
+    /// # Two ways to answer an empty list, and neither is an error
+    ///
+    /// `LastViewedAt == 0` — the member has never opened the channel — and "no post is newer than
+    /// `LastViewedAt`" both return `model.NewPostList()`, which is `{"order":[],"posts":{}}` and
+    /// **not** `null`s. The handler treats an empty `order` as its cue to fall back to a plain
+    /// first page, so neither of these reaches a client as an empty response.
+    ///
+    /// # `order` is rebuilt from scratch, and the reason is subtle
+    ///
+    /// `GetPostThread` on the last unread post returns the whole thread in `order`. Go throws
+    /// that away — `postList.Order = []string{}` — and puts back **only the unread post**, so the
+    /// thread's other replies stay in `posts` without appearing in `order`. They are re-added to
+    /// `order` by the before/after windows if and only if they also appear in the channel's own
+    /// timeline. Keeping the thread's order would put replies in the centre channel that the
+    /// centre channel never showed.
+    ///
+    /// # The before-window is conditional on the unread post surviving, and the after-window is
+    /// not
+    ///
+    /// Go guards the first with `if _, ok := postList.Posts[lastUnreadPostId]; ok` — the cloud
+    /// file limit can filter the post out from under it — and leaves the second unguarded. The
+    /// filter is inert on this deployment, but the asymmetry is ported because a port that
+    /// treated the two the same would answer a different list in the one case where they
+    /// diverge.
+    ///
+    /// # `limitAfter - 1`
+    ///
+    /// The after-window asks for one fewer than the caller's limit, because the unread post
+    /// itself already occupies a slot. `limit_after` is validated non-zero by the handler.
+    #[tracing::instrument(skip(self), fields(channel_id = %channel_id, user_id = %user_id))]
+    pub async fn get_posts_for_channel_around_last_unread(
+        &self,
+        channel_id: &str,
+        user_id: &str,
+        limit_before: i64,
+        limit_after: i64,
+        skip_fetch_threads: bool,
+        collapsed_threads: bool,
+    ) -> AppResult<PostList> {
+        let last_viewed_at = self
+            .get_channel_member_last_viewed_at(channel_id, user_id)
+            .await?;
+        if last_viewed_at == 0 {
+            return Ok(PostList::new());
+        }
+
+        let last_unread_post_id = self
+            .get_post_id_after_time(channel_id, last_viewed_at, collapsed_threads)
+            .await?;
+        if last_unread_post_id.is_empty() {
+            return Ok(PostList::new());
+        }
+
+        let thread_opts = GetPostThreadOptions {
+            user_id,
+            skip_fetch_threads,
+            collapsed_threads,
+            updates_only: false,
+            per_page: 0,
+            direction: ThreadDirection::Unset,
+            from_post: "",
+            from_create_at: 0,
+            from_update_at: 0,
+        };
+        let mut list = self
+            .get_post_thread(&last_unread_post_id, thread_opts)
+            .await?;
+
+        // `postList.Order = []string{}` — materialised, not nil, so a list that ends here still
+        // serialises `"order":[]`.
+        list.order = Some(Vec::new());
+
+        let window = |per_page: i64| GetPostsAroundOptions {
+            channel_id,
+            post_id: &last_unread_post_id,
+            user_id,
+            page: 0,
+            per_page,
+            skip_fetch_threads,
+            collapsed_threads,
+        };
+
+        if list
+            .posts
+            .as_ref()
+            .is_some_and(|posts| posts.contains_key(&last_unread_post_id))
+        {
+            list.add_order(last_unread_post_id.clone());
+
+            let before = self
+                .get_posts_around_post(window(limit_before), true)
+                .await?;
+            list.extend(&before);
+        }
+
+        let after = self
+            .get_posts_around_post(window(limit_after - 1), false)
+            .await?;
+        list.extend(&after);
+
+        list.sort_by_create_at();
+        Ok(list)
     }
 
     /// Port of `app.App.GetPostsEtag` (post.go:1421) and the string half of the store's

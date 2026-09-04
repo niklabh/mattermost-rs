@@ -28,9 +28,9 @@ use crate::common;
 
 use common::{
     GO, RUST, TINY_PNG, add_user_to_channel, assert_error_bodies_match_except_known_gaps, client,
-    create_channel, create_custom_emoji, create_plain_user, delete_custom_emoji, delete_plain_user,
-    delete_post, fetch_both_raw, fetch_both_stable, go_minted_token, logged_in_user_id,
-    post_message, purge_api_fixtures, stack_enabled,
+    create_channel, create_custom_emoji, create_plain_user, create_team, delete_custom_emoji,
+    delete_plain_user, delete_post, fetch_both_raw, fetch_both_stable, go_minted_token,
+    logged_in_user_id, post_message, purge_api_fixtures, stack_enabled,
 };
 
 /// The two custom emoji the rich-post case needs, named **uniquely per run** — see
@@ -86,27 +86,6 @@ async fn team_and_channel(client: &reqwest::Client, token: &str) -> (String, Str
         })
         .await
         .clone()
-}
-
-async fn create_team(client: &reqwest::Client, token: &str, tag: &str) -> String {
-    let response = client
-        .post(format!("{GO}/api/v4/teams"))
-        .header("Authorization", format!("Bearer {token}"))
-        .json(&serde_json::json!({
-            "name": format!("mmrs-parity-{tag}"),
-            "display_name": format!("mmrs parity {tag}"),
-            "type": "O",
-        }))
-        .send()
-        .await
-        .expect("Go answers");
-    assert!(
-        response.status().is_success(),
-        "creating the fixture team failed: {}",
-        response.text().await.unwrap_or_default()
-    );
-    let created: serde_json::Value = response.json().await.expect("the team decodes");
-    created["id"].as_str().expect("an id").to_owned()
 }
 
 /// Post a message carrying file attachments, which `post_message` cannot express.

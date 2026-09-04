@@ -406,7 +406,9 @@ async fn the_neighbouring_channel_routes_are_still_forwarded() {
     let token = go_minted_token(&client).await;
     let f = fixture(&client, &token).await;
 
-    for suffix in ["pinned/", "timezones", "moderations"] {
+    // `timezones` was in this list until it was migrated on 2026-09-04 —
+    // `parity/channel_timezones.rs` owns it now.
+    for suffix in ["pinned/", "moderations", "member_counts_by_group"] {
         let path = format!("/api/v4/channels/{}/{suffix}", f.channel_id);
         let response = client
             .get(format!("{RUST}{path}"))

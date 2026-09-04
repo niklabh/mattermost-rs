@@ -1,0 +1,42 @@
+# getTotalUsersStats + getKnownUsers + getUserTermsOfService — 2026-09-04.
+# Every line is `api`: all three oracles are the cross-server comparison, and `users_stats` adds a
+# third — a count written straight against the database, so two servers agreeing on a wrong
+# `WHERE` clause is caught too.
+#
+# name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter
+#
+# `crates/mm-api/src/users.rs` now holds five `body.push(b'\n');`, so every trailing-newline line
+# here carries a multi-line anchor naming its own handler's marshal error.
+#
+# Two facts about the development database decide whether three of these are catchable at all,
+# and both were checked rather than assumed: `Users` holds 169 rows with `RemoteId = ''` and 3
+# with `RemoteId IS NULL`, so dropping either half of that `OR` is visible; and `Bots` holds 2
+# rows, so the anti-join Go omits is visible too. On a database with no bots and no NULL
+# `RemoteId` those three lines would survive for a reason that is not a test gap.
+
+# --- getTotalUsersStats ------------------------------------------------------------------------
+stats-deleteat	crates/mm-store/src/user_store.rs	WHERE users.deleteat = 0\n               AND (users.remoteid = '' OR users.remoteid IS NULL)	WHERE users.deleteat >= 0\n               AND (users.remoteid = '' OR users.remoteid IS NULL)	api	users_stats
+stats-remoteid-empty-half	crates/mm-store/src/user_store.rs	AND (users.remoteid = '' OR users.remoteid IS NULL)	AND (users.remoteid IS NULL)	api	users_stats
+stats-remoteid-null-half	crates/mm-store/src/user_store.rs	AND (users.remoteid = '' OR users.remoteid IS NULL)	AND (users.remoteid = '')	api	users_stats
+stats-bots-are-counted	crates/mm-store/src/user_store.rs	              FROM users\n             WHERE users.deleteat = 0	              FROM users\n              LEFT JOIN bots ON users.id = bots.userid\n             WHERE bots.userid IS NULL\n               AND users.deleteat = 0	api	users_stats
+stats-view-members-gate	crates/mm-app/src/user.rs	        if self\n            .has_permission_to(user_id, &PERMISSION_VIEW_MEMBERS)\n            .await\n        {\n            ViewUsersRestriction::None\n        } else {\n            ViewUsersRestriction::Restricted	        if self\n            .has_permission_to(user_id, &PERMISSION_VIEW_MEMBERS)\n            .await\n        {\n            ViewUsersRestriction::Restricted\n        } else {\n            ViewUsersRestriction::None	api	users_stats
+stats-forward-on-restricted	crates/mm-api/src/users.rs	            return crate::proxy::forward_to_go(State(state), request).await;	            let _ = request;	api	users_stats
+stats-trailing-newline	crates/mm-api/src/users.rs	            "getTotalUsersStats",\n            "api.marshal_error",\n            None,\n            String::new(),\n            500,\n        ))\n    })?;\n    body.push(b'\\n');	            "getTotalUsersStats",\n            "api.marshal_error",\n            None,\n            String::new(),\n            500,\n        ))\n    })?;	api	users_stats
+
+# --- getKnownUsers -----------------------------------------------------------------------------
+known-self-exclusion	crates/mm-store/src/user_store.rs	             WHERE ocm.userid <> $1	             WHERE ocm.userid IS NOT NULL AND $1 = $1	api	users_known
+known-distinct	crates/mm-store/src/user_store.rs	SELECT DISTINCT ocm.userid AS "user_id!"	SELECT ocm.userid AS "user_id!"	api	users_known
+known-join-on-channel	crates/mm-store/src/user_store.rs	JOIN channelmembers AS ocm ON ocm.channelid = cm.channelid	JOIN channelmembers AS ocm ON ocm.channelid <> cm.channelid	api	users_known
+known-asker-filter	crates/mm-store/src/user_store.rs	               AND cm.userid = $1	               AND cm.userid IS NOT NULL	api	users_known
+known-trailing-newline	crates/mm-api/src/users.rs	            "getKnownUsers",\n            "api.marshal_error",\n            None,\n            String::new(),\n            500,\n        ))\n    })?;\n    body.push(b'\\n');	            "getKnownUsers",\n            "api.marshal_error",\n            None,\n            String::new(),\n            500,\n        ))\n    })?;	api	users_known
+
+# --- getUserTermsOfService ---------------------------------------------------------------------
+tos-path-id-is-ignored	crates/mm-api/src/users.rs	        .get_user_terms_of_service(&session.0.user_id)	        .get_user_terms_of_service(&user_id)	api	user_terms_of_service
+tos-notfound-status	crates/mm-app/src/user_terms_of_service.rs	                        "app.user_terms_of_service.get_by_user.no_rows.app_error",\n                        None,\n                        String::new(),\n                        404,	                        "app.user_terms_of_service.get_by_user.no_rows.app_error",\n                        None,\n                        String::new(),\n                        500,	api	user_terms_of_service
+tos-notfound-id	crates/mm-app/src/user_terms_of_service.rs	                        "app.user_terms_of_service.get_by_user.no_rows.app_error",	                        "app.user_terms_of_service.get_by_user.app_error",	api	user_terms_of_service
+tos-trailing-newline	crates/mm-api/src/users.rs	            "getUserTermsOfService",\n            "api.marshal_error",\n            None,\n            String::new(),\n            500,\n        ))\n    })?;\n    body.push(b'\\n');	            "getUserTermsOfService",\n            "api.marshal_error",\n            None,\n            String::new(),\n            500,\n        ))\n    })?;	api	user_terms_of_service
+
+# --- controls: all three must SURVIVE, or every verdict above is noise -------------------------
+control-rename-store	crates/mm-store/src/user_store.rs	        tracing::Span::current().record("count", ids.len());\n        Ok(ids)	        let found = ids;\n        tracing::Span::current().record("count", found.len());\n        Ok(found)	api	users_known
+control-rename-app	crates/mm-app/src/user.rs	        Ok(UsersStats { total_users_count })	        let counted = total_users_count;\n        Ok(UsersStats {\n            total_users_count: counted,\n        })	api	users_stats
+control-rename-api	crates/mm-api/src/users.rs	    // Bound so the shape of the route is visible, then deliberately dropped: Go reads the\n    // session's id here, never this one. See the doc comment.\n    let _ = user_id;	    // Bound so the shape of the route is visible, then deliberately dropped: Go reads the\n    // session's id here, never this one. See the doc comment.\n    drop(user_id);	api	user_terms_of_service

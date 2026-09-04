@@ -12,6 +12,26 @@ pub trait UserStore {
     /// Port of `SqlUserStore.Get` (user_store.go:609).
     fn get(&self, id: &str) -> impl std::future::Future<Output = Result<User, StoreError>> + Send;
 
+    /// Port of `SqlUserStore.Count` (user_store.go:1471) for the **one** options shape reachable
+    /// today: `UserCountOptions{IncludeBotAccounts: true}` with nil view restrictions, which is
+    /// what `App.GetTotalUsersStats` passes.
+    ///
+    /// Takes no parameters on purpose. Go builds this query from ten option fields and every one
+    /// of the other nine is at its zero value here; a parameter with one reachable value is a
+    /// field with no reader, and the two branches it would gate — the `Bots` anti-join and the
+    /// view-restriction joins — are unported for the reasons `count_total_users` and
+    /// `mm_app::App::get_view_users_restrictions` give.
+    fn count_total_users(
+        &self,
+    ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
+
+    /// Port of `SqlUserStore.GetKnownUsers` (user_store.go:2357): every *other* user who shares a
+    /// channel with this one.
+    fn get_known_users(
+        &self,
+        user_id: &str,
+    ) -> impl std::future::Future<Output = Result<Vec<String>, StoreError>> + Send;
+
     /// Port of `SqlUserStore.GetByUsername` (user_store.go:1402).
     fn get_by_username(
         &self,
@@ -368,6 +388,79 @@ fn user_from_row(row: UserRow) -> Result<User, StoreError> {
 }
 
 impl UserStore for SqlUserStore {
+    /// # Two predicates, and one of them is three-valued
+    ///
+    /// `DeleteAt = 0` excludes deactivated users. `RemoteId = '' OR RemoteId IS NULL` excludes
+    /// users synced from another server — Go writes it as an `OR` over both spellings because
+    /// the column is nullable *and* the non-shared write path stores the empty string, so a
+    /// plain `RemoteId = ''` would silently drop every row written before that column existed
+    /// and `RemoteId IS NULL` alone would drop every row written since.
+    ///
+    /// # The `Bots` anti-join is absent, and that is `IncludeBotAccounts: true`
+    ///
+    /// With the flag **off** Go adds `LEFT JOIN Bots … WHERE Bots.UserId IS NULL`. The one
+    /// caller sets it on, so bots are counted, and `/users/stats` on a server with an installed
+    /// plugin reports a larger number than its member lists show. Reproduced by *not* writing
+    /// the join, which is the easiest thing in this file to get wrong by adding.
+    #[tracing::instrument(skip_all, fields(count))]
+    async fn count_total_users(&self) -> Result<i64, StoreError> {
+        let count = sqlx::query_scalar!(
+            r#"
+            SELECT COUNT(*) AS "count!"
+              FROM users
+             WHERE users.deleteat = 0
+               AND (users.remoteid = '' OR users.remoteid IS NULL)
+            "#
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to count Users".to_owned(),
+            source,
+        })?;
+
+        tracing::Span::current().record("count", count);
+        Ok(count)
+    }
+
+    /// # A self-join on `ChannelMembers`, and every filter it does **not** have
+    ///
+    /// No `DeleteAt` anywhere: an archived channel still makes its members known to each other,
+    /// and so does a deactivated user's membership — the row survives deactivation. No channel
+    /// type filter either, so a direct message counts, which is what makes this route useful to
+    /// a client at all.
+    ///
+    /// `DISTINCT` is doing real work: two users sharing three channels would otherwise appear
+    /// three times. There is **no `ORDER BY`**, so the row order is whatever the plan yields and
+    /// two servers may legitimately disagree about it — the parity suite compares this route as
+    /// a set.
+    ///
+    /// The `NotEq` excludes the caller. Go writes it as a separate `Where`, which squirrel joins
+    /// with `AND`; the caller is in every channel it is a member of, so without it the answer
+    /// would always contain the asker.
+    #[tracing::instrument(skip_all, fields(user_id = %user_id, count))]
+    async fn get_known_users(&self, user_id: &str) -> Result<Vec<String>, StoreError> {
+        let ids = sqlx::query_scalar!(
+            r#"
+            SELECT DISTINCT ocm.userid AS "user_id!"
+              FROM channelmembers AS cm
+              JOIN channelmembers AS ocm ON ocm.channelid = cm.channelid
+             WHERE ocm.userid <> $1
+               AND cm.userid = $1
+            "#,
+            user_id
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to find ChannelMembers".to_owned(),
+            source,
+        })?;
+
+        tracing::Span::current().record("count", ids.len());
+        Ok(ids)
+    }
+
     #[tracing::instrument(skip_all, fields(user_id = %id, found))]
     async fn get(&self, id: &str) -> Result<User, StoreError> {
         // `usersQuery.Where("Id = ?", id)`. The LEFT JOIN is not optional decoration: `is_bot`

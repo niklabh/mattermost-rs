@@ -1,7 +1,9 @@
 //! Port of `api4/post.go`'s post reads: `getPost` (`GET /api/v4/posts/{post_id}`),
 //! `getPostsForChannel` (`GET /api/v4/channels/{channel_id}/posts`), `getPostThread`
-//! (`GET /api/v4/posts/{post_id}/thread`) and `getFileInfosForPost`
-//! (`GET /api/v4/posts/{post_id}/files/info`).
+//! (`GET /api/v4/posts/{post_id}/thread`), `getFileInfosForPost`
+//! (`GET /api/v4/posts/{post_id}/files/info`), `getEditHistoryForPost`
+//! (`GET /api/v4/posts/{post_id}/edit_history`) and `getPostsForChannelAroundLastUnread`
+//! (`GET /api/v4/users/{user_id}/channels/{channel_id}/posts/unread`).
 
 use axum::extract::{Path, Request, State};
 use axum::http::StatusCode;
@@ -10,8 +12,8 @@ use axum::response::{IntoResponse, Response};
 use mm_app::post::{PrepareError, PreparePostForClientOpts};
 use mm_model::file_info::get_etag_for_file_infos;
 use mm_model::permission::{
-    PERMISSION_MANAGE_SYSTEM, PERMISSION_READ_CHANNEL_CONTENT, PERMISSION_READ_DELETED_POSTS,
-    make_permission_error,
+    PERMISSION_EDIT_OTHER_USERS, PERMISSION_EDIT_POST, PERMISSION_MANAGE_SYSTEM,
+    PERMISSION_READ_CHANNEL_CONTENT, PERMISSION_READ_DELETED_POSTS, make_permission_error,
 };
 use mm_model::utils::is_valid_id;
 use mm_store::post_store::{GetPostThreadOptions, GetPostsOptions, ThreadDirection};
@@ -911,4 +913,367 @@ async fn serve_file_infos_for_post(
         )
             .into_response(),
     )
+}
+
+/// `getPostsForChannelAroundLastUnread`'s three boolean query parameters (api4/post.go:419).
+const SKIP_FETCH_THREADS_UNREAD_PARAM: &str = "skipFetchThreads";
+const COLLAPSED_THREADS_UNREAD_PARAM: &str = "collapsedThreads";
+
+/// `web.LimitDefault` (params.go:23).
+const LIMIT_DEFAULT: i64 = 60;
+/// `web.LimitMaximum` (params.go:24).
+const LIMIT_MAXIMUM: i64 = 200;
+
+/// The `limit_after`/`limit_before` half of `web.ParamsFromRequest` (params.go:251).
+///
+/// Clamped, never refused: garbage and negatives fall to 60, anything over 200 becomes 200. So
+/// the **only** value that reaches the handler's own `limit_after == 0` check is an explicit
+/// `?limit_after=0`, which is why that 400 exists at all.
+fn parse_limit(query: Option<&str>, key: &str) -> i64 {
+    match query_first(query, key).and_then(|v| v.parse::<i64>().ok()) {
+        Some(val) if val < 0 => LIMIT_DEFAULT,
+        Some(val) if val > LIMIT_MAXIMUM => LIMIT_MAXIMUM,
+        Some(val) => val,
+        None => LIMIT_DEFAULT,
+    }
+}
+
+/// Port of `getPostsForChannelAroundLastUnread` (api4/post.go:390), reached as
+/// `GET /api/v4/users/{user_id}/channels/{channel_id}/posts/unread`.
+///
+/// # The validation order is the reverse of its sibling's
+///
+/// `c.RequireUserId().RequireChannelId()` — **user first**, where `getChannelUnread` one route
+/// over opens `c.RequireChannelId().RequireUserId()`. Both hang off `BaseRoutes.ChannelForUser`,
+/// so the path segments arrive in the same order and only the handlers disagree. With both ids
+/// malformed the two routes name different parameters in their 400.
+///
+/// # Two gates, and the second one takes the channel
+///
+/// `SessionHasPermissionToUser` first — asking about yourself always passes — and then
+/// `SessionHasPermissionToReadChannel`, which needs the `Channel` and so runs *after* the
+/// `GetChannel` that can 404. The refusals report `edit_other_users` and `read_channel_content`.
+/// Note the second is **not** the `read_channel` `getChannelUnread` reports for the same channel.
+///
+/// # `limit_after == 0` is the one pagination value that is a 400
+///
+/// `web.ParamsFromRequest` clamps everything else — negatives and garbage to 60, over-200 to
+/// 200 — so the check can only fire for a literal `?limit_after=0`. `limit_before=0` is
+/// perfectly legal and asks for no history at all.
+///
+/// # The empty-list fallback, and the etag that only exists inside it
+///
+/// When the around-query comes back with an empty `order` — the member has never viewed the
+/// channel, or has read everything — Go **discards it and re-fetches a plain first page** of
+/// `limitBefore` posts. Only that branch computes an etag, and only that branch sets the `ETag`
+/// header, so a client that *does* have unread posts gets no etag at all and can never be
+/// answered 304. The etag is `GetPostsEtag`, whose `collapsedThreads` argument Go drops on the
+/// floor — see [`mm_app::App::get_posts_etag`].
+///
+/// The fallback's `UserId` is the **session's**, while the around-query above it uses the
+/// **path's**. They differ only for a caller holding `edit_other_users`, and then the two
+/// branches resolve `is_following` against different people.
+///
+/// # Forwarded
+///
+/// `collapsedThreadsExtended=true`, for the reason [`get_posts_for_channel`] gives, and any
+/// list the metadata pipeline refuses.
+#[tracing::instrument(skip_all, fields(user_id = %user_id, channel_id = %channel_id))]
+pub async fn get_posts_for_channel_around_last_unread(
+    State(state): State<AppState>,
+    Path((user_id, channel_id)): Path<(String, String)>,
+    session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    let query = request.uri().query().map(str::to_owned);
+    let if_none_match = request
+        .headers()
+        .get(IF_NONE_MATCH)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned);
+
+    match serve_posts_around_last_unread(
+        &state,
+        &user_id,
+        &channel_id,
+        &session,
+        query.as_deref(),
+        if_none_match,
+    )
+    .await
+    {
+        Outcome::Served(response) => response,
+        Outcome::Failed(err) => err.into_response(),
+        Outcome::Forward => proxy::forward_to_go(State(state), request).await,
+    }
+}
+
+async fn serve_posts_around_last_unread(
+    state: &AppState,
+    user_id: &str,
+    channel_id: &str,
+    session: &AuthenticatedSession,
+    query: Option<&str>,
+    if_none_match: Option<String>,
+) -> Outcome {
+    // `me`, resolved before the validity check (web/context.go:301).
+    let user_id = if user_id == "me" {
+        session.0.user_id.as_str()
+    } else {
+        user_id
+    };
+
+    // `c.RequireUserId().RequireChannelId()` — user first, the reverse of `getChannelUnread`.
+    if !is_valid_id(user_id) {
+        return Outcome::Failed(ApiError::invalid_url_param("user_id"));
+    }
+    if !is_valid_id(channel_id) {
+        return Outcome::Failed(ApiError::invalid_url_param("channel_id"));
+    }
+
+    if !state
+        .app
+        .session_has_permission_to_user(&session.0, user_id)
+        .await
+    {
+        return Outcome::Failed(ApiError::from(make_permission_error(
+            &session.0,
+            &[&PERMISSION_EDIT_OTHER_USERS],
+        )));
+    }
+
+    let channel = match state.app.get_channel(channel_id).await {
+        Ok(channel) => channel,
+        Err(err) => return Outcome::Failed(ApiError::from(err)),
+    };
+    let (has_permission, _is_member) = state
+        .app
+        .session_has_permission_to_read_channel(&session.0, &channel)
+        .await;
+    if !has_permission {
+        return Outcome::Failed(ApiError::from(make_permission_error(
+            &session.0,
+            &[&PERMISSION_READ_CHANNEL_CONTENT],
+        )));
+    }
+
+    let limit_after = parse_limit(query, "limit_after");
+    let limit_before = parse_limit(query, "limit_before");
+    if limit_after == 0 {
+        return Outcome::Failed(ApiError::invalid_url_param("limit_after"));
+    }
+
+    // `r.URL.Query().Get(...) == "true"` — an exact string compare, not `strconv.ParseBool`, so
+    // `?collapsedThreads=1` is **false** here where it would be true on a route using the
+    // parser. All three of these are spelled that way.
+    let skip_fetch_threads = query_flag_is_literally_true(query, SKIP_FETCH_THREADS_UNREAD_PARAM);
+    let collapsed_threads = query_flag_is_literally_true(query, COLLAPSED_THREADS_UNREAD_PARAM);
+    if query_flag_is_literally_true(query, COLLAPSED_THREADS_EXTENDED_PARAM) {
+        return Outcome::Forward;
+    }
+
+    let list = match state
+        .app
+        .get_posts_for_channel_around_last_unread(
+            channel_id,
+            user_id,
+            limit_before,
+            limit_after,
+            skip_fetch_threads,
+            collapsed_threads,
+        )
+        .await
+    {
+        Ok(list) => list,
+        Err(err) => return Outcome::Failed(ApiError::from(err)),
+    };
+
+    // `etag` stays empty on the ordinary path, and the header is only written when it is not.
+    let mut etag = String::new();
+    let list = if list.order.as_ref().is_none_or(Vec::is_empty) {
+        etag = state.app.get_posts_etag(channel_id).await;
+        if if_none_match.as_deref() == Some(etag.as_str()) {
+            return Outcome::Served(
+                (
+                    StatusCode::NOT_MODIFIED,
+                    [(ETAG.as_str(), etag.as_str()), ("x-mmrs-served-by", "rust")],
+                )
+                    .into_response(),
+            );
+        }
+
+        // `app.PageDefault` is 0, and the page size is `limitBefore` — *not* `limitAfter`, and
+        // not `PerPageDefault`. The `UserId` is the **session's**, unlike the call above.
+        let opts = GetPostsOptions {
+            channel_id,
+            user_id: &session.0.user_id,
+            page: 0,
+            per_page: limit_before,
+            skip_fetch_threads,
+            collapsed_threads,
+            include_deleted: false,
+        };
+        match state.app.get_posts_page(opts).await {
+            Ok(list) => list,
+            Err(err) => return Outcome::Failed(ApiError::from(err)),
+        }
+    } else {
+        list
+    };
+
+    let mut prepared = match state.app.prepare_post_list_for_client(&list).await {
+        Ok(prepared) => prepared,
+        Err(PrepareError::Unreproducible(reason)) => {
+            tracing::debug!(reason, channel_id, "forwarding to Go");
+            return Outcome::Forward;
+        }
+        Err(PrepareError::App(err)) => return Outcome::Failed(ApiError::from(err)),
+    };
+
+    // Go's comment: computed **after** filtering, so they only ever name posts in the response.
+    prepared.next_post_id = state
+        .app
+        .get_next_post_id_from_post_list(&prepared, &session.0.user_id, collapsed_threads)
+        .await;
+    prepared.prev_post_id = state
+        .app
+        .get_prev_post_id_from_post_list(&prepared, &session.0.user_id, collapsed_threads)
+        .await;
+
+    let (mut sanitized, _all_previews_have_membership) = match state
+        .app
+        .sanitize_post_list_metadata_for_user(prepared, &session.0.user_id)
+        .await
+    {
+        Ok(sanitized) => sanitized,
+        Err(PrepareError::Unreproducible(reason)) => {
+            tracing::debug!(reason, channel_id, "forwarding to Go");
+            return Outcome::Forward;
+        }
+        Err(PrepareError::App(err)) => return Outcome::Failed(ApiError::from(err)),
+    };
+
+    let mut body = Vec::new();
+    if let Err(err) = sanitized.encode_json(&mut body) {
+        tracing::error!(error = %err, "failed to serialise PostList");
+        return Outcome::Failed(ApiError::from(mm_model::utils::AppError::new(
+            "getPostsForChannelAroundLastUnread",
+            "api.marshal_error",
+            None,
+            String::new(),
+            500,
+        )));
+    }
+
+    // The header goes on **only** when the fallback ran. A response carrying unread posts has no
+    // `ETag` at all, which is why this route can 304 for a caught-up reader and never otherwise.
+    let mut response = (
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
+    )
+        .into_response();
+    if !etag.is_empty()
+        && let Ok(value) = etag.parse()
+    {
+        response.headers_mut().insert(HEADER_ETAG_SERVER, value);
+    }
+
+    Outcome::Served(response)
+}
+
+/// Port of `getEditHistoryForPost` (api4/post.go:701), reached as
+/// `GET /api/v4/posts/{post_id}/edit_history`.
+///
+/// # Every refusal on this route is `edit_post`, including the ones that are not refusals
+///
+/// Three separate failures all become `SetPermissionError(PermissionEditPost)`:
+///
+/// 1. **The post does not exist.** Go does not propagate `GetSinglePost`'s 404 — it *discards*
+///    the error and raises a 403. So a post id naming nothing is a permission error here, where
+///    the same id is a 404 through `getPost`.
+/// 2. The caller lacks `edit_post` on the post's channel.
+/// 3. The caller is not the post's **author**, checked after the channel gate.
+///
+/// A port that let the 404 through would leak the existence of posts this route deliberately
+/// refuses to distinguish.
+///
+/// # The `PostTypeCard` branch is dead here
+///
+/// Go exempts `custom_card` posts from the authorship check when `FeatureFlags.IntegratedBoards`
+/// is on. That flag is **false** at the pinned SHA and unset in this deployment, so the branch
+/// cannot fire; the authorship check is unconditional. Ported as the plain check rather than as
+/// a config read, for the reason [`mm_app::file::has_permission_to_file_action`] gives about
+/// gates whose answer no reachable configuration changes.
+///
+/// # `edit_post`, not `read_channel_content`
+///
+/// The channel gate asks for `edit_post` — a permission an ordinary member *does* hold for its
+/// own posts, granted through `channel_user`. It is `SessionHasPermissionToChannel`, which takes
+/// the channel **id** rather than the channel, so there is no `GetChannel` and no 404 from one.
+///
+/// # Wire format
+///
+/// `json.NewEncoder(w).Encode(postsList)` — a bare JSON **array** with a trailing newline, not a
+/// `PostList`. There is no `order`, no `posts` map and no etag.
+#[tracing::instrument(skip_all, fields(post_id = %post_id))]
+pub async fn get_edit_history_for_post(
+    State(state): State<AppState>,
+    Path(post_id): Path<String>,
+    session: AuthenticatedSession,
+) -> Result<Response, ApiError> {
+    // `c.RequirePostId()` (web/context.go:411).
+    if !is_valid_id(&post_id) {
+        return Err(ApiError::invalid_url_param("post_id"));
+    }
+
+    let permission_error =
+        || ApiError::from(make_permission_error(&session.0, &[&PERMISSION_EDIT_POST]));
+
+    // `includeDeleted` is hard-coded false, and the error is **thrown away** — see the doc
+    // comment. This is the one place in the port where an app-layer 404 is deliberately
+    // swallowed.
+    let Ok(original) = state.app.get_single_post(&post_id, false).await else {
+        return Err(permission_error());
+    };
+
+    let (allowed, _is_member) = state
+        .app
+        .session_has_permission_to_channel(&session.0, &original.channel_id, &PERMISSION_EDIT_POST)
+        .await;
+    if !allowed {
+        return Err(permission_error());
+    }
+
+    // The authorship check, unconditional here — see the doc comment on `PostTypeCard`.
+    if session.0.user_id != original.user_id {
+        return Err(permission_error());
+    }
+
+    let history = state.app.get_edit_history_for_post(&post_id).await?;
+
+    let mut body = serde_json::to_vec(&history).map_err(|err| {
+        tracing::error!(error = %err, "failed to serialise the edit history");
+        ApiError::from(mm_model::utils::AppError::new(
+            "getEditHistoryForPost",
+            "api.marshal_error",
+            None,
+            String::new(),
+            500,
+        ))
+    })?;
+    body.push(b'\n');
+
+    Ok((
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
+    )
+        .into_response())
 }
