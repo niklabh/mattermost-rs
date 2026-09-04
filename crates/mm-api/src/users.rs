@@ -2130,6 +2130,101 @@ mod autocomplete_tests {
     }
 }
 
+/// Port of `getUsersByGroupChannelIds` (api4/user.go:828), reached as
+/// `POST /api/v4/users/group_channels` — the member profiles behind a group message's avatar
+/// row, which the webapp asks for once per GM on screen.
+///
+/// # The empty-list branch is dead code, and the error it never sends is the interesting one
+///
+/// Go writes `if err != nil || len(channelIds) == 0 { … PayloadParseError … } else if
+/// len(channelIds) == 0 { SetInvalidParam("channel_ids") }`. The second arm cannot be reached:
+/// the first already caught the empty list. So `[]` and `null` answer **400
+/// `api.payload.parse.error`**, never `invalid_body_param` — the opposite of what every other
+/// by-ids route in api4 does with an empty body, and the opposite of what the dead branch says
+/// this one meant to do. Measured.
+///
+/// # There is no permission check on this route
+///
+/// Not in the handler, not in the app layer. The access rule is an `EXISTS` subquery inside the
+/// store's SQL asserting the caller is a member of each channel — see
+/// [`mm_store::user_store::SqlUserStore::get_profile_by_group_channel_ids_for_user`]. Naming a
+/// group channel you are not in answers with that channel simply absent from the map, not a 403.
+///
+/// # `asAdmin` is `c.IsSystemAdmin()`, and it only widens sanitisation
+///
+/// The same `SanitizeProfile` the by-ids route applies, with the same config-driven options.
+///
+/// # Wire format
+///
+/// `json.NewEncoder(w).Encode` of a `map[string][]*model.User` — an object with **bytewise
+/// sorted keys**, a trailing newline, and a channel that matched nothing simply absent rather
+/// than present-and-empty.
+#[tracing::instrument(skip_all, fields(user_id = %session.0.user_id, asked, found))]
+pub async fn get_users_by_group_channel_ids(
+    State(state): State<AppState>,
+    session: AuthenticatedSession,
+    request: axum::extract::Request,
+) -> Result<Response, ApiError> {
+    let bytes = axum::body::to_bytes(request.into_body(), usize::MAX)
+        .await
+        .map_err(|err| {
+            tracing::warn!(error = %err, "could not read the request body");
+            group_channels_parse_error()
+        })?;
+
+    // `SortedArrayFromJSON` then `err != nil || len == 0` — one branch, two causes, one answer.
+    let channel_ids = match sorted_array_from_json(&bytes) {
+        Ok(ids) if !ids.is_empty() => ids,
+        _ => return Err(group_channels_parse_error()),
+    };
+    tracing::Span::current().record("asked", channel_ids.len());
+
+    let is_admin = state
+        .app
+        .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)
+        .await;
+
+    let mut by_channel = state
+        .app
+        .get_users_by_group_channel_ids(&session.0.user_id, &channel_ids)
+        .await?;
+    tracing::Span::current().record("found", by_channel.len());
+
+    let options = sanitize_options(state.show_full_name, state.show_email_address, is_admin);
+    for users in by_channel.values_mut() {
+        for user in users.iter_mut() {
+            user.sanitize_profile(&options, is_admin);
+        }
+    }
+
+    let mut body = serde_json::to_vec(&by_channel).map_err(|err| {
+        tracing::error!(error = %err, "failed to serialise the group-channel profiles");
+        marshal_error("getUsersByGroupChannelIds")
+    })?;
+    body.push(b'\n');
+
+    Ok((
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
+    )
+        .into_response())
+}
+
+/// `model.NewAppError("getUsersByGroupChannelIds", model.PayloadParseError, nil, "", 400)`.
+fn group_channels_parse_error() -> ApiError {
+    ApiError::from(AppError::new(
+        "getUsersByGroupChannelIds",
+        PAYLOAD_PARSE_ERROR,
+        None,
+        String::new(),
+        400,
+    ))
+}
+
 /// `model.NewAppError(where, "api.marshal_error", nil, "", 500)`.
 fn marshal_error(where_: &'static str) -> ApiError {
     ApiError::from(AppError::new(

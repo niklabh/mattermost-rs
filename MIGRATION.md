@@ -5597,3 +5597,58 @@ branch's sanitiser needs a caller reading somebody *else's* list.
 
 **The lesson generalises past this route:** a loop whose fixture fits in one iteration is not
 tested, it is only executed. Any paginated walk needs a fixture that crosses a page boundary.
+
+## `POST /api/v4/users/group_channels` — `getUsersByGroupChannelIds` (2026-09-05)
+
+Served. `crates/mm-api/src/users.rs` (`get_users_by_group_channel_ids`),
+`crates/mm-app/src/user.rs` (`get_users_by_group_channel_ids`),
+`crates/mm-store/src/user_store.rs` (`get_profile_by_group_channel_ids_for_user`,
+`UserWithChannelRow`, `MAX_GROUP_CHANNELS_FOR_PROFILES`); 9 parity tests in
+`crates/mm-api/tests/parity/users_group_channels.rs` plus 1 unit test. The member profiles behind
+a group message's avatar row.
+
+**The one thing a reader would otherwise get wrong: an empty list is a *parse* error.** Go writes
+`if err != nil || len(channelIds) == 0 { … PayloadParseError … } else if len(channelIds) == 0 {
+SetInvalidParam("channel_ids") }` — the second arm cannot be reached, because the first already
+caught the empty list. So `[]` and `null` answer 400 `api.payload.parse.error`, never
+`invalid_body_param`, which is the opposite of every other by-ids route in api4 *and* the
+opposite of what the dead branch says this one meant to do. Measured.
+
+**There is no permission check on this route** — not in the handler, not in the app layer. The
+access rule is an `EXISTS` subquery inside the store's SQL asserting the caller is a member of
+each channel it answers for, so a group channel you are not in is *absent from the map* rather
+than a 403. Anything that "tidied" that subquery into a forgotten app-layer gate would list every
+group channel's members to anyone; the doc comments on all three layers say so.
+
+Two smaller ones: `MaxGroupChannelsForProfiles` **truncates** the id list to fifty rather than
+refusing a longer one, and it does so *after* `SortedArrayFromJSON` has sorted — so it is the
+fifty lowest-sorting ids that survive, not the first fifty the client wrote, and nothing in the
+response says a channel was dropped. And Go builds the `EXISTS` with `fmt.Sprintf`, interpolating
+the session's user id straight into the SQL text; this binds it as a parameter instead. Same rows,
+and worth naming rather than silently fixing.
+
+Mutation run: **18 run, 16 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/users-group-channels.plan`).
+
+### A test whose premise was wrong, and two survivors that were the same mistake
+
+The first sanitisation test asserted a plain caller sees no email address. It failed against
+**both** servers — this deployment has `ShowEmailAddress` on — which is the fixture being wrong,
+not the port. What `asAdmin` actually changes on the wire is narrower: the admin's copy carries
+`notify_props` and a plain caller's carries `auth_data` instead. The rewritten test pins that
+pair, and that no caller ever sees a credential.
+
+Then `Type = 'G'` survived a mutation widening it to "any message channel", because every id the
+suite passed was already a group channel. The fixture now includes an ordinary channel and a
+direct message the caller *is* a member of, and asserts both come back absent. **The rule
+generalises: a filter is only tested by a fixture the filter actually excludes** — the sibling of
+last session's "a loop whose fixture fits in one iteration is executed, not tested".
+
+### Next: `getThreadsForUser`, and why it was not this session
+
+`GET /users/{user_id}/teams/{team_id}/threads` is the highest-value unserved read left — the
+Threads view — and it is the first route with **no ported neighbours at all**: no thread model, no
+thread store, no thread app layer. It needs `model.Thread`/`ThreadResponse`, five store functions
+(`GetThreadsForUser` plus four counters that Go runs concurrently), participant hydration, and a
+fixture that builds threads, replies, memberships and unread state. That is a session's whole
+budget and then some, and it should start cold rather than be tacked onto the end of another.

@@ -165,6 +165,12 @@ pub fn router(state: AppState) -> Router {
         // lands here while `GET /users/ids` is forwarded by `partially_migrated` and Go
         // answers as before. The GET route's exact-26-char rule never saw `ids` anyway (three
         // characters), so nothing that was forwarded stops being forwarded.
+        // `BaseRoutes.Users.Handle("/group_channels")` (api4/user.go:39), POST-only — another
+        // literal sibling of `{user_id}`, same precedence reasoning as `ids` below.
+        .route(
+            "/api/v4/users/group_channels",
+            partially_migrated(post(users::get_users_by_group_channel_ids)),
+        )
         .route(
             "/api/v4/users/ids",
             partially_migrated(post(users::get_users_by_ids)),

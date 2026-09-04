@@ -129,6 +129,41 @@ impl App {
     pub async fn get_user(&self, id: &str) -> AppResult<User> {
         self.store().user().get(id).await.map_err(get_user_error)
     }
+
+    /// Port of `app.App.GetUsersByGroupChannelIds` (app/user.go:909).
+    ///
+    /// One store call, one error id, and `sanitizeProfiles` over each channel's list. The
+    /// sanitisation is the handler's job here — this returns the raw map — because the options
+    /// depend on config the api layer already holds; see `mm_api::users`.
+    ///
+    /// **There is no permission check anywhere above the store.** The access rule lives inside
+    /// the query, as an `EXISTS` asserting the caller is a member of each channel it answers
+    /// for — see [`mm_store::user_store`]. A port that "tidied" that subquery out of the SQL and
+    /// into a forgotten app-layer gate would list every group channel's members to anyone.
+    #[tracing::instrument(skip_all, fields(user_id = %user_id, asked = channel_ids.len(), found))]
+    pub async fn get_users_by_group_channel_ids(
+        &self,
+        user_id: &str,
+        channel_ids: &[String],
+    ) -> AppResult<std::collections::BTreeMap<String, Vec<User>>> {
+        let by_channel = self
+            .store()
+            .user()
+            .get_profile_by_group_channel_ids_for_user(user_id, channel_ids)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "group-channel profile lookup failed");
+                AppError::boxed(
+                    "GetUsersByGroupChannelIds",
+                    "app.user.get_profile_by_group_channel_ids_for_user.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })?;
+        tracing::Span::current().record("found", by_channel.len());
+        Ok(by_channel)
+    }
 }
 
 impl App {
@@ -641,5 +676,33 @@ mod tests {
             "the by-username miss does not wear MissingAccountError (user.go:573)"
         );
         assert!(err.params.is_none());
+    }
+
+    /// The 500 branch of `GetUsersByGroupChannelIds`, which nothing reachable over HTTP can
+    /// produce: the store only fails on a driver error, and the route has no input that causes
+    /// one. A mutation swapping this error id for a neighbouring one survived a full parity run
+    /// for exactly that reason.
+    #[tokio::test]
+    async fn a_store_failure_carries_the_group_channel_error_id() {
+        // A pool pointed at nothing, so the call fails without a 30-second acquire timeout in a
+        // unit suite (CLAUDE.md). `connect_lazy` still wants a reactor, hence `#[tokio::test]`.
+        let store = mm_store::SqlStore::from_pool(
+            sqlx::postgres::PgPoolOptions::new()
+                .acquire_timeout(std::time::Duration::from_millis(50))
+                .connect_lazy("postgres://unused/unused")
+                .expect("a lazy pool needs no server"),
+        );
+        let app = crate::App::with_config(store, crate::config::Config::default());
+
+        let err = app
+            .get_users_by_group_channel_ids("someuserid1jbyqbtxbtqcgy", &["c".to_owned()])
+            .await
+            .expect_err("the store is not connected");
+        assert_eq!(
+            err.id,
+            "app.user.get_profile_by_group_channel_ids_for_user.app_error"
+        );
+        assert_eq!(err.status_code, 500);
+        assert_eq!(err.where_, "GetUsersByGroupChannelIds");
     }
 }

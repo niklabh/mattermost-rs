@@ -51,6 +51,16 @@ pub trait UserStore {
         since: i64,
     ) -> impl std::future::Future<Output = Result<Vec<User>, StoreError>> + Send;
 
+    /// Port of `SqlUserStore.GetProfileByGroupChannelIdsForUser` (user_store.go:1209): the other
+    /// members of each named group channel, keyed by channel id.
+    fn get_profile_by_group_channel_ids_for_user(
+        &self,
+        user_id: &str,
+        channel_ids: &[String],
+    ) -> impl std::future::Future<
+        Output = Result<std::collections::BTreeMap<String, Vec<User>>, StoreError>,
+    > + Send;
+
     /// Port of `SqlUserStore.GetAllProfiles` (user_store.go:682) — `GET /users` with no filter
     /// at all — for nil view restrictions, no role filter and the default sort.
     fn get_all_profiles(
@@ -161,6 +171,13 @@ pub trait UserStore {
 }
 
 /// `model.UserSearchDefaultLimit` (model/user_search.go:7).
+/// Port of `MaxGroupChannelsForProfiles` (user_store.go:29).
+///
+/// Go **silently truncates** the caller's id list to this many rather than refusing a longer
+/// one — `channelIds = channelIds[0:MaxGroupChannelsForProfiles]` — so asking about sixty group
+/// channels answers about fifty of them, with no error and nothing in the response saying so.
+pub const MAX_GROUP_CHANNELS_FOR_PROFILES: usize = 50;
+
 pub const USER_SEARCH_DEFAULT_LIMIT: i64 = 100;
 /// `model.UserSearchMaxLimit` (model/user_search.go:6).
 pub const USER_SEARCH_MAX_LIMIT: i64 = 1000;
@@ -251,6 +268,87 @@ pub fn deleted_filter(inactive: bool, active: bool) -> Option<bool> {
 /// gets; both servers return nothing for an absurd page either way.
 fn offset_of(page: i64, per_page: i64) -> i64 {
     page.saturating_mul(per_page)
+}
+
+/// Port of Go's `UserWithChannel` (user_store.go:1198): [`UserRow`] with the joined
+/// `ChannelMembers.ChannelId` beside it.
+///
+/// A separate struct rather than an `Option` on `UserRow` because `query_as!` binds positionally
+/// — the two queries have genuinely different shapes, and one type would put a channel id on
+/// every user lookup in the file.
+struct UserWithChannelRow {
+    id: String,
+    createat: Option<i64>,
+    updateat: Option<i64>,
+    deleteat: Option<i64>,
+    username: Option<String>,
+    password: Option<String>,
+    authdata: Option<String>,
+    authservice: Option<String>,
+    email: Option<String>,
+    emailverified: Option<bool>,
+    nickname: Option<String>,
+    firstname: Option<String>,
+    lastname: Option<String>,
+    position: Option<String>,
+    roles: Option<String>,
+    allowmarketing: Option<bool>,
+    props: Option<serde_json::Value>,
+    notifyprops: Option<serde_json::Value>,
+    lastpasswordupdate: Option<i64>,
+    lastpictureupdate: Option<i64>,
+    failedattempts: Option<i64>,
+    locale: Option<String>,
+    timezone: Option<serde_json::Value>,
+    mfaactive: Option<bool>,
+    mfasecret: Option<String>,
+    mfausedtimestamps: Option<serde_json::Value>,
+    remoteid: Option<String>,
+    lastlogin: i64,
+    isbot: bool,
+    botdescription: String,
+    botlasticonupdate: i64,
+    channelid: String,
+}
+
+impl UserWithChannelRow {
+    /// Drop the joined column and hand the rest to [`user_from_row`], which every other user
+    /// lookup already shares.
+    fn into_user_row(self) -> UserRow {
+        UserRow {
+            id: self.id,
+            createat: self.createat,
+            updateat: self.updateat,
+            deleteat: self.deleteat,
+            username: self.username,
+            password: self.password,
+            authdata: self.authdata,
+            authservice: self.authservice,
+            email: self.email,
+            emailverified: self.emailverified,
+            nickname: self.nickname,
+            firstname: self.firstname,
+            lastname: self.lastname,
+            position: self.position,
+            roles: self.roles,
+            allowmarketing: self.allowmarketing,
+            props: self.props,
+            notifyprops: self.notifyprops,
+            lastpasswordupdate: self.lastpasswordupdate,
+            lastpictureupdate: self.lastpictureupdate,
+            failedattempts: self.failedattempts,
+            locale: self.locale,
+            timezone: self.timezone,
+            mfaactive: self.mfaactive,
+            mfasecret: self.mfasecret,
+            mfausedtimestamps: self.mfausedtimestamps,
+            remoteid: self.remoteid,
+            lastlogin: self.lastlogin,
+            isbot: self.isbot,
+            botdescription: self.botdescription,
+            botlasticonupdate: self.botlasticonupdate,
+        }
+    }
 }
 
 /// Postgres-backed implementation.
@@ -664,6 +762,112 @@ impl UserStore for SqlUserStore {
         tracing::Span::current().record("found", rows.len());
 
         rows.into_iter().map(user_from_row).collect()
+    }
+
+    /// Port of `SqlUserStore.GetProfileByGroupChannelIdsForUser` (user_store.go:1209).
+    ///
+    /// For each of the named **group** channels the caller is in, the other members' profiles —
+    /// which is what the webapp draws a GM's avatar row from.
+    ///
+    /// # Four predicates, and the interesting one is the `EXISTS`
+    ///
+    /// `c.Type = 'G'`, the channel id list, `Users.Id <> ?` (the caller is not in their own
+    /// avatar row), and an `EXISTS` over `ChannelMembers` asserting the **caller** is a member
+    /// of the channel. Without that last one, naming any group channel id would list its
+    /// members to anyone — it is the whole access check, and there is none at the handler or app
+    /// layer above it.
+    ///
+    /// **Go builds that `EXISTS` with `fmt.Sprintf` and the user id interpolated into the SQL
+    /// text** (user_store.go:1214). The value comes from the session so it is a 26-character id
+    /// in practice, but it is a string-built predicate all the same; here it is a bind
+    /// parameter. Same rows, and the difference is worth naming rather than silently fixing.
+    ///
+    /// # The cap truncates rather than refuses
+    ///
+    /// See [`MAX_GROUP_CHANNELS_FOR_PROFILES`]. The truncation happens on the **sorted,
+    /// de-duplicated** list `SortedArrayFromJSON` produced, so it is the fifty
+    /// lowest-sorting ids that survive — not the first fifty the client wrote.
+    ///
+    /// `ORDER BY Users.Username ASC` orders within each channel's list; the map is keyed by
+    /// channel id and a `BTreeMap` reproduces `encoding/json`'s bytewise key order.
+    #[tracing::instrument(skip_all, fields(user_id = %user_id, asked = channel_ids.len(), found))]
+    async fn get_profile_by_group_channel_ids_for_user(
+        &self,
+        user_id: &str,
+        channel_ids: &[String],
+    ) -> Result<std::collections::BTreeMap<String, Vec<User>>, StoreError> {
+        let capped = &channel_ids[..channel_ids.len().min(MAX_GROUP_CHANNELS_FOR_PROFILES)];
+
+        let rows = sqlx::query_as!(
+            UserWithChannelRow,
+            r#"
+            SELECT u.id,
+                   u.createat,
+                   u.updateat,
+                   u.deleteat,
+                   u.username,
+                   u.password,
+                   u.authdata,
+                   u.authservice,
+                   u.email,
+                   u.emailverified,
+                   u.nickname,
+                   u.firstname,
+                   u.lastname,
+                   u.position,
+                   u.roles,
+                   u.allowmarketing,
+                   u.props,
+                   u.notifyprops,
+                   u.lastpasswordupdate,
+                   u.lastpictureupdate,
+                   u.failedattempts::bigint AS failedattempts,
+                   u.locale,
+                   u.timezone,
+                   u.mfaactive,
+                   u.mfasecret,
+                   u.mfausedtimestamps,
+                   u.remoteid,
+                   u.lastlogin,
+                   (b.userid IS NOT NULL) AS "isbot!",
+                   COALESCE(b.description, '') AS "botdescription!",
+                   COALESCE(b.lasticonupdate, 0) AS "botlasticonupdate!",
+                   cm.channelid AS "channelid!"
+              FROM users u
+              LEFT JOIN bots b ON b.userid = u.id
+              JOIN channelmembers cm ON u.id = cm.userid
+              JOIN channels c ON cm.channelid = c.id
+             WHERE c.type = 'G'
+               AND cm.channelid = ANY($1::varchar[])
+               AND EXISTS (SELECT 1
+                             FROM channelmembers caller
+                            WHERE caller.userid = $2
+                              AND caller.channelid = cm.channelid)
+               AND u.id <> $2
+             ORDER BY u.username ASC
+            "#,
+            capped,
+            user_id,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to find Users".to_owned(),
+            source,
+        })?;
+
+        tracing::Span::current().record("found", rows.len());
+
+        let mut by_channel: std::collections::BTreeMap<String, Vec<User>> =
+            std::collections::BTreeMap::new();
+        for row in rows {
+            let channel_id = row.channelid.clone();
+            by_channel
+                .entry(channel_id)
+                .or_default()
+                .push(user_from_row(row.into_user_row())?);
+        }
+        Ok(by_channel)
     }
 
     #[tracing::instrument(skip_all, fields(page, per_page, found))]
