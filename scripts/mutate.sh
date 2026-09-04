@@ -72,14 +72,32 @@ cp "$FILE" "$BACKUP"
 
 restore_source() { cp "$BACKUP" "$FILE"; }
 
+# Rebuild mm-api from the mutated source and put it back on :8066.
+#
+# Two failures used to look identical and be reported as one **HARNESS FAULT** whose message,
+# "does not compile, or the server never came up", could not say which. That is the wrong
+# question to leave open: a compile error means the mutation was malformed and the plan needs
+# fixing, while a slow start means the verdict was lost to load and a re-run would have been
+# fine. Two runs in this session hit the second and were investigated as the first. So the build
+# failure now prints the compiler's own last lines, and the start is retried once with a longer
+# budget — 30 seconds against the old 10, because this machine also carries Postgres, the Go
+# server and a concurrent cargo.
 restart_server() {
-  cargo build -p mm-api > "$WORK/build.log" 2>&1 || return 1
-  pkill -f 'target/debug/mm-api' 2>/dev/null || true
-  sleep 1
-  (nohup "$ROOT/target/debug/mm-api" > "$WORK/mm-api.log" 2>&1 &)
-  for _ in $(seq 20); do
-    curl -sf -o /dev/null http://127.0.0.1:8066/api/v4/system/ping && return 0
-    sleep 0.5
+  if ! cargo build -p mm-api > "$WORK/build.log" 2>&1; then
+    echo "  the mutated source does not compile:"
+    grep -E '^(error|error\[)' "$WORK/build.log" | head -3 | sed 's/^/    /'
+    return 1
+  fi
+  for attempt in 1 2; do
+    pkill -f 'target/debug/mm-api' 2>/dev/null || true
+    sleep 1
+    (nohup "$ROOT/target/debug/mm-api" > "$WORK/mm-api.log" 2>&1 &)
+    for _ in $(seq 60); do
+      curl -sf -o /dev/null http://127.0.0.1:8066/api/v4/system/ping && return 0
+      sleep 0.5
+    done
+    echo "  mm-api did not answer within 30s (attempt $attempt); last log lines:"
+    tail -3 "$WORK/mm-api.log" 2>/dev/null | sed 's/^/    /'
   done
   return 1
 }
@@ -130,12 +148,12 @@ case "$SUITE" in
              cargo test -p mm-api --test parity > "$LOG" 2>&1 || RC=$?
            fi
          else
-           RC=1; echo "does not compile, or the server never came up" > "$LOG"
+           RC=1; echo "the mutated server never became testable — see the lines above" > "$LOG"
          fi ;;
   all)   if restart_server; then
            cargo test --workspace ${=MUTATE_FILTER} > "$LOG" 2>&1 || RC=$?
          else
-           RC=1; echo "does not compile, or the server never came up" > "$LOG"
+           RC=1; echo "the mutated server never became testable — see the lines above" > "$LOG"
          fi ;;
   *) echo "unknown suite: $SUITE"; exit 2 ;;
 esac
