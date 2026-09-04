@@ -93,16 +93,29 @@ async fn admin_user_id(pool: &PgPool) -> String {
 
 /// A plain `system_user` row, inserted by the test. Only `id` and `lastlogin` are NOT NULL, so the
 /// rest is what a real row would carry rather than what the schema demands.
+///
+/// # `nickname`, `firstname` and `lastname` are `''`, and that is not cosmetic
+///
+/// The schema permits NULL in all three; the Go server never writes one — 148 rows in the
+/// development database, zero NULLs — because `model.User` declares them as plain `string`.
+/// Leaving them NULL here makes this row match **every** user search: `SqlUserStore::search`
+/// excludes a user when some term matches no column, and under three-valued logic a NULL column
+/// makes that chain NULL rather than false, so the row is never excluded. `purge` runs at the
+/// start rather than the end, so the row outlives this suite and the next `db_user_search` run
+/// then fails on a stray username it has never heard of. Measured after a run of the two suites
+/// in that order; the query is Go's shape and stays untouched.
 async fn insert_user(pool: &PgPool, id: &str, username: &str, roles: &str) {
     sqlx::query(
         r#"
         INSERT INTO users (id, createat, updateat, deleteat, username, email, emailverified,
                            password, authdata, authservice, roles, allowmarketing, props,
                            notifyprops, lastpasswordupdate, failedattempts, locale, mfaactive,
-                           mfasecret, position, timezone, remoteid, lastlogin)
+                           mfasecret, position, timezone, remoteid, lastlogin,
+                           nickname, firstname, lastname)
         VALUES ($1, 1755000000000, 1755000000000, 0, $2, $2 || '@mmrs.invalid', true,
                 '', NULL, '', $3, false, 'null'::jsonb, 'null'::jsonb, 1755000000000, 0, 'en',
-                false, '', '', 'null'::jsonb, NULL, 0)
+                false, '', '', 'null'::jsonb, NULL, 0,
+                '', '', '')
         "#,
     )
     .bind(id)
