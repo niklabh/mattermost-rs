@@ -26,7 +26,7 @@
 //! The parameter names below keep Go's (`default_team_user_role`), because Go's `getChannelRoles`
 //! signature does; the doc comment is where the distinction lives.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use mm_model::channel::{Channel, ChannelBannerInfo, ChannelSearchOpts};
 use mm_model::channel_list::ChannelList;
@@ -237,6 +237,12 @@ pub trait ChannelStore {
         is_guest: bool,
     ) -> impl std::future::Future<Output = Result<ChannelList, StoreError>> + Send;
 
+    /// Port of `SqlChannelStore.GetChannelsMemberCount` (channel_store.go:2573).
+    fn get_channels_member_count(
+        &self,
+        ids: &[String],
+    ) -> impl std::future::Future<Output = Result<BTreeMap<String, i64>, StoreError>> + Send;
+
     /// Port of `SqlChannelStore.GetMany` (channel_store.go:1043): [`ChannelStore::get`]'s
     /// query with an id **list**, and the same `ErrNotFound` when nothing matches.
     fn get_many(
@@ -414,6 +420,14 @@ impl ChannelStore for SqlChannelStore {
     #[tracing::instrument(skip_all, fields(asked = ids.len(), found))]
     async fn get_many(&self, ids: &[String]) -> Result<Vec<Channel>, StoreError> {
         get_many(&self.pool, ids).await
+    }
+
+    #[tracing::instrument(skip_all, fields(asked = ids.len(), counted))]
+    async fn get_channels_member_count(
+        &self,
+        ids: &[String],
+    ) -> Result<BTreeMap<String, i64>, StoreError> {
+        get_channels_member_count(&self.pool, ids).await
     }
 
     #[tracing::instrument(skip_all, fields(team_id = %team_id, user_id = %user_id, is_guest, found))]
@@ -1389,6 +1403,63 @@ pub async fn get(pool: &PgPool, id: &str) -> Result<Channel, StoreError> {
 /// `allowFromCache` is dropped, as everywhere else in this port — there is no cache layer to
 /// consult, and a parameter no caller can act on is a lie at the call site.
 #[tracing::instrument(skip(pool, ids), fields(asked = ids.len(), found))]
+/// Port of `SqlChannelStore.GetChannelsMemberCount` (channel_store.go:2573).
+///
+/// # Every requested id gets a key, whether or not it has members
+///
+/// Go seeds a `defaults` map with `0` for each id and lets `scanRowsIntoMap` overwrite the ones
+/// the query answered for. A channel with no live members is therefore `"<id>": 0` on the wire,
+/// not an absent key — and the handler above only ever passes ids it has already resolved to
+/// channels, so the zeros are real channels rather than typos.
+///
+/// # The join is the filter
+///
+/// `INNER JOIN Users … AND Users.DeleteAt = 0` — a **deactivated member is not counted**, and
+/// there is no `ChannelMembers` deletion column to check because leaving a channel deletes the
+/// row outright. Dropping the join, or its predicate, inflates every count by the deactivated
+/// accounts that never left.
+///
+/// # `BTreeMap`, because the answer is a JSON object
+///
+/// `encoding/json` sorts map keys bytewise when it marshals ([D-027]), so the response object is
+/// in ascending id order regardless of the request's. A `BTreeMap<String, _>` serialised straight
+/// through reproduces that without a sort step.
+pub async fn get_channels_member_count(
+    pool: &PgPool,
+    ids: &[String],
+) -> Result<BTreeMap<String, i64>, StoreError> {
+    let mut counts: BTreeMap<String, i64> = ids.iter().map(|id| (id.clone(), 0)).collect();
+
+    if ids.is_empty() {
+        return Ok(counts);
+    }
+
+    let rows = sqlx::query!(
+        r#"
+        SELECT cm.channelid    AS "channel_id!",
+               COUNT(*)        AS "count!"
+          FROM channelmembers cm
+          INNER JOIN users u ON u.id = cm.userid
+         WHERE cm.channelid = ANY($1::text[])
+           AND u.deleteat = 0
+         GROUP BY cm.channelid
+        "#,
+        ids
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: "failed to fetch member counts".to_owned(),
+        source,
+    })?;
+
+    tracing::Span::current().record("counted", rows.len());
+    for row in rows {
+        counts.insert(row.channel_id, row.count);
+    }
+    Ok(counts)
+}
+
 pub async fn get_many(pool: &PgPool, ids: &[String]) -> Result<Vec<Channel>, StoreError> {
     let rows = sqlx::query_as!(
         ChannelRow,

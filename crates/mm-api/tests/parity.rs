@@ -45,6 +45,7 @@ mod parity {
     pub mod channel_unread;
     pub mod channels_for_team_for_user;
     pub mod channels_for_user;
+    pub mod channels_member_count;
     pub mod drafts;
     pub mod emoji_autocomplete;
     pub mod emoji_by_names;

@@ -732,6 +732,44 @@ impl App {
         Ok(channels)
     }
 
+    /// Port of `app.App.GetChannelsMemberCount` (app/channel.go:2313).
+    ///
+    /// Two ids on the store's one error — 404 `…get_channels_member_count.existing.app_error`
+    /// for a not-found, 500 `…find.app_error` otherwise — but the store has **no not-found
+    /// branch**: an id nothing matches is a `0` in the map, not an error. The 404 is dead code
+    /// in Go too, and reproduced for the same reason its neighbours are.
+    #[tracing::instrument(skip_all, fields(asked = channel_ids.len()))]
+    pub async fn get_channels_member_count(
+        &self,
+        channel_ids: &[String],
+    ) -> AppResult<std::collections::BTreeMap<String, i64>> {
+        self.store()
+            .channel()
+            .get_channels_member_count(channel_ids)
+            .await
+            .map_err(|err| {
+                let not_found = err.is_not_found();
+                tracing::error!(error = %err, "channel member counts failed");
+                if not_found {
+                    AppError::boxed(
+                        "GetChannelsMemberCount",
+                        "app.channel.get_channels_member_count.existing.app_error",
+                        None,
+                        String::new(),
+                        404,
+                    )
+                } else {
+                    AppError::boxed(
+                        "GetChannelsMemberCount",
+                        "app.channel.get_channels_member_count.find.app_error",
+                        None,
+                        String::new(),
+                        500,
+                    )
+                }
+            })
+    }
+
     /// Port of `app.App.GetChannels` (channel.go:2289) — the plural of `GetChannel`, over an
     /// id list.
     ///

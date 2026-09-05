@@ -109,6 +109,143 @@ fn validate_ids(channel_id: &str, user_id: &str) -> Result<(), ApiError> {
     Ok(())
 }
 
+/// Port of `getChannelsMemberCount` (api4/channel.go:1128) —
+/// `POST /api/v4/channels/stats/member_count`.
+///
+/// The webapp posts the ids of the channels in the sidebar to render their member counts.
+///
+/// # A partially-resolvable list is **forwarded**, because Go's answer depends on its cache
+///
+/// `GetChannels` calls `Channel().GetMany(ids, true)`, and the *cache layer* — not the sqlstore —
+/// is what answers. It reads each id from an in-memory cache, queries only the misses, and
+/// returns `ErrNotFound` when **the query it actually ran** matched nothing
+/// (localcachelayer/channel_layer.go:261, sqlstore/channel_store.go:1062).
+///
+/// So for a list of one known and one unknown id, Go answers **404 when the known channel is
+/// cached** (only the unknown id is queried, and it matches nothing) and **200 with one entry
+/// when it is not** (both are queried, one matches). Measured: a repeat of the same request
+/// flipped the answer.
+///
+/// Two cases are deterministic and are served here — **every** id resolves (Go queries a subset
+/// of ids that all exist, whichever way the cache falls) and **no** id resolves (nothing can be
+/// cached, so the whole list is queried and matches nothing → 404). Anything in between is Go's,
+/// because this port has no such cache and cannot know which way it fell.
+///
+/// # An empty list is `{}`, not the 404 the sqlstore would give
+///
+/// With zero ids the cache layer returns before querying, so `Id IN ()` — which squirrel renders
+/// as a false predicate and whose zero rows *would* be `ErrNotFound` — is never reached. `[]` and
+/// `null` are both `{}` with a 200. Measured.
+///
+/// # The permission loop runs to completion before any count is read
+///
+/// One refusal refuses the whole request, and the reported permission is `list_team_channels`
+/// whichever branch of `HasPermissionToChannelMemberCount` said no — including the
+/// `read_channel_content` one. `SetPermissionError` is passed a literal.
+///
+/// # Wire format
+///
+/// `json.NewEncoder(w).Encode(map[string]int64)` — a **trailing newline**, and an object with
+/// bytewise-sorted keys ([D-027]).
+#[tracing::instrument(skip_all, fields(asked, forwarded))]
+pub async fn get_channels_member_count(
+    State(state): State<AppState>,
+    session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    let (parts, body) = request.into_parts();
+    let bytes = match axum::body::to_bytes(body, usize::MAX).await {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            tracing::warn!(error = %err, "could not read the request body");
+            return payload_parse_error("getChannelsMemberCount").into_response();
+        }
+    };
+
+    let channel_ids = match sorted_array_from_json(&bytes) {
+        Ok(ids) => ids,
+        Err(err) => {
+            tracing::debug!(error = %err, "channel id body did not decode");
+            return payload_parse_error("getChannelsMemberCount").into_response();
+        }
+    };
+    tracing::Span::current().record("asked", channel_ids.len());
+
+    // `GetChannels` short-circuits on an empty list inside the cache layer — see the note above.
+    let channels = if channel_ids.is_empty() {
+        Vec::new()
+    } else {
+        match state.app.get_channels(&channel_ids).await {
+            Ok(channels) => channels,
+            Err(err) => return ApiError::from(err).into_response(),
+        }
+    };
+
+    if !channels.is_empty() && channels.len() != channel_ids.len() {
+        tracing::Span::current().record("forwarded", true);
+        let request = Request::from_parts(parts, axum::body::Body::from(bytes));
+        return crate::proxy::forward_to_go(State(state), request).await;
+    }
+    tracing::Span::current().record("forwarded", false);
+
+    for channel in &channels {
+        if !state
+            .app
+            .has_permission_to_channel_member_count(&session.0.user_id, channel)
+            .await
+        {
+            return ApiError::from(make_permission_error(
+                &session.0,
+                &[&PERMISSION_LIST_TEAM_CHANNELS],
+            ))
+            .into_response();
+        }
+    }
+
+    let filtered: Vec<String> = channels.into_iter().map(|channel| channel.id).collect();
+    let counts = match state.app.get_channels_member_count(&filtered).await {
+        Ok(counts) => counts,
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+
+    let mut body = match serde_json::to_vec(&counts) {
+        Ok(body) => body,
+        Err(err) => {
+            tracing::error!(error = %err, "failed to serialise the member counts");
+            return ApiError::from(mm_model::utils::AppError::new(
+                "getChannelsMemberCount",
+                "api.marshal_error",
+                None,
+                String::new(),
+                500,
+            ))
+            .into_response();
+        }
+    };
+    body.push(b'\n');
+
+    (
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
+    )
+        .into_response()
+}
+
+/// `model.NewAppError(where, model.PayloadParseError, nil, "", 400)`.
+fn payload_parse_error(where_: &'static str) -> ApiError {
+    ApiError::from(mm_model::utils::AppError::new(
+        where_,
+        mm_model::utils::PAYLOAD_PARSE_ERROR,
+        None,
+        String::new(),
+        400,
+    ))
+}
+
 /// Port of `getChannelMember` (api4/channel.go).
 ///
 /// # Order of operations, which is the security-relevant part

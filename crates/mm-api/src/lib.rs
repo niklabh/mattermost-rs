@@ -385,6 +385,12 @@ pub fn router(state: AppState) -> Router {
         // as it matches gorilla's `{channel_id:[A-Za-z0-9]+}` there, and 400s identically; a POST
         // falls to `partially_migrated`'s method fallback and is forwarded. A literal segment
         // with a hyphen would land on `mux_segments_or_forward` and be forwarded too.
+        // `BaseRoutes.Channels.Handle("/stats/member_count")` (api4/channel.go:47) — posted
+        // with the sidebar's channel ids. A literal two segments deep, so it shadows nothing.
+        .route(
+            "/api/v4/channels/stats/member_count",
+            partially_migrated(post(channels::get_channels_member_count)),
+        )
         .route(
             "/api/v4/channels/{channel_id}",
             partially_migrated_with_ids(&state, get(channels::get_channel)),

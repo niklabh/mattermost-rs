@@ -6135,3 +6135,45 @@ is invisible from the wire — the same finding `users-by-names.plan` recorded, 
 mutation now swaps the error *id*, which differs by one word and is on the wire. And clippy was
 run *after* the batch rather than before, so a lint fix landed in a file the batch had already
 run against and the tally had to be earned twice.
+
+## `POST /api/v4/channels/stats/member_count` — `getChannelsMemberCount` (2026-09-05)
+
+Served, for the two deterministic id-resolution cases. `crates/mm-api/src/channels.rs`
+(`get_channels_member_count`), `crates/mm-app/src/channel.rs`,
+`crates/mm-store/src/channel_store.rs`; 8 parity tests in
+`crates/mm-api/tests/parity/channels_member_count.rs`. The webapp posts the sidebar's channel ids
+to render their member counts.
+
+**The one thing a reader would otherwise get wrong: Go's answer for a partially-resolvable id
+list depends on an in-memory cache, so it is not a function of the database.** `GetChannels` goes
+through `localcachelayer` (channel_layer.go:261), which reads each id from `channelByIdCache` and
+queries **only the misses**; the sqlstore then returns `ErrNotFound` when the query it actually ran
+matched nothing (channel_store.go:1062). For `[known, unknown]` that is a **404 when the known
+channel is cached** and a **200 with one entry when it is not** — measured, and a repeat of the
+same request flipped it.
+
+Two shapes are deterministic and are served: **every** id resolves (Go queries a subset that all
+exist, whichever way the cache falls) and **no** id resolves (nothing can be cached, so the whole
+list is queried and matches nothing → 404). Anything in between is forwarded. Reading only the
+sqlstore would have produced a port that answered 200 where Go answers 404 roughly half the time.
+
+The same cache layer is why an **empty list is `{}` with a 200** rather than the 404 the sqlstore
+alone would give: with zero ids it returns before querying.
+
+Two smaller shapes. The count's `INNER JOIN Users … AND Users.DeleteAt = 0` means a **deactivated
+member is not counted** — and there is no `ChannelMembers` deletion column, because leaving a
+channel deletes the row outright. And every requested id is seeded to `0`, so a channel nobody is
+in is `"<id>": 0` rather than an absent key. The permission loop runs to completion before any
+count is read, one refusal refuses the whole request, and the reported permission is
+`list_team_channels` whichever branch said no.
+
+Mutation run: **11 run, 9 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/channels-member-count.plan`). Full suite: 2476 passed, 0 failed.
+
+### Two harness rules, both re-learned
+
+A SQL mutation must keep every bound parameter **used** — replacing `cm.channelid = ANY($1)` with
+`IS NOT NULL` leaves `$1` unbound, which sqlx refuses at compile time, and a compile error is a
+harness fault that voids the whole run rather than a verdict. Neutralise with `OR TRUE` instead.
+And the seeded-zeros branch was dead until the fixture had a channel with **no members at all**:
+every channel has its creator, so leaving is the only way to produce one.
