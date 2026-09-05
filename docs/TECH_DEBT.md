@@ -4566,7 +4566,7 @@ that protects the same signal).
 
 ## D-130 · The Go server we compare against is a different version from the source we port
 
-**Status** CLOSED · **Severity** unverified · **Raised and closed** 2026-08-19 (phase 2)
+**Status** OPEN (reopened 2026-09-06) · **Severity** divergence · **Raised** 2026-08-19 (phase 2)
 **Affected** every cross-server parity claim in `mm-api`.
 
 `docker-compose.yml:59` pins `mattermost/mattermost-team-edition:**latest**`. The reference tree is
@@ -4628,6 +4628,38 @@ hoped, which was the whole point.
 **Related** [D-136], which is what re-running the role diff against the matched version revealed.
 
 **Related** [D-069] (the `TZ` pin, the same class of "the environment is part of the oracle").
+
+---
+
+**Reopened 2026-09-06 — the skew is now measured, and it is not one-directional.** This entry
+closed on "every suite passes against it", which was true of every route ported at the time and is
+not a claim about routes not yet looked at. `GET /api/v4/bots` is the first one where the pinned
+source and the running `11.11.0-rc1` image disagree about the **wire format**, and probing turned
+up a second disagreement pointing the other way:
+
+| | pinned SHA (2026-08-13) | running `11.11.0-rc1` |
+|---|---|---|
+| `system_owned` on a bot | **absent** — the string does not occur anywhere in `reference/mattermost/` | **present**, and it is the object's *first* key |
+| `GET /users/{user_id}/channel_join_requests` | registered (`api4/channel_join_request.go:31`) | **404** |
+
+Both differences fit one ordering: **rc1 is an earlier cut of 11.11.0 than the pinned SHA** —
+`channel_join_requests` added after rc1, `system_owned` removed after it. Pre-release churn inside
+a minor, which is exactly what a `-rc1` tag invites and what the note above anticipated without
+being able to measure.
+
+**What this costs.** The reference is neither a superset nor a subset of the forward target, so
+"read the Go source" and "ask the running server" can give different answers for the same route,
+and neither is wrong. Where they agree — every route served so far — nothing changes. Where they
+disagree the route cannot be ported honestly: matching the source produces a body our own proxy's
+target does not serve, and matching the server means reverse-engineering a field whose semantics
+are not readable anywhere.
+
+**What is owed:** run an image built from the pinned SHA. The Dockerfile is in the reference tree
+and the build is a Go build, so this is buildable rather than blocked on a publish — and it would
+also drop the qemu emulation, since it would be built for this host's architecture. Until then, a
+route whose live shape does not match the source is **skipped and recorded**, not guessed at.
+
+**Blocked on this so far:** `GET /api/v4/bots` (`getBots`).
 
 ---
 

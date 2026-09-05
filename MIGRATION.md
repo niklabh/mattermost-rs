@@ -6359,3 +6359,31 @@ which takes `Config::default()`. So every `MM_<SECTION>_<SETTING>` [D-156] arran
 read by the tests and by nothing else — a deployed server disagreed with a configured Go server on
 all ten settings, silently, and `MM_LICENSE` would have joined them. Fixed here because this route
 is the first whose *answer* depends on an environment value.
+
+## `GET /api/v4/bots` — `getBots`: **blocked**, and it reopens [D-130] (2026-09-06)
+
+Not served. The route was picked, the Go source read, and the port abandoned before a line was
+written, because the **pinned reference and the running image disagree about the body**.
+
+`model.Bot` (bot.go:24) declares nine fields and `mm-model/src/bot.rs` already ports all nine with
+a fixture. The running `11.11.0-rc1` answers with **ten**, and the extra one — `system_owned` — is
+the object's first key:
+
+```json
+{"system_owned":false,"user_id":"rcw3d9…","username":"calls", …}
+```
+
+The string `system_owned` occurs **nowhere** in `reference/mattermost/`. Probing for the reverse
+found it: `GET /users/{user_id}/channel_join_requests` is registered in the pinned tree
+(`api4/channel_join_request.go:31`) and 404s on the running server. Both differences fit one
+ordering — rc1 is an *earlier* cut of 11.11.0 than the pinned SHA — so the reference is neither a
+superset nor a subset of the forward target.
+
+[D-130] closed on "every suite passes against it". That was true of every route ported at the
+time; it was not a claim about routes nobody had looked at yet. Reopened with the measurement, and
+with what is owed: build an image from the pinned SHA, which would drop the qemu emulation as
+well.
+
+**The rule this establishes:** when the live server's shape does not match the source, the route is
+skipped and recorded. Matching the source would serve a body our own proxy's target does not;
+matching the server would mean inventing semantics for a field no readable source describes.
