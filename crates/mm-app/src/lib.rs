@@ -25,6 +25,7 @@ pub mod team;
 pub mod thread;
 pub mod user;
 pub mod user_terms_of_service;
+pub mod webhook;
 
 use mm_store::SqlStore;
 

@@ -6431,3 +6431,52 @@ failed against *alphabetical*: a `serde_json::Value` object is a `BTreeMap` unle
 `preserve_order` feature is on. Both now assert the key **set** through `Value` and the field
 **order** on the bytes. Anything in this repo asserting order through a parsed `Value` is asserting
 nothing.
+
+## `GET /api/v4/hooks/incoming` — `getIncomingHooks` (2026-09-06)
+
+Served. `crates/mm-api/src/webhooks.rs`, `crates/mm-app/src/webhook.rs`,
+`crates/mm-store/src/webhook_store.rs`, plus `Config::enable_incoming_webhooks`; 10 parity tests
+in `crates/mm-api/tests/parity/incoming_hooks.rs`. The webapp's Integrations page. `mm-model`'s
+`incoming_webhook.rs` was already ported with fixtures, so this is store, app and edge.
+
+**The one thing a reader would otherwise get wrong: `team_id` chooses the *scope of the permission
+check*, not just the filter.** With a team the two permissions are asked on that team
+(`SessionHasPermissionToTeam`); without one they are asked at **system** scope
+(`SessionHasPermissionTo`). A team admin is therefore allowed on `?team_id=<its team>` and refused
+on the bare route, in the same second — and a port that collapsed the two checks would fail
+**open**. That caller is the only fixture in the suite that can tell them apart, and building it
+needed `PUT /teams/{id}/members/{id}/schemeRoles`, because no role on a stock server grants a
+webhook permission except `system_admin` and `team_admin`.
+
+Two more. `manage_others_incoming_webhooks` does not gate the route — it **clears the user
+filter**, so the same request returns one user's hooks or everyone's depending on a permission the
+response says nothing about. And `include_total_count=true` turns the **array into an object**, a
+JSON type change rather than an added field; the count is taken with the same cleared filter the
+page used, so it cannot disagree with the array beside it.
+
+`json.Marshal` + `w.Write`, so **no trailing newline**. An empty list is `[]`, not `null` — both
+store functions start from `[]*model.IncomingWebhook{}` (webhook_store.go:179, :199), which is the
+exact opposite of `getUserAudits`' nil slice and is why both are asserted.
+
+Mutation run: **19 run, 17 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/incoming-hooks.plan`).
+
+### The fixture is planted, because the API cannot build the rows that matter
+
+Only an admin may create an incoming webhook, so the API cannot produce a hook owned by a
+non-admin — the row that makes `manage_others_incoming_webhooks` observable at all. Nor a
+soft-deleted hook, nor two hooks sharing a display name. All five rows go straight into
+`IncomingWebhooks`; Go caches only `GetIncoming(id)` (localcachelayer/webhook_layer.go:41) and
+never the list queries, so a direct write is visible to both servers at once.
+
+The two hooks sharing a display name are inserted in **reverse id order** on purpose: without the
+`Id` half of `ORDER BY DisplayName, Id` the heap order wins, and the mutation dropping it is
+invisible to a fixture whose display names are all distinct.
+
+### A mutation that was a no-op, not a survivor
+
+Widening the team branch's predicate to `($1 = '' OR teamid = $1)` looked like a mutation and is
+not: that branch is entered only when `team_id` is non-empty, so the added disjunct is always
+false. Replaced with one that drops the predicate outright — which the other team's planted hook
+can see. Distinguishing the two is the difference between a finding about the tests and a wasted
+one.

@@ -123,6 +123,17 @@ pub struct Config {
     /// unreachable and is ported for fidelity rather than for coverage.
     pub file_driver_name: String,
 
+    /// `ServiceSettings.EnableIncomingWebhooks` (config.go:388, defaulted at :607). Go default
+    /// **`true`**.
+    ///
+    /// Gates all three of `GetIncomingWebhooksForTeamPageByUser`,
+    /// `GetIncomingWebhooksPageByUser` and `GetIncomingWebhooksCount` (app/webhook.go:646, :659,
+    /// :676), each answering **501** `api.incoming_webhook.disabled.app_error` — checked *after*
+    /// the handler's permission gate, so a caller with no rights gets the 403 and only an
+    /// authorised one ever sees the 501. Read by [`crate::App::get_incoming_webhooks_count`] and
+    /// its two neighbours.
+    pub enable_incoming_webhooks: bool,
+
     /// The `MM_LICENSE` environment variable (`platform.LicenseEnv`, platform/license.go:26).
     ///
     /// Not an `MM_<SECTION>_<SETTING>` config overlay — it is its own variable, holding a whole
@@ -159,6 +170,7 @@ impl Default for Config {
             enable_burn_on_read: true,
             feature_flag_burn_on_read: true,
             file_driver_name: "local".to_owned(),
+            enable_incoming_webhooks: true,
             license: String::new(),
         }
     }
@@ -206,6 +218,10 @@ impl Config {
             // override of `""` is a deliberate empty driver and must survive as one.
             file_driver_name: std::env::var("MM_FILESETTINGS_DRIVERNAME")
                 .unwrap_or(default.file_driver_name),
+            enable_incoming_webhooks: env_bool(
+                "MM_SERVICESETTINGS_ENABLEINCOMINGWEBHOOKS",
+                default.enable_incoming_webhooks,
+            ),
             // Its own variable, not part of the `MM_<SECTION>_<SETTING>` overlay, and Go treats
             // any non-empty value as "a licence was supplied" before it ever tries to parse it.
             license: std::env::var("MM_LICENSE").unwrap_or(default.license),

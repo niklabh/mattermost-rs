@@ -24,6 +24,7 @@ pub mod sidebar;
 pub mod status;
 pub mod teams;
 pub mod users;
+pub mod webhooks;
 
 use axum::Router;
 use axum::extract::{RawPathParams, Request, State};
@@ -597,6 +598,10 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/users/{user_id}/audits",
             partially_migrated_with_ids(&state, get(audits::get_user_audits)),
+        )
+        .route(
+            "/api/v4/hooks/incoming",
+            partially_migrated(get(webhooks::get_incoming_hooks)),
         )
         .route(
             "/api/v4/license/client",

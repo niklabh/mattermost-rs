@@ -1,0 +1,41 @@
+# Mutation plan for GET /api/v4/hooks/incoming (getIncomingHooks).
+#
+#   scripts/mutate-batch.sh scripts/mutations/incoming-hooks.plan
+#
+# Tab-separated: name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter.  `\n` becomes a newline.
+#
+# The decisions worth mutating: the `DisplayName, Id` sort (the fixture plants two hooks sharing a
+# display name, inserted in reverse id order, so dropping the tiebreak falls back to the heap);
+# which of the two permission **scopes** each branch asks for (the fixture's team admin is the only
+# caller that answers differently to the two, and getting it wrong fails *open*); whether
+# `manage_others_incoming_webhooks` clears the user filter; and that `include_total_count` takes the
+# same cleared filter the page did, so the count cannot disagree with the array beside it.
+#
+# **One mutation was replaced rather than carried as a survivor.** Widening the team branch's
+# predicate to `($1 = '' OR teamid = $1)` is a *no-op*, not a mutation: that branch is entered only
+# when `team_id` is non-empty, so the added disjunct is always false. It now drops the predicate
+# outright, which the other team's planted hook can see.
+#
+# The last two lines are the no-op controls and must SURVIVE.
+
+store-team-order-tiebreak	crates/mm-store/src/webhook_store.rs	             WHERE teamid = $1\n               AND deleteat = 0\n               AND ($2 = '' OR userid = $2)\n             ORDER BY displayname, id	             WHERE teamid = $1\n               AND deleteat = 0\n               AND ($2 = '' OR userid = $2)\n             ORDER BY displayname	api	incoming_hooks
+store-list-order-tiebreak	crates/mm-store/src/webhook_store.rs	             WHERE deleteat = 0\n               AND ($1 = '' OR userid = $1)\n             ORDER BY displayname, id	             WHERE deleteat = 0\n               AND ($1 = '' OR userid = $1)\n             ORDER BY displayname	api	incoming_hooks
+store-team-deleteat	crates/mm-store/src/webhook_store.rs	             WHERE teamid = $1\n               AND deleteat = 0	             WHERE teamid = $1\n               AND deleteat >= 0	api	incoming_hooks
+store-team-user-filter	crates/mm-store/src/webhook_store.rs	               AND ($2 = '' OR userid = $2)\n             ORDER BY displayname, id	               AND userid = $2\n             ORDER BY displayname, id	api	incoming_hooks
+store-team-predicate-dropped	crates/mm-store/src/webhook_store.rs	             WHERE teamid = $1\n               AND deleteat = 0	             WHERE ($1 = $1)\n               AND deleteat = 0	api	incoming_hooks
+store-count-team-filter	crates/mm-store/src/webhook_store.rs	             WHERE deleteat = 0\n               AND ($1 = '' OR teamid = $1)	             WHERE deleteat = 0\n               AND ($1 = '' OR teamid <> '')	api	incoming_hooks
+store-count-deleteat	crates/mm-store/src/webhook_store.rs	             WHERE deleteat = 0\n               AND ($1 = '' OR teamid = $1)	             WHERE deleteat >= 0\n               AND ($1 = '' OR teamid = $1)	api	incoming_hooks
+app-team-offset	crates/mm-app/src/webhook.rs	            .get_incoming_by_team_by_user(team_id, user_id, page * per_page, per_page)	            .get_incoming_by_team_by_user(team_id, user_id, page, per_page)	api	incoming_hooks
+app-disabled-gate-inverted	crates/mm-app/src/webhook.rs	        if !self.config().enable_incoming_webhooks {\n            return Err(disabled("GetIncomingWebhooksForTeamPage"));	        if self.config().enable_incoming_webhooks {\n            return Err(disabled("GetIncomingWebhooksForTeamPage"));	api	incoming_hooks
+api-others-filter-not-cleared	crates/mm-api/src/webhooks.rs	            .session_has_permission_to_team(\n                &session.0,\n                &team_id,\n                &PERMISSION_MANAGE_OTHERS_INCOMING_WEBHOOKS,\n            )\n            .await\n        {\n            user_id = "";	            .session_has_permission_to_team(\n                &session.0,\n                &team_id,\n                &PERMISSION_MANAGE_OTHERS_INCOMING_WEBHOOKS,\n            )\n            .await\n        {\n            user_id = user_id;	api	incoming_hooks
+api-team-permission-check	crates/mm-api/src/webhooks.rs	            .session_has_permission_to_team(\n                &session.0,\n                &team_id,\n                &PERMISSION_MANAGE_OWN_INCOMING_WEBHOOKS,\n            )\n            .await\n        {	            .session_has_permission_to_team(\n                &session.0,\n                &team_id,\n                &PERMISSION_MANAGE_OWN_INCOMING_WEBHOOKS,\n            )\n            .await\n            && false\n        {	api	incoming_hooks
+api-team-branch-uses-system-scope	crates/mm-api/src/webhooks.rs	            .session_has_permission_to_team(\n                &session.0,\n                &team_id,\n                &PERMISSION_MANAGE_OWN_INCOMING_WEBHOOKS,\n            )\n            .await	            .session_has_permission_to(&session.0, &PERMISSION_MANAGE_OWN_INCOMING_WEBHOOKS)\n            .await	api	incoming_hooks
+api-global-branch-uses-team-scope	crates/mm-api/src/webhooks.rs	            .session_has_permission_to(&session.0, &PERMISSION_MANAGE_OWN_INCOMING_WEBHOOKS)\n            .await\n        {\n            return Err(ApiError::from(make_permission_error(	            .session_has_permission_to_team(\n                &session.0,\n                &team_id,\n                &PERMISSION_MANAGE_OWN_INCOMING_WEBHOOKS,\n            )\n            .await\n        {\n            return Err(ApiError::from(make_permission_error(	api	incoming_hooks
+api-include-total-count-always	crates/mm-api/src/webhooks.rs	    let include_total_count = query_flag_is_true(query.as_deref(), INCLUDE_TOTAL_COUNT_PARAM);	    let include_total_count = true;	api	incoming_hooks
+api-count-uses-the-session-user	crates/mm-api/src/webhooks.rs	            .get_incoming_webhooks_count(&team_id, user_id)	            .get_incoming_webhooks_count(&team_id, &session.0.user_id)	api	incoming_hooks
+api-count-ignores-the-team	crates/mm-api/src/webhooks.rs	            .get_incoming_webhooks_count(&team_id, user_id)	            .get_incoming_webhooks_count("", user_id)	api	incoming_hooks
+api-trailing-newline	crates/mm-api/src/webhooks.rs	    Ok((\n        StatusCode::OK,	    let body = {\n        let mut body = body;\n        body.push(b'\\n');\n        body\n    };\n    Ok((\n        StatusCode::OK,	api	incoming_hooks
+#
+# --- no-op controls: these must SURVIVE ---
+control-rename-binding	crates/mm-api/src/webhooks.rs	    tracing::Span::current().record("count", hooks.len());	    tracing::Span::current().record("count", { let listed = &hooks; listed.len() });	api	incoming_hooks
+control-reorder-independent-selects	crates/mm-store/src/webhook_store.rs	                   COALESCE(username, '')      AS "username!",\n                   COALESCE(iconurl, '')       AS "iconurl!",\n                   COALESCE(channellocked, FALSE) AS "channellocked!",\n                   lastused                    AS "lastused!"\n              FROM incomingwebhooks\n             WHERE teamid = $1	                   COALESCE(iconurl, '')       AS "iconurl!",\n                   COALESCE(username, '')      AS "username!",\n                   COALESCE(channellocked, FALSE) AS "channellocked!",\n                   lastused                    AS "lastused!"\n              FROM incomingwebhooks\n             WHERE teamid = $1	api	incoming_hooks

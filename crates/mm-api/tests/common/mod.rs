@@ -233,7 +233,11 @@ pub fn assert_error_bodies_match_except_known_gaps(
     assert_eq!(
         go_obj.keys().collect::<Vec<_>>(),
         rs_obj.keys().collect::<Vec<_>>(),
-        "{context}: the two bodies must carry the same keys in the same order"
+        // The *set*, not the order: both sides are `serde_json::Value` objects, which are
+        // `BTreeMap`s without the `preserve_order` feature, so each side comes back alphabetical
+        // whatever its bytes said. Error bodies are compared by field here and by bytes nowhere,
+        // so that is the right claim — but it is not the claim this message used to make.
+        "{context}: the two bodies must carry the same set of keys"
     );
 
     let differing: Vec<&str> = go_obj

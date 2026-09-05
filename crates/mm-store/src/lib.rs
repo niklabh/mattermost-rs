@@ -33,6 +33,7 @@ pub mod team_store;
 pub mod thread_store;
 pub mod user_store;
 pub mod user_terms_of_service_store;
+pub mod webhook_store;
 
 pub use audit_store::{AUDIT_LIMIT_MAXIMUM, AuditStore, SqlAuditStore};
 pub use channel_store::{ChannelStore, SqlChannelStore};
@@ -53,6 +54,7 @@ pub use team_store::{SqlTeamStore, TeamStore};
 pub use thread_store::{SqlThreadStore, ThreadStore};
 pub use user_store::{SqlUserStore, UserStore};
 pub use user_terms_of_service_store::{SqlUserTermsOfServiceStore, UserTermsOfServiceStore};
+pub use webhook_store::{SqlWebhookStore, WebhookStore};
 
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
@@ -82,6 +84,7 @@ pub struct SqlStore {
     team: SqlTeamStore,
     user: SqlUserStore,
     user_terms_of_service: SqlUserTermsOfServiceStore,
+    webhook: SqlWebhookStore,
 }
 
 impl SqlStore {
@@ -123,6 +126,7 @@ impl SqlStore {
             system: SqlSystemStore::new(pool.clone()),
             team: SqlTeamStore::new(pool.clone()),
             user_terms_of_service: SqlUserTermsOfServiceStore::new(pool.clone()),
+            webhook: SqlWebhookStore::new(pool.clone()),
             user: SqlUserStore::new(pool),
         }
     }
@@ -130,6 +134,11 @@ impl SqlStore {
     /// Port of `store.Store.Audit()`.
     pub fn audit(&self) -> &SqlAuditStore {
         &self.audit
+    }
+
+    /// Port of `store.Store.Webhook()`.
+    pub fn webhook(&self) -> &SqlWebhookStore {
+        &self.webhook
     }
 
     /// Port of `store.Store.Channel()`.
