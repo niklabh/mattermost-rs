@@ -5,6 +5,7 @@
 //! forwarded. Nothing has to be removed from a list of exclusions, because there is no list —
 //! the proxy is the fallback.
 
+pub mod audits;
 pub mod auth;
 pub mod channels;
 pub mod drafts;
@@ -593,6 +594,10 @@ pub fn router(state: AppState) -> Router {
         // one segment shorter than every `/api/v4/roles/...` route below, so axum sees a
         // distinct path and there is no literal-versus-parameter precedence to settle. `GET`
         // only; nothing else is registered on it in Go either.
+        .route(
+            "/api/v4/users/{user_id}/audits",
+            partially_migrated_with_ids(&state, get(audits::get_user_audits)),
+        )
         .route(
             "/api/v4/license/client",
             partially_migrated(get(license::get_client_license)),

@@ -13,6 +13,7 @@
 //! folds unquoted identifiers to lower case, so `CreateAt` is `createat` on the wire to the
 //! driver. Queries here spell them the way the database does.
 
+pub mod audit_store;
 pub mod channel_store;
 pub mod draft_store;
 pub mod emoji_store;
@@ -33,6 +34,7 @@ pub mod thread_store;
 pub mod user_store;
 pub mod user_terms_of_service_store;
 
+pub use audit_store::{AUDIT_LIMIT_MAXIMUM, AuditStore, SqlAuditStore};
 pub use channel_store::{ChannelStore, SqlChannelStore};
 pub use draft_store::{DraftStore, SqlDraftStore};
 pub use emoji_store::{EmojiStore, SqlEmojiStore};
@@ -62,6 +64,7 @@ use sqlx::postgres::PgPoolOptions;
 /// map obvious, while the stores stay independently constructible for tests.
 #[derive(Debug, Clone)]
 pub struct SqlStore {
+    audit: SqlAuditStore,
     channel: SqlChannelStore,
     emoji: SqlEmojiStore,
     draft: SqlDraftStore,
@@ -103,6 +106,7 @@ impl SqlStore {
     /// Build the store set over an existing pool.
     pub fn from_pool(pool: PgPool) -> Self {
         Self {
+            audit: SqlAuditStore::new(pool.clone()),
             channel: SqlChannelStore::new(pool.clone()),
             emoji: SqlEmojiStore::new(pool.clone()),
             draft: SqlDraftStore::new(pool.clone()),
@@ -121,6 +125,11 @@ impl SqlStore {
             user_terms_of_service: SqlUserTermsOfServiceStore::new(pool.clone()),
             user: SqlUserStore::new(pool),
         }
+    }
+
+    /// Port of `store.Store.Audit()`.
+    pub fn audit(&self) -> &SqlAuditStore {
+        &self.audit
     }
 
     /// Port of `store.Store.Channel()`.

@@ -1,0 +1,45 @@
+# Mutation plan for GET /api/v4/users/{user_id}/audits (getUserAudits).
+#
+#   scripts/mutate-batch.sh scripts/mutations/user-audits.plan
+#
+# Tab-separated: name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter.  `\n` becomes a newline.
+#
+# The decisions worth mutating here are: which column lands on which field (the store selects
+# seven and the wire order is Go's, so a swap is invisible to a decoding test and obvious to a
+# byte one); the sort direction; `page * per_page` versus `page` as the offset; and the one that
+# changes a JSON *type* rather than a value — an empty page is `null`, not `[]`.
+#
+# Three of these run under `unit`, not `api`. The store's own 1000-row bound and the app's 400 for
+# it are **unreachable through this route** — `web.ParamsFromRequest` clamps `per_page` to 200
+# first — so no parity test can catch them and carrying them as `api` survivors would say
+# something false about the suite. They are guarded by the app-layer unit tests instead, which is
+# where a branch with no route can honestly be tested.
+#
+# **One mutation was dropped rather than carried as a survivor.** Swapping `edit_other_users` for
+# some other permission in the 403 is invisible over HTTP: `MakePermissionError` puts the
+# permission id in `detailed_error`, and `handleContextError` wipes `detailed_error` whenever
+# `EnableDeveloper` is off — which is the default and is what this port reproduces
+# unconditionally. So the name is not on the wire for either server and no parity test can see it.
+#
+# The last two lines are the no-op controls and must SURVIVE.  `control-reorder-independent-
+# selects` reorders two columns inside the SELECT list — the row struct binds by name, so the
+# wire is unchanged.
+
+store-order-direction	crates/mm-store/src/audit_store.rs	             ORDER BY createat DESC	             ORDER BY createat ASC	api	user_audits
+store-limit-offset-swap	crates/mm-store/src/audit_store.rs	             LIMIT $2 OFFSET $3	             LIMIT $3 OFFSET $2	api	user_audits
+store-user-filter-dropped	crates/mm-store/src/audit_store.rs	             WHERE userid = $1	             WHERE userid = $1 OR TRUE	api	user_audits
+store-columns-swapped	crates/mm-store/src/audit_store.rs	            action: row.action,\n            extra_info: row.extrainfo,	            action: row.extrainfo,\n            extra_info: row.action,	api	user_audits
+store-session-id-dropped	crates/mm-store/src/audit_store.rs	            session_id: row.sessionid,	            session_id: String::new(),	api	user_audits
+app-offset-is-page	crates/mm-app/src/audit.rs	            .get(user_id, page * per_page, per_page)	            .get(user_id, page, per_page)	api	user_audits
+app-out-of-bounds-status	crates/mm-app/src/audit.rs	            "app.audit.get.limit.app_error",\n            None,\n            String::new(),\n            400,	            "app.audit.get.limit.app_error",\n            None,\n            String::new(),\n            500,	unit	audit::
+app-out-of-bounds-branch	crates/mm-app/src/audit.rs	    if err.is_out_of_bounds() {	    if false {	unit	audit::
+store-out-of-bounds-guard	crates/mm-store/src/audit_store.rs	        if limit > AUDIT_LIMIT_MAXIMUM {	        if limit > AUDIT_LIMIT_MAXIMUM * 2 {	unit	audit_store::
+api-null-becomes-empty-array	crates/mm-api/src/audits.rs	        return Ok(b"null".to_vec());	        return Ok(b"[]".to_vec());	api	user_audits
+api-trailing-newline	crates/mm-api/src/audits.rs	    let mut body = encode_audits(&audits)?;\n    body.push(b'\\n');	    let body = encode_audits(&audits)?;	api	user_audits
+api-permission-check-removed	crates/mm-api/src/audits.rs	    if !state\n        .app\n        .session_has_permission_to_user(&session.0, user_id)\n        .await\n    {	    if false {	api	user_audits
+api-me-not-resolved	crates/mm-api/src/audits.rs	    let user_id = resolve_me(&user_id, &session);	    let user_id = user_id.as_str();	api	user_audits
+api-page-and-per-page-swapped	crates/mm-api/src/audits.rs	    let audits = state.app.get_audits_page(user_id, page, per_page).await?;	    let audits = state.app.get_audits_page(user_id, per_page, page).await?;	api	user_audits
+#
+# --- no-op controls: these must SURVIVE ---
+control-rename-binding	crates/mm-api/src/audits.rs	    let audits = state.app.get_audits_page(user_id, page, per_page).await?;\n    tracing::Span::current().record("count", audits.0.len());\n\n    let mut body = encode_audits(&audits)?;	    let page_of_audits = state.app.get_audits_page(user_id, page, per_page).await?;\n    tracing::Span::current().record("count", page_of_audits.0.len());\n\n    let mut body = encode_audits(&page_of_audits)?;	api	user_audits
+control-reorder-independent-selects	crates/mm-store/src/audit_store.rs	                   COALESCE(ipaddress, '')   AS "ipaddress!",\n                   COALESCE(sessionid, '')   AS "sessionid!"	                   COALESCE(sessionid, '')   AS "sessionid!",\n                   COALESCE(ipaddress, '')   AS "ipaddress!"	api	user_audits

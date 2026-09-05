@@ -6387,3 +6387,47 @@ well.
 **The rule this establishes:** when the live server's shape does not match the source, the route is
 skipped and recorded. Matching the source would serve a body our own proxy's target does not;
 matching the server would mean inventing semantics for a field no readable source describes.
+
+## `GET /api/v4/users/{user_id}/audits` — `getUserAudits` (2026-09-06)
+
+Served. `crates/mm-api/src/audits.rs`, `crates/mm-app/src/audit.rs`,
+`crates/mm-store/src/audit_store.rs` (and `StoreError::OutOfBounds`); 11 parity tests in
+`crates/mm-api/tests/parity/user_audits.rs`. The webapp's *Profile → Security → View Access
+History*. `mm-model`'s `audit.rs` was already ported, so this is store, app and edge only.
+
+**The one thing a reader would otherwise get wrong: an empty page is `null`, not `[]`.**
+`SqlAuditStore.Get` declares `var audits model.Audits` — a nil slice — and sqlx's `Select` appends
+into it, so a no-row query never allocates. The bot store beside it starts from `[]*model.Bot{}`
+and answers `[]` for the same shape of query: the difference is the initialiser, not the query.
+The first version of this port assumed `[]` and a probe of the running server said otherwise.
+
+Two more worth naming. The refusal names **`edit_other_users`** — a write permission gating a
+read, which is Go's own choice. And `ORDER BY CreateAt DESC` has **no tiebreak**, so two rows
+sharing a millisecond have no defined order on either server; the suite asserts the set as well as
+the bytes rather than adding an `Id` tiebreak that would make our order *more* defined than Go's.
+
+`json.NewEncoder(w).Encode`, so there is a trailing newline. No etag, though `model.Audits` has
+one — the absence is Go's.
+
+Mutation run: **16 run, 14 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/user-audits.plan`).
+
+### Three survivors, and each was a fixture that could not tell right from wrong
+
+- **`page * per_page` versus `page`.** The pagination test used `per_page = 1`, where the two are
+  numerically equal. The subject now logs in three times — six rows — and the test pages by two.
+- **The store's `limit > 1000` bound** is unreachable through this route, because
+  `web.ParamsFromRequest` clamps `per_page` to 200 first. It has a unit test of its own now,
+  against a `connect_lazy` pool that opens no connection, so the branch is tested where it can be
+  rather than carried as an `api` survivor.
+- **The permission *name* in the 403** is not on the wire at all: `MakePermissionError` puts it in
+  `detailed_error`, and `handleContextError` wipes that whenever `EnableDeveloper` is off. The
+  mutation was dropped rather than carried, and the plan says why.
+
+### `serde_json::Value` cannot assert field order
+
+Two assertions in this session compared `value.as_object().keys()` against Go's field order and
+failed against *alphabetical*: a `serde_json::Value` object is a `BTreeMap` unless the
+`preserve_order` feature is on. Both now assert the key **set** through `Value` and the field
+**order** on the bytes. Anything in this repo asserting order through a parsed `Value` is asserting
+nothing.

@@ -55,6 +55,16 @@ pub enum StoreError {
         detail: &'static str,
     },
 
+    /// Port of `store.NewErrOutOfBounds(limit)` (store/errors.go).
+    ///
+    /// A store function refusing a page size *before* querying. Kept apart from
+    /// [`StoreError::Argument`] because the app layer branches on it: `GetAuditsPage`
+    /// (app/audit.go:62) does `errors.As(err, &outErr)` and answers **400**, where every other
+    /// store failure on that path is a 500. Folding the two together would turn a client's
+    /// oversized `per_page` into a server error.
+    #[error("limit exceeds the store's maximum: {limit}")]
+    OutOfBounds { limit: i64 },
+
     /// A `jsonb` column held something the model type cannot represent.
     ///
     /// Go decodes these columns into `model.StringMap` with `encoding/json` and surfaces a
@@ -75,5 +85,10 @@ impl StoreError {
     /// on a message would be exactly the stringly-typed error handling `CLAUDE.md` forbids.
     pub fn is_not_found(&self) -> bool {
         matches!(self, StoreError::NotFound { .. })
+    }
+
+    /// True when a store function refused its page size, which the app layer answers 400 to.
+    pub fn is_out_of_bounds(&self) -> bool {
+        matches!(self, StoreError::OutOfBounds { .. })
     }
 }

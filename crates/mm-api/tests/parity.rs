@@ -83,6 +83,7 @@ mod parity {
     pub mod teams_unread;
     pub mod thread_for_user;
     pub mod threads_for_user;
+    pub mod user_audits;
     pub mod user_by_email;
     pub mod user_by_username;
     pub mod user_get;
