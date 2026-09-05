@@ -5761,3 +5761,63 @@ retrying until a read settled — on the reasoning that an unordered scan may re
 reasoning was sound and those changes are still right. But the *frequency* was not inherent: it
 was 16,000 junk rows and one fixture writing where it should not. A test that has been relaxed
 twice is worth re-reading as evidence about the environment rather than the assertion.
+
+## `GET /users/{user_id}/teams/{team_id}/threads/{thread_id}` — `getThreadForUser` (2026-09-05)
+
+Served, including `?extended`. `crates/mm-api/src/users.rs` (`get_thread_for_user`),
+`crates/mm-app/src/thread.rs` (`get_thread_membership_for_user`, `get_thread_for_user`),
+`crates/mm-store/src/thread_store.rs` (`get_membership_for_user`, `get_thread_for_user`);
+9 parity tests in `crates/mm-api/tests/parity/thread_for_user.rs`. The single-thread twin of
+`getThreadsForUser`, and what the webapp asks for when a thread is opened.
+
+**The one thing a reader would otherwise get wrong: the two 404s carry different error ids.**
+No `ThreadMemberships` row — an id that names nothing, or a thread this user never replied to —
+refuses at the membership lookup with `app.user.get_thread_membership_for_user.not_found`. A row
+that exists with `Following = false`, which is what `DELETE …/threads/{id}/following` leaves
+behind, gets past that lookup and is refused by the store with
+`app.user.get_threads_for_user.not_found`. Both are 404s, both reachable from the wire, and a
+client branching on the id can tell them apart. `team_id` is validated by `RequireTeamId` and then
+never read again — not by the permission checks, not by the store — so a thread answers the same
+under any team's path.
+
+Two divergences from the list route beside it. The post is `LEFT JOIN`ed here, not inner-joined,
+so `"post": null` is reachable for a `Threads` row that outlived its root. And `LastViewedAt` and
+`UnreadMentions` come from the `ThreadMembership` argument rather than the join — Go assigns them
+after the query returns (thread_store.go:607), and the unread-replies subquery binds that same
+`LastViewed` as a value.
+
+Mutation run: **17 run, 15 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/thread-for-user.plan`). Full suite: 2421 passed, 0 failed.
+
+### Five survivors, and the state the REST API quietly took back
+
+The first run caught 9 of 16. Every survivor was a branch no fixture row reached, and three of
+them shared a cause worth naming: **posting into a channel marks its threads viewed for the
+poster.** With collapsed threads enabled Go moves `LastViewed` to *now* for the poster's thread
+memberships in that channel, so a read mark set early in a fixture is silently overwritten by the
+next reply. `unread_replies` was therefore always 0, which made the subquery's cutoff, its
+`DeleteAt = 0` filter and its `RootId` join indistinguishable from each other and from nothing.
+The fixture now marks read **last**, at an explicit timestamp rather than `now()`, and asserts the
+row still holds it.
+
+The same write reached the fixture from a second direction: `other_methods_are_forwarded` was
+PUTting `/threads/{followed_root}/following` to check the sibling route still forwards, and Go's
+follow route sets `LastViewed` too. Yesterday's rule was *a fixture may only write rows it owns*;
+this is the same rule one level down. **A forwarding test should touch nothing** — it reads a
+header, so its path can name an id that does not exist, and now does.
+
+The third was `sanitizeThreadResponse`. Its three props (`add_channel_member`,
+`force_notification`, `silent_notification`) **cannot be set through `POST /posts`** — Go strips
+them from client input at creation — so the branch is dead unless the row is written directly. The
+fixture plants them, plus one key that must survive. Writing that test found the key is
+`silent_notification`, not `silent`; the shorter name passes through both servers untouched.
+
+Two mutations were **dropped rather than carried as survivors**, because neither asks a question
+this route can answer:
+
+- Blanking the `details` string Go passes at app/user.go:3094 is invisible from the wire.
+  `detailed_error` is wiped at the api boundary unless `EnableDeveloper` is on. The value is still
+  carried in the port, because it is Go's.
+- `t.postid = $1` → `>= $1` is a coin flip on a table holding a handful of threads: a `>=` scan
+  usually returns the same row. `store-thread-binding` asks the same question — which value
+  reaches `$1` — deterministically, by binding `user_id` instead.

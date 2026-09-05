@@ -16,7 +16,7 @@
 //! rather than factored in Go, and repeated here for the same reason: sqlx needs one literal
 //! statement per query.
 
-use mm_model::thread::ThreadResponse;
+use mm_model::thread::{ThreadMembership, ThreadResponse};
 use mm_model::user::User;
 use sqlx::PgPool;
 
@@ -34,6 +34,20 @@ pub trait ThreadStore {
         page_size: i64,
         include_is_urgent: bool,
     ) -> impl std::future::Future<Output = Result<Vec<ThreadResponse>, StoreError>> + Send;
+
+    /// Port of `SqlThreadStore.GetMembershipForUser` (thread_store.go:797).
+    fn get_membership_for_user(
+        &self,
+        user_id: &str,
+        post_id: &str,
+    ) -> impl std::future::Future<Output = Result<ThreadMembership, StoreError>> + Send;
+
+    /// Port of `SqlThreadStore.GetThreadForUser` (thread_store.go:562).
+    fn get_thread_for_user(
+        &self,
+        membership: &ThreadMembership,
+        include_is_urgent: bool,
+    ) -> impl std::future::Future<Output = Result<ThreadResponse, StoreError>> + Send;
 
     /// Port of `SqlThreadStore.GetTotalThreads` (thread_store.go:184).
     fn get_total_threads(
@@ -276,6 +290,172 @@ impl ThreadStore for SqlThreadStore {
                 row.into_response(Some(participants))
             })
             .collect()
+    }
+
+    /// Port of `SqlThreadStore.GetMembershipForUser` (thread_store.go:797).
+    ///
+    /// Six columns and one row. `sql.ErrNoRows` is `ErrNotFound`, which the app layer turns into
+    /// a 404 — the only outcome the api4 route can produce for a thread nobody follows.
+    #[tracing::instrument(skip(self), fields(user_id = %user_id, post_id = %post_id, found))]
+    async fn get_membership_for_user(
+        &self,
+        user_id: &str,
+        post_id: &str,
+    ) -> Result<ThreadMembership, StoreError> {
+        let row = sqlx::query!(
+            r#"
+            SELECT postid                        AS "post_id!",
+                   userid                        AS "user_id!",
+                   COALESCE(following, FALSE)    AS "following!",
+                   COALESCE(lastviewed, 0)       AS "last_viewed!",
+                   COALESCE(lastupdated, 0)      AS "last_updated!",
+                   COALESCE(unreadmentions, 0)   AS "unread_mentions!"
+              FROM threadmemberships
+             WHERE userid = $1
+               AND postid = $2
+            "#,
+            user_id,
+            post_id,
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to get thread membership with userid={user_id}"),
+            source,
+        })?;
+
+        let Some(row) = row else {
+            tracing::Span::current().record("found", false);
+            return Err(StoreError::NotFound {
+                entity: "ThreadMembership",
+                criteria: format!("userId={user_id}, postId={post_id}"),
+            });
+        };
+        tracing::Span::current().record("found", true);
+
+        Ok(ThreadMembership {
+            post_id: row.post_id,
+            user_id: row.user_id,
+            following: row.following,
+            last_updated: row.last_updated,
+            last_viewed: row.last_viewed,
+            unread_mentions: row.unread_mentions,
+        })
+    }
+
+    /// Port of `SqlThreadStore.GetThreadForUser` (thread_store.go:562).
+    ///
+    /// # It refuses an unfollowed thread **before touching the database**
+    ///
+    /// `if !threadMembership.Following { return ErrNotFound }` is the first line. The caller has
+    /// already found the row, so this refusal is specifically *unfollowed*, and it reaches the
+    /// wire as `app.user.get_threads_for_user.not_found` — a different id from the 404 a caller
+    /// with no row at all gets. Deleting this check would serve unfollowed threads Go hides.
+    ///
+    /// # No membership or team predicate anywhere
+    ///
+    /// Unlike [`Self::get_threads_for_user`], this query filters on the root post id alone — the
+    /// access check lives in the handler, as `SessionHasPermissionToReadPost`. Moving it here, or
+    /// adding the list query's `channelMembershipPredicate` for symmetry, would refuse threads Go
+    /// serves.
+    ///
+    /// # `LastViewedAt` and `UnreadMentions` come from the membership, not the join
+    ///
+    /// Go assigns them from the `ThreadMembership` argument after the query returns
+    /// (thread_store.go:607). The unread-replies subquery binds that same `LastViewed` as a
+    /// value rather than joining the row.
+    ///
+    /// # The post is `LEFT JOIN`ed, so `null` is reachable here
+    ///
+    /// The list query's join is inner; this one's is not. A `Threads` row can outlive its root
+    /// post — the fixture database held 3,190 such rows before the sweep that closed [D-155] —
+    /// and Go answers `"post": null` for one, through `ToNilIfInvalid`. The columns are coalesced
+    /// so the empty id reaches that check rather than failing the scan.
+    #[tracing::instrument(skip(self, membership), fields(post_id = %membership.post_id, found))]
+    async fn get_thread_for_user(
+        &self,
+        membership: &ThreadMembership,
+        include_is_urgent: bool,
+    ) -> Result<ThreadResponse, StoreError> {
+        if !membership.following {
+            return Err(StoreError::NotFound {
+                entity: "ThreadMembership",
+                criteria: "<following>".to_owned(),
+            });
+        }
+
+        let row = sqlx::query_as!(
+            JoinedThreadRow,
+            r#"
+            SELECT t.postid                          AS "postid!",
+                   COALESCE(t.replycount, 0)         AS "replycount!",
+                   COALESCE(t.lastreplyat, 0)        AS "lastreplyat!",
+                   t.participants                    AS "participants?",
+                   COALESCE(t.threaddeleteat, 0)     AS "threaddeleteat!",
+                   $2::bigint                        AS "lastviewedat!",
+                   $3::bigint                        AS "unreadmentions!",
+                   (SELECT COUNT(r.id)
+                      FROM posts r
+                     WHERE r.rootid = t.postid
+                       AND r.createat > $2
+                       AND r.deleteat = 0)           AS "unreadreplies!",
+                   COALESCE($4 AND pp.priority = 'urgent', FALSE) AS "isurgent!",
+                   COALESCE(p.id, '')                AS "p_id!",
+                   COALESCE(p.createat, 0)           AS "p_createat!",
+                   COALESCE(p.updateat, 0)           AS "p_updateat!",
+                   COALESCE(p.editat, 0)             AS "p_editat!",
+                   COALESCE(p.deleteat, 0)           AS "p_deleteat!",
+                   COALESCE(p.ispinned, false)       AS "p_ispinned!",
+                   COALESCE(p.userid, '')            AS "p_userid!",
+                   COALESCE(p.channelid, '')         AS "p_channelid!",
+                   COALESCE(p.rootid, '')            AS "p_rootid!",
+                   COALESCE(p.originalid, '')        AS "p_originalid!",
+                   COALESCE(p.message, '')           AS "p_message!",
+                   COALESCE(p.type, '')              AS "p_type!",
+                   p.props                           AS "p_props?",
+                   COALESCE(p.hashtags, '')          AS "p_hashtags!",
+                   p.filenames                       AS "p_filenames?",
+                   p.fileids                         AS "p_fileids?",
+                   COALESCE(p.hasreactions, false)   AS "p_hasreactions!",
+                   p.remoteid                        AS "p_remoteid?"
+              FROM threads t
+              LEFT JOIN posts p ON p.id = t.postid
+              LEFT JOIN postspriority pp ON pp.postid = t.postid
+             WHERE t.postid = $1
+            "#,
+            membership.post_id,
+            membership.last_viewed,
+            membership.unread_mentions,
+            include_is_urgent,
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!(
+                "failed to get thread for user id={}, post id={}",
+                membership.user_id, membership.post_id
+            ),
+            source,
+        })?;
+
+        let Some(row) = row else {
+            tracing::Span::current().record("found", false);
+            return Err(StoreError::NotFound {
+                entity: "Thread",
+                criteria: membership.post_id.clone(),
+            });
+        };
+        tracing::Span::current().record("found", true);
+
+        let participants = row
+            .participant_ids()
+            .into_iter()
+            .map(|id| User {
+                id,
+                ..User::default()
+            })
+            .collect();
+        row.into_response(Some(participants))
     }
 
     #[tracing::instrument(skip(self), fields(user_id = %user_id, team_id = %team_id))]

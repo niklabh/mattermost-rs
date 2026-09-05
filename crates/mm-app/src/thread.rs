@@ -112,6 +112,108 @@ impl App {
         })
     }
 
+    /// Port of `app.App.GetThreadMembershipForUser` (app/user.go:3073).
+    ///
+    /// Two branches. The 404's id — `app.user.get_thread_membership_for_user.not_found` — is
+    /// what a client sees when there is **no row**: a thread id that names nothing, or one this
+    /// user has never replied to. A thread they unfollowed still has its row and gets past this
+    /// lookup, to be refused by the store with a different id — see [`Self::get_thread_for_user`].
+    #[tracing::instrument(skip(self), fields(user_id = %user_id, thread_id = %thread_id))]
+    pub async fn get_thread_membership_for_user(
+        &self,
+        user_id: &str,
+        thread_id: &str,
+    ) -> AppResult<mm_model::thread::ThreadMembership> {
+        self.store()
+            .thread()
+            .get_membership_for_user(user_id, thread_id)
+            .await
+            .map_err(|err| {
+                if err.is_not_found() {
+                    AppError::boxed(
+                        "GetThreadMembershipForUser",
+                        "app.user.get_thread_membership_for_user.not_found",
+                        None,
+                        String::new(),
+                        404,
+                    )
+                } else {
+                    tracing::error!(error = %err, "thread membership lookup failed");
+                    AppError::boxed(
+                        "GetThreadMembershipForUser",
+                        "app.user.get_thread_membership_for_user.app_error",
+                        None,
+                        String::new(),
+                        500,
+                    )
+                }
+            })
+    }
+
+    /// Port of `app.App.GetThreadForUser` (app/user.go:3088).
+    ///
+    /// The single-thread twin of [`Self::get_threads_for_user`], and it shares that route's
+    /// `sanitizeThreadResponse`: the post's props are sanitised and its action integrations
+    /// stripped here, while the participants are sanitised by the api layer, which holds the
+    /// config the options come from.
+    ///
+    /// **The store's `Following` refusal arrives here as a 404** carrying a *different* id from
+    /// the membership lookup's — `app.user.get_threads_for_user.not_found`, plus the one
+    /// non-empty `details` string in this file. See
+    /// [`mm_store::thread_store::SqlThreadStore::get_thread_for_user`].
+    #[tracing::instrument(skip(self, membership), fields(thread_id = %membership.post_id, extended))]
+    pub async fn get_thread_for_user(
+        &self,
+        membership: &mm_model::thread::ThreadMembership,
+        extended: bool,
+    ) -> AppResult<mm_model::thread::ThreadResponse> {
+        let include_is_urgent = self.config().post_priority;
+
+        let mut thread = self
+            .store()
+            .thread()
+            .get_thread_for_user(membership, include_is_urgent)
+            .await
+            .map_err(|err| {
+                if err.is_not_found() {
+                    AppError::boxed(
+                        "GetThreadForUser",
+                        "app.user.get_threads_for_user.not_found",
+                        None,
+                        // Go passes a non-empty `details` here and nowhere else in this file
+                        // (app/user.go:3094). `detailed_error` is a wire field, so it is
+                        // carried rather than blanked.
+                        "thread not found/followed".to_owned(),
+                        404,
+                    )
+                } else {
+                    tracing::error!(error = %err, "thread lookup failed");
+                    AppError::boxed(
+                        "GetThreadForUser",
+                        "app.user.get_threads_for_user.app_error",
+                        None,
+                        String::new(),
+                        500,
+                    )
+                }
+            })?;
+
+        if extended {
+            let mut one = [thread];
+            self.hydrate_thread_participants(&mut one).await?;
+            // Destructuring a fixed-size array is irrefutable, so this needs no `expect`.
+            let [hydrated] = one;
+            thread = hydrated;
+        }
+
+        if let Some(post) = thread.post.as_mut() {
+            post.sanitize_props();
+            post.strip_action_integrations();
+        }
+
+        Ok(thread)
+    }
+
     /// `?extended=true`: replace the id-only participant stubs with real profiles.
     ///
     /// Go does this **inside the store**, with one `GetProfileByIds` over the de-duplicated ids

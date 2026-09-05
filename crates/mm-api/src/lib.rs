@@ -209,6 +209,11 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/users/{user_id}/teams/{team_id}/threads",
             partially_migrated_with_ids(&state, get(users::get_threads_for_user)),
         )
+        // `BaseRoutes.UserThread` (api4/api.go) — one segment deeper than the thread list.
+        .route(
+            "/api/v4/users/{user_id}/teams/{team_id}/threads/{thread_id}",
+            partially_migrated_with_ids(&state, get(users::get_thread_for_user)),
+        )
         .route(
             "/api/v4/users/{user_id}/channel_members",
             partially_migrated_with_ids(&state, get(users::get_channel_members_for_user)),

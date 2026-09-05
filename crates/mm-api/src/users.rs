@@ -11,7 +11,8 @@ use axum::response::{IntoResponse, Response};
 use mm_app::user::{UserPage, ViewUsersRestriction};
 use mm_model::permission::{
     PERMISSION_EDIT_OTHER_USERS, PERMISSION_MANAGE_SYSTEM, PERMISSION_READ_CHANNEL,
-    PERMISSION_VIEW_MEMBERS, PERMISSION_VIEW_TEAM, make_permission_error,
+    PERMISSION_READ_CHANNEL_CONTENT, PERMISSION_VIEW_MEMBERS, PERMISSION_VIEW_TEAM,
+    make_permission_error,
 };
 use mm_model::post::POST_PROPS_ATTACHMENTS;
 use mm_model::user::User;
@@ -1537,6 +1538,107 @@ pub async fn get_channel_members_for_user(
         StatusCode::OK,
         [
             ("Content-Type", "application/x-ndjson"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
+    )
+        .into_response())
+}
+
+/// Port of `getThreadForUser` (api4/user.go:3934), reached as
+/// `GET /api/v4/users/{user_id}/teams/{team_id}/threads/{thread_id}` — one thread, which the
+/// webapp asks for when a thread is opened.
+///
+/// # Three gates, and the team id is not one of them
+///
+/// `RequireUserId().RequireTeamId().RequireThreadId()` validates all three segments, then
+/// `SessionHasPermissionToUser` and `SessionHasPermissionToReadPost` decide. **`team_id` is
+/// never used after validation** — not by the permission checks, not by the store. A thread
+/// reached under the wrong team's path answers exactly as it does under the right one.
+///
+/// # Two different 404s, and which one you get says whether the row exists
+///
+/// A thread with **no `ThreadMemberships` row** for this user — an id that names nothing, or a
+/// thread in a channel nobody has posted a reply in — refuses at the lookup:
+/// `app.user.get_thread_membership_for_user.not_found`. A thread with a row that is not
+/// following refuses one layer deeper, in the store: `app.user.get_threads_for_user.not_found`.
+///
+/// Both are reachable from the wire and a client branching on the id can tell them apart —
+/// measured, after this comment first claimed the store's refusal was unreachable here. The
+/// unfollow route (`DELETE …/threads/{id}/following`) sets `Following = false` and keeps the
+/// row, which is how the second is produced.
+///
+/// # An unknown thread id is a 403 for a plain caller
+///
+/// `SessionHasPermissionToReadPost` cannot resolve the channel of a post that does not exist and
+/// falls back to a bare system-level check — which an ordinary user fails. So the 404 above is
+/// an admin's answer; everyone else gets `read_channel_content`. The same asymmetry `getReactions`
+/// has, for the same reason.
+#[tracing::instrument(skip_all, fields(user_id = %user_id, thread_id = %thread_id))]
+pub async fn get_thread_for_user(
+    State(state): State<AppState>,
+    Path((user_id, team_id, thread_id)): Path<(String, String, String)>,
+    axum::extract::RawQuery(query): axum::extract::RawQuery,
+    session: AuthenticatedSession,
+) -> Result<Response, ApiError> {
+    if !is_valid_id(&user_id) {
+        return Err(ApiError::invalid_url_param("user_id"));
+    }
+    if !is_valid_id(&team_id) {
+        return Err(ApiError::invalid_url_param("team_id"));
+    }
+    if !is_valid_id(&thread_id) {
+        return Err(ApiError::invalid_url_param("thread_id"));
+    }
+
+    if !state
+        .app
+        .session_has_permission_to_user(&session.0, &user_id)
+        .await
+    {
+        return Err(ApiError::from(make_permission_error(
+            &session.0,
+            &[&PERMISSION_EDIT_OTHER_USERS],
+        )));
+    }
+
+    // The second return value is `isMember`, which Go binds and never reads ([D-028]).
+    let (allowed, _is_member) = state
+        .app
+        .session_has_permission_to_read_post(&session.0, &thread_id)
+        .await;
+    if !allowed {
+        return Err(ApiError::from(make_permission_error(
+            &session.0,
+            &[&PERMISSION_READ_CHANNEL_CONTENT],
+        )));
+    }
+
+    let extended = query_flag_is_true(query.as_deref(), "extended");
+
+    let membership = state
+        .app
+        .get_thread_membership_for_user(&user_id, &thread_id)
+        .await?;
+    let mut thread = state.app.get_thread_for_user(&membership, extended).await?;
+
+    // `sanitizeProfiles(thread.Participants, false)` — a non-admin's options whoever asks, the
+    // same literal `false` the list route carries.
+    let options = sanitize_options(state.show_full_name, state.show_email_address, false);
+    for participant in thread.participants.iter_mut().flatten() {
+        participant.sanitize_profile(&options, false);
+    }
+
+    let mut body = serde_json::to_vec(&thread).map_err(|err| {
+        tracing::error!(error = %err, "failed to serialise the thread");
+        marshal_error("getThreadForUser")
+    })?;
+    body.push(b'\n');
+
+    Ok((
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
             ("x-mmrs-served-by", "rust"),
         ],
         body,

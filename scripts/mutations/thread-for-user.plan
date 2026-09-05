@@ -1,0 +1,48 @@
+# Mutation plan for GET /users/{user_id}/teams/{team_id}/threads/{thread_id} (getThreadForUser).
+#
+#   scripts/mutate-batch.sh scripts/mutations/thread-for-user.plan
+#
+# Tab-separated: name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter.  `\n` becomes a newline.
+#
+# `thread_store.rs` now holds two joined-thread queries whose SELECT lists are nearly identical,
+# so every anchor below carries a token only this one has: `$2::bigint`, `$4`, or the bare
+# `WHERE t.postid = $1`.  The list query's predicates are longer and its parameters differently
+# numbered, which is what keeps them apart.
+#
+# Three of these were dead branches until the fixture was extended: the thread had never been
+# marked read (so `LastViewed` was 0 and indistinguishable from `UnreadMentions`, and every
+# reply predated it), no reply was deleted, and no root carried a `PostsPriority` row.  The
+# fixture now marks the followed thread read, posts a reply and deletes it, and plants
+# `priority = urgent`.
+#
+# Two mutations were dropped rather than kept as survivors:
+#
+# * `app-notfound-details` — blanking the `details` string Go passes at app/user.go:3094. It
+#   cannot be seen from the wire at all: `detailed_error` is wiped at the api boundary unless
+#   `EnableDeveloper` is on, so the value is unreachable through any route in this suite.
+# * `store-thread-selector` — `t.postid = $1` to `>= $1`.  With a handful of threads in the
+#   table a `>=` scan usually returns the same row, so the verdict was a coin flip rather than a
+#   test.  `store-thread-binding` below asks the same question — *which value reaches `$1`* —
+#   deterministically.
+#
+# The last two lines are the no-op controls and must SURVIVE.
+
+store-following-refusal	crates/mm-store/src/thread_store.rs	if !membership.following {	if membership.following {	api	thread_for_user
+store-unread-replies-cutoff	crates/mm-store/src/thread_store.rs	                       AND r.createat > $2\n                       AND r.deleteat = 0)	                       AND r.createat >= 0\n                       AND r.deleteat = 0)	api	thread_for_user
+store-unread-replies-deleted	crates/mm-store/src/thread_store.rs	                       AND r.createat > $2\n                       AND r.deleteat = 0)	                       AND r.createat > $2\n                       AND r.deleteat >= 0)	api	thread_for_user
+store-unread-replies-root	crates/mm-store/src/thread_store.rs	                     WHERE r.rootid = t.postid\n                       AND r.createat > $2	                     WHERE r.rootid <> t.postid\n                       AND r.createat > $2	api	thread_for_user
+store-lastviewed-source	crates/mm-store/src/thread_store.rs	                   $2::bigint                        AS "lastviewedat!",\n                   $3::bigint                        AS "unreadmentions!",	                   $3::bigint                        AS "lastviewedat!",\n                   $2::bigint                        AS "unreadmentions!",	api	thread_for_user
+store-isurgent-predicate	crates/mm-store/src/thread_store.rs	COALESCE($4 AND pp.priority = 'urgent', FALSE) AS "isurgent!"	COALESCE($4 AND pp.priority <> 'urgent', FALSE) AS "isurgent!"	api	thread_for_user
+store-thread-binding	crates/mm-store/src/thread_store.rs	            membership.post_id,\n            membership.last_viewed,	            membership.user_id,\n            membership.last_viewed,	api	thread_for_user
+app-notfound-id	crates/mm-app/src/thread.rs	                        "GetThreadForUser",\n                        "app.user.get_threads_for_user.not_found",	                        "GetThreadForUser",\n                        "app.user.get_thread_membership_for_user.not_found",	api	thread_for_user
+app-extended-hydration	crates/mm-app/src/thread.rs	        if extended {\n            let mut one = [thread];	        if false {\n            let mut one = [thread];	api	thread_for_user
+app-post-sanitisation	crates/mm-app/src/thread.rs	        if let Some(post) = thread.post.as_mut() {\n            post.sanitize_props();\n            post.strip_action_integrations();\n        }\n\n        Ok(thread)	        if let Some(post) = thread.post.as_mut() {\n            let _ = post;\n        }\n\n        Ok(thread)	api	thread_for_user
+api-team-id-validation	crates/mm-api/src/users.rs	    if !is_valid_id(&team_id) {\n        return Err(ApiError::invalid_url_param("team_id"));\n    }\n    if !is_valid_id(&thread_id) {\n        return Err(ApiError::invalid_url_param("thread_id"));\n    }	    if !is_valid_id(&thread_id) {\n        return Err(ApiError::invalid_url_param("thread_id"));\n    }	api	thread_for_user
+api-read-post-gate	crates/mm-api/src/users.rs	    let (allowed, _is_member) = state\n        .app\n        .session_has_permission_to_read_post(&session.0, &thread_id)\n        .await;\n    if !allowed {	    let (allowed, _is_member) = state\n        .app\n        .session_has_permission_to_read_post(&session.0, &thread_id)\n        .await;\n    if false && !allowed {	api	thread_for_user
+api-extended-param-name	crates/mm-api/src/users.rs	    let extended = query_flag_is_true(query.as_deref(), "extended");	    let extended = query_flag_is_true(query.as_deref(), "extend");	api	thread_for_user
+api-participant-sanitisation	crates/mm-api/src/users.rs	    for participant in thread.participants.iter_mut().flatten() {\n        participant.sanitize_profile(&options, false);\n    }	    for participant in thread.participants.iter_mut().flatten().take(0) {\n        participant.sanitize_profile(&options, false);\n    }	api	thread_for_user
+api-trailing-newline	crates/mm-api/src/users.rs	        marshal_error("getThreadForUser")\n    })?;\n    body.push(b'\\n');	        marshal_error("getThreadForUser")\n    })?;	api	thread_for_user
+#
+# --- no-op controls: these must SURVIVE ---
+control-rename-binding	crates/mm-app/src/thread.rs	        let include_is_urgent = self.config().post_priority;\n\n        let mut thread = self\n            .store()\n            .thread()\n            .get_thread_for_user(membership, include_is_urgent)	        let urgency_enabled = self.config().post_priority;\n\n        let mut thread = self\n            .store()\n            .thread()\n            .get_thread_for_user(membership, urgency_enabled)	api	thread_for_user
+control-reorder-columns	crates/mm-store/src/thread_store.rs	                   COALESCE($4 AND pp.priority = 'urgent', FALSE) AS "isurgent!",\n                   COALESCE(p.id, '')                AS "p_id!",\n                   COALESCE(p.createat, 0)           AS "p_createat!",	                   COALESCE($4 AND pp.priority = 'urgent', FALSE) AS "isurgent!",\n                   COALESCE(p.createat, 0)           AS "p_createat!",\n                   COALESCE(p.id, '')                AS "p_id!",	api	thread_for_user
