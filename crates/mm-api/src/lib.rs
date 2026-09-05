@@ -699,6 +699,12 @@ pub fn router(state: AppState) -> Router {
         // `BaseRoutes.Emojis.Handle("/autocomplete")` (api4/emoji.go:22) — a literal sibling of
         // `{emoji_id}`, which axum prefers. Registered GET-only; `/emoji/names` and
         // `/emoji/search` are POST in Go and stay forwarded.
+        // `BaseRoutes.Emojis.Handle("/names")` (api4/emoji.go:24) — posted once per channel
+        // load with the emoji names found in the page.
+        .route(
+            "/api/v4/emoji/names",
+            partially_migrated(post(emoji::get_emojis_by_names).get(emoji::get_emoji_name_literal)),
+        )
         .route(
             "/api/v4/emoji/autocomplete",
             partially_migrated(get(emoji::autocomplete_emojis)),

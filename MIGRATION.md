@@ -6048,3 +6048,52 @@ layer's error id (reachable only from a store failure), the `Name` in the empty-
 mutations doing nothing — it renamed `let body` to `let mut body` without appending the newline it
 was named for. **A mutation that does not do what its name says is worse than none**: it reports
 a catch that belongs to a different change.
+
+## `POST /api/v4/emoji/names` — `getEmojisByNames` (2026-09-05)
+
+Served. `crates/mm-api/src/emoji.rs` (`get_emojis_by_names`, `get_emoji_name_literal`),
+`crates/mm-app/src/emoji.rs` (`get_multiple_emoji_by_name`); 7 parity tests in
+`crates/mm-api/tests/parity/emoji_by_names.rs`. The store's `get_multiple_by_name` already
+existed with only the post-metadata path behind it. The webapp posts the emoji names it found in
+a page of posts, once per channel load, beside `POST /users/usernames`.
+
+**The one thing a reader would otherwise get wrong: system emoji names are filtered out of the
+*request*, not the answer.** Go compacts the list in place before querying, so `["+1"]` asks the
+database for nothing and returns `[]` — asking for a built-in is neither an error nor a hit. This
+route answers about *custom* emoji only.
+
+The four refusals are ordered, and the order is on the wire: decode 400, then the empty-list 400,
+then the `EnableCustomEmoji` **501**, then the 200-name cap's 400. An empty body on a server with
+custom emoji disabled is the 400, not the 501; a 201-name body on that same server is the 501, not
+the cap's 400. `json.NewEncoder(w).Encode` gives a **trailing newline** and `[]` rather than
+`null` — both the store and the filtered-to-nothing branch allocate.
+
+Mutation run: **10 run, 8 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/emoji-by-names.plan`). Full suite: 2461 passed, 0 failed.
+
+### Registering a literal route changes what happens to its other methods
+
+Go registers `/emoji/names` for `POST` only, so a `GET` fails the method match and gorilla
+**falls through** to `/emoji/{emoji_id}`, where `RequireEmojiId` rejects the literal — a 400 both
+servers produced from the same handler, and one `emoji_get`'s suite has asserted since it was
+written. axum has no such fallthrough: once `/api/v4/emoji/names` is a route it answers every
+method, so the `GET` silently began forwarding. Spelled out as `get_emoji_name_literal`.
+**Adding a literal route is a change to the `{id}` route beside it**, and only the full-workspace
+run sees it — a filtered run of the new suite passes either way.
+
+### Two mutations dropped as untestable rather than carried as survivors
+
+Removing the system-emoji filter entirely changes nothing observable: a custom emoji **cannot be
+named like a built-in** (`IsValidEmojiName` refuses `model.emoji.system_emoji_name.app_error`), so
+an unfiltered `smile` reaches the query and matches no row. Only a direct `INSERT` could tell them
+apart, and that row would outlive the suite's `mmrsparity`-prefix purge. The surviving
+`is_none`/`is_some` mutation still pins the predicate's direction. And removing the
+`custom.is_empty()` early return is inert here for a reason worth knowing: it exists in Go because
+`constructArrayArgs` emits `Name IN ()` for zero names, which Postgres rejects — the guard is what
+stops a 500. This port binds `name = ANY($1)`, which is legal and empty for an empty array.
+
+### `emoji_list` was comparing a whole shared table unbracketed
+
+It reads every emoji while the other emoji suites create and soft-delete rows throughout the run,
+with plain `fetch_both` — so one side carried a `mmrsparitydoomed` row the other had already lost.
+[D-160]'s shape. Now `fetch_both_stable`.

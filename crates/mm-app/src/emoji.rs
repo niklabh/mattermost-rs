@@ -7,6 +7,61 @@ use mm_store::emoji_store::EmojiStore;
 use crate::App;
 
 impl App {
+    /// Port of `app.App.GetMultipleEmojiByName` (app/emoji.go:242).
+    ///
+    /// # It filters the request, not the answer
+    ///
+    /// Every name that names a **system** emoji is removed before the query runs, in place, with
+    /// Go's compacting loop. So `["+1", "mmrsparityx"]` asks the database for one name, and
+    /// `["+1"]` asks for none — which is the branch below, and it returns an **empty vec rather
+    /// than an error**. A client asking only for built-in emoji gets `[]`, not a 404 and not a
+    /// list of the built-ins: this route answers about *custom* emoji only.
+    ///
+    /// # The config gate here is a 403 and it is unreachable
+    ///
+    /// `getEmojisByNames` checks `EnableCustomEmoji` first and answers 501, so this second check
+    /// — same id, different status — cannot fire through the route. Reproduced because it is
+    /// Go's, and because the only thing distinguishing the two is the status a client would see
+    /// if the order ever changed.
+    #[tracing::instrument(skip_all, fields(asked = names.len(), custom))]
+    pub async fn get_multiple_emoji_by_name(&self, names: &[String]) -> AppResult<Vec<Emoji>> {
+        if !self.config().enable_custom_emoji {
+            return Err(AppError::boxed(
+                "GetMultipleEmojiByName",
+                "api.emoji.disabled.app_error",
+                None,
+                String::new(),
+                403,
+            ));
+        }
+
+        let custom: Vec<String> = names
+            .iter()
+            .filter(|name| mm_model::emoji::get_system_emoji_id(name).is_none())
+            .cloned()
+            .collect();
+        tracing::Span::current().record("custom", custom.len());
+
+        if custom.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        self.store()
+            .emoji()
+            .get_multiple_by_name(&custom)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "emoji-by-names lookup failed");
+                AppError::boxed(
+                    "GetMultipleEmojiByName",
+                    "app.emoji.get_by_name.app_error",
+                    None,
+                    format!("names={custom:?}"),
+                    500,
+                )
+            })
+    }
+
     /// Port of `app.App.GetEmoji` (app/emoji.go:196).
     ///
     /// # Two config gates, and both answer **403**, not 501

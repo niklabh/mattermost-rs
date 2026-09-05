@@ -1,7 +1,7 @@
-//! Port of `getEmojiList`, `getEmoji`, `getEmojiByName` and `autocompleteEmojis`
-//! (channels/api4/emoji.go:116, :207, :229, :331), reached as `GET /api/v4/emoji`,
-//! `GET /api/v4/emoji/{emoji_id}`, `GET /api/v4/emoji/name/{emoji_name}` and
-//! `GET /api/v4/emoji/autocomplete`.
+//! Port of `getEmojiList`, `getEmoji`, `getEmojiByName`, `autocompleteEmojis` and
+//! `getEmojisByNames` (channels/api4/emoji.go:116, :207, :229, :331, :253), reached as
+//! `GET /api/v4/emoji`, `GET /api/v4/emoji/{emoji_id}`, `GET /api/v4/emoji/name/{emoji_name}`,
+//! `GET /api/v4/emoji/autocomplete` and `POST /api/v4/emoji/names`.
 //!
 //! # The two config gates are not the same gate
 //!
@@ -20,7 +20,9 @@ use axum::extract::{Path, Request, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use mm_model::emoji::{EMOJI_NAME_MAX_LENGTH, EMOJI_SORT_BY_NAME};
-use mm_model::utils::{AppError, is_valid_alpha_num_hyphen_underscore_plus};
+use mm_model::utils::{
+    AppError, is_valid_alpha_num_hyphen_underscore_plus, sorted_array_from_json,
+};
 
 use crate::AppState;
 use crate::auth::AuthenticatedSession;
@@ -38,9 +40,11 @@ use crate::error::ApiError;
 ///
 /// Only the `GET` literals are listed. `names` and `search` are `POST`-only in Go, so a `GET`
 /// to either falls past them with `ErrMethodMismatch` and *does* reach `getEmoji` with
-/// `emoji_id = "names"` — a 400 both servers produce, pinned by the parity suite rather than
-/// papered over here. The bare `/emoji` collection is one segment shorter and is not this
-/// route's problem at all.
+/// `emoji_id = "names"` — a 400 both servers produce. `search` still reaches this handler here,
+/// because no route claims it; `names` does not, because `POST /emoji/names` is now served and
+/// **axum prefers a registered literal for every method, not just the one it was registered
+/// with**. That fallthrough is spelled out as [`get_emoji_name_literal`] instead. The bare
+/// `/emoji` collection is one segment shorter and is not this route's problem at all.
 /// Empty since `/emoji/autocomplete` became a route of its own: axum prefers a registered
 /// literal over `{emoji_id}`, so the list that used to sit here is now the router's job. Kept
 /// rather than deleted because `getEmoji`'s forwarding branch is the only thing standing between
@@ -138,6 +142,127 @@ pub async fn get_emoji_by_name(
 /// handler's 64-byte check is what a long name meets.
 fn segment_matches_emoji_name_mux(value: &str) -> bool {
     is_valid_alpha_num_hyphen_underscore_plus(value)
+}
+
+/// `GET /api/v4/emoji/names` — gorilla's method fallthrough, spelled out.
+///
+/// Go registers `/emoji/names` for `POST` only, so a `GET` fails the method match and gorilla
+/// continues to `/emoji/{emoji_id}`, where `RequireEmojiId` rejects the literal `names`. axum
+/// does not fall through: once `/api/v4/emoji/names` is a route, it answers every method, and
+/// the `GET` would be forwarded rather than served. This restores the 400.
+///
+/// It is `RequireEmojiId`'s answer and nothing else — `getEmoji`'s `EnableCustomEmoji` 501 comes
+/// *after* the id check, so a disabled server gives the same 400 here.
+pub async fn get_emoji_name_literal(_session: AuthenticatedSession) -> Response {
+    ApiError::invalid_url_param("emoji_id").into_response()
+}
+
+/// `GetEmojisByNamesMax` (api4/emoji.go:19).
+const GET_EMOJIS_BY_NAMES_MAX: usize = 200;
+
+/// Port of `getEmojisByNames` (api4/emoji.go:253) — `POST /api/v4/emoji/names`.
+///
+/// The webapp posts the emoji names it found in a page of posts, so this fires once per channel
+/// load beside `POST /users/usernames`.
+///
+/// # Four refusals, and the config gate is *third*
+///
+/// 1. The body does not decode → 400 `api.payload.parse.error`.
+/// 2. Zero names → 400 `invalid_body_param` naming `names`.
+/// 3. `EnableCustomEmoji` off → **501** `api.emoji.disabled.app_error`.
+/// 4. More than **200** names → 400 `api.emoji.get_multiple_by_name_too_many.request_error`.
+///
+/// The order matters on the wire: an empty body on a server with custom emoji disabled is the
+/// 400, not the 501, and a 201-name body on that same server is the 501, not the too-many 400.
+/// Both measured.
+///
+/// # System emoji are filtered out of the *request*
+///
+/// [`mm_app::App::get_multiple_emoji_by_name`] drops every name that is a built-in before
+/// querying, so `["+1"]` answers `[]` — this route is about custom emoji only, and asking for a
+/// built-in is not an error.
+///
+/// # Wire format
+///
+/// `json.NewEncoder(w).Encode(emojis)` — a **trailing newline**, unlike the emoji reads beside
+/// it, and `[]` rather than `null` for no matches, because both the store and the
+/// filtered-to-nothing branch return an allocated empty slice.
+#[tracing::instrument(skip_all, fields(asked))]
+pub async fn get_emojis_by_names(
+    State(state): State<AppState>,
+    // Extracted for the 401 it raises; this handler reads nothing from the session, because Go
+    // does not either — there is no permission check here at all.
+    _session: AuthenticatedSession,
+    request: Request,
+) -> Result<Response, ApiError> {
+    let bytes = axum::body::to_bytes(request.into_body(), usize::MAX)
+        .await
+        .map_err(|err| {
+            tracing::warn!(error = %err, "could not read the request body");
+            payload_parse_error()
+        })?;
+
+    let names = sorted_array_from_json(&bytes).map_err(|err| {
+        tracing::debug!(error = %err, "emoji name body did not decode");
+        payload_parse_error()
+    })?;
+    if names.is_empty() {
+        return Err(ApiError::invalid_param("names"));
+    }
+    tracing::Span::current().record("asked", names.len());
+
+    custom_emoji_enabled(&state, "getEmojisByNames")?;
+
+    if names.len() > GET_EMOJIS_BY_NAMES_MAX {
+        let mut params: std::collections::HashMap<String, serde_json::Value> =
+            std::collections::HashMap::new();
+        params.insert(
+            "MaxNames".to_owned(),
+            serde_json::Value::from(GET_EMOJIS_BY_NAMES_MAX),
+        );
+        return Err(ApiError::from(AppError::new(
+            "getEmojisByNames",
+            "api.emoji.get_multiple_by_name_too_many.request_error",
+            Some(params),
+            String::new(),
+            400,
+        )));
+    }
+
+    let emojis = state.app.get_multiple_emoji_by_name(&names).await?;
+
+    let mut body = serde_json::to_vec(&emojis).map_err(|err| {
+        tracing::error!(error = %err, "failed to serialise emojis");
+        ApiError::from(AppError::new(
+            "getEmojisByNames",
+            "api.marshal_error",
+            None,
+            String::new(),
+            500,
+        ))
+    })?;
+    body.push(b'\n');
+
+    Ok((
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
+    )
+        .into_response())
+}
+
+/// `model.NewAppError("getEmojisByNames", model.PayloadParseError, nil, "", 400)`.
+fn payload_parse_error() -> ApiError {
+    ApiError::from(AppError::new(
+        "getEmojisByNames",
+        mm_model::utils::PAYLOAD_PARSE_ERROR,
+        None,
+        String::new(),
+        400,
+    ))
 }
 
 /// `!*c.App.Config().ServiceSettings.EnableCustomEmoji` → **501**, not the app layer's 403.
