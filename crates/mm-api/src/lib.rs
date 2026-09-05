@@ -604,6 +604,10 @@ pub fn router(state: AppState) -> Router {
             partially_migrated(get(webhooks::get_incoming_hooks)),
         )
         .route(
+            "/api/v4/hooks/outgoing",
+            partially_migrated(get(webhooks::get_outgoing_hooks)),
+        )
+        .route(
             "/api/v4/license/client",
             partially_migrated(get(license::get_client_license)),
         )

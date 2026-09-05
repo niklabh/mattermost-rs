@@ -380,26 +380,51 @@ async fn paging_and_the_active_filters_match_go() {
     );
 }
 
-/// [`headers_of_both`], read Go-ours-Go until Go's two answers agree.
+/// [`headers_of_both`], read Go-ours-Go and **bracketed** — the rule
+/// [`common::fetch_both_stable`] uses, for the same reason.
 ///
 /// The `not_in_team` etag is `MAX(UpdateAt)` over **every** user outside the team, so any other
 /// test in this binary — or in another worktree — that touches any user row moves it between the
 /// two reads. Measured: 108 milliseconds apart, same count, different MAX.
+///
+/// This waited for Go to go **quiet** until 2026-09-06, and that stopped working: three route
+/// suites landed that day, each creating plain users, promoting them and logging them in, and
+/// `MAX(UpdateAt)` over every user then moves for as long as any suite in the binary is still
+/// building fixtures. The test failed with *"Go's etag never settled"* — which is a statement
+/// about the write pressure, not about the port, and it blocked every full run.
+///
+/// Bracketing is the stronger check anyway, and it is [D-167]'s prescription: a **correct** port
+/// answers an etag Go also answered at some instant inside the window, so it matches one of the
+/// two reads. A **wrong** one matches neither, however busy the table is. Quiescence is kept as a
+/// third acceptance for the case where Go really is still and the difference is ours to explain.
 async fn stable_headers_of_both(
     client: &reqwest::Client,
     token: &str,
     path: &str,
 ) -> Vec<(u16, String, Option<String>)> {
-    for attempt in 1..=8u64 {
+    let mut last = None;
+    for attempt in 1..=12u64 {
         let before = headers_of_both(client, token, path, None).await;
         let ours = headers_of_both(client, token, path, None).await;
         let after = headers_of_both(client, token, path, None).await;
+
+        if ours[1] == before[0] {
+            return vec![before[0].clone(), ours[1].clone()];
+        }
+        if ours[1] == after[0] {
+            return vec![after[0].clone(), ours[1].clone()];
+        }
         if before[0] == after[0] {
             return vec![before[0].clone(), ours[1].clone()];
         }
+
+        last = Some((before[0].clone(), ours[1].clone(), after[0].clone()));
         tokio::time::sleep(std::time::Duration::from_millis(50 * attempt)).await;
     }
-    panic!("{path}: Go's etag never settled, so no comparison here would mean anything");
+    panic!(
+        "{path}: our answer matched neither bracket, repeatedly — that is a divergence, not \
+         churn: {last:?}"
+    );
 }
 
 /// The etag arms. `in_team` mints one and 304s on it; `in_channel` never sends one; the

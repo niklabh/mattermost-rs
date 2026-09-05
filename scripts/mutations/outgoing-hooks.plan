@@ -1,0 +1,42 @@
+# Mutation plan for GET /api/v4/hooks/outgoing (getOutgoingHooks).
+#
+#   scripts/mutate-batch.sh scripts/mutations/outgoing-hooks.plan
+#
+# What is worth mutating here and is *not* worth re-mutating from the incoming plan: the three
+# permission **scopes** and the order the branches are tried in (`channel_id` wins over `team_id`);
+# the owner column, which is `CreatorId` here and `UserId` on the incoming table; and the three
+# states of a `model.StringArray` column — NULL, `[]`, populated — which a store defaulting a NULL
+# to `[]` would collapse into two.
+#
+# **Two lines run under `store`, not `api`.** The owner filter is unreachable over HTTP: the only
+# roles granting `manage_own_*_webhooks` also grant `manage_others_*`, so every caller that can
+# reach either route arrives with the filter already cleared. `store-outgoing-creator-column`
+# survived the whole `api` suite for that reason. `tests/db_webhook_owner_filter.rs` exercises the
+# branch where it is reachable — at the store, with the owner passed directly — and both tables'
+# columns are mutated there, because `IncomingWebhooks.UserId` and `OutgoingWebhooks.CreatorId`
+# are different columns doing the same job.
+#
+# The last two lines are the no-op controls and must SURVIVE.
+
+store-outgoing-null-array-becomes-empty	crates/mm-store/src/webhook_store.rs	        None => Ok(None),	        None => Ok(Some(Vec::new())),	api	outgoing_hooks
+store-outgoing-channel-predicate	crates/mm-store/src/webhook_store.rs	             WHERE channelid = $1\n               AND deleteat = 0	             WHERE ($1 = $1)\n               AND deleteat = 0	api	outgoing_hooks
+store-outgoing-team-predicate	crates/mm-store/src/webhook_store.rs	             WHERE teamid = $1\n               AND deleteat = 0\n               AND ($2 = '' OR creatorid = $2)	             WHERE ($1 = $1)\n               AND deleteat = 0\n               AND ($2 = '' OR creatorid = $2)	api	outgoing_hooks
+store-outgoing-creator-column	crates/mm-store/src/webhook_store.rs	             WHERE channelid = $1\n               AND deleteat = 0\n               AND ($2 = '' OR creatorid = $2)	             WHERE channelid = $1\n               AND deleteat = 0\n               AND ($2 = '' OR channelid = $2)	store	a_named_owner
+store-incoming-owner-column	crates/mm-store/src/webhook_store.rs	             WHERE teamid = $1\n               AND deleteat = 0\n               AND ($2 = '' OR userid = $2)	             WHERE teamid = $1\n               AND deleteat = 0\n               AND ($2 = '' OR teamid = $2)	store	a_named_owner
+store-outgoing-deleteat	crates/mm-store/src/webhook_store.rs	             WHERE channelid = $1\n               AND deleteat = 0	             WHERE channelid = $1\n               AND deleteat >= 0	api	outgoing_hooks
+store-outgoing-channel-order-tiebreak	crates/mm-store/src/webhook_store.rs	               AND ($2 = '' OR creatorid = $2)\n             ORDER BY displayname, id\n             LIMIT $3 OFFSET $4\n            "#,\n            channel_id,	               AND ($2 = '' OR creatorid = $2)\n             ORDER BY displayname\n             LIMIT $3 OFFSET $4\n            "#,\n            channel_id,	api	outgoing_hooks
+store-outgoing-triggerwhen-column	crates/mm-store/src/webhook_store.rs	            trigger_when: i64::from(self.triggerwhen),	            trigger_when: 0,	api	outgoing_hooks
+store-outgoing-columns-swapped	crates/mm-store/src/webhook_store.rs	            display_name: self.displayname,\n            description: self.description,	            display_name: self.description,\n            description: self.displayname,	api	outgoing_hooks
+app-outgoing-team-offset	crates/mm-app/src/webhook.rs	            .get_outgoing_by_team_by_user(team_id, user_id, page * per_page, per_page)	            .get_outgoing_by_team_by_user(team_id, user_id, page, per_page)	api	outgoing_hooks
+app-outgoing-disabled-gate	crates/mm-app/src/webhook.rs	        if !self.config().enable_outgoing_webhooks {\n            return Err(outgoing_disabled("GetOutgoingWebhooksForChannelPage"));	        if self.config().enable_outgoing_webhooks {\n            return Err(outgoing_disabled("GetOutgoingWebhooksForChannelPage"));	api	outgoing_hooks
+api-outgoing-channel-precedence	crates/mm-api/src/webhooks.rs	    let hooks = if !channel_id.is_empty() {	    let hooks = if !team_id.is_empty() && false {	api	outgoing_hooks
+api-outgoing-branch-order	crates/mm-api/src/webhooks.rs	    let hooks = if !channel_id.is_empty() {\n        tracing::Span::current().record("scope", "channel");	    let hooks = if !channel_id.is_empty() && team_id.is_empty() {\n        tracing::Span::current().record("scope", "channel");	api	outgoing_hooks
+api-outgoing-channel-permission	crates/mm-api/src/webhooks.rs	        if !allowed {\n            return Err(refused());\n        }	        if false {\n            return Err(refused());\n        }	api	outgoing_hooks
+api-outgoing-channel-others-filter	crates/mm-api/src/webhooks.rs	        if others {\n            user_id = "";\n        }	        if false {\n            user_id = "";\n        }	api	outgoing_hooks
+api-outgoing-team-branch-uses-system-scope	crates/mm-api/src/webhooks.rs	            .session_has_permission_to_team(\n                &session.0,\n                &team_id,\n                &PERMISSION_MANAGE_OWN_OUTGOING_WEBHOOKS,\n            )\n            .await\n        {\n            return Err(refused());	            .session_has_permission_to(&session.0, &PERMISSION_MANAGE_OWN_OUTGOING_WEBHOOKS)\n            .await\n        {\n            return Err(refused());	api	outgoing_hooks
+api-outgoing-system-branch-uses-team-scope	crates/mm-api/src/webhooks.rs	            .session_has_permission_to(&session.0, &PERMISSION_MANAGE_OWN_OUTGOING_WEBHOOKS)\n            .await\n        {\n            return Err(refused());\n        }\n        if state\n            .app\n            .session_has_permission_to(&session.0, &PERMISSION_MANAGE_OTHERS_OUTGOING_WEBHOOKS)	            .session_has_permission_to_team(\n                &session.0,\n                &team_id,\n                &PERMISSION_MANAGE_OWN_OUTGOING_WEBHOOKS,\n            )\n            .await\n        {\n            return Err(refused());\n        }\n        if state\n            .app\n            .session_has_permission_to(&session.0, &PERMISSION_MANAGE_OTHERS_OUTGOING_WEBHOOKS)	api	outgoing_hooks
+api-outgoing-trailing-newline	crates/mm-api/src/webhooks.rs	        encode(&hooks)?,\n    )\n        .into_response())\n}	        {\n            let mut body = encode(&hooks)?;\n            body.push(b'\\n');\n            body\n        },\n    )\n        .into_response())\n}	api	outgoing_hooks
+#
+# --- no-op controls: these must SURVIVE ---
+control-rename-binding	crates/mm-api/src/webhooks.rs	    tracing::Span::current().record("count", hooks.len());\n\n    Ok((\n        StatusCode::OK,\n        [\n            ("Content-Type", "application/json"),\n            ("x-mmrs-served-by", "rust"),\n        ],\n        encode(&hooks)?,	    tracing::Span::current().record("count", { let listed = &hooks; listed.len() });\n\n    Ok((\n        StatusCode::OK,\n        [\n            ("Content-Type", "application/json"),\n            ("x-mmrs-served-by", "rust"),\n        ],\n        encode(&hooks)?,	api	outgoing_hooks
+control-reorder-independent-selects	crates/mm-store/src/webhook_store.rs	                   COALESCE(username, '')      AS "username!",\n                   COALESCE(iconurl, '')       AS "iconurl!"\n              FROM outgoingwebhooks\n             WHERE channelid = $1	                   COALESCE(iconurl, '')       AS "iconurl!",\n                   COALESCE(username, '')      AS "username!"\n              FROM outgoingwebhooks\n             WHERE channelid = $1	api	outgoing_hooks

@@ -1,11 +1,13 @@
-//! Port of `SqlWebhookStore` (channels/store/sqlstore/webhook_store.go) — the three incoming-hook
-//! reads `getIncomingHooks` needs, and nothing else.
+//! Port of `SqlWebhookStore` (channels/store/sqlstore/webhook_store.go) — the reads
+//! `getIncomingHooks` and `getOutgoingHooks` need, and nothing else.
 //!
-//! The outgoing half, the single-hook reads and every write are not ported: `GET /api/v4/hooks/
-//! incoming` is the only route migrated over this table, and a store function with no caller is a
-//! guess about a query nothing can falsify.
+//! The single-hook reads and every write are not ported: those two list routes are all that is
+//! migrated over this table, and a store function with no caller is a guess about a query nothing
+//! can falsify.
 
 use mm_model::incoming_webhook::IncomingWebhook;
+use mm_model::outgoing_webhook::OutgoingWebhook;
+use mm_model::utils::StringArray;
 use sqlx::PgPool;
 
 use crate::error::StoreError;
@@ -35,6 +37,32 @@ pub trait WebhookStore {
         team_id: &str,
         user_id: &str,
     ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
+
+    /// Port of `SqlWebhookStore.GetOutgoingListByUser` (webhook_store.go:283) — every team.
+    fn get_outgoing_list_by_user(
+        &self,
+        user_id: &str,
+        offset: i64,
+        limit: i64,
+    ) -> impl std::future::Future<Output = Result<Vec<OutgoingWebhook>, StoreError>> + Send;
+
+    /// Port of `SqlWebhookStore.GetOutgoingByChannelByUser` (webhook_store.go:309).
+    fn get_outgoing_by_channel_by_user(
+        &self,
+        channel_id: &str,
+        user_id: &str,
+        offset: i64,
+        limit: i64,
+    ) -> impl std::future::Future<Output = Result<Vec<OutgoingWebhook>, StoreError>> + Send;
+
+    /// Port of `SqlWebhookStore.GetOutgoingByTeamByUser` (webhook_store.go:337).
+    fn get_outgoing_by_team_by_user(
+        &self,
+        team_id: &str,
+        user_id: &str,
+        offset: i64,
+        limit: i64,
+    ) -> impl std::future::Future<Output = Result<Vec<OutgoingWebhook>, StoreError>> + Send;
 }
 
 /// Postgres-backed implementation.
@@ -88,6 +116,81 @@ impl From<IncomingWebhookRow> for IncomingWebhook {
             channel_locked: row.channellocked,
             last_used: row.lastused,
         }
+    }
+}
+
+/// One row of `outgoingWebhookSelectQuery` (webhook_store.go:54-73).
+///
+/// `TriggerWords` and `CallbackURLs` are `model.StringArray`, which the schema stores as a
+/// **JSON array inside a `varchar`** — `StringArray.Scan` (model/utils.go:118) `json.Unmarshal`s
+/// whatever the column holds and leaves the field **nil** for a SQL NULL. So all three states are
+/// distinguishable on the wire: `null`, `[]`, and a populated array. That is why the model's field
+/// is an `Option` and why this row reads the column as an `Option<String>` rather than defaulting
+/// it to `[]`.
+struct OutgoingWebhookRow {
+    id: String,
+    token: String,
+    createat: i64,
+    updateat: i64,
+    deleteat: i64,
+    creatorid: String,
+    channelid: String,
+    teamid: String,
+    triggerwords: Option<String>,
+    triggerwhen: i32,
+    callbackurls: Option<String>,
+    displayname: String,
+    description: String,
+    contenttype: String,
+    username: String,
+    iconurl: String,
+}
+
+/// `StringArray.Scan`: NULL leaves the field nil; anything else is `json.Unmarshal`ed, and a
+/// failure there fails the whole query on Go's side too.
+///
+/// An **empty string** is therefore a scan error, not an empty array — `json.Unmarshal([]byte(""))`
+/// is "unexpected end of JSON input". Reproduced rather than smoothed into `[]`: a column Go
+/// cannot read is a row neither server can serve, and silently inventing a value here would make
+/// us answer where Go 500s.
+fn string_array_column(
+    raw: Option<String>,
+    column: &'static str,
+) -> Result<Option<StringArray>, StoreError> {
+    match raw {
+        None => Ok(None),
+        Some(json) => serde_json::from_str(&json)
+            .map(Some)
+            .map_err(|source| StoreError::Decode {
+                entity: "OutgoingWebhook",
+                column,
+                source,
+            }),
+    }
+}
+
+impl OutgoingWebhookRow {
+    fn into_model(self) -> Result<OutgoingWebhook, StoreError> {
+        Ok(OutgoingWebhook {
+            id: self.id,
+            token: self.token,
+            create_at: self.createat,
+            update_at: self.updateat,
+            delete_at: self.deleteat,
+            creator_id: self.creatorid,
+            channel_id: self.channelid,
+            team_id: self.teamid,
+            trigger_words: string_array_column(self.triggerwords, "TriggerWords")?,
+            // Go's field is `int`; the column is a 4-byte `integer`. The widening is ours and
+            // changes nothing — `TriggerWhen` holds 0 or 1 (`TRIGGER_WORDS_*`).
+            trigger_when: i64::from(self.triggerwhen),
+            callback_urls: string_array_column(self.callbackurls, "CallbackURLs")?,
+            display_name: self.displayname,
+            description: self.description,
+            content_type: self.contenttype,
+            username: self.username,
+            icon_url: self.iconurl,
+        })
     }
 }
 
@@ -234,6 +337,173 @@ impl WebhookStore for SqlWebhookStore {
 
         tracing::Span::current().record("count", count);
         Ok(count)
+    }
+
+    /// # The user filter is `CreatorId`, not `UserId`
+    ///
+    /// The incoming table names its owner column `UserId` and this one names it `CreatorId`
+    /// (webhook_store.go:295). The two routes read the same-looking predicate off different
+    /// columns, and the mistake would be invisible on a fixture where the creator is also the
+    /// only user.
+    #[tracing::instrument(skip_all, fields(user_id, offset, limit, found))]
+    async fn get_outgoing_list_by_user(
+        &self,
+        user_id: &str,
+        offset: i64,
+        limit: i64,
+    ) -> Result<Vec<OutgoingWebhook>, StoreError> {
+        let rows = sqlx::query_as!(
+            OutgoingWebhookRow,
+            r#"
+            SELECT id                          AS "id!",
+                   COALESCE(token, '')         AS "token!",
+                   COALESCE(createat, 0)       AS "createat!",
+                   COALESCE(updateat, 0)       AS "updateat!",
+                   COALESCE(deleteat, 0)       AS "deleteat!",
+                   COALESCE(creatorid, '')     AS "creatorid!",
+                   COALESCE(channelid, '')     AS "channelid!",
+                   COALESCE(teamid, '')        AS "teamid!",
+                   triggerwords                AS "triggerwords?",
+                   COALESCE(triggerwhen, 0)    AS "triggerwhen!",
+                   callbackurls                AS "callbackurls?",
+                   COALESCE(displayname, '')   AS "displayname!",
+                   COALESCE(description, '')   AS "description!",
+                   COALESCE(contenttype, '')   AS "contenttype!",
+                   COALESCE(username, '')      AS "username!",
+                   COALESCE(iconurl, '')       AS "iconurl!"
+              FROM outgoingwebhooks
+             WHERE deleteat = 0
+               AND ($1 = '' OR creatorid = $1)
+             ORDER BY displayname, id
+             LIMIT $2 OFFSET $3
+            "#,
+            user_id,
+            limit,
+            offset
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to find OutgoingWebhooks".to_owned(),
+            source,
+        })?;
+
+        tracing::Span::current().record("found", rows.len());
+        rows.into_iter()
+            .map(OutgoingWebhookRow::into_model)
+            .collect()
+    }
+
+    /// # `LIMIT`/`OFFSET` are conditional in Go here, and unconditional in the list query
+    ///
+    /// `GetOutgoingByChannelByUser` applies them only `if limit >= 0 && offset >= 0`
+    /// (webhook_store.go:322) — a guard `GetOutgoingListByUser` does not have. Through this route
+    /// both come from `web.ParamsFromRequest`, which floors `page` at 0 and `per_page` at 0, so
+    /// the guard is always true and the branch is unreachable. It is **not** reproduced: a
+    /// condition that cannot be false is not a behaviour, and writing it would invite a reader to
+    /// find the fixture that exercises it. Recorded here instead.
+    #[tracing::instrument(skip_all, fields(channel_id, user_id, offset, limit, found))]
+    async fn get_outgoing_by_channel_by_user(
+        &self,
+        channel_id: &str,
+        user_id: &str,
+        offset: i64,
+        limit: i64,
+    ) -> Result<Vec<OutgoingWebhook>, StoreError> {
+        let rows = sqlx::query_as!(
+            OutgoingWebhookRow,
+            r#"
+            SELECT id                          AS "id!",
+                   COALESCE(token, '')         AS "token!",
+                   COALESCE(createat, 0)       AS "createat!",
+                   COALESCE(updateat, 0)       AS "updateat!",
+                   COALESCE(deleteat, 0)       AS "deleteat!",
+                   COALESCE(creatorid, '')     AS "creatorid!",
+                   COALESCE(channelid, '')     AS "channelid!",
+                   COALESCE(teamid, '')        AS "teamid!",
+                   triggerwords                AS "triggerwords?",
+                   COALESCE(triggerwhen, 0)    AS "triggerwhen!",
+                   callbackurls                AS "callbackurls?",
+                   COALESCE(displayname, '')   AS "displayname!",
+                   COALESCE(description, '')   AS "description!",
+                   COALESCE(contenttype, '')   AS "contenttype!",
+                   COALESCE(username, '')      AS "username!",
+                   COALESCE(iconurl, '')       AS "iconurl!"
+              FROM outgoingwebhooks
+             WHERE channelid = $1
+               AND deleteat = 0
+               AND ($2 = '' OR creatorid = $2)
+             ORDER BY displayname, id
+             LIMIT $3 OFFSET $4
+            "#,
+            channel_id,
+            user_id,
+            limit,
+            offset
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to find OutgoingWebhooks".to_owned(),
+            source,
+        })?;
+
+        tracing::Span::current().record("found", rows.len());
+        rows.into_iter()
+            .map(OutgoingWebhookRow::into_model)
+            .collect()
+    }
+
+    #[tracing::instrument(skip_all, fields(team_id, user_id, offset, limit, found))]
+    async fn get_outgoing_by_team_by_user(
+        &self,
+        team_id: &str,
+        user_id: &str,
+        offset: i64,
+        limit: i64,
+    ) -> Result<Vec<OutgoingWebhook>, StoreError> {
+        let rows = sqlx::query_as!(
+            OutgoingWebhookRow,
+            r#"
+            SELECT id                          AS "id!",
+                   COALESCE(token, '')         AS "token!",
+                   COALESCE(createat, 0)       AS "createat!",
+                   COALESCE(updateat, 0)       AS "updateat!",
+                   COALESCE(deleteat, 0)       AS "deleteat!",
+                   COALESCE(creatorid, '')     AS "creatorid!",
+                   COALESCE(channelid, '')     AS "channelid!",
+                   COALESCE(teamid, '')        AS "teamid!",
+                   triggerwords                AS "triggerwords?",
+                   COALESCE(triggerwhen, 0)    AS "triggerwhen!",
+                   callbackurls                AS "callbackurls?",
+                   COALESCE(displayname, '')   AS "displayname!",
+                   COALESCE(description, '')   AS "description!",
+                   COALESCE(contenttype, '')   AS "contenttype!",
+                   COALESCE(username, '')      AS "username!",
+                   COALESCE(iconurl, '')       AS "iconurl!"
+              FROM outgoingwebhooks
+             WHERE teamid = $1
+               AND deleteat = 0
+               AND ($2 = '' OR creatorid = $2)
+             ORDER BY displayname, id
+             LIMIT $3 OFFSET $4
+            "#,
+            team_id,
+            user_id,
+            limit,
+            offset
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to find OutgoingWebhooks".to_owned(),
+            source,
+        })?;
+
+        tracing::Span::current().record("found", rows.len());
+        rows.into_iter()
+            .map(OutgoingWebhookRow::into_model)
+            .collect()
     }
 }
 

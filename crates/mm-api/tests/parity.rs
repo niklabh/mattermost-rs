@@ -58,6 +58,7 @@ mod parity {
     pub mod incoming_hooks;
     pub mod license_client;
     pub mod me_alias;
+    pub mod outgoing_hooks;
     pub mod post_bulk_reactions;
     pub mod post_edit_history;
     pub mod post_get;

@@ -6480,3 +6480,66 @@ not: that branch is entered only when `team_id` is non-empty, so the added disju
 false. Replaced with one that drops the predicate outright — which the other team's planted hook
 can see. Distinguishing the two is the difference between a finding about the tests and a wasted
 one.
+
+## `GET /api/v4/hooks/outgoing` — `getOutgoingHooks` (2026-09-06)
+
+Served. Extends `crates/mm-api/src/webhooks.rs`, `crates/mm-app/src/webhook.rs` and
+`crates/mm-store/src/webhook_store.rs`, plus `Config::enable_outgoing_webhooks`; 9 parity tests in
+`crates/mm-api/tests/parity/outgoing_hooks.rs` and 1 store test in
+`crates/mm-store/tests/db_webhook_owner_filter.rs`.
+
+**The one thing a reader would otherwise get wrong: there are *three* scopes and `channel_id`
+wins.** `channel_id` is checked first, then `team_id`, then neither, and the branches are
+exclusive — a request carrying both is a **channel** request and the team is ignored entirely.
+Each branch asks the same permission pair at a different scope (`…ToChannel`, `…ToTeam`, plain).
+The suite's team admin is the only caller that answers differently to all three.
+
+Two more. The owner column is **`CreatorId`** here and `UserId` on the incoming table
+(webhook_store.go:295 versus :188) — the same predicate off different columns. And
+`trigger_words`/`callback_urls` are `model.StringArray` stored as JSON inside a `varchar`:
+`StringArray.Scan` leaves the field **nil** for a SQL NULL, so `null`, `[]` and a populated array
+are three distinct answers. The fixture plants one hook of each.
+
+Go's error ids are not symmetric and one is a copy-paste: the team function reports
+`app.webhooks.get_outgoing_by_team.app_error` while both the channel function **and the unscoped
+list** report `…get_outgoing_by_channel.app_error` (webhook.go:827) — the whole-server list naming
+a channel it never had. Reproduced, with a unit test so that "fixing" it fails.
+
+Mutation run: **20 run, 18 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/outgoing-hooks.plan`).
+
+### The owner filter cannot be reached over HTTP, on either route
+
+Both list routes narrow to one owner unless the caller holds `manage_others_*_webhooks` — and on
+a stock server the only roles granting `manage_own_*` are `system_admin` and `team_admin`, **both
+of which also grant `manage_others_*`**. So every caller that can reach either route arrives with
+the filter already cleared, and a mutation swapping the outgoing table's `CreatorId` for another
+column survived the entire `api` suite.
+
+The branch is not unreachable in principle — a custom scheme could grant one and not the other —
+so it is tested where it *is* reachable: `tests/db_webhook_owner_filter.rs` calls the store
+directly with an owner id, for both tables. This is the second route this session where a branch
+had to be tested below the edge rather than dropped ([`getUserAudits`]'s 1000-row bound was the
+first).
+
+### `MUTATE_FILTER` filters test *names*, not targets
+
+`MUTATE_FILTER=db_webhook_owner_filter` — the name of a file in `tests/` — matches no test
+function, so cargo runs **zero** tests, exits 0, and the mutation is reported SURVIVED. Two were,
+before this was noticed. `scripts/mutate.sh` now says so at the top, and the rule is: a CAUGHT line
+must name a test, and a SURVIVED line on a mutation you predicted should be checked against the
+filter before it is believed.
+
+### And the users-list etag stopped settling, which is [D-167] arriving
+
+`the_etag_arms_match_go_except_for_gos_two_pointer_components` failed the first full run after
+this session's three route suites landed — *"Go's etag never settled"*. That etag is
+`MAX(UpdateAt)` over **every** user outside the team, and the three suites between them create
+seven plain users, promote two of them and log one in three times, so `MAX(UpdateAt)` moves for as
+long as any suite in the binary is still building fixtures. The message is a statement about write
+pressure, not about the port, and it blocked every full run.
+
+It now **brackets** instead of waiting for quiet — the rule `fetch_both_stable` already uses, and
+[D-167]'s own prescription: a correct port answers an etag Go also answered at some instant inside
+the window, so it matches one of the two reads; a wrong one matches neither however busy the table
+is. Quiescence is kept as a third acceptance.

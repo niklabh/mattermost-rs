@@ -19,6 +19,12 @@
 #
 #   MUTATE_FILTER=authorization:: scripts/mutate.sh ...
 #
+# **It filters test NAMES, not test targets.** `MUTATE_FILTER=db_webhook_owner_filter` — the name
+# of a file in `tests/` — matches no test function, so cargo runs **zero** tests, exits 0, and the
+# mutation is reported SURVIVED. Two mutations were reported that way before this line existed.
+# Filter on something in the test function's own name (`a_named_owner`), and sanity-check a new
+# plan line by confirming the CAUGHT message names a test.
+#
 # For `api`, narrow to the suite(s) under test — leaving this unset lets an unrelated suite
 # decide the verdict, which has twice produced a whole run of false CAUGHTs:
 #

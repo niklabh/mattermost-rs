@@ -134,6 +134,14 @@ pub struct Config {
     /// its two neighbours.
     pub enable_incoming_webhooks: bool,
 
+    /// `ServiceSettings.EnableOutgoingWebhooks` (config.go:389, defaulted at :611). Go default
+    /// **`true`**.
+    ///
+    /// The outgoing counterpart of [`Config::enable_incoming_webhooks`], gating the three
+    /// functions behind `getOutgoingHooks` with **its own** error id,
+    /// `api.outgoing_webhook.disabled.app_error`. Two settings, two ids, one status.
+    pub enable_outgoing_webhooks: bool,
+
     /// The `MM_LICENSE` environment variable (`platform.LicenseEnv`, platform/license.go:26).
     ///
     /// Not an `MM_<SECTION>_<SETTING>` config overlay — it is its own variable, holding a whole
@@ -171,6 +179,7 @@ impl Default for Config {
             feature_flag_burn_on_read: true,
             file_driver_name: "local".to_owned(),
             enable_incoming_webhooks: true,
+            enable_outgoing_webhooks: true,
             license: String::new(),
         }
     }
@@ -221,6 +230,10 @@ impl Config {
             enable_incoming_webhooks: env_bool(
                 "MM_SERVICESETTINGS_ENABLEINCOMINGWEBHOOKS",
                 default.enable_incoming_webhooks,
+            ),
+            enable_outgoing_webhooks: env_bool(
+                "MM_SERVICESETTINGS_ENABLEOUTGOINGWEBHOOKS",
+                default.enable_outgoing_webhooks,
             ),
             // Its own variable, not part of the `MM_<SECTION>_<SETTING>` overlay, and Go treats
             // any non-empty value as "a licence was supplied" before it ever tries to parse it.

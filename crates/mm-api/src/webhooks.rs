@@ -1,8 +1,7 @@
-//! Port of `getIncomingHooks` (channels/api4/webhook.go:207), reached as
-//! `GET /api/v4/hooks/incoming`.
+//! Port of `getIncomingHooks` and `getOutgoingHooks` (channels/api4/webhook.go:207, :512),
+//! reached as `GET /api/v4/hooks/incoming` and `GET /api/v4/hooks/outgoing`.
 //!
-//! The webapp's *Integrations → Incoming Webhooks* page. Only the incoming list is migrated; the
-//! outgoing list, the single-hook reads and every write are still forwarded.
+//! The webapp's *Integrations* pages. The single-hook reads and every write are still forwarded.
 //!
 //! # Two shapes on one route
 //!
@@ -25,7 +24,8 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use mm_model::incoming_webhook::IncomingWebhooksWithCount;
 use mm_model::permission::{
-    PERMISSION_MANAGE_OTHERS_INCOMING_WEBHOOKS, PERMISSION_MANAGE_OWN_INCOMING_WEBHOOKS,
+    PERMISSION_MANAGE_OTHERS_INCOMING_WEBHOOKS, PERMISSION_MANAGE_OTHERS_OUTGOING_WEBHOOKS,
+    PERMISSION_MANAGE_OWN_INCOMING_WEBHOOKS, PERMISSION_MANAGE_OWN_OUTGOING_WEBHOOKS,
     make_permission_error,
 };
 use mm_model::utils::AppError;
@@ -37,6 +37,7 @@ use crate::error::ApiError;
 
 const TEAM_ID_PARAM: &str = "team_id";
 const INCLUDE_TOTAL_COUNT_PARAM: &str = "include_total_count";
+const CHANNEL_ID_PARAM: &str = "channel_id";
 
 /// Port of `getIncomingHooks` (webhook.go:207).
 ///
@@ -177,6 +178,140 @@ fn encode<T: serde::Serialize>(value: &T) -> Result<Vec<u8>, ApiError> {
             500,
         ))
     })
+}
+
+/// Port of `getOutgoingHooks` (webhook.go:512).
+///
+/// # Three scopes, checked in a fixed order, and `channel_id` wins
+///
+/// `channel_id` first, then `team_id`, then neither — and the branches are exclusive, so a
+/// request carrying **both** is a *channel* request and the team is ignored entirely. Each branch
+/// asks the same pair of permissions at a different scope:
+/// `SessionHasPermissionToChannel`, `SessionHasPermissionToTeam`, `SessionHasPermissionTo`. A
+/// port that collapsed them fails **open**, exactly as on the incoming route.
+///
+/// # No `include_total_count`
+///
+/// The incoming route has one; this one does not, so the response is always an array. The two
+/// handlers sit forty lines apart in the same Go file and differ in that, in the number of
+/// scopes, and in the owner column their store filters on (`CreatorId`, not `UserId`).
+///
+/// # Wire format
+///
+/// `json.Marshal` + `w.Write` (webhook.go:566, :572) — no trailing newline, and an empty list is
+/// `[]` because all three store functions start from `[]*model.OutgoingWebhook{}`.
+#[tracing::instrument(skip_all, fields(channel_id, team_id, scope, count))]
+pub async fn get_outgoing_hooks(
+    State(state): State<AppState>,
+    RawQuery(query): RawQuery,
+    session: AuthenticatedSession,
+) -> Result<Response, ApiError> {
+    let channel_id = query_first(query.as_deref(), CHANNEL_ID_PARAM).unwrap_or_default();
+    let team_id = query_first(query.as_deref(), TEAM_ID_PARAM).unwrap_or_default();
+    tracing::Span::current().record("channel_id", &channel_id);
+    tracing::Span::current().record("team_id", &team_id);
+
+    let page = parse_page(query.as_deref());
+    let per_page = parse_per_page(query.as_deref());
+
+    let mut user_id = session.0.user_id.as_str();
+    let refused = || {
+        ApiError::from(make_permission_error(
+            &session.0,
+            &[&PERMISSION_MANAGE_OWN_OUTGOING_WEBHOOKS],
+        ))
+    };
+
+    let hooks = if !channel_id.is_empty() {
+        tracing::Span::current().record("scope", "channel");
+        // `SessionHasPermissionToChannel` returns `(allowed, is_member)`; Go discards the second
+        // value here with `ok, _ :=`, so membership does not enter the decision.
+        let (allowed, _) = state
+            .app
+            .session_has_permission_to_channel(
+                &session.0,
+                &channel_id,
+                &PERMISSION_MANAGE_OWN_OUTGOING_WEBHOOKS,
+            )
+            .await;
+        if !allowed {
+            return Err(refused());
+        }
+        let (others, _) = state
+            .app
+            .session_has_permission_to_channel(
+                &session.0,
+                &channel_id,
+                &PERMISSION_MANAGE_OTHERS_OUTGOING_WEBHOOKS,
+            )
+            .await;
+        if others {
+            user_id = "";
+        }
+        state
+            .app
+            .get_outgoing_webhooks_for_channel_page_by_user(&channel_id, user_id, page, per_page)
+            .await?
+    } else if !team_id.is_empty() {
+        tracing::Span::current().record("scope", "team");
+        if !state
+            .app
+            .session_has_permission_to_team(
+                &session.0,
+                &team_id,
+                &PERMISSION_MANAGE_OWN_OUTGOING_WEBHOOKS,
+            )
+            .await
+        {
+            return Err(refused());
+        }
+        if state
+            .app
+            .session_has_permission_to_team(
+                &session.0,
+                &team_id,
+                &PERMISSION_MANAGE_OTHERS_OUTGOING_WEBHOOKS,
+            )
+            .await
+        {
+            user_id = "";
+        }
+        state
+            .app
+            .get_outgoing_webhooks_for_team_page_by_user(&team_id, user_id, page, per_page)
+            .await?
+    } else {
+        tracing::Span::current().record("scope", "system");
+        if !state
+            .app
+            .session_has_permission_to(&session.0, &PERMISSION_MANAGE_OWN_OUTGOING_WEBHOOKS)
+            .await
+        {
+            return Err(refused());
+        }
+        if state
+            .app
+            .session_has_permission_to(&session.0, &PERMISSION_MANAGE_OTHERS_OUTGOING_WEBHOOKS)
+            .await
+        {
+            user_id = "";
+        }
+        state
+            .app
+            .get_outgoing_webhooks_page_by_user(user_id, page, per_page)
+            .await?
+    };
+    tracing::Span::current().record("count", hooks.len());
+
+    Ok((
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        encode(&hooks)?,
+    )
+        .into_response())
 }
 
 #[cfg(test)]
