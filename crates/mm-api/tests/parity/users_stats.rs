@@ -155,6 +155,17 @@ async fn the_count_matches_the_database_including_bots() {
 }
 
 /// `DeleteAt = 0`: deactivating an account takes it out of the count on both servers.
+///
+/// # Not `after < before`
+///
+/// That is what this test asserted until a full-suite run reported `62 -> 62`. The total is
+/// **global mutable state**: fifty other suites create users throughout the run, and one landing
+/// between the two readings cancels the drop exactly. The failure said nothing about the route.
+///
+/// So the drop is asserted where it is actually observable — the doomed row now carries a
+/// non-zero `DeleteAt`, and the route's total equals the count of rows that predicate leaves,
+/// read from the database in the same bracket. A route that had *not* excluded the deactivated
+/// user would be one higher than the database and fail, whoever else was creating accounts.
 #[tokio::test]
 async fn a_deactivated_user_leaves_the_count() {
     if !stack_enabled() {
@@ -164,29 +175,66 @@ async fn a_deactivated_user_leaves_the_count() {
     let token = go_minted_token(&client).await;
     let f = fixture(&client, &token).await;
 
-    // The doomed user is alive here, so it is inside the `before` reading.
+    // Alive first, or this proves nothing about deactivation.
     let alive = client
         .get(format!("{GO}/api/v4/users/stats"))
         .header("Authorization", format!("Bearer {}", f.doomed_token))
         .send()
         .await
         .expect("reachable");
-    assert_eq!(alive.status(), 200);
-    let before: serde_json::Value = alive.json().await.expect("JSON");
-    let before = before["total_users_count"].as_i64().expect("a number");
+    assert_eq!(alive.status(), 200, "the doomed user can read the route");
+    assert_eq!(
+        deleted_at(&f.doomed_id).await,
+        Some(0),
+        "the fixture's doomed user starts active"
+    );
 
     delete_plain_user(&client, &token, &f.doomed_id).await;
 
-    // …and gone here. Compared on the Rust side and then across, so the drop is attributed to the
-    // predicate rather than to the two servers disagreeing.
-    let (go, rs) = fetch_both_stable(&client, &token, "/api/v4/users/stats").await;
-    assert_eq!(String::from_utf8_lossy(&go), String::from_utf8_lossy(&rs));
-    let after: serde_json::Value = serde_json::from_slice(&go).expect("JSON");
-    let after = after["total_users_count"].as_i64().expect("a number");
     assert!(
-        after < before,
-        "a deactivated user must leave the count: {before} -> {after}"
+        deleted_at(&f.doomed_id).await.is_some_and(|at| at > 0),
+        "`DELETE /users/{{id}}` sets DeleteAt rather than removing the row"
     );
+
+    // Bracketed the same way as `the_count_matches_the_database_including_bots`: a concurrent
+    // create elsewhere must be detected, not mistaken for a route that failed to exclude the row.
+    for _ in 0..12 {
+        let Some(before) = count_countable_users().await else {
+            return;
+        };
+        let (go, rs) = fetch_both_stable(&client, &token, "/api/v4/users/stats").await;
+        let Some(after) = count_countable_users().await else {
+            return;
+        };
+        if before != after {
+            continue;
+        }
+        assert_eq!(String::from_utf8_lossy(&go), String::from_utf8_lossy(&rs));
+        let parsed: serde_json::Value = serde_json::from_slice(&go).expect("JSON");
+        assert_eq!(
+            parsed["total_users_count"].as_i64().expect("a number"),
+            before,
+            "the deactivated user is out of the count on both servers"
+        );
+        return;
+    }
+    panic!("the user table never stopped changing, so no comparison here would mean anything");
+}
+
+/// One user's `DeleteAt`, or `None` when there is no database to ask.
+async fn deleted_at(user_id: &str) -> Option<i64> {
+    let url = std::env::var("DATABASE_URL").ok()?;
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .acquire_timeout(std::time::Duration::from_secs(5))
+        .connect(&url)
+        .await
+        .ok()?;
+    sqlx::query_scalar::<_, i64>("SELECT deleteat FROM users WHERE id = $1")
+        .bind(user_id)
+        .fetch_one(&pool)
+        .await
+        .ok()
 }
 
 /// The forward: a caller holding no permissions at all takes Go's restricted branch, which this

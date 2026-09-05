@@ -1,0 +1,23 @@
+# Mutation plan for the `me` alias (`RequireUserId`, web/context.go:296).
+#
+#   scripts/mutate-batch.sh scripts/mutations/me-alias.plan
+#
+# Tab-separated: name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter.  `\n` becomes a newline.
+#
+# The first four lines each take the resolution back out of one handler — the exact bug the sweep
+# was written to find, once per route that had it.  The fifth asks the opposite question: a
+# resolver that returns the session's id *unconditionally* passes every `me` test and quietly
+# reads the caller's own data for an explicit id, so it is checked against a suite that reads
+# somebody else's thread.
+#
+# The last two lines are the no-op controls and must SURVIVE.
+
+resolve-me-thread-for-user	crates/mm-api/src/users.rs	    let user_id = resolve_me(&user_id, &session);\n    if !is_valid_id(user_id) {\n        return Err(ApiError::invalid_url_param("user_id"));\n    }\n    if !is_valid_id(&team_id) {	    let user_id = user_id.as_str();\n    if !is_valid_id(user_id) {\n        return Err(ApiError::invalid_url_param("user_id"));\n    }\n    if !is_valid_id(&team_id) {	api	me_alias
+resolve-me-threads-list	crates/mm-api/src/users.rs	    let user_id = resolve_me(&user_id, &session);\n\n    match serve_threads(	    let user_id = user_id.as_str();\n\n    match serve_threads(	api	me_alias
+resolve-me-channel-members	crates/mm-api/src/users.rs	    let user_id = resolve_me(&user_id, &session);\n    is_valid_id(user_id)	    let user_id = user_id.as_str();\n    is_valid_id(user_id)	api	me_alias
+resolve-me-flagged-posts	crates/mm-api/src/posts.rs	    let user_id = resolve_me(user_id, session);\n    if !is_valid_id(user_id) {\n        return Outcome::Failed(ApiError::invalid_url_param("user_id"));\n    }\n\n    if !state	    if !is_valid_id(user_id) {\n        return Outcome::Failed(ApiError::invalid_url_param("user_id"));\n    }\n\n    if !state	api	me_alias
+resolve-me-unconditional	crates/mm-api/src/channels.rs	    if user_id == ME {\n        session.0.user_id.as_str()\n    } else {\n        user_id\n    }	    if user_id != ME {\n        session.0.user_id.as_str()\n    } else {\n        user_id\n    }	api	thread_for_user
+#
+# --- no-op controls: these must SURVIVE ---
+control-rename-param	crates/mm-api/src/channels.rs	pub(crate) fn resolve_me<'a>(user_id: &'a str, session: &'a AuthenticatedSession) -> &'a str {\n    if user_id == ME {\n        session.0.user_id.as_str()\n    } else {\n        user_id\n    }\n}	pub(crate) fn resolve_me<'a>(raw: &'a str, session: &'a AuthenticatedSession) -> &'a str {\n    if raw == ME {\n        session.0.user_id.as_str()\n    } else {\n        raw\n    }\n}	api	me_alias
+control-reorder-swept-paths	crates/mm-api/tests/parity/me_alias.rs	        "/api/v4/users/me/status".to_owned(),\n        "/api/v4/users/me/sessions".to_owned(),	        "/api/v4/users/me/sessions".to_owned(),\n        "/api/v4/users/me/status".to_owned(),	api	me_alias

@@ -5821,3 +5821,38 @@ this route can answer:
 - `t.postid = $1` → `>= $1` is a coin flip on a table holding a handful of threads: a `>=` scan
   usually returns the same row. `store-thread-binding` asks the same question — which value
   reaches `$1` — deterministically, by binding `user_id` instead.
+
+## The `me` alias, on four routes that had lost it (2026-09-05)
+
+Not a route — a wire bug in a *class* of routes. `crates/mm-api/src/channels.rs` (`resolve_me`),
+`crates/mm-api/src/users.rs`, `crates/mm-api/src/posts.rs`; 2 parity tests in
+`crates/mm-api/tests/parity/me_alias.rs`.
+
+`RequireUserId` (web/context.go:296) substitutes the session's user id for the literal `me`
+**before** calling `IsValidId`. Every api4 route with a `{user_id}` segment therefore accepts it,
+and the webapp prefers it to the real id on most reads. Four served routes validated first and so
+answered **400 where Go answers 200**: `/users/me/channel_members`, `/users/me/posts/flagged`,
+`/users/me/teams/{team}/threads` and `.../threads/{thread}` — the four most recently added, all
+shipped in the last two days. The older routes each carry their own copy of the resolution and
+were correct; the copies are now one `resolve_me` helper.
+
+**The one thing a reader would otherwise get wrong: no route's own suite can find this.** Each
+tests its route with an explicit id, which is the one input that cannot show the bug. The test is
+therefore shaped like the bug — `every_served_user_route_accepts_me` walks all twenty served
+`{user_id}` routes and compares statuses across both servers, and **a new route with a `{user_id}`
+segment belongs in that list**. Its sibling asserts the alias resolves to the *session's* user
+rather than merely to something valid, because a substitution of the wrong id still answers 200.
+
+Mutation run: **7 run, 5 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/me-alias.plan`). Full suite: 2423 passed, 0 failed.
+
+### And one flaky test whose premise was global state
+
+`users_stats::a_deactivated_user_leaves_the_count` failed a full-suite run with `62 -> 62`. It
+asserted `after < before` on `total_users_count` — a **global** counter that fifty other suites
+move throughout the run, so one concurrent `create_plain_user` cancels the drop exactly. The
+failure said nothing about the route. It now asserts what is actually observable: the doomed row
+carries a non-zero `DeleteAt`, and the route's total equals the database's count of rows that
+predicate leaves, read in the same bracket as `the_count_matches_the_database_including_bots`
+uses. A route that failed to exclude the row would be one higher than the database whoever else
+was creating accounts.

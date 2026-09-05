@@ -22,7 +22,7 @@ use mm_store::post_store::{GetPostThreadOptions, GetPostsOptions, ThreadDirectio
 
 use crate::AppState;
 use crate::auth::AuthenticatedSession;
-use crate::channels::{parse_page, parse_per_page, query_first, query_flag_is_true};
+use crate::channels::{parse_page, parse_per_page, query_first, query_flag_is_true, resolve_me};
 use crate::error::ApiError;
 use crate::proxy;
 
@@ -1019,11 +1019,7 @@ async fn serve_posts_around_last_unread(
     if_none_match: Option<String>,
 ) -> Outcome {
     // `me`, resolved before the validity check (web/context.go:301).
-    let user_id = if user_id == "me" {
-        session.0.user_id.as_str()
-    } else {
-        user_id
-    };
+    let user_id = resolve_me(user_id, session);
 
     // `c.RequireUserId().RequireChannelId()` — user first, the reverse of `getChannelUnread`.
     if !is_valid_id(user_id) {
@@ -1574,7 +1570,8 @@ async fn serve_flagged_posts(
     session: &AuthenticatedSession,
     query: Option<&str>,
 ) -> Outcome {
-    // `c.RequireUserId()` (web/context.go:397).
+    // `c.RequireUserId()` (web/context.go:296), `me` resolved first.
+    let user_id = resolve_me(user_id, session);
     if !is_valid_id(user_id) {
         return Outcome::Failed(ApiError::invalid_url_param("user_id"));
     }

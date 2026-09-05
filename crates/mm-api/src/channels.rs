@@ -57,6 +57,22 @@ use crate::error::ApiError;
 /// `model.Me` (user.go:26) — the literal a client may send instead of its own id.
 pub(crate) const ME: &str = "me";
 
+/// Resolve the `me` alias, **before** the validity check — `RequireUserId` (web/context.go:301)
+/// substitutes the session's user id and only then calls `IsValidId`.
+///
+/// Every api4 route with a `{user_id}` segment accepts the literal, and the webapp prefers it to
+/// the real id on most reads. Validating first is not a stricter port, it is a wrong one: the
+/// route answers 400 where Go answers 200. Four served routes did exactly that until a sweep of
+/// `/users/me/...` across both servers found them — see `tests/parity/me_alias.rs`, which is that
+/// sweep kept as a test.
+pub(crate) fn resolve_me<'a>(user_id: &'a str, session: &'a AuthenticatedSession) -> &'a str {
+    if user_id == ME {
+        session.0.user_id.as_str()
+    } else {
+        user_id
+    }
+}
+
 /// Port of `Context.RequireChannelId` / `RequireUserId` (web/context.go:388, :296).
 ///
 /// Both are the same one-line check against `IsValidId`, differing only in the parameter name

@@ -20,7 +20,7 @@ use mm_model::utils::{AppError, PAYLOAD_PARSE_ERROR, is_valid_id, sorted_array_f
 
 use crate::AppState;
 use crate::auth::AuthenticatedSession;
-use crate::channels::{parse_page, parse_per_page, query_first, query_flag_is_true};
+use crate::channels::{parse_page, parse_per_page, query_first, query_flag_is_true, resolve_me};
 use crate::error::ApiError;
 
 /// `model.HeaderEtagServer`.
@@ -1432,13 +1432,15 @@ pub async fn get_channel_members_for_user(
     axum::extract::RawQuery(query): axum::extract::RawQuery,
     session: AuthenticatedSession,
 ) -> Result<Response, ApiError> {
-    is_valid_id(&user_id)
+    // `me` first, then `RequireUserId` (web/context.go:301).
+    let user_id = resolve_me(&user_id, &session);
+    is_valid_id(user_id)
         .then_some(())
         .ok_or_else(|| ApiError::invalid_url_param("user_id"))?;
 
     if !state
         .app
-        .session_has_permission_to_user(&session.0, &user_id)
+        .session_has_permission_to_user(&session.0, user_id)
         .await
     {
         return Err(ApiError::from(make_permission_error(
@@ -1455,7 +1457,7 @@ pub async fn get_channel_members_for_user(
         let mut members = state
             .app
             .get_channel_members_with_team_data_for_user_with_pagination(
-                &user_id, page, per_page, "",
+                user_id, page, per_page, "",
             )
             .await?;
         for member in &mut members {
@@ -1489,7 +1491,7 @@ pub async fn get_channel_members_for_user(
         let members = match state
             .app
             .get_channel_members_with_team_data_for_user_with_pagination(
-                &user_id,
+                user_id,
                 -1,
                 CHANNEL_MEMBERS_STREAM_PAGE_SIZE,
                 &from_channel_id,
@@ -1581,7 +1583,10 @@ pub async fn get_thread_for_user(
     axum::extract::RawQuery(query): axum::extract::RawQuery,
     session: AuthenticatedSession,
 ) -> Result<Response, ApiError> {
-    if !is_valid_id(&user_id) {
+    // `RequireUserId` substitutes the session's id for `me` before validating it
+    // (web/context.go:301), so the literal must be resolved first or this 400s where Go answers.
+    let user_id = resolve_me(&user_id, &session);
+    if !is_valid_id(user_id) {
         return Err(ApiError::invalid_url_param("user_id"));
     }
     if !is_valid_id(&team_id) {
@@ -1593,7 +1598,7 @@ pub async fn get_thread_for_user(
 
     if !state
         .app
-        .session_has_permission_to_user(&session.0, &user_id)
+        .session_has_permission_to_user(&session.0, user_id)
         .await
     {
         return Err(ApiError::from(make_permission_error(
@@ -1618,7 +1623,7 @@ pub async fn get_thread_for_user(
 
     let membership = state
         .app
-        .get_thread_membership_for_user(&user_id, &thread_id)
+        .get_thread_membership_for_user(user_id, &thread_id)
         .await?;
     let mut thread = state.app.get_thread_for_user(&membership, extended).await?;
 
@@ -2391,7 +2396,10 @@ pub async fn get_threads_for_user(
     }
     tracing::Span::current().record("forwarded", false);
 
-    match serve_threads(&state, &user_id, &team_id, &session, query.as_deref()).await {
+    // `me` before `serve_threads` validates it, as `RequireUserId` does (web/context.go:301).
+    let user_id = resolve_me(&user_id, &session);
+
+    match serve_threads(&state, user_id, &team_id, &session, query.as_deref()).await {
         Ok(Outcome::Served(response)) => response,
         Ok(Outcome::Forward) => {
             tracing::Span::current().record("forwarded", true);
