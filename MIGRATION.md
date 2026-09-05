@@ -6226,3 +6226,45 @@ in its forwarded list. Registering the route flipped it. Asserted the other way 
 dropped, which is the idiom that suite already used when `/ids` moved — the second time this
 session that adding a route changed a neighbour's expectations, and the second time only the
 full-workspace run saw it.
+
+## `POST /api/v4/users/search` — `searchUsers` (2026-09-05)
+
+Served for the default option set. `crates/mm-api/src/users.rs` (`search_users`),
+`crates/mm-store/src/user_store.rs` (`UserSearchOptions` gains `allow_emails` and
+`allow_inactive`, honoured by all three search queries); 9 parity tests in
+`crates/mm-api/tests/parity/users_search.rs`. The add-members dialog and the admin console's user
+list. `App::search_users_in_team` already existed behind `autocompleteUsers`.
+
+**The one thing a reader would otherwise get wrong: the validation order is the wire.** `limit` is
+defaulted to 100 **before** `term` is checked, so `{}` is the *term* 400 and never the limit one;
+and `limit` is range-checked **last**, after every permission check, so a body carrying both a
+team the caller cannot see and a bad limit is the **403**. Both measured against the running Go
+server before any code was written.
+
+All three 400s share one id — `api.context.invalid_body_param.app_error` — and differ only in the
+parameter name, which `AppError.params` never serialises. A client cannot tell `props` from `term`
+from `limit`, and no mutation in the plan tries to.
+
+Eleven body fields pick a different branch of `App.SearchUsers`' dispatch (user.go:2412) or add a
+filter `performSearch` builds. Each is **forwarded whole**, and the suite asserts that even at its
+*zero value* — `{"role": ""}` is Go's, because the field's presence is what the port refuses to
+approximate, not its value.
+
+`AllowEmails` and `AllowFullNames` are a permission rather than a preference: a system admin
+searches `Email`, `FirstName` and `LastName` unconditionally, everybody else only as
+`ShowEmailAddress`/`ShowFullName` allow. **The columns the query matches on differ per caller**,
+not just the columns the response shows — which is why the fixture plants an address whose local
+part appears in no username, the only way to prove the email column is searched at all.
+
+`json.Marshal` + `w.Write`, so **no trailing newline** ([D-086]), and `[]` rather than `null`.
+
+Mutation run: **17 run, 15 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/users-search.plan`). Full suite: 2495 passed, 0 failed.
+
+### Two harness rules, one of them written the iteration before
+
+The first batch aborted in preflight: a mutation was anchored on the doc comment of the item
+*before* it rather than after. The second was voided by a fault — `store-email-column` deleted the
+arm carrying the only use of `$6`, and sqlx refuses a query with an unused parameter. That is the
+rule added to the loop after `channels-member-count.plan` hit it, applied here to a mutation
+written before the rule existed. It now neutralises with `AND FALSE` instead of deleting.

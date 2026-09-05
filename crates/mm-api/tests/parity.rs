@@ -94,5 +94,6 @@ mod parity {
     pub mod users_list;
     pub mod users_me;
     pub mod users_me_sessions;
+    pub mod users_search;
     pub mod users_stats;
 }

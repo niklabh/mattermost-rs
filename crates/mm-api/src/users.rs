@@ -320,6 +320,202 @@ pub async fn get_user_by_username(
     }
 }
 
+/// The `model.UserSearch` fields that change which store query runs, and are therefore Go's.
+///
+/// Each one either picks a different branch of `App.SearchUsers`' dispatch (user.go:2412) or adds
+/// a filter `performSearch` builds — a role filter, a group-constrained join. A request carrying
+/// any of them is forwarded whole rather than approximated, the same arrangement
+/// `getThreadsForUser` uses for its option set.
+const USER_SEARCH_FORWARDED_FIELDS: &[&str] = &[
+    "not_in_team_id",
+    "in_channel_id",
+    "not_in_channel_id",
+    "in_group_id",
+    "not_in_group_id",
+    "without_team",
+    "group_constrained",
+    "role",
+    "roles",
+    "channel_roles",
+    "team_roles",
+];
+
+/// Port of `searchUsers` (api4/user.go:1104) — `POST /api/v4/users/search`.
+///
+/// The add-members dialog and the admin console's user list.
+///
+/// # The validation order is the wire
+///
+/// `limit` is **defaulted before `term` is checked**, so `{}` is the `term` 400 and never the
+/// `limit` one; and `limit` is range-checked **last**, after every permission check, so a body
+/// with a bad team *and* a bad limit is the 403. Both measured.
+///
+/// # Which fields are served
+///
+/// `term`, `team_id`, `allow_inactive` and `limit`. Everything in
+/// [`USER_SEARCH_FORWARDED_FIELDS`] picks a different store query or adds a filter, and is handed
+/// to Go — including the `team_id == "" && not_in_channel_id != ""` 400, which is Go's to answer
+/// because the body that produces it is one we forward.
+///
+/// # Emails and full names are a permission, not a preference
+///
+/// A system admin searches on `Email`, `FirstName` and `LastName` unconditionally; everybody else
+/// gets them only when `ShowEmailAddress` / `ShowFullName` allow it. The columns the query matches
+/// on therefore differ per caller, not just the columns the response shows.
+///
+/// # Wire format
+///
+/// `json.Marshal` then `w.Write`, so **no trailing newline** ([D-086]) — and `[]` rather than
+/// `null` for no matches, because the store allocates.
+#[tracing::instrument(skip_all, fields(forwarded, found))]
+pub async fn search_users(
+    State(state): State<AppState>,
+    session: AuthenticatedSession,
+    request: axum::extract::Request,
+) -> Response {
+    let (parts, body) = request.into_parts();
+    let bytes = match axum::body::to_bytes(body, usize::MAX).await {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            tracing::warn!(error = %err, "could not read the request body");
+            return ApiError::invalid_param("props").into_response();
+        }
+    };
+
+    // Decoded to a `Value` first: **serde builds a struct from a JSON array positionally** where
+    // Go's decoder refuses a non-object, so `["x"]` would otherwise become a search for `x`.
+    let decoded: serde_json::Value = match mm_model::utils::decode_one_from_json(&bytes) {
+        Ok(decoded) => decoded,
+        Err(err) => {
+            tracing::debug!(error = %err, "user search body did not decode");
+            return ApiError::invalid_param("props").into_response();
+        }
+    };
+    let Some(map) = decoded.as_object() else {
+        // `Decode` into a non-pointer struct leaves the zero value for `null`, which then fails
+        // the empty-term check rather than the decode one — the same 400 either way.
+        return if decoded.is_null() {
+            ApiError::invalid_param("term").into_response()
+        } else {
+            ApiError::invalid_param("props").into_response()
+        };
+    };
+
+    if USER_SEARCH_FORWARDED_FIELDS
+        .iter()
+        .any(|name| map.contains_key(*name))
+    {
+        tracing::Span::current().record("forwarded", true);
+        let request = axum::extract::Request::from_parts(parts, axum::body::Body::from(bytes));
+        return crate::proxy::forward_to_go(State(state), request).await;
+    }
+
+    let props: mm_model::user_search::UserSearch = match serde_json::from_value(decoded.clone()) {
+        Ok(props) => props,
+        Err(err) => {
+            tracing::debug!(error = %err, "user search body has the wrong field types");
+            return ApiError::invalid_param("props").into_response();
+        }
+    };
+
+    // `if props.Limit == 0 { props.Limit = UserSearchDefaultLimit }` — **before** the term check.
+    let limit = if props.limit == 0 {
+        mm_model::user_search::USER_SEARCH_DEFAULT_LIMIT
+    } else {
+        props.limit
+    };
+
+    if props.term.is_empty() {
+        return ApiError::invalid_param("term").into_response();
+    }
+
+    if !props.team_id.is_empty()
+        && !state
+            .app
+            .session_has_permission_to_team(
+                &session.0,
+                &props.team_id,
+                &mm_model::permission::PERMISSION_VIEW_TEAM,
+            )
+            .await
+    {
+        return ApiError::from(make_permission_error(
+            &session.0,
+            &[&mm_model::permission::PERMISSION_VIEW_TEAM],
+        ))
+        .into_response();
+    }
+
+    // Last, after the permission checks — a body with both a bad team and a bad limit is the 403.
+    if limit <= 0 || limit > mm_model::user_search::USER_SEARCH_MAX_LIMIT {
+        return ApiError::invalid_param("limit").into_response();
+    }
+
+    // The nil-restrictions fast path: `RestrictUsersSearchByPermissions` rewrites the query for a
+    // caller whose `view_members` is scheme-granted, and that rewrite is Go's.
+    if !state
+        .app
+        .has_permission_to(&session.0.user_id, &PERMISSION_VIEW_MEMBERS)
+        .await
+    {
+        tracing::Span::current().record("forwarded", true);
+        let request = axum::extract::Request::from_parts(parts, axum::body::Body::from(bytes));
+        return crate::proxy::forward_to_go(State(state), request).await;
+    }
+    tracing::Span::current().record("forwarded", false);
+
+    let is_admin = state
+        .app
+        .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)
+        .await;
+    let search_options = mm_store::user_store::UserSearchOptions {
+        allow_emails: is_admin || state.show_email_address,
+        allow_inactive: props.allow_inactive,
+        allow_full_names: is_admin || state.show_full_name,
+        limit,
+    };
+
+    let mut users = match state
+        .app
+        .search_users_in_team(&props.team_id, &props.term, &search_options)
+        .await
+    {
+        Ok(users) => users,
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+    tracing::Span::current().record("found", users.len());
+
+    let options = sanitize_options(state.show_full_name, state.show_email_address, is_admin);
+    for user in &mut users {
+        user.sanitize_profile(&options, is_admin);
+    }
+
+    let body = match serde_json::to_vec(&users) {
+        Ok(body) => body,
+        Err(err) => {
+            tracing::error!(error = %err, "failed to serialise users");
+            return ApiError::from(AppError::new(
+                "searchUsers",
+                "api.marshal_error",
+                None,
+                String::new(),
+                500,
+            ))
+            .into_response();
+        }
+    };
+
+    (
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
+    )
+        .into_response()
+}
+
 /// Port of `getUsersByNames` (api4/user.go:1231) — `POST /api/v4/users/usernames`.
 ///
 /// The webapp posts the usernames it found in a page of posts, so this fires once per channel
@@ -1307,6 +1503,8 @@ pub async fn autocomplete_users(
         .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)
         .await;
     let options = mm_store::user_store::UserSearchOptions {
+        allow_emails: false,
+        allow_inactive: false,
         allow_full_names: allow_full_names(is_admin, state.show_full_name),
         limit: parsed.limit,
     };

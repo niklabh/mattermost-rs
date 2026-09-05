@@ -1,0 +1,40 @@
+# Mutation plan for POST /users/search (searchUsers).
+#
+#   scripts/mutate-batch.sh scripts/mutations/users-search.plan
+#
+# Tab-separated: name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter.  `\n` becomes a newline.
+#
+# The fixture carries a deactivated user (for `allow_inactive`), a planted email whose local part
+# appears in no username (for the `AllowEmails` column), two teams (for the `team_id` join) and a
+# body with both a bad team and a bad limit (for the order of the two checks).  Each exists
+# because the branch it covers is otherwise dead.
+#
+# The three 400s share one id and differ only in the parameter name, which `AppError.params` never
+# serialises — so no mutation here distinguishes `props` from `term` from `limit`, and none tries.
+#
+# `store-email-column` neutralises the email arm with `AND FALSE` rather than deleting it: `$6`
+# is bound nowhere else in that statement, and sqlx refuses a query with an unused parameter —
+# a compile error, which is a harness fault rather than a verdict.
+#
+# A SQL mutation must keep every bound parameter used.  A control must cover its binding's whole
+# life, closures included.  The last two lines are the no-op controls and must SURVIVE.
+
+store-allow-inactive	crates/mm-store/src/user_store.rs	               AND ($5 OR u.deleteat = 0)	               AND (NOT $5 OR u.deleteat = 0)	api	users_search
+store-email-column	crates/mm-store/src/user_store.rs	                             OR ($6 AND lower(u.email) LIKE lower('%' || s.term || '%') ESCAPE '*')\n                             OR u.id = s.term	                             OR ($6 AND FALSE)\n                             OR u.id = s.term	api	users_search
+store-team-join	crates/mm-store/src/user_store.rs	             WHERE ($1 = '' OR tm.userid IS NOT NULL)\n               AND ($5 OR u.deleteat = 0)	             WHERE ($1 = '' OR TRUE)\n               AND ($5 OR u.deleteat = 0)	api	users_search
+api-limit-default	crates/mm-api/src/users.rs	    let limit = if props.limit == 0 {\n        mm_model::user_search::USER_SEARCH_DEFAULT_LIMIT\n    } else {\n        props.limit\n    };	    let limit = props.limit;	api	users_search
+api-limit-upper-bound	crates/mm-api/src/users.rs	    if limit <= 0 || limit > mm_model::user_search::USER_SEARCH_MAX_LIMIT {	    if limit <= 0 {	api	users_search
+api-limit-lower-bound	crates/mm-api/src/users.rs	    if limit <= 0 || limit > mm_model::user_search::USER_SEARCH_MAX_LIMIT {	    if limit > mm_model::user_search::USER_SEARCH_MAX_LIMIT {	api	users_search
+api-empty-term-400	crates/mm-api/src/users.rs	    if props.term.is_empty() {\n        return ApiError::invalid_param("term").into_response();\n    }	    if false {\n        return ApiError::invalid_param("term").into_response();\n    }	api	users_search
+api-team-permission	crates/mm-api/src/users.rs	    if !props.team_id.is_empty()\n        && !state	    if false\n        && !state	api	users_search
+api-check-order	crates/mm-api/src/users.rs	    // Last, after the permission checks — a body with both a bad team and a bad limit is the 403.\n    if limit <= 0 || limit > mm_model::user_search::USER_SEARCH_MAX_LIMIT {\n        return ApiError::invalid_param("limit").into_response();\n    }	    if false {\n        return ApiError::invalid_param("limit").into_response();\n    }	api	users_search
+api-non-object-body	crates/mm-api/src/users.rs	    let Some(map) = decoded.as_object() else {	    let map = serde_json::Map::new();\n    let map = &map;\n    if false {	api	users_search
+api-forwarded-fields	crates/mm-api/src/users.rs	    if USER_SEARCH_FORWARDED_FIELDS\n        .iter()\n        .any(|name| map.contains_key(*name))\n    {	    if false {	api	users_search
+api-allow-emails-source	crates/mm-api/src/users.rs	        allow_emails: is_admin || state.show_email_address,	        allow_emails: false,	api	users_search
+api-allow-inactive-source	crates/mm-api/src/users.rs	        allow_inactive: props.allow_inactive,	        allow_inactive: false,	api	users_search
+api-team-id-source	crates/mm-api/src/users.rs	        .search_users_in_team(&props.team_id, &props.term, &search_options)	        .search_users_in_team("", &props.term, &search_options)	api	users_search
+api-trailing-newline	crates/mm-api/src/users.rs	    (\n        StatusCode::OK,\n        [\n            ("Content-Type", "application/json"),\n            ("x-mmrs-served-by", "rust"),\n        ],\n        body,\n    )\n        .into_response()\n}\n\n/// Port of `getUsersByNames` (api4/user.go:1231)	    let body = [body, b"\\n".to_vec()].concat();\n\n    (\n        StatusCode::OK,\n        [\n            ("Content-Type", "application/json"),\n            ("x-mmrs-served-by", "rust"),\n        ],\n        body,\n    )\n        .into_response()\n}\n\n/// Port of `getUsersByNames` (api4/user.go:1231)	api	users_search
+#
+# --- no-op controls: these must SURVIVE ---
+control-rename-binding	crates/mm-api/src/users.rs	    let search_options = mm_store::user_store::UserSearchOptions {\n        allow_emails: is_admin || state.show_email_address,\n        allow_inactive: props.allow_inactive,\n        allow_full_names: is_admin || state.show_full_name,\n        limit,\n    };\n\n    let mut users = match state\n        .app\n        .search_users_in_team(&props.team_id, &props.term, &search_options)	    let how = mm_store::user_store::UserSearchOptions {\n        allow_emails: is_admin || state.show_email_address,\n        allow_inactive: props.allow_inactive,\n        allow_full_names: is_admin || state.show_full_name,\n        limit,\n    };\n\n    let mut users = match state\n        .app\n        .search_users_in_team(&props.team_id, &props.term, &how)	api	users_search
+control-reorder-forwarded-fields	crates/mm-api/src/users.rs	    "not_in_team_id",\n    "in_channel_id",	    "in_channel_id",\n    "not_in_team_id",	api	users_search

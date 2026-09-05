@@ -216,6 +216,18 @@ pub struct UserSearchOptions {
     /// searchable columns (`UserSearchTypeNames` vs `UserSearchTypeNamesNoFullName`,
     /// user_store.go:34-35).
     pub allow_full_names: bool,
+    /// `AllowEmails`: whether `Email` joins the searchable columns (`UserSearchTypeAll` vs
+    /// `UserSearchTypeNames`, user_store.go:36-37).
+    ///
+    /// `autocompleteUsers` pins this **false** — "Never autocomplete on emails"
+    /// (api4/user.go:1399) — and `searchUsers` sets it from `ShowEmailAddress`, or
+    /// unconditionally for a system admin. It is the only difference between the two search
+    /// column sets that a non-admin can turn on.
+    pub allow_emails: bool,
+    /// `AllowInactive`: when false, `Users.DeleteAt = 0` is added.
+    ///
+    /// Comes straight off `searchUsers`' request body; `autocompleteUsers` never sets it.
+    pub allow_inactive: bool,
     /// `Limit`, already defaulted and clamped by the caller. Go casts it with `uint64(...)` and
     /// hands it to Postgres unchecked, so a **negative** limit is a failed query and a 500 on
     /// both servers — measured against the running Go server, not inferred.
@@ -1486,7 +1498,7 @@ impl UserStore for SqlUserStore {
                 ON (tm.userid = u.id AND tm.deleteat = 0 AND tm.teamid = $1)
               LEFT JOIN bots b ON b.userid = u.id
              WHERE ($1 = '' OR tm.userid IS NOT NULL)
-               AND u.deleteat = 0
+               AND ($5 OR u.deleteat = 0)
                AND NOT EXISTS (
                      SELECT 1
                        FROM unnest($2::text[]) AS s(term)
@@ -1495,6 +1507,7 @@ impl UserStore for SqlUserStore {
                              OR ($3 AND lower(u.firstname) LIKE lower('%' || s.term || '%') ESCAPE '*')
                              OR ($3 AND lower(u.lastname) LIKE lower('%' || s.term || '%') ESCAPE '*')
                              OR lower(u.nickname) LIKE lower('%' || s.term || '%') ESCAPE '*'
+                             OR ($6 AND lower(u.email) LIKE lower('%' || s.term || '%') ESCAPE '*')
                              OR u.id = s.term
                             )
                    )
@@ -1505,6 +1518,8 @@ impl UserStore for SqlUserStore {
             &terms,
             options.allow_full_names,
             options.limit,
+            options.allow_inactive,
+            options.allow_emails,
         )
         .fetch_all(&self.pool)
         .await
@@ -1654,7 +1669,7 @@ impl UserStore for SqlUserStore {
               LEFT JOIN bots b ON b.userid = u.id
              WHERE cm.userid IS NULL
                AND ($1 = '' OR tm.userid IS NOT NULL)
-               AND u.deleteat = 0
+               AND ($6 OR u.deleteat = 0)
                AND NOT EXISTS (
                      SELECT 1
                        FROM unnest($3::text[]) AS s(term)
@@ -1663,6 +1678,7 @@ impl UserStore for SqlUserStore {
                              OR ($4 AND lower(u.firstname) LIKE lower('%' || s.term || '%') ESCAPE '*')
                              OR ($4 AND lower(u.lastname) LIKE lower('%' || s.term || '%') ESCAPE '*')
                              OR lower(u.nickname) LIKE lower('%' || s.term || '%') ESCAPE '*'
+                             OR ($7 AND lower(u.email) LIKE lower('%' || s.term || '%') ESCAPE '*')
                              OR u.id = s.term
                             )
                    )
@@ -1674,6 +1690,8 @@ impl UserStore for SqlUserStore {
             &terms,
             options.allow_full_names,
             options.limit,
+            options.allow_inactive,
+            options.allow_emails,
         )
         .fetch_all(&self.pool)
         .await
