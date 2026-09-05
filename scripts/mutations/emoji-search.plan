@@ -1,0 +1,34 @@
+# Mutation plan for POST /emoji/search (searchEmojis).
+#
+#   scripts/mutate-batch.sh scripts/mutations/emoji-search.plan
+#
+# Tab-separated: name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter.  `\n` becomes a newline.
+#
+# The fixture holds two emoji sharing a stem, one of them with the search term in the *middle*
+# of its name — without that, `prefix_only` and a substring search agree on every input and the
+# flag is dead.  The empty-term branch and the decode branch answer the same 400, so only their
+# *presence* is testable, not which one fired.
+#
+# The `EnableCustomEmoji` 403 in `App::search_emoji` cannot be tested here: the flag is on.  Its
+# absence from this handler — the thing that makes it a 403 rather than a 501 — is documented in
+# the module rather than mutated.
+#
+# `api-get-is-a-fallthrough` swaps the error *id*, not the parameter name: `AppError.params` is
+# not serialised, so renaming `emoji_id` to `term` is invisible from the wire — the same reason
+# the empty-list `Name` mutation was dropped from `users-by-names.plan`.  `invalid_url_param`
+# against `invalid_body_param` differs by one word in the id and is on the wire.
+#
+# A control must cover its binding's whole life, closures included.  The last two lines are the
+# no-op controls and must SURVIVE.
+
+api-empty-term-400	crates/mm-api/src/emoji.rs	    if search.term.is_empty() {\n        return Err(ApiError::invalid_param("term"));\n    }	    if false {\n        return Err(ApiError::invalid_param("term"));\n    }	api	emoji_search
+api-prefix-only-flag	crates/mm-api/src/emoji.rs	        .search_emoji(&search.term, search.prefix_only, PER_PAGE_MAXIMUM)	        .search_emoji(&search.term, !search.prefix_only, PER_PAGE_MAXIMUM)	api	emoji_search
+api-search-term-source	crates/mm-api/src/emoji.rs	        .search_emoji(&search.term, search.prefix_only, PER_PAGE_MAXIMUM)	        .search_emoji("", search.prefix_only, PER_PAGE_MAXIMUM)	api	emoji_search
+api-decodes-one-value	crates/mm-api/src/emoji.rs	    let search: EmojiSearch = mm_model::utils::decode_one_from_json(&bytes).map_err(|err| {	    let search: EmojiSearch = serde_json::from_slice(&bytes).map_err(|err| {	api	emoji_search
+api-prefix-only-default	crates/mm-api/src/emoji.rs	struct EmojiSearch {\n    #[serde(default)]\n    term: String,\n    #[serde(default)]\n    prefix_only: bool,\n}	struct EmojiSearch {\n    #[serde(default)]\n    term: String,\n    #[serde(default = "yes")]\n    prefix_only: bool,\n}\n\nfn yes() -> bool {\n    true\n}	api	emoji_search
+api-trailing-newline	crates/mm-api/src/emoji.rs	    body.push(b'\\n');\n\n    Ok((\n        StatusCode::OK,\n        [\n            ("Content-Type", "application/json"),\n            ("x-mmrs-served-by", "rust"),\n        ],\n        body,\n    )\n        .into_response())\n}\n\n/// `web.PerPageMaximum`	    Ok((\n        StatusCode::OK,\n        [\n            ("Content-Type", "application/json"),\n            ("x-mmrs-served-by", "rust"),\n        ],\n        body,\n    )\n        .into_response())\n}\n\n/// `web.PerPageMaximum`	api	emoji_search
+api-get-is-a-fallthrough	crates/mm-api/src/emoji.rs	pub async fn get_emoji_search_literal(_session: AuthenticatedSession) -> Response {\n    ApiError::invalid_url_param("emoji_id").into_response()\n}	pub async fn get_emoji_search_literal(_session: AuthenticatedSession) -> Response {\n    ApiError::invalid_param("emoji_id").into_response()\n}	api	emoji_search
+#
+# --- no-op controls: these must SURVIVE ---
+control-rename-binding	crates/mm-api/src/emoji.rs	    if search.term.is_empty() {\n        return Err(ApiError::invalid_param("term"));\n    }\n    tracing::Span::current().record("prefix_only", search.prefix_only);\n\n    let emojis = state\n        .app\n        .search_emoji(&search.term, search.prefix_only, PER_PAGE_MAXIMUM)\n        .await?;	    if search.term.is_empty() {\n        return Err(ApiError::invalid_param("term"));\n    }\n    tracing::Span::current().record("prefix_only", search.prefix_only);\n\n    let asked = search;\n    let emojis = state\n        .app\n        .search_emoji(&asked.term, asked.prefix_only, PER_PAGE_MAXIMUM)\n        .await?;	api	emoji_search
+control-reorder-independent-lets	crates/mm-api/tests/parity/emoji_search.rs	            let prefixed = format!("{stem}aaa");\n            let middle = format!("{stem}zzzmiddle");	            let middle = format!("{stem}zzzmiddle");\n            let prefixed = format!("{stem}aaa");	api	emoji_search

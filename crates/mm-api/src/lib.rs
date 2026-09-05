@@ -701,6 +701,12 @@ pub fn router(state: AppState) -> Router {
         // `/emoji/search` are POST in Go and stay forwarded.
         // `BaseRoutes.Emojis.Handle("/names")` (api4/emoji.go:24) — posted once per channel
         // load with the emoji names found in the page.
+        // `BaseRoutes.Emojis.Handle("/search")` (api4/emoji.go:25) — the emoji picker posts this
+        // on every keystroke. `GET` is gorilla's fallthrough to `{emoji_id}`, as for `/names`.
+        .route(
+            "/api/v4/emoji/search",
+            partially_migrated(post(emoji::search_emojis).get(emoji::get_emoji_search_literal)),
+        )
         .route(
             "/api/v4/emoji/names",
             partially_migrated(post(emoji::get_emojis_by_names).get(emoji::get_emoji_name_literal)),

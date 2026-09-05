@@ -881,6 +881,27 @@ pub fn remove_duplicate_strings(input: &mut Vec<String>) {
     input.dedup();
 }
 
+/// Port of `json.NewDecoder(r.Body).Decode(&v)`, which is **not** `json.Unmarshal`.
+///
+/// Two differences, both reachable from the wire:
+///
+/// 1. **Trailing data is ignored.** The decoder reads one value and stops, so a body of
+///    `{"term":"a"}{"term":"b"}` decodes to the first object and succeeds. `serde_json::from_slice`
+///    rejects it as trailing characters, which would be a 400 where Go answers 200. Deserializing
+///    from a `Deserializer` without calling `end()` reproduces Go.
+/// 2. **A lone surrogate escape is `U+FFFD`, not an error** — see [`replace_lone_surrogates`],
+///    which every other body decoder in this crate already goes through.
+///
+/// An empty body is an error on both (`EOF` there, "expected value" here); the two ids differ but
+/// neither reaches the wire, since every caller maps the failure to its own `AppError`.
+pub fn decode_one_from_json<T: serde::de::DeserializeOwned>(
+    data: &[u8],
+) -> Result<T, serde_json::Error> {
+    let data = replace_lone_surrogates(data);
+    let mut deserializer = serde_json::Deserializer::from_slice(&data);
+    T::deserialize(&mut deserializer)
+}
+
 /// Port of `model.SortedArrayFromJSON` (utils.go:546): `json.Decoder.Decode` into `[]string`,
 /// then [`remove_duplicate_strings`]. The body every "by ids" / "by names" POST in api4 carries.
 ///

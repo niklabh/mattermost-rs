@@ -1,14 +1,17 @@
-//! Port of `getEmojiList`, `getEmoji`, `getEmojiByName`, `autocompleteEmojis` and
-//! `getEmojisByNames` (channels/api4/emoji.go:116, :207, :229, :331, :253), reached as
-//! `GET /api/v4/emoji`, `GET /api/v4/emoji/{emoji_id}`, `GET /api/v4/emoji/name/{emoji_name}`,
-//! `GET /api/v4/emoji/autocomplete` and `POST /api/v4/emoji/names`.
+//! Port of `getEmojiList`, `getEmoji`, `getEmojiByName`, `autocompleteEmojis`,
+//! `getEmojisByNames` and `searchEmojis` (channels/api4/emoji.go:116, :207, :229, :331, :253,
+//! :286), reached as `GET /api/v4/emoji`, `GET /api/v4/emoji/{emoji_id}`,
+//! `GET /api/v4/emoji/name/{emoji_name}`, `GET /api/v4/emoji/autocomplete`,
+//! `POST /api/v4/emoji/names` and `POST /api/v4/emoji/search`.
 //!
-//! # The two config gates are not the same gate
+//! # The two config gates are not the same gate, and `searchEmojis` has only one
 //!
-//! Each handler checks `EnableCustomEmoji` and answers **501** `api.emoji.disabled.app_error`.
-//! [`mm_app::App::get_emoji`] then checks it *again* and answers **403** with the same id. The
-//! handler runs first, so the 403 is unreachable through these routes — reproduced in the app
-//! layer for the reason given there, and the 501 is what a client sees.
+//! Five of these handlers check `EnableCustomEmoji` and answer **501**
+//! `api.emoji.disabled.app_error`; the app layer then checks it *again* and answers **403** with
+//! the same id, which the handler's earlier return shadows. `searchEmojis` has **no handler
+//! check**, so it is the one route where the 403 reaches the wire — a client distinguishing
+//! "not implemented here" from "forbidden" sees a different answer from the same feature flag
+//! depending on which emoji route it asked.
 //!
 //! # `image` is not here
 //!
@@ -142,6 +145,103 @@ pub async fn get_emoji_by_name(
 /// handler's 64-byte check is what a long name meets.
 fn segment_matches_emoji_name_mux(value: &str) -> bool {
     is_valid_alpha_num_hyphen_underscore_plus(value)
+}
+
+/// The body of `POST /api/v4/emoji/search` — `model.EmojiSearch` (model/emoji_search.go:6).
+///
+/// `#[serde(default)]` because Go leaves an absent key at its zero value: `{"term":"x"}` is a
+/// legal body and `prefix_only` is then `false`.
+#[derive(Debug, Default, serde::Deserialize)]
+struct EmojiSearch {
+    #[serde(default)]
+    term: String,
+    #[serde(default)]
+    prefix_only: bool,
+}
+
+/// Port of `searchEmojis` (api4/emoji.go:286) — `POST /api/v4/emoji/search`.
+///
+/// The emoji picker posts this on every keystroke past the first.
+///
+/// # The only emoji route whose config refusal is a 403
+///
+/// There is no `EnableCustomEmoji` check in this handler, so
+/// [`mm_app::App::search_emoji`]'s **403** is what a client sees — where the five routes beside
+/// it answer 501 from their own handlers. See the module docs.
+///
+/// # Two 400s that a client cannot tell apart
+///
+/// A body that does not decode is `SetInvalidParamWithErr("term", …)` and an empty term is
+/// `SetInvalidParam("term")` — the **same id and the same parameter name**, so `{"prefix_only":
+/// true}`, `null`, `[]` and `not json` are one answer between them.
+///
+/// # The limit is not a parameter
+///
+/// `web.PerPageMaximum` — 200 — is passed as a literal. There is no `per_page` on this route, and
+/// a client asking for more gets 200 rows regardless.
+///
+/// # Wire format
+///
+/// `json.NewEncoder(w).Encode(emojis)` — a **trailing newline**, and `[]` rather than `null` for
+/// no matches, because the store allocates.
+#[tracing::instrument(skip_all, fields(prefix_only))]
+pub async fn search_emojis(
+    State(state): State<AppState>,
+    // Extracted for the 401; this handler reads nothing from the session, because Go does not
+    // either — there is no permission check on emoji search at all.
+    _session: AuthenticatedSession,
+    request: Request,
+) -> Result<Response, ApiError> {
+    let bytes = axum::body::to_bytes(request.into_body(), usize::MAX)
+        .await
+        .map_err(|err| {
+            tracing::warn!(error = %err, "could not read the request body");
+            ApiError::invalid_param("term")
+        })?;
+
+    let search: EmojiSearch = mm_model::utils::decode_one_from_json(&bytes).map_err(|err| {
+        tracing::debug!(error = %err, "emoji search body did not decode");
+        ApiError::invalid_param("term")
+    })?;
+    if search.term.is_empty() {
+        return Err(ApiError::invalid_param("term"));
+    }
+    tracing::Span::current().record("prefix_only", search.prefix_only);
+
+    let emojis = state
+        .app
+        .search_emoji(&search.term, search.prefix_only, PER_PAGE_MAXIMUM)
+        .await?;
+
+    let mut body = serde_json::to_vec(&emojis).map_err(|err| {
+        tracing::error!(error = %err, "failed to serialise emojis");
+        ApiError::from(AppError::new(
+            "searchEmojis",
+            "api.marshal_error",
+            None,
+            String::new(),
+            500,
+        ))
+    })?;
+    body.push(b'\n');
+
+    Ok((
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
+    )
+        .into_response())
+}
+
+/// `web.PerPageMaximum` (web/params.go:20).
+const PER_PAGE_MAXIMUM: i64 = 200;
+
+/// `GET /api/v4/emoji/search` — the same method fallthrough as [`get_emoji_name_literal`].
+pub async fn get_emoji_search_literal(_session: AuthenticatedSession) -> Response {
+    ApiError::invalid_url_param("emoji_id").into_response()
 }
 
 /// `GET /api/v4/emoji/names` — gorilla's method fallthrough, spelled out.

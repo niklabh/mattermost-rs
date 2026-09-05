@@ -50,6 +50,7 @@ mod parity {
     pub mod emoji_by_names;
     pub mod emoji_get;
     pub mod emoji_list;
+    pub mod emoji_search;
     pub mod file_info;
     pub mod flagged_posts;
     pub mod me_alias;

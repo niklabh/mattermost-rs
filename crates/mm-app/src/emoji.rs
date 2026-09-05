@@ -194,6 +194,14 @@ impl App {
     /// the one a client actually sees when custom emoji are off, rather than being shadowed by a
     /// handler-level 501.
     ///
+    /// # This 403 is the one that reaches the wire
+    ///
+    /// Every other emoji route checks `EnableCustomEmoji` in its *handler* and answers 501, which
+    /// shadows this. `searchEmojis` has **no handler check**, so `POST /emoji/search` is the one
+    /// route where a client sees the 403 — the same feature flag, a different status, depending
+    /// on which emoji route was asked. `autocompleteEmojis`, this function's other caller, does
+    /// have the handler check.
+    ///
     /// The 500's `detailed_error` carries `name=<term>` — the only place in the emoji app layer
     /// that puts a caller's input into an error. `detailed_error` is on the wire but Go leaves it
     /// empty unless the server is in developer mode, so this is reproduced for the log rather

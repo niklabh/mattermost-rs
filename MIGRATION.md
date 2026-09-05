@@ -6097,3 +6097,41 @@ stops a 500. This port binds `name = ANY($1)`, which is legal and empty for an e
 It reads every emoji while the other emoji suites create and soft-delete rows throughout the run,
 with plain `fetch_both` — so one side carried a `mmrsparitydoomed` row the other had already lost.
 [D-160]'s shape. Now `fetch_both_stable`.
+
+## `POST /api/v4/emoji/search` — `searchEmojis` (2026-09-05)
+
+Served. `crates/mm-api/src/emoji.rs` (`search_emojis`, `get_emoji_search_literal`),
+`crates/mm-model/src/utils.rs` (`decode_one_from_json`); 7 parity tests in
+`crates/mm-api/tests/parity/emoji_search.rs`. The app's `search_emoji` and the store's `search`
+already existed behind `autocompleteEmojis`. The emoji picker posts this on every keystroke.
+
+**The one thing a reader would otherwise get wrong: this is the only emoji route whose config
+refusal is a 403.** The five others check `EnableCustomEmoji` in their *handler* and answer 501,
+which shadows the app layer's 403. `searchEmojis` has no handler check at all, so the same feature
+flag gives a client a different status depending on which emoji route it asked. Recorded on
+`App::search_emoji`, whose other caller does have the handler check.
+
+The two 400s carry the same id **and** the same parameter name — `SetInvalidParamWithErr("term")`
+for a body that will not decode, `SetInvalidParam("term")` for an empty term — so `not json`,
+`[]`, `{}`, `null`, `{"term":""}`, `{"prefix_only":true}` and an empty body are one answer between
+them. The limit is `web.PerPageMaximum` (200) as a literal; there is no `per_page` on this route.
+
+Mutation run: **9 run, 7 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/emoji-search.plan`). Full suite: 2468 passed, 0 failed.
+
+### `json.NewDecoder(r.Body).Decode` is not `json.Unmarshal`
+
+It reads **one** value and ignores what follows, so `{"term":"a"}{"term":"b"}` decodes to the
+first object and answers 200 where `serde_json::from_slice` would call it trailing characters and
+400. `decode_one_from_json` deserializes from a `Deserializer` without calling `end()`, which
+reproduces that, and it inherits `replace_lone_surrogates` — the other half of the difference,
+since Go decodes a lone `\uD800` to `U+FFFD` where serde fails the whole body. A parity test sends
+the two-object body and a mutation swaps the helper back to `from_slice`.
+
+### Two mutation lessons, both repeats
+
+`AppError.params` is not serialised, so a mutation that renames a parameter (`emoji_id` to `term`)
+is invisible from the wire — the same finding `users-by-names.plan` recorded, made again. The
+mutation now swaps the error *id*, which differs by one word and is on the wire. And clippy was
+run *after* the batch rather than before, so a lint fix landed in a file the batch had already
+run against and the tally had to be earned twice.
