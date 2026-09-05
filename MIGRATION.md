@@ -6321,3 +6321,41 @@ deactivate and delete users and teams throughout a run. The bracketed idiom
 (`fetch_both_stable`, walk-and-deduplicate) exists and works; it has been applied one failing test
 at a time. **See [D-167]** — the remaining whole-table reads should be converted deliberately
 rather than as each one fails.
+## `GET /api/v4/license/client` — `getClientLicense` (2026-09-06)
+
+Served, for an unlicensed installation. `crates/mm-api/src/license.rs`,
+`crates/mm-app/src/license.rs`, `crates/mm-store/src/system_store.rs`; 8 parity tests in
+`crates/mm-api/tests/parity/license_client.rs`. Every webapp load calls this before it renders
+anything.
+
+**The one thing a reader would otherwise get wrong: there is no query to port.** Go answers from
+a map built **at startup** (`PlatformService.LoadLicense`, platform/license.go:49) out of
+`MM_LICENSE`, `Systems.ActiveLicenseId`, or a licence file on disk — and the disk case writes the
+row, so two of the three are visible to a second process. `mm-app/src/license.rs` reads those two
+and returns [`LicenseState`]; `Licensed` means "forward", because the client map is derived from a
+signed licence body that is not ported. Only the `nil`-licence answer, `{"IsLicensed":"false"}`,
+is ours.
+
+`MM_LICENSE` set on the Go container's environment and not on ours is the one case we get wrong,
+and it fails safe: we forward. Same arrangement as [D-156], which now records it.
+
+Two 400s, in an order that matters: an absent **or empty** `format` is
+`api.license.client.old_format.app_error`, and any other value is `SetInvalidParam("format")` —
+whose id says *body* param for a query-string parameter. The comparison is case-sensitive, so
+`format=OLD` is the second error. `w.Write` (license.go:51), so **no trailing newline**.
+
+`read_license_information` is deliberately **not** checked: on the unlicensed path Go's two
+branches converge, because `GetSanitizedClientLicense` only deletes keys and the fallback map has
+none of them. A permission check whose outcomes are indistinguishable cannot be tested; it lands
+with the licensed map.
+
+Mutation run: **17 run, 15 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/license-client.plan`).
+
+### `main.rs` was building the `App` on Go's defaults, not on the environment
+
+`mm_app::config`'s own module doc said `main.rs` uses `Config::from_env`; it used `App::new`,
+which takes `Config::default()`. So every `MM_<SECTION>_<SETTING>` [D-156] arranged to be read was
+read by the tests and by nothing else — a deployed server disagreed with a configured Go server on
+all ten settings, silently, and `MM_LICENSE` would have joined them. Fixed here because this route
+is the first whose *answer* depends on an environment value.

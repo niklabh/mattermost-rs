@@ -27,6 +27,7 @@ pub mod session_store;
 /// The read side of `SidebarCategories` — Go hangs these off `ChannelStore`.
 pub mod sidebar_category_store;
 pub mod status_store;
+pub mod system_store;
 pub mod team_store;
 pub mod thread_store;
 pub mod user_store;
@@ -45,6 +46,7 @@ pub use scheme_store::{SchemeStore, SqlSchemeStore};
 pub use session_store::{SessionStore, SqlSessionStore};
 pub use sidebar_category_store::{SidebarCategoryStore, SqlSidebarCategoryStore};
 pub use status_store::{SqlStatusStore, StatusStore};
+pub use system_store::{SYSTEM_ACTIVE_LICENSE_ID, SqlSystemStore, SystemStore};
 pub use team_store::{SqlTeamStore, TeamStore};
 pub use thread_store::{SqlThreadStore, ThreadStore};
 pub use user_store::{SqlUserStore, UserStore};
@@ -73,6 +75,7 @@ pub struct SqlStore {
     session: SqlSessionStore,
     sidebar_category: SqlSidebarCategoryStore,
     status: SqlStatusStore,
+    system: SqlSystemStore,
     team: SqlTeamStore,
     user: SqlUserStore,
     user_terms_of_service: SqlUserTermsOfServiceStore,
@@ -113,6 +116,7 @@ impl SqlStore {
             session: SqlSessionStore::new(pool.clone()),
             sidebar_category: SqlSidebarCategoryStore::new(pool.clone()),
             status: SqlStatusStore::new(pool.clone()),
+            system: SqlSystemStore::new(pool.clone()),
             team: SqlTeamStore::new(pool.clone()),
             user_terms_of_service: SqlUserTermsOfServiceStore::new(pool.clone()),
             user: SqlUserStore::new(pool),
@@ -182,6 +186,11 @@ impl SqlStore {
     /// Port of `store.Store.Status()`.
     pub fn status(&self) -> &SqlStatusStore {
         &self.status
+    }
+
+    /// Port of `store.Store.System()`.
+    pub fn system(&self) -> &SqlSystemStore {
+        &self.system
     }
 
     /// Port of `store.Store.Team()`.

@@ -12,6 +12,7 @@ pub mod emoji;
 pub mod error;
 /// `getFileInfo` — the one `/files/` route that returns JSON rather than bytes.
 pub mod files;
+pub mod license;
 pub mod posts;
 pub mod preferences;
 pub mod proxy;
@@ -592,6 +593,10 @@ pub fn router(state: AppState) -> Router {
         // one segment shorter than every `/api/v4/roles/...` route below, so axum sees a
         // distinct path and there is no literal-versus-parameter precedence to settle. `GET`
         // only; nothing else is registered on it in Go either.
+        .route(
+            "/api/v4/license/client",
+            partially_migrated(get(license::get_client_license)),
+        )
         .route(
             "/api/v4/roles",
             partially_migrated(get(roles::get_all_roles)),

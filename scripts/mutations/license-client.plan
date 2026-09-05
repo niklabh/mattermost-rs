@@ -1,0 +1,36 @@
+# Mutation plan for GET /api/v4/license/client (getClientLicense).
+#
+#   scripts/mutate-batch.sh scripts/mutations/license-client.plan
+#
+# Tab-separated: name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter.  `\n` becomes a newline.
+#
+# The decisions a reader could plausibly get wrong on this route are: which of the two 400s an
+# empty `format` gets and in what order they are checked; whether the comparison is
+# case-sensitive; whether the body carries a newline; and — the one with a wrong *answer* rather
+# than a wrong error — whether a licensed installation is forwarded or served the unlicensed map.
+#
+# `api-first-query-value` mutates the shared `query_first` helper rather than this route's own
+# code, because "first value of a repeated key" is `url.Values.Get` semantics that live there.
+# The filter keeps the verdict this suite's.
+#
+# The last two lines are the no-op controls and must SURVIVE.
+
+api-branch-order	crates/mm-api/src/license.rs	    if format.is_empty() {\n        return old_format_error().into_response();\n    }\n    if format != FORMAT_OLD {\n        return ApiError::invalid_param(FORMAT_PARAM).into_response();\n    }	    if format != FORMAT_OLD {\n        return ApiError::invalid_param(FORMAT_PARAM).into_response();\n    }\n    if format.is_empty() {\n        return old_format_error().into_response();\n    }	api	license_client
+api-format-case-insensitive	crates/mm-api/src/license.rs	    if format != FORMAT_OLD {	    if !format.eq_ignore_ascii_case(FORMAT_OLD) {	api	license_client
+api-missing-format-id	crates/mm-api/src/license.rs	        "api.license.client.old_format.app_error",	        "api.context.invalid_body_param.app_error",	api	license_client
+api-old-format-status	crates/mm-api/src/license.rs	        "api.license.client.old_format.app_error",\n        None,\n        String::new(),\n        400,	        "api.license.client.old_format.app_error",\n        None,\n        String::new(),\n        501,	api	license_client
+api-licensed-does-not-forward	crates/mm-api/src/license.rs	    if state_of_licence == LicenseState::Licensed {\n        return proxy::forward_to_go(State(state), request).await;	    if false {\n        return proxy::forward_to_go(State(state), request).await;	api	license_client
+api-forward-predicate-inverted	crates/mm-api/src/license.rs	    if state_of_licence == LicenseState::Licensed {\n        return proxy::forward_to_go(State(state), request).await;	    if state_of_licence != LicenseState::Licensed {\n        return proxy::forward_to_go(State(state), request).await;	api	license_client
+api-trailing-newline	crates/mm-api/src/license.rs	        Ok(body) => (\n            StatusCode::OK,	        Ok(mut body) => (\n            {\n                body.push(b'\\n');\n                StatusCode::OK\n            },	api	license_client
+api-content-type	crates/mm-api/src/license.rs	                ("Content-Type", "application/json"),\n                ("x-mmrs-served-by", "rust"),	                ("Content-Type", "text/plain"),\n                ("x-mmrs-served-by", "rust"),	api	license_client
+api-status-code	crates/mm-api/src/license.rs	        Ok(body) => (\n            StatusCode::OK,	        Ok(body) => (\n            StatusCode::CREATED,	api	license_client
+api-first-query-value	crates/mm-api/src/channels.rs	    form_urlencoded::parse(query?.as_bytes())\n        .find(|(k, _)| k == key)\n        .map(|(_, value)| value.into_owned())	    form_urlencoded::parse(query?.as_bytes())\n        .filter(|(k, _)| k == key)\n        .last()\n        .map(|(_, value)| value.into_owned())	api	license_client
+app-license-map-key	crates/mm-app/src/license.rs	        map.insert("IsLicensed".to_owned(), "false".to_owned());	        map.insert("isLicensed".to_owned(), "false".to_owned());	api	license_client
+app-license-map-value	crates/mm-app/src/license.rs	        map.insert("IsLicensed".to_owned(), "false".to_owned());	        map.insert("IsLicensed".to_owned(), "true".to_owned());	api	license_client
+app-active-id-validity	crates/mm-app/src/license.rs	            Some(id) if mm_model::utils::is_valid_id(&id) => LicenseState::Licensed,	            Some(_) => LicenseState::Licensed,	api	license_client
+app-env-license-inverted	crates/mm-app/src/license.rs	        if !self.config().license.is_empty() {	        if self.config().license.is_empty() {	api	license_client
+store-lookup-column	crates/mm-store/src/system_store.rs	sqlx::query_scalar!("SELECT value FROM systems WHERE name = $1", name)	sqlx::query_scalar!("SELECT value FROM systems WHERE value = $1", name)	api	license_client
+#
+# --- no-op controls: these must SURVIVE ---
+control-rename-binding	crates/mm-api/src/license.rs	    let state_of_licence = match state.app.license_state().await {\n        Ok(state_of_licence) => state_of_licence,\n        Err(err) => return ApiError::from(err).into_response(),\n    };\n    tracing::Span::current().record("licensed", state_of_licence == LicenseState::Licensed);\n\n    if state_of_licence == LicenseState::Licensed {	    let licence = match state.app.license_state().await {\n        Ok(licence) => licence,\n        Err(err) => return ApiError::from(err).into_response(),\n    };\n    tracing::Span::current().record("licensed", licence == LicenseState::Licensed);\n\n    if licence == LicenseState::Licensed {	api	license_client
+control-reorder-independent-lets	crates/mm-api/tests/parity/license_client.rs	    let client = client();\n    let token = go_minted_token(&client).await;\n\n    let path = format!("{PATH}?format=old");\n    let ((go_status, go), (rs_status, rs)) = fetch_both_raw(&client, &token, &path).await;\n\n    assert_eq!(go_status, 200, "an unlicensed server still answers 200");	    let path = format!("{PATH}?format=old");\n    let client = client();\n    let token = go_minted_token(&client).await;\n\n    let ((go_status, go), (rs_status, rs)) = fetch_both_raw(&client, &token, &path).await;\n\n    assert_eq!(go_status, 200, "an unlicensed server still answers 200");	api	license_client

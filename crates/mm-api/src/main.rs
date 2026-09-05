@@ -45,7 +45,13 @@ async fn main() -> anyhow::Result<()> {
         .context("could not connect to the shared Postgres")?;
     tracing::info!("connected to the shared database");
 
-    let state = AppState::new(App::new(store), go_upstream.clone());
+    // `Config::from_env`, not `App::new` — the latter takes Go's *defaults* and ignores the
+    // environment. Every `MM_<SECTION>_<SETTING>` the Go server beside us reads is read here too
+    // (see `mm_app::config`), and `MM_LICENSE` decides whether `/license/client` answers or
+    // forwards. Constructing on defaults made this server disagree with a configured Go server on
+    // every one of those settings, silently.
+    let app = App::with_config(store, mm_app::config::Config::from_env());
+    let state = AppState::new(app, go_upstream.clone());
     let listener = tokio::net::TcpListener::bind(&listen)
         .await
         .with_context(|| format!("could not bind {listen}"))?;

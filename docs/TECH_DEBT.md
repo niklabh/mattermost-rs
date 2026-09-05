@@ -5439,6 +5439,18 @@ otherwise does not have.
 **Where the pin lives:** the module doc on `mm-app/src/config.rs`, which states which direction
 each setting fails.
 
+**2026-09-06 — `MM_LICENSE` joins this, and it is the one that fails safe.** `getClientLicense`
+needs to know whether the installation is licensed. Two of Go's three sources are readable from
+here (`Systems.ActiveLicenseId`, and the disk file, which Go's own loader saves into that row);
+the third is the `MM_LICENSE` environment variable, read by the same `Config::from_env`
+arrangement above. An operator who sets it on the Go container and not on `mm-api` leaves us
+believing the server is unlicensed — but unlike the two settings above, being wrong here makes us
+**forward** rather than answer, so the client still gets Go's map. See
+`mm-app/src/license.rs`.
+
+**Also 2026-09-06:** `main.rs` was building the `App` with `App::new`, which takes
+`Config::default()` — so none of this was read outside the tests. Now `Config::from_env`.
+
 ---
 
 ## D-158 · sqlx materialises a nil Go map before scanning, and only one ported store knows it

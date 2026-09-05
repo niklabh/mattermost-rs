@@ -55,6 +55,7 @@ mod parity {
     pub mod emoji_search;
     pub mod file_info;
     pub mod flagged_posts;
+    pub mod license_client;
     pub mod me_alias;
     pub mod post_bulk_reactions;
     pub mod post_edit_history;

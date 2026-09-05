@@ -122,6 +122,15 @@ pub struct Config {
     /// would fail Go's own validation, which is why the branch it gates is close to
     /// unreachable and is ported for fidelity rather than for coverage.
     pub file_driver_name: String,
+
+    /// The `MM_LICENSE` environment variable (`platform.LicenseEnv`, platform/license.go:26).
+    ///
+    /// Not an `MM_<SECTION>_<SETTING>` config overlay — it is its own variable, holding a whole
+    /// signed licence rather than a setting, and Go reads it **before** the database
+    /// (`LoadLicense`, platform/license.go:52). Kept here as the raw string because the only
+    /// question anything ported asks of it is whether it is empty: validating a licence needs the
+    /// signing key, which is not ported. Read by [`crate::App::license_state`].
+    pub license: String,
 }
 
 impl Config {
@@ -150,6 +159,7 @@ impl Default for Config {
             enable_burn_on_read: true,
             feature_flag_burn_on_read: true,
             file_driver_name: "local".to_owned(),
+            license: String::new(),
         }
     }
 }
@@ -196,6 +206,9 @@ impl Config {
             // override of `""` is a deliberate empty driver and must survive as one.
             file_driver_name: std::env::var("MM_FILESETTINGS_DRIVERNAME")
                 .unwrap_or(default.file_driver_name),
+            // Its own variable, not part of the `MM_<SECTION>_<SETTING>` overlay, and Go treats
+            // any non-empty value as "a licence was supplied" before it ever tries to parse it.
+            license: std::env::var("MM_LICENSE").unwrap_or(default.license),
         }
     }
 }
