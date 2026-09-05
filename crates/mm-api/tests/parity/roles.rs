@@ -123,6 +123,20 @@ async fn write_synthetic_roles() -> Synthetic {
     // survive between runs, and every one of them is written to be inert (see below). Children
     // first: the channel points at the scheme, the scheme names the roles, the team owns the
     // channel.
+    // # One transaction, or Go caches a half-built fixture
+    //
+    // Go's `rolePermissionsCache` (localcachelayer/role_layer.go:125) is keyed by the sorted
+    // role-name list and holds whatever `ChannelHigherScopedPermissions` computed the first time
+    // that key was asked for — for thirty minutes, with no invalidation a direct database write
+    // can reach. These INSERTs used to autocommit one at a time, so a concurrent
+    // `GET /api/v4/roles` landing after the scheme roles committed but before the scheme, team
+    // and channel did would see roles with **no higher scope**, cache the unmerged permissions
+    // under the run's own key, and answer with them for the rest of the run. Our side reads
+    // through, merges, and disagrees — a divergence entirely manufactured by the fixture.
+    //
+    // One transaction makes the whole arrangement atomic to Go: it either sees no synthetic roles
+    // at all, or sees them with their scheme, team and channel already in place.
+    let mut tx = pool.begin().await.expect("the fixture transaction opens");
     for statement in [
         "DELETE FROM channels WHERE id LIKE 'mmrschan%'",
         "DELETE FROM schemes WHERE id LIKE 'mmrsscheme%'",
@@ -131,7 +145,7 @@ async fn write_synthetic_roles() -> Synthetic {
         "DELETE FROM teams WHERE id LIKE 'mmrsteam%'",
     ] {
         sqlx::query(statement)
-            .execute(&pool)
+            .execute(&mut *tx)
             .await
             .expect("earlier synthetic rows are cleared");
     }
@@ -151,7 +165,7 @@ async fn write_synthetic_roles() -> Synthetic {
     .bind(SYNTHETIC_PERMISSIONS)
     .bind(&roles.empty_id)
     .bind(&roles.empty_name)
-    .execute(&pool)
+    .execute(&mut *tx)
     .await
     .expect("the synthetic rows are written");
 
@@ -174,7 +188,7 @@ async fn write_synthetic_roles() -> Synthetic {
     .bind(&roles.scheme_guest_role)
     .bind(&scheme_id)
     .bind(SCHEME_ROLE_PERMISSIONS)
-    .execute(&pool)
+    .execute(&mut *tx)
     .await
     .expect("the scheme roles are written");
 
@@ -191,7 +205,7 @@ async fn write_synthetic_roles() -> Synthetic {
     .bind(&roles.scheme_admin_role)
     .bind(&roles.scheme_user_role)
     .bind(&roles.scheme_guest_role)
-    .execute(&pool)
+    .execute(&mut *tx)
     .await
     .expect("the scheme is written");
 
@@ -225,7 +239,7 @@ async fn write_synthetic_roles() -> Synthetic {
     .bind(&team_id)
     .bind(format!("mmrs-scheme-team-{stamp}"))
     .bind(format!("mmrsinvite{stamp}0001"))
-    .execute(&pool)
+    .execute(&mut *tx)
     .await
     .expect("the scheme's team is written");
 
@@ -244,9 +258,11 @@ async fn write_synthetic_roles() -> Synthetic {
     .bind(&team_id)
     .bind(format!("mmrs-scheme-channel-{stamp}"))
     .bind(&scheme_id)
-    .execute(&pool)
+    .execute(&mut *tx)
     .await
     .expect("the scheme's channel is written");
+
+    tx.commit().await.expect("the fixture transaction commits");
 
     assert_scannable_by_go(&pool, &team_id, &channel_id).await;
 

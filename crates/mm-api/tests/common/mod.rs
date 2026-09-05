@@ -303,6 +303,14 @@ pub async fn create_plain_user(
     team_id: &str,
     tag: &str,
 ) -> PlainUser {
+    // The sweep in [`purge_api_fixtures`] is what removes an earlier run's `mmrsplain%` rows, and
+    // a create here fails outright without it: an assertion panics past the trailing
+    // [`delete_plain_user`], so an aborted run leaves the username taken and Go answers
+    // `app.user.save.username_exists.app_error` to every later run. Suites that only *use* a plain
+    // user had no other reason to purge, so the guarantee belongs here rather than at each call
+    // site. It is a `OnceCell`, so this costs nothing after the first caller.
+    purge_api_fixtures().await;
+
     let username = format!("mmrsplain{tag}");
     let password = "Mmrs-Plain-1234";
 
