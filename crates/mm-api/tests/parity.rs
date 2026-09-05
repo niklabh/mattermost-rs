@@ -67,6 +67,7 @@ mod parity {
     pub mod sidebar_router;
     pub mod status;
     pub mod team_channel_lists;
+    pub mod team_exists;
     pub mod team_get;
     pub mod team_members_route;
     pub mod team_name_members;

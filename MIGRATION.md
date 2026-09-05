@@ -5963,3 +5963,56 @@ the two off the page. It now walks every page. That surfaced the second half: pa
 `OFFSET page * perPage` over a table being inserted into returns the same row twice ([D-160]), so
 the walk is deduplicated. The claim is about membership of the listing; the paging itself is
 pinned by `parity/users_list.rs`.
+
+## `GET /teams/name/{team_name}/exists` — `teamExists` (2026-09-05)
+
+Served. `crates/mm-api/src/teams.rs` (`team_exists`, plus a fix to `get_team_by_name`); 8 parity
+tests in `crates/mm-api/tests/parity/team_exists.rs`. The join and signup flows ask this before
+offering a team.
+
+**The one thing a reader would otherwise get wrong: "exists" means "you can see it".** The route
+never 404s and never 403s — a name that matches nothing and a team the caller may not see are the
+same `{"exists":false}` with a 200, which is the point: it must not tell a stranger which private
+teams are out there. Visibility is three branches:
+
+```go
+(teamMember != nil && teamMember.DeleteAt == 0) ||
+(team.AllowOpenInvite && SessionHasPermissionTo(list_public_teams)) ||
+(!team.AllowOpenInvite && SessionHasPermissionTo(list_private_teams))
+```
+
+Note what is **not** there. `getTeamByName` guards on `AllowOpenInvite || Type != TeamOpen` and
+falls back to `view_team` *on the team*; this one ignores `Type` entirely and asks for a
+**system-level** list permission. A team with open invites off is therefore visible to an admin
+and to nobody else, however public its type. And a **left** membership does not count — the row
+survives a `DELETE` with a non-zero `DeleteAt`, so a user who left a private team stops being able
+to see that it exists.
+
+Wire format: `w.Write([]byte(MapBoolToJSON(resp)))`, so **no trailing newline** ([D-086]).
+
+Mutation run: **11 run, 9 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/team-exists.plan`). Full suite: 2448 passed, 0 failed.
+
+### `web/params.go` lowercases the name segments, and two served routes did not
+
+`params.TeamName = strings.ToLower(props["team_name"])` (params.go:178), and the same for
+`channel_name`. It applies to **every** route with those segments, before any handler sees them —
+so `/teams/name/MMRS-PARITY-X` is the same request as the lowercase one. The two channel routes
+already did this; **both team routes validated the raw segment** and answered 400 where Go answers
+200. `get_team_by_name` had shipped with the bug; `team_exists` was written with it. Fixed in both,
+and the test covers both, because no single route's suite would have found it — the same shape as
+the `me` alias two entries up.
+
+### Two test premises that were wrong, not the port
+
+`IsValidTeamName` is `isValidAlphaNum` plus a minimum length of **2** — so `ab` is valid and only a
+single character is too short — and it carries **no reserved-name check**: `signup`, `login` and
+`admin` are all valid team names here, whatever `CleanTeamName` next door suggests. Uppercase is
+valid too, for the lowercasing reason above.
+
+### And a survivor that was a dead branch
+
+`member.is_some_and(|m| m.delete_at == 0)` → `member.is_some()` survived the first batch: every
+membership row the fixture could reach had `DeleteAt == 0`, so the two agreed everywhere. A second
+plain user now joins the private team and leaves it, which is the only way to produce the row that
+tells them apart.

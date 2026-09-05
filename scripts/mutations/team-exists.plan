@@ -1,0 +1,32 @@
+# Mutation plan for GET /teams/name/{team_name}/exists (teamExists).
+#
+#   scripts/mutate-batch.sh scripts/mutations/team-exists.plan
+#
+# Tab-separated: name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter.  `\n` becomes a newline.
+#
+# The visibility rule has three independent branches, and the fixture carries one team for each:
+# a team the plain user joined, a private one (open invites off) nobody but the admin is in, and
+# an open-invite one.  Without all three, two of the branches are dead and the third answers for
+# them.
+#
+# `api-membership-deleteat` survived the first run: no fixture user had a *left* membership, so
+# `member.is_some()` and `member.delete_at == 0` agreed on every row the suite could reach.  A
+# second plain user now joins the private team and leaves it — `DELETE` on a team member is a
+# soft delete, so the row survives with a non-zero `DeleteAt`.
+#
+# A control must cover its binding's whole life.  The last two lines are the no-op controls and
+# must SURVIVE.
+
+api-lowercase-the-name	crates/mm-api/src/teams.rs	    let team_name = team_name.to_lowercase();\n\n    if !mm_model::team::is_valid_team_name(&team_name) {\n        return ApiError::invalid_url_param("team_name").into_response();\n    }\n\n    let team = match state.app.get_team_by_name(&team_name).await {	    if !mm_model::team::is_valid_team_name(&team_name) {\n        return ApiError::invalid_url_param("team_name").into_response();\n    }\n\n    let team = match state.app.get_team_by_name(&team_name).await {	api	team_exists
+api-name-validation	crates/mm-api/src/teams.rs	    if !mm_model::team::is_valid_team_name(&team_name) {\n        return ApiError::invalid_url_param("team_name").into_response();\n    }\n\n    let team = match state.app.get_team_by_name(&team_name).await {	    if false {\n        return ApiError::invalid_url_param("team_name").into_response();\n    }\n\n    let team = match state.app.get_team_by_name(&team_name).await {	api	team_exists
+api-missing-team-is-false	crates/mm-api/src/teams.rs	        Err(err) if err.status_code == 404 => None,\n        Err(err) => return ApiError::from(err).into_response(),\n    };\n\n    let mut exists = false;	        Err(err) if err.status_code == 405 => None,\n        Err(err) => return ApiError::from(err).into_response(),\n    };\n\n    let mut exists = false;	api	team_exists
+api-membership-branch	crates/mm-api/src/teams.rs	        let is_current_member = member.is_some_and(|member| member.delete_at == 0);	        let is_current_member = false;	api	team_exists
+api-membership-deleteat	crates/mm-api/src/teams.rs	        let is_current_member = member.is_some_and(|member| member.delete_at == 0);	        let is_current_member = member.is_some();	api	team_exists
+api-open-invite-flag	crates/mm-api/src/teams.rs	            || if team.allow_open_invite {	            || if !team.allow_open_invite {	api	team_exists
+api-public-teams-permission	crates/mm-api/src/teams.rs	                    .session_has_permission_to(&session.0, &PERMISSION_LIST_PUBLIC_TEAMS)	                    .session_has_permission_to(&session.0, &PERMISSION_LIST_PRIVATE_TEAMS)	api	team_exists
+api-private-teams-permission	crates/mm-api/src/teams.rs	                    .session_has_permission_to(&session.0, &PERMISSION_LIST_PRIVATE_TEAMS)	                    .session_has_permission_to(&session.0, &PERMISSION_LIST_PUBLIC_TEAMS)	api	team_exists
+api-body-shape	crates/mm-api/src/teams.rs	        format!("{{\\"exists\\":{exists}}}").into_bytes(),	        format!("{{\\"exists\\":{exists}}}\\n").into_bytes(),	api	team_exists
+#
+# --- no-op controls: these must SURVIVE ---
+control-rename-binding	crates/mm-api/src/teams.rs	        let is_current_member = member.is_some_and(|member| member.delete_at == 0);\n        exists = is_current_member\n            || if team.allow_open_invite {	        let joined = member.is_some_and(|member| member.delete_at == 0);\n        exists = joined\n            || if team.allow_open_invite {	api	team_exists
+control-reorder-independent-lets	crates/mm-api/tests/parity/team_exists.rs	    let joined = create_team(client, token, "exists").await;\n            let private = create_team(client, token, "existspriv").await;	    let private = create_team(client, token, "existspriv").await;\n            let joined = create_team(client, token, "exists").await;	api	team_exists

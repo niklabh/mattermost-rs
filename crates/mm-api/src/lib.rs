@@ -319,6 +319,11 @@ pub fn router(state: AppState) -> Router {
         // `/teams/name/{team_name}` above, and neither segment is id-shaped (`[A-Za-z0-9_-]+`
         // for both), so the id middleware stays off and the handler carries both mux classes
         // forward itself.
+        // `BaseRoutes.TeamByName.Handle("/exists")` (api4/team.go:68).
+        .route(
+            "/api/v4/teams/name/{team_name}/exists",
+            partially_migrated(get(teams::team_exists)),
+        )
         .route(
             "/api/v4/teams/name/{team_name}/channels/name/{channel_name}",
             partially_migrated(get(channels::get_channel_by_name_for_team_name)),
