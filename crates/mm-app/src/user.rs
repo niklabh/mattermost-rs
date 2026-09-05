@@ -167,6 +167,30 @@ impl App {
 }
 
 impl App {
+    /// Port of `app.App.GetFilteredUsersStats` (user.go:2384).
+    ///
+    /// One store call, one wrapper struct, one error id —
+    /// `app.user.get_total_users_count.app_error`, **shared with the unfiltered
+    /// `/users/stats`**, so a client cannot tell which count failed from the id alone.
+    #[tracing::instrument(skip_all, fields(team_id = %options.team_id, channel_id = %options.channel_id))]
+    pub async fn get_filtered_users_stats(
+        &self,
+        options: &mm_model::user_count::UserCountOptions,
+    ) -> AppResult<mm_model::stats::UsersStats> {
+        let total_users_count = self.store().user().count(options).await.map_err(|err| {
+            tracing::error!(error = %err, "filtered user count failed");
+            AppError::boxed(
+                "GetFilteredUsersStats",
+                "app.user.get_total_users_count.app_error",
+                None,
+                String::new(),
+                500,
+            )
+        })?;
+
+        Ok(mm_model::stats::UsersStats { total_users_count })
+    }
+
     /// Port of `app.App.GetUsersByUsernames` (user.go:921), **minus the sanitizer**.
     ///
     /// Go's `sanitizeProfiles(users, asAdmin)` reads the privacy settings from config, which in

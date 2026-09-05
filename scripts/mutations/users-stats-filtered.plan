@@ -1,0 +1,39 @@
+# Mutation plan for GET /users/stats/filtered (getFilteredUsersStats).
+#
+#   scripts/mutate-batch.sh scripts/mutations/users-stats-filtered.plan
+#
+# Tab-separated: name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter.  `\n` becomes a newline.
+#
+# Every assertion in the suite is **relative** — the count is over the whole users table, which
+# the other suites add to and delete from throughout the run — so each mutation has to move a
+# comparison between two reads, not an absolute number.
+#
+# The fixture carries a deactivated user, a bot-free baseline, and a user with a planted
+# `RemoteId`, which no API can set: without that row the `include_remote_users` filter is dead,
+# because this installation has no remote users at all.
+#
+# `store-team-membership-deleted` survived the first run: no fixture user had *left* a team, so
+# `tm.DeleteAt = 0` and no predicate agreed on every row.  The fixture now has a team everybody
+# left — `TeamMembers` rows survive a leave with a non-zero `DeleteAt` — whose count is 0 only
+# because of that predicate.
+#
+# A SQL mutation must keep every bound parameter used — sqlx refuses an unused one, which is a
+# compile error and a harness fault.  A control must cover its binding's whole life.  The last two
+# lines are the no-op controls and must SURVIVE.
+
+store-include-deleted	crates/mm-store/src/user_store.rs	             WHERE ($1 OR u.deleteat = 0)\n               AND ($2 OR u.remoteid = '' OR u.remoteid IS NULL)	             WHERE (NOT $1 OR u.deleteat = 0)\n               AND ($2 OR u.remoteid = '' OR u.remoteid IS NULL)	api	users_stats_filtered
+store-include-remote	crates/mm-store/src/user_store.rs	               AND ($2 OR u.remoteid = '' OR u.remoteid IS NULL)\n               AND ($3 OR b.userid IS NULL)	               AND ($2 OR TRUE)\n               AND ($3 OR b.userid IS NULL)	api	users_stats_filtered
+store-include-bots	crates/mm-store/src/user_store.rs	               AND ($3 OR b.userid IS NULL)\n               AND ($4 = '' OR tm.userid IS NOT NULL)	               AND ($3 OR b.userid IS NOT NULL)\n               AND ($4 = '' OR tm.userid IS NOT NULL)	api	users_stats_filtered
+store-team-filter	crates/mm-store/src/user_store.rs	               AND ($4 = '' OR tm.userid IS NOT NULL)\n               AND ($4 <> '' OR $5 = '' OR cm.userid IS NOT NULL)	               AND ($4 = '' OR TRUE)\n               AND ($4 <> '' OR $5 = '' OR cm.userid IS NOT NULL)	api	users_stats_filtered
+store-channel-filter	crates/mm-store/src/user_store.rs	               AND ($4 <> '' OR $5 = '' OR cm.userid IS NOT NULL)	               AND ($4 = '' OR $5 = '' OR cm.userid IS NOT NULL)	api	users_stats_filtered
+store-team-membership-deleted	crates/mm-store/src/user_store.rs	                ON (tm.userid = u.id AND tm.teamid = $4 AND tm.deleteat = 0)\n              LEFT JOIN channelmembers cm ON (cm.userid = u.id AND cm.channelid = $5)	                ON (tm.userid = u.id AND tm.teamid = $4 AND tm.deleteat >= 0)\n              LEFT JOIN channelmembers cm ON (cm.userid = u.id AND cm.channelid = $5)	api	users_stats_filtered
+api-permission-gate	crates/mm-api/src/users.rs	    if !state\n        .app\n        .session_has_permission_to(\n            &session.0,\n            &mm_model::permission::PERMISSION_SYSCONSOLE_READ_USER_MANAGEMENT_USERS,\n        )\n        .await\n    {	    if false\n        && !state\n        .app\n        .session_has_permission_to(\n            &session.0,\n            &mm_model::permission::PERMISSION_SYSCONSOLE_READ_USER_MANAGEMENT_USERS,\n        )\n        .await\n    {	api	users_stats_filtered
+api-forwarded-role-params	crates/mm-api/src/users.rs	    if FILTERED_STATS_FORWARDED_PARAMS\n        .iter()\n        .any(|name| query_first(query.as_deref(), name).is_some())\n    {	    if false {	api	users_stats_filtered
+api-unparseable-bool	crates/mm-api/src/users.rs	            .and_then(|raw| mm_model::utils::parse_go_bool(&raw))\n            .unwrap_or(false)	            .map(|raw| mm_model::utils::parse_go_bool(&raw).unwrap_or(true))\n            .unwrap_or(false)	api	users_stats_filtered
+api-team-param-name	crates/mm-api/src/users.rs	        team_id: query_first(query.as_deref(), "in_team").unwrap_or_default(),	        team_id: query_first(query.as_deref(), "team_id").unwrap_or_default(),	api	users_stats_filtered
+api-channel-param-name	crates/mm-api/src/users.rs	        channel_id: query_first(query.as_deref(), "in_channel").unwrap_or_default(),	        channel_id: query_first(query.as_deref(), "channel_id").unwrap_or_default(),	api	users_stats_filtered
+api-trailing-newline	crates/mm-api/src/users.rs	    body.push(b'\\n');\n\n    (\n        StatusCode::OK,\n        [\n            ("Content-Type", "application/json"),\n            ("x-mmrs-served-by", "rust"),\n        ],\n        body,\n    )\n        .into_response()\n}\n\n/// The `model.UserSearch` fields	    (\n        StatusCode::OK,\n        [\n            ("Content-Type", "application/json"),\n            ("x-mmrs-served-by", "rust"),\n        ],\n        body,\n    )\n        .into_response()\n}\n\n/// The `model.UserSearch` fields	api	users_stats_filtered
+#
+# --- no-op controls: these must SURVIVE ---
+control-rename-binding	crates/mm-api/src/users.rs	    let options = mm_model::user_count::UserCountOptions {\n        include_deleted: flag("include_deleted"),\n        include_bot_accounts: flag("include_bots"),\n        include_remote_users: flag("include_remote_users"),\n        team_id: query_first(query.as_deref(), "in_team").unwrap_or_default(),\n        channel_id: query_first(query.as_deref(), "in_channel").unwrap_or_default(),\n        ..mm_model::user_count::UserCountOptions::default()\n    };\n\n    let stats = match state.app.get_filtered_users_stats(&options).await {	    let counting = mm_model::user_count::UserCountOptions {\n        include_deleted: flag("include_deleted"),\n        include_bot_accounts: flag("include_bots"),\n        include_remote_users: flag("include_remote_users"),\n        team_id: query_first(query.as_deref(), "in_team").unwrap_or_default(),\n        channel_id: query_first(query.as_deref(), "in_channel").unwrap_or_default(),\n        ..mm_model::user_count::UserCountOptions::default()\n    };\n\n    let stats = match state.app.get_filtered_users_stats(&counting).await {	api	users_stats_filtered
+control-reorder-joins	crates/mm-store/src/user_store.rs	              LEFT JOIN bots b ON b.userid = u.id\n              LEFT JOIN teammembers tm\n                ON (tm.userid = u.id AND tm.teamid = $4 AND tm.deleteat = 0)	              LEFT JOIN teammembers tm\n                ON (tm.userid = u.id AND tm.teamid = $4 AND tm.deleteat = 0)\n              LEFT JOIN bots b ON b.userid = u.id	api	users_stats_filtered

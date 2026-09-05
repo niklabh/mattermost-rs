@@ -285,9 +285,12 @@ async fn a_caller_without_view_members_is_forwarded() {
     );
 }
 
-/// `/users/stats/filtered` is one segment deeper and unregistered.
+/// `/users/stats/filtered` is one segment deeper and **registered now**.
+///
+/// Asserted the other way rather than deleted, because "which router claims this path" is what
+/// this test exists to pin. Its behaviour lives in `parity/users_stats_filtered.rs`.
 #[tokio::test]
-async fn the_filtered_variant_is_still_forwarded() {
+async fn the_filtered_variant_is_served_now() {
     if !stack_enabled() {
         return;
     }
@@ -306,7 +309,7 @@ async fn the_filtered_variant_is_still_forwarded() {
             .headers()
             .get("x-mmrs-served-by")
             .and_then(|v| v.to_str().ok()),
-        Some("go"),
-        "getFilteredUsersStats is a different handler with ten query parameters"
+        Some("rust"),
+        "served since `getFilteredUsersStats` landed; its own suite is `users_stats_filtered`"
     );
 }

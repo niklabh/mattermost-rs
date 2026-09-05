@@ -429,10 +429,29 @@ async fn the_etag_arms_match_go_except_for_gos_two_pointer_components() {
     let not_team = stable_headers_of_both(&client, &token, &not_in_team).await;
     let not_team_scoped = stable_headers_of_both(&client, &token, &not_in_team_with_team).await;
 
-    let go_etag = team[0].2.clone().expect("Go sends an ETag for in_team");
-    let rs_etag = team[1].2.clone().expect("we send an ETag for in_team");
-    let go_conditional = headers_of_both(&client, &token, &in_team, Some(&go_etag)).await;
-    let rs_conditional = headers_of_both(&client, &token, &in_team, Some(&rs_etag)).await;
+    // **The mint and the conditional request have to see the same users table.** This etag is
+    // `MAX(UpdateAt)` over every user, and the other parity suites create, deactivate and edit
+    // users throughout the run — so an etag minted a moment ago is legitimately stale by the time
+    // it is sent back, and Go answers 200 rather than 304. Retried until the etag survives its
+    // own round trip; a 200 on an etag that did *not* move is the real failure this asserts.
+    let mut go_etag;
+    let mut rs_etag;
+    let mut go_conditional;
+    let mut rs_conditional;
+    let mut attempts = 0;
+    loop {
+        let minted = stable_headers_of_both(&client, &token, &in_team).await;
+        go_etag = minted[0].2.clone().expect("Go sends an ETag for in_team");
+        rs_etag = minted[1].2.clone().expect("we send an ETag for in_team");
+        go_conditional = headers_of_both(&client, &token, &in_team, Some(&go_etag)).await;
+        rs_conditional = headers_of_both(&client, &token, &in_team, Some(&rs_etag)).await;
+
+        let after = stable_headers_of_both(&client, &token, &in_team).await;
+        attempts += 1;
+        if after[0].2 == Some(go_etag.clone()) || attempts >= 12 {
+            break;
+        }
+    }
     let mismatched = headers_of_both(&client, &token, &in_team, Some("nonsense")).await;
     teardown(&client, &f).await;
 

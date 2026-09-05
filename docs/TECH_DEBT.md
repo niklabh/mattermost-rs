@@ -5598,3 +5598,19 @@ The purge now sweeps by the dangling reference rather than by name — a channel
 names no team, a post whose channel is gone, a thread whose post is gone — which is what the old
 note asked for. Such a row is unreachable through any API on either server, so nothing that
 deletes it can be observed by a test. After the sweep: 0 orphans, 189 channels, 4 threads.
+
+### [D-167] OPEN — whole-table parity reads still race concurrent fixtures
+
+Three of five full-workspace runs on 2026-09-05 each failed a *different* test, and every one was
+a read over shared state that another suite's fixture moved mid-run: the users-list etag
+(`MAX(UpdateAt)` over every user), `channel_members_list`'s `OFFSET` paging, and an intra-suite
+ordering race in `roles` that reproduces only under a narrow filter.
+
+Each has been fixed as it surfaced — bracketed reads (`fetch_both_stable`), walk-and-deduplicate,
+retry-until-settled. What is owed is the *deliberate* pass: enumerate the assertions that read a
+whole shared table (users, roles, emoji, channel members) and convert them, rather than waiting
+for each to fail. The suite now has 22 routes' worth of fixtures creating and deleting users and
+teams concurrently, so the pressure only grows.
+
+Not a port divergence: both servers read the same database, and every failure so far has been the
+test's premise, not the answer.

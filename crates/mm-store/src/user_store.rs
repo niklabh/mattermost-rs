@@ -21,6 +21,12 @@ pub trait UserStore {
     /// field with no reader, and the two branches it would gate — the `Bots` anti-join and the
     /// view-restriction joins — are unported for the reasons `count_total_users` and
     /// `mm_app::App::get_view_users_restrictions` give.
+    /// Port of `SqlUserStore.Count` (user_store.go:1471) — the filtered count.
+    fn count(
+        &self,
+        options: &mm_model::user_count::UserCountOptions,
+    ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
+
     fn count_total_users(
         &self,
     ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
@@ -524,6 +530,65 @@ impl UserStore for SqlUserStore {
     /// caller sets it on, so bots are counted, and `/users/stats` on a server with an installed
     /// plugin reports a larger number than its member lists show. Reproduced by *not* writing
     /// the join, which is the easiest thing in this file to get wrong by adding.
+    /// Port of `SqlUserStore.Count` (user_store.go:1471).
+    ///
+    /// Go builds this one predicate at a time with squirrel; written here as a single statement
+    /// whose clauses are gated on the options, because every join it can add is on a unique key
+    /// and so cannot fan a row out.
+    ///
+    /// # `TeamId` wins over `ChannelId`
+    ///
+    /// Go's `else if` (user_store.go:1497) means a request naming both filters on the **team**
+    /// and ignores the channel entirely — measured: `?in_team=X&in_channel=Y` returns the team's
+    /// count, not the intersection. The two guards below encode that precedence rather than
+    /// intersecting.
+    ///
+    /// # The team join carries `DeleteAt = 0`; the channel join does not
+    ///
+    /// A user who left a team is not counted; a user who left a *channel* has no
+    /// `ChannelMembers` row at all, because leaving a channel deletes it outright.
+    ///
+    /// # `ExcludeRegularUsers` is not modelled
+    ///
+    /// `getFilteredUsersStats` never sets it, and with `IncludeBotAccounts` off Go **returns an
+    /// error** rather than a count for that combination (user_store.go:1491). Nothing reachable
+    /// from the wire produces either half.
+    #[tracing::instrument(skip_all, fields(count))]
+    async fn count(
+        &self,
+        options: &mm_model::user_count::UserCountOptions,
+    ) -> Result<i64, StoreError> {
+        let count = sqlx::query_scalar!(
+            r#"
+            SELECT COUNT(*) AS "count!"
+              FROM users u
+              LEFT JOIN bots b ON b.userid = u.id
+              LEFT JOIN teammembers tm
+                ON (tm.userid = u.id AND tm.teamid = $4 AND tm.deleteat = 0)
+              LEFT JOIN channelmembers cm ON (cm.userid = u.id AND cm.channelid = $5)
+             WHERE ($1 OR u.deleteat = 0)
+               AND ($2 OR u.remoteid = '' OR u.remoteid IS NULL)
+               AND ($3 OR b.userid IS NULL)
+               AND ($4 = '' OR tm.userid IS NOT NULL)
+               AND ($4 <> '' OR $5 = '' OR cm.userid IS NOT NULL)
+            "#,
+            options.include_deleted,
+            options.include_remote_users,
+            options.include_bot_accounts,
+            options.team_id,
+            options.channel_id,
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to count Users".to_owned(),
+            source,
+        })?;
+
+        tracing::Span::current().record("count", count);
+        Ok(count)
+    }
+
     #[tracing::instrument(skip_all, fields(count))]
     async fn count_total_users(&self) -> Result<i64, StoreError> {
         let count = sqlx::query_scalar!(

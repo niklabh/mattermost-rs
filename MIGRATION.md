@@ -6268,3 +6268,56 @@ The first batch aborted in preflight: a mutation was anchored on the doc comment
 arm carrying the only use of `$6`, and sqlx refuses a query with an unused parameter. That is the
 rule added to the loop after `channels-member-count.plan` hit it, applied here to a mutation
 written before the rule existed. It now neutralises with `AND FALSE` instead of deleting.
+
+## `GET /api/v4/users/stats/filtered` — `getFilteredUsersStats` (2026-09-05)
+
+Served for the non-role option set, and **this removes a forward**: `users_stats.rs` had a test
+pinning the filtered variant as Go's, which now asserts the opposite. `crates/mm-api/src/users.rs`
+(`get_filtered_users_stats`), `crates/mm-app/src/user.rs`, `crates/mm-store/src/user_store.rs`
+(`count`); 6 parity tests in `crates/mm-api/tests/parity/users_stats_filtered.rs`.
+
+**The one thing a reader would otherwise get wrong: `in_team` wins over `in_channel`.** The
+store's `else if` (user_store.go:1497) means a request naming both filters on the **team alone** —
+measured: the two together return the team's count, not the intersection.
+
+Three more measured shapes. An **unparseable boolean is `false`, not a 400**: `strconv.ParseBool`'s
+error is discarded, so `?include_deleted=yes` counts as off. The team join carries
+`tm.DeleteAt = 0` and the channel join does not, because leaving a channel deletes the row
+outright while leaving a team soft-deletes it. And `json.NewEncoder(w).Encode` gives this route a
+**trailing newline**, unlike the unfiltered `/users/stats` beside it, which uses `w.Write`.
+
+The three role parameters add a join, an `IN` list and their own `CleanRoleNames` 400; each is
+forwarded at any value, including the empty string Go itself treats as absent.
+
+Mutation run: **14 run, 12 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/users-stats-filtered.plan`). Full suite: 2501 passed, 0 failed.
+
+### Two branches that were dead until a row reached them
+
+`include_remote_users` moved nothing: this installation has **no remote users at all**, and no API
+creates one, so the fixture plants a `RemoteId`. And `tm.DeleteAt = 0` was indistinguishable from
+no predicate until the fixture had a team **everybody left** — `TeamMembers` rows survive a leave
+— whose count is 0 only because of it. An absolute assertion is safe there, unlike the
+whole-table counts in the same suite, because no other suite writes to that team.
+
+## Suite stability, again — and this time it is write pressure, not orphans
+
+Five full-workspace runs while finishing this route: **two green (2495, 2501) and three failing, a
+different test each time** — `roles::all_roles_matches_go_byte_for_byte`,
+`users_list::the_etag_arms_match_go…`, `channel_members_list::pages_split_cover_and_run_out…`.
+Every one is a read over shared state that a concurrent writer moved:
+
+- the users-list **etag is `MAX(UpdateAt)` over every user**, so an etag minted a moment before
+  the conditional request is legitimately stale and Go answers 200. Fixed here: the mint is
+  retried until it survives its own round trip, and a 200 on an etag that did *not* move is still
+  the failure the test asserts.
+- `channel_members_list` pages by `OFFSET`, and a membership removed between page 0 and page 1
+  shifts rows into a duplicate — [D-160]'s signature exactly.
+- the `roles` failure reproduces **only under a narrow `--test parity parity::roles` filter** and
+  not in a full run, which makes it an intra-suite ordering race rather than a port divergence.
+
+The aggravator is this session's own fixtures: twenty-two routes' worth of suites now create,
+deactivate and delete users and teams throughout a run. The bracketed idiom
+(`fetch_both_stable`, walk-and-deduplicate) exists and works; it has been applied one failing test
+at a time. **See [D-167]** — the remaining whole-table reads should be converted deliberately
+rather than as each one fails.

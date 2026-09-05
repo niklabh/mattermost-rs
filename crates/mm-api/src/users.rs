@@ -320,6 +320,119 @@ pub async fn get_user_by_username(
     }
 }
 
+/// The `getFilteredUsersStats` query parameters that add a role filter, and are therefore Go's.
+///
+/// `applyMultiRoleFilters` (user_store.go) turns each into a join and an `IN` list, and
+/// `CleanRoleNames` validates them first — a 400 this port would have to reproduce exactly. A
+/// request carrying any of them is forwarded whole, at any value, including the empty string that
+/// Go itself treats as absent.
+const FILTERED_STATS_FORWARDED_PARAMS: &[&str] = &["roles", "channel_roles", "team_roles"];
+
+/// Port of `getFilteredUsersStats` (api4/user.go:1042) —
+/// `GET /api/v4/users/stats/filtered`.
+///
+/// The admin console's user list. This route was forwarded until now; `users_stats.rs` asserted
+/// that, and now asserts the opposite.
+///
+/// # The permission is a *sysconsole* one, and it is checked last
+///
+/// Every parameter is parsed and every role name validated **before**
+/// `sysconsole_read_user_management_users` is consulted, so a caller with no rights at all still
+/// gets the role 400 rather than the 403. Reproduced by keeping the order.
+///
+/// # An unparseable boolean is `false`, not a 400
+///
+/// `strconv.ParseBool` returns an error the handler **discards** (`includeDeletedBool, _ := …`),
+/// so `?include_deleted=yes` counts as `false`. Measured.
+///
+/// # `in_team` wins over `in_channel`
+///
+/// The store's `else if` (user_store.go:1497) means a request naming both filters on the team
+/// alone. Measured: the two together return the team's count, not the intersection.
+///
+/// # Wire format
+///
+/// `json.NewEncoder(w).Encode(stats)` — a **trailing newline**, unlike the unfiltered
+/// `/users/stats` beside it, which uses `w.Write`.
+#[tracing::instrument(skip_all, fields(forwarded))]
+pub async fn get_filtered_users_stats(
+    State(state): State<AppState>,
+    axum::extract::RawQuery(query): axum::extract::RawQuery,
+    session: AuthenticatedSession,
+    request: axum::extract::Request,
+) -> Response {
+    if FILTERED_STATS_FORWARDED_PARAMS
+        .iter()
+        .any(|name| query_first(query.as_deref(), name).is_some())
+    {
+        tracing::Span::current().record("forwarded", true);
+        return crate::proxy::forward_to_go(State(state), request).await;
+    }
+    tracing::Span::current().record("forwarded", false);
+
+    if !state
+        .app
+        .session_has_permission_to(
+            &session.0,
+            &mm_model::permission::PERMISSION_SYSCONSOLE_READ_USER_MANAGEMENT_USERS,
+        )
+        .await
+    {
+        return ApiError::from(make_permission_error(
+            &session.0,
+            &[&mm_model::permission::PERMISSION_SYSCONSOLE_READ_USER_MANAGEMENT_USERS],
+        ))
+        .into_response();
+    }
+
+    // `strconv.ParseBool` returns `(false, err)` for anything it does not recognise and the
+    // handler discards the error, so an unparseable value is `false` — not a 400 and not `true`.
+    let flag = |name: &str| {
+        query_first(query.as_deref(), name)
+            .and_then(|raw| mm_model::utils::parse_go_bool(&raw))
+            .unwrap_or(false)
+    };
+    let options = mm_model::user_count::UserCountOptions {
+        include_deleted: flag("include_deleted"),
+        include_bot_accounts: flag("include_bots"),
+        include_remote_users: flag("include_remote_users"),
+        team_id: query_first(query.as_deref(), "in_team").unwrap_or_default(),
+        channel_id: query_first(query.as_deref(), "in_channel").unwrap_or_default(),
+        ..mm_model::user_count::UserCountOptions::default()
+    };
+
+    let stats = match state.app.get_filtered_users_stats(&options).await {
+        Ok(stats) => stats,
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+
+    let mut body = match serde_json::to_vec(&stats) {
+        Ok(body) => body,
+        Err(err) => {
+            tracing::error!(error = %err, "failed to serialise the stats");
+            return ApiError::from(AppError::new(
+                "getFilteredUsersStats",
+                "api.marshal_error",
+                None,
+                String::new(),
+                500,
+            ))
+            .into_response();
+        }
+    };
+    body.push(b'\n');
+
+    (
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
+    )
+        .into_response()
+}
+
 /// The `model.UserSearch` fields that change which store query runs, and are therefore Go's.
 ///
 /// Each one either picks a different branch of `App.SearchUsers`' dispatch (user.go:2412) or adds

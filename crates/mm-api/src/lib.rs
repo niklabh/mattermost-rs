@@ -545,6 +545,12 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/users/stats",
             partially_migrated(get(users::get_total_users_stats)),
         )
+        // `/users/stats/filtered` is one segment deeper again — a different handler with its own
+        // query parameters, and forwarded until `getFilteredUsersStats` landed.
+        .route(
+            "/api/v4/users/stats/filtered",
+            partially_migrated(get(users::get_filtered_users_stats)),
+        )
         // `BaseRoutes.User.Handle("/terms_of_service")` (api4/user.go:61) — one segment deeper
         // than `{user_id}`. Registered GET only: the `POST` on the same path
         // (`saveUserTermsOfService`, :60) falls to `partially_migrated`'s method fallback.
