@@ -6,6 +6,7 @@
 pub mod authorization;
 pub mod channel;
 pub mod config;
+pub mod draft;
 pub mod emoji;
 /// The read side of `app/file.go` — `FileInfo` rows, never file bytes.
 pub mod file;

@@ -5856,3 +5856,54 @@ carries a non-zero `DeleteAt`, and the route's total equals the database's count
 predicate leaves, read in the same bracket as `the_count_matches_the_database_including_bots`
 uses. A route that failed to exclude the row would be one higher than the database whoever else
 was creating accounts.
+
+## `GET /users/{user_id}/teams/{team_id}/drafts` — `getDrafts` (2026-09-05)
+
+Served. `crates/mm-api/src/drafts.rs` (new), `crates/mm-app/src/draft.rs` (new),
+`crates/mm-store/src/draft_store.rs` (new — one query), `crates/mm-app/src/config.rs`
+(`allow_synced_drafts`); 7 parity tests in `crates/mm-api/tests/parity/drafts.rs`. The webapp asks
+for this once per team load, and `mm-model`'s `draft.rs` had been ported with nothing behind it.
+
+**The one thing a reader would otherwise get wrong: the `{user_id}` segment is decorative.** The
+handler passes `c.AppContext.Session().UserId` to the app layer, never `c.Params.UserId`, so
+`/users/{anybody}/teams/{team}/drafts` returns **the caller's own** drafts — measured with a second
+user's id in the path. And nothing in this handler validates an id: there is no `RequireUserId`,
+no `RequireTeamId`, and its first statement is `if c.Err != nil`, so `/users/short/teams/{team}/…`
+is a 200 where every neighbouring route gives 400. The router's `[A-Za-z0-9]+` charset is the only
+filter either segment passes through.
+
+Three more measured shapes. The feature gate is a **501** (`api.drafts.disabled.app_error`) and it
+runs *before* the permission check, so a caller holding nothing still gets the 501 rather than a
+403. The permission checked is `view_team` and the one reported is `create_post` — reproduced, but
+not observable, because `SetPermissionError` puts it in `DetailedError` and the api boundary wipes
+that unless `EnableDeveloper` is on. And every draft carries `"metadata": {}` whether or not it
+has files: `getFileInfosForDraft` returns `(nil, nil)` for a draft with no file ids, which is the
+*success* path, and `omitempty` on a pointer tests the pointer.
+
+A draft holding a file whose mini preview would have to be generated is **forwarded** — Go reads
+the file backend and writes the row back, which this port cannot do. Same `PrepareError::Unreproducible`
+path `getFileInfo` uses, and the same narrow guard.
+
+Mutation run: **18 run, 16 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/drafts.plan`). Full suite: 2430 passed, 0 failed.
+
+### The first batch was void, and all three causes were mine
+
+- **A control that does not compile voids the run.** `control-rename-binding` renamed a binding
+  used three lines below its anchor. A control is supposed to survive; one that fails to build
+  reports a harness fault and throws away the other seventeen verdicts.
+- **INNER → LEFT JOIN is inert here.** `cm.userid = $1` stays in the `WHERE` clause and discards
+  exactly the NULL-extended rows a left join would add. The mutation now breaks the join *column*,
+  which is the decision a reader could actually get wrong.
+- **No fixture row had a NULL `Props`.** `upsertDraft` always writes at least `{}`, so the
+  "NULL is an empty map, not nil" branch was dead. Probed against Go first — a planted NULL reads
+  back as `"props": {}` — then planted in the fixture. `Props` and `Priority` are both `varchar`
+  columns holding JSON text, unlike `Posts.Props`, so this port parses them itself and an
+  all-`{}` fixture cannot tell a working decoder from one that returns the empty map for
+  everything.
+
+### Drafts orphaned by a deleted channel
+
+`purge_api_fixtures` now sweeps them, by the same dangling-reference rule as [D-155]. Nine had
+accumulated against two live ones: `getDrafts` inner-joins `ChannelMembers`, so an orphaned draft
+is invisible to the only route that would otherwise reach it.

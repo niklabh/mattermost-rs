@@ -795,6 +795,12 @@ async fn purge_api_fixtures_once() {
         "DELETE FROM posts WHERE NOT EXISTS (SELECT 1 FROM channels c WHERE c.id = posts.channelid)",
         "DELETE FROM threadmemberships WHERE NOT EXISTS (SELECT 1 FROM posts p WHERE p.id = threadmemberships.postid)",
         "DELETE FROM threads WHERE NOT EXISTS (SELECT 1 FROM posts p WHERE p.id = threads.postid)",
+        // A `Drafts` row survives its channel the same way, and no API can reach it afterwards:
+        // `getDrafts` inner-joins `ChannelMembers`, so an orphan is invisible to the route that
+        // would otherwise clean it up. Nine rows against two live ones when the drafts suite was
+        // written, from three days of runs.
+        "DELETE FROM drafts WHERE NOT EXISTS (SELECT 1 FROM channels c WHERE c.id = drafts.channelid)",
+        "DELETE FROM drafts WHERE NOT EXISTS (SELECT 1 FROM users u WHERE u.id = drafts.userid)",
     ] {
         let _ = sqlx::query(statement).execute(&pool).await;
     }

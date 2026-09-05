@@ -7,6 +7,7 @@
 
 pub mod auth;
 pub mod channels;
+pub mod drafts;
 pub mod emoji;
 pub mod error;
 /// `getFileInfo` — the one `/files/` route that returns JSON rather than bytes.
@@ -213,6 +214,12 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/users/{user_id}/teams/{team_id}/threads/{thread_id}",
             partially_migrated_with_ids(&state, get(users::get_thread_for_user)),
+        )
+        // `BaseRoutes.TeamForUser.Handle("/drafts")` (api4/drafts.go:17) — the threads routes'
+        // sibling under the same base, and the one route here whose `{user_id}` is decorative.
+        .route(
+            "/api/v4/users/{user_id}/teams/{team_id}/drafts",
+            partially_migrated_with_ids(&state, get(drafts::get_drafts)),
         )
         .route(
             "/api/v4/users/{user_id}/channel_members",

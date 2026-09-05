@@ -14,6 +14,7 @@
 //! driver. Queries here spell them the way the database does.
 
 pub mod channel_store;
+pub mod draft_store;
 pub mod emoji_store;
 pub mod error;
 pub mod file_info_store;
@@ -32,6 +33,7 @@ pub mod user_store;
 pub mod user_terms_of_service_store;
 
 pub use channel_store::{ChannelStore, SqlChannelStore};
+pub use draft_store::{DraftStore, SqlDraftStore};
 pub use emoji_store::{EmojiStore, SqlEmojiStore};
 pub use error::StoreError;
 pub use file_info_store::{FileInfoStore, SqlFileInfoStore};
@@ -60,6 +62,7 @@ use sqlx::postgres::PgPoolOptions;
 pub struct SqlStore {
     channel: SqlChannelStore,
     emoji: SqlEmojiStore,
+    draft: SqlDraftStore,
     file_info: SqlFileInfoStore,
     post: SqlPostStore,
     reaction: SqlReactionStore,
@@ -99,6 +102,7 @@ impl SqlStore {
         Self {
             channel: SqlChannelStore::new(pool.clone()),
             emoji: SqlEmojiStore::new(pool.clone()),
+            draft: SqlDraftStore::new(pool.clone()),
             file_info: SqlFileInfoStore::new(pool.clone()),
             post: SqlPostStore::new(pool.clone()),
             reaction: SqlReactionStore::new(pool.clone()),
@@ -131,6 +135,10 @@ impl SqlStore {
     }
 
     /// Port of `store.Store.FileInfo()`.
+    pub fn draft(&self) -> &SqlDraftStore {
+        &self.draft
+    }
+
     pub fn file_info(&self) -> &SqlFileInfoStore {
         &self.file_info
     }

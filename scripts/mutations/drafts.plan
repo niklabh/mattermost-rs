@@ -1,0 +1,40 @@
+# Mutation plan for GET /users/{user_id}/teams/{team_id}/drafts (getDrafts).
+#
+#   scripts/mutate-batch.sh scripts/mutations/drafts.plan
+#
+# Tab-separated: name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter.  `\n` becomes a newline.
+#
+# The store's query is one of a kind in this tree, so its anchors need no disambiguation.  The
+# fixture was built for the three predicates that would otherwise be dead: a draft in a channel
+# the author has left (the `ChannelMembers` join), a draft in a DM (`TeamId = ''`), and one
+# carrying non-empty `Props` and `Priority` (the two `varchar`-holding-JSON decoders, which an
+# all-`{}` fixture cannot distinguish from a decoder that returns the empty map for everything).
+#
+# `store-channel-members-join` was first written as INNER -> LEFT JOIN, which is **inert**: the
+# `cm.userid = $1` in the WHERE clause discards the NULL-extended rows a left join would add.
+# It now breaks the join *column* instead, which is the decision a reader could actually get
+# wrong. And `control-rename-binding` first renamed a binding used again three lines below its
+# anchor, which is a compile error and voids the whole run rather than surviving it.
+#
+# The last two lines are the no-op controls and must SURVIVE.
+
+store-channel-members-join	crates/mm-store/src/draft_store.rs	              INNER JOIN channelmembers cm ON cm.channelid = d.channelid	              INNER JOIN channelmembers cm ON cm.userid = d.userid	api	parity::drafts
+store-membership-subject	crates/mm-store/src/draft_store.rs	               AND cm.userid = $1\n	               AND cm.userid IS NOT NULL\n	api	parity::drafts
+store-draft-owner	crates/mm-store/src/draft_store.rs	               AND d.userid = $1\n	               AND d.userid IS NOT NULL\n	api	parity::drafts
+store-teamless-channels	crates/mm-store/src/draft_store.rs	               AND (c.teamid = $2 OR c.teamid = '')	               AND (c.teamid = $2)	api	parity::drafts
+store-team-filter	crates/mm-store/src/draft_store.rs	               AND (c.teamid = $2 OR c.teamid = '')	               AND (c.teamid <> $2 OR c.teamid = '')	api	parity::drafts
+store-order-direction	crates/mm-store/src/draft_store.rs	             ORDER BY d.updateat DESC	             ORDER BY d.updateat ASC	api	parity::drafts
+store-props-column	crates/mm-store/src/draft_store.rs	                   d.props               AS "props?",\n                   d.priority            AS "priority?",	                   d.priority            AS "props?",\n                   d.props               AS "priority?",	api	parity::drafts
+store-null-map-is-empty	crates/mm-store/src/draft_store.rs	    let Some(raw) = raw else {\n        return Ok(Some(StringInterface::new()));\n    };	    let Some(raw) = raw else {\n        return Ok(None);\n    };	api	parity::drafts
+app-metadata-on-empty	crates/mm-app/src/draft.rs	        if ids.is_empty() {\n            draft.metadata = Some(PostMetadata::default());\n            return Ok(());\n        }	        if ids.is_empty() {\n            return Ok(());\n        }	api	parity::drafts
+app-feature-gate	crates/mm-app/src/draft.rs	        if !self.config().allow_synced_drafts {	        if self.config().allow_synced_drafts {	api	parity::drafts
+api-feature-gate	crates/mm-api/src/drafts.rs	    if !state.app.config().allow_synced_drafts {	    if state.app.config().allow_synced_drafts {	api	parity::drafts
+api-permission-gate	crates/mm-api/src/drafts.rs	    if !state\n        .app\n        .session_has_permission_to_team(	    if false\n        && !state\n        .app\n        .session_has_permission_to_team(	api	parity::drafts
+api-permission-subject	crates/mm-api/src/drafts.rs	            &mm_model::permission::PERMISSION_VIEW_TEAM,	            &PERMISSION_CREATE_POST,	api	parity::drafts
+api-session-user-not-path-user	crates/mm-api/src/drafts.rs	        .get_drafts_for_user(&session.0.user_id, team_id)	        .get_drafts_for_user(team_id, team_id)	api	parity::drafts
+api-empty-is-null	crates/mm-api/src/drafts.rs	    let body = if drafts.is_empty() {\n        b"null\\n".to_vec()	    let body = if false {\n        b"null\\n".to_vec()	api	parity::drafts
+api-trailing-newline	crates/mm-api/src/drafts.rs	        body.push(b'\\n');\n        body\n    };	        body\n    };	api	parity::drafts
+#
+# --- no-op controls: these must SURVIVE ---
+control-rename-binding	crates/mm-api/src/drafts.rs	    let drafts = state\n        .app\n        .get_drafts_for_user(&session.0.user_id, team_id)\n        .await?;\n\n    let body = if drafts.is_empty() {\n        b"null\\n".to_vec()\n    } else {\n        let mut body = serde_json::to_vec(&drafts).map_err(|err| {	    let saved = state\n        .app\n        .get_drafts_for_user(&session.0.user_id, team_id)\n        .await?;\n\n    let body = if saved.is_empty() {\n        b"null\\n".to_vec()\n    } else {\n        let mut body = serde_json::to_vec(&saved).map_err(|err| {	api	parity::drafts
+control-reorder-columns	crates/mm-store/src/draft_store.rs	            SELECT d.createat            AS "create_at!",\n                   d.updateat            AS "update_at!",\n                   d.message             AS "message!",	            SELECT d.updateat            AS "update_at!",\n                   d.createat            AS "create_at!",\n                   d.message             AS "message!",	api	parity::drafts
