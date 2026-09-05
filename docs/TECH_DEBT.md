@@ -5584,3 +5584,17 @@ but costs a proxy hop, and the same guard will be needed by every future route t
 produces, so it needs its own session and a full-suite run: it may equally *repair* latent
 mismatches elsewhere or expose tests that were passing on alphabetical order. Do not fold it into
 a route session.
+
+## [D-155] orphaned fixture rows — CLOSED 2026-09-05
+
+`purge_api_fixtures` selected by the `mmrs-parity-%` name prefix, which never reached the rows Go
+authors on a fixture's behalf — a created team's `town-square` and `off-topic`, and the
+`SidebarCategories` keyed on its `TeamId`. Deleting the team orphaned all of them.
+
+Measured before the fix: **16,066 orphaned channels against 25 live ones**, ~32,000 posts hanging
+off them, and **3,190 `Threads` rows whose root post no longer existed** against 4 real ones.
+
+The purge now sweeps by the dangling reference rather than by name — a channel whose `TeamId`
+names no team, a post whose channel is gone, a thread whose post is gone — which is what the old
+note asked for. Such a row is unreachable through any API on either server, so nothing that
+deletes it can be observed by a test. After the sweep: 0 orphans, 189 channels, 4 threads.

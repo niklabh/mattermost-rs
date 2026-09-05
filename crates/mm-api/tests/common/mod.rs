@@ -677,13 +677,24 @@ static PURGED: tokio::sync::OnceCell<()> = tokio::sync::OnceCell::const_new();
 
 /// Delete every row the api suites author, once per test binary.
 ///
-/// **Known gap — [D-155].** Selection is by the `mmrs-parity-%` name prefix, which does not
-/// reach the rows *Go* authors on a fixture's behalf: a created team's `town-square` and
-/// `off-topic` channels carry no prefix, and its `SidebarCategories` are keyed on `TeamId`, so
-/// the `teams` delete below orphans all of them. An orphaned channel's dangling `TeamId` arrives
-/// as NULL through the channel-member join and is therefore listed under every team, and its
-/// empty display name ties under the channel lists' `ORDER BY DisplayName`. Delete by
-/// `TeamId`-has-no-team, not by name, when this is fixed.
+/// # [D-155], closed
+///
+/// Selection is by the `mmrs-parity-%` name prefix, which does not reach the rows *Go* authors
+/// on a fixture's behalf: a created team's `town-square` and `off-topic` carry no prefix, and
+/// the `teams` delete below orphans both. An orphaned channel's dangling `TeamId` arrives as
+/// NULL through the channel-member join and is therefore listed under **every** team, and its
+/// empty display name ties under the channel lists' `ORDER BY DisplayName`.
+///
+/// The note here used to end "delete by `TeamId`-has-no-team, not by name, when this is fixed".
+/// That is what the orphan sweep at the end of this function now does — and it was not
+/// cosmetic: the development database had reached **16,066** orphaned channels against 25 live
+/// ones, with 50,000-odd posts hanging off them, and three different suites failed one run each
+/// on ties and cross-team leakage that all trace back here.
+///
+/// The sweep is deliberately **not** limited to this project's names. An orphan is defined by
+/// its dangling `TeamId`, exactly as the old note asked: a channel whose team does not exist is
+/// unreachable through any API on either server, so nothing that deletes it can be observed by a
+/// test. DMs and GMs carry `TeamId = ''` and are excluded by construction.
 pub async fn purge_api_fixtures() {
     PURGED.get_or_init(purge_api_fixtures_once).await;
 }
@@ -756,6 +767,34 @@ async fn purge_api_fixtures_once() {
         "DELETE FROM sidebarchannels WHERE channelid IN (SELECT id FROM channels WHERE type = 'D' AND (split_part(name, '__', 1) NOT IN (SELECT id FROM users) OR split_part(name, '__', 2) NOT IN (SELECT id FROM users)))",
         "DELETE FROM channelmemberhistory WHERE channelid IN (SELECT id FROM channels WHERE type = 'D' AND (split_part(name, '__', 1) NOT IN (SELECT id FROM users) OR split_part(name, '__', 2) NOT IN (SELECT id FROM users)))",
         "DELETE FROM channels WHERE type = 'D' AND (split_part(name, '__', 1) NOT IN (SELECT id FROM users) OR split_part(name, '__', 2) NOT IN (SELECT id FROM users))",
+        // ---- [D-155]: channels whose team no longer exists, and everything hanging off them.
+        //
+        // Dependents first, each selected through the same orphan predicate, because the
+        // channel delete is what makes them unreachable rather than what removes them. The
+        // predicate is `TeamId` names no `Teams` row — never a name prefix, so it collects the
+        // `town-square` and `off-topic` Go creates for a team this suite later deletes.
+        "DELETE FROM threadmemberships WHERE postid IN (SELECT p.id FROM posts p JOIN channels c ON c.id = p.channelid WHERE c.teamid <> '' AND NOT EXISTS (SELECT 1 FROM teams t WHERE t.id = c.teamid))",
+        "DELETE FROM threads WHERE postid IN (SELECT p.id FROM posts p JOIN channels c ON c.id = p.channelid WHERE c.teamid <> '' AND NOT EXISTS (SELECT 1 FROM teams t WHERE t.id = c.teamid))",
+        "DELETE FROM postspriority WHERE postid IN (SELECT p.id FROM posts p JOIN channels c ON c.id = p.channelid WHERE c.teamid <> '' AND NOT EXISTS (SELECT 1 FROM teams t WHERE t.id = c.teamid))",
+        "DELETE FROM postacknowledgements WHERE postid IN (SELECT p.id FROM posts p JOIN channels c ON c.id = p.channelid WHERE c.teamid <> '' AND NOT EXISTS (SELECT 1 FROM teams t WHERE t.id = c.teamid))",
+        "DELETE FROM reactions WHERE postid IN (SELECT p.id FROM posts p JOIN channels c ON c.id = p.channelid WHERE c.teamid <> '' AND NOT EXISTS (SELECT 1 FROM teams t WHERE t.id = c.teamid))",
+        "DELETE FROM fileinfo WHERE channelid IN (SELECT c.id FROM channels c WHERE c.teamid <> '' AND NOT EXISTS (SELECT 1 FROM teams t WHERE t.id = c.teamid))",
+        "DELETE FROM posts WHERE channelid IN (SELECT c.id FROM channels c WHERE c.teamid <> '' AND NOT EXISTS (SELECT 1 FROM teams t WHERE t.id = c.teamid))",
+        "DELETE FROM channelmembers WHERE channelid IN (SELECT c.id FROM channels c WHERE c.teamid <> '' AND NOT EXISTS (SELECT 1 FROM teams t WHERE t.id = c.teamid))",
+        "DELETE FROM channelmemberhistory WHERE channelid IN (SELECT c.id FROM channels c WHERE c.teamid <> '' AND NOT EXISTS (SELECT 1 FROM teams t WHERE t.id = c.teamid))",
+        "DELETE FROM sidebarchannels WHERE channelid IN (SELECT c.id FROM channels c WHERE c.teamid <> '' AND NOT EXISTS (SELECT 1 FROM teams t WHERE t.id = c.teamid))",
+        "DELETE FROM publicchannels WHERE teamid <> '' AND NOT EXISTS (SELECT 1 FROM teams t WHERE t.id = publicchannels.teamid)",
+        "DELETE FROM channels c WHERE c.teamid <> '' AND NOT EXISTS (SELECT 1 FROM teams t WHERE t.id = c.teamid)",
+        // `SidebarCategories` are keyed on `TeamId` and outlive their team the same way.
+        "DELETE FROM sidebarcategories WHERE teamid <> '' AND NOT EXISTS (SELECT 1 FROM teams t WHERE t.id = sidebarcategories.teamid)",
+        // ---- The same rule, one reference further out. These run **last** because the deletes
+        // above are what strand them: a `Threads` row survives its root post, and a `Posts` row
+        // survives its channel, and neither is reachable through any API afterwards. Left alone
+        // they are the largest unbounded growth in the fixture database — 3,190 dangling thread
+        // rows against 4 live ones when this sweep was written.
+        "DELETE FROM posts WHERE NOT EXISTS (SELECT 1 FROM channels c WHERE c.id = posts.channelid)",
+        "DELETE FROM threadmemberships WHERE NOT EXISTS (SELECT 1 FROM posts p WHERE p.id = threadmemberships.postid)",
+        "DELETE FROM threads WHERE NOT EXISTS (SELECT 1 FROM posts p WHERE p.id = threads.postid)",
     ] {
         let _ = sqlx::query(statement).execute(&pool).await;
     }

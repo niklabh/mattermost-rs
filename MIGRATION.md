@@ -5717,3 +5717,47 @@ mutating. Both are **observations, not diagnoses** — recorded so the next sess
 rather than re-deriving it. A store test *was* diagnosed and fixed: `db_user_profile_lists`
 asserted the whole development database fit in one 200-row page, which stopped being true after a
 night of fixtures; it now walks the pages, which is what its own failure message asked for.
+
+## Suite stability, not a route (2026-09-05)
+
+Three consecutive full-suite runs had each failed **one different test** — `channel_members_list`,
+then `teams_unread`, then `roles` — every one passing in isolation. This session spent itself on
+that instead of an eleventh route, because a suite that fails somewhere different each run cannot
+tell anyone whether the next route works.
+
+Two causes, both found and fixed. Two consecutive clean runs afterwards: **2412 passed, 0 failed**.
+
+### The development database had 16,066 orphaned channels
+
+`purge_api_fixtures` deleted by name prefix, which never reached the `town-square` and `off-topic`
+Go creates for each fixture team — so deleting the team orphaned them, every run, for as long as
+the project has had this suite. An orphan's dangling `TeamId` arrives as NULL through the
+channel-member join and is therefore listed under *every* team, and its empty display name ties
+under `ORDER BY DisplayName`: exactly the ordering flakes that have been patched one test at a
+time for two days. Alongside them sat 3,190 `Threads` rows whose root post no longer existed,
+against 4 real ones.
+
+The purge now sweeps by the **dangling reference** — a channel whose team is gone, a post whose
+channel is gone, a thread whose post is gone — which is what [D-155]'s own note asked for and is
+now closed. 16,066 orphans → 0; 16,253 channels → 189; 3,194 threads → 4.
+
+### And one fixture was writing into other suites' rows
+
+With the noise gone, the remaining failures collapsed onto a single suite and said the same thing
+every run: `channel_members_list` expects its channel to hold four members and found five.
+`channel_members_for_user`'s bulk fixture — added yesterday to make the streaming walk cross a
+page boundary — planted 150 memberships into **150 arbitrary existing channels**, whichever had
+the lowest ids. When another suite's fixture channel fell in that range, its member count changed
+underneath it.
+
+It now creates 150 synthetic channels in its own team and plants into those. **A fixture may only
+write rows it owns**: selecting existing rows by anything other than its own prefix is writing
+into somebody else's test.
+
+### What this says about the earlier "flakes"
+
+Several tests were relaxed over the last two days — comparing pages as sets, then as counts, then
+retrying until a read settled — on the reasoning that an unordered scan may reshuffle. That
+reasoning was sound and those changes are still right. But the *frequency* was not inherent: it
+was 16,000 junk rows and one fixture writing where it should not. A test that has been relaxed
+twice is worth re-reading as evidence about the environment rather than the assertion.

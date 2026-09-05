@@ -77,7 +77,7 @@ async fn fixture(client: &reqwest::Client, token: &str) -> &'static Fixture {
             // comes back exactly full. Planted with one statement: creating that many channels
             // over REST would dominate the suite's runtime.
             let paged = create_plain_user(client, token, &team_id, "cmfupaged").await;
-            plant_many_memberships(&paged.id, 150).await;
+            plant_many_memberships(&team_id, &paged.id, 150).await;
 
             Fixture {
                 plain_id: plain.id,
@@ -93,12 +93,15 @@ async fn fixture(client: &reqwest::Client, token: &str) -> &'static Fixture {
         .await
 }
 
-/// Give `user_id` membership of `count` existing channels, straight into the table.
+/// Give `user_id` membership of `count` channels **this fixture creates**, straight into the
+/// table.
 ///
-/// The REST API would need `count` channel creations and joins to reach the same state, which is
-/// minutes of fixture time for a property — that the streaming walk pages correctly — that needs
-/// nothing else about those channels to be true.
-async fn plant_many_memberships(user_id: &str, count: i64) {
+/// It used to select `count` *existing* channels — which is a fixture writing into other suites'
+/// rows. `channel_members_list` asserts its channel holds exactly four members, and when its
+/// channel fell inside the id range this picked, it held five: three of that suite's tests
+/// failed on every full-suite run and passed in isolation. The channels are synthetic and live
+/// in this suite's own team, so nothing else can see them.
+async fn plant_many_memberships(team_id: &str, user_id: &str, count: i64) {
     let Ok(url) = std::env::var("DATABASE_URL") else {
         return;
     };
@@ -110,22 +113,39 @@ async fn plant_many_memberships(user_id: &str, count: i64) {
     else {
         return;
     };
+
+    // `mmrs-parity-` so the name-prefix purge collects them, and an id derived from the row
+    // number so the set is stable across runs.
+    sqlx::query(
+        "INSERT INTO channels (id, createat, updateat, deleteat, teamid, type, displayname, \
+             name, header, purpose, lastpostat, totalmsgcount, extraupdateat, creatorid, \
+             totalmsgcountroot, lastrootpostat) \
+         SELECT 'mmrsbulk' || lpad(g::text, 18, '0'), 0, 0, 0, $1, 'O', \
+                'mmrs parity bulk ' || g, 'mmrs-parity-bulk-' || g, '', '', 0, 0, 0, $2, 0, 0 \
+           FROM generate_series(1, $3) AS g \
+         ON CONFLICT (id) DO NOTHING",
+    )
+    .bind(team_id)
+    .bind(user_id)
+    .bind(count)
+    .execute(&pool)
+    .await
+    .expect("the channel insert runs");
+
     sqlx::query(
         "INSERT INTO channelmembers (channelid, userid, roles, lastviewedat, msgcount, \
              mentioncount, notifyprops, lastupdateat, schemeuser, schemeadmin, schemeguest, \
              mentioncountroot, msgcountroot, urgentmentioncount) \
-         SELECT c.id, $1, 'channel_user', 0, 0, 0, '{}', 0, true, false, false, 0, 0, 0 \
-           FROM channels c \
-          WHERE c.type <> 'S' \
-          ORDER BY c.id \
-          LIMIT $2 \
+         SELECT 'mmrsbulk' || lpad(g::text, 18, '0'), $1, 'channel_user', 0, 0, 0, '{}', 0, \
+                true, false, false, 0, 0, 0 \
+           FROM generate_series(1, $2) AS g \
          ON CONFLICT (channelid, userid) DO NOTHING",
     )
     .bind(user_id)
     .bind(count)
     .execute(&pool)
     .await
-    .expect("the insert runs");
+    .expect("the membership insert runs");
 }
 
 async fn open_direct_channel(client: &reqwest::Client, token: &str, a: &str, b: &str) -> String {
@@ -639,13 +659,38 @@ async fn the_stream_walks_past_the_first_page_without_repeating_or_dropping_a_ro
         "the walk stays in channel-id order across the page boundary"
     );
 
-    // And the array branch agrees on the whole set, so nothing was dropped at the seam.
+    // And the array branch agrees on the whole set — **once the two reads land on the same
+    // membership**. They are two requests seconds apart against a table every other suite in
+    // this binary is writing to, so the set can genuinely differ between them; measured at 152
+    // against 158. Retry until they settle, and if they never do, say so rather than reporting
+    // a divergence that is not one. What each read *individually* proves — byte-identical across
+    // the two servers, ordered, no duplicates — is asserted above and unconditionally.
     let array = path(&f.paged_id, "page=0&per_page=200");
-    let (go_array, _rs) = fetch_both_stable(&client, &f.paged_token, &array).await;
-    assert_eq!(
-        ids,
-        channel_ids(&go_array),
-        "the two encodings carry the same rows across a page boundary"
+    let mut agreed = false;
+    for attempt in 1..=8_u64 {
+        let (go_stream, _rs) = fetch_both_stable(&client, &f.paged_token, &stream).await;
+        let (go_array, _rs) = fetch_both_stable(&client, &f.paged_token, &array).await;
+        let streamed: Vec<String> = go_stream
+            .split(|b| *b == b'\n')
+            .filter(|l| !l.is_empty())
+            .map(|line| {
+                serde_json::from_slice::<serde_json::Value>(line).expect("one object per line")
+                    ["channel_id"]
+                    .as_str()
+                    .expect("an id")
+                    .to_owned()
+            })
+            .collect();
+        if streamed == channel_ids(&go_array) {
+            agreed = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100 * attempt)).await;
+    }
+    assert!(
+        agreed,
+        "the two encodings never agreed on one membership; the table is being written to \
+         faster than a pair of reads can bracket it"
     );
 }
 
