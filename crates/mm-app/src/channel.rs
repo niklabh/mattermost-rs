@@ -732,6 +732,61 @@ impl App {
         Ok(channels)
     }
 
+    /// Port of `app.App.SearchChannels` (app/channel.go:3484).
+    ///
+    /// `includeDeleted` is a literal **`true`**, so archived channels are results. The term is
+    /// `strings.TrimSpace`d here and nowhere else — the store's sanitiser trims nothing.
+    ///
+    /// The policy-action hydration Go does after the search is a no-op without the access-control
+    /// service, which lives in the out-of-scope enterprise tree — the same treatment
+    /// `has_permission_to_file_action` gets.
+    #[tracing::instrument(skip_all, fields(team_id = %team_id))]
+    pub async fn search_channels(&self, team_id: &str, term: &str) -> AppResult<ChannelList> {
+        self.store()
+            .channel()
+            .search_in_team(team_id, term.trim())
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "channel search failed");
+                AppError::boxed(
+                    "SearchChannels",
+                    "app.channel.search.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })
+    }
+
+    /// Port of `app.App.SearchChannelsForUser` (app/channel.go:3508).
+    ///
+    /// [`Self::search_channels`] narrowed to the caller's memberships — and still public channels
+    /// only, because the store joins `PublicChannels`. Same `where`? **No**: the error id is
+    /// shared (`app.channel.search.app_error`) but Go's `where` is `SearchChannelsForUser`, and
+    /// `where` is on the wire.
+    #[tracing::instrument(skip_all, fields(team_id = %team_id, user_id = %user_id))]
+    pub async fn search_channels_for_user(
+        &self,
+        user_id: &str,
+        team_id: &str,
+        term: &str,
+    ) -> AppResult<ChannelList> {
+        self.store()
+            .channel()
+            .search_for_user_in_team(user_id, team_id, term.trim())
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "channel search for user failed");
+                AppError::boxed(
+                    "SearchChannelsForUser",
+                    "app.channel.search.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })
+    }
+
     /// Port of `app.App.GetChannelsMemberCount` (app/channel.go:2313).
     ///
     /// Two ids on the store's one error — 404 `…get_channels_member_count.existing.app_error`

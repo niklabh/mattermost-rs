@@ -6177,3 +6177,52 @@ A SQL mutation must keep every bound parameter **used** — replacing `cm.channe
 harness fault that voids the whole run rather than a verdict. Neutralise with `OR TRUE` instead.
 And the seeded-zeros branch was dead until the fixture had a channel with **no members at all**:
 every channel has its creator, so leaving is the only way to produce one.
+
+## `POST /teams/{team_id}/channels/search` — `searchChannelsForTeam` (2026-09-05)
+
+Served. `crates/mm-api/src/channels.rs` (`search_channels_for_team`),
+`crates/mm-app/src/channel.rs` (`search_channels`, `search_channels_for_user`),
+`crates/mm-store/src/channel_store.rs` (`search_in_team`, `search_for_user_in_team`); 10 parity
+tests in `crates/mm-api/tests/parity/channel_search.rs`. The "Browse channels" dialog.
+
+**The one thing a reader would otherwise get wrong: private channels are never results, in either
+branch.** Both store queries select the channel columns from `Channels` but join `PublicChannels`
+— Go's denormalised shadow table — for the team filter, the `ORDER BY` and both halves of the
+search clause. That table holds public channels only, so the second branch is *the public channels
+you are in*, not *your channels*. A port that searched `Channels` directly would leak private
+channels into the browse dialog.
+
+Two more. `includeDeleted` is a literal `true` in both app functions, so the `DeleteAt = 0`
+predicate is never added and **archived channels are results** — that is what the dialog's
+archived tab reads. And a caller who is neither a lister nor a team member gets `GetTeamMember`'s
+**404**, not a 403: Go calls it for the side effect of its error.
+
+Mutation run: **13 run, 11 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/channel-search.plan`). Full suite: 2486 passed, 0 failed.
+
+### The second branch is unreachable, and forcing it exposed the session model
+
+`list_team_channels` is granted by **`team_user`**, which every team membership carries, so a team
+member is always a lister and `SearchChannelsForUser` never runs through this route. Stripping the
+roles behind a live session does not reach it either: **Go's session cache still holds the
+`TeamMembers` it was built with**, so Go stayed on the first branch while this port — reading the
+`Sessions` row alone — fell to the second. That is a state the REST API cannot produce, so the
+test was dropped and `store-membership-subject` came out of the plan with the reason recorded,
+rather than being carried as a survivor. The divergence belongs to the session model, not to this
+route.
+
+### serde builds a struct from a JSON array; Go's decoder refuses one
+
+`[]` deserialized to `ChannelSearch { term: "" }` and answered **200 where Go answers 400**.
+Checking the route shipped one iteration earlier, `POST /emoji/search` had the same hole and was
+worse: `["term", true]` was a **200 on this server and a 400 on Go's**, measured. Both handlers
+now decode to a `serde_json::Value` and match on `Object`, and both suites assert the
+positional-array case.
+
+### And a neighbour's assertion, caught only by the full run
+
+`team_channel_lists` pins *which router claims each `/channels/<literal>` path*, and had `search`
+in its forwarded list. Registering the route flipped it. Asserted the other way rather than
+dropped, which is the idiom that suite already used when `/ids` moved — the second time this
+session that adding a route changed a neighbour's expectations, and the second time only the
+full-workspace run saw it.

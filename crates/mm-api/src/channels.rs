@@ -109,6 +109,150 @@ fn validate_ids(channel_id: &str, user_id: &str) -> Result<(), ApiError> {
     Ok(())
 }
 
+/// The body of `POST /api/v4/teams/{team_id}/channels/search` — `model.ChannelSearch`.
+///
+/// Go's struct carries a dozen fields; **this handler reads only `term`**, so the rest are
+/// decoded and dropped. Modelled as one field for that reason: adding the others would suggest
+/// they do something here.
+#[derive(Debug, Default, serde::Deserialize)]
+struct ChannelSearch {
+    #[serde(default)]
+    term: String,
+}
+
+/// Port of `searchChannelsForTeam` (api4/channel.go:1035) —
+/// `POST /api/v4/teams/{team_id}/channels/search`.
+///
+/// The "Browse channels" dialog.
+///
+/// # Two branches, and the second one can 404
+///
+/// A caller with `list_team_channels` on the team searches **every public channel in it**. A
+/// caller without it must be a team member — `GetTeamMember` is called for the side effect of its
+/// error, so a non-member gets that call's **404**, not a 403 — and then searches only the public
+/// channels they have joined.
+///
+/// # Private channels are never results, in either branch
+///
+/// Both store queries join `PublicChannels`, Go's denormalised shadow table, which holds public
+/// channels only. So the second branch is "the public channels you are in", not "your channels".
+///
+/// # Archived channels *are* results
+///
+/// `includeDeleted` is a literal `true` in both app functions, so the `DeleteAt = 0` predicate is
+/// never added. That is what the dialog's archived tab reads.
+///
+/// # Wire format
+///
+/// `json.NewEncoder(w).Encode(channels)` — a **trailing newline**, and `[]` rather than `null`
+/// for no matches, because `model.ChannelList{}` is allocated. Go's comment says it deliberately
+/// does not fill in channel props.
+#[tracing::instrument(skip_all, fields(team_id = %team_id, listing))]
+pub async fn search_channels_for_team(
+    State(state): State<AppState>,
+    Path(team_id): Path<String>,
+    session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    if let Err(err) = require_id(&team_id, "team_id") {
+        return err.into_response();
+    }
+
+    let bytes = match axum::body::to_bytes(request.into_body(), usize::MAX).await {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            tracing::warn!(error = %err, "could not read the request body");
+            return ApiError::invalid_param("channel_search").into_response();
+        }
+    };
+    // `json.NewDecoder(r.Body).Decode(&props)` into a **pointer**, so a body of `null` decodes
+    // without error and leaves it nil — which `props == nil` then rejects. `Option` reproduces
+    // both halves.
+    //
+    // The value is decoded to a `Value` first, and anything but an object is refused, because
+    // **serde builds a struct from a JSON array positionally** where Go's decoder refuses one:
+    // `[]` would otherwise deserialize to `ChannelSearch { term: "" }` and answer 200 where Go
+    // answers 400. Measured — this test failed before the check existed.
+    let decoded: Option<serde_json::Value> = match mm_model::utils::decode_one_from_json(&bytes) {
+        Ok(decoded) => decoded,
+        Err(err) => {
+            tracing::debug!(error = %err, "channel search body did not decode");
+            return ApiError::invalid_param("channel_search").into_response();
+        }
+    };
+    let props = match decoded {
+        Some(serde_json::Value::Object(map)) => {
+            match serde_json::from_value::<ChannelSearch>(serde_json::Value::Object(map)) {
+                Ok(props) => props,
+                Err(err) => {
+                    tracing::debug!(error = %err, "channel search body has the wrong field types");
+                    return ApiError::invalid_param("channel_search").into_response();
+                }
+            }
+        }
+        _ => return ApiError::invalid_param("channel_search").into_response(),
+    };
+
+    let may_list = state
+        .app
+        .session_has_permission_to_team(
+            &session.0,
+            &team_id,
+            &mm_model::permission::PERMISSION_LIST_TEAM_CHANNELS,
+        )
+        .await;
+    tracing::Span::current().record("listing", may_list);
+
+    let channels = if may_list {
+        state.app.search_channels(&team_id, &props.term).await
+    } else {
+        // Called for its error alone: a caller who is not a team member gets `GetTeamMember`'s
+        // 404 rather than a permission refusal.
+        if let Err(err) = state
+            .app
+            .get_team_member(&team_id, &session.0.user_id)
+            .await
+        {
+            return ApiError::from(err).into_response();
+        }
+        state
+            .app
+            .search_channels_for_user(&session.0.user_id, &team_id, &props.term)
+            .await
+    };
+
+    let channels = match channels {
+        Ok(channels) => channels,
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+
+    let mut body = match serde_json::to_vec(&channels) {
+        Ok(body) => body,
+        Err(err) => {
+            tracing::error!(error = %err, "failed to serialise the channels");
+            return ApiError::from(mm_model::utils::AppError::new(
+                "searchChannelsForTeam",
+                "api.marshal_error",
+                None,
+                String::new(),
+                500,
+            ))
+            .into_response();
+        }
+    };
+    body.push(b'\n');
+
+    (
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
+    )
+        .into_response()
+}
+
 /// Port of `getChannelsMemberCount` (api4/channel.go:1128) —
 /// `POST /api/v4/channels/stats/member_count`.
 ///

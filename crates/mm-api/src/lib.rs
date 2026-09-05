@@ -484,6 +484,12 @@ pub fn router(state: AppState) -> Router {
         )
         // `BaseRoutes.ChannelsForTeam.Handle("/autocomplete")` (api4/channel.go:68) — a literal
         // sibling of `/deleted` and `/private`, one segment deeper than `/teams/{team_id}`.
+        // `BaseRoutes.ChannelsForTeam.Handle("/search")` (api4/channel.go:67) — the browse
+        // dialog.
+        .route(
+            "/api/v4/teams/{team_id}/channels/search",
+            partially_migrated_with_ids(&state, post(channels::search_channels_for_team)),
+        )
         .route(
             "/api/v4/teams/{team_id}/channels/autocomplete",
             partially_migrated_with_ids(&state, get(channels::autocomplete_channels_for_team)),

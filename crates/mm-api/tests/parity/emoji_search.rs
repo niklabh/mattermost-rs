@@ -147,6 +147,10 @@ async fn every_bad_body_is_the_same_400() {
     for raw in [
         &b"not json"[..],
         &b"[]"[..],
+        // **A positional array.** serde would build the struct from it field by field and
+        // search; Go's decoder refuses a non-object outright. This route shipped without the
+        // check and answered 200 here for one iteration.
+        &br#"["zzzmiddle", true]"#[..],
         &b"{\"term\":1}"[..],
         // Decodes to the zero value, so it lands on the empty-term branch — same answer.
         &b"null"[..],

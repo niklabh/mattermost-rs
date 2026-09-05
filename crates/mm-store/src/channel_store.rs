@@ -237,6 +237,21 @@ pub trait ChannelStore {
         is_guest: bool,
     ) -> impl std::future::Future<Output = Result<ChannelList, StoreError>> + Send;
 
+    /// Port of `SqlChannelStore.SearchInTeam` (channel_store.go:3598).
+    fn search_in_team(
+        &self,
+        team_id: &str,
+        term: &str,
+    ) -> impl std::future::Future<Output = Result<ChannelList, StoreError>> + Send;
+
+    /// Port of `SqlChannelStore.SearchForUserInTeam` (channel_store.go:3620).
+    fn search_for_user_in_team(
+        &self,
+        user_id: &str,
+        team_id: &str,
+        term: &str,
+    ) -> impl std::future::Future<Output = Result<ChannelList, StoreError>> + Send;
+
     /// Port of `SqlChannelStore.GetChannelsMemberCount` (channel_store.go:2573).
     fn get_channels_member_count(
         &self,
@@ -420,6 +435,21 @@ impl ChannelStore for SqlChannelStore {
     #[tracing::instrument(skip_all, fields(asked = ids.len(), found))]
     async fn get_many(&self, ids: &[String]) -> Result<Vec<Channel>, StoreError> {
         get_many(&self.pool, ids).await
+    }
+
+    #[tracing::instrument(skip_all, fields(team_id = %team_id, found))]
+    async fn search_in_team(&self, team_id: &str, term: &str) -> Result<ChannelList, StoreError> {
+        search_in_team(&self.pool, team_id, term).await
+    }
+
+    #[tracing::instrument(skip_all, fields(team_id = %team_id, user_id = %user_id, found))]
+    async fn search_for_user_in_team(
+        &self,
+        user_id: &str,
+        team_id: &str,
+        term: &str,
+    ) -> Result<ChannelList, StoreError> {
+        search_for_user_in_team(&self.pool, user_id, team_id, term).await
     }
 
     #[tracing::instrument(skip_all, fields(asked = ids.len(), counted))]
@@ -1402,6 +1432,209 @@ pub async fn get(pool: &PgPool, id: &str) -> Result<Channel, StoreError> {
 ///
 /// `allowFromCache` is dropped, as everywhere else in this port — there is no cache layer to
 /// consult, and a parameter no caller can act on is a lie at the call site.
+/// Port of `SqlChannelStore.SearchInTeam` (channel_store.go:3598) — every **public** channel in
+/// a team matching the term.
+///
+/// # The search reads `PublicChannels`, not `Channels`
+///
+/// Go selects the channel columns from `Channels` and joins `PublicChannels c` for everything
+/// else: the team filter, the `ORDER BY`, and both halves of the search clause all read `c`.
+/// That shadow table holds only public channels, so **a private channel is never a result** —
+/// of this query or of [`search_for_user_in_team`], which joins it too. A port that searched
+/// `Channels` directly would leak private channels into the browse dialog.
+///
+/// # `includeDeleted` is a constant `true` here
+///
+/// `App::search_channels` passes it literally (app/channel.go:3485), so the `DeleteAt = 0`
+/// predicate Go would add is never added: **archived channels are results**. That is what the
+/// browse dialog's "archived channels" tab reads.
+///
+/// # The clause is present or absent, never empty
+///
+/// The same rule [`autocomplete_in_team`] documents: `searchClause` returns nil when
+/// [`sanitize_search_term`] yields the empty string, and a nil clause is *omitted*. `$2` is that
+/// presence bit; when it is false both arms are short-circuited and the whole (ordered, limited)
+/// list comes back.
+pub async fn search_in_team(
+    pool: &PgPool,
+    team_id: &str,
+    term: &str,
+) -> Result<ChannelList, StoreError> {
+    let sanitized = sanitize_search_term(term);
+    let has_search = !sanitized.is_empty();
+    let like_term = if has_search {
+        wildcard_search_term(&sanitized)
+    } else {
+        String::new()
+    };
+    let fulltext_term = build_fulltext_term(term);
+    let text_config = default_text_search_config(pool).await?;
+
+    let rows = sqlx::query_as!(
+        ChannelRow,
+        r#"
+        SELECT
+                   ch.id AS "id!",
+                   ch.createat,
+                   ch.updateat,
+                   ch.deleteat,
+                   ch.teamid,
+                   ch.type::text AS "channel_type!",
+                   ch.displayname,
+                   ch.name,
+                   ch.header,
+                   ch.purpose,
+                   ch.lastpostat,
+                   ch.totalmsgcount,
+                   ch.extraupdateat,
+                   ch.creatorid,
+                   ch.schemeid,
+                   ch.groupconstrained,
+                   ch.autotranslation AS "autotranslation!",
+                   ch.shared,
+                   ch.totalmsgcountroot,
+                   ch.lastrootpostat,
+                   ch.bannerinfo,
+                   ch.defaultcategoryname AS "defaultcategoryname!",
+                   ch.discoverable AS "discoverable!",
+                   EXISTS (
+                       SELECT 1 FROM accesscontrolpolicies acp
+                        WHERE acp.id = ch.id AND acp.type = 'channel'
+                   ) AS "policy_enforced!",
+                   COALESCE((
+                       SELECT acp.active FROM accesscontrolpolicies acp
+                        WHERE acp.id = ch.id AND acp.type = 'channel' AND acp.active = TRUE
+                        LIMIT 1
+                   ), false) AS "policy_is_active!"
+           FROM channels ch
+           JOIN publicchannels c ON c.id = ch.id
+          WHERE c.teamid = $1
+            AND (NOT $2
+                 OR LOWER(c.name) LIKE LOWER($3) ESCAPE '*'
+                 OR LOWER(c.displayname) LIKE LOWER($3) ESCAPE '*'
+                 OR LOWER(c.purpose) LIKE LOWER($3) ESCAPE '*'
+                 OR to_tsvector($5::text::regconfig,
+                                c.name || ' ' || c.displayname || ' ' || c.purpose)
+                    @@ to_tsquery($5::text::regconfig, $4))
+          ORDER BY c.displayname
+          LIMIT 100
+        "#,
+        team_id,
+        has_search,
+        like_term,
+        fulltext_term,
+        text_config,
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: "failed to find Channels".to_owned(),
+        source,
+    })?;
+
+    tracing::Span::current().record("found", rows.len());
+    let channels: Vec<_> = rows
+        .into_iter()
+        .map(channel_from_row)
+        .collect::<Result<_, _>>()?;
+    Ok(ChannelList(channels))
+}
+
+/// Port of `SqlChannelStore.SearchForUserInTeam` (channel_store.go:3620) — [`search_in_team`]
+/// narrowed to the channels the caller is a member of.
+///
+/// The extra join is `ChannelMembers`, and it is on the **PublicChannels** id, so this is still
+/// public channels only — a private channel the caller is in is not a result. See
+/// [`search_in_team`] for the rest.
+pub async fn search_for_user_in_team(
+    pool: &PgPool,
+    user_id: &str,
+    team_id: &str,
+    term: &str,
+) -> Result<ChannelList, StoreError> {
+    let sanitized = sanitize_search_term(term);
+    let has_search = !sanitized.is_empty();
+    let like_term = if has_search {
+        wildcard_search_term(&sanitized)
+    } else {
+        String::new()
+    };
+    let fulltext_term = build_fulltext_term(term);
+    let text_config = default_text_search_config(pool).await?;
+
+    let rows = sqlx::query_as!(
+        ChannelRow,
+        r#"
+        SELECT
+                   ch.id AS "id!",
+                   ch.createat,
+                   ch.updateat,
+                   ch.deleteat,
+                   ch.teamid,
+                   ch.type::text AS "channel_type!",
+                   ch.displayname,
+                   ch.name,
+                   ch.header,
+                   ch.purpose,
+                   ch.lastpostat,
+                   ch.totalmsgcount,
+                   ch.extraupdateat,
+                   ch.creatorid,
+                   ch.schemeid,
+                   ch.groupconstrained,
+                   ch.autotranslation AS "autotranslation!",
+                   ch.shared,
+                   ch.totalmsgcountroot,
+                   ch.lastrootpostat,
+                   ch.bannerinfo,
+                   ch.defaultcategoryname AS "defaultcategoryname!",
+                   ch.discoverable AS "discoverable!",
+                   EXISTS (
+                       SELECT 1 FROM accesscontrolpolicies acp
+                        WHERE acp.id = ch.id AND acp.type = 'channel'
+                   ) AS "policy_enforced!",
+                   COALESCE((
+                       SELECT acp.active FROM accesscontrolpolicies acp
+                        WHERE acp.id = ch.id AND acp.type = 'channel' AND acp.active = TRUE
+                        LIMIT 1
+                   ), false) AS "policy_is_active!"
+           FROM channels ch
+           JOIN publicchannels c ON c.id = ch.id
+           JOIN channelmembers cm ON cm.channelid = c.id
+          WHERE c.teamid = $1
+            AND cm.userid = $2
+            AND (NOT $3
+                 OR LOWER(c.name) LIKE LOWER($4) ESCAPE '*'
+                 OR LOWER(c.displayname) LIKE LOWER($4) ESCAPE '*'
+                 OR LOWER(c.purpose) LIKE LOWER($4) ESCAPE '*'
+                 OR to_tsvector($6::text::regconfig,
+                                c.name || ' ' || c.displayname || ' ' || c.purpose)
+                    @@ to_tsquery($6::text::regconfig, $5))
+          ORDER BY c.displayname
+          LIMIT 100
+        "#,
+        team_id,
+        user_id,
+        has_search,
+        like_term,
+        fulltext_term,
+        text_config,
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: "failed to find Channels".to_owned(),
+        source,
+    })?;
+
+    tracing::Span::current().record("found", rows.len());
+    let channels: Vec<_> = rows
+        .into_iter()
+        .map(channel_from_row)
+        .collect::<Result<_, _>>()?;
+    Ok(ChannelList(channels))
+}
+
 #[tracing::instrument(skip(pool, ids), fields(asked = ids.len(), found))]
 /// Port of `SqlChannelStore.GetChannelsMemberCount` (channel_store.go:2573).
 ///
