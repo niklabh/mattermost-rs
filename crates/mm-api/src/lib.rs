@@ -203,6 +203,12 @@ pub fn router(state: AppState) -> Router {
         // handler's own `RequireUserId` would otherwise have to answer for.
         // `BaseRoutes.User.Handle("/channel_members")` (api4/user.go:107) — one segment deeper
         // than `/users/{user_id}`, so it shadows nothing.
+        // `BaseRoutes.ThreadsForUser` (api4/api.go) — `/users/{id}/teams/{id}/threads`, three
+        // segments deeper than `/users/{user_id}` and a sibling of the team channel lists.
+        .route(
+            "/api/v4/users/{user_id}/teams/{team_id}/threads",
+            partially_migrated_with_ids(&state, get(users::get_threads_for_user)),
+        )
         .route(
             "/api/v4/users/{user_id}/channel_members",
             partially_migrated_with_ids(&state, get(users::get_channel_members_for_user)),

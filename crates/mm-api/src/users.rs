@@ -13,12 +13,13 @@ use mm_model::permission::{
     PERMISSION_EDIT_OTHER_USERS, PERMISSION_MANAGE_SYSTEM, PERMISSION_READ_CHANNEL,
     PERMISSION_VIEW_MEMBERS, PERMISSION_VIEW_TEAM, make_permission_error,
 };
+use mm_model::post::POST_PROPS_ATTACHMENTS;
 use mm_model::user::User;
 use mm_model::utils::{AppError, PAYLOAD_PARSE_ERROR, is_valid_id, sorted_array_from_json};
 
 use crate::AppState;
 use crate::auth::AuthenticatedSession;
-use crate::channels::{parse_page, parse_per_page, query_first};
+use crate::channels::{parse_page, parse_per_page, query_first, query_flag_is_true};
 use crate::error::ApiError;
 
 /// `model.HeaderEtagServer`.
@@ -2222,6 +2223,183 @@ fn group_channels_parse_error() -> ApiError {
         None,
         String::new(),
         400,
+    ))
+}
+
+/// The query parameters `getThreadsForUser` accepts that this port does **not** serve.
+///
+/// Each one changes the store query in a way that needs its own fixture to verify — a cursor, a
+/// `Since` window, an unread-only filter, the deleted variant, or one of the two "only" modes —
+/// and a port that guessed at any of them would be wrong invisibly. A request carrying one is
+/// handed to Go, which is the same mechanism `getPost` uses for a post it cannot reproduce.
+///
+/// `extended`, `per_page` and `page` are served; `page` because Go ignores it on this route.
+const THREADS_FORWARDED_PARAMS: &[&str] = &[
+    "since",
+    "before",
+    "after",
+    "unread",
+    "deleted",
+    "totalsOnly",
+    "threadsOnly",
+    "excludeDirect",
+];
+
+/// Port of `getThreadsForUser` (api4/user.go:3976), reached as
+/// `GET /api/v4/users/{user_id}/teams/{team_id}/threads` — the Threads view.
+///
+/// # Two gates, in Go's order
+///
+/// `SessionHasPermissionToUser` naming `edit_other_users`, then `SessionHasPermissionToTeam`
+/// naming `view_team`. Both answer the same 403 over HTTP.
+///
+/// # What is served, and what is handed upstream
+///
+/// The default request — the one the Threads view makes on load — plus `?extended`. Every other
+/// parameter in [`THREADS_FORWARDED_PARAMS`] forwards, because each rewrites the store query and
+/// deserves a fixture of its own before it is claimed. The two mutually-exclusive checks Go makes
+/// (`before` with `after`, `totalsOnly` with `threadsOnly`) live entirely inside that forwarded
+/// space, so this handler never has to make them.
+///
+/// # `page` is read and thrown away
+///
+/// `c.Params.Page` is parsed like every other route's and then never used: this route paginates
+/// by cursor, not offset. So `?page=7` is not an error and not a page — it is nothing.
+///
+/// # Wire format
+///
+/// `json.NewEncoder(w).Encode(threads)` — trailing newline. `participants` is a list of `User`
+/// carrying **only `id`** unless `?extended=true`, and the counters beside the list are computed
+/// by four separate queries, so `total` is not `threads.len()`.
+#[tracing::instrument(skip_all, fields(user_id = %user_id, team_id = %team_id, forwarded))]
+pub async fn get_threads_for_user(
+    State(state): State<AppState>,
+    Path((user_id, team_id)): Path<(String, String)>,
+    session: AuthenticatedSession,
+    request: axum::extract::Request,
+) -> Response {
+    let query = request.uri().query().map(str::to_owned);
+
+    if THREADS_FORWARDED_PARAMS
+        .iter()
+        .any(|name| query_first(query.as_deref(), name).is_some())
+    {
+        tracing::Span::current().record("forwarded", true);
+        return crate::proxy::forward_to_go(State(state), request).await;
+    }
+    tracing::Span::current().record("forwarded", false);
+
+    match serve_threads(&state, &user_id, &team_id, &session, query.as_deref()).await {
+        Ok(Outcome::Served(response)) => response,
+        Ok(Outcome::Forward) => {
+            tracing::Span::current().record("forwarded", true);
+            crate::proxy::forward_to_go(State(state), request).await
+        }
+        Err(err) => err.into_response(),
+    }
+}
+
+/// What [`get_threads_for_user`] decided, before any of it is written.
+enum Outcome {
+    Served(Response),
+    /// The Go server has to answer this one — see the `attachments` note inside.
+    Forward,
+}
+
+async fn serve_threads(
+    state: &AppState,
+    user_id: &str,
+    team_id: &str,
+    session: &AuthenticatedSession,
+    query: Option<&str>,
+) -> Result<Outcome, ApiError> {
+    // `c.RequireUserId().RequireTeamId()` — user first.
+    if !is_valid_id(user_id) {
+        return Err(ApiError::invalid_url_param("user_id"));
+    }
+    if !is_valid_id(team_id) {
+        return Err(ApiError::invalid_url_param("team_id"));
+    }
+
+    if !state
+        .app
+        .session_has_permission_to_user(&session.0, user_id)
+        .await
+    {
+        return Err(ApiError::from(make_permission_error(
+            &session.0,
+            &[&PERMISSION_EDIT_OTHER_USERS],
+        )));
+    }
+    if !state
+        .app
+        .session_has_permission_to_team(&session.0, team_id, &PERMISSION_VIEW_TEAM)
+        .await
+    {
+        return Err(ApiError::from(make_permission_error(
+            &session.0,
+            &[&PERMISSION_VIEW_TEAM],
+        )));
+    }
+
+    let extended = query_flag_is_true(query, "extended");
+    let per_page = parse_per_page(query);
+
+    let mut threads = state
+        .app
+        .get_threads_for_user(user_id, team_id, per_page, extended)
+        .await?;
+
+    // **A root post carrying `attachments` is forwarded, page and all.**
+    //
+    // `StripActionIntegrations` rewrites that prop by re-marshalling the decoded
+    // `SlackAttachment` slice. Go's `encoding/json` emits a struct's fields in declaration
+    // order; `serde_json::Value` sorts them, because this workspace does not enable
+    // `preserve_order`. The two bodies then differ by key order inside `props.attachments` and
+    // by nothing else — measured, and the reason this route refuses rather than serves. See
+    // `docs/TECH_DEBT.md`.
+    //
+    // Every other route that meets this prop forwards for a different reason
+    // (`mm_app::post::REFUSED_PROPS`), so nothing has needed the ordering until now.
+    if threads
+        .threads
+        .iter()
+        .flatten()
+        .filter_map(|thread| thread.post.as_ref())
+        .any(|post| {
+            post.props
+                .as_ref()
+                .is_some_and(|props| props.contains_key(POST_PROPS_ATTACHMENTS))
+        })
+    {
+        return Ok(Outcome::Forward);
+    }
+
+    // `sanitizeProfiles(thread.Participants, false)` — the literal `false`, so participants are
+    // sanitised as a non-admin even when a system admin is asking. See the app layer.
+    let options = sanitize_options(state.show_full_name, state.show_email_address, false);
+    for thread in threads.threads.iter_mut().flatten() {
+        for participant in thread.participants.iter_mut().flatten() {
+            participant.sanitize_profile(&options, false);
+        }
+    }
+
+    let mut body = serde_json::to_vec(&threads).map_err(|err| {
+        tracing::error!(error = %err, "failed to serialise the threads");
+        marshal_error("getThreadsForUser")
+    })?;
+    body.push(b'\n');
+
+    Ok(Outcome::Served(
+        (
+            StatusCode::OK,
+            [
+                ("Content-Type", "application/json"),
+                ("x-mmrs-served-by", "rust"),
+            ],
+            body,
+        )
+            .into_response(),
     ))
 }
 

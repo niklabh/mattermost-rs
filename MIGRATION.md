@@ -5652,3 +5652,68 @@ thread store, no thread app layer. It needs `model.Thread`/`ThreadResponse`, fiv
 (`GetThreadsForUser` plus four counters that Go runs concurrently), participant hydration, and a
 fixture that builds threads, replies, memberships and unread state. That is a session's whole
 budget and then some, and it should start cold rather than be tacked onto the end of another.
+
+## `GET /users/{user_id}/teams/{team_id}/threads` — `getThreadsForUser` (2026-09-05)
+
+Served, for the default option set plus `?extended`. `crates/mm-api/src/users.rs`
+(`get_threads_for_user`, `serve_threads`), `crates/mm-app/src/thread.rs` (new),
+`crates/mm-store/src/thread_store.rs` (new — five queries); 16 parity tests in
+`crates/mm-api/tests/parity/threads_for_user.rs`. The Threads view, and the first route to reach
+`mm-model`'s `thread.rs`, which was ported long ago with nothing behind it.
+
+**The one thing a reader would otherwise get wrong: participants are id-only stubs.** Without
+`?extended=true` each is a `User` with every field but `id` at Go's zero value — so the wire shows
+`"username": ""` rather than omitting it. And the embedded post carries **no computed fields**:
+`reply_count` is `0` and `participants` is `null` on it however many replies the thread has,
+because this query has no reply-count subquery. The thread's own `reply_count` beside it is the
+real number. Both measured.
+
+### What is forwarded, and why that is the honest shape
+
+`since`, `before`, `after`, `unread`, `deleted`, `totalsOnly`, `threadsOnly` and `excludeDirect`
+each rewrite the store query, and each is handed to Go rather than guessed at — the list is a
+constant, and a parity test asserts every one of them forwards, so adding one to the handler
+without a fixture fails the suite. A page whose root post carries an `attachments` prop is
+forwarded too, for a reason that is not about threads at all: see **[D-166]**.
+
+Two divergences worth naming. Go runs the four counters and the list **concurrently** with an
+`errgroup`; this runs them in sequence, which is a latency decision and not a wire one. And
+`sanitizeThreadResponse` sanitises participants as a **non-admin** whoever asks — the literal
+`false`, not `IsSystemAdmin()` — which is the opposite of every other route that hydrates users.
+
+Mutation run: **23 run, 21 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/threads-for-user.plan`).
+
+### Seven survivors, one shape
+
+Every one was a branch the fixture never reached: no thread carried a `PostsPriority` row, so the
+urgency `CASE`, the urgent-mentions counter *and* the config flag that gates both were all dead at
+once; none had `Following = false`; none had `LastViewed` exactly equal to `LastReplyAt`, which is
+what the strict `<` in the unread counter turns on; none had a deleted reply; and the post
+sanitiser had nothing to sanitise, because `createPost` strips `force_notification` on the way in
+just as `SanitizeProps` strips it on the way out. A second actor now carries the first four, a
+third carries the attachments post — alone, because forwarding is per page — and the notification
+prop is planted straight into the table.
+
+**The rule this session adds:** a column-driven branch — a priority row, a boolean flag, an
+exact-equality boundary — is dead code until a fixture row carries that value. It is the sibling
+of "a loop needs a fixture that crosses a page boundary" and "a filter needs a fixture it
+excludes".
+
+### One thing I broke and repaired
+
+`crates/mm-model/src/thread.rs` was **already ported**, and I wrote a new one over it before
+checking; `git checkout` restored it, and the original is better than what I wrote (its
+`participants` is `Option<StringArray>`, which distinguishes Go's nil from an empty array). Check
+for the file before creating it — `mm-model` holds many types with no route behind them yet.
+
+### Three different flaky tests in three full-suite runs
+
+`channel_members_list` (fixed earlier today), then `teams_unread`, then `roles` — each passing in
+isolation, each a cross-suite artefact of concurrent fixtures rather than anything about the route
+under test. `teams_unread`'s bracketing helper is already as good as the pattern gets and still
+lost to three teams being created beside it; `roles` compares a scheme role another suite is
+mutating. Both are **observations, not diagnoses** — recorded so the next session sees the shape
+rather than re-deriving it. A store test *was* diagnosed and fixed: `db_user_profile_lists`
+asserted the whole development database fit in one 200-row page, which stopped being true after a
+night of fixtures; it now walks the pages, which is what its own failure message asked for.

@@ -418,6 +418,32 @@ async fn not_in_team_lists_the_left_member_and_never_the_current_ones() {
     purge(&pool).await;
 }
 
+/// Every page of `GetAllProfiles`, concatenated.
+///
+/// Each page is `ORDER BY Username ASC` over the same offset, so the concatenation is ordered
+/// too — which is what the ordering assertion below reads. The page size is deliberately large:
+/// this walks a development database, not a paging contract, and the paging itself is pinned by
+/// `parity/users_list.rs`.
+async fn all_profiles_pages(
+    store: &SqlUserStore,
+    deleted: Option<bool>,
+) -> Vec<mm_model::user::User> {
+    const PER_PAGE: i64 = 200;
+    let mut all = Vec::new();
+    for page in 0..50 {
+        let mut chunk = store
+            .get_all_profiles(page, PER_PAGE, deleted)
+            .await
+            .expect("query runs");
+        let short = (chunk.len() as i64) < PER_PAGE;
+        all.append(&mut chunk);
+        if short {
+            return all;
+        }
+    }
+    panic!("more than fifty pages of users; the development database needs a purge");
+}
+
 #[tokio::test]
 async fn all_profiles_is_username_ordered_and_carries_the_active_filter() {
     if !db_enabled() {
@@ -429,16 +455,12 @@ async fn all_profiles_is_username_ordered_and_carries_the_active_filter() {
     seed(&pool).await;
     let store = SqlUserStore::new(pool.clone());
 
-    let all = store
-        .get_all_profiles(0, 200, None)
-        .await
-        .expect("query runs");
-    assert!(
-        all.len() < 200,
-        "the development database has grown past one page; this assertion needs a smaller \
-         database or a keyset walk ({} users)",
-        all.len()
-    );
+    // **Walked, not assumed to fit.** This used to ask for one 200-row page and assert the whole
+    // development database was smaller than that — which held until a night of fixture runs put
+    // more than two hundred users in it, and then failed with a message telling its reader to do
+    // exactly this. The fixture's own six users can sit on any page; `ours` filters them out of
+    // whatever comes back.
+    let all = all_profiles_pages(&store, None).await;
     assert_eq!(
         ours(&all),
         vec![
@@ -456,16 +478,10 @@ async fn all_profiles_is_username_ordered_and_carries_the_active_filter() {
     sorted.sort_unstable();
     assert_eq!(names, sorted, "ORDER BY Users.Username ASC");
 
-    let gone = store
-        .get_all_profiles(0, 200, Some(true))
-        .await
-        .expect("query runs");
+    let gone = all_profiles_pages(&store, Some(true)).await;
     assert_eq!(ours(&gone), vec!["mmrsulist-dan", "mmrsulist-mid"]);
 
-    let live = store
-        .get_all_profiles(0, 200, Some(false))
-        .await
-        .expect("query runs");
+    let live = all_profiles_pages(&store, Some(false)).await;
     assert_eq!(
         ours(&live),
         vec![

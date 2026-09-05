@@ -5562,3 +5562,25 @@ green in isolation, and neither of the two suites added that day ever among them
 
 **Where the pin lives:** the comments at the two renamed `create_team` call sites, and the
 `ATTEMPTS` constant in `crates/mm-api/tests/common/mod.rs`.
+
+## [D-166] `serde_json` sorts object keys where Go emits struct order — OPEN
+
+**Owner:** unassigned. **Blocks:** serving any route whose response embeds a post carrying an
+`attachments` prop.
+
+`Post::strip_action_integrations` rewrites `props.attachments` by re-marshalling the decoded
+`SlackAttachment` slice — the same thing Go does. Go's `encoding/json` emits a struct's fields in
+**declaration order** (`id, fallback, color, pretext, author_name, …`); `serde_json::Value` is
+backed by a `BTreeMap` and emits them **alphabetically**. The two bodies then differ by key order
+inside `props.attachments` and by nothing else.
+
+Nothing noticed until `getThreadsForUser`, because every earlier route that meets this prop
+forwards for a different reason (`mm_app::post::REFUSED_PROPS`). That route now forwards a whole
+page when any root post carries the prop — see `mm_api::users::serve_threads` — which is correct
+but costs a proxy hop, and the same guard will be needed by every future route that embeds a post.
+
+**The fix is one Cargo feature**, `serde_json/preserve_order`, which swaps the map for an
+`IndexMap` and keeps insertion order. It is a workspace-wide change to every `Value` this port
+produces, so it needs its own session and a full-suite run: it may equally *repair* latent
+mismatches elsewhere or expose tests that were passing on alphabetical order. Do not fold it into
+a route session.
