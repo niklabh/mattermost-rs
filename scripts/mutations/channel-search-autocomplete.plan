@@ -1,0 +1,46 @@
+# Mutation plan for GET /teams/{team_id}/channels/search_autocomplete
+# (autocompleteChannelsForTeamForSearch).
+#
+#   scripts/mutate-batch.sh scripts/mutations/channel-search-autocomplete.plan
+#
+# Tab-separated: name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter.  `\n` becomes a newline.
+#
+# channel_store.rs now holds two autocomplete queries over the same columns. This one is the
+# only one with a `UNION`, with `channelmembers cm` in the base query, and with an `otherusers`
+# join — every anchor below reaches for one of those.
+#
+# The three term helpers are shared with `/autocomplete` and are already mutated by
+# scripts/mutations/channel-autocomplete.plan; they are not repeated here.
+#
+# Three survivors from the first run were fixture gaps, and one was a weak mutation:
+#   - `store-membership-join` as a LEFT JOIN plus `IS NULL` is **inert** — every channel has its
+#     creator as a member, so the NULL row it looks for never exists. Dropping the predicate is
+#     the mutation that means something.
+#   - the `LIKE` and full-text branches both survived because every fixture's name and display
+#     name said the same words. `mmrs-parity-sadisp` is now displayed as `Zephyrine Quokka`, and
+#     the suite asks for a mid-word fragment (LIKE only) and the two words reversed (tsquery
+#     only).
+#   - `app-trim` survived against a padded term the full-text half could still match; it is a
+#     padded *mid-word* term now.
+#
+# The last two lines are the no-op controls and must SURVIVE.
+store-membership-join	crates/mm-store/src/channel_store.rs	            AND cm.userid = $2\n            AND c.type IN ('O', 'P', 'D', 'G')\n            AND (NOT $3	            AND cm.userid = cm.userid\n            AND c.type IN ('O', 'P', 'D', 'G')\n            AND (NOT $3	api	channel_search_autocomplete
+store-team-predicate	crates/mm-store/src/channel_store.rs	          WHERE (c.teamid = $1 OR (c.teamid = '' AND c.type = 'G'))\n            AND cm.userid = $2\n            AND c.type IN ('O', 'P', 'D', 'G')\n            AND (NOT $3	          WHERE (c.teamid = c.teamid OR (c.teamid = '' AND c.type = 'G'))\n            AND cm.userid = $2\n            AND c.type IN ('O', 'P', 'D', 'G')\n            AND (NOT $3	api	channel_search_autocomplete
+store-group-message-arm	crates/mm-store/src/channel_store.rs	          WHERE (c.teamid = $1 OR (c.teamid = '' AND c.type = 'G'))\n            AND cm.userid = $2\n            AND c.type IN ('O', 'P', 'D', 'G')\n            AND (NOT $3	          WHERE (c.teamid = $1 OR (c.teamid = '' AND c.type = 'D'))\n            AND cm.userid = $2\n            AND c.type IN ('O', 'P', 'D', 'G')\n            AND (NOT $3	api	channel_search_autocomplete
+store-union-like-branch	crates/mm-store/src/channel_store.rs	            AND (NOT $3\n                 OR LOWER(c.name) LIKE LOWER($4) ESCAPE '*'\n                 OR LOWER(c.displayname) LIKE LOWER($4) ESCAPE '*'\n                 OR LOWER(c.purpose) LIKE LOWER($4) ESCAPE '*')	            AND (NOT $3\n                 OR LOWER(c.name) LIKE LOWER($4) ESCAPE '*')	api	channel_search_autocomplete
+store-union-fulltext-branch	crates/mm-store/src/channel_store.rs	            AND $3\n            AND to_tsvector($6::text::regconfig,\n                            c.name || ' ' || c.displayname || ' ' || c.purpose)\n                @@ to_tsquery($6::text::regconfig, $5)	            AND $3\n            AND to_tsvector($6::text::regconfig, '')\n                @@ to_tsquery($6::text::regconfig, $5)	api	channel_search_autocomplete
+store-outer-limit	crates/mm-store/src/channel_store.rs	          LIMIT 50)\n        LIMIT 50\n        "#,	          LIMIT 50)\n        LIMIT 2\n        "#,	api	channel_search_autocomplete
+store-dm-display-name	crates/mm-store/src/channel_store.rs	               otherusers.username AS "displayname?",	               c.displayname,	api	channel_search_autocomplete
+store-dm-other-user	crates/mm-store/src/channel_store.rs	                      WHERE iu.id <> $1\n	                      WHERE iu.id = $1\n	api	channel_search_autocomplete
+store-dm-term-columns	crates/mm-store/src/channel_store.rs	                        AND (NOT $2\n                             OR LOWER(iu.username) LIKE LOWER($3) ESCAPE '*'\n                             OR LOWER(iu.nickname) LIKE LOWER($3) ESCAPE '*')	                        AND (NOT $2\n                             OR LOWER(iu.id) LIKE LOWER($3) ESCAPE '*')	api	channel_search_autocomplete
+store-dm-pass-dropped	crates/mm-store/src/channel_store.rs	    channels.extend(\n        autocomplete_in_team_for_search_direct_messages(pool, user_id, has_search, &like_term)\n            .await?,\n    );	    let _ = autocomplete_in_team_for_search_direct_messages(pool, user_id, has_search, &like_term)\n        .await?;	api	channel_search_autocomplete
+store-dm-type	crates/mm-store/src/channel_store.rs	         WHERE c.type = 'D'\n           AND cm.userid = $1	         WHERE c.type = 'G'\n           AND cm.userid = $1	api	channel_search_autocomplete
+store-merge-sort-dropped	crates/mm-store/src/channel_store.rs	    channels.sort_by(|a, b| {\n        mm_model::utils::go_to_lower(&a.display_name)\n            .cmp(&mm_model::utils::go_to_lower(&b.display_name))\n    });	    let _ = &mut channels;	api	channel_search_autocomplete
+app-trim	crates/mm-app/src/channel.rs	        let term = term.trim();\n\n        let channels = self\n            .store()\n            .channel()\n            .autocomplete_in_team_for_search(	        let term = term;\n\n        let channels = self\n            .store()\n            .channel()\n            .autocomplete_in_team_for_search(	api	channel_search_autocomplete
+api-session-user	crates/mm-api/src/channels.rs	.autocomplete_channels_for_search(&team_id, &session.0.user_id, &name)	.autocomplete_channels_for_search(&team_id, &team_id, &name)	api	channel_search_autocomplete
+api-require-team-id	crates/mm-api/src/channels.rs	    require_id(&team_id, "team_id")?;\n\n    let name = query_first(query.as_deref(), "name").unwrap_or_default();\n\n    let channels = state\n        .app\n        .autocomplete_channels_for_search(	    let _ = &team_id;\n\n    let name = query_first(query.as_deref(), "name").unwrap_or_default();\n\n    let channels = state\n        .app\n        .autocomplete_channels_for_search(	api	channel_search_autocomplete
+api-query-parameter	crates/mm-api/src/channels.rs	    let name = query_first(query.as_deref(), "name").unwrap_or_default();\n\n    let channels = state\n        .app\n        .autocomplete_channels_for_search(	    let name = query_first(query.as_deref(), "term").unwrap_or_default();\n\n    let channels = state\n        .app\n        .autocomplete_channels_for_search(	api	channel_search_autocomplete
+#
+# --- no-op controls: these must SURVIVE ---
+control-rename-binding	crates/mm-store/src/channel_store.rs	    .map_err(|source| StoreError::Db {\n        context: "failed to find direct-message Channels".to_owned(),\n        source,\n    })?;	    .map_err(|cause| StoreError::Db {\n        context: "failed to find direct-message Channels".to_owned(),\n        source: cause,\n    })?;	api	channel_search_autocomplete
+control-reorder-like-columns	crates/mm-store/src/channel_store.rs	                 OR LOWER(c.name) LIKE LOWER($4) ESCAPE '*'\n                 OR LOWER(c.displayname) LIKE LOWER($4) ESCAPE '*'\n                 OR LOWER(c.purpose) LIKE LOWER($4) ESCAPE '*')	                 OR LOWER(c.purpose) LIKE LOWER($4) ESCAPE '*'\n                 OR LOWER(c.displayname) LIKE LOWER($4) ESCAPE '*'\n                 OR LOWER(c.name) LIKE LOWER($4) ESCAPE '*')	api	channel_search_autocomplete

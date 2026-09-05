@@ -50,6 +50,7 @@ use mm_model::post::Post;
 use mm_model::post_acknowledgement::PostAcknowledgement;
 use mm_model::post_list::PostList;
 use mm_model::post_metadata::PostPriority;
+use mm_model::preference::PREFERENCE_CATEGORY_FLAGGED_POST;
 use mm_model::user::User;
 use mm_model::utils::{StringArray, StringInterface};
 use sqlx::PgPool;
@@ -64,6 +65,24 @@ pub trait PostStore {
         id: &str,
         incl_deleted: bool,
     ) -> impl std::future::Future<Output = Result<Post, StoreError>> + Send;
+
+    /// Port of `SqlPostStore.getFlaggedPosts` (post_store.go:535) and its three exported
+    /// wrappers, folded into the two filters they differ by. An empty `channel_id` or `team_id`
+    /// means "no filter", exactly as Go's clause builders decide.
+    fn get_flagged_posts(
+        &self,
+        user_id: &str,
+        channel_id: &str,
+        team_id: &str,
+        offset: i64,
+        limit: i64,
+    ) -> impl std::future::Future<Output = Result<PostList, StoreError>> + Send;
+
+    /// Port of `SqlPostStore.GetPostsByIds` (post_store.go:2592).
+    fn get_posts_by_ids(
+        &self,
+        post_ids: &[String],
+    ) -> impl std::future::Future<Output = Result<Vec<Post>, StoreError>> + Send;
 
     /// Port of `SqlPostPriorityStore.GetForPostWithContext` (post_priority_store.go:29).
     fn get_priority_for_post(
@@ -1204,6 +1223,223 @@ pub(crate) fn post_from_row(row: PostRow) -> Result<Post, StoreError> {
 }
 
 impl PostStore for SqlPostStore {
+    /// Port of `SqlPostStore.getFlaggedPosts` (post_store.go:535).
+    ///
+    /// Go builds this one by string substitution rather than with squirrel, and two of its
+    /// habits are on the wire.
+    ///
+    /// # The team filter is missing its parentheses, and that is not a typo to tidy
+    ///
+    /// `buildFlaggedPostTeamFilterClause` returns the literal `AND B.TeamId = ? OR B.TeamId = ''`
+    /// (post_store.go:609), appended to a `WHERE ChannelId IN (…)`. `AND` binds tighter than
+    /// `OR`, so the predicate Go actually runs is
+    ///
+    /// ```text
+    /// (ChannelId IN (members…) AND B.TeamId = ?) OR B.TeamId = ''
+    /// ```
+    ///
+    /// — the second disjunct has **no membership check at all**. Every channel with an empty
+    /// `TeamId` is a DM or a GM, so a flagged post in any DM passes the team filter for *every*
+    /// team id, and it does so whether or not the caller is still a member of that DM. Measured
+    /// against the running server: a flagged DM post comes back under a team it has nothing to
+    /// do with. The flagged-by-this-user subquery still applies, which is what keeps it from
+    /// being a disclosure bug rather than a filtering one.
+    ///
+    /// Written here as `(members AND ($4 = '' OR teamid = $4)) OR ($4 <> '' AND teamid = '')`,
+    /// which is the same truth table in one statement: with no team id the second disjunct is
+    /// dead and the first is the bare membership check, which is Go's no-clause shape.
+    ///
+    /// # `LIMIT ? OFFSET ?` is fed `perPage` and **`page`**
+    ///
+    /// The handler passes `c.Params.Page` where the store names `offset` (api4/post.go:493) and
+    /// never multiplies by the page size. So `?page=1&per_page=1` skips **one post**, not one
+    /// page, and `?page=2` on a three-post list returns the third. That is Go's arithmetic and
+    /// it is reproduced; the parameter is named `offset` here for the same reason Go names it
+    /// that.
+    ///
+    /// # Everything else
+    ///
+    /// `Posts.DeleteAt = 0` inside the subquery — unlike [`Self::get_posts_by_ids`], this one
+    /// does filter. The `ReplyCount` correlated subquery is the same as that route's, resolving
+    /// each post's thread root first. `ORDER BY CreateAt` is unqualified in Go and resolves to
+    /// the select list's own output column, which is `A`'s, not the joined channel's.
+    #[tracing::instrument(
+        skip(self),
+        fields(user_id = %user_id, channel_id = %channel_id, team_id = %team_id, found)
+    )]
+    async fn get_flagged_posts(
+        &self,
+        user_id: &str,
+        channel_id: &str,
+        team_id: &str,
+        offset: i64,
+        limit: i64,
+    ) -> Result<PostList, StoreError> {
+        let rows = sqlx::query_as!(
+            PostRow,
+            r#"
+            SELECT a.id,
+                   a.createat     AS "create_at!",
+                   a.updateat     AS "update_at!",
+                   a.editat       AS "edit_at!",
+                   a.deleteat     AS "delete_at!",
+                   a.ispinned     AS "is_pinned!",
+                   a.userid       AS "user_id!",
+                   a.channelid    AS "channel_id!",
+                   a.rootid       AS "root_id!",
+                   a.originalid   AS "original_id!",
+                   a.message      AS "message!",
+                   a.type         AS "post_type!",
+                   a.props        AS "props?",
+                   a.hashtags     AS "hashtags!",
+                   a.filenames    AS "filenames?",
+                   a.fileids      AS "file_ids?",
+                   a.hasreactions AS "has_reactions!",
+                   a.remoteid     AS "remote_id?",
+                   (SELECT count(*)
+                      FROM posts r
+                     WHERE r.rootid = (CASE WHEN a.rootid = '' THEN a.id ELSE a.rootid END)
+                       AND r.deleteat = 0) AS "reply_count!"
+              FROM (SELECT posts.id,
+                           posts.createat,
+                           posts.updateat,
+                           posts.editat,
+                           posts.deleteat,
+                           posts.ispinned,
+                           posts.userid,
+                           posts.channelid,
+                           posts.rootid,
+                           posts.originalid,
+                           posts.message,
+                           posts.type,
+                           posts.props,
+                           posts.hashtags,
+                           posts.filenames,
+                           posts.fileids,
+                           posts.hasreactions,
+                           posts.remoteid
+                      FROM posts
+                     WHERE posts.id IN (SELECT preferences.name
+                                          FROM preferences
+                                         WHERE preferences.userid = $1
+                                           AND preferences.category = $2)
+                       AND ($3 = '' OR posts.channelid = $3)
+                       AND posts.deleteat = 0) AS a
+              INNER JOIN channels b ON b.id = a.channelid
+             WHERE (a.channelid IN (SELECT channelmembers.channelid
+                                      FROM channelmembers
+                                     WHERE channelmembers.userid = $1)
+                    AND ($4 = '' OR b.teamid = $4))
+                OR ($4 <> '' AND b.teamid = '')
+             ORDER BY a.createat DESC
+             LIMIT $5 OFFSET $6
+            "#,
+            user_id,
+            PREFERENCE_CATEGORY_FLAGGED_POST,
+            channel_id,
+            team_id,
+            limit,
+            offset,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to find Posts".to_owned(),
+            source,
+        })?;
+
+        tracing::Span::current().record("found", rows.len());
+
+        // `pl.AddPost(post)` then `pl.AddOrder(post.Id)` per row, in query order — so `order`
+        // is `CreateAt DESC` and the map is keyed by id. There is no `ErrNotFound` branch: an
+        // empty result is an empty list, not a miss.
+        let mut list = PostList::new();
+        for row in rows {
+            let post = post_from_row(row)?;
+            let id = post.id.clone();
+            list.add_post(post);
+            list.add_order(id);
+        }
+
+        Ok(list)
+    }
+
+    /// Port of `SqlPostStore.GetPostsByIds` (post_store.go:2592).
+    ///
+    /// # There is no `DeleteAt` filter
+    ///
+    /// The only predicate is `p.Id IN (…)`. Every other multi-post read in this store excludes
+    /// soft-deleted rows; this one does not, so `POST /api/v4/posts/ids` returns a deleted post
+    /// with its `delete_at` set and its message intact. That is Go's answer, verified against the
+    /// running server, and it is the single most surprising thing about the route.
+    ///
+    /// # `ReplyCount` is correlated, not a CTE
+    ///
+    /// `[`Self::get_thread_replies`]` computes one count for the whole thread; this computes one
+    /// per row, resolving each post's own thread root first — `CASE WHEN p.RootId = '' THEN p.Id
+    /// ELSE p.RootId END` — so a root reports its replies and a reply reports its parent's. The
+    /// inner count *does* exclude deleted replies even though the outer query does not exclude
+    /// deleted posts.
+    ///
+    /// # Zero rows is `ErrNotFound`
+    ///
+    /// Not an empty list (post_store.go:2604). The app layer turns it into a **404**, so a body
+    /// naming only ids that exist nowhere is `app.post.get.app_error` rather than `[]`. An empty
+    /// id list would reach the same place — squirrel renders `IN ()` as `(1=0)` here rather than
+    /// as the syntax error `constructArrayArgs` produces elsewhere — but the handler's own
+    /// `len == 0` check answers 400 first, so that path is unreachable from the wire.
+    #[tracing::instrument(skip(self, post_ids), fields(asked = post_ids.len(), found))]
+    async fn get_posts_by_ids(&self, post_ids: &[String]) -> Result<Vec<Post>, StoreError> {
+        let rows = sqlx::query_as!(
+            PostRow,
+            r#"
+            SELECT p.id,
+                   p.createat     AS "create_at!",
+                   p.updateat     AS "update_at!",
+                   p.editat       AS "edit_at!",
+                   p.deleteat     AS "delete_at!",
+                   p.ispinned     AS "is_pinned!",
+                   p.userid       AS "user_id!",
+                   p.channelid    AS "channel_id!",
+                   p.rootid       AS "root_id!",
+                   p.originalid   AS "original_id!",
+                   p.message      AS "message!",
+                   p.type         AS "post_type!",
+                   p.props        AS "props?",
+                   p.hashtags     AS "hashtags!",
+                   p.filenames    AS "filenames?",
+                   p.fileids      AS "file_ids?",
+                   p.hasreactions AS "has_reactions!",
+                   p.remoteid     AS "remote_id?",
+                   (SELECT count(*)
+                      FROM posts r
+                     WHERE r.rootid = (CASE WHEN p.rootid = '' THEN p.id ELSE p.rootid END)
+                       AND r.deleteat = 0) AS "reply_count!"
+              FROM posts p
+             WHERE p.id = ANY($1::text[])
+             ORDER BY p.createat DESC
+            "#,
+            post_ids
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to find Posts".to_owned(),
+            source,
+        })?;
+
+        tracing::Span::current().record("found", rows.len());
+
+        if rows.is_empty() {
+            return Err(StoreError::NotFound {
+                entity: "Post",
+                criteria: format!("postIds={post_ids:?}"),
+            });
+        }
+
+        rows.into_iter().map(post_from_row).collect()
+    }
+
     #[tracing::instrument(skip(self), fields(post_id = %id, incl_deleted))]
     async fn get_single(&self, id: &str, incl_deleted: bool) -> Result<Post, StoreError> {
         // Go appends `AND Posts.DeleteAt = 0` to the builder only when `!inclDeleted`. A

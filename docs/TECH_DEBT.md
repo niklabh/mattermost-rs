@@ -5562,3 +5562,55 @@ green in isolation, and neither of the two suites added that day ever among them
 
 **Where the pin lives:** the comments at the two renamed `create_team` call sites, and the
 `ATTEMPTS` constant in `crates/mm-api/tests/common/mod.rs`.
+
+## [D-166] `serde_json` sorts object keys where Go emits struct order — OPEN
+
+**Owner:** unassigned. **Blocks:** serving any route whose response embeds a post carrying an
+`attachments` prop.
+
+`Post::strip_action_integrations` rewrites `props.attachments` by re-marshalling the decoded
+`SlackAttachment` slice — the same thing Go does. Go's `encoding/json` emits a struct's fields in
+**declaration order** (`id, fallback, color, pretext, author_name, …`); `serde_json::Value` is
+backed by a `BTreeMap` and emits them **alphabetically**. The two bodies then differ by key order
+inside `props.attachments` and by nothing else.
+
+Nothing noticed until `getThreadsForUser`, because every earlier route that meets this prop
+forwards for a different reason (`mm_app::post::REFUSED_PROPS`). That route now forwards a whole
+page when any root post carries the prop — see `mm_api::users::serve_threads` — which is correct
+but costs a proxy hop, and the same guard will be needed by every future route that embeds a post.
+
+**The fix is one Cargo feature**, `serde_json/preserve_order`, which swaps the map for an
+`IndexMap` and keeps insertion order. It is a workspace-wide change to every `Value` this port
+produces, so it needs its own session and a full-suite run: it may equally *repair* latent
+mismatches elsewhere or expose tests that were passing on alphabetical order. Do not fold it into
+a route session.
+
+## [D-155] orphaned fixture rows — CLOSED 2026-09-05
+
+`purge_api_fixtures` selected by the `mmrs-parity-%` name prefix, which never reached the rows Go
+authors on a fixture's behalf — a created team's `town-square` and `off-topic`, and the
+`SidebarCategories` keyed on its `TeamId`. Deleting the team orphaned all of them.
+
+Measured before the fix: **16,066 orphaned channels against 25 live ones**, ~32,000 posts hanging
+off them, and **3,190 `Threads` rows whose root post no longer existed** against 4 real ones.
+
+The purge now sweeps by the dangling reference rather than by name — a channel whose `TeamId`
+names no team, a post whose channel is gone, a thread whose post is gone — which is what the old
+note asked for. Such a row is unreachable through any API on either server, so nothing that
+deletes it can be observed by a test. After the sweep: 0 orphans, 189 channels, 4 threads.
+
+### [D-167] OPEN — whole-table parity reads still race concurrent fixtures
+
+Three of five full-workspace runs on 2026-09-05 each failed a *different* test, and every one was
+a read over shared state that another suite's fixture moved mid-run: the users-list etag
+(`MAX(UpdateAt)` over every user), `channel_members_list`'s `OFFSET` paging, and an intra-suite
+ordering race in `roles` that reproduces only under a narrow filter.
+
+Each has been fixed as it surfaced — bracketed reads (`fetch_both_stable`), walk-and-deduplicate,
+retry-until-settled. What is owed is the *deliberate* pass: enumerate the assertions that read a
+whole shared table (users, roles, emoji, channel members) and convert them, rather than waiting
+for each to fail. The suite now has 22 routes' worth of fixtures creating and deleting users and
+teams concurrently, so the pressure only grows.
+
+Not a port divergence: both servers read the same database, and every failure so far has been the
+test's premise, not the answer.

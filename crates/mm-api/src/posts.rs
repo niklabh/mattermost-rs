@@ -2,8 +2,10 @@
 //! `getPostsForChannel` (`GET /api/v4/channels/{channel_id}/posts`), `getPostThread`
 //! (`GET /api/v4/posts/{post_id}/thread`), `getFileInfosForPost`
 //! (`GET /api/v4/posts/{post_id}/files/info`), `getEditHistoryForPost`
-//! (`GET /api/v4/posts/{post_id}/edit_history`) and `getPostsForChannelAroundLastUnread`
-//! (`GET /api/v4/users/{user_id}/channels/{channel_id}/posts/unread`).
+//! (`GET /api/v4/posts/{post_id}/edit_history`), `getPostsForChannelAroundLastUnread`
+//! (`GET /api/v4/users/{user_id}/channels/{channel_id}/posts/unread`), `getPostsByIds`
+//! (`POST /api/v4/posts/ids`) and `getFlaggedPostsForUser`
+//! (`GET /api/v4/users/{user_id}/posts/flagged`).
 
 use axum::extract::{Path, Request, State};
 use axum::http::StatusCode;
@@ -15,12 +17,12 @@ use mm_model::permission::{
     PERMISSION_EDIT_OTHER_USERS, PERMISSION_EDIT_POST, PERMISSION_MANAGE_SYSTEM,
     PERMISSION_READ_CHANNEL_CONTENT, PERMISSION_READ_DELETED_POSTS, make_permission_error,
 };
-use mm_model::utils::is_valid_id;
+use mm_model::utils::{PAYLOAD_PARSE_ERROR, go_json_marshal, is_valid_id, sorted_array_from_json};
 use mm_store::post_store::{GetPostThreadOptions, GetPostsOptions, ThreadDirection};
 
 use crate::AppState;
 use crate::auth::AuthenticatedSession;
-use crate::channels::{parse_page, parse_per_page, query_first, query_flag_is_true};
+use crate::channels::{parse_page, parse_per_page, query_first, query_flag_is_true, resolve_me};
 use crate::error::ApiError;
 use crate::proxy;
 
@@ -1017,11 +1019,7 @@ async fn serve_posts_around_last_unread(
     if_none_match: Option<String>,
 ) -> Outcome {
     // `me`, resolved before the validity check (web/context.go:301).
-    let user_id = if user_id == "me" {
-        session.0.user_id.as_str()
-    } else {
-        user_id
-    };
+    let user_id = resolve_me(user_id, session);
 
     // `c.RequireUserId().RequireChannelId()` — user first, the reverse of `getChannelUnread`.
     if !is_valid_id(user_id) {
@@ -1276,4 +1274,525 @@ pub async fn get_edit_history_for_post(
         body,
     )
         .into_response())
+}
+
+/// `model.HeaderFirstInaccessiblePostTime`. Go's constant is the literal header name; it is
+/// spelled out here because `client4.go`, where the constant lives, is out of scope — and the
+/// value was read off the running server, which is the better oracle anyway.
+const HEADER_FIRST_INACCESSIBLE_POST_TIME: &str = "First-Inaccessible-Post-Time";
+
+/// `getPostsByIds`'s cap on the id list (api4/post.go:641).
+const POSTS_BY_IDS_MAX: usize = 1000;
+
+/// Port of `getPostsByIds` (api4/post.go:631) — `POST /api/v4/posts/ids`.
+///
+/// The webapp calls this to hydrate permalinks, search hits and thread roots it does not already
+/// hold, so the ids in one request routinely span several channels.
+///
+/// # Three refusals, in Go's order
+///
+/// 1. **Not a JSON array of strings** → 400 `api.payload.parse.error`.
+/// 2. **No ids** (`[]`, and `null`, which `SortedArrayFromJSON` reduces to the same thing) → 400
+///    `api.context.invalid_body_param.app_error` naming **`post_ids`**. Unlike its neighbour
+///    `getBulkReactions`, this route *has* the length check, so the `IN ()` bug that makes an
+///    empty bulk-reactions request a 500 is unreachable here.
+/// 3. **More than 1000 ids** → 400 `api.post.posts_by_ids.invalid_body.request_error`. Counted
+///    **after** de-duplication, so 1500 copies of one id is a legal request.
+///
+/// # An all-unknown id list is a 404, not `[]`
+///
+/// The store raises `ErrNotFound` for zero rows and the app layer turns it into a 404
+/// `app.post.get.app_error`. But a list mixing a known id with unknown ones is a 200 carrying
+/// only the known post — the miss is not reported. So "some ids were wrong" and "every id was
+/// wrong" are answered by different status codes.
+///
+/// # Filtering is silent, and it happens twice
+///
+/// A post whose channel `GetChannels` did not return is skipped; so is a post whose channel the
+/// session cannot read. Neither produces an error or a placeholder — the post is simply absent
+/// from the array. That is what makes the response safe to hand a client that guessed ids, and
+/// it is why an unreadable id gives 200 here where `getBulkReactions` gives 403.
+///
+/// # Wire format
+///
+/// `json.NewEncoder(w).Encode(posts)` over a `[]*model.Post` initialised to `[]`, so the empty
+/// answer is `[]` (never `null`) and there **is** a trailing newline. Every 200 carries
+/// `First-Inaccessible-Post-Time`, which is `0` on any deployment without a Cloud `PostHistory`
+/// limit — see [`mm_app::App::get_posts_by_ids`].
+#[tracing::instrument(skip_all, fields(user_id = %session.0.user_id, asked, served))]
+pub async fn get_posts_by_ids(
+    State(state): State<AppState>,
+    session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    // Split rather than consumed: `PreparePostForClient` can decide a post is beyond this
+    // server's reach, and the forward path then needs the body it was given.
+    let (parts, body) = request.into_parts();
+    let bytes = match axum::body::to_bytes(body, usize::MAX).await {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            tracing::warn!(error = %err, "could not read the request body");
+            return posts_by_ids_parse_error().into_response();
+        }
+    };
+
+    match serve_posts_by_ids(&state, &session, &bytes).await {
+        Outcome::Served(response) => response,
+        Outcome::Failed(err) => err.into_response(),
+        Outcome::Forward => {
+            let request = Request::from_parts(parts, axum::body::Body::from(bytes));
+            proxy::forward_to_go(State(state), request).await
+        }
+    }
+}
+
+/// `model.NewAppError("getPostsByIds", model.PayloadParseError, nil, "", 400)`.
+fn posts_by_ids_parse_error() -> ApiError {
+    ApiError::from(mm_model::utils::AppError::new(
+        "getPostsByIds",
+        PAYLOAD_PARSE_ERROR,
+        None,
+        String::new(),
+        400,
+    ))
+}
+
+/// The validation half of `getPostsByIds` (api4/post.go:632-644), in Go's order.
+///
+/// 1. **Not a JSON array of strings** → 400 `api.payload.parse.error`. The decoder's habits —
+///    trailing bytes ignored, a `null` element read as `""`, a `null` body read as an empty
+///    list — live in [`sorted_array_from_json`] and its oracle.
+/// 2. **No ids** → 400 `api.context.invalid_body_param.app_error` naming **`post_ids`**, plural.
+///    The name reaches the wire only through i18n, which this port does not do (our `message`
+///    is the raw id, [D-092]) — so it is pinned by the unit test below rather than by the parity
+///    suite, which cannot see it.
+/// 3. **More than 1000** → 400 `api.post.posts_by_ids.invalid_body.request_error` carrying
+///    `MaxLength`. Counted **after** `SortedArrayFromJSON` de-duplicates, so 1500 copies of one
+///    id is a legal request for one post.
+#[allow(clippy::result_large_err)]
+fn parse_post_ids(body: &[u8]) -> Result<Vec<String>, ApiError> {
+    let post_ids = sorted_array_from_json(body).map_err(|err| {
+        tracing::debug!(error = %err, "post_ids body did not decode");
+        posts_by_ids_parse_error()
+    })?;
+
+    if post_ids.is_empty() {
+        return Err(ApiError::invalid_param("post_ids"));
+    }
+
+    if post_ids.len() > POSTS_BY_IDS_MAX {
+        let mut params: std::collections::HashMap<String, serde_json::Value> =
+            std::collections::HashMap::new();
+        params.insert(
+            "MaxLength".to_owned(),
+            serde_json::Value::from(POSTS_BY_IDS_MAX),
+        );
+        return Err(ApiError::from(mm_model::utils::AppError::new(
+            "getPostsByIds",
+            "api.post.posts_by_ids.invalid_body.request_error",
+            Some(params),
+            String::new(),
+            400,
+        )));
+    }
+
+    Ok(post_ids)
+}
+
+async fn serve_posts_by_ids(
+    state: &AppState,
+    session: &AuthenticatedSession,
+    bytes: &[u8],
+) -> Outcome {
+    let post_ids = match parse_post_ids(bytes) {
+        Ok(ids) => ids,
+        Err(err) => return Outcome::Failed(err),
+    };
+    tracing::Span::current().record("asked", post_ids.len());
+
+    let (found, first_inaccessible_post_time) = match state.app.get_posts_by_ids(&post_ids).await {
+        Ok(found) => found,
+        Err(err) => return Outcome::Failed(ApiError::from(err)),
+    };
+
+    // Go collects every post's channel id, duplicates included, and hands the lot to
+    // `GetChannels`; the store's `IN` collapses them. Collected the same way rather than
+    // de-duplicated first, so the store sees what Go's store sees.
+    let channel_ids: Vec<String> = found.iter().map(|post| post.channel_id.clone()).collect();
+    let channels = match state.app.get_channels(&channel_ids).await {
+        Ok(channels) => channels,
+        Err(err) => return Outcome::Failed(ApiError::from(err)),
+    };
+    let channels_by_id: std::collections::HashMap<&str, &mm_model::channel::Channel> =
+        channels.iter().map(|c| (c.id.as_str(), c)).collect();
+
+    // `&model.PreparePostForClientOpts{IncludePriority: true}` — the same options `getPost`
+    // passes, and every other field false.
+    let opts = PreparePostForClientOpts {
+        include_priority: true,
+        ..PreparePostForClientOpts::default()
+    };
+
+    let mut posts: Vec<mm_model::post::Post> = Vec::new();
+    for post in &found {
+        // Go's `channelMap[post.ChannelId]` miss is a bare `continue`: a post whose channel
+        // `GetMany` filtered out — a board, a space, or a hard-deleted row — is dropped without
+        // comment rather than being an error.
+        let Some(channel) = channels_by_id.get(post.channel_id.as_str()) else {
+            continue;
+        };
+
+        // `isMemberForAllPosts` is computed from the second return value and used only to tag
+        // the audit record, which is not ported ([D-028]).
+        let (has_permission, _is_member) = state
+            .app
+            .session_has_permission_to_read_channel(&session.0, channel)
+            .await;
+        if !has_permission {
+            continue;
+        }
+
+        let mut prepared = match state
+            .app
+            .prepare_post_for_client_with_embeds_and_images(post, opts)
+            .await
+        {
+            Ok(prepared) => prepared,
+            Err(PrepareError::Unreproducible(reason)) => {
+                tracing::debug!(reason, post_id = %post.id, "forwarding to Go");
+                return Outcome::Forward;
+            }
+            Err(PrepareError::App(err)) => return Outcome::Failed(ApiError::from(err)),
+        };
+
+        // `post.StripActionIntegrations()`, in place and before the slice is encoded. Note that
+        // Go does **not** call `SanitizePostMetadataForUser` here, unlike `getPost` — a preview
+        // embed the caller cannot see is left in place on this route.
+        //
+        // **Unreachable today**, and deliberately kept: the only posts with integrations to
+        // strip carry an `attachments` prop, which is in `mm_app::post::REFUSED_PROPS`, so
+        // `prepare_post_for_client_with_embeds_and_images` has already forwarded them. Narrowing
+        // that refusal set without this line would start leaking `integration` blocks — url,
+        // and the context map — to every client.
+        prepared.strip_action_integrations();
+        posts.push(prepared);
+    }
+    tracing::Span::current().record("served", posts.len());
+
+    // `json.NewEncoder(w).Encode` — Go escapes `<`, `>` and `&`, which a post message or a props
+    // value can carry freely, and appends the newline `json.Marshal` does not.
+    let encoded = match go_json_marshal(&posts) {
+        Ok(encoded) => encoded,
+        Err(err) => {
+            tracing::error!(error = %err, "failed to serialise the posts");
+            return Outcome::Failed(ApiError::from(mm_model::utils::AppError::new(
+                "getPostsByIds",
+                "api.marshal_error",
+                None,
+                String::new(),
+                500,
+            )));
+        }
+    };
+    let mut body = encoded.into_bytes();
+    body.push(b'\n');
+
+    Outcome::Served(
+        (
+            StatusCode::OK,
+            [
+                (
+                    HEADER_FIRST_INACCESSIBLE_POST_TIME,
+                    first_inaccessible_post_time.to_string().as_str(),
+                ),
+                ("Content-Type", "application/json"),
+                ("x-mmrs-served-by", "rust"),
+            ],
+            body,
+        )
+            .into_response(),
+    )
+}
+
+/// Port of `getFlaggedPostsForUser` (api4/post.go:475) —
+/// `GET /api/v4/users/{user_id}/posts/flagged`.
+///
+/// The webapp's "Saved messages" panel. Three query shapes, chosen in this order: `channel_id`
+/// wins if present, then `team_id`, then neither — so passing both filters by channel and
+/// ignores the team.
+///
+/// # `page` is an offset, not a page
+///
+/// `c.Params.Page` is handed straight to the store's `offset` (api4/post.go:493) with no
+/// multiplication by `per_page`. `?page=1&per_page=1` skips **one post**; `?page=2` skips two.
+/// Measured against the running server. See [`mm_store::PostStore::get_flagged_posts`], which
+/// also documents the missing parentheses in Go's team filter.
+///
+/// # The permission gate is `edit_other_users`, and it runs before anything else
+///
+/// `SessionHasPermissionToUser` — self, or a system admin. The refusal names
+/// `PermissionEditOtherUsers`, which is a *write* permission guarding a read, and it is what
+/// Go reports whatever the real reason.
+///
+/// # Then a second, per-channel gate, and it is silent
+///
+/// Each post's channel is looked up and `SessionHasPermissionToReadChannel`'d; a post whose
+/// channel is missing from that lookup, or unreadable, is `continue`d past. So this route can
+/// answer 200 with an empty list where the caller genuinely has flags — the same silent
+/// filtering as [`get_posts_by_ids`]. The permission answer is **cached per channel id** for the
+/// duration of the request, which is only a performance detail here because the answer cannot
+/// change mid-list.
+///
+/// # Wire format
+///
+/// `clientPostList.EncodeJSON(w)` — a `PostList` with a trailing newline, and `NewPostList`
+/// gives it a non-nil `order` and `posts`, so an empty answer is `{"order":[],"posts":{},…}`
+/// rather than nulls.
+#[tracing::instrument(skip_all, fields(user_id = %user_id, kept))]
+pub async fn get_flagged_posts_for_user(
+    State(state): State<AppState>,
+    Path(user_id): Path<String>,
+    session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    let query = request.uri().query().map(str::to_owned);
+
+    match serve_flagged_posts(&state, &user_id, &session, query.as_deref()).await {
+        Outcome::Served(response) => response,
+        Outcome::Failed(err) => err.into_response(),
+        Outcome::Forward => proxy::forward_to_go(State(state), request).await,
+    }
+}
+
+async fn serve_flagged_posts(
+    state: &AppState,
+    user_id: &str,
+    session: &AuthenticatedSession,
+    query: Option<&str>,
+) -> Outcome {
+    // `c.RequireUserId()` (web/context.go:296), `me` resolved first.
+    let user_id = resolve_me(user_id, session);
+    if !is_valid_id(user_id) {
+        return Outcome::Failed(ApiError::invalid_url_param("user_id"));
+    }
+
+    if !state
+        .app
+        .session_has_permission_to_user(&session.0, user_id)
+        .await
+    {
+        return Outcome::Failed(ApiError::from(make_permission_error(
+            &session.0,
+            &[&PERMISSION_EDIT_OTHER_USERS],
+        )));
+    }
+
+    // Go reads both, then branches on `channelId != ""` first. A blank `?channel_id=` is the
+    // same as absent, because it compares against the empty string rather than testing presence.
+    let channel_id = query_first(query, "channel_id").unwrap_or_default();
+    let team_id = query_first(query, "team_id").unwrap_or_default();
+    let (channel_filter, team_filter) = if !channel_id.is_empty() {
+        (channel_id.as_str(), "")
+    } else {
+        ("", team_id.as_str())
+    };
+
+    // `c.Params.Page` into the store's `offset` — see the doc comment above.
+    let list = match state
+        .app
+        .get_flagged_posts(
+            user_id,
+            channel_filter,
+            team_filter,
+            parse_page(query),
+            parse_per_page(query),
+        )
+        .await
+    {
+        Ok(list) => list,
+        Err(err) => return Outcome::Failed(ApiError::from(err)),
+    };
+
+    // Borrowed, not cloned: the whole point of the loop below is to copy the few posts that
+    // survive the gate, and cloning the map first would copy the ones that do not.
+    let no_posts = mm_model::post_list::PostMap::new();
+    let posts = list.posts.as_ref().unwrap_or(&no_posts);
+    let channel_ids: Vec<String> = list
+        .order
+        .iter()
+        .flatten()
+        .filter_map(|id| posts.get(id))
+        .map(|post| post.channel_id.clone())
+        .collect();
+    // **Skipped when there is nothing to look up.** `SqlChannelStore.GetMany` raises
+    // `ErrNotFound` for zero rows, which [`mm_app::App::get_channels`] turns into a 404 — and a
+    // user with no visible flagged posts reaches here with an empty id list. Go answers that
+    // request `200 {"order":[],"posts":{},…}`, measured; whatever squirrel does with an empty
+    // `IN`, the channel map cannot be observed when no post survives to consult it. Calling the
+    // store anyway would turn Go's empty list into our 404, which is what the first run did.
+    let channels = if channel_ids.is_empty() {
+        Vec::new()
+    } else {
+        match state.app.get_channels(&channel_ids).await {
+            Ok(channels) => channels,
+            Err(err) => return Outcome::Failed(ApiError::from(err)),
+        }
+    };
+    let channels_by_id: std::collections::HashMap<&str, &mm_model::channel::Channel> =
+        channels.iter().map(|c| (c.id.as_str(), c)).collect();
+
+    // Go rebuilds the list from scratch rather than filtering in place, so a post whose channel
+    // is unreadable leaves neither an `order` entry nor a `posts` key behind.
+    let mut kept = mm_model::post_list::PostList::new();
+    let mut channel_read_permission: std::collections::HashMap<String, bool> =
+        std::collections::HashMap::new();
+    for id in list.order.iter().flatten() {
+        let Some(post) = posts.get(id) else {
+            continue;
+        };
+        let allowed = match channel_read_permission.get(&post.channel_id) {
+            Some(allowed) => *allowed,
+            None => {
+                let allowed = match channels_by_id.get(post.channel_id.as_str()) {
+                    // Go's `channelMap` miss is a bare `continue` that never writes the cache —
+                    // so a missing channel is re-looked-up for every post that names it. Same
+                    // answer either way; the cache write is skipped here for the same reason.
+                    None => continue,
+                    Some(channel) => {
+                        let (has_permission, _is_member) = state
+                            .app
+                            .session_has_permission_to_read_channel(&session.0, channel)
+                            .await;
+                        has_permission
+                    }
+                };
+                channel_read_permission.insert(post.channel_id.clone(), allowed);
+                allowed
+            }
+        };
+        if !allowed {
+            continue;
+        }
+        kept.add_post(post.clone());
+        kept.add_order(id.clone());
+    }
+
+    // `pl.SortByCreateAt()` — the store already ordered by `CreateAt DESC`, and this sorts the
+    // same way, but it is Go's and a filtered list is not obliged to have kept the order.
+    kept.sort_by_create_at();
+    tracing::Span::current().record("kept", kept.order.as_ref().map_or(0, Vec::len));
+
+    let prepared = match state.app.prepare_post_list_for_client(&kept).await {
+        Ok(prepared) => prepared,
+        Err(PrepareError::Unreproducible(reason)) => {
+            tracing::debug!(reason, user_id, "forwarding to Go");
+            return Outcome::Forward;
+        }
+        Err(PrepareError::App(err)) => return Outcome::Failed(ApiError::from(err)),
+    };
+
+    let (mut sanitized, _all_previews_have_membership) = match state
+        .app
+        .sanitize_post_list_metadata_for_user(prepared, &session.0.user_id)
+        .await
+    {
+        Ok(sanitized) => sanitized,
+        Err(PrepareError::Unreproducible(reason)) => {
+            tracing::debug!(reason, user_id, "forwarding to Go");
+            return Outcome::Forward;
+        }
+        Err(PrepareError::App(err)) => return Outcome::Failed(ApiError::from(err)),
+    };
+
+    let mut body = Vec::new();
+    if let Err(err) = sanitized.encode_json(&mut body) {
+        tracing::error!(error = %err, "failed to serialise the flagged PostList");
+        return Outcome::Failed(ApiError::from(mm_model::utils::AppError::new(
+            "getFlaggedPostsForUser",
+            "api.marshal_error",
+            None,
+            String::new(),
+            500,
+        )));
+    }
+
+    Outcome::Served(
+        (
+            StatusCode::OK,
+            [
+                ("Content-Type", "application/json"),
+                ("x-mmrs-served-by", "rust"),
+            ],
+            body,
+        )
+            .into_response(),
+    )
+}
+
+#[cfg(test)]
+mod posts_by_ids_tests {
+    use super::*;
+
+    fn error_of(body: &str) -> Box<mm_model::utils::AppError> {
+        parse_post_ids(body.as_bytes())
+            .expect_err("this body must be rejected")
+            .0
+    }
+
+    /// The i18n parameters never reach the wire on this deployment, so the parity suite cannot
+    /// tell `post_ids` from `post_id` — and a mutation swapping them survived until this test
+    /// existed. `Name` is what the translated message interpolates, so it is wire format the
+    /// day the bundle lands.
+    #[test]
+    fn the_empty_list_names_post_ids_plural() {
+        for body in ["[]", "null"] {
+            let err = error_of(body);
+            assert_eq!(err.id, "api.context.invalid_body_param.app_error", "{body}");
+            assert_eq!(err.status_code, 400, "{body}");
+            assert_eq!(
+                err.params.as_ref().and_then(|p| p.get("Name")),
+                Some(&serde_json::Value::from("post_ids")),
+                "{body}: plural, and it is the body parameter's name not the URL one"
+            );
+        }
+    }
+
+    #[test]
+    fn a_body_that_is_not_an_array_of_strings_is_a_parse_error() {
+        for body in ["{}", "[1,2]", "not json", "\"a\""] {
+            let err = error_of(body);
+            assert_eq!(err.id, PAYLOAD_PARSE_ERROR, "{body}");
+            assert_eq!(err.status_code, 400, "{body}");
+        }
+    }
+
+    /// The cap is a strict `>`, and it is applied to the **de-duplicated** list.
+    #[test]
+    fn the_cap_is_one_thousand_distinct_ids() {
+        let distinct: Vec<String> = (0..=POSTS_BY_IDS_MAX).map(|i| format!("{i:026}")).collect();
+        let over = serde_json::to_string(&distinct).expect("serialises");
+        let err = error_of(&over);
+        assert_eq!(err.id, "api.post.posts_by_ids.invalid_body.request_error");
+        assert_eq!(
+            err.params.as_ref().and_then(|p| p.get("MaxLength")),
+            Some(&serde_json::Value::from(POSTS_BY_IDS_MAX))
+        );
+
+        let exactly = serde_json::to_string(&distinct[..POSTS_BY_IDS_MAX]).expect("serialises");
+        assert_eq!(
+            parse_post_ids(exactly.as_bytes())
+                .expect("1000 is under the cap")
+                .len(),
+            POSTS_BY_IDS_MAX
+        );
+
+        let duplicated =
+            serde_json::to_string(&vec!["a"; POSTS_BY_IDS_MAX + 500]).expect("serialises");
+        assert_eq!(
+            parse_post_ids(duplicated.as_bytes())
+                .expect("de-duplicated before the count")
+                .len(),
+            1
+        );
+    }
 }

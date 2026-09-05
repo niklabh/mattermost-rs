@@ -6,6 +6,7 @@
 pub mod authorization;
 pub mod channel;
 pub mod config;
+pub mod draft;
 pub mod emoji;
 /// The read side of `app/file.go` — `FileInfo` rows, never file bytes.
 pub mod file;
@@ -19,6 +20,7 @@ pub mod session;
 pub mod sidebar;
 pub mod status;
 pub mod team;
+pub mod thread;
 pub mod user;
 pub mod user_terms_of_service;
 

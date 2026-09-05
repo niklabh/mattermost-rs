@@ -7,6 +7,61 @@ use mm_store::emoji_store::EmojiStore;
 use crate::App;
 
 impl App {
+    /// Port of `app.App.GetMultipleEmojiByName` (app/emoji.go:242).
+    ///
+    /// # It filters the request, not the answer
+    ///
+    /// Every name that names a **system** emoji is removed before the query runs, in place, with
+    /// Go's compacting loop. So `["+1", "mmrsparityx"]` asks the database for one name, and
+    /// `["+1"]` asks for none — which is the branch below, and it returns an **empty vec rather
+    /// than an error**. A client asking only for built-in emoji gets `[]`, not a 404 and not a
+    /// list of the built-ins: this route answers about *custom* emoji only.
+    ///
+    /// # The config gate here is a 403 and it is unreachable
+    ///
+    /// `getEmojisByNames` checks `EnableCustomEmoji` first and answers 501, so this second check
+    /// — same id, different status — cannot fire through the route. Reproduced because it is
+    /// Go's, and because the only thing distinguishing the two is the status a client would see
+    /// if the order ever changed.
+    #[tracing::instrument(skip_all, fields(asked = names.len(), custom))]
+    pub async fn get_multiple_emoji_by_name(&self, names: &[String]) -> AppResult<Vec<Emoji>> {
+        if !self.config().enable_custom_emoji {
+            return Err(AppError::boxed(
+                "GetMultipleEmojiByName",
+                "api.emoji.disabled.app_error",
+                None,
+                String::new(),
+                403,
+            ));
+        }
+
+        let custom: Vec<String> = names
+            .iter()
+            .filter(|name| mm_model::emoji::get_system_emoji_id(name).is_none())
+            .cloned()
+            .collect();
+        tracing::Span::current().record("custom", custom.len());
+
+        if custom.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        self.store()
+            .emoji()
+            .get_multiple_by_name(&custom)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "emoji-by-names lookup failed");
+                AppError::boxed(
+                    "GetMultipleEmojiByName",
+                    "app.emoji.get_by_name.app_error",
+                    None,
+                    format!("names={custom:?}"),
+                    500,
+                )
+            })
+    }
+
     /// Port of `app.App.GetEmoji` (app/emoji.go:196).
     ///
     /// # Two config gates, and both answer **403**, not 501
@@ -130,6 +185,60 @@ impl App {
             })
     }
 
+    /// Port of `app.App.SearchEmoji` (app/emoji.go:294).
+    ///
+    /// **One gate, not two.** Unlike [`Self::get_emoji`] and its by-name twin, this checks only
+    /// `EnableCustomEmoji` and never `FileSettings.DriverName` — so it cannot answer
+    /// `api.emoji.storage.app_error` at all. And unlike them, its handler
+    /// (`autocompleteEmojis`, api4/emoji.go:331) carries **no gate of its own**, so this 403 is
+    /// the one a client actually sees when custom emoji are off, rather than being shadowed by a
+    /// handler-level 501.
+    ///
+    /// # This 403 is the one that reaches the wire
+    ///
+    /// Every other emoji route checks `EnableCustomEmoji` in its *handler* and answers 501, which
+    /// shadows this. `searchEmojis` has **no handler check**, so `POST /emoji/search` is the one
+    /// route where a client sees the 403 — the same feature flag, a different status, depending
+    /// on which emoji route was asked. `autocompleteEmojis`, this function's other caller, does
+    /// have the handler check.
+    ///
+    /// The 500's `detailed_error` carries `name=<term>` — the only place in the emoji app layer
+    /// that puts a caller's input into an error. `detailed_error` is on the wire but Go leaves it
+    /// empty unless the server is in developer mode, so this is reproduced for the log rather
+    /// than for the response.
+    #[tracing::instrument(skip(self), fields(prefix_only, limit))]
+    pub async fn search_emoji(
+        &self,
+        name: &str,
+        prefix_only: bool,
+        limit: i64,
+    ) -> AppResult<Vec<Emoji>> {
+        if !self.config().enable_custom_emoji {
+            return Err(AppError::boxed(
+                "SearchEmoji",
+                "api.emoji.disabled.app_error",
+                None,
+                String::new(),
+                403,
+            ));
+        }
+
+        self.store()
+            .emoji()
+            .search(name, prefix_only, limit)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "emoji search failed");
+                AppError::boxed(
+                    "SearchEmoji",
+                    "app.emoji.get_by_name.app_error",
+                    None,
+                    format!("name={name}"),
+                    500,
+                )
+            })
+    }
+
     /// The two config gates both single-emoji reads open with, in Go's order.
     ///
     /// `where_` is threaded through because it is on the wire — `AppError.where` is serialised
@@ -204,6 +313,48 @@ mod tests {
     async fn gos_defaults_pass_both_gates() {
         let app = crate::App::with_config(unreachable_store(), Config::default());
         assert!(app.emoji_storage_available("GetEmoji").is_ok());
+    }
+
+    /// `SearchEmoji`'s gate is **its own**, not the shared `emoji_storage_available` — it checks
+    /// only `EnableCustomEmoji` and never the file driver, and its handler carries no 501 of its
+    /// own. So this 403 is the status a client of `GET /emoji/autocomplete` would actually see,
+    /// and nothing over HTTP can reach it on a server with the setting on. Asserted here for the
+    /// same reason the gate order above is: the parity suite cannot turn the setting off.
+    #[tokio::test]
+    async fn search_emoji_refuses_with_a_403_and_never_asks_about_the_file_driver() {
+        let config = Config {
+            enable_custom_emoji: false,
+            ..Config::default()
+        };
+        let app = crate::App::with_config(unreachable_store(), config);
+        let err = app
+            .search_emoji("anything", true, 100)
+            .await
+            .expect_err("custom emoji are off");
+        assert_eq!(err.id, "api.emoji.disabled.app_error");
+        assert_eq!(
+            err.status_code, 403,
+            "the app layer's 403, not a handler 501"
+        );
+        assert_eq!(err.where_, "SearchEmoji");
+
+        // An empty file driver is *not* a refusal here, unlike every other emoji read. With the
+        // setting back on, the gate opens and the call goes on to the store — which is
+        // unreachable in this test, so it fails as a 500 rather than as a 403.
+        let config = Config {
+            file_driver_name: String::new(),
+            ..Config::default()
+        };
+        let app = crate::App::with_config(unreachable_store(), config);
+        let err = app
+            .search_emoji("anything", true, 100)
+            .await
+            .expect_err("the store is not connected");
+        assert_eq!(
+            err.id, "app.emoji.get_by_name.app_error",
+            "it got past the gate: no file-driver check on this path"
+        );
+        assert_eq!(err.status_code, 500);
     }
 
     /// A pool that is never connected: these three tests never reach the store, and a real

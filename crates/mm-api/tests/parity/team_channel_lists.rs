@@ -530,15 +530,11 @@ async fn the_sibling_literals_are_still_forwarded_to_go() {
     let token = go_minted_token(&client).await;
     let team_id = create_team(&client, &token, "sibteam").await;
 
-    // GET siblings. `/recommended` and the two autocompletes are GET routes in Go;
-    // `/managed_categories` is behind a feature flag and 404s when it is off — forwarded either
-    // way, which is the whole point.
-    for literal in [
-        "recommended",
-        "autocomplete?name=town",
-        "search_autocomplete?name=town",
-        "managed_categories",
-    ] {
+    // GET siblings still forwarded. Both autocompletes have left this list — they are served
+    // from Rust now, by two different handlers (`parity/channel_autocomplete.rs` and
+    // `parity/channel_search_autocomplete.rs`). `/managed_categories` is behind a feature flag
+    // and 404s when it is off, forwarded either way, which is the whole point.
+    for literal in ["recommended", "managed_categories"] {
         let path = format!("/api/v4/teams/{team_id}/channels/{literal}");
         let (_, served_by, _) = served_by_and_etag(&client, RUST, &token, &path).await;
         assert_eq!(
@@ -550,10 +546,7 @@ async fn the_sibling_literals_are_still_forwarded_to_go() {
 
     // POST-only siblings, plus a POST to a path we serve for GET: the method fallback in
     // `partially_migrated` has to forward, or migrating GET would have broken POST.
-    for (literal, body) in [
-        ("search", serde_json::json!({ "term": "town" })),
-        ("", serde_json::json!({})),
-    ] {
+    for (literal, body) in [("", serde_json::json!({}))] {
         let path = if literal.is_empty() {
             format!("/api/v4/teams/{team_id}/channels")
         } else {
@@ -576,9 +569,27 @@ async fn the_sibling_literals_are_still_forwarded_to_go() {
         );
     }
 
-    // `/ids` was in the list above until `getPublicChannelsByIdsForTeam` landed. It is asserted
-    // here rather than dropped, because "which router claims this path" is exactly what this
-    // test exists to pin — and it now has to say `rust`.
+    // `/ids` was in the list above until `getPublicChannelsByIdsForTeam` landed, and `/search`
+    // until `searchChannelsForTeam` did. They are asserted here rather than dropped, because
+    // "which router claims this path" is exactly what this test exists to pin — and both now
+    // have to say `rust`.
+    let search_path = format!("/api/v4/teams/{team_id}/channels/search");
+    let response = client
+        .post(format!("{RUST}{search_path}"))
+        .header("Authorization", format!("Bearer {token}"))
+        .json(&serde_json::json!({ "term": "town" }))
+        .send()
+        .await
+        .expect("the server answers");
+    assert_eq!(
+        response
+            .headers()
+            .get("x-mmrs-served-by")
+            .and_then(|v| v.to_str().ok()),
+        Some("rust"),
+        "POST {search_path} is served now"
+    );
+
     let ids_path = format!("/api/v4/teams/{team_id}/channels/ids");
     let response = client
         .post(format!("{RUST}{ids_path}"))

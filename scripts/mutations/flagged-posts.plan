@@ -1,0 +1,39 @@
+# Mutation plan for GET /api/v4/users/{user_id}/posts/flagged (getFlaggedPostsForUser).
+#
+#   scripts/mutate-batch.sh scripts/mutations/flagged-posts.plan
+#
+# Tab-separated: name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter.  `\n` becomes a newline.
+#
+# post_store.rs now holds three `ReplyCount` subqueries and several `ORDER BY p.createat`
+# clauses; every anchor here carries enough of its own query to be unambiguous. The flagged
+# query is the only one that mentions `preferences`.
+#
+# `app.post.get_flagged_posts.app_error` is NOT mutated. It is only produced when the store
+# itself fails, and nothing reachable over HTTP makes that happen — the mutation survived a run
+# for that reason, and no fixture can fix it without fault injection.
+#
+# Two survivors that *were* fixture gaps, both fixed rather than tolerated:
+#   - `page * per_page` is indistinguishable from `page` when `per_page` is 1, which every
+#     pagination case used. The suite now also pages two at a time.
+#   - The handler's per-channel read gate is unreachable while every member of a channel can
+#     read it. The fixture now plants a `ChannelMembers` row with no roles, which the REST API
+#     cannot create, so the store's subquery matches and the gate is what refuses.
+#
+# The last two lines are the no-op controls and must SURVIVE.
+store-team-filter-parenthesised	crates/mm-store/src/post_store.rs	             WHERE (a.channelid IN (SELECT channelmembers.channelid\n                                      FROM channelmembers\n                                     WHERE channelmembers.userid = $1)\n                    AND ($4 = '' OR b.teamid = $4))\n                OR ($4 <> '' AND b.teamid = '')	             WHERE (a.channelid IN (SELECT channelmembers.channelid\n                                      FROM channelmembers\n                                     WHERE channelmembers.userid = $1)\n                    AND ($4 = '' OR b.teamid = $4))	api	flagged_posts
+store-drops-membership	crates/mm-store/src/post_store.rs	             WHERE (a.channelid IN (SELECT channelmembers.channelid\n                                      FROM channelmembers\n                                     WHERE channelmembers.userid = $1)\n                    AND ($4 = '' OR b.teamid = $4))\n                OR ($4 <> '' AND b.teamid = '')	             WHERE (a.channelid NOT IN (SELECT channelmembers.channelid\n                                      FROM channelmembers\n                                     WHERE channelmembers.userid = $1)\n                    AND ($4 = '' OR b.teamid = $4))\n                OR ($4 <> '' AND b.teamid = '')	api	flagged_posts
+store-channel-filter	crates/mm-store/src/post_store.rs	AND ($3 = '' OR posts.channelid = $3)	AND ($3 = '' OR posts.userid = $3)	api	flagged_posts
+store-deleted-posts	crates/mm-store/src/post_store.rs	AND ($3 = '' OR posts.channelid = $3)\n                       AND posts.deleteat = 0) AS a	AND ($3 = '' OR posts.channelid = $3)\n                       AND posts.deleteat >= 0) AS a	api	flagged_posts
+store-preference-category	crates/mm-store/src/post_store.rs	AND preferences.category = $2)	AND preferences.category <> $2)	api	flagged_posts
+store-order-direction	crates/mm-store/src/post_store.rs	ORDER BY a.createat DESC\n             LIMIT $5 OFFSET $6	ORDER BY a.createat ASC\n             LIMIT $5 OFFSET $6	api	flagged_posts
+store-limit-offset-swapped	crates/mm-store/src/post_store.rs	            limit,\n            offset,	            offset,\n            limit,	api	flagged_posts
+api-page-times-per-page	crates/mm-api/src/posts.rs	            parse_page(query),\n            parse_per_page(query),	            parse_page(query) * parse_per_page(query),\n            parse_per_page(query),	api	flagged_posts
+api-team-wins-over-channel	crates/mm-api/src/posts.rs	    let (channel_filter, team_filter) = if !channel_id.is_empty() {	    let (channel_filter, team_filter) = if channel_id.is_empty() {	api	flagged_posts
+api-user-permission-gate	crates/mm-api/src/posts.rs	// `c.RequireUserId()` (web/context.go:397).\n    if !is_valid_id(user_id) {\n        return Outcome::Failed(ApiError::invalid_url_param("user_id"));\n    }\n\n    if !state\n        .app\n        .session_has_permission_to_user(&session.0, user_id)\n        .await\n    {	// `c.RequireUserId()` (web/context.go:397).\n    if !is_valid_id(user_id) {\n        return Outcome::Failed(ApiError::invalid_url_param("user_id"));\n    }\n\n    if false {	api	flagged_posts
+api-require-user-id	crates/mm-api/src/posts.rs	// `c.RequireUserId()` (web/context.go:397).\n    if !is_valid_id(user_id) {	// `c.RequireUserId()` (web/context.go:397).\n    if false {	api	flagged_posts
+api-channel-read-gate	crates/mm-api/src/posts.rs	        if !allowed {\n            continue;\n        }\n        kept.add_post(post.clone());	        if false {\n            continue;\n        }\n        kept.add_post(post.clone());	api	flagged_posts
+api-empty-channel-ids-guard	crates/mm-api/src/posts.rs	    let channels = if channel_ids.is_empty() {\n        Vec::new()\n    } else {	    let channels = if false {\n        Vec::new()\n    } else {	api	flagged_posts
+#
+# --- no-op controls: these must SURVIVE ---
+control-rename-binding	crates/mm-api/src/posts.rs	    let no_posts = mm_model::post_list::PostMap::new();\n    let posts = list.posts.as_ref().unwrap_or(&no_posts);	    let empty_posts = mm_model::post_list::PostMap::new();\n    let posts = list.posts.as_ref().unwrap_or(&empty_posts);	api	flagged_posts
+control-reorder-predicates	crates/mm-store/src/post_store.rs	                     WHERE r.rootid = (CASE WHEN a.rootid = '' THEN a.id ELSE a.rootid END)\n                       AND r.deleteat = 0) AS "reply_count!"	                     WHERE r.deleteat = 0\n                       AND r.rootid = (CASE WHEN a.rootid = '' THEN a.id ELSE a.rootid END)) AS "reply_count!"	api	flagged_posts

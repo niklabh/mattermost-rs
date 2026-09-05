@@ -461,7 +461,7 @@ pub async fn get_team_stats(
 /// plus `_` and `-`, one character narrower than the username class (no `.`). A segment outside
 /// it never matches Go's route and falls to the mux 404, so it is forwarded rather than
 /// answered — [D-150]'s rule under a third alphabet.
-fn segment_matches_team_name_mux(value: &str) -> bool {
+pub(crate) fn segment_matches_team_name_mux(value: &str) -> bool {
     !value.is_empty()
         && value
             .bytes()
@@ -511,6 +511,112 @@ where
     !is_public_team && !has_view_team().await
 }
 
+/// Port of `teamExists` (api4/team.go:376) — `GET /api/v4/teams/name/{team_name}/exists`.
+///
+/// The join and signup flows ask this before offering a team, and it is the one team read that
+/// **never 404s**: a name that matches nothing, and a team the caller may not see, are the same
+/// answer — `{"exists":false}` with a 200.
+///
+/// # Three ways to be visible, and they are not `getTeamByName`'s
+///
+/// ```go
+/// (teamMember != nil && teamMember.DeleteAt == 0) ||
+/// (team.AllowOpenInvite && SessionHasPermissionTo(list_public_teams)) ||
+/// (!team.AllowOpenInvite && SessionHasPermissionTo(list_private_teams))
+/// ```
+///
+/// Note what is **not** there. `getTeamByName` guards on `AllowOpenInvite || Type != TeamOpen`
+/// and falls back to `view_team` *on the team*; this one ignores `Type` entirely and asks for a
+/// **system-level** list permission instead. So a private team the caller is not in exists for an
+/// admin (who holds `list_private_teams`) and does not exist for anybody else — and a public
+/// team with open invite off is equally invisible, because the second branch reads
+/// `AllowOpenInvite`, not the type.
+///
+/// A **left** membership does not count: `DeleteAt == 0` is checked on the member row, so a user
+/// who left a private team stops being able to see that it exists.
+///
+/// # Two errors that are swallowed and one that is not
+///
+/// Both lookups propagate only when `StatusCode != 404`. A missing team and a missing membership
+/// are ordinary, so a broken query is the only thing that reaches the client — as a 500 with the
+/// store's own id.
+///
+/// # Wire format
+///
+/// `w.Write([]byte(model.MapBoolToJSON(resp)))` — `json.Marshal` of a one-key `map[string]bool`,
+/// so **no trailing newline** ([D-086] again). Measured on the running server.
+#[tracing::instrument(skip_all, fields(team_name = %team_name, forwarded))]
+pub async fn team_exists(
+    State(state): State<AppState>,
+    Path(team_name): Path<String>,
+    session: AuthenticatedSession,
+    request: axum::extract::Request,
+) -> Response {
+    // `BaseRoutes.TeamByName` is `{team_name:[A-Za-z0-9_-]+}`; anything else is gorilla's own
+    // 404 rather than this handler's 400. Unlike `getTeamByName` there is nothing to shadow —
+    // the `Team` subrouter registers no `/{x}/exists`.
+    if !segment_matches_team_name_mux(&team_name) {
+        tracing::Span::current().record("forwarded", true);
+        return crate::proxy::forward_to_go(State(state), request).await;
+    }
+    tracing::Span::current().record("forwarded", false);
+
+    // `params.TeamName = strings.ToLower(props["team_name"])` (web/params.go:178) — **every**
+    // route with a `{team_name}` segment gets it lowercased before any handler sees it, so
+    // `/teams/name/MMRS-PARITY-X` is the same request as the lowercase one. Rust's
+    // `to_lowercase` is the full Unicode mapping where Go's is the simple one, but the mux check
+    // above has already restricted this segment to `[A-Za-z0-9_-]`, where the two agree. The
+    // same treatment `get_channel_by_name_for_team_name` already gave it.
+    let team_name = team_name.to_lowercase();
+
+    if !mm_model::team::is_valid_team_name(&team_name) {
+        return ApiError::invalid_url_param("team_name").into_response();
+    }
+
+    let team = match state.app.get_team_by_name(&team_name).await {
+        Ok(team) => Some(team),
+        Err(err) if err.status_code == 404 => None,
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+
+    let mut exists = false;
+    if let Some(team) = team {
+        let member = match state
+            .app
+            .get_team_member(&team.id, &session.0.user_id)
+            .await
+        {
+            Ok(member) => Some(member),
+            Err(err) if err.status_code == 404 => None,
+            Err(err) => return ApiError::from(err).into_response(),
+        };
+
+        let is_current_member = member.is_some_and(|member| member.delete_at == 0);
+        exists = is_current_member
+            || if team.allow_open_invite {
+                state
+                    .app
+                    .session_has_permission_to(&session.0, &PERMISSION_LIST_PUBLIC_TEAMS)
+                    .await
+            } else {
+                state
+                    .app
+                    .session_has_permission_to(&session.0, &PERMISSION_LIST_PRIVATE_TEAMS)
+                    .await
+            };
+    }
+
+    (
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        format!("{{\"exists\":{exists}}}").into_bytes(),
+    )
+        .into_response()
+}
+
 /// Port of `getTeamByName` (api4/team.go:386), reached as `GET /api/v4/teams/name/{team_name}`.
 ///
 /// # Order of operations
@@ -545,6 +651,14 @@ pub async fn get_team_by_name(
         return crate::proxy::forward_to_go(State(state), request).await;
     }
     tracing::Span::current().record("forwarded", false);
+
+    // `params.TeamName = strings.ToLower(props["team_name"])` (web/params.go:178) — **every**
+    // route with a `{team_name}` segment gets it lowercased before any handler sees it, so
+    // `/teams/name/MMRS-PARITY-X` is the same request as the lowercase one. Rust's
+    // `to_lowercase` is the full Unicode mapping where Go's is the simple one, but the mux check
+    // above has already restricted this segment to `[A-Za-z0-9_-]`, where the two agree. The
+    // same treatment `get_channel_by_name_for_team_name` already gave it.
+    let team_name = team_name.to_lowercase();
 
     if !mm_model::team::is_valid_team_name(&team_name) {
         return ApiError::invalid_url_param("team_name").into_response();

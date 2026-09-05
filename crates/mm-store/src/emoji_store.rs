@@ -56,6 +56,14 @@ pub trait EmojiStore {
         limit: i64,
         sort_by_name: bool,
     ) -> impl std::future::Future<Output = Result<Vec<Emoji>, StoreError>> + Send;
+
+    /// Port of `SqlEmojiStore.Search` (emoji_store.go:108).
+    fn search(
+        &self,
+        name: &str,
+        prefix_only: bool,
+        limit: i64,
+    ) -> impl std::future::Future<Output = Result<Vec<Emoji>, StoreError>> + Send;
 }
 
 #[derive(Debug, Clone)]
@@ -286,6 +294,94 @@ impl EmojiStore for SqlEmojiStore {
             })
             .collect())
     }
+
+    /// Port of `SqlEmojiStore.Search` (emoji_store.go:108).
+    ///
+    /// # The LIKE pattern is built, not bound
+    ///
+    /// Go sanitises the term with **backslash** as the escape character — not the `*` its channel
+    /// search uses — and then concatenates: `term = ("" | "%") + name + "%"`. `sq.Like` emits a
+    /// bare `Name LIKE ?` with **no `ESCAPE` clause**, so Postgres' default escape (backslash) is
+    /// what makes the sanitising work. Reproduced exactly; an `ESCAPE '\'` would be equivalent
+    /// but is not what Go writes.
+    ///
+    /// Two consequences a reader would not predict, both measured:
+    ///
+    /// - **A term of `\` matches everything.** `sanitizeSearchTerm` strips every occurrence of
+    ///   the escape character first, so `\` sanitises to the empty string and the pattern becomes
+    ///   the bare `%`.
+    /// - **The match is case-sensitive.** There is no `LOWER` on either side, unlike the channel
+    ///   autocomplete beside it, so `?name=MMRS` finds nothing while `?name=mmrs` finds the list.
+    ///
+    /// `emojiSelectQuery` carries `DeleteAt = 0`, so a deleted emoji is never a completion.
+    /// `ORDER BY Name` and the caller's limit finish it.
+    #[tracing::instrument(skip(self), fields(prefix_only, limit, found))]
+    async fn search(
+        &self,
+        name: &str,
+        prefix_only: bool,
+        limit: i64,
+    ) -> Result<Vec<Emoji>, StoreError> {
+        let sanitized = sanitize_emoji_search_term(name);
+        let pattern = if prefix_only {
+            format!("{sanitized}%")
+        } else {
+            format!("%{sanitized}%")
+        };
+
+        let rows = sqlx::query_as!(
+            EmojiRow,
+            r#"
+            SELECT id        AS "id!",
+                   createat  AS "create_at!",
+                   updateat  AS "update_at!",
+                   deleteat  AS "delete_at!",
+                   creatorid AS "creator_id!",
+                   name      AS "name!"
+              FROM emoji
+             WHERE deleteat = 0
+               AND name LIKE $1
+             ORDER BY name
+             LIMIT $2
+            "#,
+            pattern,
+            limit
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("could not search emojis by name {sanitized}"),
+            source,
+        })?;
+
+        tracing::Span::current().record("found", rows.len());
+
+        Ok(rows
+            .into_iter()
+            .map(|row| Emoji {
+                id: row.id,
+                create_at: row.create_at,
+                update_at: row.update_at,
+                delete_at: row.delete_at,
+                creator_id: row.creator_id,
+                name: row.name,
+            })
+            .collect())
+    }
+}
+
+/// Port of `sanitizeSearchTerm(term, "\\")` (sqlstore/utils.go:62) as the emoji store calls it.
+///
+/// The same function the channel search uses, with **backslash** as the escape character rather
+/// than `*`. Order is Go's and it is the whole behaviour: every backslash is removed first, and
+/// only then are `%` and `_` prefixed with one. So `\` sanitises to nothing, `%` to `\%`, and a
+/// caller cannot smuggle a wildcard through either.
+fn sanitize_emoji_search_term(term: &str) -> String {
+    let mut out = term.replace('\\', "");
+    for c in ['%', '_'] {
+        out = out.replace(c, &format!("\\{c}"));
+    }
+    out
 }
 
 /// The six columns of `emojiSelectQuery` (emoji_store.go:27), named so the two `GetList`
@@ -298,4 +394,28 @@ struct EmojiRow {
     delete_at: i64,
     creator_id: String,
     name: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `sanitizeSearchTerm(term, "\\")`: the escape character is removed **before** `%` and `_`
+    /// are escaped with it, so a term made only of backslashes sanitises to nothing — and an
+    /// empty term makes the prefix pattern the bare `%`, which matches every emoji. Measured
+    /// against the running server: `?name=%5C` returns the whole first page.
+    #[test]
+    fn the_escape_character_is_stripped_before_the_wildcards_are_escaped() {
+        assert_eq!(sanitize_emoji_search_term(""), "");
+        assert_eq!(sanitize_emoji_search_term("\\"), "");
+        assert_eq!(sanitize_emoji_search_term("\\\\\\\\"), "");
+        assert_eq!(sanitize_emoji_search_term("smile"), "smile");
+        assert_eq!(sanitize_emoji_search_term("%"), "\\%");
+        assert_eq!(sanitize_emoji_search_term("_"), "\\_");
+        assert_eq!(sanitize_emoji_search_term("a%b_c"), "a\\%b\\_c");
+        // A backslash the caller supplied cannot become an escape for the `%` beside it.
+        assert_eq!(sanitize_emoji_search_term("\\%"), "\\%");
+        // Case is untouched — the query has no `LOWER` on either side.
+        assert_eq!(sanitize_emoji_search_term("SMILE"), "SMILE");
+    }
 }

@@ -1,0 +1,36 @@
+# Mutation plan for GET /teams/name/{team_name}/channels/name/{channel_name}
+# (getChannelByNameForTeamName).
+#
+#   scripts/mutate-batch.sh scripts/mutations/channel-by-team-name.plan
+#
+# Tab-separated: name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter.  `\n` becomes a newline.
+#
+# The shared tail (`serve_named_channel`) is pinned by the `channel_by_name` suite as well, so
+# a mutation inside it is caught twice over; the lines below aim at what is new — the team half,
+# the two mux classes, and the validator order. The filter names both suites where a mutation
+# is shared, because narrowing it to one would let the other decide the verdict.
+#
+# `validate_team_name_then_channel_name`'s parameter names run against the **unit** suite: the
+# name reaches a client only through the i18n message, which this port does not serve ([D-092]),
+# so the parity suite is blind to them.
+#
+# `api-channel-name-validator` survived the first run: the mux class and `IsValidChannelIdentifier`
+# agree on almost everything, and a one-character channel name — the obvious probe — is *not*
+# refused (there is no minimum-length rule, measured). The gap is the first character: the mux
+# accepts a leading `-` or `_` and the validator does not. The suite now asks for both.
+#
+# The last two lines are the no-op controls and must SURVIVE.
+app-team-lookup-skipped	crates/mm-app/src/channel.rs	        let team = self.get_team_by_name(team_name).await?;\n        self.get_channel_by_name(channel_name, &team.id, include_deleted)	        let team = self.get_team_by_name(team_name).await?;\n        self.get_channel_by_name(channel_name, &team.name, include_deleted)	api	channel_by_name_for_team_name
+app-channel-before-team	crates/mm-app/src/channel.rs	        let team = self.get_team_by_name(team_name).await?;\n        self.get_channel_by_name(channel_name, &team.id, include_deleted)\n            .await	        let found = self.get_channel_by_name(channel_name, team_name, include_deleted).await;\n        let team = self.get_team_by_name(team_name).await?;\n        let _ = &team;\n        found	api	channel_by_name_for_team_name
+api-team-name-validator	crates/mm-api/src/channels.rs	    if !mm_model::team::is_valid_team_name(team_name) {	    if false {	api	channel_by_name_for_team_name
+api-channel-name-validator	crates/mm-api/src/channels.rs	    if !is_valid_channel_identifier(channel_name) {\n        return Err(ApiError::invalid_url_param("channel_name"));\n    }\n    Ok(())	    if false {\n        return Err(ApiError::invalid_url_param("channel_name"));\n    }\n    Ok(())	api	channel_by_name_for_team_name
+api-first-refusal-name	crates/mm-api/src/channels.rs	return Err(ApiError::invalid_url_param("team_name"));	return Err(ApiError::invalid_url_param("channel_name"));	unit	the_team_name_is_validated
+api-team-name-mux	crates/mm-api/src/channels.rs	    if !crate::teams::segment_matches_team_name_mux(&team_name)\n        || !segment_matches_channel_name_mux(&channel_name)\n    {	    if false {	api	channel_by_name_for_team_name
+api-team-name-lowercase	crates/mm-api/src/channels.rs	    let team_name = team_name.to_lowercase();\n    let channel_name = channel_name.to_lowercase();	    let channel_name = channel_name.to_lowercase();	api	channel_by_name_for_team_name
+api-include-deleted	crates/mm-api/src/channels.rs	    let include_deleted = query_flag_is_true(query.as_deref(), INCLUDE_DELETED_PARAM);\n\n    let channel = match state\n        .app\n        .get_channel_by_name_for_team_name(	    let include_deleted = !query_flag_is_true(query.as_deref(), INCLUDE_DELETED_PARAM);\n\n    let channel = match state\n        .app\n        .get_channel_by_name_for_team_name(	api	channel_by_name_for_team_name
+api-open-channel-branch	crates/mm-api/src/channels.rs	        channel.channel_type == CHANNEL_TYPE_OPEN,\n        |permission| async {	        false,\n        |permission| async {	api	channel_by_name
+api-trailing-newline	crates/mm-api/src/channels.rs	    body.push(b'\\n');\n\n    (\n        StatusCode::OK,\n        [\n            ("Content-Type", "application/json"),\n            ("x-mmrs-served-by", "rust"),\n        ],\n        body,\n    )\n        .into_response()\n}\n\n/// Port of `getChannelByNameForTeamName` (api4/channel.go:1823), reached as	    (\n        StatusCode::OK,\n        [\n            ("Content-Type", "application/json"),\n            ("x-mmrs-served-by", "rust"),\n        ],\n        body,\n    )\n        .into_response()\n}\n\n/// Port of `getChannelByNameForTeamName` (api4/channel.go:1823), reached as	api	channel_by_name
+#
+# --- no-op controls: these must SURVIVE ---
+control-rename-binding	crates/mm-api/src/channels.rs	    let team_name = team_name.to_lowercase();\n    let channel_name = channel_name.to_lowercase();	    let team_name = team_name.to_ascii_lowercase();\n    let channel_name = channel_name.to_lowercase();	api	channel_by_name_for_team_name
+control-reorder-headers	crates/mm-api/src/channels.rs	    body.push(b'\\n');\n\n    (\n        StatusCode::OK,\n        [\n            ("Content-Type", "application/json"),\n            ("x-mmrs-served-by", "rust"),\n        ],\n        body,\n    )\n        .into_response()\n}\n\n/// Port of `getChannelByNameForTeamName` (api4/channel.go:1823), reached as	    body.push(b'\\n');\n\n    (\n        StatusCode::OK,\n        [\n            ("x-mmrs-served-by", "rust"),\n            ("Content-Type", "application/json"),\n        ],\n        body,\n    )\n        .into_response()\n}\n\n/// Port of `getChannelByNameForTeamName` (api4/channel.go:1823), reached as	api	channel_by_name_for_team_name

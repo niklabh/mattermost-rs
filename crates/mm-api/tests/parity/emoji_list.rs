@@ -24,7 +24,7 @@ use crate::common;
 
 use common::{
     GO, RUST, assert_error_bodies_match_except_known_gaps, client, create_custom_emoji,
-    delete_custom_emoji, fetch_both, fetch_both_raw, go_minted_token, logged_in_user_id,
+    delete_custom_emoji, fetch_both_raw, fetch_both_stable, go_minted_token, logged_in_user_id,
     purge_api_fixtures, stack_enabled, unique_emoji_name,
 };
 
@@ -72,12 +72,17 @@ async fn fixture(client: &reqwest::Client, token: &str) -> &'static Fixture {
 }
 
 /// Every emoji the two servers return for `path`, as `(names, bodies)`.
+///
+/// **Bracketed**, because this route lists the *whole* emoji table and the other emoji suites
+/// create and soft-delete rows in it throughout the run. An unbracketed pair of reads straddles
+/// one of those deletes often enough to fail — [D-160]'s shape, seen here as one side carrying a
+/// `mmrsparitydoomed` row the other had already lost.
 async fn names_from_both(
     client: &reqwest::Client,
     token: &str,
     path: &str,
 ) -> (Vec<String>, Vec<String>) {
-    let (go, rs) = fetch_both(client, token, path).await;
+    let (go, rs) = fetch_both_stable(client, token, path).await;
     let parse = |body: &[u8]| -> Vec<String> {
         serde_json::from_slice::<serde_json::Value>(body)
             .expect("JSON")
@@ -105,7 +110,7 @@ async fn the_sorted_page_is_byte_identical() {
     let f = fixture(&client, &token).await;
 
     let path = "/api/v4/emoji?sort=name&per_page=200";
-    let (go, rs) = fetch_both(&client, &token, path).await;
+    let (go, rs) = fetch_both_stable(&client, &token, path).await;
     assert_eq!(
         String::from_utf8_lossy(&go),
         String::from_utf8_lossy(&rs),
@@ -221,7 +226,7 @@ async fn per_page_zero_is_an_empty_page_not_an_unlimited_one() {
     let _ = fixture(&client, &token).await;
 
     let path = "/api/v4/emoji?per_page=0";
-    let (go, rs) = fetch_both(&client, &token, path).await;
+    let (go, rs) = fetch_both_stable(&client, &token, path).await;
     assert_eq!(go, b"[]\n", "LIMIT 0, and an initialised slice — not null");
     assert_eq!(rs, go);
 }
@@ -247,7 +252,7 @@ async fn pagination_clamps_rather_than_refusing() {
     };
     for query in ["page=-1", "page=abc", "per_page=-5", "per_page=notanumber"] {
         let path = format!("/api/v4/emoji?sort=name&{query}");
-        let (go, rs) = fetch_both(&client, &token, &path).await;
+        let (go, rs) = fetch_both_stable(&client, &token, &path).await;
         assert_eq!(
             String::from_utf8_lossy(&go),
             String::from_utf8_lossy(&rs),
@@ -287,7 +292,7 @@ async fn the_collection_does_not_shadow_the_single_reads() {
     let f = fixture(&client, &token).await;
 
     let path = format!("/api/v4/emoji/name/{}", f.names[0]);
-    let (go, rs) = fetch_both(&client, &token, &path).await;
+    let (go, rs) = fetch_both_stable(&client, &token, &path).await;
     assert_eq!(go, rs, "{path} is still getEmojiByName");
 
     // `POST /api/v4/emoji` is createEmoji and must still be Go's.
@@ -306,20 +311,9 @@ async fn the_collection_does_not_shadow_the_single_reads() {
         "only GET /emoji is migrated"
     );
 
-    // And `/emoji/autocomplete`, which gorilla's ordering owns, is still forwarded.
-    let response = client
-        .get(format!("{RUST}/api/v4/emoji/autocomplete?name=mmrs"))
-        .header("Authorization", format!("Bearer {token}"))
-        .send()
-        .await
-        .expect("reachable");
-    assert_eq!(
-        response
-            .headers()
-            .get("x-mmrs-served-by")
-            .and_then(|v| v.to_str().ok()),
-        Some("go")
-    );
+    // `/emoji/autocomplete` used to be asserted here as forwarded. It is a route of its own
+    // now — see `parity/emoji_autocomplete.rs`. `/emoji/names` and `/emoji/search` are POST in
+    // Go and are still nobody's here, which the GET above already covers.
 
     let _ = GO;
 }

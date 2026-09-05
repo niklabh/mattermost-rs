@@ -1,0 +1,30 @@
+# Mutation plan for POST /api/v4/posts/ids/reactions (getBulkReactions).
+#
+#   scripts/mutate-batch.sh scripts/mutations/bulk-reactions.plan
+#
+# Tab-separated: name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter.  `\n` becomes a newline.
+#
+# Every SELECT list in reaction_store.rs is byte-identical between GetForPost and
+# BulkGetForPosts — only the WHERE differs — so an anchor inside the column list alone is
+# ambiguous and mutates whichever query comes first. Each store anchor below therefore runs
+# down to `WHERE postid = ANY($1::text[])`, which only the bulk query has.
+#
+# The last two lines are the no-op controls and must SURVIVE. If either is caught, the harness
+# is deciding verdicts on something other than the mutation and the rest of the run means
+# nothing.
+store-empty-guard	crates/mm-store/src/reaction_store.rs	if post_ids.is_empty() {	if false {	api	post_bulk_reactions
+store-wrong-column	crates/mm-store/src/reaction_store.rs	WHERE postid = ANY($1::text[])	WHERE userid = ANY($1::text[])	api	post_bulk_reactions
+store-soft-delete	crates/mm-store/src/reaction_store.rs	ANY($1::text[])\n               AND COALESCE(deleteat, 0) = 0	ANY($1::text[])\n               AND COALESCE(deleteat, 0) >= 0	api	post_bulk_reactions
+store-order-by	crates/mm-store/src/reaction_store.rs	AND COALESCE(deleteat, 0) = 0\n             ORDER BY createat\n            "#,\n            post_ids	AND COALESCE(deleteat, 0) = 0\n             ORDER BY emojiname\n            "#,\n            post_ids	api	post_bulk_reactions
+store-coalesce-updateat	crates/mm-store/src/reaction_store.rs	COALESCE(updateat, createat) AS "update_at!",\n                   COALESCE(deleteat, 0)        AS "delete_at!",\n                   remoteid  AS "remote_id?",\n                   channelid AS "channel_id!"\n              FROM reactions\n             WHERE postid = ANY($1::text[])	updateat AS "update_at!",\n                   COALESCE(deleteat, 0)        AS "delete_at!",\n                   remoteid  AS "remote_id?",\n                   channelid AS "channel_id!"\n              FROM reactions\n             WHERE postid = ANY($1::text[])	api	post_bulk_reactions
+store-coalesce-deleteat	crates/mm-store/src/reaction_store.rs	COALESCE(updateat, createat) AS "update_at!",\n                   COALESCE(deleteat, 0)        AS "delete_at!",\n                   remoteid  AS "remote_id?",\n                   channelid AS "channel_id!"\n              FROM reactions\n             WHERE postid = ANY($1::text[])	COALESCE(updateat, createat) AS "update_at!",\n                   deleteat AS "delete_at!",\n                   remoteid  AS "remote_id?",\n                   channelid AS "channel_id!"\n              FROM reactions\n             WHERE postid = ANY($1::text[])	api	post_bulk_reactions
+app-populate-empty	crates/mm-app/src/reaction.rs	for post_id in post_ids {\n            grouped.entry(post_id.clone()).or_default();\n        }	for post_id in post_ids {\n            let _ = post_id;\n        }	api	post_bulk_reactions
+app-group-key	crates/mm-app/src/reaction.rs	.entry(reaction.post_id.clone())	.entry(reaction.user_id.clone())	api	post_bulk_reactions
+app-error-id	crates/mm-app/src/reaction.rs	"app.reaction.bulk_get_for_post_ids.app_error"	"app.reaction.get_for_post.app_error"	api	post_bulk_reactions
+api-permission-gate	crates/mm-api/src/reactions.rs	.session_has_permission_to_read_post(&session.0, post_id)\n            .await;\n        if !allowed {	.session_has_permission_to_read_post(&session.0, post_id)\n            .await;\n        if false {	api	post_bulk_reactions
+api-permission-loop	crates/mm-api/src/reactions.rs	for post_id in &post_ids {	for post_id in &post_ids[..0] {	api	post_bulk_reactions
+api-payload-status	crates/mm-api/src/reactions.rs	PAYLOAD_PARSE_ERROR,\n        None,\n        String::new(),\n        400,	PAYLOAD_PARSE_ERROR,\n        None,\n        String::new(),\n        500,	api	post_bulk_reactions
+#
+# --- no-op controls: these must SURVIVE ---
+control-rename-binding	crates/mm-api/src/reactions.rs	.map_err(|err| {\n            tracing::warn!(error = %err, "could not read the request body");	.map_err(|cause| {\n            tracing::warn!(error = %cause, "could not read the request body");	api	post_bulk_reactions
+control-reorder-columns	crates/mm-store/src/reaction_store.rs	COALESCE(updateat, createat) AS "update_at!",\n                   COALESCE(deleteat, 0)        AS "delete_at!",\n                   remoteid  AS "remote_id?",\n                   channelid AS "channel_id!"\n              FROM reactions\n             WHERE postid = ANY($1::text[])	COALESCE(updateat, createat) AS "update_at!",\n                   COALESCE(deleteat, 0)        AS "delete_at!",\n                   channelid AS "channel_id!",\n                   remoteid  AS "remote_id?"\n              FROM reactions\n             WHERE postid = ANY($1::text[])	api	post_bulk_reactions

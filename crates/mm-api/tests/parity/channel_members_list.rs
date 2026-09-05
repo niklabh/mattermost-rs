@@ -45,6 +45,18 @@ async fn teardown(
     }
 }
 
+/// The rows of a member list, ordered by `user_id` so two windows of an unordered scan can be
+/// compared for content without asserting an order neither server promises.
+fn sorted_rows(body: &[u8]) -> Vec<serde_json::Value> {
+    let mut rows: Vec<serde_json::Value> = serde_json::from_slice::<serde_json::Value>(body)
+        .expect("decodes")
+        .as_array()
+        .expect("an array")
+        .clone();
+    rows.sort_by(|a, b| a["user_id"].as_str().cmp(&b["user_id"].as_str()));
+    rows
+}
+
 fn member_ids(body: &[u8]) -> Vec<String> {
     serde_json::from_slice::<serde_json::Value>(body)
         .expect("decodes")
@@ -148,19 +160,44 @@ async fn pages_split_cover_and_run_out_identically() {
         all_ids.sort();
 
         paged_ids.clear();
+        let mut go_paged_ids = Vec::new();
         for page in 0..2 {
             let path = format!("/api/v4/channels/{channel_id}/members?page={page}&per_page=2");
             let (go_body, rs_body) = fetch_both_stable(&client, &token, &path).await;
+
+            // **Nothing is asserted about a single page across the two servers**, neither its
+            // bytes nor its rows. The store's query has no `ORDER BY`, so a page is a window
+            // onto a scan whose order Postgres does not promise to repeat between two
+            // executions — and Go's request and ours are two executions. The byte comparison
+            // held while `channelmembers` was quiet, then failed once other suites began writing
+            // to that table; comparing the rows as a set failed the same way, because the two
+            // servers had genuinely selected *different members*, not the same ones reordered.
+            //
+            // What both servers do promise is that two pages of two cover the whole membership.
+            // That is asserted below, per server, and the two coverings are compared with each
+            // other. The byte-for-byte wire check lives on the **unpaged** read, in
+            // [`the_member_list_is_byte_identical_and_sanitised_around_the_caller`], where there
+            // is no window to disagree about.
             assert_eq!(
-                String::from_utf8_lossy(&rs_body),
-                String::from_utf8_lossy(&go_body),
-                "page {page} must agree byte for byte"
+                sorted_rows(&rs_body).len(),
+                sorted_rows(&go_body).len(),
+                "page {page} must hold the same number of rows on both servers"
             );
+
             let ids = member_ids(&rs_body);
             assert_eq!(ids.len(), 2, "page {page} holds exactly two rows");
             paged_ids.extend(ids);
+            go_paged_ids.extend(member_ids(&go_body));
         }
         paged_ids.sort();
+        go_paged_ids.sort();
+        if paged_ids != go_paged_ids {
+            // The two servers walked different windows of an unordered scan. Retry with the
+            // loop rather than fail: the assertion that matters is the coverage one below, and
+            // it is checked unconditionally once the reads have settled.
+            tokio::time::sleep(std::time::Duration::from_millis(50 * attempt)).await;
+            continue;
+        }
 
         if paged_ids == all_ids {
             break;

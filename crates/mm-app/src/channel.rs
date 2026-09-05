@@ -6,7 +6,9 @@ use std::collections::HashMap;
 
 use mm_model::channel::{Channel, ChannelSearchOpts};
 use mm_model::channel_list::ChannelList;
-use mm_model::channel_member::{CHANNEL_MARK_UNREAD_MENTION, ChannelMember, ChannelUnread};
+use mm_model::channel_member::{
+    CHANNEL_MARK_UNREAD_MENTION, ChannelMember, ChannelMembersWithTeamData, ChannelUnread,
+};
 use mm_model::post_list::PostList;
 use mm_model::user::MARK_UNREAD_NOTIFY_PROP;
 use mm_model::utils::{AppError, AppResult, get_preferred_timezone, remove_duplicate_strings};
@@ -416,6 +418,186 @@ impl App {
             })
     }
 
+    /// Port of `app.App.GetChannelMembersWithTeamDataForUserWithPagination` (channel.go:2640).
+    ///
+    /// `page == -1` selects the cursor walk and anything else the offset page — Go's
+    /// `ChannelMemberCursor` carries both shapes in one struct and branches on the sentinel.
+    ///
+    /// # The `where` field names the *store* method, not this function
+    ///
+    /// Go assigns `method` from whichever branch it took and passes that to `NewAppError`, so a
+    /// failure reports `GetMembersForUserWithCursorPagination` or `GetMembersForUserWithPagination`
+    /// rather than the caller. Reproduced: `where` is not on the wire, but it is what a log
+    /// reader uses to tell the two branches apart, which is the only reason Go bothers.
+    ///
+    /// # The 404 is a control-flow signal
+    ///
+    /// Only the cursor branch can raise it — its store call treats an empty page as
+    /// `ErrNotFound` — and the streaming handler above reads that 404 as "the walk is done".
+    /// The error id is `app.channel.get_member.missing.app_error`.
+    #[tracing::instrument(skip(self), fields(user_id = %user_id, page, per_page, found))]
+    pub async fn get_channel_members_with_team_data_for_user_with_pagination(
+        &self,
+        user_id: &str,
+        page: i64,
+        per_page: i64,
+        from_channel_id: &str,
+    ) -> AppResult<ChannelMembersWithTeamData> {
+        let (result, method) = if page == -1 {
+            (
+                self.store()
+                    .channel()
+                    .get_members_for_user_with_cursor_pagination(user_id, per_page, from_channel_id)
+                    .await,
+                "GetMembersForUserWithCursorPagination",
+            )
+        } else {
+            (
+                self.store()
+                    .channel()
+                    .get_members_for_user_with_pagination(user_id, page, per_page)
+                    .await,
+                "GetMembersForUserWithPagination",
+            )
+        };
+
+        let members = result.map_err(|err| {
+            if err.is_not_found() {
+                AppError::boxed(
+                    method,
+                    "app.channel.get_member.missing.app_error",
+                    None,
+                    String::new(),
+                    404,
+                )
+            } else {
+                tracing::error!(error = %err, "paginated channel-member lookup failed");
+                AppError::boxed(
+                    method,
+                    "app.channel.get_members.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            }
+        })?;
+        tracing::Span::current().record("found", members.len());
+        Ok(members)
+    }
+
+    /// Port of `app.App.AutocompleteChannelsForSearch` (channel.go:3434).
+    ///
+    /// The thinnest of the three autocompletes: trim the term, one store call, one error id.
+    /// **No `GetUser`** — so no guest branch, and an unknown user id is not an error here — and
+    /// **no `FilterChannelListForUserVisibility`**, which its sibling calls and which is a no-op
+    /// on this build anyway. `includeDeleted` is hardcoded `true` as it is there, so archived
+    /// channels are listed.
+    ///
+    /// The error id is the same `app.channel.search.app_error` the sibling uses, but the `where`
+    /// is this function's own name rather than the sibling's `AutocompleteChannels`.
+    #[tracing::instrument(skip(self), fields(team_id = %team_id, user_id = %user_id, found))]
+    pub async fn autocomplete_channels_for_search(
+        &self,
+        team_id: &str,
+        user_id: &str,
+        term: &str,
+    ) -> AppResult<ChannelList> {
+        let term = term.trim();
+
+        let channels = self
+            .store()
+            .channel()
+            .autocomplete_in_team_for_search(team_id, user_id, term)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "channel search autocomplete failed");
+                AppError::boxed(
+                    "AutocompleteChannelsForSearch",
+                    "app.channel.search.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })?;
+        tracing::Span::current().record("found", channels.0.len());
+        Ok(channels)
+    }
+
+    /// Port of `app.App.AutocompleteChannelsForTeam` (channel.go:3400).
+    ///
+    /// `includeDeleted` is hardcoded to **true** there, so archived channels are in the answer;
+    /// the term is trimmed of surrounding whitespace before it reaches the store.
+    ///
+    /// The user is fetched for one bit — `IsGuest()` — and its own error is returned unwrapped,
+    /// so an unknown user id answers `GetUser`'s 404 rather than a search error.
+    ///
+    /// **`FilterChannelListForUserVisibility` is not ported.** It returns its input untouched
+    /// unless `FeatureFlags.DiscoverableChannels` is on
+    /// (app/channel_discoverable_visibility.go:182), and that flag is false at the pinned SHA —
+    /// the same gate [D-153] records for `serveDiscoverableNonMember`. The store's
+    /// `Discoverable = true` disjunct is still ported, because it is a column predicate rather
+    /// than a feature-flagged code path.
+    #[tracing::instrument(skip(self), fields(team_id = %team_id, user_id = %user_id, found))]
+    pub async fn autocomplete_channels_for_team(
+        &self,
+        team_id: &str,
+        user_id: &str,
+        term: &str,
+    ) -> AppResult<ChannelList> {
+        // `strings.TrimSpace` — Go trims Unicode whitespace, which is `str::trim`.
+        let term = term.trim();
+
+        let user = self.get_user(user_id).await?;
+
+        let channels = self
+            .store()
+            .channel()
+            .autocomplete_in_team(team_id, user_id, term, user.is_guest())
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "channel autocomplete failed");
+                // Go's `where` is `AutocompleteChannels`, not the function's own name.
+                AppError::boxed(
+                    "AutocompleteChannels",
+                    "app.channel.search.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })?;
+        tracing::Span::current().record("found", channels.0.len());
+        Ok(channels)
+    }
+
+    /// Port of `app.App.GetChannelByNameForTeamName` (channel.go:2358).
+    ///
+    /// [`Self::get_channel_by_name`] with the team resolved by **name** first, and the same two
+    /// channel error ids after it. Two things about the team half are worth stating:
+    ///
+    /// - **Both team branches are 404**, including the default one. Go writes
+    ///   `app.team.get_by_name.app_error` with `http.StatusNotFound` (channel.go:2368), so a
+    ///   genuine database failure resolving the team answers 404 here where every sibling
+    ///   answers 500. Reproduced by delegating to [`crate::App::get_team_by_name`], which
+    ///   already carries that shape.
+    /// - **`where` differs from Go's** — this delegates, so the team errors say `GetTeamByName`
+    ///   where Go says `GetChannelByNameForTeamName`. `where` is not a field of the JSON error
+    ///   body (`id`, `message`, `detailed_error`, `request_id`, `status_code`), so nothing on
+    ///   the wire moves; duplicating the function to change an invisible string would not.
+    ///
+    /// The team is used only for its id. Its own permissions are checked by the handler against
+    /// `channel.TeamId`, which for a DM or GM is the empty string and not this team's id.
+    #[tracing::instrument(skip_all, fields(team_name = %team_name, name = %channel_name, include_deleted))]
+    pub async fn get_channel_by_name_for_team_name(
+        &self,
+        channel_name: &str,
+        team_name: &str,
+        include_deleted: bool,
+    ) -> AppResult<Channel> {
+        let team = self.get_team_by_name(team_name).await?;
+        self.get_channel_by_name(channel_name, &team.id, include_deleted)
+            .await
+    }
+
     /// Port of `app.App.GetChannelsForTeamForUser` (channel.go:2409) through the
     /// `Server.getChannelsForTeamForUser` (:2394) it delegates to.
     ///
@@ -547,6 +729,142 @@ impl App {
                 )
             })?;
         tracing::Span::current().record("count", channels.0.len());
+        Ok(channels)
+    }
+
+    /// Port of `app.App.SearchChannels` (app/channel.go:3484).
+    ///
+    /// `includeDeleted` is a literal **`true`**, so archived channels are results. The term is
+    /// `strings.TrimSpace`d here and nowhere else — the store's sanitiser trims nothing.
+    ///
+    /// The policy-action hydration Go does after the search is a no-op without the access-control
+    /// service, which lives in the out-of-scope enterprise tree — the same treatment
+    /// `has_permission_to_file_action` gets.
+    #[tracing::instrument(skip_all, fields(team_id = %team_id))]
+    pub async fn search_channels(&self, team_id: &str, term: &str) -> AppResult<ChannelList> {
+        self.store()
+            .channel()
+            .search_in_team(team_id, term.trim())
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "channel search failed");
+                AppError::boxed(
+                    "SearchChannels",
+                    "app.channel.search.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })
+    }
+
+    /// Port of `app.App.SearchChannelsForUser` (app/channel.go:3508).
+    ///
+    /// [`Self::search_channels`] narrowed to the caller's memberships — and still public channels
+    /// only, because the store joins `PublicChannels`. Same `where`? **No**: the error id is
+    /// shared (`app.channel.search.app_error`) but Go's `where` is `SearchChannelsForUser`, and
+    /// `where` is on the wire.
+    #[tracing::instrument(skip_all, fields(team_id = %team_id, user_id = %user_id))]
+    pub async fn search_channels_for_user(
+        &self,
+        user_id: &str,
+        team_id: &str,
+        term: &str,
+    ) -> AppResult<ChannelList> {
+        self.store()
+            .channel()
+            .search_for_user_in_team(user_id, team_id, term.trim())
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "channel search for user failed");
+                AppError::boxed(
+                    "SearchChannelsForUser",
+                    "app.channel.search.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })
+    }
+
+    /// Port of `app.App.GetChannelsMemberCount` (app/channel.go:2313).
+    ///
+    /// Two ids on the store's one error — 404 `…get_channels_member_count.existing.app_error`
+    /// for a not-found, 500 `…find.app_error` otherwise — but the store has **no not-found
+    /// branch**: an id nothing matches is a `0` in the map, not an error. The 404 is dead code
+    /// in Go too, and reproduced for the same reason its neighbours are.
+    #[tracing::instrument(skip_all, fields(asked = channel_ids.len()))]
+    pub async fn get_channels_member_count(
+        &self,
+        channel_ids: &[String],
+    ) -> AppResult<std::collections::BTreeMap<String, i64>> {
+        self.store()
+            .channel()
+            .get_channels_member_count(channel_ids)
+            .await
+            .map_err(|err| {
+                let not_found = err.is_not_found();
+                tracing::error!(error = %err, "channel member counts failed");
+                if not_found {
+                    AppError::boxed(
+                        "GetChannelsMemberCount",
+                        "app.channel.get_channels_member_count.existing.app_error",
+                        None,
+                        String::new(),
+                        404,
+                    )
+                } else {
+                    AppError::boxed(
+                        "GetChannelsMemberCount",
+                        "app.channel.get_channels_member_count.find.app_error",
+                        None,
+                        String::new(),
+                        500,
+                    )
+                }
+            })
+    }
+
+    /// Port of `app.App.GetChannels` (channel.go:2289) — the plural of `GetChannel`, over an
+    /// id list.
+    ///
+    /// Both error ids say **`GetChannel`**, singular, in the `where` field: Go passes the
+    /// singular name to `NewAppError` in the plural function. Kept, because `where` is the one
+    /// field of an `AppError` a client can see change without a translation file.
+    ///
+    /// `HydrateChannelsPolicyActions` is not ported. It fills `PolicyActions` on channels whose
+    /// `PolicyEnforced` is true, and Go *logs and continues* when it fails rather than
+    /// propagating — so its absence changes one unselected field on a channel this deployment
+    /// cannot create, and never changes the status.
+    #[tracing::instrument(skip_all, fields(asked = channel_ids.len(), count))]
+    pub async fn get_channels(&self, channel_ids: &[String]) -> AppResult<Vec<Channel>> {
+        let channels = self
+            .store()
+            .channel()
+            .get_many(channel_ids)
+            .await
+            .map_err(|err| {
+                let not_found = err.is_not_found();
+                tracing::error!(error = %err, "channels-by-ids lookup failed");
+                if not_found {
+                    AppError::boxed(
+                        "GetChannel",
+                        "app.channel.get.existing.app_error",
+                        None,
+                        String::new(),
+                        404,
+                    )
+                } else {
+                    AppError::boxed(
+                        "GetChannel",
+                        "app.channel.get.find.app_error",
+                        None,
+                        String::new(),
+                        500,
+                    )
+                }
+            })?;
+        tracing::Span::current().record("count", channels.len());
         Ok(channels)
     }
 

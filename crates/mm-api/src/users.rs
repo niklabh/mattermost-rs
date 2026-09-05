@@ -10,14 +10,19 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use mm_app::user::{UserPage, ViewUsersRestriction};
 use mm_model::permission::{
-    PERMISSION_MANAGE_SYSTEM, PERMISSION_READ_CHANNEL, PERMISSION_VIEW_MEMBERS,
-    PERMISSION_VIEW_TEAM, make_permission_error,
+    PERMISSION_EDIT_OTHER_USERS, PERMISSION_MANAGE_SYSTEM, PERMISSION_READ_CHANNEL,
+    PERMISSION_READ_CHANNEL_CONTENT, PERMISSION_VIEW_MEMBERS, PERMISSION_VIEW_TEAM,
+    make_permission_error,
 };
+use mm_model::post::POST_PROPS_ATTACHMENTS;
 use mm_model::user::User;
-use mm_model::utils::{AppError, PAYLOAD_PARSE_ERROR, is_valid_id, sorted_array_from_json};
+use mm_model::utils::{
+    AppError, PAYLOAD_PARSE_ERROR, go_to_lower, is_valid_id, sorted_array_from_json,
+};
 
 use crate::AppState;
 use crate::auth::AuthenticatedSession;
+use crate::channels::{parse_page, parse_per_page, query_first, query_flag_is_true, resolve_me};
 use crate::error::ApiError;
 
 /// `model.HeaderEtagServer`.
@@ -313,6 +318,556 @@ pub async fn get_user_by_username(
         Ok(response) => response,
         Err(err) => err.into_response(),
     }
+}
+
+/// The `getFilteredUsersStats` query parameters that add a role filter, and are therefore Go's.
+///
+/// `applyMultiRoleFilters` (user_store.go) turns each into a join and an `IN` list, and
+/// `CleanRoleNames` validates them first — a 400 this port would have to reproduce exactly. A
+/// request carrying any of them is forwarded whole, at any value, including the empty string that
+/// Go itself treats as absent.
+const FILTERED_STATS_FORWARDED_PARAMS: &[&str] = &["roles", "channel_roles", "team_roles"];
+
+/// Port of `getFilteredUsersStats` (api4/user.go:1042) —
+/// `GET /api/v4/users/stats/filtered`.
+///
+/// The admin console's user list. This route was forwarded until now; `users_stats.rs` asserted
+/// that, and now asserts the opposite.
+///
+/// # The permission is a *sysconsole* one, and it is checked last
+///
+/// Every parameter is parsed and every role name validated **before**
+/// `sysconsole_read_user_management_users` is consulted, so a caller with no rights at all still
+/// gets the role 400 rather than the 403. Reproduced by keeping the order.
+///
+/// # An unparseable boolean is `false`, not a 400
+///
+/// `strconv.ParseBool` returns an error the handler **discards** (`includeDeletedBool, _ := …`),
+/// so `?include_deleted=yes` counts as `false`. Measured.
+///
+/// # `in_team` wins over `in_channel`
+///
+/// The store's `else if` (user_store.go:1497) means a request naming both filters on the team
+/// alone. Measured: the two together return the team's count, not the intersection.
+///
+/// # Wire format
+///
+/// `json.NewEncoder(w).Encode(stats)` — a **trailing newline**, unlike the unfiltered
+/// `/users/stats` beside it, which uses `w.Write`.
+#[tracing::instrument(skip_all, fields(forwarded))]
+pub async fn get_filtered_users_stats(
+    State(state): State<AppState>,
+    axum::extract::RawQuery(query): axum::extract::RawQuery,
+    session: AuthenticatedSession,
+    request: axum::extract::Request,
+) -> Response {
+    if FILTERED_STATS_FORWARDED_PARAMS
+        .iter()
+        .any(|name| query_first(query.as_deref(), name).is_some())
+    {
+        tracing::Span::current().record("forwarded", true);
+        return crate::proxy::forward_to_go(State(state), request).await;
+    }
+    tracing::Span::current().record("forwarded", false);
+
+    if !state
+        .app
+        .session_has_permission_to(
+            &session.0,
+            &mm_model::permission::PERMISSION_SYSCONSOLE_READ_USER_MANAGEMENT_USERS,
+        )
+        .await
+    {
+        return ApiError::from(make_permission_error(
+            &session.0,
+            &[&mm_model::permission::PERMISSION_SYSCONSOLE_READ_USER_MANAGEMENT_USERS],
+        ))
+        .into_response();
+    }
+
+    // `strconv.ParseBool` returns `(false, err)` for anything it does not recognise and the
+    // handler discards the error, so an unparseable value is `false` — not a 400 and not `true`.
+    let flag = |name: &str| {
+        query_first(query.as_deref(), name)
+            .and_then(|raw| mm_model::utils::parse_go_bool(&raw))
+            .unwrap_or(false)
+    };
+    let options = mm_model::user_count::UserCountOptions {
+        include_deleted: flag("include_deleted"),
+        include_bot_accounts: flag("include_bots"),
+        include_remote_users: flag("include_remote_users"),
+        team_id: query_first(query.as_deref(), "in_team").unwrap_or_default(),
+        channel_id: query_first(query.as_deref(), "in_channel").unwrap_or_default(),
+        ..mm_model::user_count::UserCountOptions::default()
+    };
+
+    let stats = match state.app.get_filtered_users_stats(&options).await {
+        Ok(stats) => stats,
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+
+    let mut body = match serde_json::to_vec(&stats) {
+        Ok(body) => body,
+        Err(err) => {
+            tracing::error!(error = %err, "failed to serialise the stats");
+            return ApiError::from(AppError::new(
+                "getFilteredUsersStats",
+                "api.marshal_error",
+                None,
+                String::new(),
+                500,
+            ))
+            .into_response();
+        }
+    };
+    body.push(b'\n');
+
+    (
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
+    )
+        .into_response()
+}
+
+/// The `model.UserSearch` fields that change which store query runs, and are therefore Go's.
+///
+/// Each one either picks a different branch of `App.SearchUsers`' dispatch (user.go:2412) or adds
+/// a filter `performSearch` builds — a role filter, a group-constrained join. A request carrying
+/// any of them is forwarded whole rather than approximated, the same arrangement
+/// `getThreadsForUser` uses for its option set.
+const USER_SEARCH_FORWARDED_FIELDS: &[&str] = &[
+    "not_in_team_id",
+    "in_channel_id",
+    "not_in_channel_id",
+    "in_group_id",
+    "not_in_group_id",
+    "without_team",
+    "group_constrained",
+    "role",
+    "roles",
+    "channel_roles",
+    "team_roles",
+];
+
+/// Port of `searchUsers` (api4/user.go:1104) — `POST /api/v4/users/search`.
+///
+/// The add-members dialog and the admin console's user list.
+///
+/// # The validation order is the wire
+///
+/// `limit` is **defaulted before `term` is checked**, so `{}` is the `term` 400 and never the
+/// `limit` one; and `limit` is range-checked **last**, after every permission check, so a body
+/// with a bad team *and* a bad limit is the 403. Both measured.
+///
+/// # Which fields are served
+///
+/// `term`, `team_id`, `allow_inactive` and `limit`. Everything in
+/// [`USER_SEARCH_FORWARDED_FIELDS`] picks a different store query or adds a filter, and is handed
+/// to Go — including the `team_id == "" && not_in_channel_id != ""` 400, which is Go's to answer
+/// because the body that produces it is one we forward.
+///
+/// # Emails and full names are a permission, not a preference
+///
+/// A system admin searches on `Email`, `FirstName` and `LastName` unconditionally; everybody else
+/// gets them only when `ShowEmailAddress` / `ShowFullName` allow it. The columns the query matches
+/// on therefore differ per caller, not just the columns the response shows.
+///
+/// # Wire format
+///
+/// `json.Marshal` then `w.Write`, so **no trailing newline** ([D-086]) — and `[]` rather than
+/// `null` for no matches, because the store allocates.
+#[tracing::instrument(skip_all, fields(forwarded, found))]
+pub async fn search_users(
+    State(state): State<AppState>,
+    session: AuthenticatedSession,
+    request: axum::extract::Request,
+) -> Response {
+    let (parts, body) = request.into_parts();
+    let bytes = match axum::body::to_bytes(body, usize::MAX).await {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            tracing::warn!(error = %err, "could not read the request body");
+            return ApiError::invalid_param("props").into_response();
+        }
+    };
+
+    // Decoded to a `Value` first: **serde builds a struct from a JSON array positionally** where
+    // Go's decoder refuses a non-object, so `["x"]` would otherwise become a search for `x`.
+    let decoded: serde_json::Value = match mm_model::utils::decode_one_from_json(&bytes) {
+        Ok(decoded) => decoded,
+        Err(err) => {
+            tracing::debug!(error = %err, "user search body did not decode");
+            return ApiError::invalid_param("props").into_response();
+        }
+    };
+    let Some(map) = decoded.as_object() else {
+        // `Decode` into a non-pointer struct leaves the zero value for `null`, which then fails
+        // the empty-term check rather than the decode one — the same 400 either way.
+        return if decoded.is_null() {
+            ApiError::invalid_param("term").into_response()
+        } else {
+            ApiError::invalid_param("props").into_response()
+        };
+    };
+
+    if USER_SEARCH_FORWARDED_FIELDS
+        .iter()
+        .any(|name| map.contains_key(*name))
+    {
+        tracing::Span::current().record("forwarded", true);
+        let request = axum::extract::Request::from_parts(parts, axum::body::Body::from(bytes));
+        return crate::proxy::forward_to_go(State(state), request).await;
+    }
+
+    let props: mm_model::user_search::UserSearch = match serde_json::from_value(decoded.clone()) {
+        Ok(props) => props,
+        Err(err) => {
+            tracing::debug!(error = %err, "user search body has the wrong field types");
+            return ApiError::invalid_param("props").into_response();
+        }
+    };
+
+    // `if props.Limit == 0 { props.Limit = UserSearchDefaultLimit }` — **before** the term check.
+    let limit = if props.limit == 0 {
+        mm_model::user_search::USER_SEARCH_DEFAULT_LIMIT
+    } else {
+        props.limit
+    };
+
+    if props.term.is_empty() {
+        return ApiError::invalid_param("term").into_response();
+    }
+
+    if !props.team_id.is_empty()
+        && !state
+            .app
+            .session_has_permission_to_team(
+                &session.0,
+                &props.team_id,
+                &mm_model::permission::PERMISSION_VIEW_TEAM,
+            )
+            .await
+    {
+        return ApiError::from(make_permission_error(
+            &session.0,
+            &[&mm_model::permission::PERMISSION_VIEW_TEAM],
+        ))
+        .into_response();
+    }
+
+    // Last, after the permission checks — a body with both a bad team and a bad limit is the 403.
+    if limit <= 0 || limit > mm_model::user_search::USER_SEARCH_MAX_LIMIT {
+        return ApiError::invalid_param("limit").into_response();
+    }
+
+    // The nil-restrictions fast path: `RestrictUsersSearchByPermissions` rewrites the query for a
+    // caller whose `view_members` is scheme-granted, and that rewrite is Go's.
+    if !state
+        .app
+        .has_permission_to(&session.0.user_id, &PERMISSION_VIEW_MEMBERS)
+        .await
+    {
+        tracing::Span::current().record("forwarded", true);
+        let request = axum::extract::Request::from_parts(parts, axum::body::Body::from(bytes));
+        return crate::proxy::forward_to_go(State(state), request).await;
+    }
+    tracing::Span::current().record("forwarded", false);
+
+    let is_admin = state
+        .app
+        .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)
+        .await;
+    let search_options = mm_store::user_store::UserSearchOptions {
+        allow_emails: is_admin || state.show_email_address,
+        allow_inactive: props.allow_inactive,
+        allow_full_names: is_admin || state.show_full_name,
+        limit,
+    };
+
+    let mut users = match state
+        .app
+        .search_users_in_team(&props.team_id, &props.term, &search_options)
+        .await
+    {
+        Ok(users) => users,
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+    tracing::Span::current().record("found", users.len());
+
+    let options = sanitize_options(state.show_full_name, state.show_email_address, is_admin);
+    for user in &mut users {
+        user.sanitize_profile(&options, is_admin);
+    }
+
+    let body = match serde_json::to_vec(&users) {
+        Ok(body) => body,
+        Err(err) => {
+            tracing::error!(error = %err, "failed to serialise users");
+            return ApiError::from(AppError::new(
+                "searchUsers",
+                "api.marshal_error",
+                None,
+                String::new(),
+                500,
+            ))
+            .into_response();
+        }
+    };
+
+    (
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
+    )
+        .into_response()
+}
+
+/// Port of `getUsersByNames` (api4/user.go:1231) — `POST /api/v4/users/usernames`.
+///
+/// The webapp posts the usernames it found in a page of posts, so this fires once per channel
+/// load with whatever `@mentions` were on screen.
+///
+/// # Two 400s, in Go's order
+///
+/// `SortedArrayFromJSON` first — a body that is not a JSON array of strings is
+/// `api.payload.parse.error` — then an **empty list** is `invalid_body_param` naming `usernames`.
+/// Unlike `getUsersByIds` there is no `since` parameter and no `?since=` branch, so those are the
+/// only two.
+///
+/// # Nothing validates a username
+///
+/// There is no `IsValidUsername` here, on the list or on its members. A name of the wrong shape
+/// is simply a name that matches nothing, and the answer is the array without it. A request for
+/// five names can legitimately answer with two, and the caller cannot tell "no such user" from
+/// "not allowed to see them" — which is the same guarantee `getUsersByIds` gives.
+///
+/// # Order is the store's, not the request's
+///
+/// `SortedArrayFromJSON` sorts the request and the query carries `ORDER BY Users.Username ASC`,
+/// so the two agree — but it is the second that the wire depends on.
+///
+/// # Wire format
+///
+/// `json.Marshal` then `w.Write`, so **no trailing newline** ([D-086]) — the opposite of
+/// `getUser` beside it, and the same as `getUsersByIds`.
+#[tracing::instrument(skip_all, fields(count, forwarded))]
+pub async fn get_users_by_names(
+    State(state): State<AppState>,
+    session: AuthenticatedSession,
+    request: axum::extract::Request,
+) -> Response {
+    // The nil-restrictions fast path. `GetViewUsersRestrictions` is called before the fetch in
+    // Go and its non-nil branch changes the *query*; every such caller is Go's.
+    if !state
+        .app
+        .has_permission_to(&session.0.user_id, &PERMISSION_VIEW_MEMBERS)
+        .await
+    {
+        tracing::Span::current().record("forwarded", true);
+        return crate::proxy::forward_to_go(State(state), request).await;
+    }
+    tracing::Span::current().record("forwarded", false);
+
+    match serve_users_by_names(&state, &session, request).await {
+        Ok(response) => response,
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn serve_users_by_names(
+    state: &AppState,
+    session: &AuthenticatedSession,
+    request: axum::extract::Request,
+) -> Result<Response, ApiError> {
+    let bytes = axum::body::to_bytes(request.into_body(), usize::MAX)
+        .await
+        .map_err(|err| {
+            tracing::warn!(error = %err, "could not read the request body");
+            ApiError::from(AppError::new(
+                "getUsersByNames",
+                PAYLOAD_PARSE_ERROR,
+                None,
+                String::new(),
+                400,
+            ))
+        })?;
+
+    let usernames = sorted_array_from_json(&bytes).map_err(|err| {
+        tracing::debug!(error = %err, "username body did not decode");
+        ApiError::from(AppError::new(
+            "getUsersByNames",
+            PAYLOAD_PARSE_ERROR,
+            None,
+            String::new(),
+            400,
+        ))
+    })?;
+    if usernames.is_empty() {
+        return Err(ApiError::invalid_param("usernames"));
+    }
+    tracing::Span::current().record("count", usernames.len());
+
+    let is_admin = state
+        .app
+        .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)
+        .await;
+
+    let mut users = state.app.get_users_by_usernames(&usernames).await?;
+    let options = sanitize_options(state.show_full_name, state.show_email_address, is_admin);
+    for user in &mut users {
+        user.sanitize_profile(&options, is_admin);
+    }
+
+    let body = serde_json::to_vec(&users).map_err(|err| {
+        tracing::error!(error = %err, "failed to serialise users");
+        ApiError::from(AppError::new(
+            "getUsersByNames",
+            "api.marshal_error",
+            None,
+            String::new(),
+            500,
+        ))
+    })?;
+
+    Ok((
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
+    )
+        .into_response())
+}
+
+/// Port of `getUserByEmail` (api4/user.go:421) — `GET /api/v4/users/email/{email}`.
+///
+/// # It is not `getUser` with a different lookup
+///
+/// Two things every other single-user read does, this one does **not**, and both are on the wire:
+///
+/// 1. **No terms-of-service branch.** `getUser` and `getUserByUsername` fill in
+///    `terms_of_service_id`/`terms_of_service_create_at` for an admin or for the caller
+///    themselves. This handler has no such block, so those fields are always absent here — even
+///    for a caller looking up their own email.
+/// 2. **No `is_self` case in the sanitiser.** The others call `user.Sanitize(map[string]bool{})`
+///    when the target is the caller, which keeps every field. This one always calls
+///    `SanitizeProfile(user, c.IsSystemAdmin())`, so **a non-admin reading their own email gets
+///    the stranger's view of themselves** — no `notify_props`, no `auth_data`, and no `email`
+///    unless `ShowEmailAddress` is on.
+///
+/// Reusing [`respond_with_user`] would have quietly added both. It is a different tail.
+///
+/// # The permission gate is on the *option*, not on a permission
+///
+/// `GetSanitizeOptions(IsSystemAdmin())["email"]` is `ShowEmailAddress || isAdmin`. When it is
+/// false the route is a **403** `api.user.get_user_by_email.permissions.app_error` for everyone
+/// but an admin — before the lookup, so it leaks nothing about whether the address exists.
+///
+/// # `SanitizeEmail`, and the `.+` in the route
+///
+/// `c.SanitizeEmail()` (web/context.go:549) lowercases the segment and then runs `IsValidEmail`,
+/// which is `net/mail.ParseAddress` plus a rejection of the `Name <addr>` forms. The gorilla
+/// pattern is `{email:.+}`, so the segment may contain slashes — hence the wildcard in the route
+/// table rather than a single-segment parameter, and hence `GET /users/email/verify` reaching
+/// here as the invalid address `verify` rather than as the POST route beside it.
+#[tracing::instrument(skip_all, fields(forwarded))]
+pub async fn get_user_by_email(
+    State(state): State<AppState>,
+    Path(email): Path<String>,
+    headers: HeaderMap,
+    session: AuthenticatedSession,
+    request: axum::extract::Request,
+) -> Response {
+    // `strings.ToLower` is Go's simple mapping, which is not Rust's `to_lowercase` on every
+    // input — see [`go_to_lower`].
+    let email = go_to_lower(&email);
+    if !mm_model::utils::is_valid_email(&email) {
+        return ApiError::invalid_url_param("email").into_response();
+    }
+
+    let is_admin = state
+        .app
+        .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)
+        .await;
+    let options = sanitize_options(state.show_full_name, state.show_email_address, is_admin);
+    if options.get("email") != Some(&true) {
+        return ApiError::from(AppError::boxed(
+            "getUserByEmail",
+            "api.user.get_user_by_email.permissions.app_error",
+            None,
+            format!("userId={}", session.0.user_id),
+            403,
+        ))
+        .into_response();
+    }
+
+    // The nil-restrictions fast path, checked before the fetch — the same one
+    // [`get_user_by_username`] takes, and for the same reason: a caller whose restrictions are
+    // non-nil takes Go's existence-hiding 403 on the failure branch, which this port does not
+    // reproduce.
+    if !state
+        .app
+        .has_permission_to(&session.0.user_id, &PERMISSION_VIEW_MEMBERS)
+        .await
+    {
+        tracing::Span::current().record("forwarded", true);
+        return crate::proxy::forward_to_go(State(state), request).await;
+    }
+    tracing::Span::current().record("forwarded", false);
+
+    let mut user = match state.app.get_user_by_email(&email).await {
+        Ok(user) => user,
+        // Restrictions are nil for this caller, so Go surfaces the fetch error as-is.
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+
+    // `UserCanSeeOtherUser`: self is its first branch, nil restrictions its second. True by
+    // construction after the fast path above.
+
+    let etag = user.etag(state.show_full_name, state.show_email_address);
+    if let Some(if_none_match) = headers.get(IF_NONE_MATCH).and_then(|v| v.to_str().ok())
+        && if_none_match == etag
+    {
+        return (StatusCode::NOT_MODIFIED, [(ETAG, etag)]).into_response();
+    }
+
+    // No `is_self` branch — see the note above.
+    user.sanitize_profile(&options, is_admin);
+
+    let mut body = match serde_json::to_vec(&user) {
+        Ok(body) => body,
+        Err(err) => {
+            tracing::error!(error = %err, "failed to serialise User");
+            return ApiError::from(AppError::boxed(
+                "getUserByEmail",
+                "api.marshal_error",
+                None,
+                String::new(),
+                500,
+            ))
+            .into_response();
+        }
+    };
+    body.push(b'\n');
+
+    (
+        StatusCode::OK,
+        [
+            (HEADER_ETAG_SERVER, etag.as_str()),
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
+    )
+        .into_response()
 }
 
 /// The validated inputs of `getUsersByIds`, split from the handler so every 400 branch has a
@@ -1061,6 +1616,8 @@ pub async fn autocomplete_users(
         .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)
         .await;
     let options = mm_store::user_store::UserSearchOptions {
+        allow_emails: false,
+        allow_inactive: false,
         allow_full_names: allow_full_names(is_admin, state.show_full_name),
         limit: parsed.limit,
     };
@@ -1386,6 +1943,280 @@ async fn serve_total_users_stats(state: &AppState) -> Result<Response, ApiError>
         body,
     )
         .into_response())
+}
+
+/// The page size the streaming branch walks with (api4/user.go:3773).
+const CHANNEL_MEMBERS_STREAM_PAGE_SIZE: i64 = 100;
+
+/// Port of `getChannelMembersForUser` (api4/user.go:3737), reached as
+/// `GET /api/v4/users/{user_id}/channel_members` — every channel the caller belongs to, across
+/// every team. The webapp asks for it once per load.
+///
+/// # Two responses behind one path, chosen by a sentinel
+///
+/// `?page=-1` selects a **newline-delimited stream** (`application/x-ndjson`, one member object
+/// per line) that the handler walks a hundred rows at a time; anything else — including no
+/// `page` at all, which parses to `0` — selects the ordinary paginated **JSON array**. Both are
+/// measured against the running server.
+///
+/// # The streaming branch stops on a 404
+///
+/// Its store call raises `ErrNotFound` for an empty page rather than returning `[]`, and the loop
+/// reads that as "done" — but **only once it has a cursor**. Go's guard is
+/// `fromChannelID != "" && err.Id == MissingChannelMemberError`, so a caller whose *first* page
+/// is empty gets the 404 itself, with `Content-Type: application/x-ndjson` already set on it. A
+/// user with no channel memberships at all is the one shape that reaches it.
+///
+/// # Sanitisation is per row and it is the caller's own that survives
+///
+/// `SanitizeForCurrentUser` blanks `LastViewedAt`, `LastUpdateAt` and the mention counts to `-1`
+/// for every member that is not the requesting session's user — the same helper the channel
+/// member list uses, applied here to rows spanning every team.
+///
+/// # One divergence, and it is not on the wire
+///
+/// Go writes each page to the socket as it reads it; this collects the whole walk and answers in
+/// one body. The bytes are identical — the tests compare them — but a caller with a very large
+/// membership sees Go's first line sooner and holds less of our memory. Recorded rather than
+/// hidden: streaming through `axum::body::Body` would reproduce it if it ever matters.
+#[tracing::instrument(skip_all, fields(user_id = %user_id, streaming, count))]
+pub async fn get_channel_members_for_user(
+    State(state): State<AppState>,
+    Path(user_id): Path<String>,
+    axum::extract::RawQuery(query): axum::extract::RawQuery,
+    session: AuthenticatedSession,
+) -> Result<Response, ApiError> {
+    // `me` first, then `RequireUserId` (web/context.go:301).
+    let user_id = resolve_me(&user_id, &session);
+    is_valid_id(user_id)
+        .then_some(())
+        .ok_or_else(|| ApiError::invalid_url_param("user_id"))?;
+
+    if !state
+        .app
+        .session_has_permission_to_user(&session.0, user_id)
+        .await
+    {
+        return Err(ApiError::from(make_permission_error(
+            &session.0,
+            &[&PERMISSION_EDIT_OTHER_USERS],
+        )));
+    }
+
+    let page = parse_page_allowing_negative(query.as_deref());
+    let per_page = parse_per_page(query.as_deref());
+    tracing::Span::current().record("streaming", page == -1);
+
+    if page != -1 {
+        let mut members = state
+            .app
+            .get_channel_members_with_team_data_for_user_with_pagination(
+                user_id, page, per_page, "",
+            )
+            .await?;
+        for member in &mut members {
+            member
+                .channel_member
+                .sanitize_for_current_user(&session.0.user_id);
+        }
+        tracing::Span::current().record("count", members.len());
+
+        let mut body = serde_json::to_vec(&members).map_err(|err| {
+            tracing::error!(error = %err, "failed to serialise the channel members");
+            marshal_error("getChannelMembersForUser")
+        })?;
+        body.push(b'\n');
+
+        return Ok((
+            StatusCode::OK,
+            [
+                ("Content-Type", "application/json"),
+                ("x-mmrs-served-by", "rust"),
+            ],
+            body,
+        )
+            .into_response());
+    }
+
+    let mut body: Vec<u8> = Vec::new();
+    let mut from_channel_id = String::new();
+    let mut count = 0usize;
+    loop {
+        let members = match state
+            .app
+            .get_channel_members_with_team_data_for_user_with_pagination(
+                user_id,
+                -1,
+                CHANNEL_MEMBERS_STREAM_PAGE_SIZE,
+                &from_channel_id,
+            )
+            .await
+        {
+            Ok(members) => members,
+            Err(err) => {
+                // Go: `if fromChannelID != "" && err.Id == MissingChannelMemberError { break }`.
+                // Without a cursor the 404 is the answer, not the terminator.
+                if !from_channel_id.is_empty()
+                    && err.id == "app.channel.get_member.missing.app_error"
+                {
+                    break;
+                }
+                return Err(ApiError::from(err));
+            }
+        };
+
+        for mut member in members.iter().cloned() {
+            // Go sanitises the loop's *copy* and encodes that, leaving the slice untouched —
+            // which is unobservable here, but it is why the clone is Go's shape and not a
+            // borrow-checker concession.
+            member
+                .channel_member
+                .sanitize_for_current_user(&session.0.user_id);
+            serde_json::to_writer(&mut body, &member).map_err(|err| {
+                tracing::error!(error = %err, "failed to serialise a channel member");
+                marshal_error("getChannelMembersForUser")
+            })?;
+            body.push(b'\n');
+            count += 1;
+        }
+
+        if (members.len() as i64) < CHANNEL_MEMBERS_STREAM_PAGE_SIZE {
+            break;
+        }
+        from_channel_id = members
+            .last()
+            .map(|member| member.channel_member.channel_id.clone())
+            .unwrap_or_default();
+    }
+    tracing::Span::current().record("count", count);
+
+    Ok((
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/x-ndjson"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
+    )
+        .into_response())
+}
+
+/// Port of `getThreadForUser` (api4/user.go:3934), reached as
+/// `GET /api/v4/users/{user_id}/teams/{team_id}/threads/{thread_id}` — one thread, which the
+/// webapp asks for when a thread is opened.
+///
+/// # Three gates, and the team id is not one of them
+///
+/// `RequireUserId().RequireTeamId().RequireThreadId()` validates all three segments, then
+/// `SessionHasPermissionToUser` and `SessionHasPermissionToReadPost` decide. **`team_id` is
+/// never used after validation** — not by the permission checks, not by the store. A thread
+/// reached under the wrong team's path answers exactly as it does under the right one.
+///
+/// # Two different 404s, and which one you get says whether the row exists
+///
+/// A thread with **no `ThreadMemberships` row** for this user — an id that names nothing, or a
+/// thread in a channel nobody has posted a reply in — refuses at the lookup:
+/// `app.user.get_thread_membership_for_user.not_found`. A thread with a row that is not
+/// following refuses one layer deeper, in the store: `app.user.get_threads_for_user.not_found`.
+///
+/// Both are reachable from the wire and a client branching on the id can tell them apart —
+/// measured, after this comment first claimed the store's refusal was unreachable here. The
+/// unfollow route (`DELETE …/threads/{id}/following`) sets `Following = false` and keeps the
+/// row, which is how the second is produced.
+///
+/// # An unknown thread id is a 403 for a plain caller
+///
+/// `SessionHasPermissionToReadPost` cannot resolve the channel of a post that does not exist and
+/// falls back to a bare system-level check — which an ordinary user fails. So the 404 above is
+/// an admin's answer; everyone else gets `read_channel_content`. The same asymmetry `getReactions`
+/// has, for the same reason.
+#[tracing::instrument(skip_all, fields(user_id = %user_id, thread_id = %thread_id))]
+pub async fn get_thread_for_user(
+    State(state): State<AppState>,
+    Path((user_id, team_id, thread_id)): Path<(String, String, String)>,
+    axum::extract::RawQuery(query): axum::extract::RawQuery,
+    session: AuthenticatedSession,
+) -> Result<Response, ApiError> {
+    // `RequireUserId` substitutes the session's id for `me` before validating it
+    // (web/context.go:301), so the literal must be resolved first or this 400s where Go answers.
+    let user_id = resolve_me(&user_id, &session);
+    if !is_valid_id(user_id) {
+        return Err(ApiError::invalid_url_param("user_id"));
+    }
+    if !is_valid_id(&team_id) {
+        return Err(ApiError::invalid_url_param("team_id"));
+    }
+    if !is_valid_id(&thread_id) {
+        return Err(ApiError::invalid_url_param("thread_id"));
+    }
+
+    if !state
+        .app
+        .session_has_permission_to_user(&session.0, user_id)
+        .await
+    {
+        return Err(ApiError::from(make_permission_error(
+            &session.0,
+            &[&PERMISSION_EDIT_OTHER_USERS],
+        )));
+    }
+
+    // The second return value is `isMember`, which Go binds and never reads ([D-028]).
+    let (allowed, _is_member) = state
+        .app
+        .session_has_permission_to_read_post(&session.0, &thread_id)
+        .await;
+    if !allowed {
+        return Err(ApiError::from(make_permission_error(
+            &session.0,
+            &[&PERMISSION_READ_CHANNEL_CONTENT],
+        )));
+    }
+
+    let extended = query_flag_is_true(query.as_deref(), "extended");
+
+    let membership = state
+        .app
+        .get_thread_membership_for_user(user_id, &thread_id)
+        .await?;
+    let mut thread = state.app.get_thread_for_user(&membership, extended).await?;
+
+    // `sanitizeProfiles(thread.Participants, false)` — a non-admin's options whoever asks, the
+    // same literal `false` the list route carries.
+    let options = sanitize_options(state.show_full_name, state.show_email_address, false);
+    for participant in thread.participants.iter_mut().flatten() {
+        participant.sanitize_profile(&options, false);
+    }
+
+    let mut body = serde_json::to_vec(&thread).map_err(|err| {
+        tracing::error!(error = %err, "failed to serialise the thread");
+        marshal_error("getThreadForUser")
+    })?;
+    body.push(b'\n');
+
+    Ok((
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
+    )
+        .into_response())
+}
+
+/// `parse_page` with the `-1` sentinel let through.
+///
+/// `web.ParamsFromRequest` (params.go:222) reads `page` with `strconv.Atoi` and keeps whatever it
+/// gets, including negatives; the shared [`parse_page`] clamps those to the default because every
+/// other route treats a negative page as garbage. This one route gives `-1` a meaning, so it
+/// needs the raw value — and only `-1`, since `-2` reaches Go's offset arithmetic as a negative
+/// `OFFSET` and errors there just as it does here.
+fn parse_page_allowing_negative(query: Option<&str>) -> i64 {
+    match query_first(query, "page").and_then(|v| v.parse::<i64>().ok()) {
+        Some(val) if val >= -1 => val,
+        _ => parse_page(query),
+    }
 }
 
 #[cfg(test)]
@@ -1959,4 +2790,290 @@ mod autocomplete_tests {
         assert_eq!(admin.get("authservice"), Some(&true));
         assert_eq!(admin.get("authdata"), Some(&true));
     }
+}
+
+/// Port of `getUsersByGroupChannelIds` (api4/user.go:828), reached as
+/// `POST /api/v4/users/group_channels` — the member profiles behind a group message's avatar
+/// row, which the webapp asks for once per GM on screen.
+///
+/// # The empty-list branch is dead code, and the error it never sends is the interesting one
+///
+/// Go writes `if err != nil || len(channelIds) == 0 { … PayloadParseError … } else if
+/// len(channelIds) == 0 { SetInvalidParam("channel_ids") }`. The second arm cannot be reached:
+/// the first already caught the empty list. So `[]` and `null` answer **400
+/// `api.payload.parse.error`**, never `invalid_body_param` — the opposite of what every other
+/// by-ids route in api4 does with an empty body, and the opposite of what the dead branch says
+/// this one meant to do. Measured.
+///
+/// # There is no permission check on this route
+///
+/// Not in the handler, not in the app layer. The access rule is an `EXISTS` subquery inside the
+/// store's SQL asserting the caller is a member of each channel — see
+/// [`mm_store::user_store::SqlUserStore::get_profile_by_group_channel_ids_for_user`]. Naming a
+/// group channel you are not in answers with that channel simply absent from the map, not a 403.
+///
+/// # `asAdmin` is `c.IsSystemAdmin()`, and it only widens sanitisation
+///
+/// The same `SanitizeProfile` the by-ids route applies, with the same config-driven options.
+///
+/// # Wire format
+///
+/// `json.NewEncoder(w).Encode` of a `map[string][]*model.User` — an object with **bytewise
+/// sorted keys**, a trailing newline, and a channel that matched nothing simply absent rather
+/// than present-and-empty.
+#[tracing::instrument(skip_all, fields(user_id = %session.0.user_id, asked, found))]
+pub async fn get_users_by_group_channel_ids(
+    State(state): State<AppState>,
+    session: AuthenticatedSession,
+    request: axum::extract::Request,
+) -> Result<Response, ApiError> {
+    let bytes = axum::body::to_bytes(request.into_body(), usize::MAX)
+        .await
+        .map_err(|err| {
+            tracing::warn!(error = %err, "could not read the request body");
+            group_channels_parse_error()
+        })?;
+
+    // `SortedArrayFromJSON` then `err != nil || len == 0` — one branch, two causes, one answer.
+    let channel_ids = match sorted_array_from_json(&bytes) {
+        Ok(ids) if !ids.is_empty() => ids,
+        _ => return Err(group_channels_parse_error()),
+    };
+    tracing::Span::current().record("asked", channel_ids.len());
+
+    let is_admin = state
+        .app
+        .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)
+        .await;
+
+    let mut by_channel = state
+        .app
+        .get_users_by_group_channel_ids(&session.0.user_id, &channel_ids)
+        .await?;
+    tracing::Span::current().record("found", by_channel.len());
+
+    let options = sanitize_options(state.show_full_name, state.show_email_address, is_admin);
+    for users in by_channel.values_mut() {
+        for user in users.iter_mut() {
+            user.sanitize_profile(&options, is_admin);
+        }
+    }
+
+    let mut body = serde_json::to_vec(&by_channel).map_err(|err| {
+        tracing::error!(error = %err, "failed to serialise the group-channel profiles");
+        marshal_error("getUsersByGroupChannelIds")
+    })?;
+    body.push(b'\n');
+
+    Ok((
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
+    )
+        .into_response())
+}
+
+/// `model.NewAppError("getUsersByGroupChannelIds", model.PayloadParseError, nil, "", 400)`.
+fn group_channels_parse_error() -> ApiError {
+    ApiError::from(AppError::new(
+        "getUsersByGroupChannelIds",
+        PAYLOAD_PARSE_ERROR,
+        None,
+        String::new(),
+        400,
+    ))
+}
+
+/// The query parameters `getThreadsForUser` accepts that this port does **not** serve.
+///
+/// Each one changes the store query in a way that needs its own fixture to verify — a cursor, a
+/// `Since` window, an unread-only filter, the deleted variant, or one of the two "only" modes —
+/// and a port that guessed at any of them would be wrong invisibly. A request carrying one is
+/// handed to Go, which is the same mechanism `getPost` uses for a post it cannot reproduce.
+///
+/// `extended`, `per_page` and `page` are served; `page` because Go ignores it on this route.
+const THREADS_FORWARDED_PARAMS: &[&str] = &[
+    "since",
+    "before",
+    "after",
+    "unread",
+    "deleted",
+    "totalsOnly",
+    "threadsOnly",
+    "excludeDirect",
+];
+
+/// Port of `getThreadsForUser` (api4/user.go:3976), reached as
+/// `GET /api/v4/users/{user_id}/teams/{team_id}/threads` — the Threads view.
+///
+/// # Two gates, in Go's order
+///
+/// `SessionHasPermissionToUser` naming `edit_other_users`, then `SessionHasPermissionToTeam`
+/// naming `view_team`. Both answer the same 403 over HTTP.
+///
+/// # What is served, and what is handed upstream
+///
+/// The default request — the one the Threads view makes on load — plus `?extended`. Every other
+/// parameter in [`THREADS_FORWARDED_PARAMS`] forwards, because each rewrites the store query and
+/// deserves a fixture of its own before it is claimed. The two mutually-exclusive checks Go makes
+/// (`before` with `after`, `totalsOnly` with `threadsOnly`) live entirely inside that forwarded
+/// space, so this handler never has to make them.
+///
+/// # `page` is read and thrown away
+///
+/// `c.Params.Page` is parsed like every other route's and then never used: this route paginates
+/// by cursor, not offset. So `?page=7` is not an error and not a page — it is nothing.
+///
+/// # Wire format
+///
+/// `json.NewEncoder(w).Encode(threads)` — trailing newline. `participants` is a list of `User`
+/// carrying **only `id`** unless `?extended=true`, and the counters beside the list are computed
+/// by four separate queries, so `total` is not `threads.len()`.
+#[tracing::instrument(skip_all, fields(user_id = %user_id, team_id = %team_id, forwarded))]
+pub async fn get_threads_for_user(
+    State(state): State<AppState>,
+    Path((user_id, team_id)): Path<(String, String)>,
+    session: AuthenticatedSession,
+    request: axum::extract::Request,
+) -> Response {
+    let query = request.uri().query().map(str::to_owned);
+
+    if THREADS_FORWARDED_PARAMS
+        .iter()
+        .any(|name| query_first(query.as_deref(), name).is_some())
+    {
+        tracing::Span::current().record("forwarded", true);
+        return crate::proxy::forward_to_go(State(state), request).await;
+    }
+    tracing::Span::current().record("forwarded", false);
+
+    // `me` before `serve_threads` validates it, as `RequireUserId` does (web/context.go:301).
+    let user_id = resolve_me(&user_id, &session);
+
+    match serve_threads(&state, user_id, &team_id, &session, query.as_deref()).await {
+        Ok(Outcome::Served(response)) => response,
+        Ok(Outcome::Forward) => {
+            tracing::Span::current().record("forwarded", true);
+            crate::proxy::forward_to_go(State(state), request).await
+        }
+        Err(err) => err.into_response(),
+    }
+}
+
+/// What [`get_threads_for_user`] decided, before any of it is written.
+enum Outcome {
+    Served(Response),
+    /// The Go server has to answer this one — see the `attachments` note inside.
+    Forward,
+}
+
+async fn serve_threads(
+    state: &AppState,
+    user_id: &str,
+    team_id: &str,
+    session: &AuthenticatedSession,
+    query: Option<&str>,
+) -> Result<Outcome, ApiError> {
+    // `c.RequireUserId().RequireTeamId()` — user first.
+    if !is_valid_id(user_id) {
+        return Err(ApiError::invalid_url_param("user_id"));
+    }
+    if !is_valid_id(team_id) {
+        return Err(ApiError::invalid_url_param("team_id"));
+    }
+
+    if !state
+        .app
+        .session_has_permission_to_user(&session.0, user_id)
+        .await
+    {
+        return Err(ApiError::from(make_permission_error(
+            &session.0,
+            &[&PERMISSION_EDIT_OTHER_USERS],
+        )));
+    }
+    if !state
+        .app
+        .session_has_permission_to_team(&session.0, team_id, &PERMISSION_VIEW_TEAM)
+        .await
+    {
+        return Err(ApiError::from(make_permission_error(
+            &session.0,
+            &[&PERMISSION_VIEW_TEAM],
+        )));
+    }
+
+    let extended = query_flag_is_true(query, "extended");
+    let per_page = parse_per_page(query);
+
+    let mut threads = state
+        .app
+        .get_threads_for_user(user_id, team_id, per_page, extended)
+        .await?;
+
+    // **A root post carrying `attachments` is forwarded, page and all.**
+    //
+    // `StripActionIntegrations` rewrites that prop by re-marshalling the decoded
+    // `SlackAttachment` slice. Go's `encoding/json` emits a struct's fields in declaration
+    // order; `serde_json::Value` sorts them, because this workspace does not enable
+    // `preserve_order`. The two bodies then differ by key order inside `props.attachments` and
+    // by nothing else — measured, and the reason this route refuses rather than serves. See
+    // `docs/TECH_DEBT.md`.
+    //
+    // Every other route that meets this prop forwards for a different reason
+    // (`mm_app::post::REFUSED_PROPS`), so nothing has needed the ordering until now.
+    if threads
+        .threads
+        .iter()
+        .flatten()
+        .filter_map(|thread| thread.post.as_ref())
+        .any(|post| {
+            post.props
+                .as_ref()
+                .is_some_and(|props| props.contains_key(POST_PROPS_ATTACHMENTS))
+        })
+    {
+        return Ok(Outcome::Forward);
+    }
+
+    // `sanitizeProfiles(thread.Participants, false)` — the literal `false`, so participants are
+    // sanitised as a non-admin even when a system admin is asking. See the app layer.
+    let options = sanitize_options(state.show_full_name, state.show_email_address, false);
+    for thread in threads.threads.iter_mut().flatten() {
+        for participant in thread.participants.iter_mut().flatten() {
+            participant.sanitize_profile(&options, false);
+        }
+    }
+
+    let mut body = serde_json::to_vec(&threads).map_err(|err| {
+        tracing::error!(error = %err, "failed to serialise the threads");
+        marshal_error("getThreadsForUser")
+    })?;
+    body.push(b'\n');
+
+    Ok(Outcome::Served(
+        (
+            StatusCode::OK,
+            [
+                ("Content-Type", "application/json"),
+                ("x-mmrs-served-by", "rust"),
+            ],
+            body,
+        )
+            .into_response(),
+    ))
+}
+
+/// `model.NewAppError(where, "api.marshal_error", nil, "", 500)`.
+fn marshal_error(where_: &'static str) -> ApiError {
+    ApiError::from(AppError::new(
+        where_,
+        "api.marshal_error",
+        None,
+        String::new(),
+        500,
+    ))
 }

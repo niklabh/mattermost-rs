@@ -678,6 +678,101 @@ impl App {
     ///
     /// And because it is `GetByIds`, `archived` is dropped on the way through — see
     /// [`mm_store::file_info_store`].
+    /// Port of `app.App.GetFlaggedPosts` (post.go:1593), `GetFlaggedPostsForTeam` (:1616) and
+    /// `GetFlaggedPostsForChannel` (:1639) — three functions whose bodies differ only in which
+    /// store wrapper they call, folded into the two filters.
+    ///
+    /// **All three carry the same error id and the same status**, `app.post.get_flagged_posts`
+    /// / 500, so the api4 handler's three-way branch is invisible in an error.
+    ///
+    /// The three stages after the store call are all no-ops on this deployment and are not
+    /// ported:
+    ///
+    /// - `revealBurnOnReadPostsForUser` returns immediately unless `postList.BurnOnReadPosts` is
+    ///   non-empty *and* both `FeatureFlags.BurnOnRead` and `ServiceSettings.EnableBurnOnRead`
+    ///   are on (post_helpers.go:369). Neither is; and a burn-on-read post reaching the handler
+    ///   would be refused by [`App::prepare_post_for_client`] anyway.
+    /// - `filterInaccessiblePosts` needs a Cloud licence carrying a `PostHistory` limit — see
+    ///   the module docs.
+    /// - `applyPostsWillBeConsumedHook` is a plugin hook; the port refuses `custom_*` post types,
+    ///   which is where a plugin's own posts land.
+    #[tracing::instrument(
+        skip(self),
+        fields(user_id = %user_id, channel_id = %channel_id, team_id = %team_id, found)
+    )]
+    pub async fn get_flagged_posts(
+        &self,
+        user_id: &str,
+        channel_id: &str,
+        team_id: &str,
+        offset: i64,
+        limit: i64,
+    ) -> AppResult<PostList> {
+        let list = self
+            .store()
+            .post()
+            .get_flagged_posts(user_id, channel_id, team_id, offset, limit)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "flagged-post lookup failed");
+                AppError::boxed(
+                    "GetFlaggedPosts",
+                    "app.post.get_flagged_posts.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })?;
+        tracing::Span::current().record("found", list.order.as_ref().map_or(0, Vec::len));
+        Ok(list)
+    }
+
+    /// Port of `app.App.GetPostsByIds` (post.go:2780).
+    ///
+    /// One store call and two error branches sharing **one error id**: `app.post.get.app_error`
+    /// is both the 404 (nothing matched) and the 500 (the query failed), so the status is the
+    /// only thing that distinguishes them on the wire.
+    ///
+    /// # The second return value is always `0` here
+    ///
+    /// Go returns `firstInaccessiblePostTime` from `getFilteredAccessiblePosts`, which truncates
+    /// the list at a Cloud licence's `PostHistory` limit. **This deployment has no such
+    /// licence**, so the filter is a pass-through and the time is `0` — measured on the running
+    /// server, which answers `First-Inaccessible-Post-Time: 0` on every 200. The value is
+    /// returned rather than dropped so the handler that formats the header has it in the right
+    /// place if a licence ever lands; it is not computed, and this is the one thing here that a
+    /// licensed deployment would need revisited.
+    #[tracing::instrument(skip(self, post_ids), fields(asked = post_ids.len(), found))]
+    pub async fn get_posts_by_ids(&self, post_ids: &[String]) -> AppResult<(Vec<Post>, i64)> {
+        let posts = self
+            .store()
+            .post()
+            .get_posts_by_ids(post_ids)
+            .await
+            .map_err(|err| {
+                if err.is_not_found() {
+                    AppError::boxed(
+                        "GetPostsByIds",
+                        "app.post.get.app_error",
+                        None,
+                        String::new(),
+                        404,
+                    )
+                } else {
+                    tracing::error!(error = %err, "posts-by-ids lookup failed");
+                    AppError::boxed(
+                        "GetPostsByIds",
+                        "app.post.get.app_error",
+                        None,
+                        String::new(),
+                        500,
+                    )
+                }
+            })?;
+        tracing::Span::current().record("found", posts.len());
+        Ok((posts, 0))
+    }
+
     #[tracing::instrument(skip(self), fields(post_id = %post_id))]
     pub async fn get_edit_history_for_post(&self, post_id: &str) -> AppResult<Vec<Post>> {
         let mut posts = self

@@ -14,6 +14,7 @@
 //! driver. Queries here spell them the way the database does.
 
 pub mod channel_store;
+pub mod draft_store;
 pub mod emoji_store;
 pub mod error;
 pub mod file_info_store;
@@ -27,10 +28,12 @@ pub mod session_store;
 pub mod sidebar_category_store;
 pub mod status_store;
 pub mod team_store;
+pub mod thread_store;
 pub mod user_store;
 pub mod user_terms_of_service_store;
 
 pub use channel_store::{ChannelStore, SqlChannelStore};
+pub use draft_store::{DraftStore, SqlDraftStore};
 pub use emoji_store::{EmojiStore, SqlEmojiStore};
 pub use error::StoreError;
 pub use file_info_store::{FileInfoStore, SqlFileInfoStore};
@@ -43,6 +46,7 @@ pub use session_store::{SessionStore, SqlSessionStore};
 pub use sidebar_category_store::{SidebarCategoryStore, SqlSidebarCategoryStore};
 pub use status_store::{SqlStatusStore, StatusStore};
 pub use team_store::{SqlTeamStore, TeamStore};
+pub use thread_store::{SqlThreadStore, ThreadStore};
 pub use user_store::{SqlUserStore, UserStore};
 pub use user_terms_of_service_store::{SqlUserTermsOfServiceStore, UserTermsOfServiceStore};
 
@@ -58,9 +62,11 @@ use sqlx::postgres::PgPoolOptions;
 pub struct SqlStore {
     channel: SqlChannelStore,
     emoji: SqlEmojiStore,
+    draft: SqlDraftStore,
     file_info: SqlFileInfoStore,
     post: SqlPostStore,
     reaction: SqlReactionStore,
+    thread: SqlThreadStore,
     preference: SqlPreferenceStore,
     role: SqlRoleStore,
     scheme: SqlSchemeStore,
@@ -96,9 +102,11 @@ impl SqlStore {
         Self {
             channel: SqlChannelStore::new(pool.clone()),
             emoji: SqlEmojiStore::new(pool.clone()),
+            draft: SqlDraftStore::new(pool.clone()),
             file_info: SqlFileInfoStore::new(pool.clone()),
             post: SqlPostStore::new(pool.clone()),
             reaction: SqlReactionStore::new(pool.clone()),
+            thread: SqlThreadStore::new(pool.clone()),
             preference: SqlPreferenceStore::new(pool.clone()),
             role: SqlRoleStore::new(pool.clone()),
             scheme: SqlSchemeStore::new(pool.clone()),
@@ -127,6 +135,10 @@ impl SqlStore {
     }
 
     /// Port of `store.Store.FileInfo()`.
+    pub fn draft(&self) -> &SqlDraftStore {
+        &self.draft
+    }
+
     pub fn file_info(&self) -> &SqlFileInfoStore {
         &self.file_info
     }
@@ -138,6 +150,10 @@ impl SqlStore {
     }
 
     /// Port of `store.Store.Reaction()`.
+    pub fn thread(&self) -> &SqlThreadStore {
+        &self.thread
+    }
+
     pub fn reaction(&self) -> &SqlReactionStore {
         &self.reaction
     }

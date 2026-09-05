@@ -91,6 +91,14 @@ pub struct Config {
     /// so the branch is live on Team Edition.
     pub post_priority: bool,
 
+    /// `ServiceSettings.AllowSyncedDrafts` (config.go:488). Go default **`true`**.
+    ///
+    /// Gates the whole drafts feature. Every one of `getDrafts`, `upsertDraft` and `deleteDraft`
+    /// checks it *first* and answers **501** `api.drafts.disabled.app_error` when it is off —
+    /// before any permission check, so a caller with no rights at all still gets the 501 rather
+    /// than a 403.
+    pub allow_synced_drafts: bool,
+
     /// `ServiceSettings.EnableBurnOnRead` (config.go:472). Go default **`true`**.
     pub enable_burn_on_read: bool,
 
@@ -138,6 +146,7 @@ impl Default for Config {
             enable_post_icon_override: false,
             enable_custom_emoji: true,
             post_priority: true,
+            allow_synced_drafts: true,
             enable_burn_on_read: true,
             feature_flag_burn_on_read: true,
             file_driver_name: "local".to_owned(),
@@ -171,6 +180,10 @@ impl Config {
                 default.enable_custom_emoji,
             ),
             post_priority: env_bool("MM_SERVICESETTINGS_POSTPRIORITY", default.post_priority),
+            allow_synced_drafts: env_bool(
+                "MM_SERVICESETTINGS_ALLOWSYNCEDDRAFTS",
+                default.allow_synced_drafts,
+            ),
             enable_burn_on_read: env_bool(
                 "MM_SERVICESETTINGS_ENABLEBURNONREAD",
                 default.enable_burn_on_read,

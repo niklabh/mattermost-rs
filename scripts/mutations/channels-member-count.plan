@@ -1,0 +1,32 @@
+# Mutation plan for POST /channels/stats/member_count (getChannelsMemberCount).
+#
+#   scripts/mutate-batch.sh scripts/mutations/channels-member-count.plan
+#
+# Tab-separated: name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter.  `\n` becomes a newline.
+#
+# The fixture carries one channel each for the three permission branches (joined-open,
+# unjoined-open, private) and a **deactivated** member of the first, without which the count's
+# `Users.DeleteAt = 0` join is dead weight.  It also covers all three resolution shapes: every id
+# known, none known, and a mix — the last of which this port forwards rather than guesses.
+#
+# `store-count-channel-filter` keeps `$1` bound with `OR TRUE` rather than replacing the
+# predicate outright: sqlx refuses a query with an unused parameter, which is a compile error and
+# a harness fault rather than a verdict — the same shape as the `LIMIT` mutations in
+# `threads-for-user.plan`.
+#
+# Clippy before the batch, not after.  A control must cover its binding's whole life, closures
+# included.  The last two lines are the no-op controls and must SURVIVE.
+
+store-deactivated-join	crates/mm-store/src/channel_store.rs	          INNER JOIN users u ON u.id = cm.userid\n         WHERE cm.channelid = ANY($1::text[])\n           AND u.deleteat = 0	          INNER JOIN users u ON u.id = cm.userid\n         WHERE cm.channelid = ANY($1::text[])\n           AND u.deleteat >= 0	api	channels_member_count
+store-count-channel-filter	crates/mm-store/src/channel_store.rs	         WHERE cm.channelid = ANY($1::text[])\n           AND u.deleteat = 0\n         GROUP BY cm.channelid	         WHERE (cm.channelid = ANY($1::text[]) OR TRUE)\n           AND u.deleteat = 0\n         GROUP BY cm.channelid	api	channels_member_count
+store-defaults-are-seeded	crates/mm-store/src/channel_store.rs	    let mut counts: BTreeMap<String, i64> = ids.iter().map(|id| (id.clone(), 0)).collect();	    let mut counts: BTreeMap<String, i64> = BTreeMap::new();	api	channels_member_count
+api-permission-loop	crates/mm-api/src/channels.rs	        if !state\n            .app\n            .has_permission_to_channel_member_count(&session.0.user_id, channel)\n            .await\n        {	        if false\n            && !state\n            .app\n            .has_permission_to_channel_member_count(&session.0.user_id, channel)\n            .await\n        {	api	channels_member_count
+api-partial-forward	crates/mm-api/src/channels.rs	    if !channels.is_empty() && channels.len() != channel_ids.len() {	    if false {	api	channels_member_count
+api-empty-short-circuit	crates/mm-api/src/channels.rs	    let channels = if channel_ids.is_empty() {\n        Vec::new()\n    } else {	    let channels = if false {\n        Vec::new()\n    } else {	api	channels_member_count
+api-counts-the-filtered-ids	crates/mm-api/src/channels.rs	    let filtered: Vec<String> = channels.into_iter().map(|channel| channel.id).collect();\n    let counts = match state.app.get_channels_member_count(&filtered).await {	    let filtered: Vec<String> = channels.into_iter().map(|channel| channel.team_id).collect();\n    let counts = match state.app.get_channels_member_count(&filtered).await {	api	channels_member_count
+api-trailing-newline	crates/mm-api/src/channels.rs	    body.push(b'\\n');\n\n    (\n        StatusCode::OK,\n        [\n            ("Content-Type", "application/json"),\n            ("x-mmrs-served-by", "rust"),\n        ],\n        body,\n    )\n        .into_response()\n}\n\n/// `model.NewAppError(where, model.PayloadParseError	    (\n        StatusCode::OK,\n        [\n            ("Content-Type", "application/json"),\n            ("x-mmrs-served-by", "rust"),\n        ],\n        body,\n    )\n        .into_response()\n}\n\n/// `model.NewAppError(where, model.PayloadParseError	api	channels_member_count
+api-parse-error-id	crates/mm-api/src/channels.rs	        where_,\n        mm_model::utils::PAYLOAD_PARSE_ERROR,	        where_,\n        "api.context.invalid_body_param.app_error",	api	channels_member_count
+#
+# --- no-op controls: these must SURVIVE ---
+control-rename-binding	crates/mm-api/src/channels.rs	    let filtered: Vec<String> = channels.into_iter().map(|channel| channel.id).collect();\n    let counts = match state.app.get_channels_member_count(&filtered).await {	    let resolved: Vec<String> = channels.into_iter().map(|channel| channel.id).collect();\n    let counts = match state.app.get_channels_member_count(&resolved).await {	api	channels_member_count
+control-reorder-columns	crates/mm-store/src/channel_store.rs	        SELECT cm.channelid    AS "channel_id!",\n               COUNT(*)        AS "count!"	        SELECT COUNT(*)        AS "count!",\n               cm.channelid    AS "channel_id!"	api	channels_member_count

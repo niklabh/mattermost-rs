@@ -65,6 +65,8 @@ async fn pool() -> PgPool {
 
 fn options(allow_full_names: bool, limit: i64) -> UserSearchOptions {
     UserSearchOptions {
+        allow_emails: false,
+        allow_inactive: false,
         allow_full_names,
         limit,
     }

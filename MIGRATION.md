@@ -5262,3 +5262,1062 @@ wrong, a slow start means the verdict was lost to load. Two faults in this sessi
 and were investigated as the first. A build failure now prints the compiler's own lines, and the
 start is retried once with a 30-second budget rather than 10 — this machine carries Postgres, the
 Go server and a concurrent cargo alongside it.
+
+## `POST /api/v4/posts/ids/reactions` — `getBulkReactions` (2026-09-04)
+
+Served. `crates/mm-api/src/reactions.rs` (`get_bulk_reactions`),
+`crates/mm-app/src/reaction.rs` (`get_bulk_reactions_for_posts`),
+`crates/mm-store/src/reaction_store.rs` (`bulk_get_for_posts`); 12 parity tests in
+`crates/mm-api/tests/parity/post_bulk_reactions.rs`. The webapp posts this once per channel load
+with the ids of every post it just rendered.
+
+**The one thing a reader would otherwise get wrong: an empty request is a 500, not a 400.**
+`getBulkReactions` has no length check — alone among api4's by-ids handlers — so `[]` and `null`
+both reach `constructArrayArgs`, which emits the literal `PostId IN ()`, which Postgres will not
+parse. Measured against the running Go server, both bodies answer 500
+`app.reaction.bulk_get_for_post_ids.app_error`. The refusal is ported into the *store*, where
+Go's lives, because hoisting it into a tidy 400 in the handler would change the status. The
+second thing: this route's empty value is `[]` where its neighbour `GET /posts/{id}/reactions`
+answers `null` — `populateEmptyReactions` (app/reaction.go:148) writes a literal empty slice for
+every requested id, including ids that name no post at all. Both are documented on the code.
+
+### The `COALESCE` survivors from the `getReactions` session are now reachable
+
+That session recorded two mutations it could not kill: `COALESCE(UpdateAt, CreateAt)` and
+`COALESCE(DeleteAt, 0)` exist for rows written before a backfill migration, and nothing reachable
+over REST produces the NULL they defend against — Go's `SaveReaction` always writes both columns.
+The fixture here plants the NULLs directly (`plant_nulls`, guarded by a re-check that fails loudly
+if the planting did not happen), so both coalesces are live branches and both mutations die. The
+same trick applies to the sibling route's suite, which still has the survivors.
+
+Mutation run: **14 run, 12 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/bulk-reactions.plan`). Every anchor in that plan runs down to
+`WHERE postid = ANY($1::text[])`: the two queries in `reaction_store.rs` have byte-identical
+SELECT lists and differ only in their WHERE, so any anchor inside the column list alone is
+ambiguous and would mutate whichever query comes first.
+
+## `POST /api/v4/posts/ids` — `getPostsByIds` (2026-09-04)
+
+Served. `crates/mm-api/src/posts.rs` (`get_posts_by_ids`, `parse_post_ids`),
+`crates/mm-app/src/post.rs` (`get_posts_by_ids`), `crates/mm-app/src/channel.rs`
+(`get_channels`), `crates/mm-store/src/post_store.rs` (`get_posts_by_ids`),
+`crates/mm-store/src/channel_store.rs` (`get_many`); 14 parity tests in
+`crates/mm-api/tests/parity/posts_by_ids.rs` plus 3 unit tests. The webapp calls this to hydrate
+permalinks, search hits and thread roots.
+
+**The one thing a reader would otherwise get wrong: this query has no `DeleteAt` filter.** Every
+other multi-post read in the store excludes soft-deleted rows; `GetPostsByIds`'s only predicate is
+`p.Id IN (…)`, so a deleted post is served with its `delete_at` set and its message already
+blanked by the delete. Two more that are close behind: an all-unknown id list is a **404**
+(`ErrNotFound` for zero rows) while a list with one known id among unknowns is a 200 that mentions
+the misses nowhere; and an unreadable post is **dropped silently**, where the neighbouring
+`POST /posts/ids/reactions` refuses the whole request with a 403.
+
+`StripActionIntegrations` is ported but currently unreachable: the only posts with an integration
+to strip carry an `attachments` prop, which `REFUSED_PROPS` forwards to Go before the strip runs.
+Kept, and documented at the call site, because narrowing that refusal set without it would start
+leaking `integration` blocks. `First-Inaccessible-Post-Time` is set on every 200 and is always
+`0` without a Cloud `PostHistory` licence — measured, not assumed.
+
+### A survivor the parity suite could not have caught
+
+`ApiError::invalid_param("post_ids")` → `"post_id"` survived the first run, and no fixture could
+have fixed it: the parameter reaches a client only through the translated `message`, and this port
+serves the raw error id instead ([D-092]), so both spellings are byte-identical on the wire. The
+fix was to extract `parse_post_ids` and assert the `Name` param in a unit test — which is also
+where the 1000-id cap's off-by-one and the de-duplication-before-counting rule are now pinned.
+That mutation's plan line runs against the `unit` suite for the same reason.
+
+Mutation run: **17 run, 15 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/posts-by-ids.plan`).
+
+## `GET /api/v4/users/{user_id}/posts/flagged` — `getFlaggedPostsForUser` (2026-09-05)
+
+Served. `crates/mm-api/src/posts.rs` (`get_flagged_posts_for_user`), `crates/mm-app/src/post.rs`
+(`get_flagged_posts`), `crates/mm-store/src/post_store.rs` (`get_flagged_posts`); 12 parity tests
+in `crates/mm-api/tests/parity/flagged_posts.rs`. The webapp's "Saved messages" panel.
+
+**The one thing a reader would otherwise get wrong: Go's team filter is missing its
+parentheses.** `buildFlaggedPostTeamFilterClause` emits `AND B.TeamId = ? OR B.TeamId = ''`
+(post_store.go:609) onto a `WHERE ChannelId IN (members…)`, and `AND` binds tighter — so the
+predicate that runs is `(members AND TeamId = ?) OR TeamId = ''`, whose second disjunct has **no
+membership check at all**. Every DM and GM has an empty `TeamId`, so a flagged DM post answers for
+*any* team id, including one that names nothing. Measured, and reproduced as
+`(members AND ($4 = '' OR teamid = $4)) OR ($4 <> '' AND teamid = '')`, the same truth table in
+one statement. Second: **`page` is an offset.** The handler hands `c.Params.Page` to the store's
+`offset` with no multiplication (api4/post.go:493), so `?page=1&per_page=1` skips one post.
+
+One divergence, deliberate: the handler skips the `GetChannels` call when no post survived the
+store, because our `get_many` raises `ErrNotFound` for zero rows and Go answers that request
+`200 {"order":[],"posts":{},…}`. The channel map cannot be observed when no post consults it.
+
+### Three survivors, and only one of them was unfixable
+
+- **`page * per_page` is indistinguishable from `page` when `per_page` is 1**, which every
+  pagination case used. The suite now also pages two at a time.
+- **The handler's per-channel read gate looked unreachable**: the store already requires a
+  `ChannelMembers` row, and an ordinary member can always read the channel. The fixture now plants
+  a membership row with **no roles** — which `POST /channels/{id}/members` cannot create — so the
+  subquery matches, `read_channel` does not, and the gate is what refuses. Go agrees.
+- **`app.post.get_flagged_posts.app_error` is only produced by a store failure**, which nothing
+  reachable over HTTP causes. Dropped from the plan rather than tolerated silently.
+
+`Posts.DeleteAt = 0` needed the same treatment: `DeletePost` deletes the post's flagged-post
+preferences with it, so over REST no flag ever points at a deleted post. The fixture plants the
+preference row back.
+
+Mutation run: **15 run, 13 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/flagged-posts.plan`).
+
+### [D-160] a third time, now on a *paginated* unordered scan
+
+`channel_members_list::pages_split_cover_and_run_out_identically` compared each page of
+`GET /channels/{id}/members` byte for byte between the two servers. That query has no `ORDER BY`,
+so a page is a window onto a scan whose order Postgres does not promise to repeat between two
+executions — and `fetch_both_stable`'s third acceptance (Go quiescent across the window) lets a
+stable-but-different window through. It held while `channelmembers` was quiet and failed in the
+full-suite run once this session's fixtures began writing to that table; it passed in isolation,
+the signature. Pages are now compared as **sets of rows** sorted by `user_id`, which keeps every
+field under comparison and gives up only the ordering claim neither server makes, plus a new
+assertion that both servers page over the same membership. The unpaged byte-for-byte check is
+untouched. **The rule, again: an unordered read may not be byte-compared as a sequence — and a
+paginated one may not be byte-compared at all.**
+
+## `GET /teams/name/{team_name}/channels/name/{channel_name}` — `getChannelByNameForTeamName` (2026-09-05)
+
+Served. `crates/mm-api/src/channels.rs` (`get_channel_by_name_for_team_name`,
+`validate_team_name_then_channel_name`, and the extracted `serve_named_channel`),
+`crates/mm-app/src/channel.rs` (`get_channel_by_name_for_team_name`); 10 parity tests in
+`crates/mm-api/tests/parity/channel_by_name_for_team_name.rs` plus 1 unit test. The webapp
+resolves permalinks this way, because a link carries names and not ids.
+
+**The one thing a reader would otherwise get wrong: the team lookup's *failure* branch is also a
+404.** Go writes `app.team.get_by_name.app_error` with `http.StatusNotFound` (channel.go:2368),
+so a genuine database failure resolving the team answers 404 where every sibling answers 500.
+Beyond that this is `getChannelByName` with the team named: same permission block, same
+`FillInChannelProps`, same trailing newline — now shared rather than copied, since the two
+handlers differed only in the `where` they stamp on a refusal, and `where` is not a field of the
+JSON error body.
+
+### The survivor was a validator whose gap is one character wide
+
+Disabling `IsValidChannelIdentifier` on this path survived the first run. The obvious probe — a
+one-character channel name — does **not** 400: there is no minimum-length rule on a channel name,
+measured, unlike the two-character minimum on a team name. The reachable gap is the *first*
+character: the mux class `[A-Za-z0-9_-]+` accepts a leading `-` or `_` and the validator requires
+alphanumeric. The suite now asks for both, and for the one-character name that must still be a
+404, so the test cannot pass against a validator that simply rejects everything short.
+
+Mutation run: **12 run, 10 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/channel-by-team-name.plan`). Two of those mutations land in the shared tail
+and are caught by the older `channel_by_name` suite, which is why the plan filters on both module
+names — narrowing to one would let the other decide the verdict.
+
+## `GET /teams/{team_id}/channels/autocomplete` — `autocompleteChannelsForTeam` (2026-09-05)
+
+Served. `crates/mm-api/src/channels.rs` (`autocomplete_channels_for_team`),
+`crates/mm-app/src/channel.rs` (`autocomplete_channels_for_team`),
+`crates/mm-store/src/channel_store.rs` (`autocomplete_in_team` plus the three term helpers);
+13 parity tests in `crates/mm-api/tests/parity/channel_autocomplete.rs` and 3 unit tests. The
+Ctrl+K quick switcher, so it fires once per keystroke — the busiest channel read in the app.
+
+**The one thing a reader would otherwise get wrong: `?name=*` is not a wildcard.**
+`sanitizeSearchTerm` strips the escape character `*` *before* escaping `%` and `_`, so a term of
+`*` sanitises to the empty string — and an empty sanitised term makes `searchClause` return nil,
+which Go **omits from the query** rather than adding as an always-false predicate. `?name=*` and
+`?name=` return the same 50 channels. Two more: `includeDeleted` is hardcoded `true` in the app
+layer, so archived channels are listed; and `FillInChannelsProps` is deliberately *not* called
+here, alone among the channel lists, with Go's own comment saying why.
+
+The search clause is `LIKE … OR to_tsquery(…)` and **both halves are load-bearing**: `?name=town
+square` matches `town-square` only through the full-text half (no column holds the string with a
+space in it), and `?name=copen` matches `mmrs-parity-acopen` only through the LIKE half
+(`to_tsquery` matches lexeme *prefixes*, and `copen` starts no lexeme). Go interpolates
+`default_text_search_config` into the SQL text; this passes it as a parameter cast to `regconfig`,
+which keeps the statement a single compile-checked literal.
+
+Mutation run: **20 run, 18 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/channel-autocomplete.plan`). Both survivors of the first run were terms the
+*other* half of the clause could also match — the fix was a mid-word term, not a weaker assertion.
+
+### Three repairs the full-suite run forced, all cross-suite
+
+- **A fixture tag is a shared namespace.** `create_plain_user(.., "autoc")` builds the username
+  `mmrsplainautoc`, which is exactly the prefix `parity/users_autocomplete.rs` searches for — so
+  this suite put an extra user in the middle of that one's corpus and failed three of its tests
+  while passing in isolation. Renamed to `chanac`.
+- `team_channel_lists::the_sibling_literals_are_still_forwarded_to_go` asserted `/autocomplete`
+  was forwarded. It no longer is; `/search_autocomplete` still is, and is a different handler.
+- **[D-160], fourth instance, and the previous fix was not enough.**
+  `channel_members_list::pages_split_cover_and_run_out_identically` was changed last session to
+  compare each page as a *set of rows* instead of bytes. It failed again, and the diff showed the
+  two servers had selected **genuinely different members** — not the same ones reordered. A page
+  of an `ORDER BY`-less query is a window onto a scan Postgres does not promise to repeat between
+  executions, so no per-page comparison across the two servers can hold. The test now asserts
+  only what both servers do promise: that two pages of two cover the whole membership, per server,
+  and that the two coverings agree — retrying when they do not. The byte-for-byte wire check lives
+  on the unpaged read, where there is no window to disagree about.
+
+## `GET /api/v4/emoji/autocomplete` — `autocompleteEmojis` (2026-09-05)
+
+Served. `crates/mm-api/src/emoji.rs` (`autocomplete_emojis`), `crates/mm-app/src/emoji.rs`
+(`search_emoji`), `crates/mm-store/src/emoji_store.rs` (`search` and
+`sanitize_emoji_search_term`); 9 parity tests in
+`crates/mm-api/tests/parity/emoji_autocomplete.rs` plus 2 unit tests. The `:` picker, so it fires
+once per keystroke.
+
+**The one thing a reader would otherwise get wrong: the match is case-sensitive.** There is no
+`LOWER` on either side of the `LIKE`, unlike the channel autocomplete ported one session earlier —
+so `?name=MMRS` finds nothing while `?name=mmrs` finds the list. Two more: it is a **prefix**
+match (`prefixOnly` is hardcoded `true`, so the pattern is `name%` and never `%name%`), and
+`?name=\` matches **everything**, because `sanitizeSearchTerm` strips the escape character before
+escaping `%` and `_` with it, leaving the bare `%`. Go's escape character here is a **backslash**,
+not the `*` the channel search uses, and `sq.Like` emits no `ESCAPE` clause — Postgres' default is
+what makes it work.
+
+This handler is also the only emoji read with **no `EnableCustomEmoji` gate of its own**. Its
+siblings answer 501 and shadow the app layer's 403; here the 403 is what a client would see, which
+is why it is pinned by a unit test rather than by the parity suite — nothing over HTTP can turn
+the setting off.
+
+Mutation run: **18 run, 16 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/emoji-autocomplete.plan`). Two survivors of the first run: the disabled-gate
+status, fixed with the unit test above; and, twice over, a `LIMIT` mutation that has to stay
+`LEAST($2, 2::bigint)` — a bare `2` drops the bind and an untyped `2` fails sqlx's type check, and
+both surface as a harness fault rather than a verdict.
+
+### Three stale assertions the route retired
+
+`emoji_get::the_autocomplete_literal_is_forwarded`, an assertion inside `emoji_list`, and the
+unit test `only_the_get_literals_are_shadowed` all encoded "gorilla's registration order owns
+this literal, so we forward it". axum owns it now, for the same reason and in the same direction.
+The first is kept — renamed to `the_autocomplete_literal_does_not_land_on_get_emoji`, because what
+it guards is `getEmoji`'s routing rather than autocomplete's behaviour — and
+`EMOJI_SHADOWED_LITERALS` is now empty but retained, since it is the only thing between a future
+`GET /emoji/<literal>` of Go's and a 400 from a handler that thought it had an id.
+
+## `GET /teams/{team_id}/channels/search_autocomplete` — `autocompleteChannelsForTeamForSearch` (2026-09-05)
+
+Served. `crates/mm-api/src/channels.rs` (`autocomplete_channels_for_team_for_search`),
+`crates/mm-app/src/channel.rs` (`autocomplete_channels_for_search`),
+`crates/mm-store/src/channel_store.rs` (`autocomplete_in_team_for_search` and
+`autocomplete_in_team_for_search_direct_messages`); 14 parity tests in
+`crates/mm-api/tests/parity/channel_search_autocomplete.rs`. The search box's channel suggestions.
+
+**The one thing a reader would otherwise get wrong: a direct message is listed under the *other
+user's username*.** Go selects `channelSliceColumns(true, "C")` — which already contains
+`C.DisplayName` — and then appends `OtherUsers.Username AS DisplayName`. Two output columns of
+the same name, and the scan takes the last, so the `Channel` handed back carries a display name
+the `Channels` row does not have. A DM's stored display name is empty, so a port that used it
+would list a blank. Reproduced by selecting the username into that position rather than by
+relying on a duplicate-column rule.
+
+Three more, none of them shared with the `/autocomplete` sibling one literal away:
+
+- **No permission gate at all.** The sibling asks for `list_team_channels` and 403s a non-member;
+  this route has nothing, and a foreign team answers **200 with an empty list** — the
+  `ChannelMembers` join does the work. A port that shared a gate between the two would refuse
+  requests Go serves.
+- **Membership is required for every channel, public ones included**, so the switcher lists
+  channels this does not.
+- **It can return more than fifty.** Two fifty-row queries are `UNION`ed, the union is limited to
+  fifty again, and then up to fifty direct messages are *appended*. Measured: 58 rows for an empty
+  term.
+
+**Parity risk, stated plainly:** Go merges the two passes and sorts with `sort.Slice`, which is
+**unstable**. Two channels whose lower-cased display names are equal come back in an order Go
+itself does not repeat, and no port can match that. `sort_by` here is stable and keeps
+union-then-DM order for ties — *an* order Go could have produced, but not one it promises. Every
+fixture in the suite has a distinct display name so the question never arises; a caller with two
+identically-named channels is outside what this port can guarantee.
+
+Mutation run: **18 run, 16 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/channel-search-autocomplete.plan`). Four survivors on the first run, and one
+of them was a **weak mutation rather than a fixture gap**: turning the membership `JOIN` into a
+`LEFT JOIN` plus `cm.userid IS NULL` is inert, because every channel has at least its creator as
+a member and the NULL row it looks for never exists. Dropping the predicate is the mutation that
+means something. The other three were real gaps — every fixture's name and display name said the
+same words, so the `LIKE` list could be narrowed to `Name` alone, the full-text branch could be
+neutered, and the term's trim could be dropped, all unnoticed. `mmrs-parity-sadisp` is now
+displayed as `Zephyrine Quokka`, and the suite asks for a mid-word fragment (only `LIKE` finds
+it), the two words reversed (only `to_tsquery` finds it), and a padded mid-word term (only a
+trimmed `LIKE` finds it).
+
+### An observation, not yet a diagnosis
+
+Twice now — this session and the emoji-autocomplete one — the **first** full-suite run after a
+rebuild has reported a couple of parity failures and aborted early, with two immediate re-runs
+clean. The failure output was not captured either time, so there is nothing here but the pattern:
+first run after `cargo` rebuilds, a handful of parity tests, never reproducible. Capture the log
+on the first run rather than the third when it next happens.
+
+## `GET /users/{user_id}/channel_members` — `getChannelMembersForUser` (2026-09-05)
+
+Served. `crates/mm-api/src/users.rs` (`get_channel_members_for_user`,
+`parse_page_allowing_negative`), `crates/mm-app/src/channel.rs`
+(`get_channel_members_with_team_data_for_user_with_pagination`),
+`crates/mm-store/src/channel_store.rs` (`get_members_for_user_with_pagination`,
+`get_members_for_user_with_cursor_pagination`); 13 parity tests in
+`crates/mm-api/tests/parity/channel_members_for_user.rs`. Every channel the caller belongs to,
+across every team — the webapp asks once per load. First route to reach
+`model.ChannelMemberWithTeamData`, which was ported earlier and had no caller.
+
+**The one thing a reader would otherwise get wrong: `?page=-1` is a sentinel, not a page.** It
+selects a **newline-delimited stream** (`application/x-ndjson`, one member object per line) that
+the handler walks a hundred rows at a time; anything else — including no `page` at all, which
+parses to `0` — selects the ordinary JSON array. The shared `parse_page` clamps negatives to the
+default because every other route treats them as garbage, so this route needs its own parser.
+
+**And the stream stops on a 404 it only sometimes swallows.** The cursor store call raises
+`ErrNotFound` for an empty page rather than returning `[]`, and the loop reads that as "done" —
+but Go's guard is `fromChannelID != "" && err.Id == MissingChannelMemberError`, so a caller whose
+*first* page is empty gets the 404 itself, with `Content-Type: application/x-ndjson` already set
+on it. A user with no channel memberships is the only shape that reaches it, and the REST API
+cannot create one (Go joins every new team member to the default channels), so the fixture deletes
+the rows directly.
+
+One divergence, not on the wire: Go writes each page to the socket as it reads it; this collects
+the walk and answers in one body. The bytes are identical — the tests compare them — but Go's
+first line arrives sooner and holds less memory. Recorded at the call site rather than hidden.
+
+Mutation run: **22 run, 20 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/channel-members-for-user.plan`).
+
+### Five survivors, one cause
+
+The fixture user held fewer memberships than a single page, so the streaming loop ran **exactly
+once** — and its cursor (`ChannelId > ?`), its page-size test (`len < 100`) and its cursor advance
+(`.last()`) were all dead code. Three mutations survived on that one gap: widening `>` to `>=`
+repeats a row, widening `<` to `<=` stops after the first page, and `.first()` walks the same page
+forever. `cmfupaged` now carries **150 planted memberships** — one `INSERT … SELECT`, because
+creating that many channels over REST would dominate the suite — so the first page comes back
+exactly full and the walk takes two turns. The other two survivors were narrower: the three team
+`COALESCE`s need a channel with **no team** (the plain user now has a DM), and the streaming
+branch's sanitiser needs a caller reading somebody *else's* list.
+
+**The lesson generalises past this route:** a loop whose fixture fits in one iteration is not
+tested, it is only executed. Any paginated walk needs a fixture that crosses a page boundary.
+
+## `POST /api/v4/users/group_channels` — `getUsersByGroupChannelIds` (2026-09-05)
+
+Served. `crates/mm-api/src/users.rs` (`get_users_by_group_channel_ids`),
+`crates/mm-app/src/user.rs` (`get_users_by_group_channel_ids`),
+`crates/mm-store/src/user_store.rs` (`get_profile_by_group_channel_ids_for_user`,
+`UserWithChannelRow`, `MAX_GROUP_CHANNELS_FOR_PROFILES`); 9 parity tests in
+`crates/mm-api/tests/parity/users_group_channels.rs` plus 1 unit test. The member profiles behind
+a group message's avatar row.
+
+**The one thing a reader would otherwise get wrong: an empty list is a *parse* error.** Go writes
+`if err != nil || len(channelIds) == 0 { … PayloadParseError … } else if len(channelIds) == 0 {
+SetInvalidParam("channel_ids") }` — the second arm cannot be reached, because the first already
+caught the empty list. So `[]` and `null` answer 400 `api.payload.parse.error`, never
+`invalid_body_param`, which is the opposite of every other by-ids route in api4 *and* the
+opposite of what the dead branch says this one meant to do. Measured.
+
+**There is no permission check on this route** — not in the handler, not in the app layer. The
+access rule is an `EXISTS` subquery inside the store's SQL asserting the caller is a member of
+each channel it answers for, so a group channel you are not in is *absent from the map* rather
+than a 403. Anything that "tidied" that subquery into a forgotten app-layer gate would list every
+group channel's members to anyone; the doc comments on all three layers say so.
+
+Two smaller ones: `MaxGroupChannelsForProfiles` **truncates** the id list to fifty rather than
+refusing a longer one, and it does so *after* `SortedArrayFromJSON` has sorted — so it is the
+fifty lowest-sorting ids that survive, not the first fifty the client wrote, and nothing in the
+response says a channel was dropped. And Go builds the `EXISTS` with `fmt.Sprintf`, interpolating
+the session's user id straight into the SQL text; this binds it as a parameter instead. Same rows,
+and worth naming rather than silently fixing.
+
+Mutation run: **18 run, 16 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/users-group-channels.plan`).
+
+### A test whose premise was wrong, and two survivors that were the same mistake
+
+The first sanitisation test asserted a plain caller sees no email address. It failed against
+**both** servers — this deployment has `ShowEmailAddress` on — which is the fixture being wrong,
+not the port. What `asAdmin` actually changes on the wire is narrower: the admin's copy carries
+`notify_props` and a plain caller's carries `auth_data` instead. The rewritten test pins that
+pair, and that no caller ever sees a credential.
+
+Then `Type = 'G'` survived a mutation widening it to "any message channel", because every id the
+suite passed was already a group channel. The fixture now includes an ordinary channel and a
+direct message the caller *is* a member of, and asserts both come back absent. **The rule
+generalises: a filter is only tested by a fixture the filter actually excludes** — the sibling of
+last session's "a loop whose fixture fits in one iteration is executed, not tested".
+
+### Next: `getThreadsForUser`, and why it was not this session
+
+`GET /users/{user_id}/teams/{team_id}/threads` is the highest-value unserved read left — the
+Threads view — and it is the first route with **no ported neighbours at all**: no thread model, no
+thread store, no thread app layer. It needs `model.Thread`/`ThreadResponse`, five store functions
+(`GetThreadsForUser` plus four counters that Go runs concurrently), participant hydration, and a
+fixture that builds threads, replies, memberships and unread state. That is a session's whole
+budget and then some, and it should start cold rather than be tacked onto the end of another.
+
+## `GET /users/{user_id}/teams/{team_id}/threads` — `getThreadsForUser` (2026-09-05)
+
+Served, for the default option set plus `?extended`. `crates/mm-api/src/users.rs`
+(`get_threads_for_user`, `serve_threads`), `crates/mm-app/src/thread.rs` (new),
+`crates/mm-store/src/thread_store.rs` (new — five queries); 16 parity tests in
+`crates/mm-api/tests/parity/threads_for_user.rs`. The Threads view, and the first route to reach
+`mm-model`'s `thread.rs`, which was ported long ago with nothing behind it.
+
+**The one thing a reader would otherwise get wrong: participants are id-only stubs.** Without
+`?extended=true` each is a `User` with every field but `id` at Go's zero value — so the wire shows
+`"username": ""` rather than omitting it. And the embedded post carries **no computed fields**:
+`reply_count` is `0` and `participants` is `null` on it however many replies the thread has,
+because this query has no reply-count subquery. The thread's own `reply_count` beside it is the
+real number. Both measured.
+
+### What is forwarded, and why that is the honest shape
+
+`since`, `before`, `after`, `unread`, `deleted`, `totalsOnly`, `threadsOnly` and `excludeDirect`
+each rewrite the store query, and each is handed to Go rather than guessed at — the list is a
+constant, and a parity test asserts every one of them forwards, so adding one to the handler
+without a fixture fails the suite. A page whose root post carries an `attachments` prop is
+forwarded too, for a reason that is not about threads at all: see **[D-166]**.
+
+Two divergences worth naming. Go runs the four counters and the list **concurrently** with an
+`errgroup`; this runs them in sequence, which is a latency decision and not a wire one. And
+`sanitizeThreadResponse` sanitises participants as a **non-admin** whoever asks — the literal
+`false`, not `IsSystemAdmin()` — which is the opposite of every other route that hydrates users.
+
+Mutation run: **23 run, 21 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/threads-for-user.plan`).
+
+### Seven survivors, one shape
+
+Every one was a branch the fixture never reached: no thread carried a `PostsPriority` row, so the
+urgency `CASE`, the urgent-mentions counter *and* the config flag that gates both were all dead at
+once; none had `Following = false`; none had `LastViewed` exactly equal to `LastReplyAt`, which is
+what the strict `<` in the unread counter turns on; none had a deleted reply; and the post
+sanitiser had nothing to sanitise, because `createPost` strips `force_notification` on the way in
+just as `SanitizeProps` strips it on the way out. A second actor now carries the first four, a
+third carries the attachments post — alone, because forwarding is per page — and the notification
+prop is planted straight into the table.
+
+**The rule this session adds:** a column-driven branch — a priority row, a boolean flag, an
+exact-equality boundary — is dead code until a fixture row carries that value. It is the sibling
+of "a loop needs a fixture that crosses a page boundary" and "a filter needs a fixture it
+excludes".
+
+### One thing I broke and repaired
+
+`crates/mm-model/src/thread.rs` was **already ported**, and I wrote a new one over it before
+checking; `git checkout` restored it, and the original is better than what I wrote (its
+`participants` is `Option<StringArray>`, which distinguishes Go's nil from an empty array). Check
+for the file before creating it — `mm-model` holds many types with no route behind them yet.
+
+### Three different flaky tests in three full-suite runs
+
+`channel_members_list` (fixed earlier today), then `teams_unread`, then `roles` — each passing in
+isolation, each a cross-suite artefact of concurrent fixtures rather than anything about the route
+under test. `teams_unread`'s bracketing helper is already as good as the pattern gets and still
+lost to three teams being created beside it; `roles` compares a scheme role another suite is
+mutating. Both are **observations, not diagnoses** — recorded so the next session sees the shape
+rather than re-deriving it. A store test *was* diagnosed and fixed: `db_user_profile_lists`
+asserted the whole development database fit in one 200-row page, which stopped being true after a
+night of fixtures; it now walks the pages, which is what its own failure message asked for.
+
+## Suite stability, not a route (2026-09-05)
+
+Three consecutive full-suite runs had each failed **one different test** — `channel_members_list`,
+then `teams_unread`, then `roles` — every one passing in isolation. This session spent itself on
+that instead of an eleventh route, because a suite that fails somewhere different each run cannot
+tell anyone whether the next route works.
+
+Two causes, both found and fixed. Two consecutive clean runs afterwards: **2412 passed, 0 failed**.
+
+### The development database had 16,066 orphaned channels
+
+`purge_api_fixtures` deleted by name prefix, which never reached the `town-square` and `off-topic`
+Go creates for each fixture team — so deleting the team orphaned them, every run, for as long as
+the project has had this suite. An orphan's dangling `TeamId` arrives as NULL through the
+channel-member join and is therefore listed under *every* team, and its empty display name ties
+under `ORDER BY DisplayName`: exactly the ordering flakes that have been patched one test at a
+time for two days. Alongside them sat 3,190 `Threads` rows whose root post no longer existed,
+against 4 real ones.
+
+The purge now sweeps by the **dangling reference** — a channel whose team is gone, a post whose
+channel is gone, a thread whose post is gone — which is what [D-155]'s own note asked for and is
+now closed. 16,066 orphans → 0; 16,253 channels → 189; 3,194 threads → 4.
+
+### And one fixture was writing into other suites' rows
+
+With the noise gone, the remaining failures collapsed onto a single suite and said the same thing
+every run: `channel_members_list` expects its channel to hold four members and found five.
+`channel_members_for_user`'s bulk fixture — added yesterday to make the streaming walk cross a
+page boundary — planted 150 memberships into **150 arbitrary existing channels**, whichever had
+the lowest ids. When another suite's fixture channel fell in that range, its member count changed
+underneath it.
+
+It now creates 150 synthetic channels in its own team and plants into those. **A fixture may only
+write rows it owns**: selecting existing rows by anything other than its own prefix is writing
+into somebody else's test.
+
+### What this says about the earlier "flakes"
+
+Several tests were relaxed over the last two days — comparing pages as sets, then as counts, then
+retrying until a read settled — on the reasoning that an unordered scan may reshuffle. That
+reasoning was sound and those changes are still right. But the *frequency* was not inherent: it
+was 16,000 junk rows and one fixture writing where it should not. A test that has been relaxed
+twice is worth re-reading as evidence about the environment rather than the assertion.
+
+## `GET /users/{user_id}/teams/{team_id}/threads/{thread_id}` — `getThreadForUser` (2026-09-05)
+
+Served, including `?extended`. `crates/mm-api/src/users.rs` (`get_thread_for_user`),
+`crates/mm-app/src/thread.rs` (`get_thread_membership_for_user`, `get_thread_for_user`),
+`crates/mm-store/src/thread_store.rs` (`get_membership_for_user`, `get_thread_for_user`);
+9 parity tests in `crates/mm-api/tests/parity/thread_for_user.rs`. The single-thread twin of
+`getThreadsForUser`, and what the webapp asks for when a thread is opened.
+
+**The one thing a reader would otherwise get wrong: the two 404s carry different error ids.**
+No `ThreadMemberships` row — an id that names nothing, or a thread this user never replied to —
+refuses at the membership lookup with `app.user.get_thread_membership_for_user.not_found`. A row
+that exists with `Following = false`, which is what `DELETE …/threads/{id}/following` leaves
+behind, gets past that lookup and is refused by the store with
+`app.user.get_threads_for_user.not_found`. Both are 404s, both reachable from the wire, and a
+client branching on the id can tell them apart. `team_id` is validated by `RequireTeamId` and then
+never read again — not by the permission checks, not by the store — so a thread answers the same
+under any team's path.
+
+Two divergences from the list route beside it. The post is `LEFT JOIN`ed here, not inner-joined,
+so `"post": null` is reachable for a `Threads` row that outlived its root. And `LastViewedAt` and
+`UnreadMentions` come from the `ThreadMembership` argument rather than the join — Go assigns them
+after the query returns (thread_store.go:607), and the unread-replies subquery binds that same
+`LastViewed` as a value.
+
+Mutation run: **17 run, 15 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/thread-for-user.plan`). Full suite: 2421 passed, 0 failed.
+
+### Five survivors, and the state the REST API quietly took back
+
+The first run caught 9 of 16. Every survivor was a branch no fixture row reached, and three of
+them shared a cause worth naming: **posting into a channel marks its threads viewed for the
+poster.** With collapsed threads enabled Go moves `LastViewed` to *now* for the poster's thread
+memberships in that channel, so a read mark set early in a fixture is silently overwritten by the
+next reply. `unread_replies` was therefore always 0, which made the subquery's cutoff, its
+`DeleteAt = 0` filter and its `RootId` join indistinguishable from each other and from nothing.
+The fixture now marks read **last**, at an explicit timestamp rather than `now()`, and asserts the
+row still holds it.
+
+The same write reached the fixture from a second direction: `other_methods_are_forwarded` was
+PUTting `/threads/{followed_root}/following` to check the sibling route still forwards, and Go's
+follow route sets `LastViewed` too. Yesterday's rule was *a fixture may only write rows it owns*;
+this is the same rule one level down. **A forwarding test should touch nothing** — it reads a
+header, so its path can name an id that does not exist, and now does.
+
+The third was `sanitizeThreadResponse`. Its three props (`add_channel_member`,
+`force_notification`, `silent_notification`) **cannot be set through `POST /posts`** — Go strips
+them from client input at creation — so the branch is dead unless the row is written directly. The
+fixture plants them, plus one key that must survive. Writing that test found the key is
+`silent_notification`, not `silent`; the shorter name passes through both servers untouched.
+
+Two mutations were **dropped rather than carried as survivors**, because neither asks a question
+this route can answer:
+
+- Blanking the `details` string Go passes at app/user.go:3094 is invisible from the wire.
+  `detailed_error` is wiped at the api boundary unless `EnableDeveloper` is on. The value is still
+  carried in the port, because it is Go's.
+- `t.postid = $1` → `>= $1` is a coin flip on a table holding a handful of threads: a `>=` scan
+  usually returns the same row. `store-thread-binding` asks the same question — which value
+  reaches `$1` — deterministically, by binding `user_id` instead.
+
+## The `me` alias, on four routes that had lost it (2026-09-05)
+
+Not a route — a wire bug in a *class* of routes. `crates/mm-api/src/channels.rs` (`resolve_me`),
+`crates/mm-api/src/users.rs`, `crates/mm-api/src/posts.rs`; 2 parity tests in
+`crates/mm-api/tests/parity/me_alias.rs`.
+
+`RequireUserId` (web/context.go:296) substitutes the session's user id for the literal `me`
+**before** calling `IsValidId`. Every api4 route with a `{user_id}` segment therefore accepts it,
+and the webapp prefers it to the real id on most reads. Four served routes validated first and so
+answered **400 where Go answers 200**: `/users/me/channel_members`, `/users/me/posts/flagged`,
+`/users/me/teams/{team}/threads` and `.../threads/{thread}` — the four most recently added, all
+shipped in the last two days. The older routes each carry their own copy of the resolution and
+were correct; the copies are now one `resolve_me` helper.
+
+**The one thing a reader would otherwise get wrong: no route's own suite can find this.** Each
+tests its route with an explicit id, which is the one input that cannot show the bug. The test is
+therefore shaped like the bug — `every_served_user_route_accepts_me` walks all twenty served
+`{user_id}` routes and compares statuses across both servers, and **a new route with a `{user_id}`
+segment belongs in that list**. Its sibling asserts the alias resolves to the *session's* user
+rather than merely to something valid, because a substitution of the wrong id still answers 200.
+
+Mutation run: **7 run, 5 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/me-alias.plan`). Full suite: 2423 passed, 0 failed.
+
+### And one flaky test whose premise was global state
+
+`users_stats::a_deactivated_user_leaves_the_count` failed a full-suite run with `62 -> 62`. It
+asserted `after < before` on `total_users_count` — a **global** counter that fifty other suites
+move throughout the run, so one concurrent `create_plain_user` cancels the drop exactly. The
+failure said nothing about the route. It now asserts what is actually observable: the doomed row
+carries a non-zero `DeleteAt`, and the route's total equals the database's count of rows that
+predicate leaves, read in the same bracket as `the_count_matches_the_database_including_bots`
+uses. A route that failed to exclude the row would be one higher than the database whoever else
+was creating accounts.
+
+## `GET /users/{user_id}/teams/{team_id}/drafts` — `getDrafts` (2026-09-05)
+
+Served. `crates/mm-api/src/drafts.rs` (new), `crates/mm-app/src/draft.rs` (new),
+`crates/mm-store/src/draft_store.rs` (new — one query), `crates/mm-app/src/config.rs`
+(`allow_synced_drafts`); 7 parity tests in `crates/mm-api/tests/parity/drafts.rs`. The webapp asks
+for this once per team load, and `mm-model`'s `draft.rs` had been ported with nothing behind it.
+
+**The one thing a reader would otherwise get wrong: the `{user_id}` segment is decorative.** The
+handler passes `c.AppContext.Session().UserId` to the app layer, never `c.Params.UserId`, so
+`/users/{anybody}/teams/{team}/drafts` returns **the caller's own** drafts — measured with a second
+user's id in the path. And nothing in this handler validates an id: there is no `RequireUserId`,
+no `RequireTeamId`, and its first statement is `if c.Err != nil`, so `/users/short/teams/{team}/…`
+is a 200 where every neighbouring route gives 400. The router's `[A-Za-z0-9]+` charset is the only
+filter either segment passes through.
+
+Three more measured shapes. The feature gate is a **501** (`api.drafts.disabled.app_error`) and it
+runs *before* the permission check, so a caller holding nothing still gets the 501 rather than a
+403. The permission checked is `view_team` and the one reported is `create_post` — reproduced, but
+not observable, because `SetPermissionError` puts it in `DetailedError` and the api boundary wipes
+that unless `EnableDeveloper` is on. And every draft carries `"metadata": {}` whether or not it
+has files: `getFileInfosForDraft` returns `(nil, nil)` for a draft with no file ids, which is the
+*success* path, and `omitempty` on a pointer tests the pointer.
+
+A draft holding a file whose mini preview would have to be generated is **forwarded** — Go reads
+the file backend and writes the row back, which this port cannot do. Same `PrepareError::Unreproducible`
+path `getFileInfo` uses, and the same narrow guard.
+
+Mutation run: **18 run, 16 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/drafts.plan`). Full suite: 2430 passed, 0 failed.
+
+### The first batch was void, and all three causes were mine
+
+- **A control that does not compile voids the run.** `control-rename-binding` renamed a binding
+  used three lines below its anchor. A control is supposed to survive; one that fails to build
+  reports a harness fault and throws away the other seventeen verdicts.
+- **INNER → LEFT JOIN is inert here.** `cm.userid = $1` stays in the `WHERE` clause and discards
+  exactly the NULL-extended rows a left join would add. The mutation now breaks the join *column*,
+  which is the decision a reader could actually get wrong.
+- **No fixture row had a NULL `Props`.** `upsertDraft` always writes at least `{}`, so the
+  "NULL is an empty map, not nil" branch was dead. Probed against Go first — a planted NULL reads
+  back as `"props": {}` — then planted in the fixture. `Props` and `Priority` are both `varchar`
+  columns holding JSON text, unlike `Posts.Props`, so this port parses them itself and an
+  all-`{}` fixture cannot tell a working decoder from one that returns the empty map for
+  everything.
+
+### Drafts orphaned by a deleted channel
+
+`purge_api_fixtures` now sweeps them, by the same dangling-reference rule as [D-155]. Nine had
+accumulated against two live ones: `getDrafts` inner-joins `ChannelMembers`, so an orphaned draft
+is invisible to the only route that would otherwise reach it.
+
+## `GET /api/v4/users/email/{email}` — `getUserByEmail` (2026-09-05)
+
+Served. `crates/mm-api/src/users.rs` (`get_user_by_email`), `crates/mm-app/src/user.rs`
+(`get_user_by_email`), `crates/mm-store/src/user_store.rs` (`get_by_email`); 10 parity tests in
+`crates/mm-api/tests/parity/user_by_email.rs`.
+
+**The one thing a reader would otherwise get wrong: this is not `getUser` with a different
+lookup.** It omits two whole blocks the other two single-user reads have, and both omissions are
+on the wire:
+
+1. **No terms-of-service branch**, so `terms_of_service_id` and `terms_of_service_create_at` are
+   never present here — not even for an admin, not even for the caller themselves.
+2. **No `is_self` case in the sanitiser.** `getUser` and `getUserByUsername` call
+   `user.Sanitize(map[string]bool{})` when the target is the caller, keeping every field. This one
+   always calls `SanitizeProfile(user, IsSystemAdmin())`, so **looking yourself up by email
+   returns the stranger's view of you**: no `notify_props`, `auth_data` blanked to `""`.
+
+Reusing this crate's shared `respond_with_user` tail would have silently added both back; two of
+the mutations exist to catch exactly that tidy-port mistake.
+
+Two more measured shapes. The gate is on the sanitize *option*, not on a permission:
+`GetSanitizeOptions(isAdmin)["email"]` is `ShowEmailAddress || isAdmin`, and a false value is a
+403 **before** the lookup, so nothing leaks about whether the address exists. And `GetByEmail` is
+`Where("Email = lower(?)")` — the **parameter** is lowered, not the column — so a row whose stored
+address has capitals is unreachable by email on both servers, whichever case the caller sends. Go
+cannot write such a row; the fixture plants one.
+
+The route is registered as a **wildcard** (`/users/email/{*email}`) because gorilla's pattern is
+`{email:.+}`, whose `.` matches a slash. `GET /users/email/verify` therefore lands here as the
+invalid address `verify` rather than on the `POST /users/email/verify` route beside it — measured,
+and asserted.
+
+Mutation run: **13 run, 11 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/user-by-email.plan`). Full suite: 2440 passed, 0 failed.
+
+### Two things the mutation harness taught, again
+
+- **A control must cover its binding's whole life.** Renaming only the declaration is a compile
+  error, which the batch reports as a harness fault and which voids every other verdict in the
+  run. Three batches have now been lost to it, so the rule is written into the plan files.
+- **Removing a config gate is inert when the config makes the gate always pass.** `ShowEmailAddress`
+  is on here, so deleting the `email` option check changes nothing. The mutation now inverts the
+  gate's polarity instead, which at least pins that it reads that option and not a constant. The
+  refusing half needs a server with `ShowEmailAddress` off and is not testable on this deployment.
+
+### And a store test whose premise was one page of a shared table
+
+`db_user_profile_lists::not_in_team_lists_the_left_member_and_never_the_current_ones` read page
+zero of `GetProfilesNotInTeam` at 200 rows and expected its two fixture users. That listing is
+everyone outside the fixture's team — the whole development database — and the parity suites
+create `mmrsplain%` users concurrently, which sort *before* `mmrsulist-` and pushed the later of
+the two off the page. It now walks every page. That surfaced the second half: paging by
+`OFFSET page * perPage` over a table being inserted into returns the same row twice ([D-160]), so
+the walk is deduplicated. The claim is about membership of the listing; the paging itself is
+pinned by `parity/users_list.rs`.
+
+## `GET /teams/name/{team_name}/exists` — `teamExists` (2026-09-05)
+
+Served. `crates/mm-api/src/teams.rs` (`team_exists`, plus a fix to `get_team_by_name`); 8 parity
+tests in `crates/mm-api/tests/parity/team_exists.rs`. The join and signup flows ask this before
+offering a team.
+
+**The one thing a reader would otherwise get wrong: "exists" means "you can see it".** The route
+never 404s and never 403s — a name that matches nothing and a team the caller may not see are the
+same `{"exists":false}` with a 200, which is the point: it must not tell a stranger which private
+teams are out there. Visibility is three branches:
+
+```go
+(teamMember != nil && teamMember.DeleteAt == 0) ||
+(team.AllowOpenInvite && SessionHasPermissionTo(list_public_teams)) ||
+(!team.AllowOpenInvite && SessionHasPermissionTo(list_private_teams))
+```
+
+Note what is **not** there. `getTeamByName` guards on `AllowOpenInvite || Type != TeamOpen` and
+falls back to `view_team` *on the team*; this one ignores `Type` entirely and asks for a
+**system-level** list permission. A team with open invites off is therefore visible to an admin
+and to nobody else, however public its type. And a **left** membership does not count — the row
+survives a `DELETE` with a non-zero `DeleteAt`, so a user who left a private team stops being able
+to see that it exists.
+
+Wire format: `w.Write([]byte(MapBoolToJSON(resp)))`, so **no trailing newline** ([D-086]).
+
+Mutation run: **11 run, 9 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/team-exists.plan`). Full suite: 2448 passed, 0 failed.
+
+### `web/params.go` lowercases the name segments, and two served routes did not
+
+`params.TeamName = strings.ToLower(props["team_name"])` (params.go:178), and the same for
+`channel_name`. It applies to **every** route with those segments, before any handler sees them —
+so `/teams/name/MMRS-PARITY-X` is the same request as the lowercase one. The two channel routes
+already did this; **both team routes validated the raw segment** and answered 400 where Go answers
+200. `get_team_by_name` had shipped with the bug; `team_exists` was written with it. Fixed in both,
+and the test covers both, because no single route's suite would have found it — the same shape as
+the `me` alias two entries up.
+
+### Two test premises that were wrong, not the port
+
+`IsValidTeamName` is `isValidAlphaNum` plus a minimum length of **2** — so `ab` is valid and only a
+single character is too short — and it carries **no reserved-name check**: `signup`, `login` and
+`admin` are all valid team names here, whatever `CleanTeamName` next door suggests. Uppercase is
+valid too, for the lowercasing reason above.
+
+### And a survivor that was a dead branch
+
+`member.is_some_and(|m| m.delete_at == 0)` → `member.is_some()` survived the first batch: every
+membership row the fixture could reach had `DeleteAt == 0`, so the two agreed everywhere. A second
+plain user now joins the private team and leaves it, which is the only way to produce the row that
+tells them apart.
+
+## `POST /api/v4/users/usernames` — `getUsersByNames` (2026-09-05)
+
+Served. `crates/mm-api/src/users.rs` (`get_users_by_names`), `crates/mm-app/src/user.rs`
+(`get_users_by_usernames`), `crates/mm-store/src/user_store.rs` (`get_profiles_by_usernames`);
+6 parity tests in `crates/mm-api/tests/parity/users_by_names.rs`. The webapp posts the usernames
+it found in a page of posts, so this fires once per channel load with whatever `@mentions` were
+on screen.
+
+**The one thing a reader would otherwise get wrong: this query has no `DeleteAt` filter at all.**
+Every neighbouring user query has one, and adding it here is the likeliest wrong port — a
+**deactivated** account is returned like any other, which is what lets a client render an old
+mention. `GetProfilesByUsernames` takes a `UserGetOptions` carrying only `ViewRestrictions` and
+never reads `Active`, `Inactive` or `Role`.
+
+Nothing validates a username either, on the list or on its members, and there is no not-found: a
+request for five names can answer with two, and the caller cannot tell "no such user" from "not
+allowed to see them" — the same guarantee `getUsersByIds` gives. The two 400s are Go's order,
+`SortedArrayFromJSON` first (`api.payload.parse.error`) and the empty list second
+(`invalid_body_param`); a body of `null` reduces to zero names without an error and so lands on
+the *second*. `json.Marshal` + `w.Write`, so **no trailing newline** ([D-086]).
+
+Mutation run: **9 run, 7 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/users-by-names.plan`). Full suite: 2454 passed, 0 failed.
+
+Three mutations are deliberately absent, each because nothing on the wire could see it: the app
+layer's error id (reachable only from a store failure), the `Name` in the empty-list 400
+(`params` is not serialised into an `AppError`), and dropping the restrictions fast-path forward
+(no fixture caller has non-nil restrictions). Writing the plan also caught one of my own
+mutations doing nothing — it renamed `let body` to `let mut body` without appending the newline it
+was named for. **A mutation that does not do what its name says is worse than none**: it reports
+a catch that belongs to a different change.
+
+## `POST /api/v4/emoji/names` — `getEmojisByNames` (2026-09-05)
+
+Served. `crates/mm-api/src/emoji.rs` (`get_emojis_by_names`, `get_emoji_name_literal`),
+`crates/mm-app/src/emoji.rs` (`get_multiple_emoji_by_name`); 7 parity tests in
+`crates/mm-api/tests/parity/emoji_by_names.rs`. The store's `get_multiple_by_name` already
+existed with only the post-metadata path behind it. The webapp posts the emoji names it found in
+a page of posts, once per channel load, beside `POST /users/usernames`.
+
+**The one thing a reader would otherwise get wrong: system emoji names are filtered out of the
+*request*, not the answer.** Go compacts the list in place before querying, so `["+1"]` asks the
+database for nothing and returns `[]` — asking for a built-in is neither an error nor a hit. This
+route answers about *custom* emoji only.
+
+The four refusals are ordered, and the order is on the wire: decode 400, then the empty-list 400,
+then the `EnableCustomEmoji` **501**, then the 200-name cap's 400. An empty body on a server with
+custom emoji disabled is the 400, not the 501; a 201-name body on that same server is the 501, not
+the cap's 400. `json.NewEncoder(w).Encode` gives a **trailing newline** and `[]` rather than
+`null` — both the store and the filtered-to-nothing branch allocate.
+
+Mutation run: **10 run, 8 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/emoji-by-names.plan`). Full suite: 2461 passed, 0 failed.
+
+### Registering a literal route changes what happens to its other methods
+
+Go registers `/emoji/names` for `POST` only, so a `GET` fails the method match and gorilla
+**falls through** to `/emoji/{emoji_id}`, where `RequireEmojiId` rejects the literal — a 400 both
+servers produced from the same handler, and one `emoji_get`'s suite has asserted since it was
+written. axum has no such fallthrough: once `/api/v4/emoji/names` is a route it answers every
+method, so the `GET` silently began forwarding. Spelled out as `get_emoji_name_literal`.
+**Adding a literal route is a change to the `{id}` route beside it**, and only the full-workspace
+run sees it — a filtered run of the new suite passes either way.
+
+### Two mutations dropped as untestable rather than carried as survivors
+
+Removing the system-emoji filter entirely changes nothing observable: a custom emoji **cannot be
+named like a built-in** (`IsValidEmojiName` refuses `model.emoji.system_emoji_name.app_error`), so
+an unfiltered `smile` reaches the query and matches no row. Only a direct `INSERT` could tell them
+apart, and that row would outlive the suite's `mmrsparity`-prefix purge. The surviving
+`is_none`/`is_some` mutation still pins the predicate's direction. And removing the
+`custom.is_empty()` early return is inert here for a reason worth knowing: it exists in Go because
+`constructArrayArgs` emits `Name IN ()` for zero names, which Postgres rejects — the guard is what
+stops a 500. This port binds `name = ANY($1)`, which is legal and empty for an empty array.
+
+### `emoji_list` was comparing a whole shared table unbracketed
+
+It reads every emoji while the other emoji suites create and soft-delete rows throughout the run,
+with plain `fetch_both` — so one side carried a `mmrsparitydoomed` row the other had already lost.
+[D-160]'s shape. Now `fetch_both_stable`.
+
+## `POST /api/v4/emoji/search` — `searchEmojis` (2026-09-05)
+
+Served. `crates/mm-api/src/emoji.rs` (`search_emojis`, `get_emoji_search_literal`),
+`crates/mm-model/src/utils.rs` (`decode_one_from_json`); 7 parity tests in
+`crates/mm-api/tests/parity/emoji_search.rs`. The app's `search_emoji` and the store's `search`
+already existed behind `autocompleteEmojis`. The emoji picker posts this on every keystroke.
+
+**The one thing a reader would otherwise get wrong: this is the only emoji route whose config
+refusal is a 403.** The five others check `EnableCustomEmoji` in their *handler* and answer 501,
+which shadows the app layer's 403. `searchEmojis` has no handler check at all, so the same feature
+flag gives a client a different status depending on which emoji route it asked. Recorded on
+`App::search_emoji`, whose other caller does have the handler check.
+
+The two 400s carry the same id **and** the same parameter name — `SetInvalidParamWithErr("term")`
+for a body that will not decode, `SetInvalidParam("term")` for an empty term — so `not json`,
+`[]`, `{}`, `null`, `{"term":""}`, `{"prefix_only":true}` and an empty body are one answer between
+them. The limit is `web.PerPageMaximum` (200) as a literal; there is no `per_page` on this route.
+
+Mutation run: **9 run, 7 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/emoji-search.plan`). Full suite: 2468 passed, 0 failed.
+
+### `json.NewDecoder(r.Body).Decode` is not `json.Unmarshal`
+
+It reads **one** value and ignores what follows, so `{"term":"a"}{"term":"b"}` decodes to the
+first object and answers 200 where `serde_json::from_slice` would call it trailing characters and
+400. `decode_one_from_json` deserializes from a `Deserializer` without calling `end()`, which
+reproduces that, and it inherits `replace_lone_surrogates` — the other half of the difference,
+since Go decodes a lone `\uD800` to `U+FFFD` where serde fails the whole body. A parity test sends
+the two-object body and a mutation swaps the helper back to `from_slice`.
+
+### Two mutation lessons, both repeats
+
+`AppError.params` is not serialised, so a mutation that renames a parameter (`emoji_id` to `term`)
+is invisible from the wire — the same finding `users-by-names.plan` recorded, made again. The
+mutation now swaps the error *id*, which differs by one word and is on the wire. And clippy was
+run *after* the batch rather than before, so a lint fix landed in a file the batch had already
+run against and the tally had to be earned twice.
+
+## `POST /api/v4/channels/stats/member_count` — `getChannelsMemberCount` (2026-09-05)
+
+Served, for the two deterministic id-resolution cases. `crates/mm-api/src/channels.rs`
+(`get_channels_member_count`), `crates/mm-app/src/channel.rs`,
+`crates/mm-store/src/channel_store.rs`; 8 parity tests in
+`crates/mm-api/tests/parity/channels_member_count.rs`. The webapp posts the sidebar's channel ids
+to render their member counts.
+
+**The one thing a reader would otherwise get wrong: Go's answer for a partially-resolvable id
+list depends on an in-memory cache, so it is not a function of the database.** `GetChannels` goes
+through `localcachelayer` (channel_layer.go:261), which reads each id from `channelByIdCache` and
+queries **only the misses**; the sqlstore then returns `ErrNotFound` when the query it actually ran
+matched nothing (channel_store.go:1062). For `[known, unknown]` that is a **404 when the known
+channel is cached** and a **200 with one entry when it is not** — measured, and a repeat of the
+same request flipped it.
+
+Two shapes are deterministic and are served: **every** id resolves (Go queries a subset that all
+exist, whichever way the cache falls) and **no** id resolves (nothing can be cached, so the whole
+list is queried and matches nothing → 404). Anything in between is forwarded. Reading only the
+sqlstore would have produced a port that answered 200 where Go answers 404 roughly half the time.
+
+The same cache layer is why an **empty list is `{}` with a 200** rather than the 404 the sqlstore
+alone would give: with zero ids it returns before querying.
+
+Two smaller shapes. The count's `INNER JOIN Users … AND Users.DeleteAt = 0` means a **deactivated
+member is not counted** — and there is no `ChannelMembers` deletion column, because leaving a
+channel deletes the row outright. And every requested id is seeded to `0`, so a channel nobody is
+in is `"<id>": 0` rather than an absent key. The permission loop runs to completion before any
+count is read, one refusal refuses the whole request, and the reported permission is
+`list_team_channels` whichever branch said no.
+
+Mutation run: **11 run, 9 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/channels-member-count.plan`). Full suite: 2476 passed, 0 failed.
+
+### Two harness rules, both re-learned
+
+A SQL mutation must keep every bound parameter **used** — replacing `cm.channelid = ANY($1)` with
+`IS NOT NULL` leaves `$1` unbound, which sqlx refuses at compile time, and a compile error is a
+harness fault that voids the whole run rather than a verdict. Neutralise with `OR TRUE` instead.
+And the seeded-zeros branch was dead until the fixture had a channel with **no members at all**:
+every channel has its creator, so leaving is the only way to produce one.
+
+## `POST /teams/{team_id}/channels/search` — `searchChannelsForTeam` (2026-09-05)
+
+Served. `crates/mm-api/src/channels.rs` (`search_channels_for_team`),
+`crates/mm-app/src/channel.rs` (`search_channels`, `search_channels_for_user`),
+`crates/mm-store/src/channel_store.rs` (`search_in_team`, `search_for_user_in_team`); 10 parity
+tests in `crates/mm-api/tests/parity/channel_search.rs`. The "Browse channels" dialog.
+
+**The one thing a reader would otherwise get wrong: private channels are never results, in either
+branch.** Both store queries select the channel columns from `Channels` but join `PublicChannels`
+— Go's denormalised shadow table — for the team filter, the `ORDER BY` and both halves of the
+search clause. That table holds public channels only, so the second branch is *the public channels
+you are in*, not *your channels*. A port that searched `Channels` directly would leak private
+channels into the browse dialog.
+
+Two more. `includeDeleted` is a literal `true` in both app functions, so the `DeleteAt = 0`
+predicate is never added and **archived channels are results** — that is what the dialog's
+archived tab reads. And a caller who is neither a lister nor a team member gets `GetTeamMember`'s
+**404**, not a 403: Go calls it for the side effect of its error.
+
+Mutation run: **13 run, 11 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/channel-search.plan`). Full suite: 2486 passed, 0 failed.
+
+### The second branch is unreachable, and forcing it exposed the session model
+
+`list_team_channels` is granted by **`team_user`**, which every team membership carries, so a team
+member is always a lister and `SearchChannelsForUser` never runs through this route. Stripping the
+roles behind a live session does not reach it either: **Go's session cache still holds the
+`TeamMembers` it was built with**, so Go stayed on the first branch while this port — reading the
+`Sessions` row alone — fell to the second. That is a state the REST API cannot produce, so the
+test was dropped and `store-membership-subject` came out of the plan with the reason recorded,
+rather than being carried as a survivor. The divergence belongs to the session model, not to this
+route.
+
+### serde builds a struct from a JSON array; Go's decoder refuses one
+
+`[]` deserialized to `ChannelSearch { term: "" }` and answered **200 where Go answers 400**.
+Checking the route shipped one iteration earlier, `POST /emoji/search` had the same hole and was
+worse: `["term", true]` was a **200 on this server and a 400 on Go's**, measured. Both handlers
+now decode to a `serde_json::Value` and match on `Object`, and both suites assert the
+positional-array case.
+
+### And a neighbour's assertion, caught only by the full run
+
+`team_channel_lists` pins *which router claims each `/channels/<literal>` path*, and had `search`
+in its forwarded list. Registering the route flipped it. Asserted the other way rather than
+dropped, which is the idiom that suite already used when `/ids` moved — the second time this
+session that adding a route changed a neighbour's expectations, and the second time only the
+full-workspace run saw it.
+
+## `POST /api/v4/users/search` — `searchUsers` (2026-09-05)
+
+Served for the default option set. `crates/mm-api/src/users.rs` (`search_users`),
+`crates/mm-store/src/user_store.rs` (`UserSearchOptions` gains `allow_emails` and
+`allow_inactive`, honoured by all three search queries); 9 parity tests in
+`crates/mm-api/tests/parity/users_search.rs`. The add-members dialog and the admin console's user
+list. `App::search_users_in_team` already existed behind `autocompleteUsers`.
+
+**The one thing a reader would otherwise get wrong: the validation order is the wire.** `limit` is
+defaulted to 100 **before** `term` is checked, so `{}` is the *term* 400 and never the limit one;
+and `limit` is range-checked **last**, after every permission check, so a body carrying both a
+team the caller cannot see and a bad limit is the **403**. Both measured against the running Go
+server before any code was written.
+
+All three 400s share one id — `api.context.invalid_body_param.app_error` — and differ only in the
+parameter name, which `AppError.params` never serialises. A client cannot tell `props` from `term`
+from `limit`, and no mutation in the plan tries to.
+
+Eleven body fields pick a different branch of `App.SearchUsers`' dispatch (user.go:2412) or add a
+filter `performSearch` builds. Each is **forwarded whole**, and the suite asserts that even at its
+*zero value* — `{"role": ""}` is Go's, because the field's presence is what the port refuses to
+approximate, not its value.
+
+`AllowEmails` and `AllowFullNames` are a permission rather than a preference: a system admin
+searches `Email`, `FirstName` and `LastName` unconditionally, everybody else only as
+`ShowEmailAddress`/`ShowFullName` allow. **The columns the query matches on differ per caller**,
+not just the columns the response shows — which is why the fixture plants an address whose local
+part appears in no username, the only way to prove the email column is searched at all.
+
+`json.Marshal` + `w.Write`, so **no trailing newline** ([D-086]), and `[]` rather than `null`.
+
+Mutation run: **17 run, 15 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/users-search.plan`). Full suite: 2495 passed, 0 failed.
+
+### Two harness rules, one of them written the iteration before
+
+The first batch aborted in preflight: a mutation was anchored on the doc comment of the item
+*before* it rather than after. The second was voided by a fault — `store-email-column` deleted the
+arm carrying the only use of `$6`, and sqlx refuses a query with an unused parameter. That is the
+rule added to the loop after `channels-member-count.plan` hit it, applied here to a mutation
+written before the rule existed. It now neutralises with `AND FALSE` instead of deleting.
+
+## `GET /api/v4/users/stats/filtered` — `getFilteredUsersStats` (2026-09-05)
+
+Served for the non-role option set, and **this removes a forward**: `users_stats.rs` had a test
+pinning the filtered variant as Go's, which now asserts the opposite. `crates/mm-api/src/users.rs`
+(`get_filtered_users_stats`), `crates/mm-app/src/user.rs`, `crates/mm-store/src/user_store.rs`
+(`count`); 6 parity tests in `crates/mm-api/tests/parity/users_stats_filtered.rs`.
+
+**The one thing a reader would otherwise get wrong: `in_team` wins over `in_channel`.** The
+store's `else if` (user_store.go:1497) means a request naming both filters on the **team alone** —
+measured: the two together return the team's count, not the intersection.
+
+Three more measured shapes. An **unparseable boolean is `false`, not a 400**: `strconv.ParseBool`'s
+error is discarded, so `?include_deleted=yes` counts as off. The team join carries
+`tm.DeleteAt = 0` and the channel join does not, because leaving a channel deletes the row
+outright while leaving a team soft-deletes it. And `json.NewEncoder(w).Encode` gives this route a
+**trailing newline**, unlike the unfiltered `/users/stats` beside it, which uses `w.Write`.
+
+The three role parameters add a join, an `IN` list and their own `CleanRoleNames` 400; each is
+forwarded at any value, including the empty string Go itself treats as absent.
+
+Mutation run: **14 run, 12 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/users-stats-filtered.plan`). Full suite: 2501 passed, 0 failed.
+
+### Two branches that were dead until a row reached them
+
+`include_remote_users` moved nothing: this installation has **no remote users at all**, and no API
+creates one, so the fixture plants a `RemoteId`. And `tm.DeleteAt = 0` was indistinguishable from
+no predicate until the fixture had a team **everybody left** — `TeamMembers` rows survive a leave
+— whose count is 0 only because of it. An absolute assertion is safe there, unlike the
+whole-table counts in the same suite, because no other suite writes to that team.
+
+## Suite stability, again — and this time it is write pressure, not orphans
+
+Five full-workspace runs while finishing this route: **two green (2495, 2501) and three failing, a
+different test each time** — `roles::all_roles_matches_go_byte_for_byte`,
+`users_list::the_etag_arms_match_go…`, `channel_members_list::pages_split_cover_and_run_out…`.
+Every one is a read over shared state that a concurrent writer moved:
+
+- the users-list **etag is `MAX(UpdateAt)` over every user**, so an etag minted a moment before
+  the conditional request is legitimately stale and Go answers 200. Fixed here: the mint is
+  retried until it survives its own round trip, and a 200 on an etag that did *not* move is still
+  the failure the test asserts.
+- `channel_members_list` pages by `OFFSET`, and a membership removed between page 0 and page 1
+  shifts rows into a duplicate — [D-160]'s signature exactly.
+- the `roles` failure reproduces **only under a narrow `--test parity parity::roles` filter** and
+  not in a full run, which makes it an intra-suite ordering race rather than a port divergence.
+
+The aggravator is this session's own fixtures: twenty-two routes' worth of suites now create,
+deactivate and delete users and teams throughout a run. The bracketed idiom
+(`fetch_both_stable`, walk-and-deduplicate) exists and works; it has been applied one failing test
+at a time. **See [D-167]** — the remaining whole-table reads should be converted deliberately
+rather than as each one fails.

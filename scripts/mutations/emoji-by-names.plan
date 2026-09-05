@@ -1,0 +1,44 @@
+# Mutation plan for POST /emoji/names (getEmojisByNames).
+#
+#   scripts/mutate-batch.sh scripts/mutations/emoji-by-names.plan
+#
+# Tab-separated: name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter.  `\n` becomes a newline.
+#
+# The fixture asks for a built-in emoji, a custom one, a name that matches nothing, and exactly
+# 200 and 201 names — one per branch.  Without the built-in the system-emoji filter is dead code
+# and `[]` is indistinguishable from `null`; without both sides of the cap the boundary is
+# `>= 200` as easily as `> 200`.
+#
+# The config gate cannot be tested from its refusing side: `EnableCustomEmoji` is on here, so
+# `custom_emoji_enabled` always passes.  Its *position* can be, and is — the plan does not try to
+# mutate the check itself.
+#
+# Two mutations were dropped rather than carried as survivors, because **nothing a client can
+# produce distinguishes them**:
+#
+# * Removing the system-emoji filter entirely.  A custom emoji **cannot be named like a built-in**
+#   — `IsValidEmojiName` refuses `model.emoji.system_emoji_name.app_error` — so an unfiltered
+#   `smile` reaches the query and matches no row, which is the same answer as not asking.  Only a
+#   direct `INSERT` could tell them apart, and that row would outlive the suite's purge, which
+#   sweeps by the `mmrsparity` prefix.  `app-system-emoji-filter` still pins the predicate's
+#   *direction*, because inverting it drops the custom names instead.
+# * Removing the `custom.is_empty()` early return.  It exists in Go because
+#   `constructArrayArgs` emits `Name IN ()` for zero names, which Postgres rejects — the guard is
+#   what stops a 500.  This port binds `name = ANY($1)`, which is legal and empty for an empty
+#   array, so the guard saves a query and nothing else.
+#
+# A control must cover its binding's whole life.  The last two lines are the no-op controls and
+# must SURVIVE.
+
+app-system-emoji-filter	crates/mm-app/src/emoji.rs	            .filter(|name| mm_model::emoji::get_system_emoji_id(name).is_none())	            .filter(|name| mm_model::emoji::get_system_emoji_id(name).is_some())	api	emoji_by_names
+api-empty-list-400	crates/mm-api/src/emoji.rs	    if names.is_empty() {\n        return Err(ApiError::invalid_param("names"));\n    }	    if false {\n        return Err(ApiError::invalid_param("names"));\n    }	api	emoji_by_names
+api-parse-error-id	crates/mm-api/src/emoji.rs	        "getEmojisByNames",\n        mm_model::utils::PAYLOAD_PARSE_ERROR,	        "getEmojisByNames",\n        "api.context.invalid_body_param.app_error",	api	emoji_by_names
+api-cap-boundary	crates/mm-api/src/emoji.rs	    if names.len() > GET_EMOJIS_BY_NAMES_MAX {	    if names.len() >= GET_EMOJIS_BY_NAMES_MAX {	api	emoji_by_names
+api-cap-value	crates/mm-api/src/emoji.rs	const GET_EMOJIS_BY_NAMES_MAX: usize = 200;	const GET_EMOJIS_BY_NAMES_MAX: usize = 500;	api	emoji_by_names
+api-too-many-id	crates/mm-api/src/emoji.rs	            "api.emoji.get_multiple_by_name_too_many.request_error",	            "api.emoji.get_multiple_by_name_too_few.request_error",	api	emoji_by_names
+api-trailing-newline	crates/mm-api/src/emoji.rs	    body.push(b'\\n');\n\n    Ok((\n        StatusCode::OK,\n        [\n            ("Content-Type", "application/json"),\n            ("x-mmrs-served-by", "rust"),\n        ],\n        body,\n    )\n        .into_response())\n}\n\n/// `model.NewAppError("getEmojisByNames"	    Ok((\n        StatusCode::OK,\n        [\n            ("Content-Type", "application/json"),\n            ("x-mmrs-served-by", "rust"),\n        ],\n        body,\n    )\n        .into_response())\n}\n\n/// `model.NewAppError("getEmojisByNames"	api	emoji_by_names
+store-name-column	crates/mm-store/src/emoji_store.rs	    async fn get_multiple_by_name(&self, names: &[String]) -> Result<Vec<Emoji>, StoreError> {	    async fn get_multiple_by_name(&self, names: &[String]) -> Result<Vec<Emoji>, StoreError> {\n        let names = &names.iter().map(|n| format!("{n}x")).collect::<Vec<_>>()[..];	api	emoji_by_names
+#
+# --- no-op controls: these must SURVIVE ---
+control-rename-binding	crates/mm-app/src/emoji.rs	        if custom.is_empty() {\n            return Ok(Vec::new());\n        }\n\n        self.store()\n            .emoji()\n            .get_multiple_by_name(&custom)\n            .await\n            .map_err(|err| {\n                tracing::error!(error = %err, "emoji-by-names lookup failed");\n                AppError::boxed(\n                    "GetMultipleEmojiByName",\n                    "app.emoji.get_by_name.app_error",\n                    None,\n                    format!("names={custom:?}"),	        let wanted = custom;\n        if wanted.is_empty() {\n            return Ok(Vec::new());\n        }\n\n        self.store()\n            .emoji()\n            .get_multiple_by_name(&wanted)\n            .await\n            .map_err(|err| {\n                tracing::error!(error = %err, "emoji-by-names lookup failed");\n                AppError::boxed(\n                    "GetMultipleEmojiByName",\n                    "app.emoji.get_by_name.app_error",\n                    None,\n                    format!("names={wanted:?}"),	api	emoji_by_names
+control-reorder-columns	crates/mm-store/src/emoji_store.rs	            SELECT id        AS "id!",\n                   createat  AS "create_at!",\n                   updateat  AS "update_at!",\n                   deleteat  AS "delete_at!",\n                   creatorid AS "creator_id!",\n                   name      AS "name!"\n              FROM emoji\n             WHERE deleteat = 0\n               AND name = ANY($1)	            SELECT createat  AS "create_at!",\n                   id        AS "id!",\n                   updateat  AS "update_at!",\n                   deleteat  AS "delete_at!",\n                   creatorid AS "creator_id!",\n                   name      AS "name!"\n              FROM emoji\n             WHERE deleteat = 0\n               AND name = ANY($1)	api	emoji_by_names

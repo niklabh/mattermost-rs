@@ -1,0 +1,55 @@
+# Mutation plan for GET /teams/{team_id}/channels/autocomplete (autocompleteChannelsForTeam).
+#
+#   scripts/mutate-batch.sh scripts/mutations/channel-autocomplete.plan
+#
+# Tab-separated: name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter.  `\n` becomes a newline.
+#
+# channel_store.rs now holds several queries selecting the same 25 channel columns; every
+# anchor below reaches into this one's WHERE, which is the only one mentioning `to_tsvector`
+# or `$4`.
+#
+# The term helpers run against the **unit** suite: they are pure functions with their own
+# tests, and a mutation in one is caught in milliseconds rather than in a stack round trip.
+#
+# Two survivors from the first run, both fixture gaps, both fixed:
+#   - `store-order-drops-the-case`: nothing asked for a term whose display-name match and
+#     alphabetical order disagree. The fixture now carries `aczz` (matches in its display name)
+#     and `acaa` (matches only in its purpose), so dropping the CASE reverses them.
+#   - `app-trim`: no test passed a padded term. `?name=%20%20acopen%20%20` is one now.
+#
+# `store-like-half-dropped` and `app-trim` both survived a run against terms the *full-text*
+# clause could also match — `to_tsquery` matches lexeme prefixes, so `?name=acopen` finds
+# `mmrs-parity-acopen` with or without the LIKE. The suite now asks for `copen`, a term from the
+# middle of a word, which only a substring match can find.
+#
+# `store-private-needs-membership` may not compare against `'X'`: `channel_type` is a Postgres
+# enum and an unknown label is a compile error, which the harness reports as a fault rather than
+# a verdict. `'D'` is a real label with the same effect.
+#
+# `store-fulltext-half-dropped` cannot be written as `OR FALSE`: sqlx then sees $6 and $7 unused
+# and refuses to compile, which the harness reports as a fault rather than a verdict. Neutering
+# the *match* keeps every parameter bound.
+#
+# The last two lines are the no-op controls and must SURVIVE.
+store-team-scope	crates/mm-store/src/channel_store.rs	         WHERE c.teamid = $1\n           AND c.type IN ('O', 'P', 'D', 'G')\n           AND (CASE	         WHERE c.teamid <> $1\n           AND c.type IN ('O', 'P', 'D', 'G')\n           AND (CASE	api	channel_autocomplete
+store-guest-branch-inverted	crates/mm-store/src/channel_store.rs	                    WHEN $3 THEN c.id IN (SELECT cm.channelid	                    WHEN NOT $3 THEN c.id IN (SELECT cm.channelid	api	channel_autocomplete
+store-private-needs-membership	crates/mm-store/src/channel_store.rs	                    ELSE c.type <> 'P'\n                         OR c.id IN (SELECT cm.channelid	                    ELSE c.type <> 'D'\n                         OR c.id IN (SELECT cm.channelid	api	channel_autocomplete
+store-search-clause-always-on	crates/mm-store/src/channel_store.rs	           AND (NOT $4\n                OR LOWER(c.name) LIKE LOWER($5) ESCAPE '*'	           AND (FALSE\n                OR LOWER(c.name) LIKE LOWER($5) ESCAPE '*'	api	channel_autocomplete
+store-like-half-dropped	crates/mm-store/src/channel_store.rs	                OR LOWER(c.name) LIKE LOWER($5) ESCAPE '*'\n                OR LOWER(c.displayname) LIKE LOWER($5) ESCAPE '*'\n                OR LOWER(c.purpose) LIKE LOWER($5) ESCAPE '*'\n                OR to_tsvector(	                OR to_tsvector(	api	channel_autocomplete
+store-fulltext-half-dropped	crates/mm-store/src/channel_store.rs	                OR to_tsvector($7::text::regconfig, c.name || ' ' || c.displayname || ' ' || c.purpose)\n                   @@ to_tsquery($7::text::regconfig, $6))	                OR to_tsvector($7::text::regconfig, '')\n                   @@ to_tsquery($7::text::regconfig, $6))	api	channel_autocomplete
+store-order-drops-the-case	crates/mm-store/src/channel_store.rs	         ORDER BY CASE\n                      WHEN $4 AND LOWER(c.displayname) LIKE LOWER($5) ESCAPE '*' THEN 0\n                      ELSE 1\n                  END,\n                  c.displayname	         ORDER BY c.displayname	api	channel_autocomplete
+store-limit	crates/mm-store/src/channel_store.rs	         LIMIT 50\n	         LIMIT 5\n	api	channel_autocomplete
+helper-sanitize-order	crates/mm-store/src/channel_store.rs	    let mut out = term.replace('*', "");\n    for c in ['%', '_'] {	    let mut out = term.to_owned();\n    for c in ['%', '_'] {	unit	channel_store::tests
+helper-sanitize-chars	crates/mm-store/src/channel_store.rs	    for c in ['%', '_'] {	    for c in ['%'] {	unit	channel_store::tests
+helper-wildcard-wrapping	crates/mm-store/src/channel_store.rs	mm_model::utils::go_to_lower(&format!("%{term}%"))	mm_model::utils::go_to_lower(&format!("{term}%"))	unit	channel_store::tests
+helper-fulltext-prefix	crates/mm-store/src/channel_store.rs	        .map(|part| format!("{part}:*"))	        .map(|part| format!("{part}"))	unit	channel_store::tests
+helper-fulltext-joiner	crates/mm-store/src/channel_store.rs	.join(" & ")	.join(" | ")	unit	channel_store::tests
+helper-fulltext-pipes	crates/mm-store/src/channel_store.rs	.replace('|', "")	.replace('|', " ")	unit	channel_store::tests
+app-trim	crates/mm-app/src/channel.rs	        let term = term.trim();	        let term = term;	api	channel_autocomplete
+app-is-guest	crates/mm-app/src/channel.rs	.autocomplete_in_team(team_id, user_id, term, user.is_guest())	.autocomplete_in_team(team_id, user_id, term, !user.is_guest())	api	channel_autocomplete
+api-permission-gate	crates/mm-api/src/channels.rs	        .session_has_permission_to_team(&session.0, &team_id, &PERMISSION_LIST_TEAM_CHANNELS)\n        .await\n    {\n        return Err(ApiError::from(make_permission_error(\n            &session.0,\n            &[&PERMISSION_LIST_TEAM_CHANNELS],\n        )));\n    }\n\n    // `r.URL.Query().Get("name")`	        .session_has_permission_to_team(&session.0, &team_id, &PERMISSION_LIST_TEAM_CHANNELS)\n        .await\n        || true\n    {\n        return Err(ApiError::from(make_permission_error(\n            &session.0,\n            &[&PERMISSION_LIST_TEAM_CHANNELS],\n        )));\n    }\n\n    // `r.URL.Query().Get("name")`	api	channel_autocomplete
+api-query-parameter	crates/mm-api/src/channels.rs	let name = query_first(query.as_deref(), "name").unwrap_or_default();	let name = query_first(query.as_deref(), "term").unwrap_or_default();	api	channel_autocomplete
+#
+# --- no-op controls: these must SURVIVE ---
+control-rename-binding	crates/mm-store/src/channel_store.rs	    let sanitized = sanitize_search_term(term);\n    let has_search = !sanitized.is_empty();\n    let like_term = if has_search {\n        wildcard_search_term(&sanitized)	    let cleaned = sanitize_search_term(term);\n    let has_search = !cleaned.is_empty();\n    let like_term = if has_search {\n        wildcard_search_term(&cleaned)	api	channel_autocomplete
+control-reorder-like-columns	crates/mm-store/src/channel_store.rs	                OR LOWER(c.name) LIKE LOWER($5) ESCAPE '*'\n                OR LOWER(c.displayname) LIKE LOWER($5) ESCAPE '*'\n                OR LOWER(c.purpose) LIKE LOWER($5) ESCAPE '*'	                OR LOWER(c.purpose) LIKE LOWER($5) ESCAPE '*'\n                OR LOWER(c.displayname) LIKE LOWER($5) ESCAPE '*'\n                OR LOWER(c.name) LIKE LOWER($5) ESCAPE '*'	api	channel_autocomplete

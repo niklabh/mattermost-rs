@@ -1,0 +1,43 @@
+# Mutation plan for POST /api/v4/users/group_channels (getUsersByGroupChannelIds).
+#
+#   scripts/mutate-batch.sh scripts/mutations/users-group-channels.plan
+#
+# Tab-separated: name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter.  `\n` becomes a newline.
+#
+# user_store.rs holds several queries over the same user columns; this one is the only one
+# joining `channelmembers` or selecting `cm.channelid`.
+#
+# `app-error-id` runs against the **unit** suite: its 500 needs a driver failure, and no HTTP
+# input produces one, so the parity suite is blind to it. It survived a run for that reason.
+#
+# `store-group-type` may not compare against `'X'`: `channel_type` is a Postgres enum and an
+# unknown label is a compile error, which the harness reports as a fault rather than a verdict.
+# This is the third plan in this series to trip over that — the rule is `'S'`, `'D'` or another
+# real label, never a made-up one.
+#
+# `store-group-type` survived a run because every id the suite passed was already a group
+# channel, so widening `Type = 'G'` to "any message channel" changed nothing. The fixture now
+# carries an ordinary channel and a direct message the caller *is* a member of, and asserts both
+# come back absent.
+#
+# The last two lines are the no-op controls and must SURVIVE.
+store-access-subquery	crates/mm-store/src/user_store.rs	               AND EXISTS (SELECT 1\n                             FROM channelmembers caller\n                            WHERE caller.userid = $2\n                              AND caller.channelid = cm.channelid)	               AND TRUE	api	users_group_channels
+store-access-subject	crates/mm-store/src/user_store.rs	                            WHERE caller.userid = $2\n                              AND caller.channelid = cm.channelid)	                            WHERE caller.userid = u.id\n                              AND caller.channelid = cm.channelid)	api	users_group_channels
+store-self-exclusion	crates/mm-store/src/user_store.rs	               AND u.id <> $2\n	               AND u.id <> ''\n	api	users_group_channels
+store-group-type	crates/mm-store/src/user_store.rs	             WHERE c.type = 'G'\n	             WHERE c.type <> 'S'\n	api	users_group_channels
+store-channel-filter	crates/mm-store/src/user_store.rs	               AND cm.channelid = ANY($1::varchar[])	               AND cm.channelid <> ALL($1::varchar[])	api	users_group_channels
+store-username-order	crates/mm-store/src/user_store.rs	               AND u.id <> $2\n             ORDER BY u.username ASC	               AND u.id <> $2\n             ORDER BY u.id ASC	api	users_group_channels
+store-cap-truncation	crates/mm-store/src/user_store.rs	        let capped = &channel_ids[..channel_ids.len().min(MAX_GROUP_CHANNELS_FOR_PROFILES)];	        let capped = channel_ids;	api	users_group_channels
+store-cap-size	crates/mm-store/src/user_store.rs	pub const MAX_GROUP_CHANNELS_FOR_PROFILES: usize = 50;	pub const MAX_GROUP_CHANNELS_FOR_PROFILES: usize = 49;	api	users_group_channels
+store-map-key	crates/mm-store/src/user_store.rs	            let channel_id = row.channelid.clone();	            let channel_id = row.id.clone();	api	users_group_channels
+api-session-user	crates/mm-api/src/users.rs	.get_users_by_group_channel_ids(&session.0.user_id, &channel_ids)	.get_users_by_group_channel_ids(&channel_ids[0], &channel_ids)	api	users_group_channels
+api-empty-list-accepted	crates/mm-api/src/users.rs	        Ok(ids) if !ids.is_empty() => ids,	        Ok(ids) => ids,	api	users_group_channels
+api-refusal-kind	crates/mm-api/src/users.rs	        _ => return Err(group_channels_parse_error()),	        _ => return Err(ApiError::invalid_param("channel_ids")),	api	users_group_channels
+api-admin-bit	crates/mm-api/src/users.rs	    let options = sanitize_options(state.show_full_name, state.show_email_address, is_admin);\n    for users in by_channel.values_mut() {	    let options = sanitize_options(state.show_full_name, state.show_email_address, !is_admin);\n    for users in by_channel.values_mut() {	api	users_group_channels
+api-sanitise-dropped	crates/mm-api/src/users.rs	        for user in users.iter_mut() {\n            user.sanitize_profile(&options, is_admin);\n        }	        for user in users.iter_mut() {\n            let _ = user;\n        }	api	users_group_channels
+api-trailing-newline	crates/mm-api/src/users.rs	    let mut body = serde_json::to_vec(&by_channel).map_err(|err| {\n        tracing::error!(error = %err, "failed to serialise the group-channel profiles");\n        marshal_error("getUsersByGroupChannelIds")\n    })?;\n    body.push(b'\\n');	    let body = serde_json::to_vec(&by_channel).map_err(|err| {\n        tracing::error!(error = %err, "failed to serialise the group-channel profiles");\n        marshal_error("getUsersByGroupChannelIds")\n    })?;	api	users_group_channels
+app-error-id	crates/mm-app/src/user.rs	                    "GetUsersByGroupChannelIds",\n                    "app.user.get_profile_by_group_channel_ids_for_user.app_error",	                    "GetUsersByGroupChannelIds",\n                    "app.user.get_profiles.app_error",	unit	a_store_failure_carries
+#
+# --- no-op controls: these must SURVIVE ---
+control-rename-binding	crates/mm-store/src/user_store.rs	        let capped = &channel_ids[..channel_ids.len().min(MAX_GROUP_CHANNELS_FOR_PROFILES)];	        let within_cap = &channel_ids[..channel_ids.len().min(MAX_GROUP_CHANNELS_FOR_PROFILES)];\n        let capped = within_cap;	api	users_group_channels
+control-reorder-predicates	crates/mm-store/src/user_store.rs	             WHERE c.type = 'G'\n               AND cm.channelid = ANY($1::varchar[])	             WHERE cm.channelid = ANY($1::varchar[])\n               AND c.type = 'G'	api	users_group_channels

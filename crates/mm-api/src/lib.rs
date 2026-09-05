@@ -7,6 +7,7 @@
 
 pub mod auth;
 pub mod channels;
+pub mod drafts;
 pub mod emoji;
 pub mod error;
 /// `getFileInfo` — the one `/files/` route that returns JSON rather than bytes.
@@ -165,6 +166,23 @@ pub fn router(state: AppState) -> Router {
         // lands here while `GET /users/ids` is forwarded by `partially_migrated` and Go
         // answers as before. The GET route's exact-26-char rule never saw `ids` anyway (three
         // characters), so nothing that was forwarded stops being forwarded.
+        // `BaseRoutes.Users.Handle("/group_channels")` (api4/user.go:39), POST-only — another
+        // literal sibling of `{user_id}`, same precedence reasoning as `ids` below.
+        .route(
+            "/api/v4/users/group_channels",
+            partially_migrated(post(users::get_users_by_group_channel_ids)),
+        )
+        // `BaseRoutes.Users.Handle("/search")` (api4/user.go:35) — the add-members dialog.
+        .route(
+            "/api/v4/users/search",
+            partially_migrated(post(users::search_users)),
+        )
+        // `BaseRoutes.Users.Handle("/usernames")` (api4/user.go:33) — the webapp posts the
+        // usernames it found in a page of posts.
+        .route(
+            "/api/v4/users/usernames",
+            partially_migrated(post(users::get_users_by_names)),
+        )
         .route(
             "/api/v4/users/ids",
             partially_migrated(post(users::get_users_by_ids)),
@@ -184,6 +202,14 @@ pub fn router(state: AppState) -> Router {
         // Deeper than the `{user_id}` route, so no conflict — and the parameter is *not*
         // id-shaped: Go's username class allows `_`, `-` and `.`, so the id-charset middleware
         // must not apply. The handler carries its own mux-charset forward instead.
+        // `BaseRoutes.UserByEmail` (api4/api.go:205) — `PathPrefix("/email/{email:.+}")`, whose
+        // `.+` matches slashes, so this is a wildcard rather than one segment. `POST
+        // /users/email/verify` is registered *before* it in Go and wins there; here the method
+        // does the same job, since only GET is served.
+        .route(
+            "/api/v4/users/email/{*email}",
+            partially_migrated(get(users::get_user_by_email)),
+        )
         .route(
             "/api/v4/users/username/{username}",
             partially_migrated(get(users::get_user_by_username)),
@@ -191,6 +217,37 @@ pub fn router(state: AppState) -> Router {
         // Was the literal `/users/me/sessions`; now the parameterised route, with `me` resolved
         // in the handler like every other alias. The `me` bytes are unchanged — pinned by the
         // parity suite — and the gate that was `true` by construction is now evaluated.
+        // `BaseRoutes.PostsForUser.Handle("/flagged")` (api4/post.go:35) —
+        // `/users/{user_id}/posts/flagged`. Two segments deeper than `/users/{user_id}`, so it
+        // shadows nothing; `partially_migrated_with_ids` keeps the exact-26-char rule the
+        // handler's own `RequireUserId` would otherwise have to answer for.
+        // `BaseRoutes.User.Handle("/channel_members")` (api4/user.go:107) — one segment deeper
+        // than `/users/{user_id}`, so it shadows nothing.
+        // `BaseRoutes.ThreadsForUser` (api4/api.go) — `/users/{id}/teams/{id}/threads`, three
+        // segments deeper than `/users/{user_id}` and a sibling of the team channel lists.
+        .route(
+            "/api/v4/users/{user_id}/teams/{team_id}/threads",
+            partially_migrated_with_ids(&state, get(users::get_threads_for_user)),
+        )
+        // `BaseRoutes.UserThread` (api4/api.go) — one segment deeper than the thread list.
+        .route(
+            "/api/v4/users/{user_id}/teams/{team_id}/threads/{thread_id}",
+            partially_migrated_with_ids(&state, get(users::get_thread_for_user)),
+        )
+        // `BaseRoutes.TeamForUser.Handle("/drafts")` (api4/drafts.go:17) — the threads routes'
+        // sibling under the same base, and the one route here whose `{user_id}` is decorative.
+        .route(
+            "/api/v4/users/{user_id}/teams/{team_id}/drafts",
+            partially_migrated_with_ids(&state, get(drafts::get_drafts)),
+        )
+        .route(
+            "/api/v4/users/{user_id}/channel_members",
+            partially_migrated_with_ids(&state, get(users::get_channel_members_for_user)),
+        )
+        .route(
+            "/api/v4/users/{user_id}/posts/flagged",
+            partially_migrated_with_ids(&state, get(posts::get_flagged_posts_for_user)),
+        )
         .route(
             "/api/v4/users/{user_id}/sessions",
             partially_migrated_with_ids(&state, get(sessions::get_sessions)),
@@ -269,6 +326,19 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/teams/name/{team_name}",
             partially_migrated(get(teams::get_team_by_name)),
         )
+        // `BaseRoutes.ChannelByNameForTeamName` (api.go:225) — two segments deeper than
+        // `/teams/name/{team_name}` above, and neither segment is id-shaped (`[A-Za-z0-9_-]+`
+        // for both), so the id middleware stays off and the handler carries both mux classes
+        // forward itself.
+        // `BaseRoutes.TeamByName.Handle("/exists")` (api4/team.go:68).
+        .route(
+            "/api/v4/teams/name/{team_name}/exists",
+            partially_migrated(get(teams::team_exists)),
+        )
+        .route(
+            "/api/v4/teams/name/{team_name}/channels/name/{channel_name}",
+            partially_migrated(get(channels::get_channel_by_name_for_team_name)),
+        )
         .route(
             "/api/v4/teams/{team_id}/members",
             partially_migrated_with_ids(&state, get(teams::get_team_members)),
@@ -320,6 +390,12 @@ pub fn router(state: AppState) -> Router {
         // as it matches gorilla's `{channel_id:[A-Za-z0-9]+}` there, and 400s identically; a POST
         // falls to `partially_migrated`'s method fallback and is forwarded. A literal segment
         // with a hyphen would land on `mux_segments_or_forward` and be forwarded too.
+        // `BaseRoutes.Channels.Handle("/stats/member_count")` (api4/channel.go:47) — posted
+        // with the sidebar's channel ids. A literal two segments deep, so it shadows nothing.
+        .route(
+            "/api/v4/channels/stats/member_count",
+            partially_migrated(post(channels::get_channels_member_count)),
+        )
         .route(
             "/api/v4/channels/{channel_id}",
             partially_migrated_with_ids(&state, get(channels::get_channel)),
@@ -411,6 +487,28 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/teams/{team_id}/channels/private",
             partially_migrated_with_ids(&state, get(channels::get_private_channels_for_team)),
         )
+        // `BaseRoutes.ChannelsForTeam.Handle("/autocomplete")` (api4/channel.go:68) — a literal
+        // sibling of `/deleted` and `/private`, one segment deeper than `/teams/{team_id}`.
+        // `BaseRoutes.ChannelsForTeam.Handle("/search")` (api4/channel.go:67) — the browse
+        // dialog.
+        .route(
+            "/api/v4/teams/{team_id}/channels/search",
+            partially_migrated_with_ids(&state, post(channels::search_channels_for_team)),
+        )
+        .route(
+            "/api/v4/teams/{team_id}/channels/autocomplete",
+            partially_migrated_with_ids(&state, get(channels::autocomplete_channels_for_team)),
+        )
+        // `BaseRoutes.ChannelsForTeam.Handle("/search_autocomplete")` (api4/channel.go:69) — the
+        // literal beside `/autocomplete`, and a different handler with a different query and no
+        // permission gate at all.
+        .route(
+            "/api/v4/teams/{team_id}/channels/search_autocomplete",
+            partially_migrated_with_ids(
+                &state,
+                get(channels::autocomplete_channels_for_team_for_search),
+            ),
+        )
         // `BaseRoutes.ChannelsForTeam.Handle("/ids")` (api4/channel.go:66), POST-only — a third
         // static literal beside `/private` and `/deleted`, so the "no precedence puzzle here"
         // note above covers it unchanged. It was in that note's list of unregistered literals
@@ -446,6 +544,12 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/users/stats",
             partially_migrated(get(users::get_total_users_stats)),
+        )
+        // `/users/stats/filtered` is one segment deeper again — a different handler with its own
+        // query parameters, and forwarded until `getFilteredUsersStats` landed.
+        .route(
+            "/api/v4/users/stats/filtered",
+            partially_migrated(get(users::get_filtered_users_stats)),
         )
         // `BaseRoutes.User.Handle("/terms_of_service")` (api4/user.go:61) — one segment deeper
         // than `{user_id}`. Registered GET only: the `POST` on the same path
@@ -508,6 +612,15 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/posts/{post_id}",
             partially_migrated_with_ids(&state, get(posts::get_post)),
         )
+        // `BaseRoutes.Posts.Handle("/ids")` (api4/post.go:28). The literal `ids` sits where
+        // `{post_id}` sits above; axum prefers the literal. Nothing that used to be answered
+        // stops being answered — the route above enforces exact-26-character ids and `ids` is
+        // three characters, so this path was forwarded, not served. POST-only, which is all Go
+        // registers here; `/posts/ephemeral` is a sibling this router still leaves to Go.
+        .route(
+            "/api/v4/posts/ids",
+            partially_migrated(post(posts::get_posts_by_ids)),
+        )
         // `BaseRoutes.Post.Handle("/thread")` (api4/post.go:31) — one segment deeper than the
         // route above, so neither shadows the other. Its literal siblings under `{post_id}`
         // (`/edit_history`, `/info`, `/files/info`, `/reveal`, `/patch`, `/pin`, …) are not
@@ -526,6 +639,16 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/posts/{post_id}/reactions",
             partially_migrated_with_ids(&state, get(reactions::get_reactions)),
+        )
+        // `BaseRoutes.Posts.Handle("/ids/reactions")` (api4/reaction.go:19). The literal `ids`
+        // sits where `{post_id}` sits above and axum prefers the literal, so this wins for the
+        // one path that spells it. Nothing that used to be answered stops being answered: the
+        // route above is wrapped in the exact-26-char id middleware and `ids` is three
+        // characters, so `POST /posts/ids/reactions` was being forwarded to Go, not served.
+        // Registered POST-only — Go has no other method on this path.
+        .route(
+            "/api/v4/posts/ids/reactions",
+            partially_migrated(post(reactions::get_bulk_reactions)),
         )
         // `BaseRoutes.Post.Handle("/edit_history")` (api4/post.go:30) — another sibling of
         // `/thread` and `/reactions`, one segment deeper than `/posts/{post_id}`.
@@ -595,6 +718,25 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/emoji/name/{emoji_name}",
             partially_migrated(get(emoji::get_emoji_by_name)),
+        )
+        // `BaseRoutes.Emojis.Handle("/autocomplete")` (api4/emoji.go:22) — a literal sibling of
+        // `{emoji_id}`, which axum prefers. Registered GET-only; `/emoji/names` and
+        // `/emoji/search` are POST in Go and stay forwarded.
+        // `BaseRoutes.Emojis.Handle("/names")` (api4/emoji.go:24) — posted once per channel
+        // load with the emoji names found in the page.
+        // `BaseRoutes.Emojis.Handle("/search")` (api4/emoji.go:25) — the emoji picker posts this
+        // on every keystroke. `GET` is gorilla's fallthrough to `{emoji_id}`, as for `/names`.
+        .route(
+            "/api/v4/emoji/search",
+            partially_migrated(post(emoji::search_emojis).get(emoji::get_emoji_search_literal)),
+        )
+        .route(
+            "/api/v4/emoji/names",
+            partially_migrated(post(emoji::get_emojis_by_names).get(emoji::get_emoji_name_literal)),
+        )
+        .route(
+            "/api/v4/emoji/autocomplete",
+            partially_migrated(get(emoji::autocomplete_emojis)),
         )
         // `BaseRoutes.ChannelCategories` (api.go:231), the three GETs. The five writes on
         // these same paths fall to `partially_migrated`'s method fallback and stay forwarded —

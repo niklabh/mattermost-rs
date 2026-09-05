@@ -21,6 +21,12 @@ pub trait UserStore {
     /// field with no reader, and the two branches it would gate — the `Bots` anti-join and the
     /// view-restriction joins — are unported for the reasons `count_total_users` and
     /// `mm_app::App::get_view_users_restrictions` give.
+    /// Port of `SqlUserStore.Count` (user_store.go:1471) — the filtered count.
+    fn count(
+        &self,
+        options: &mm_model::user_count::UserCountOptions,
+    ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
+
     fn count_total_users(
         &self,
     ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
@@ -33,6 +39,18 @@ pub trait UserStore {
     ) -> impl std::future::Future<Output = Result<Vec<String>, StoreError>> + Send;
 
     /// Port of `SqlUserStore.GetByUsername` (user_store.go:1402).
+    /// Port of `SqlUserStore.GetProfilesByUsernames` (user_store.go:1084).
+    fn get_profiles_by_usernames(
+        &self,
+        usernames: &[String],
+    ) -> impl std::future::Future<Output = Result<Vec<User>, StoreError>> + Send;
+
+    /// Port of `SqlUserStore.GetByEmail` (user_store.go:1282).
+    fn get_by_email(
+        &self,
+        email: &str,
+    ) -> impl std::future::Future<Output = Result<User, StoreError>> + Send;
+
     fn get_by_username(
         &self,
         username: &str,
@@ -50,6 +68,16 @@ pub trait UserStore {
         ids: &[String],
         since: i64,
     ) -> impl std::future::Future<Output = Result<Vec<User>, StoreError>> + Send;
+
+    /// Port of `SqlUserStore.GetProfileByGroupChannelIdsForUser` (user_store.go:1209): the other
+    /// members of each named group channel, keyed by channel id.
+    fn get_profile_by_group_channel_ids_for_user(
+        &self,
+        user_id: &str,
+        channel_ids: &[String],
+    ) -> impl std::future::Future<
+        Output = Result<std::collections::BTreeMap<String, Vec<User>>, StoreError>,
+    > + Send;
 
     /// Port of `SqlUserStore.GetAllProfiles` (user_store.go:682) — `GET /users` with no filter
     /// at all — for nil view restrictions, no role filter and the default sort.
@@ -161,6 +189,13 @@ pub trait UserStore {
 }
 
 /// `model.UserSearchDefaultLimit` (model/user_search.go:7).
+/// Port of `MaxGroupChannelsForProfiles` (user_store.go:29).
+///
+/// Go **silently truncates** the caller's id list to this many rather than refusing a longer
+/// one — `channelIds = channelIds[0:MaxGroupChannelsForProfiles]` — so asking about sixty group
+/// channels answers about fifty of them, with no error and nothing in the response saying so.
+pub const MAX_GROUP_CHANNELS_FOR_PROFILES: usize = 50;
+
 pub const USER_SEARCH_DEFAULT_LIMIT: i64 = 100;
 /// `model.UserSearchMaxLimit` (model/user_search.go:6).
 pub const USER_SEARCH_MAX_LIMIT: i64 = 1000;
@@ -187,6 +222,18 @@ pub struct UserSearchOptions {
     /// searchable columns (`UserSearchTypeNames` vs `UserSearchTypeNamesNoFullName`,
     /// user_store.go:34-35).
     pub allow_full_names: bool,
+    /// `AllowEmails`: whether `Email` joins the searchable columns (`UserSearchTypeAll` vs
+    /// `UserSearchTypeNames`, user_store.go:36-37).
+    ///
+    /// `autocompleteUsers` pins this **false** — "Never autocomplete on emails"
+    /// (api4/user.go:1399) — and `searchUsers` sets it from `ShowEmailAddress`, or
+    /// unconditionally for a system admin. It is the only difference between the two search
+    /// column sets that a non-admin can turn on.
+    pub allow_emails: bool,
+    /// `AllowInactive`: when false, `Users.DeleteAt = 0` is added.
+    ///
+    /// Comes straight off `searchUsers`' request body; `autocompleteUsers` never sets it.
+    pub allow_inactive: bool,
     /// `Limit`, already defaulted and clamped by the caller. Go casts it with `uint64(...)` and
     /// hands it to Postgres unchecked, so a **negative** limit is a failed query and a 500 on
     /// both servers — measured against the running Go server, not inferred.
@@ -251,6 +298,87 @@ pub fn deleted_filter(inactive: bool, active: bool) -> Option<bool> {
 /// gets; both servers return nothing for an absurd page either way.
 fn offset_of(page: i64, per_page: i64) -> i64 {
     page.saturating_mul(per_page)
+}
+
+/// Port of Go's `UserWithChannel` (user_store.go:1198): [`UserRow`] with the joined
+/// `ChannelMembers.ChannelId` beside it.
+///
+/// A separate struct rather than an `Option` on `UserRow` because `query_as!` binds positionally
+/// — the two queries have genuinely different shapes, and one type would put a channel id on
+/// every user lookup in the file.
+struct UserWithChannelRow {
+    id: String,
+    createat: Option<i64>,
+    updateat: Option<i64>,
+    deleteat: Option<i64>,
+    username: Option<String>,
+    password: Option<String>,
+    authdata: Option<String>,
+    authservice: Option<String>,
+    email: Option<String>,
+    emailverified: Option<bool>,
+    nickname: Option<String>,
+    firstname: Option<String>,
+    lastname: Option<String>,
+    position: Option<String>,
+    roles: Option<String>,
+    allowmarketing: Option<bool>,
+    props: Option<serde_json::Value>,
+    notifyprops: Option<serde_json::Value>,
+    lastpasswordupdate: Option<i64>,
+    lastpictureupdate: Option<i64>,
+    failedattempts: Option<i64>,
+    locale: Option<String>,
+    timezone: Option<serde_json::Value>,
+    mfaactive: Option<bool>,
+    mfasecret: Option<String>,
+    mfausedtimestamps: Option<serde_json::Value>,
+    remoteid: Option<String>,
+    lastlogin: i64,
+    isbot: bool,
+    botdescription: String,
+    botlasticonupdate: i64,
+    channelid: String,
+}
+
+impl UserWithChannelRow {
+    /// Drop the joined column and hand the rest to [`user_from_row`], which every other user
+    /// lookup already shares.
+    fn into_user_row(self) -> UserRow {
+        UserRow {
+            id: self.id,
+            createat: self.createat,
+            updateat: self.updateat,
+            deleteat: self.deleteat,
+            username: self.username,
+            password: self.password,
+            authdata: self.authdata,
+            authservice: self.authservice,
+            email: self.email,
+            emailverified: self.emailverified,
+            nickname: self.nickname,
+            firstname: self.firstname,
+            lastname: self.lastname,
+            position: self.position,
+            roles: self.roles,
+            allowmarketing: self.allowmarketing,
+            props: self.props,
+            notifyprops: self.notifyprops,
+            lastpasswordupdate: self.lastpasswordupdate,
+            lastpictureupdate: self.lastpictureupdate,
+            failedattempts: self.failedattempts,
+            locale: self.locale,
+            timezone: self.timezone,
+            mfaactive: self.mfaactive,
+            mfasecret: self.mfasecret,
+            mfausedtimestamps: self.mfausedtimestamps,
+            remoteid: self.remoteid,
+            lastlogin: self.lastlogin,
+            isbot: self.isbot,
+            botdescription: self.botdescription,
+            botlasticonupdate: self.botlasticonupdate,
+        }
+    }
 }
 
 /// Postgres-backed implementation.
@@ -402,6 +530,65 @@ impl UserStore for SqlUserStore {
     /// caller sets it on, so bots are counted, and `/users/stats` on a server with an installed
     /// plugin reports a larger number than its member lists show. Reproduced by *not* writing
     /// the join, which is the easiest thing in this file to get wrong by adding.
+    /// Port of `SqlUserStore.Count` (user_store.go:1471).
+    ///
+    /// Go builds this one predicate at a time with squirrel; written here as a single statement
+    /// whose clauses are gated on the options, because every join it can add is on a unique key
+    /// and so cannot fan a row out.
+    ///
+    /// # `TeamId` wins over `ChannelId`
+    ///
+    /// Go's `else if` (user_store.go:1497) means a request naming both filters on the **team**
+    /// and ignores the channel entirely — measured: `?in_team=X&in_channel=Y` returns the team's
+    /// count, not the intersection. The two guards below encode that precedence rather than
+    /// intersecting.
+    ///
+    /// # The team join carries `DeleteAt = 0`; the channel join does not
+    ///
+    /// A user who left a team is not counted; a user who left a *channel* has no
+    /// `ChannelMembers` row at all, because leaving a channel deletes it outright.
+    ///
+    /// # `ExcludeRegularUsers` is not modelled
+    ///
+    /// `getFilteredUsersStats` never sets it, and with `IncludeBotAccounts` off Go **returns an
+    /// error** rather than a count for that combination (user_store.go:1491). Nothing reachable
+    /// from the wire produces either half.
+    #[tracing::instrument(skip_all, fields(count))]
+    async fn count(
+        &self,
+        options: &mm_model::user_count::UserCountOptions,
+    ) -> Result<i64, StoreError> {
+        let count = sqlx::query_scalar!(
+            r#"
+            SELECT COUNT(*) AS "count!"
+              FROM users u
+              LEFT JOIN bots b ON b.userid = u.id
+              LEFT JOIN teammembers tm
+                ON (tm.userid = u.id AND tm.teamid = $4 AND tm.deleteat = 0)
+              LEFT JOIN channelmembers cm ON (cm.userid = u.id AND cm.channelid = $5)
+             WHERE ($1 OR u.deleteat = 0)
+               AND ($2 OR u.remoteid = '' OR u.remoteid IS NULL)
+               AND ($3 OR b.userid IS NULL)
+               AND ($4 = '' OR tm.userid IS NOT NULL)
+               AND ($4 <> '' OR $5 = '' OR cm.userid IS NOT NULL)
+            "#,
+            options.include_deleted,
+            options.include_remote_users,
+            options.include_bot_accounts,
+            options.team_id,
+            options.channel_id,
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to count Users".to_owned(),
+            source,
+        })?;
+
+        tracing::Span::current().record("count", count);
+        Ok(count)
+    }
+
     #[tracing::instrument(skip_all, fields(count))]
     async fn count_total_users(&self) -> Result<i64, StoreError> {
         let count = sqlx::query_scalar!(
@@ -593,6 +780,144 @@ impl UserStore for SqlUserStore {
 
         user_from_row(row)
     }
+    /// # No deletion filter, and no options
+    ///
+    /// `GetProfilesByUsernames` takes a `UserGetOptions` carrying only `ViewRestrictions`; it
+    /// never reads `Active`, `Inactive` or `Role`. A **deactivated** user whose username is
+    /// asked for is returned like any other, which is what lets a client render an old mention.
+    ///
+    /// `ORDER BY Users.Username ASC` is wire surface: the answer is a JSON array and its order is
+    /// the store's, not the request's.
+    ///
+    /// # The restrictions filter is not here
+    ///
+    /// `applyViewRestrictionsFilter` joins `TeamMembers`/`ChannelMembers` for a caller whose
+    /// `view_members` is granted only through a team or channel scheme. The api layer forwards
+    /// every such caller to Go, so this query is always the nil-restrictions branch — the same
+    /// arrangement `get_profile_by_ids` has.
+    #[tracing::instrument(skip_all, fields(count = usernames.len(), found))]
+    async fn get_profiles_by_usernames(
+        &self,
+        usernames: &[String],
+    ) -> Result<Vec<User>, StoreError> {
+        let rows = sqlx::query_as!(
+            UserRow,
+            r#"
+            SELECT u.id,
+                   u.createat,
+                   u.updateat,
+                   u.deleteat,
+                   u.username,
+                   u.password,
+                   u.authdata,
+                   u.authservice,
+                   u.email,
+                   u.emailverified,
+                   u.nickname,
+                   u.firstname,
+                   u.lastname,
+                   u.position,
+                   u.roles,
+                   u.allowmarketing,
+                   u.props,
+                   u.notifyprops,
+                   u.lastpasswordupdate,
+                   u.lastpictureupdate,
+                   u.failedattempts::bigint AS failedattempts,
+                   u.locale,
+                   u.timezone,
+                   u.mfaactive,
+                   u.mfasecret,
+                   u.mfausedtimestamps,
+                   u.remoteid,
+                   u.lastlogin,
+                   (b.userid IS NOT NULL) AS "isbot!",
+                   COALESCE(b.description, '') AS "botdescription!",
+                   COALESCE(b.lasticonupdate, 0) AS "botlasticonupdate!"
+              FROM users u
+              LEFT JOIN bots b ON b.userid = u.id
+             WHERE u.username = ANY($1::text[])
+             ORDER BY u.username ASC
+            "#,
+            usernames
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to find Users".to_owned(),
+            source,
+        })?;
+
+        tracing::Span::current().record("found", rows.len());
+        rows.into_iter().map(user_from_row).collect()
+    }
+
+    #[tracing::instrument(skip_all, fields(email = %email, found))]
+    async fn get_by_email(&self, email: &str) -> Result<User, StoreError> {
+        // `usersQuery.Where("Email = lower(?)", email)` (user_store.go:1283) — the
+        // **parameter** is lowered, not the column, exactly as the username lookup above does it.
+        // `SanitizeEmail` has already lowered the path segment by the time the route reaches
+        // here, so the `lower()` is Go's belt and braces; it is kept because a *stored* email
+        // that is not lowercase would then be unreachable on both servers, and that is the
+        // behaviour to match rather than to fix.
+        let row = sqlx::query_as!(
+            UserRow,
+            r#"
+            SELECT u.id,
+                   u.createat,
+                   u.updateat,
+                   u.deleteat,
+                   u.username,
+                   u.password,
+                   u.authdata,
+                   u.authservice,
+                   u.email,
+                   u.emailverified,
+                   u.nickname,
+                   u.firstname,
+                   u.lastname,
+                   u.position,
+                   u.roles,
+                   u.allowmarketing,
+                   u.props,
+                   u.notifyprops,
+                   u.lastpasswordupdate,
+                   u.lastpictureupdate,
+                   u.failedattempts::bigint AS failedattempts,
+                   u.locale,
+                   u.timezone,
+                   u.mfaactive,
+                   u.mfasecret,
+                   u.mfausedtimestamps,
+                   u.remoteid,
+                   u.lastlogin,
+                   (b.userid IS NOT NULL) AS "isbot!",
+                   COALESCE(b.description, '') AS "botdescription!",
+                   COALESCE(b.lasticonupdate, 0) AS "botlasticonupdate!"
+              FROM users u
+              LEFT JOIN bots b ON b.userid = u.id
+             WHERE u.email = lower($1)
+            "#,
+            email
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to find User with email={email}"),
+            source,
+        })?;
+
+        let Some(row) = row else {
+            tracing::Span::current().record("found", false);
+            return Err(StoreError::NotFound {
+                entity: "User",
+                criteria: format!("email={email}"),
+            });
+        };
+        tracing::Span::current().record("found", true);
+
+        user_from_row(row)
+    }
     #[tracing::instrument(skip_all, fields(count = ids.len(), since, found))]
     async fn get_profile_by_ids(
         &self,
@@ -664,6 +989,112 @@ impl UserStore for SqlUserStore {
         tracing::Span::current().record("found", rows.len());
 
         rows.into_iter().map(user_from_row).collect()
+    }
+
+    /// Port of `SqlUserStore.GetProfileByGroupChannelIdsForUser` (user_store.go:1209).
+    ///
+    /// For each of the named **group** channels the caller is in, the other members' profiles —
+    /// which is what the webapp draws a GM's avatar row from.
+    ///
+    /// # Four predicates, and the interesting one is the `EXISTS`
+    ///
+    /// `c.Type = 'G'`, the channel id list, `Users.Id <> ?` (the caller is not in their own
+    /// avatar row), and an `EXISTS` over `ChannelMembers` asserting the **caller** is a member
+    /// of the channel. Without that last one, naming any group channel id would list its
+    /// members to anyone — it is the whole access check, and there is none at the handler or app
+    /// layer above it.
+    ///
+    /// **Go builds that `EXISTS` with `fmt.Sprintf` and the user id interpolated into the SQL
+    /// text** (user_store.go:1214). The value comes from the session so it is a 26-character id
+    /// in practice, but it is a string-built predicate all the same; here it is a bind
+    /// parameter. Same rows, and the difference is worth naming rather than silently fixing.
+    ///
+    /// # The cap truncates rather than refuses
+    ///
+    /// See [`MAX_GROUP_CHANNELS_FOR_PROFILES`]. The truncation happens on the **sorted,
+    /// de-duplicated** list `SortedArrayFromJSON` produced, so it is the fifty
+    /// lowest-sorting ids that survive — not the first fifty the client wrote.
+    ///
+    /// `ORDER BY Users.Username ASC` orders within each channel's list; the map is keyed by
+    /// channel id and a `BTreeMap` reproduces `encoding/json`'s bytewise key order.
+    #[tracing::instrument(skip_all, fields(user_id = %user_id, asked = channel_ids.len(), found))]
+    async fn get_profile_by_group_channel_ids_for_user(
+        &self,
+        user_id: &str,
+        channel_ids: &[String],
+    ) -> Result<std::collections::BTreeMap<String, Vec<User>>, StoreError> {
+        let capped = &channel_ids[..channel_ids.len().min(MAX_GROUP_CHANNELS_FOR_PROFILES)];
+
+        let rows = sqlx::query_as!(
+            UserWithChannelRow,
+            r#"
+            SELECT u.id,
+                   u.createat,
+                   u.updateat,
+                   u.deleteat,
+                   u.username,
+                   u.password,
+                   u.authdata,
+                   u.authservice,
+                   u.email,
+                   u.emailverified,
+                   u.nickname,
+                   u.firstname,
+                   u.lastname,
+                   u.position,
+                   u.roles,
+                   u.allowmarketing,
+                   u.props,
+                   u.notifyprops,
+                   u.lastpasswordupdate,
+                   u.lastpictureupdate,
+                   u.failedattempts::bigint AS failedattempts,
+                   u.locale,
+                   u.timezone,
+                   u.mfaactive,
+                   u.mfasecret,
+                   u.mfausedtimestamps,
+                   u.remoteid,
+                   u.lastlogin,
+                   (b.userid IS NOT NULL) AS "isbot!",
+                   COALESCE(b.description, '') AS "botdescription!",
+                   COALESCE(b.lasticonupdate, 0) AS "botlasticonupdate!",
+                   cm.channelid AS "channelid!"
+              FROM users u
+              LEFT JOIN bots b ON b.userid = u.id
+              JOIN channelmembers cm ON u.id = cm.userid
+              JOIN channels c ON cm.channelid = c.id
+             WHERE c.type = 'G'
+               AND cm.channelid = ANY($1::varchar[])
+               AND EXISTS (SELECT 1
+                             FROM channelmembers caller
+                            WHERE caller.userid = $2
+                              AND caller.channelid = cm.channelid)
+               AND u.id <> $2
+             ORDER BY u.username ASC
+            "#,
+            capped,
+            user_id,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to find Users".to_owned(),
+            source,
+        })?;
+
+        tracing::Span::current().record("found", rows.len());
+
+        let mut by_channel: std::collections::BTreeMap<String, Vec<User>> =
+            std::collections::BTreeMap::new();
+        for row in rows {
+            let channel_id = row.channelid.clone();
+            by_channel
+                .entry(channel_id)
+                .or_default()
+                .push(user_from_row(row.into_user_row())?);
+        }
+        Ok(by_channel)
     }
 
     #[tracing::instrument(skip_all, fields(page, per_page, found))]
@@ -1132,7 +1563,7 @@ impl UserStore for SqlUserStore {
                 ON (tm.userid = u.id AND tm.deleteat = 0 AND tm.teamid = $1)
               LEFT JOIN bots b ON b.userid = u.id
              WHERE ($1 = '' OR tm.userid IS NOT NULL)
-               AND u.deleteat = 0
+               AND ($5 OR u.deleteat = 0)
                AND NOT EXISTS (
                      SELECT 1
                        FROM unnest($2::text[]) AS s(term)
@@ -1141,6 +1572,7 @@ impl UserStore for SqlUserStore {
                              OR ($3 AND lower(u.firstname) LIKE lower('%' || s.term || '%') ESCAPE '*')
                              OR ($3 AND lower(u.lastname) LIKE lower('%' || s.term || '%') ESCAPE '*')
                              OR lower(u.nickname) LIKE lower('%' || s.term || '%') ESCAPE '*'
+                             OR ($6 AND lower(u.email) LIKE lower('%' || s.term || '%') ESCAPE '*')
                              OR u.id = s.term
                             )
                    )
@@ -1151,6 +1583,8 @@ impl UserStore for SqlUserStore {
             &terms,
             options.allow_full_names,
             options.limit,
+            options.allow_inactive,
+            options.allow_emails,
         )
         .fetch_all(&self.pool)
         .await
@@ -1300,7 +1734,7 @@ impl UserStore for SqlUserStore {
               LEFT JOIN bots b ON b.userid = u.id
              WHERE cm.userid IS NULL
                AND ($1 = '' OR tm.userid IS NOT NULL)
-               AND u.deleteat = 0
+               AND ($6 OR u.deleteat = 0)
                AND NOT EXISTS (
                      SELECT 1
                        FROM unnest($3::text[]) AS s(term)
@@ -1309,6 +1743,7 @@ impl UserStore for SqlUserStore {
                              OR ($4 AND lower(u.firstname) LIKE lower('%' || s.term || '%') ESCAPE '*')
                              OR ($4 AND lower(u.lastname) LIKE lower('%' || s.term || '%') ESCAPE '*')
                              OR lower(u.nickname) LIKE lower('%' || s.term || '%') ESCAPE '*'
+                             OR ($7 AND lower(u.email) LIKE lower('%' || s.term || '%') ESCAPE '*')
                              OR u.id = s.term
                             )
                    )
@@ -1320,6 +1755,8 @@ impl UserStore for SqlUserStore {
             &terms,
             options.allow_full_names,
             options.limit,
+            options.allow_inactive,
+            options.allow_emails,
         )
         .fetch_all(&self.pool)
         .await

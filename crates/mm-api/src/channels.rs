@@ -57,6 +57,22 @@ use crate::error::ApiError;
 /// `model.Me` (user.go:26) — the literal a client may send instead of its own id.
 pub(crate) const ME: &str = "me";
 
+/// Resolve the `me` alias, **before** the validity check — `RequireUserId` (web/context.go:301)
+/// substitutes the session's user id and only then calls `IsValidId`.
+///
+/// Every api4 route with a `{user_id}` segment accepts the literal, and the webapp prefers it to
+/// the real id on most reads. Validating first is not a stricter port, it is a wrong one: the
+/// route answers 400 where Go answers 200. Four served routes did exactly that until a sweep of
+/// `/users/me/...` across both servers found them — see `tests/parity/me_alias.rs`, which is that
+/// sweep kept as a test.
+pub(crate) fn resolve_me<'a>(user_id: &'a str, session: &'a AuthenticatedSession) -> &'a str {
+    if user_id == ME {
+        session.0.user_id.as_str()
+    } else {
+        user_id
+    }
+}
+
 /// Port of `Context.RequireChannelId` / `RequireUserId` (web/context.go:388, :296).
 ///
 /// Both are the same one-line check against `IsValidId`, differing only in the parameter name
@@ -91,6 +107,287 @@ fn validate_ids(channel_id: &str, user_id: &str) -> Result<(), ApiError> {
     require_id(channel_id, "channel_id")?;
     require_id(user_id, "user_id")?;
     Ok(())
+}
+
+/// The body of `POST /api/v4/teams/{team_id}/channels/search` — `model.ChannelSearch`.
+///
+/// Go's struct carries a dozen fields; **this handler reads only `term`**, so the rest are
+/// decoded and dropped. Modelled as one field for that reason: adding the others would suggest
+/// they do something here.
+#[derive(Debug, Default, serde::Deserialize)]
+struct ChannelSearch {
+    #[serde(default)]
+    term: String,
+}
+
+/// Port of `searchChannelsForTeam` (api4/channel.go:1035) —
+/// `POST /api/v4/teams/{team_id}/channels/search`.
+///
+/// The "Browse channels" dialog.
+///
+/// # Two branches, and the second one can 404
+///
+/// A caller with `list_team_channels` on the team searches **every public channel in it**. A
+/// caller without it must be a team member — `GetTeamMember` is called for the side effect of its
+/// error, so a non-member gets that call's **404**, not a 403 — and then searches only the public
+/// channels they have joined.
+///
+/// # Private channels are never results, in either branch
+///
+/// Both store queries join `PublicChannels`, Go's denormalised shadow table, which holds public
+/// channels only. So the second branch is "the public channels you are in", not "your channels".
+///
+/// # Archived channels *are* results
+///
+/// `includeDeleted` is a literal `true` in both app functions, so the `DeleteAt = 0` predicate is
+/// never added. That is what the dialog's archived tab reads.
+///
+/// # Wire format
+///
+/// `json.NewEncoder(w).Encode(channels)` — a **trailing newline**, and `[]` rather than `null`
+/// for no matches, because `model.ChannelList{}` is allocated. Go's comment says it deliberately
+/// does not fill in channel props.
+#[tracing::instrument(skip_all, fields(team_id = %team_id, listing))]
+pub async fn search_channels_for_team(
+    State(state): State<AppState>,
+    Path(team_id): Path<String>,
+    session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    if let Err(err) = require_id(&team_id, "team_id") {
+        return err.into_response();
+    }
+
+    let bytes = match axum::body::to_bytes(request.into_body(), usize::MAX).await {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            tracing::warn!(error = %err, "could not read the request body");
+            return ApiError::invalid_param("channel_search").into_response();
+        }
+    };
+    // `json.NewDecoder(r.Body).Decode(&props)` into a **pointer**, so a body of `null` decodes
+    // without error and leaves it nil — which `props == nil` then rejects. `Option` reproduces
+    // both halves.
+    //
+    // The value is decoded to a `Value` first, and anything but an object is refused, because
+    // **serde builds a struct from a JSON array positionally** where Go's decoder refuses one:
+    // `[]` would otherwise deserialize to `ChannelSearch { term: "" }` and answer 200 where Go
+    // answers 400. Measured — this test failed before the check existed.
+    let decoded: Option<serde_json::Value> = match mm_model::utils::decode_one_from_json(&bytes) {
+        Ok(decoded) => decoded,
+        Err(err) => {
+            tracing::debug!(error = %err, "channel search body did not decode");
+            return ApiError::invalid_param("channel_search").into_response();
+        }
+    };
+    let props = match decoded {
+        Some(serde_json::Value::Object(map)) => {
+            match serde_json::from_value::<ChannelSearch>(serde_json::Value::Object(map)) {
+                Ok(props) => props,
+                Err(err) => {
+                    tracing::debug!(error = %err, "channel search body has the wrong field types");
+                    return ApiError::invalid_param("channel_search").into_response();
+                }
+            }
+        }
+        _ => return ApiError::invalid_param("channel_search").into_response(),
+    };
+
+    let may_list = state
+        .app
+        .session_has_permission_to_team(
+            &session.0,
+            &team_id,
+            &mm_model::permission::PERMISSION_LIST_TEAM_CHANNELS,
+        )
+        .await;
+    tracing::Span::current().record("listing", may_list);
+
+    let channels = if may_list {
+        state.app.search_channels(&team_id, &props.term).await
+    } else {
+        // Called for its error alone: a caller who is not a team member gets `GetTeamMember`'s
+        // 404 rather than a permission refusal.
+        if let Err(err) = state
+            .app
+            .get_team_member(&team_id, &session.0.user_id)
+            .await
+        {
+            return ApiError::from(err).into_response();
+        }
+        state
+            .app
+            .search_channels_for_user(&session.0.user_id, &team_id, &props.term)
+            .await
+    };
+
+    let channels = match channels {
+        Ok(channels) => channels,
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+
+    let mut body = match serde_json::to_vec(&channels) {
+        Ok(body) => body,
+        Err(err) => {
+            tracing::error!(error = %err, "failed to serialise the channels");
+            return ApiError::from(mm_model::utils::AppError::new(
+                "searchChannelsForTeam",
+                "api.marshal_error",
+                None,
+                String::new(),
+                500,
+            ))
+            .into_response();
+        }
+    };
+    body.push(b'\n');
+
+    (
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
+    )
+        .into_response()
+}
+
+/// Port of `getChannelsMemberCount` (api4/channel.go:1128) —
+/// `POST /api/v4/channels/stats/member_count`.
+///
+/// The webapp posts the ids of the channels in the sidebar to render their member counts.
+///
+/// # A partially-resolvable list is **forwarded**, because Go's answer depends on its cache
+///
+/// `GetChannels` calls `Channel().GetMany(ids, true)`, and the *cache layer* — not the sqlstore —
+/// is what answers. It reads each id from an in-memory cache, queries only the misses, and
+/// returns `ErrNotFound` when **the query it actually ran** matched nothing
+/// (localcachelayer/channel_layer.go:261, sqlstore/channel_store.go:1062).
+///
+/// So for a list of one known and one unknown id, Go answers **404 when the known channel is
+/// cached** (only the unknown id is queried, and it matches nothing) and **200 with one entry
+/// when it is not** (both are queried, one matches). Measured: a repeat of the same request
+/// flipped the answer.
+///
+/// Two cases are deterministic and are served here — **every** id resolves (Go queries a subset
+/// of ids that all exist, whichever way the cache falls) and **no** id resolves (nothing can be
+/// cached, so the whole list is queried and matches nothing → 404). Anything in between is Go's,
+/// because this port has no such cache and cannot know which way it fell.
+///
+/// # An empty list is `{}`, not the 404 the sqlstore would give
+///
+/// With zero ids the cache layer returns before querying, so `Id IN ()` — which squirrel renders
+/// as a false predicate and whose zero rows *would* be `ErrNotFound` — is never reached. `[]` and
+/// `null` are both `{}` with a 200. Measured.
+///
+/// # The permission loop runs to completion before any count is read
+///
+/// One refusal refuses the whole request, and the reported permission is `list_team_channels`
+/// whichever branch of `HasPermissionToChannelMemberCount` said no — including the
+/// `read_channel_content` one. `SetPermissionError` is passed a literal.
+///
+/// # Wire format
+///
+/// `json.NewEncoder(w).Encode(map[string]int64)` — a **trailing newline**, and an object with
+/// bytewise-sorted keys ([D-027]).
+#[tracing::instrument(skip_all, fields(asked, forwarded))]
+pub async fn get_channels_member_count(
+    State(state): State<AppState>,
+    session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    let (parts, body) = request.into_parts();
+    let bytes = match axum::body::to_bytes(body, usize::MAX).await {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            tracing::warn!(error = %err, "could not read the request body");
+            return payload_parse_error("getChannelsMemberCount").into_response();
+        }
+    };
+
+    let channel_ids = match sorted_array_from_json(&bytes) {
+        Ok(ids) => ids,
+        Err(err) => {
+            tracing::debug!(error = %err, "channel id body did not decode");
+            return payload_parse_error("getChannelsMemberCount").into_response();
+        }
+    };
+    tracing::Span::current().record("asked", channel_ids.len());
+
+    // `GetChannels` short-circuits on an empty list inside the cache layer — see the note above.
+    let channels = if channel_ids.is_empty() {
+        Vec::new()
+    } else {
+        match state.app.get_channels(&channel_ids).await {
+            Ok(channels) => channels,
+            Err(err) => return ApiError::from(err).into_response(),
+        }
+    };
+
+    if !channels.is_empty() && channels.len() != channel_ids.len() {
+        tracing::Span::current().record("forwarded", true);
+        let request = Request::from_parts(parts, axum::body::Body::from(bytes));
+        return crate::proxy::forward_to_go(State(state), request).await;
+    }
+    tracing::Span::current().record("forwarded", false);
+
+    for channel in &channels {
+        if !state
+            .app
+            .has_permission_to_channel_member_count(&session.0.user_id, channel)
+            .await
+        {
+            return ApiError::from(make_permission_error(
+                &session.0,
+                &[&PERMISSION_LIST_TEAM_CHANNELS],
+            ))
+            .into_response();
+        }
+    }
+
+    let filtered: Vec<String> = channels.into_iter().map(|channel| channel.id).collect();
+    let counts = match state.app.get_channels_member_count(&filtered).await {
+        Ok(counts) => counts,
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+
+    let mut body = match serde_json::to_vec(&counts) {
+        Ok(body) => body,
+        Err(err) => {
+            tracing::error!(error = %err, "failed to serialise the member counts");
+            return ApiError::from(mm_model::utils::AppError::new(
+                "getChannelsMemberCount",
+                "api.marshal_error",
+                None,
+                String::new(),
+                500,
+            ))
+            .into_response();
+        }
+    };
+    body.push(b'\n');
+
+    (
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
+    )
+        .into_response()
+}
+
+/// `model.NewAppError(where, model.PayloadParseError, nil, "", 400)`.
+fn payload_parse_error(where_: &'static str) -> ApiError {
+    ApiError::from(mm_model::utils::AppError::new(
+        where_,
+        mm_model::utils::PAYLOAD_PARSE_ERROR,
+        None,
+        String::new(),
+        400,
+    ))
 }
 
 /// Port of `getChannelMember` (api4/channel.go).
@@ -796,6 +1093,7 @@ fn channel_by_name_denial(
     refusal: ByNameRefusal,
     session: &mm_model::session::Session,
     channel: &mm_model::channel::Channel,
+    where_: &'static str,
 ) -> ApiError {
     match refusal {
         ByNameRefusal::Forbidden => ApiError::from(make_permission_error(
@@ -803,7 +1101,7 @@ fn channel_by_name_denial(
             &[&PERMISSION_READ_PUBLIC_CHANNEL],
         )),
         ByNameRefusal::NotFound => ApiError::from(mm_model::utils::AppError::new(
-            "getChannelByName",
+            where_,
             "app.channel.get_by_name.missing.app_error",
             None,
             format!("teamId={}, name={}", channel.team_id, channel.name),
@@ -861,7 +1159,7 @@ pub async fn get_channel_by_name(
 
     let include_deleted = query_flag_is_true(query.as_deref(), INCLUDE_DELETED_PARAM);
 
-    let mut channel = match state
+    let channel = match state
         .app
         .get_channel_by_name(&channel_name, &team_id, include_deleted)
         .await
@@ -870,6 +1168,22 @@ pub async fn get_channel_by_name(
         Err(err) => return ApiError::from(err).into_response(),
     };
 
+    serve_named_channel(&state, &session, channel, "getChannelByName").await
+}
+
+/// The half of `getChannelByName` (api4/channel.go:1790-1812) that `getChannelByNameForTeamName`
+/// (:1836-1862) repeats verbatim: the two-branch permission block, `FillInChannelProps`, and
+/// `json.NewEncoder(w).Encode`.
+///
+/// The two handlers differ only in how they reached the channel and in the `where` they stamp on
+/// a refusal — which is not a field of the JSON error body, so it is carried for the log and for
+/// the day an audit layer wants it, not for the wire.
+async fn serve_named_channel(
+    state: &AppState,
+    session: &AuthenticatedSession,
+    mut channel: mm_model::channel::Channel,
+    where_: &'static str,
+) -> Response {
     let refusal = channel_by_name_refusal(
         channel.channel_type == CHANNEL_TYPE_OPEN,
         |permission| async {
@@ -893,7 +1207,7 @@ pub async fn get_channel_by_name(
     .await;
 
     if let Some(refusal) = refusal {
-        return channel_by_name_denial(refusal, &session.0, &channel).into_response();
+        return channel_by_name_denial(refusal, &session.0, &channel, where_).into_response();
     }
 
     if let Err(err) = state.app.fill_in_channel_props(&mut channel).await {
@@ -905,7 +1219,7 @@ pub async fn get_channel_by_name(
         Err(err) => {
             tracing::error!(error = %err, "failed to serialise Channel");
             return ApiError::from(mm_model::utils::AppError::new(
-                "getChannelByName",
+                where_,
                 "api.marshal_error",
                 None,
                 String::new(),
@@ -925,6 +1239,90 @@ pub async fn get_channel_by_name(
         body,
     )
         .into_response()
+}
+
+/// Port of `getChannelByNameForTeamName` (api4/channel.go:1823), reached as
+/// `GET /api/v4/teams/name/{team_name}/channels/name/{channel_name}`.
+///
+/// [`get_channel_by_name`] with the team named instead of identified — the webapp resolves a
+/// permalink this way, because a link carries names and not ids.
+///
+/// # Order of operations
+///
+/// 1. **Both segments carry Go's mux charset**, `[A-Za-z0-9_-]+` (api.go:216, :225). Neither is
+///    id-shaped, so the id middleware does not apply and a non-matching segment is forwarded.
+/// 2. **Both are lower-cased before anything looks at them** (params.go:178-179), so
+///    `/teams/name/SLICE-TEAM/channels/name/Town-Square` answers 200 — measured.
+/// 3. `RequireTeamName().RequireChannelName()` — **team first**. `IsValidTeamName` is
+///    `isValidAlphaNum` plus a two-character minimum, so a one-character team name is the
+///    reachable 400 here; the mux has already refused everything else.
+/// 4. `?include_deleted` chooses the store variant.
+/// 5. The team lookup, then the channel lookup, then the shared tail —
+///    [`serve_named_channel`].
+///
+/// # A missing team and a missing channel are different 404s
+///
+/// `app.team.get_by_name.missing.app_error` against
+/// `app.channel.get_by_name.missing.app_error`, and the team one comes first — so a request
+/// naming neither reports the team. Both are 404, and so is the team lookup's *failure* branch
+/// (see [`mm_app::App::get_channel_by_name_for_team_name`]).
+#[tracing::instrument(skip_all, fields(team_name = %team_name, channel_name = %channel_name, forwarded))]
+pub async fn get_channel_by_name_for_team_name(
+    State(state): State<AppState>,
+    Path((team_name, channel_name)): Path<(String, String)>,
+    axum::extract::RawQuery(query): axum::extract::RawQuery,
+    session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    if !crate::teams::segment_matches_team_name_mux(&team_name)
+        || !segment_matches_channel_name_mux(&channel_name)
+    {
+        tracing::Span::current().record("forwarded", true);
+        return crate::proxy::forward_to_go(State(state), request).await;
+    }
+    tracing::Span::current().record("forwarded", false);
+
+    let team_name = team_name.to_lowercase();
+    let channel_name = channel_name.to_lowercase();
+
+    // `RequireTeamName()` then `RequireChannelName()`, in that order — the first failure wins
+    // and names its own parameter, which is not on the wire ([D-092]) but is pinned by the unit
+    // test below.
+    if let Err(err) = validate_team_name_then_channel_name(&team_name, &channel_name) {
+        return err.into_response();
+    }
+
+    let include_deleted = query_flag_is_true(query.as_deref(), INCLUDE_DELETED_PARAM);
+
+    let channel = match state
+        .app
+        .get_channel_by_name_for_team_name(&channel_name, &team_name, include_deleted)
+        .await
+    {
+        Ok(channel) => channel,
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+
+    serve_named_channel(&state, &session, channel, "getChannelByNameForTeamName").await
+}
+
+/// `c.RequireTeamName().RequireChannelName()` (api4/channel.go:1824) — team first.
+///
+/// Split out so the *order* is testable in-process: over HTTP both answer the same
+/// `api.context.invalid_url_param.app_error` 400 and the parameter name they carry never reaches
+/// the client ([D-092]).
+#[allow(clippy::result_large_err)]
+fn validate_team_name_then_channel_name(
+    team_name: &str,
+    channel_name: &str,
+) -> Result<(), ApiError> {
+    if !mm_model::team::is_valid_team_name(team_name) {
+        return Err(ApiError::invalid_url_param("team_name"));
+    }
+    if !is_valid_channel_identifier(channel_name) {
+        return Err(ApiError::invalid_url_param("channel_name"));
+    }
+    Ok(())
 }
 
 /// Go's `c.RequireUserId().RequireTeamId()` for [`get_channels_for_team_for_user`] — **user
@@ -1429,6 +1827,116 @@ fn channel_list_response(body: Vec<u8>) -> Response {
         body,
     )
         .into_response()
+}
+
+/// Port of `autocompleteChannelsForTeam` (api4/channel.go:1516), reached as
+/// `GET /api/v4/teams/{team_id}/channels/autocomplete` — the Ctrl+K quick switcher, which fires
+/// once per keystroke.
+///
+/// # Order of operations
+///
+/// 1. `RequireTeamId()`.
+/// 2. **`list_team_channels` on the team**, the same gate as [`get_public_channels_for_team`]
+///    and reported the same way.
+/// 3. `?name` — read **after** the gate, and never validated. Any string is a legal term; there
+///    is no minimum length and no 400 on this route at all.
+/// 4. `AutocompleteChannelsForTeam`, then `json.NewEncoder(w).Encode`.
+///
+/// # `FillInChannelsProps` is deliberately skipped
+///
+/// Go says so in a comment (channel.go:1535): *"Don't fill in channels props, since unused by
+/// client and potentially expensive."* Every other channel-list route in this file fills them,
+/// so a port that reached for the shared helper would add a field Go omits.
+///
+/// # `?name=*` is not a wildcard — it is *no search at all*
+///
+/// The store strips `*` before escaping, so a term of `*` sanitises to the empty string and the
+/// search clause is omitted rather than emptied. `?name=*` and `?name=` return the same 50
+/// channels. See [`mm_store::channel_store::autocomplete_in_team`], which also covers why
+/// archived channels are included and why the full-text half is load-bearing.
+#[tracing::instrument(skip_all, fields(team_id = %team_id, count))]
+pub async fn autocomplete_channels_for_team(
+    State(state): State<AppState>,
+    Path(team_id): Path<String>,
+    axum::extract::RawQuery(query): axum::extract::RawQuery,
+    session: AuthenticatedSession,
+) -> Result<Response, ApiError> {
+    require_id(&team_id, "team_id")?;
+
+    if !state
+        .app
+        .session_has_permission_to_team(&session.0, &team_id, &PERMISSION_LIST_TEAM_CHANNELS)
+        .await
+    {
+        return Err(ApiError::from(make_permission_error(
+            &session.0,
+            &[&PERMISSION_LIST_TEAM_CHANNELS],
+        )));
+    }
+
+    // `r.URL.Query().Get("name")` — absent and empty are the same string to Go, and both mean
+    // "no term".
+    let name = query_first(query.as_deref(), "name").unwrap_or_default();
+
+    let channels = state
+        .app
+        .autocomplete_channels_for_team(&team_id, &session.0.user_id, &name)
+        .await?;
+    tracing::Span::current().record("count", channels.0.len());
+
+    Ok(channel_list_response(encoded_channel_list(
+        "autocompleteChannelsForTeam",
+        &channels,
+    )?))
+}
+
+/// Port of `autocompleteChannelsForTeamForSearch` (api4/channel.go:1542), reached as
+/// `GET /api/v4/teams/{team_id}/channels/search_autocomplete` — the search box's channel
+/// suggestions.
+///
+/// # It has no permission gate
+///
+/// `RequireTeamId()` and then straight to the app layer — no `SessionHasPermissionToTeam`, where
+/// [`autocomplete_channels_for_team`] one route over asks for `list_team_channels`. **This route
+/// can never answer 403.** It is safe because the store joins `ChannelMembers` on the caller, so
+/// a team the caller has nothing to do with answers an empty list rather than a refusal; but the
+/// asymmetry is Go's and a port that shared a gate between the two siblings would refuse
+/// requests Go serves.
+///
+/// # It can return more than fifty channels
+///
+/// The store unions two fifty-row queries, limits the union to fifty, and then **appends** up to
+/// fifty direct messages. Measured against the running server: 58 rows for an empty term. Any
+/// client paginating on a fifty-row assumption is wrong about this route, and so is any port
+/// that adds a tidy outer limit.
+///
+/// # And what it lists is not what the switcher lists
+///
+/// Every channel here needs a `ChannelMembers` row, public ones included; group messages arrive
+/// from outside the team; direct messages arrive through a second query that replaces the
+/// display name with the other user's username. See
+/// [`mm_store::channel_store::autocomplete_in_team_for_search`].
+#[tracing::instrument(skip_all, fields(team_id = %team_id, count))]
+pub async fn autocomplete_channels_for_team_for_search(
+    State(state): State<AppState>,
+    Path(team_id): Path<String>,
+    axum::extract::RawQuery(query): axum::extract::RawQuery,
+    session: AuthenticatedSession,
+) -> Result<Response, ApiError> {
+    require_id(&team_id, "team_id")?;
+
+    let name = query_first(query.as_deref(), "name").unwrap_or_default();
+
+    let channels = state
+        .app
+        .autocomplete_channels_for_search(&team_id, &session.0.user_id, &name)
+        .await?;
+    tracing::Span::current().record("count", channels.0.len());
+
+    Ok(channel_list_response(encoded_channel_list(
+        "autocompleteChannelsForTeamForSearch",
+        &channels,
+    )?))
 }
 
 /// Port of `getPublicChannelsForTeam` (api4/channel.go:1221), reached as
@@ -2648,7 +3156,12 @@ mod tests {
             ..Default::default()
         };
 
-        let forbidden = channel_by_name_denial(ByNameRefusal::Forbidden, &session, &channel);
+        let forbidden = channel_by_name_denial(
+            ByNameRefusal::Forbidden,
+            &session,
+            &channel,
+            "getChannelByName",
+        );
         assert_eq!(forbidden.0.status_code, 403);
         assert_eq!(forbidden.0.id, "api.context.permissions.app_error");
         assert_eq!(
@@ -2656,7 +3169,12 @@ mod tests {
             format!("userId={ME_ID}, permission=read_public_channel")
         );
 
-        let missing = channel_by_name_denial(ByNameRefusal::NotFound, &session, &channel);
+        let missing = channel_by_name_denial(
+            ByNameRefusal::NotFound,
+            &session,
+            &channel,
+            "getChannelByName",
+        );
         assert_eq!(missing.0.status_code, 404);
         assert_eq!(missing.0.id, "app.channel.get_by_name.missing.app_error");
         assert_eq!(missing.0.where_, "getChannelByName");
@@ -3064,5 +3582,32 @@ mod tests {
                 .and_then(|v| v.to_str().ok()),
             Some("rust")
         );
+    }
+
+    /// `c.RequireTeamName().RequireChannelName()` — **team first**, and each names its own
+    /// parameter. Over HTTP both answer the same `invalid_url_param` 400 with the same body, so
+    /// the order and the names are only visible here ([D-092]).
+    #[test]
+    fn the_team_name_is_validated_before_the_channel_name() {
+        fn name_of(err: &ApiError) -> Option<&serde_json::Value> {
+            err.0.params.as_ref().and_then(|p| p.get("Name"))
+        }
+
+        // Both wrong: the team is reported.
+        let err = validate_team_name_then_channel_name("a", "")
+            .expect_err("a one-character team name is invalid");
+        assert_eq!(name_of(&err), Some(&serde_json::Value::from("team_name")));
+
+        // Only the channel is wrong.
+        let err = validate_team_name_then_channel_name("mmrs-parity-team", "")
+            .expect_err("an empty channel name is invalid");
+        assert_eq!(
+            name_of(&err),
+            Some(&serde_json::Value::from("channel_name"))
+        );
+
+        // `IsValidTeamName` is `isValidAlphaNum` plus a two-character minimum; two is enough.
+        validate_team_name_then_channel_name("ab", "town-square")
+            .expect("two characters clears the minimum");
     }
 }
