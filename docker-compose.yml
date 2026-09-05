@@ -56,6 +56,17 @@ services:
   mattermost:
     # No arm64 manifest is published, so the platform is forced and the container runs under
     # emulation on Apple silicon. It is slow to boot and fine for a forward target.
+    #
+    # On an **arm64 Linux** host there is no Rosetta and Docker registers no emulator by default,
+    # so this container restart-loops with `exec /mattermost/bin/mattermost: exec format error`
+    # and nothing else says why — the parity suites then either skip or fail against a forward
+    # target that is not there. Register qemu once per boot of the host:
+    #
+    #   docker run --privileged --rm tonistiigi/binfmt --install amd64
+    #
+    # Check with `ls /proc/sys/fs/binfmt_misc/` — `qemu-x86_64` must be listed. Under qemu the Go
+    # server takes ~20s to answer `/api/v4/system/ping` and the parity suite runs roughly three
+    # times slower than on native amd64; that is the cost, not a fault.
     # PINNED, and it must stay pinned: `latest` was 11.10.0 while the reference tree is pinned by
     # SHA to 11.11.0, so every parity claim in this repo was measured against a server one minor
     # out of step without anyone noticing. See D-130.
