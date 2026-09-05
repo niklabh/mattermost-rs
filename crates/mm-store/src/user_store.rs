@@ -33,6 +33,12 @@ pub trait UserStore {
     ) -> impl std::future::Future<Output = Result<Vec<String>, StoreError>> + Send;
 
     /// Port of `SqlUserStore.GetByUsername` (user_store.go:1402).
+    /// Port of `SqlUserStore.GetByEmail` (user_store.go:1282).
+    fn get_by_email(
+        &self,
+        email: &str,
+    ) -> impl std::future::Future<Output = Result<User, StoreError>> + Send;
+
     fn get_by_username(
         &self,
         username: &str,
@@ -685,6 +691,72 @@ impl UserStore for SqlUserStore {
             return Err(StoreError::NotFound {
                 entity: "User",
                 criteria: format!("username={username}"),
+            });
+        };
+        tracing::Span::current().record("found", true);
+
+        user_from_row(row)
+    }
+    #[tracing::instrument(skip_all, fields(email = %email, found))]
+    async fn get_by_email(&self, email: &str) -> Result<User, StoreError> {
+        // `usersQuery.Where("Email = lower(?)", email)` (user_store.go:1283) — the
+        // **parameter** is lowered, not the column, exactly as the username lookup above does it.
+        // `SanitizeEmail` has already lowered the path segment by the time the route reaches
+        // here, so the `lower()` is Go's belt and braces; it is kept because a *stored* email
+        // that is not lowercase would then be unreachable on both servers, and that is the
+        // behaviour to match rather than to fix.
+        let row = sqlx::query_as!(
+            UserRow,
+            r#"
+            SELECT u.id,
+                   u.createat,
+                   u.updateat,
+                   u.deleteat,
+                   u.username,
+                   u.password,
+                   u.authdata,
+                   u.authservice,
+                   u.email,
+                   u.emailverified,
+                   u.nickname,
+                   u.firstname,
+                   u.lastname,
+                   u.position,
+                   u.roles,
+                   u.allowmarketing,
+                   u.props,
+                   u.notifyprops,
+                   u.lastpasswordupdate,
+                   u.lastpictureupdate,
+                   u.failedattempts::bigint AS failedattempts,
+                   u.locale,
+                   u.timezone,
+                   u.mfaactive,
+                   u.mfasecret,
+                   u.mfausedtimestamps,
+                   u.remoteid,
+                   u.lastlogin,
+                   (b.userid IS NOT NULL) AS "isbot!",
+                   COALESCE(b.description, '') AS "botdescription!",
+                   COALESCE(b.lasticonupdate, 0) AS "botlasticonupdate!"
+              FROM users u
+              LEFT JOIN bots b ON b.userid = u.id
+             WHERE u.email = lower($1)
+            "#,
+            email
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to find User with email={email}"),
+            source,
+        })?;
+
+        let Some(row) = row else {
+            tracing::Span::current().record("found", false);
+            return Err(StoreError::NotFound {
+                entity: "User",
+                criteria: format!("email={email}"),
             });
         };
         tracing::Span::current().record("found", true);

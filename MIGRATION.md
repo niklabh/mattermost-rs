@@ -5907,3 +5907,59 @@ Mutation run: **18 run, 16 caught, 2 controls survived, 0 harness faults**
 `purge_api_fixtures` now sweeps them, by the same dangling-reference rule as [D-155]. Nine had
 accumulated against two live ones: `getDrafts` inner-joins `ChannelMembers`, so an orphaned draft
 is invisible to the only route that would otherwise reach it.
+
+## `GET /api/v4/users/email/{email}` — `getUserByEmail` (2026-09-05)
+
+Served. `crates/mm-api/src/users.rs` (`get_user_by_email`), `crates/mm-app/src/user.rs`
+(`get_user_by_email`), `crates/mm-store/src/user_store.rs` (`get_by_email`); 10 parity tests in
+`crates/mm-api/tests/parity/user_by_email.rs`.
+
+**The one thing a reader would otherwise get wrong: this is not `getUser` with a different
+lookup.** It omits two whole blocks the other two single-user reads have, and both omissions are
+on the wire:
+
+1. **No terms-of-service branch**, so `terms_of_service_id` and `terms_of_service_create_at` are
+   never present here — not even for an admin, not even for the caller themselves.
+2. **No `is_self` case in the sanitiser.** `getUser` and `getUserByUsername` call
+   `user.Sanitize(map[string]bool{})` when the target is the caller, keeping every field. This one
+   always calls `SanitizeProfile(user, IsSystemAdmin())`, so **looking yourself up by email
+   returns the stranger's view of you**: no `notify_props`, `auth_data` blanked to `""`.
+
+Reusing this crate's shared `respond_with_user` tail would have silently added both back; two of
+the mutations exist to catch exactly that tidy-port mistake.
+
+Two more measured shapes. The gate is on the sanitize *option*, not on a permission:
+`GetSanitizeOptions(isAdmin)["email"]` is `ShowEmailAddress || isAdmin`, and a false value is a
+403 **before** the lookup, so nothing leaks about whether the address exists. And `GetByEmail` is
+`Where("Email = lower(?)")` — the **parameter** is lowered, not the column — so a row whose stored
+address has capitals is unreachable by email on both servers, whichever case the caller sends. Go
+cannot write such a row; the fixture plants one.
+
+The route is registered as a **wildcard** (`/users/email/{*email}`) because gorilla's pattern is
+`{email:.+}`, whose `.` matches a slash. `GET /users/email/verify` therefore lands here as the
+invalid address `verify` rather than on the `POST /users/email/verify` route beside it — measured,
+and asserted.
+
+Mutation run: **13 run, 11 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/user-by-email.plan`). Full suite: 2440 passed, 0 failed.
+
+### Two things the mutation harness taught, again
+
+- **A control must cover its binding's whole life.** Renaming only the declaration is a compile
+  error, which the batch reports as a harness fault and which voids every other verdict in the
+  run. Three batches have now been lost to it, so the rule is written into the plan files.
+- **Removing a config gate is inert when the config makes the gate always pass.** `ShowEmailAddress`
+  is on here, so deleting the `email` option check changes nothing. The mutation now inverts the
+  gate's polarity instead, which at least pins that it reads that option and not a constant. The
+  refusing half needs a server with `ShowEmailAddress` off and is not testable on this deployment.
+
+### And a store test whose premise was one page of a shared table
+
+`db_user_profile_lists::not_in_team_lists_the_left_member_and_never_the_current_ones` read page
+zero of `GetProfilesNotInTeam` at 200 rows and expected its two fixture users. That listing is
+everyone outside the fixture's team — the whole development database — and the parity suites
+create `mmrsplain%` users concurrently, which sort *before* `mmrsulist-` and pushed the later of
+the two off the page. It now walks every page. That surfaced the second half: paging by
+`OFFSET page * perPage` over a table being inserted into returns the same row twice ([D-160]), so
+the walk is deduplicated. The claim is about membership of the listing; the paging itself is
+pinned by `parity/users_list.rs`.

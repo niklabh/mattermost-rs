@@ -404,18 +404,47 @@ async fn not_in_team_lists_the_left_member_and_never_the_current_ones() {
     seed(&pool).await;
     let store = SqlUserStore::new(pool.clone());
 
-    let users = store
-        .get_profiles_not_in_team(TEAM, 0, 200)
-        .await
-        .expect("query runs");
+    // **Every page, not the first one.** `GetProfilesNotInTeam` lists everyone outside the
+    // fixture's team — which is the whole development database — so one 200-row page holds the
+    // two fixture users only while that database stays small. It did not: a full-workspace run
+    // dropped `eve` alone, because the parity suites create `mmrsplain%` users concurrently and
+    // those sort *before* `mmrsulist-`, pushing the later of the two off page zero. The same
+    // shape `all_profiles_pages` was written for.
+    let users = not_in_team_pages(&store).await;
+    // **Sorted and deduplicated, because the offsets move under the walk.** Paging by
+    // `OFFSET page * perPage` over a table other suites are inserting into returns the same row
+    // on two consecutive pages whenever a row before it is added mid-walk — [D-160] again, and
+    // measured here as `bob` four times. The claim this test makes is about *membership* of the
+    // listing, not about its paging, which `parity/users_list.rs` pins instead.
+    let mut names = ours(&users);
+    names.sort_unstable();
+    names.dedup();
     assert_eq!(
-        ours(&users),
+        names,
         vec!["mmrsulist-bob", "mmrsulist-eve"],
         "`bob`'s membership is soft-deleted, so the same `tm.DeleteAt = 0` that *excludes* him \
          from the in-team listing *includes* him here"
     );
 
     purge(&pool).await;
+}
+
+/// Every page of `GetProfilesNotInTeam`, concatenated — see [`all_profiles_pages`] for why.
+async fn not_in_team_pages(store: &SqlUserStore) -> Vec<mm_model::user::User> {
+    const PER_PAGE: i64 = 200;
+    let mut all = Vec::new();
+    for page in 0..50 {
+        let mut chunk = store
+            .get_profiles_not_in_team(TEAM, page, PER_PAGE)
+            .await
+            .expect("query runs");
+        let short = (chunk.len() as i64) < PER_PAGE;
+        all.append(&mut chunk);
+        if short {
+            return all;
+        }
+    }
+    panic!("more than fifty pages of users; the development database needs a purge");
 }
 
 /// Every page of `GetAllProfiles`, concatenated.

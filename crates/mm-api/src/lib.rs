@@ -191,6 +191,14 @@ pub fn router(state: AppState) -> Router {
         // Deeper than the `{user_id}` route, so no conflict — and the parameter is *not*
         // id-shaped: Go's username class allows `_`, `-` and `.`, so the id-charset middleware
         // must not apply. The handler carries its own mux-charset forward instead.
+        // `BaseRoutes.UserByEmail` (api4/api.go:205) — `PathPrefix("/email/{email:.+}")`, whose
+        // `.+` matches slashes, so this is a wildcard rather than one segment. `POST
+        // /users/email/verify` is registered *before* it in Go and wins there; here the method
+        // does the same job, since only GET is served.
+        .route(
+            "/api/v4/users/email/{*email}",
+            partially_migrated(get(users::get_user_by_email)),
+        )
         .route(
             "/api/v4/users/username/{username}",
             partially_migrated(get(users::get_user_by_username)),

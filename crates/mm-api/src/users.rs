@@ -16,7 +16,9 @@ use mm_model::permission::{
 };
 use mm_model::post::POST_PROPS_ATTACHMENTS;
 use mm_model::user::User;
-use mm_model::utils::{AppError, PAYLOAD_PARSE_ERROR, is_valid_id, sorted_array_from_json};
+use mm_model::utils::{
+    AppError, PAYLOAD_PARSE_ERROR, go_to_lower, is_valid_id, sorted_array_from_json,
+};
 
 use crate::AppState;
 use crate::auth::AuthenticatedSession;
@@ -316,6 +318,129 @@ pub async fn get_user_by_username(
         Ok(response) => response,
         Err(err) => err.into_response(),
     }
+}
+
+/// Port of `getUserByEmail` (api4/user.go:421) — `GET /api/v4/users/email/{email}`.
+///
+/// # It is not `getUser` with a different lookup
+///
+/// Two things every other single-user read does, this one does **not**, and both are on the wire:
+///
+/// 1. **No terms-of-service branch.** `getUser` and `getUserByUsername` fill in
+///    `terms_of_service_id`/`terms_of_service_create_at` for an admin or for the caller
+///    themselves. This handler has no such block, so those fields are always absent here — even
+///    for a caller looking up their own email.
+/// 2. **No `is_self` case in the sanitiser.** The others call `user.Sanitize(map[string]bool{})`
+///    when the target is the caller, which keeps every field. This one always calls
+///    `SanitizeProfile(user, c.IsSystemAdmin())`, so **a non-admin reading their own email gets
+///    the stranger's view of themselves** — no `notify_props`, no `auth_data`, and no `email`
+///    unless `ShowEmailAddress` is on.
+///
+/// Reusing [`respond_with_user`] would have quietly added both. It is a different tail.
+///
+/// # The permission gate is on the *option*, not on a permission
+///
+/// `GetSanitizeOptions(IsSystemAdmin())["email"]` is `ShowEmailAddress || isAdmin`. When it is
+/// false the route is a **403** `api.user.get_user_by_email.permissions.app_error` for everyone
+/// but an admin — before the lookup, so it leaks nothing about whether the address exists.
+///
+/// # `SanitizeEmail`, and the `.+` in the route
+///
+/// `c.SanitizeEmail()` (web/context.go:549) lowercases the segment and then runs `IsValidEmail`,
+/// which is `net/mail.ParseAddress` plus a rejection of the `Name <addr>` forms. The gorilla
+/// pattern is `{email:.+}`, so the segment may contain slashes — hence the wildcard in the route
+/// table rather than a single-segment parameter, and hence `GET /users/email/verify` reaching
+/// here as the invalid address `verify` rather than as the POST route beside it.
+#[tracing::instrument(skip_all, fields(forwarded))]
+pub async fn get_user_by_email(
+    State(state): State<AppState>,
+    Path(email): Path<String>,
+    headers: HeaderMap,
+    session: AuthenticatedSession,
+    request: axum::extract::Request,
+) -> Response {
+    // `strings.ToLower` is Go's simple mapping, which is not Rust's `to_lowercase` on every
+    // input — see [`go_to_lower`].
+    let email = go_to_lower(&email);
+    if !mm_model::utils::is_valid_email(&email) {
+        return ApiError::invalid_url_param("email").into_response();
+    }
+
+    let is_admin = state
+        .app
+        .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)
+        .await;
+    let options = sanitize_options(state.show_full_name, state.show_email_address, is_admin);
+    if options.get("email") != Some(&true) {
+        return ApiError::from(AppError::boxed(
+            "getUserByEmail",
+            "api.user.get_user_by_email.permissions.app_error",
+            None,
+            format!("userId={}", session.0.user_id),
+            403,
+        ))
+        .into_response();
+    }
+
+    // The nil-restrictions fast path, checked before the fetch — the same one
+    // [`get_user_by_username`] takes, and for the same reason: a caller whose restrictions are
+    // non-nil takes Go's existence-hiding 403 on the failure branch, which this port does not
+    // reproduce.
+    if !state
+        .app
+        .has_permission_to(&session.0.user_id, &PERMISSION_VIEW_MEMBERS)
+        .await
+    {
+        tracing::Span::current().record("forwarded", true);
+        return crate::proxy::forward_to_go(State(state), request).await;
+    }
+    tracing::Span::current().record("forwarded", false);
+
+    let mut user = match state.app.get_user_by_email(&email).await {
+        Ok(user) => user,
+        // Restrictions are nil for this caller, so Go surfaces the fetch error as-is.
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+
+    // `UserCanSeeOtherUser`: self is its first branch, nil restrictions its second. True by
+    // construction after the fast path above.
+
+    let etag = user.etag(state.show_full_name, state.show_email_address);
+    if let Some(if_none_match) = headers.get(IF_NONE_MATCH).and_then(|v| v.to_str().ok())
+        && if_none_match == etag
+    {
+        return (StatusCode::NOT_MODIFIED, [(ETAG, etag)]).into_response();
+    }
+
+    // No `is_self` branch — see the note above.
+    user.sanitize_profile(&options, is_admin);
+
+    let mut body = match serde_json::to_vec(&user) {
+        Ok(body) => body,
+        Err(err) => {
+            tracing::error!(error = %err, "failed to serialise User");
+            return ApiError::from(AppError::boxed(
+                "getUserByEmail",
+                "api.marshal_error",
+                None,
+                String::new(),
+                500,
+            ))
+            .into_response();
+        }
+    };
+    body.push(b'\n');
+
+    (
+        StatusCode::OK,
+        [
+            (HEADER_ETAG_SERVER, etag.as_str()),
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
+    )
+        .into_response()
 }
 
 /// The validated inputs of `getUsersByIds`, split from the handler so every 400 branch has a

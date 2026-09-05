@@ -81,6 +81,7 @@ fn paths(f: &Fixture) -> Vec<String> {
         format!("/api/v4/users/me/teams/{team}/channels/categories"),
         format!("/api/v4/users/me/channels/{channel}/unread"),
         format!("/api/v4/users/me/channels/{channel}/posts/unread"),
+        format!("/api/v4/users/me/teams/{team}/drafts"),
         format!("/api/v4/users/me/teams/{team}/threads?per_page=2"),
         format!("/api/v4/users/me/teams/{team}/threads/{thread}"),
     ]

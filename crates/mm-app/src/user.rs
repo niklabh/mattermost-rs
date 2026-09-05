@@ -167,6 +167,35 @@ impl App {
 }
 
 impl App {
+    /// Port of `app.App.GetUserByEmail` (user.go:581).
+    ///
+    /// **The neighbour's shape, not the one three lines above it.** `GetUserByUsername` invents
+    /// its own id; this one uses `MissingAccountError` — `app.user.missing_account.const` — the
+    /// same id `GetUser` gives an unknown *id*, so a client cannot tell "no such email" from "no
+    /// such user id" by the error alone. Both branches share it and only the status differs.
+    #[tracing::instrument(skip_all, fields(email = %email))]
+    pub async fn get_user_by_email(&self, email: &str) -> AppResult<User> {
+        self.store()
+            .user()
+            .get_by_email(email)
+            .await
+            .map_err(|err| {
+                let status = if matches!(err, StoreError::NotFound { .. }) {
+                    404
+                } else {
+                    tracing::error!(error = %err, "user-by-email lookup failed");
+                    500
+                };
+                AppError::boxed(
+                    "GetUserByEmail",
+                    "app.user.missing_account.const",
+                    None,
+                    String::new(),
+                    status,
+                )
+            })
+    }
+
     /// Port of `app.App.GetUserByUsername` (user.go:567).
     ///
     /// **Both branches carry the same id** — `app.user.get_by_username.app_error` — and only the
