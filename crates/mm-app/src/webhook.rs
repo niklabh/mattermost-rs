@@ -310,3 +310,95 @@ mod outgoing_tests {
         assert_ne!(OUTGOING_BY_CHANNEL_ERROR, OUTGOING_BY_TEAM_ERROR);
     }
 }
+
+impl App {
+    /// Port of `App.GetIncomingWebhook` (webhook.go:622).
+    ///
+    /// # One id, two statuses
+    ///
+    /// `app.webhooks.get_incoming.app_error` is **both** the 404 and the 500 — Go's `switch`
+    /// changes the status and leaves the id alone (webhook.go:632, :634). A client cannot tell
+    /// "no such hook" from "the database is down" by the id, only by the status line, and a port
+    /// that gave the two different ids would be inventing a distinction Go does not make.
+    #[tracing::instrument(skip_all, fields(hook_id))]
+    pub async fn get_incoming_webhook(&self, hook_id: &str) -> AppResult<IncomingWebhook> {
+        if !self.config().enable_incoming_webhooks {
+            return Err(disabled("GetIncomingWebhook"));
+        }
+
+        self.store()
+            .webhook()
+            .get_incoming(hook_id)
+            .await
+            .map_err(|err| single_hook_error("GetIncomingWebhook", INCOMING_GET_ERROR, err))
+    }
+
+    /// Port of `App.GetOutgoingWebhook` (webhook.go:797) — the same shape, its own id.
+    #[tracing::instrument(skip_all, fields(hook_id))]
+    pub async fn get_outgoing_webhook(&self, hook_id: &str) -> AppResult<OutgoingWebhook> {
+        if !self.config().enable_outgoing_webhooks {
+            return Err(outgoing_disabled("GetOutgoingWebhook"));
+        }
+
+        self.store()
+            .webhook()
+            .get_outgoing(hook_id)
+            .await
+            .map_err(|err| single_hook_error("GetOutgoingWebhook", OUTGOING_GET_ERROR, err))
+    }
+}
+
+const INCOMING_GET_ERROR: &str = "app.webhooks.get_incoming.app_error";
+const OUTGOING_GET_ERROR: &str = "app.webhooks.get_outgoing.app_error";
+
+/// Go's `errors.As(err, &nfErr)` split: **404 for not-found, 500 for anything else, same id**.
+fn single_hook_error(where_: &str, id: &'static str, err: StoreError) -> Box<AppError> {
+    let not_found = err.is_not_found();
+    if !not_found {
+        tracing::error!(caller = where_, error = ?err, "single webhook lookup failed");
+    }
+    AppError::boxed(
+        where_,
+        id,
+        None,
+        String::new(),
+        if not_found { 404 } else { 500 },
+    )
+}
+
+#[cfg(test)]
+mod single_hook_tests {
+    use super::*;
+
+    /// The id is the same on both arms and only the status moves. Asserted because the obvious
+    /// "improvement" — a distinct `not_found` id — is a wire change.
+    #[test]
+    fn not_found_and_failure_share_an_id_and_differ_only_in_status() {
+        let missing = single_hook_error(
+            "GetIncomingWebhook",
+            INCOMING_GET_ERROR,
+            StoreError::NotFound {
+                entity: "IncomingWebhook",
+                criteria: "id=x".to_owned(),
+            },
+        );
+        let broken = single_hook_error(
+            "GetIncomingWebhook",
+            INCOMING_GET_ERROR,
+            StoreError::Db {
+                context: "boom".to_owned(),
+                source: sqlx::Error::RowNotFound,
+            },
+        );
+
+        assert_eq!(missing.id, broken.id, "one id, two statuses");
+        assert_eq!(missing.status_code, 404);
+        assert_eq!(broken.status_code, 500);
+    }
+
+    /// And the two hook kinds do not share theirs.
+    #[test]
+    fn the_two_single_hook_ids_are_distinct() {
+        assert_ne!(INCOMING_GET_ERROR, OUTGOING_GET_ERROR);
+    }
+}

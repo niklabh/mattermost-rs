@@ -608,6 +608,14 @@ pub fn router(state: AppState) -> Router {
             partially_migrated(get(webhooks::get_outgoing_hooks)),
         )
         .route(
+            "/api/v4/hooks/incoming/{hook_id}",
+            partially_migrated_with_ids(&state, get(webhooks::get_incoming_hook)),
+        )
+        .route(
+            "/api/v4/hooks/outgoing/{hook_id}",
+            partially_migrated_with_ids(&state, get(webhooks::get_outgoing_hook)),
+        )
+        .route(
             "/api/v4/license/client",
             partially_migrated(get(license::get_client_license)),
         )

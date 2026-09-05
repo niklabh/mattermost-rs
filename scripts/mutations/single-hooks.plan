@@ -1,0 +1,40 @@
+# Mutation plan for GET /api/v4/hooks/{incoming,outgoing}/{hook_id}
+# (getIncomingHook, getOutgoingHook).
+#
+#   scripts/mutate-batch.sh scripts/mutations/single-hooks.plan
+#
+# What these two routes get to decide that the list routes do not: whether a soft-deleted hook is a
+# 404 or a row; whether the *channel* is consulted at all (incoming yes, outgoing no); which of two
+# different permissions each of the two refusals names; and the trailing newline, which these two
+# have and the two lists do not.
+#
+# **Three lines run under `unit`, not `api`.** The third gate — you may read a hook you did not
+# create only with `manage_others_*` — is unreachable over HTTP: the only roles granting
+# `manage_own_*` also grant `manage_others_*`, so every caller that gets past gate two already
+# satisfies gate three. Three mutations of it survived the whole parity suite. It is now a named
+# function with a truth table, tested where it can be.
+#
+# Gate **two** is reachable, but only against a hook the caller **owns** — otherwise gate three
+# refuses the same caller with the same 403 and the same body, because the permission name is
+# wiped from `detailed_error`. The fixture therefore plants a hook of each kind owned by the plain
+# user, and `api-single-outgoing-own-permission` needed the outgoing one to be caught.
+#
+# The last two lines are the no-op controls and must SURVIVE.
+
+store-single-incoming-deleteat	crates/mm-store/src/webhook_store.rs	              FROM incomingwebhooks\n             WHERE id = $1\n               AND deleteat = 0	              FROM incomingwebhooks\n             WHERE id = $1\n               AND deleteat >= 0	api	single_hooks
+store-single-outgoing-deleteat	crates/mm-store/src/webhook_store.rs	              FROM outgoingwebhooks\n             WHERE id = $1\n               AND deleteat = 0	              FROM outgoingwebhooks\n             WHERE id = $1\n               AND deleteat >= 0	api	single_hooks
+app-single-not-found-status	crates/mm-app/src/webhook.rs	        if not_found { 404 } else { 500 },	        if not_found { 500 } else { 500 },	api	single_hooks
+app-single-incoming-id	crates/mm-app/src/webhook.rs	const INCOMING_GET_ERROR: &str = "app.webhooks.get_incoming.app_error";	const INCOMING_GET_ERROR: &str = "app.webhooks.get_outgoing.app_error";	api	single_hooks
+api-single-incoming-hook-id-validation	crates/mm-api/src/webhooks.rs	    is_valid_id(&hook_id)\n        .then_some(())\n        .ok_or_else(|| ApiError::invalid_url_param("hook_id"))?;\n\n    let hook = state.app.get_incoming_webhook(&hook_id).await?;	    let hook = state.app.get_incoming_webhook(&hook_id).await?;	api	single_hooks
+api-single-channel-type	crates/mm-api/src/webhooks.rs	    let restricted_channel = if channel.channel_type == CHANNEL_TYPE_OPEN {	    let restricted_channel = if channel.channel_type != CHANNEL_TYPE_OPEN {	api	single_hooks
+api-single-channel-check-dropped	crates/mm-api/src/webhooks.rs	        || restricted_channel\n    {	        || false\n    {	api	single_hooks
+api-ownership-gate-removed	crates/mm-api/src/webhooks.rs	    session_user_id != owner_id && !manages_others	    false	unit	only_a_non_owner
+api-ownership-gate-inverted	crates/mm-api/src/webhooks.rs	    session_user_id != owner_id && !manages_others	    session_user_id == owner_id && !manages_others	unit	only_a_non_owner
+api-ownership-gate-ignores-manage-others	crates/mm-api/src/webhooks.rs	    session_user_id != owner_id && !manages_others	    session_user_id != owner_id	unit	only_a_non_owner
+api-single-incoming-own-permission	crates/mm-api/src/webhooks.rs	        .session_has_permission_to_team(\n            &session.0,\n            &hook.team_id,\n            &PERMISSION_MANAGE_OWN_INCOMING_WEBHOOKS,\n        )\n        .await\n        || restricted_channel	        .session_has_permission_to_team(\n            &session.0,\n            &hook.team_id,\n            &PERMISSION_MANAGE_OWN_INCOMING_WEBHOOKS,\n        )\n        .await\n        && restricted_channel	api	single_hooks
+api-single-outgoing-own-permission	crates/mm-api/src/webhooks.rs	        .session_has_permission_to_team(\n            &session.0,\n            &hook.team_id,\n            &PERMISSION_MANAGE_OWN_OUTGOING_WEBHOOKS,\n        )\n        .await\n    {\n        return Err(ApiError::from(make_permission_error(	        .session_has_permission_to_team(\n            &session.0,\n            &hook.team_id,\n            &PERMISSION_MANAGE_OWN_OUTGOING_WEBHOOKS,\n        )\n        .await\n        && false\n    {\n        return Err(ApiError::from(make_permission_error(	api	single_hooks
+api-single-trailing-newline	crates/mm-api/src/webhooks.rs	    let mut body = encode(value)?;\n    body.push(b'\\n');	    let body = encode(value)?;	api	single_hooks
+#
+# --- no-op controls: these must SURVIVE ---
+control-rename-binding	crates/mm-api/src/webhooks.rs	    let hook = state.app.get_outgoing_webhook(&hook_id).await?;\n    tracing::Span::current().record("owner", &hook.creator_id);	    let found = state.app.get_outgoing_webhook(&hook_id).await?;\n    let hook = found;\n    tracing::Span::current().record("owner", &hook.creator_id);	api	single_hooks
+control-reorder-independent-selects	crates/mm-store/src/webhook_store.rs	                   COALESCE(username, '')      AS "username!",\n                   COALESCE(iconurl, '')       AS "iconurl!",\n                   COALESCE(channellocked, FALSE) AS "channellocked!",\n                   lastused                    AS "lastused!"\n              FROM incomingwebhooks\n             WHERE id = $1	                   COALESCE(iconurl, '')       AS "iconurl!",\n                   COALESCE(username, '')      AS "username!",\n                   COALESCE(channellocked, FALSE) AS "channellocked!",\n                   lastused                    AS "lastused!"\n              FROM incomingwebhooks\n             WHERE id = $1	api	single_hooks

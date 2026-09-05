@@ -6543,3 +6543,59 @@ It now **brackets** instead of waiting for quiet — the rule `fetch_both_stable
 [D-167]'s own prescription: a correct port answers an etag Go also answered at some instant inside
 the window, so it matches one of the two reads; a wrong one matches neither however busy the table
 is. Quiescence is kept as a third acceptance.
+
+## `GET /api/v4/hooks/{incoming,outgoing}/{hook_id}` — `getIncomingHook`, `getOutgoingHook` (2026-09-06)
+
+Served. Extends `crates/mm-api/src/webhooks.rs`, `crates/mm-app/src/webhook.rs` and
+`crates/mm-store/src/webhook_store.rs`; 9 parity tests in
+`crates/mm-api/tests/parity/single_hooks.rs`. The integration **edit** screen, where the list page
+sends you.
+
+**The one thing a reader would otherwise get wrong: the two routes disagree about the channel.**
+`getIncomingHook` looks the hook's channel up and refuses a caller who cannot read it;
+`getOutgoingHook` never looks at a channel at all. So a team admin who is not a member of a
+private channel is refused the incoming hook in it and **served the outgoing hook in the same
+channel**. That is Go's asymmetry, and the suite pins it in one test.
+
+Three more. A soft-deleted hook is a **404** — `DeleteAt = 0` is in the single-row `WHERE`, so it
+is not found rather than returned with `delete_at` set, and "deleted" is indistinguishable from
+"never existed". The app layer's 404 and 500 **share one id** and differ only in status
+(webhook.go:632, :634). And both single reads use `json.NewEncoder(w).Encode`, so they carry a
+**trailing newline** that the two list routes in the same file do not.
+
+Ids in the fixture carry twelve digits of the clock: `GetIncoming(id, true)` is the only webhook
+read Go serves from a cache (localcachelayer/webhook_layer.go:41), held for thirty minutes with no
+invalidation a direct write can reach.
+
+Mutation run: **15 run, 13 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/single-hooks.plan`).
+
+### Two gates that look alike, and only one of them is reachable
+
+Gate two is the team permission (plus the channel, on the incoming route); gate three is "you may
+read a hook you did not create only with `manage_others_*`". Four mutations survived the first run
+because both gates produce **the same 403 with the same body** — the permission name lives in
+`detailed_error`, which `handleContextError` wipes.
+
+- **Gate three is unreachable over HTTP entirely**: the only roles granting `manage_own_*` also
+  grant `manage_others_*`, so nobody who passes gate two can fail gate three. It is now a named
+  function, `refused_for_ownership`, shared by both handlers and tested as a truth table. Naming
+  the rule once instead of writing it twice is the better code anyway.
+- **Gate two is reachable, but only against a hook the caller owns** — otherwise gate three
+  refuses the same caller identically. The fixture now plants an incoming *and* an outgoing hook
+  owned by the plain user, and the outgoing one is what caught the last survivor.
+
+### A `DELETE` in a forwarding test is a real `DELETE`
+
+`other_methods_are_forwarded` pointed at the fixture's own hook, and the forward did what it says:
+Go soft-deleted it, so whichever test ran next found a 404 where it expected a 200. It now uses
+the fixture's deliberately-absent id. The forward is what is under test; the deletion was
+collateral.
+
+### The `MUTATE_FILTER` trap, twice in one session
+
+Having documented in the previous route that `MUTATE_FILTER` matches **test names**, three
+mutations here were then filtered on `refused_for_ownership` — a *function* name — and all three
+were reported SURVIVED against a run of zero tests. The rule is worth restating as a check rather
+than a fact: **a SURVIVED verdict on a mutation you predicted would be caught is a claim about the
+filter until the CAUGHT lines around it name real tests.**

@@ -1,7 +1,15 @@
-//! Port of `getIncomingHooks` and `getOutgoingHooks` (channels/api4/webhook.go:207, :512),
-//! reached as `GET /api/v4/hooks/incoming` and `GET /api/v4/hooks/outgoing`.
+//! Port of the four webhook **reads** — `getIncomingHooks`, `getOutgoingHooks`,
+//! `getIncomingHook` and `getOutgoingHook` (channels/api4/webhook.go:207, :512, :272, :577) —
+//! reached as `GET /api/v4/hooks/{incoming,outgoing}` and `.../{hook_id}`.
 //!
-//! The webapp's *Integrations* pages. The single-hook reads and every write are still forwarded.
+//! The webapp's *Integrations* pages: the lists, and the single hook an edit screen loads. Every
+//! write is still forwarded.
+//!
+//! # The lists and the single reads disagree about the newline
+//!
+//! Both lists use `json.Marshal` + `w.Write` — **no** trailing newline. Both single reads use
+//! `json.NewEncoder(w).Encode` — **a** trailing newline. Four handlers in one file, split down
+//! the middle, and nothing marks the difference except which function each one reached for.
 //!
 //! # Two shapes on one route
 //!
@@ -19,7 +27,7 @@
 //! observable through *this* route, and it is recorded rather than smoothed over because the
 //! store function is shared with routes that are not migrated.
 
-use axum::extract::{RawQuery, State};
+use axum::extract::{Path, RawQuery, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use mm_model::incoming_webhook::IncomingWebhooksWithCount;
@@ -28,7 +36,7 @@ use mm_model::permission::{
     PERMISSION_MANAGE_OWN_INCOMING_WEBHOOKS, PERMISSION_MANAGE_OWN_OUTGOING_WEBHOOKS,
     make_permission_error,
 };
-use mm_model::utils::AppError;
+use mm_model::utils::{AppError, is_valid_id};
 
 use crate::AppState;
 use crate::auth::AuthenticatedSession;
@@ -314,6 +322,167 @@ pub async fn get_outgoing_hooks(
         .into_response())
 }
 
+/// Port of `getIncomingHook` (webhook.go:272) — `GET /api/v4/hooks/incoming/{hook_id}`.
+///
+/// # Three gates, and the last two report **different permissions**
+///
+/// 1. The hook must exist and not be soft-deleted — the store's own `DeleteAt = 0`, so a deleted
+///    hook is a **404** rather than a hook with `delete_at` set.
+/// 2. `manage_own_incoming_webhooks` **on the hook's team**, *and* — if the hook's channel is not
+///    open — read access to that channel. The two are `||`-ed into one refusal that names
+///    `manage_own_incoming_webhooks`, so a caller refused for the *channel* is told about the
+///    *webhook* permission. Go's wording, reproduced.
+/// 3. If the caller does not own the hook, `manage_others_incoming_webhooks` on the same team —
+///    and this refusal names that second permission. Two refusals, two ids, both 403.
+///
+/// # The channel check runs before the permission check and can 404 first
+///
+/// `GetChannel(hook.ChannelId)` is called unconditionally, before any permission question. A hook
+/// whose channel has been permanently deleted therefore answers the channel's 404 to *everyone*,
+/// including a caller who would have been refused. Order is wire-visible; it is reproduced.
+#[tracing::instrument(skip_all, fields(hook_id = %hook_id, owner))]
+pub async fn get_incoming_hook(
+    State(state): State<AppState>,
+    Path(hook_id): Path<String>,
+    session: AuthenticatedSession,
+) -> Result<Response, ApiError> {
+    is_valid_id(&hook_id)
+        .then_some(())
+        .ok_or_else(|| ApiError::invalid_url_param("hook_id"))?;
+
+    let hook = state.app.get_incoming_webhook(&hook_id).await?;
+    tracing::Span::current().record("owner", &hook.user_id);
+
+    let channel = state.app.get_channel(&hook.channel_id).await?;
+    let restricted_channel = if channel.channel_type == CHANNEL_TYPE_OPEN {
+        false
+    } else {
+        let (has_channel_permission, _) = state
+            .app
+            .session_has_permission_to_read_channel(&session.0, &channel)
+            .await;
+        !has_channel_permission
+    };
+
+    if !state
+        .app
+        .session_has_permission_to_team(
+            &session.0,
+            &hook.team_id,
+            &PERMISSION_MANAGE_OWN_INCOMING_WEBHOOKS,
+        )
+        .await
+        || restricted_channel
+    {
+        return Err(ApiError::from(make_permission_error(
+            &session.0,
+            &[&PERMISSION_MANAGE_OWN_INCOMING_WEBHOOKS],
+        )));
+    }
+
+    let manages_others = state
+        .app
+        .session_has_permission_to_team(
+            &session.0,
+            &hook.team_id,
+            &PERMISSION_MANAGE_OTHERS_INCOMING_WEBHOOKS,
+        )
+        .await;
+    if refused_for_ownership(&session.0.user_id, &hook.user_id, manages_others) {
+        return Err(ApiError::from(make_permission_error(
+            &session.0,
+            &[&PERMISSION_MANAGE_OTHERS_INCOMING_WEBHOOKS],
+        )));
+    }
+
+    encoded(&hook)
+}
+
+/// Port of `getOutgoingHook` (webhook.go:577) — `GET /api/v4/hooks/outgoing/{hook_id}`.
+///
+/// The same two refusals as its incoming twin and **no channel check at all**: an outgoing hook's
+/// channel may be empty (a team-wide hook), and Go does not look it up. So a caller who cannot
+/// read the hook's channel still gets the hook, which is the asymmetry between the two routes.
+///
+/// The ownership column is `CreatorId`, as everywhere else on this table.
+#[tracing::instrument(skip_all, fields(hook_id = %hook_id, owner))]
+pub async fn get_outgoing_hook(
+    State(state): State<AppState>,
+    Path(hook_id): Path<String>,
+    session: AuthenticatedSession,
+) -> Result<Response, ApiError> {
+    is_valid_id(&hook_id)
+        .then_some(())
+        .ok_or_else(|| ApiError::invalid_url_param("hook_id"))?;
+
+    let hook = state.app.get_outgoing_webhook(&hook_id).await?;
+    tracing::Span::current().record("owner", &hook.creator_id);
+
+    if !state
+        .app
+        .session_has_permission_to_team(
+            &session.0,
+            &hook.team_id,
+            &PERMISSION_MANAGE_OWN_OUTGOING_WEBHOOKS,
+        )
+        .await
+    {
+        return Err(ApiError::from(make_permission_error(
+            &session.0,
+            &[&PERMISSION_MANAGE_OWN_OUTGOING_WEBHOOKS],
+        )));
+    }
+
+    let manages_others = state
+        .app
+        .session_has_permission_to_team(
+            &session.0,
+            &hook.team_id,
+            &PERMISSION_MANAGE_OTHERS_OUTGOING_WEBHOOKS,
+        )
+        .await;
+    if refused_for_ownership(&session.0.user_id, &hook.creator_id, manages_others) {
+        return Err(ApiError::from(make_permission_error(
+            &session.0,
+            &[&PERMISSION_MANAGE_OTHERS_OUTGOING_WEBHOOKS],
+        )));
+    }
+
+    encoded(&hook)
+}
+
+/// `model.ChannelTypeOpen` (model/channel.go).
+const CHANNEL_TYPE_OPEN: &str = "O";
+
+/// The **third** gate on both single-hook routes: you may read a hook you did not create only
+/// with `manage_others_*_webhooks` (webhook.go:317, :604).
+///
+/// Extracted, and shared by the two handlers, because it is **not reachable through the API on a
+/// stock server**: the only roles granting `manage_own_*` are `system_admin` and `team_admin`, and
+/// both also grant `manage_others_*`, so every caller that gets past gate two already satisfies
+/// this one. Three mutations of it survived the whole parity suite. A pure function with a truth
+/// table is where a rule with no reachable branch can still be tested — and the rule itself is
+/// worth naming once rather than writing twice.
+fn refused_for_ownership(session_user_id: &str, owner_id: &str, manages_others: bool) -> bool {
+    session_user_id != owner_id && !manages_others
+}
+
+/// The single reads' response: `json.NewEncoder(w).Encode`, so **with** a trailing newline —
+/// unlike the two lists in this same file.
+fn encoded<T: serde::Serialize>(value: &T) -> Result<Response, ApiError> {
+    let mut body = encode(value)?;
+    body.push(b'\n');
+    Ok((
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
+    )
+        .into_response())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -369,6 +538,25 @@ mod tests {
                 r#""channel_locked":true,"last_used":0}]"#
             )
         );
+    }
+
+    /// The ownership gate's whole truth table. Only one of the four combinations refuses, and it
+    /// is the one no stock role can produce — see the note on the function.
+    #[test]
+    fn only_a_non_owner_without_manage_others_is_refused() {
+        assert!(
+            refused_for_ownership("someone", "someone-else", false),
+            "not the owner and cannot manage others' — the only refusal"
+        );
+        assert!(
+            !refused_for_ownership("someone", "someone-else", true),
+            "manage_others lets you read anyone's"
+        );
+        assert!(
+            !refused_for_ownership("someone", "someone", false),
+            "your own hook needs no second permission"
+        );
+        assert!(!refused_for_ownership("someone", "someone", true));
     }
 
     /// `strconv.ParseBool` with the error discarded: a bare key and `=yes` are both false, so

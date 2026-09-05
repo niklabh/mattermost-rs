@@ -63,6 +63,23 @@ pub trait WebhookStore {
         offset: i64,
         limit: i64,
     ) -> impl std::future::Future<Output = Result<Vec<OutgoingWebhook>, StoreError>> + Send;
+
+    /// Port of `SqlWebhookStore.GetIncoming` (webhook_store.go:128).
+    ///
+    /// Go's second parameter, `allowFromCache`, selects the cache layer's read
+    /// (localcachelayer/webhook_layer.go:41) and has no meaning here — nothing on this side
+    /// caches, so it is not in the signature. It is the only place either webhook route touches
+    /// a Go cache at all: the list queries are uncached.
+    fn get_incoming(
+        &self,
+        id: &str,
+    ) -> impl std::future::Future<Output = Result<IncomingWebhook, StoreError>> + Send;
+
+    /// Port of `SqlWebhookStore.GetOutgoing` (webhook_store.go:263).
+    fn get_outgoing(
+        &self,
+        id: &str,
+    ) -> impl std::future::Future<Output = Result<OutgoingWebhook, StoreError>> + Send;
 }
 
 /// Postgres-backed implementation.
@@ -504,6 +521,92 @@ impl WebhookStore for SqlWebhookStore {
         rows.into_iter()
             .map(OutgoingWebhookRow::into_model)
             .collect()
+    }
+
+    /// # A soft-deleted hook is a **404**, not a row with `delete_at` set
+    ///
+    /// `DeleteAt = 0` is in the `WHERE` (webhook_store.go:134), so deleting a hook makes this
+    /// route stop finding it rather than return it deleted — the same predicate the list queries
+    /// carry, reaching a different answer because this one is a single-row `Get`.
+    #[tracing::instrument(skip_all, fields(id, found))]
+    async fn get_incoming(&self, id: &str) -> Result<IncomingWebhook, StoreError> {
+        let row = sqlx::query_as!(
+            IncomingWebhookRow,
+            r#"
+            SELECT id                          AS "id!",
+                   COALESCE(createat, 0)       AS "createat!",
+                   COALESCE(updateat, 0)       AS "updateat!",
+                   COALESCE(deleteat, 0)       AS "deleteat!",
+                   COALESCE(userid, '')        AS "userid!",
+                   COALESCE(channelid, '')     AS "channelid!",
+                   COALESCE(teamid, '')        AS "teamid!",
+                   COALESCE(displayname, '')   AS "displayname!",
+                   COALESCE(description, '')   AS "description!",
+                   COALESCE(username, '')      AS "username!",
+                   COALESCE(iconurl, '')       AS "iconurl!",
+                   COALESCE(channellocked, FALSE) AS "channellocked!",
+                   lastused                    AS "lastused!"
+              FROM incomingwebhooks
+             WHERE id = $1
+               AND deleteat = 0
+            "#,
+            id
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to get IncomingWebhook with id={id}"),
+            source,
+        })?
+        .ok_or_else(|| StoreError::NotFound {
+            entity: "IncomingWebhook",
+            criteria: format!("id={id}"),
+        })?;
+
+        tracing::Span::current().record("found", true);
+        Ok(IncomingWebhook::from(row))
+    }
+
+    #[tracing::instrument(skip_all, fields(id, found))]
+    async fn get_outgoing(&self, id: &str) -> Result<OutgoingWebhook, StoreError> {
+        let row = sqlx::query_as!(
+            OutgoingWebhookRow,
+            r#"
+            SELECT id                          AS "id!",
+                   COALESCE(token, '')         AS "token!",
+                   COALESCE(createat, 0)       AS "createat!",
+                   COALESCE(updateat, 0)       AS "updateat!",
+                   COALESCE(deleteat, 0)       AS "deleteat!",
+                   COALESCE(creatorid, '')     AS "creatorid!",
+                   COALESCE(channelid, '')     AS "channelid!",
+                   COALESCE(teamid, '')        AS "teamid!",
+                   triggerwords                AS "triggerwords?",
+                   COALESCE(triggerwhen, 0)    AS "triggerwhen!",
+                   callbackurls                AS "callbackurls?",
+                   COALESCE(displayname, '')   AS "displayname!",
+                   COALESCE(description, '')   AS "description!",
+                   COALESCE(contenttype, '')   AS "contenttype!",
+                   COALESCE(username, '')      AS "username!",
+                   COALESCE(iconurl, '')       AS "iconurl!"
+              FROM outgoingwebhooks
+             WHERE id = $1
+               AND deleteat = 0
+            "#,
+            id
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to get OutgoingWebhook with id={id}"),
+            source,
+        })?
+        .ok_or_else(|| StoreError::NotFound {
+            entity: "OutgoingWebhook",
+            criteria: format!("id={id}"),
+        })?;
+
+        tracing::Span::current().record("found", true);
+        row.into_model()
     }
 }
 
