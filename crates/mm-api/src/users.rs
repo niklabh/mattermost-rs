@@ -320,6 +320,124 @@ pub async fn get_user_by_username(
     }
 }
 
+/// Port of `getUsersByNames` (api4/user.go:1231) — `POST /api/v4/users/usernames`.
+///
+/// The webapp posts the usernames it found in a page of posts, so this fires once per channel
+/// load with whatever `@mentions` were on screen.
+///
+/// # Two 400s, in Go's order
+///
+/// `SortedArrayFromJSON` first — a body that is not a JSON array of strings is
+/// `api.payload.parse.error` — then an **empty list** is `invalid_body_param` naming `usernames`.
+/// Unlike `getUsersByIds` there is no `since` parameter and no `?since=` branch, so those are the
+/// only two.
+///
+/// # Nothing validates a username
+///
+/// There is no `IsValidUsername` here, on the list or on its members. A name of the wrong shape
+/// is simply a name that matches nothing, and the answer is the array without it. A request for
+/// five names can legitimately answer with two, and the caller cannot tell "no such user" from
+/// "not allowed to see them" — which is the same guarantee `getUsersByIds` gives.
+///
+/// # Order is the store's, not the request's
+///
+/// `SortedArrayFromJSON` sorts the request and the query carries `ORDER BY Users.Username ASC`,
+/// so the two agree — but it is the second that the wire depends on.
+///
+/// # Wire format
+///
+/// `json.Marshal` then `w.Write`, so **no trailing newline** ([D-086]) — the opposite of
+/// `getUser` beside it, and the same as `getUsersByIds`.
+#[tracing::instrument(skip_all, fields(count, forwarded))]
+pub async fn get_users_by_names(
+    State(state): State<AppState>,
+    session: AuthenticatedSession,
+    request: axum::extract::Request,
+) -> Response {
+    // The nil-restrictions fast path. `GetViewUsersRestrictions` is called before the fetch in
+    // Go and its non-nil branch changes the *query*; every such caller is Go's.
+    if !state
+        .app
+        .has_permission_to(&session.0.user_id, &PERMISSION_VIEW_MEMBERS)
+        .await
+    {
+        tracing::Span::current().record("forwarded", true);
+        return crate::proxy::forward_to_go(State(state), request).await;
+    }
+    tracing::Span::current().record("forwarded", false);
+
+    match serve_users_by_names(&state, &session, request).await {
+        Ok(response) => response,
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn serve_users_by_names(
+    state: &AppState,
+    session: &AuthenticatedSession,
+    request: axum::extract::Request,
+) -> Result<Response, ApiError> {
+    let bytes = axum::body::to_bytes(request.into_body(), usize::MAX)
+        .await
+        .map_err(|err| {
+            tracing::warn!(error = %err, "could not read the request body");
+            ApiError::from(AppError::new(
+                "getUsersByNames",
+                PAYLOAD_PARSE_ERROR,
+                None,
+                String::new(),
+                400,
+            ))
+        })?;
+
+    let usernames = sorted_array_from_json(&bytes).map_err(|err| {
+        tracing::debug!(error = %err, "username body did not decode");
+        ApiError::from(AppError::new(
+            "getUsersByNames",
+            PAYLOAD_PARSE_ERROR,
+            None,
+            String::new(),
+            400,
+        ))
+    })?;
+    if usernames.is_empty() {
+        return Err(ApiError::invalid_param("usernames"));
+    }
+    tracing::Span::current().record("count", usernames.len());
+
+    let is_admin = state
+        .app
+        .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)
+        .await;
+
+    let mut users = state.app.get_users_by_usernames(&usernames).await?;
+    let options = sanitize_options(state.show_full_name, state.show_email_address, is_admin);
+    for user in &mut users {
+        user.sanitize_profile(&options, is_admin);
+    }
+
+    let body = serde_json::to_vec(&users).map_err(|err| {
+        tracing::error!(error = %err, "failed to serialise users");
+        ApiError::from(AppError::new(
+            "getUsersByNames",
+            "api.marshal_error",
+            None,
+            String::new(),
+            500,
+        ))
+    })?;
+
+    Ok((
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
+    )
+        .into_response())
+}
+
 /// Port of `getUserByEmail` (api4/user.go:421) — `GET /api/v4/users/email/{email}`.
 ///
 /// # It is not `getUser` with a different lookup

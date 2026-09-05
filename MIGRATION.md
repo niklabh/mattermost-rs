@@ -6016,3 +6016,35 @@ valid too, for the lowercasing reason above.
 membership row the fixture could reach had `DeleteAt == 0`, so the two agreed everywhere. A second
 plain user now joins the private team and leaves it, which is the only way to produce the row that
 tells them apart.
+
+## `POST /api/v4/users/usernames` — `getUsersByNames` (2026-09-05)
+
+Served. `crates/mm-api/src/users.rs` (`get_users_by_names`), `crates/mm-app/src/user.rs`
+(`get_users_by_usernames`), `crates/mm-store/src/user_store.rs` (`get_profiles_by_usernames`);
+6 parity tests in `crates/mm-api/tests/parity/users_by_names.rs`. The webapp posts the usernames
+it found in a page of posts, so this fires once per channel load with whatever `@mentions` were
+on screen.
+
+**The one thing a reader would otherwise get wrong: this query has no `DeleteAt` filter at all.**
+Every neighbouring user query has one, and adding it here is the likeliest wrong port — a
+**deactivated** account is returned like any other, which is what lets a client render an old
+mention. `GetProfilesByUsernames` takes a `UserGetOptions` carrying only `ViewRestrictions` and
+never reads `Active`, `Inactive` or `Role`.
+
+Nothing validates a username either, on the list or on its members, and there is no not-found: a
+request for five names can answer with two, and the caller cannot tell "no such user" from "not
+allowed to see them" — the same guarantee `getUsersByIds` gives. The two 400s are Go's order,
+`SortedArrayFromJSON` first (`api.payload.parse.error`) and the empty list second
+(`invalid_body_param`); a body of `null` reduces to zero names without an error and so lands on
+the *second*. `json.Marshal` + `w.Write`, so **no trailing newline** ([D-086]).
+
+Mutation run: **9 run, 7 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/users-by-names.plan`). Full suite: 2454 passed, 0 failed.
+
+Three mutations are deliberately absent, each because nothing on the wire could see it: the app
+layer's error id (reachable only from a store failure), the `Name` in the empty-list 400
+(`params` is not serialised into an `AppError`), and dropping the restrictions fast-path forward
+(no fixture caller has non-nil restrictions). Writing the plan also caught one of my own
+mutations doing nothing — it renamed `let body` to `let mut body` without appending the newline it
+was named for. **A mutation that does not do what its name says is worse than none**: it reports
+a catch that belongs to a different change.

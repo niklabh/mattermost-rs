@@ -1,0 +1,30 @@
+# Mutation plan for POST /users/usernames (getUsersByNames).
+#
+#   scripts/mutate-batch.sh scripts/mutations/users-by-names.plan
+#
+# Tab-separated: name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter.  `\n` becomes a newline.
+#
+# The fixture carries a **deactivated** account because this query has no `DeleteAt` filter at
+# all, and adding one is the likeliest wrong port — every neighbouring user query has one.  It
+# also asks for three names out of username order, so the `ORDER BY` is not answered for by the
+# request's own sorting.
+#
+# Three mutations are deliberately absent, each because nothing on the wire could see it: the
+# app layer's error id (reachable only from a store failure), the `Name` in the empty-list 400
+# (`params` is not serialised into an `AppError`), and dropping the restrictions fast-path
+# forward (no fixture caller has non-nil restrictions).
+#
+# A control must cover its binding's whole life.  The last two lines are the no-op controls and
+# must SURVIVE.
+
+store-username-column	crates/mm-store/src/user_store.rs	             WHERE u.username = ANY($1::text[])\n             ORDER BY u.username ASC	             WHERE u.id = ANY($1::text[])\n             ORDER BY u.username ASC	api	users_by_names
+store-order-direction	crates/mm-store/src/user_store.rs	             WHERE u.username = ANY($1::text[])\n             ORDER BY u.username ASC	             WHERE u.username = ANY($1::text[])\n             ORDER BY u.username DESC	api	users_by_names
+store-adds-a-deleted-filter	crates/mm-store/src/user_store.rs	             WHERE u.username = ANY($1::text[])\n             ORDER BY u.username ASC	             WHERE u.username = ANY($1::text[])\n               AND u.deleteat = 0\n             ORDER BY u.username ASC	api	users_by_names
+api-empty-list-400	crates/mm-api/src/users.rs	    if usernames.is_empty() {\n        return Err(ApiError::invalid_param("usernames"));\n    }	    if false {\n        return Err(ApiError::invalid_param("usernames"));\n    }	api	users_by_names
+api-parse-error-id	crates/mm-api/src/users.rs	        tracing::debug!(error = %err, "username body did not decode");\n        ApiError::from(AppError::new(\n            "getUsersByNames",\n            PAYLOAD_PARSE_ERROR,	        tracing::debug!(error = %err, "username body did not decode");\n        ApiError::from(AppError::new(\n            "getUsersByNames",\n            "api.context.invalid_body_param.app_error",	api	users_by_names
+api-sanitiser-admin-flag	crates/mm-api/src/users.rs	    let mut users = state.app.get_users_by_usernames(&usernames).await?;\n    let options = sanitize_options(state.show_full_name, state.show_email_address, is_admin);\n    for user in &mut users {\n        user.sanitize_profile(&options, is_admin);\n    }	    let mut users = state.app.get_users_by_usernames(&usernames).await?;\n    let options = sanitize_options(state.show_full_name, state.show_email_address, true);\n    for user in &mut users {\n        user.sanitize_profile(&options, true);\n    }	api	users_by_names
+api-trailing-newline	crates/mm-api/src/users.rs	            "getUsersByNames",\n            "api.marshal_error",\n            None,\n            String::new(),\n            500,\n        ))\n    })?;\n\n    Ok((	            "getUsersByNames",\n            "api.marshal_error",\n            None,\n            String::new(),\n            500,\n        ))\n    })?;\n\n    let body = [body, b"\\n".to_vec()].concat();\n\n    Ok((	api	users_by_names
+#
+# --- no-op controls: these must SURVIVE ---
+control-rename-binding	crates/mm-api/src/users.rs	    if usernames.is_empty() {\n        return Err(ApiError::invalid_param("usernames"));\n    }\n    tracing::Span::current().record("count", usernames.len());\n\n    let is_admin = state\n        .app\n        .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)\n        .await;\n\n    let mut users = state.app.get_users_by_usernames(&usernames).await?;	    if usernames.is_empty() {\n        return Err(ApiError::invalid_param("usernames"));\n    }\n    tracing::Span::current().record("count", usernames.len());\n\n    let is_admin = state\n        .app\n        .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)\n        .await;\n\n    let asked = usernames;\n    let mut users = state.app.get_users_by_usernames(&asked).await?;	api	users_by_names
+control-reorder-columns	crates/mm-store/src/user_store.rs	                   u.mfausedtimestamps,\n                   u.remoteid,\n                   u.lastlogin,\n                   (b.userid IS NOT NULL) AS "isbot!",\n                   COALESCE(b.description, '') AS "botdescription!",\n                   COALESCE(b.lasticonupdate, 0) AS "botlasticonupdate!"\n              FROM users u\n              LEFT JOIN bots b ON b.userid = u.id\n             WHERE u.username = ANY($1::text[])	                   u.remoteid,\n                   u.mfausedtimestamps,\n                   u.lastlogin,\n                   (b.userid IS NOT NULL) AS "isbot!",\n                   COALESCE(b.description, '') AS "botdescription!",\n                   COALESCE(b.lasticonupdate, 0) AS "botlasticonupdate!"\n              FROM users u\n              LEFT JOIN bots b ON b.userid = u.id\n             WHERE u.username = ANY($1::text[])	api	users_by_names

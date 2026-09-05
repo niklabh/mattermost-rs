@@ -167,6 +167,34 @@ impl App {
 }
 
 impl App {
+    /// Port of `app.App.GetUsersByUsernames` (user.go:921), **minus the sanitizer**.
+    ///
+    /// Go's `sanitizeProfiles(users, asAdmin)` reads the privacy settings from config, which in
+    /// this deployment are `AppState`'s stand-ins ([D-085]), so the api layer applies
+    /// `SanitizeProfile` per user with the map `getUser` builds. Every caller sanitises.
+    ///
+    /// One error branch and one id — `app.user.get_profiles.app_error`, 500 — shared with
+    /// [`Self::get_users_by_ids`]. There is **no not-found**: a username that names nobody is
+    /// simply absent from the array, so a request for five names can legitimately answer with
+    /// two.
+    #[tracing::instrument(skip_all, fields(count = usernames.len()))]
+    pub async fn get_users_by_usernames(&self, usernames: &[String]) -> AppResult<Vec<User>> {
+        self.store()
+            .user()
+            .get_profiles_by_usernames(usernames)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "profiles-by-username lookup failed");
+                AppError::boxed(
+                    "GetUsersByUsernames",
+                    "app.user.get_profiles.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })
+    }
+
     /// Port of `app.App.GetUserByEmail` (user.go:581).
     ///
     /// **The neighbour's shape, not the one three lines above it.** `GetUserByUsername` invents

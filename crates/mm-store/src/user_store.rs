@@ -33,6 +33,12 @@ pub trait UserStore {
     ) -> impl std::future::Future<Output = Result<Vec<String>, StoreError>> + Send;
 
     /// Port of `SqlUserStore.GetByUsername` (user_store.go:1402).
+    /// Port of `SqlUserStore.GetProfilesByUsernames` (user_store.go:1084).
+    fn get_profiles_by_usernames(
+        &self,
+        usernames: &[String],
+    ) -> impl std::future::Future<Output = Result<Vec<User>, StoreError>> + Send;
+
     /// Port of `SqlUserStore.GetByEmail` (user_store.go:1282).
     fn get_by_email(
         &self,
@@ -697,6 +703,78 @@ impl UserStore for SqlUserStore {
 
         user_from_row(row)
     }
+    /// # No deletion filter, and no options
+    ///
+    /// `GetProfilesByUsernames` takes a `UserGetOptions` carrying only `ViewRestrictions`; it
+    /// never reads `Active`, `Inactive` or `Role`. A **deactivated** user whose username is
+    /// asked for is returned like any other, which is what lets a client render an old mention.
+    ///
+    /// `ORDER BY Users.Username ASC` is wire surface: the answer is a JSON array and its order is
+    /// the store's, not the request's.
+    ///
+    /// # The restrictions filter is not here
+    ///
+    /// `applyViewRestrictionsFilter` joins `TeamMembers`/`ChannelMembers` for a caller whose
+    /// `view_members` is granted only through a team or channel scheme. The api layer forwards
+    /// every such caller to Go, so this query is always the nil-restrictions branch — the same
+    /// arrangement `get_profile_by_ids` has.
+    #[tracing::instrument(skip_all, fields(count = usernames.len(), found))]
+    async fn get_profiles_by_usernames(
+        &self,
+        usernames: &[String],
+    ) -> Result<Vec<User>, StoreError> {
+        let rows = sqlx::query_as!(
+            UserRow,
+            r#"
+            SELECT u.id,
+                   u.createat,
+                   u.updateat,
+                   u.deleteat,
+                   u.username,
+                   u.password,
+                   u.authdata,
+                   u.authservice,
+                   u.email,
+                   u.emailverified,
+                   u.nickname,
+                   u.firstname,
+                   u.lastname,
+                   u.position,
+                   u.roles,
+                   u.allowmarketing,
+                   u.props,
+                   u.notifyprops,
+                   u.lastpasswordupdate,
+                   u.lastpictureupdate,
+                   u.failedattempts::bigint AS failedattempts,
+                   u.locale,
+                   u.timezone,
+                   u.mfaactive,
+                   u.mfasecret,
+                   u.mfausedtimestamps,
+                   u.remoteid,
+                   u.lastlogin,
+                   (b.userid IS NOT NULL) AS "isbot!",
+                   COALESCE(b.description, '') AS "botdescription!",
+                   COALESCE(b.lasticonupdate, 0) AS "botlasticonupdate!"
+              FROM users u
+              LEFT JOIN bots b ON b.userid = u.id
+             WHERE u.username = ANY($1::text[])
+             ORDER BY u.username ASC
+            "#,
+            usernames
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to find Users".to_owned(),
+            source,
+        })?;
+
+        tracing::Span::current().record("found", rows.len());
+        rows.into_iter().map(user_from_row).collect()
+    }
+
     #[tracing::instrument(skip_all, fields(email = %email, found))]
     async fn get_by_email(&self, email: &str) -> Result<User, StoreError> {
         // `usersQuery.Where("Email = lower(?)", email)` (user_store.go:1283) — the

@@ -84,6 +84,7 @@ mod parity {
     pub mod user_terms_of_service;
     pub mod users_autocomplete;
     pub mod users_by_ids;
+    pub mod users_by_names;
     pub mod users_group_channels;
     pub mod users_known;
     pub mod users_list;

@@ -172,6 +172,12 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/users/group_channels",
             partially_migrated(post(users::get_users_by_group_channel_ids)),
         )
+        // `BaseRoutes.Users.Handle("/usernames")` (api4/user.go:33) — the webapp posts the
+        // usernames it found in a page of posts.
+        .route(
+            "/api/v4/users/usernames",
+            partially_migrated(post(users::get_users_by_names)),
+        )
         .route(
             "/api/v4/users/ids",
             partially_migrated(post(users::get_users_by_ids)),
