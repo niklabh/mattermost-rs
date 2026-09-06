@@ -406,12 +406,12 @@ async fn the_neighbouring_channel_routes_are_still_forwarded() {
     let token = go_minted_token(&client).await;
     let f = fixture(&client, &token).await;
 
-    // Two have left this list: `timezones` on 2026-09-04 (`parity/channel_timezones.rs`) and
-    // `moderations` on 2026-09-06 (`parity/licence_gated_channels.rs`, which serves its licence
-    // error and forwards a licensed installation). `member_counts_by_group` is still Go's, and
-    // `pinned/` — with the trailing slash — is the one that matters here: it is a *different path*
-    // from the `pinned` we serve, and it must keep reaching Go's own answer.
-    for suffix in ["pinned/", "member_counts_by_group"] {
+    // Three have left this list: `timezones` on 2026-09-04 (`parity/channel_timezones.rs`) and, on
+    // 2026-09-06, `moderations` and `member_counts_by_group` (`parity/licence_gated_channels.rs`,
+    // which serves their licence errors and forwards a licensed installation). `pinned/` — with
+    // the trailing slash — is what is left, and it is the one that matters here: a *different
+    // path* from the `pinned` we serve, which must keep reaching Go's own answer.
+    for suffix in ["pinned/"] {
         let path = format!("/api/v4/channels/{}/{suffix}", f.channel_id);
         let response = client
             .get(format!("{RUST}{path}"))

@@ -6838,12 +6838,13 @@ query on both servers — it is the success that is sticky.
   one that does not compile. There is nothing for a test to catch that the type system does not
   already refuse.
 
-## `GET /channels/{id}/moderations` and `/channels/{id}/bookmarks` — the two licence gates (2026-09-06)
+## `GET /channels/{id}/moderations`, `/bookmarks`, `/member_counts_by_group` — three licence gates (2026-09-06)
 
 Served, for an unlicensed installation. `crates/mm-api/src/channels.rs`
-(`get_channel_moderations`, `list_channel_bookmarks`, `licence_gate`); 6 parity tests in
-`crates/mm-api/tests/parity/licence_gated_channels.rs`. Both are real client routes on a licensed
-server — the System Console's moderation panel and the channel bookmark bar.
+(`get_channel_moderations`, `list_channel_bookmarks`, `get_channel_member_counts_by_group`,
+`licence_gate`); 6 parity tests in `crates/mm-api/tests/parity/licence_gated_channels.rs`. All
+three are real client routes on a licensed server — the System Console's moderation panel, the
+channel bookmark bar, and the group-membership counts a group-constrained channel shows.
 
 **The one thing a reader would otherwise get wrong: the licence check is the *first* statement in
 each handler**, ahead of `RequireChannelId` and ahead of every permission question
@@ -6852,15 +6853,15 @@ to be valid — answers the **licence** error rather than a 400, and a plain use
 the channel gets the licence error rather than a permission one. On moderations that is two
 different 403s, and the ordering decides which.
 
-The two errors are **not the same shape**: a `403` for moderations and a `501` for bookmarks. Two
-licence gates twenty files apart, one calling itself "not permitted" and the other "not
-implemented".
+The errors are **not the same shape**: a `403` for moderations and for the group counts, a `501`
+for bookmarks — two statuses and three ids between them, one calling itself "not permitted" and
+another "not implemented", twenty files apart.
 
-A licensed installation is forwarded — everything behind either gate (scheme-derived moderations,
-the bookmark store) is unported. That is now the third pair of routes drawing this boundary, so
-the decision lives in one `licence_gate` helper rather than three copies.
+A licensed installation is forwarded — everything behind the gates (scheme-derived moderations,
+the bookmark store, the group-membership tables) is unported. The decision lives in one
+`licence_gate` helper rather than three copies.
 
-Mutation run: **8 run, 6 caught, 2 controls survived, 0 harness faults**
+Mutation run: **10 run, 8 caught, 2 controls survived, 0 harness faults**
 (`scripts/mutations/licence-gated-channels.plan`).
 
 ### A segment outside the mux charset is refused *before* the licence gate

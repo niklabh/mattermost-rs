@@ -1,5 +1,5 @@
-# Mutation plan for the two licence-gated channel reads (getChannelModerations,
-# listChannelBookmarksForChannel).
+# Mutation plan for the three licence-gated channel reads (getChannelModerations,
+# listChannelBookmarksForChannel, channelMemberCountsByGroup).
 #
 #   scripts/mutate-batch.sh scripts/mutations/licence-gated-channels.plan
 #
@@ -20,6 +20,8 @@ api-moderations-id	crates/mm-api/src/channels.rs	                "api.channel.ge
 api-bookmarks-id	crates/mm-api/src/channels.rs	                "api.channel.bookmark.channel_bookmark.license.error",	                "api.channel.get_channel_moderations.license.error",	api	licence_gated_channels
 api-licence-gate-inverted	crates/mm-api/src/channels.rs	        Ok(mm_app::license::LicenseState::Licensed) => {\n            tracing::Span::current().record("licensed", true);\n            LicenceGate::Forward(proxy::forward_to_go(State(state.clone()), request).await)\n        }\n        Ok(mm_app::license::LicenseState::Unlicensed) => {	        Ok(mm_app::license::LicenseState::Unlicensed) => {\n            tracing::Span::current().record("licensed", true);\n            LicenceGate::Forward(proxy::forward_to_go(State(state.clone()), request).await)\n        }\n        Ok(mm_app::license::LicenseState::Licensed) => {	api	licence_gated_channels
 api-licensed-answers-anyway	crates/mm-api/src/channels.rs	            LicenceGate::Forward(proxy::forward_to_go(State(state.clone()), request).await)	            {\n                let _ = request;\n                LicenceGate::Unlicensed\n            }	api	licence_gated_channels
+api-member-counts-status	crates/mm-api/src/channels.rs	                "api.channel.channel_member_counts_by_group.license.error",\n                None,\n                String::new(),\n                403,	                "api.channel.channel_member_counts_by_group.license.error",\n                None,\n                String::new(),\n                501,	api	licence_gated_channels
+api-member-counts-id	crates/mm-api/src/channels.rs	                "api.channel.channel_member_counts_by_group.license.error",	                "api.channel.get_channel_moderations.license.error",	api	licence_gated_channels
 #
 # --- no-op controls: these must SURVIVE ---
 control-rename-binding	crates/mm-api/src/channels.rs	async fn licence_gate(state: &AppState, request: Request) -> LicenceGate {\n    match state.app.license_state().await {	async fn licence_gate(state: &AppState, request: Request) -> LicenceGate {\n    let licence = state.app.license_state().await;\n    match licence {	api	licence_gated_channels

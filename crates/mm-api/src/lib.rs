@@ -640,6 +640,10 @@ pub fn router(state: AppState) -> Router {
             partially_migrated_with_ids(&state, get(channels::list_channel_bookmarks)),
         )
         .route(
+            "/api/v4/channels/{channel_id}/member_counts_by_group",
+            partially_migrated_with_ids(&state, get(channels::get_channel_member_counts_by_group)),
+        )
+        .route(
             "/api/v4/limits/server",
             partially_migrated(get(limits::get_server_limits)),
         )

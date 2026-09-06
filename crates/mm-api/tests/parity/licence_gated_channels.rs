@@ -1,18 +1,20 @@
-//! Cross-server parity for the two licence-gated channel reads —
-//! `GET /api/v4/channels/{channel_id}/moderations` (`getChannelModerations`) and
-//! `GET /api/v4/channels/{channel_id}/bookmarks` (`listChannelBookmarksForChannel`).
+//! Cross-server parity for the three licence-gated channel reads —
+//! `GET /api/v4/channels/{channel_id}/moderations` (`getChannelModerations`),
+//! `.../bookmarks` (`listChannelBookmarksForChannel`) and
+//! `.../member_counts_by_group` (`channelMemberCountsByGroup`).
 //!
 //! ```sh
 //! scripts/parity.sh -p mm-api --test parity licence_gated_channels
 //! ```
 //!
-//! # Both routes are one statement long on an unlicensed server
+//! # All three routes are one statement long on an unlicensed server
 //!
 //! Each opens with `if c.App.Channels().License() == nil` and returns before validating the
 //! channel id or asking any permission (channel.go:2973, channel_bookmark.go:447). So the whole
 //! reachable behaviour here is: which error, at which status, for **every** caller and every
-//! id-shaped segment. The two differ — a **403** for moderations and a **501** for bookmarks —
-//! and a client branching on the status sees them differently.
+//! id-shaped segment. They differ: a **403** for moderations and for the group counts, a **501**
+//! for bookmarks — two statuses and three ids between them, and a client branching on the status
+//! sees them differently.
 //!
 //! A licensed installation is forwarded, and [`a_license_row_hands_both_routes_back_to_go`] pins
 //! that boundary the way `license_client` and `recommended_channels` pin theirs.
@@ -52,6 +54,9 @@ fn moderations(channel_id: &str) -> String {
 fn bookmarks(channel_id: &str) -> String {
     format!("/api/v4/channels/{channel_id}/bookmarks")
 }
+fn member_counts(channel_id: &str) -> String {
+    format!("/api/v4/channels/{channel_id}/member_counts_by_group")
+}
 
 /// Each route's own error, at its own status, byte-compatible with Go.
 #[tokio::test]
@@ -75,6 +80,11 @@ async fn each_route_answers_its_own_licence_error() {
             501,
             "api.channel.bookmark.channel_bookmark.license.error",
         ),
+        (
+            member_counts(&fixture.channel),
+            403,
+            "api.channel.channel_member_counts_by_group.license.error",
+        ),
     ] {
         let ((go_status, go), (rs_status, rs)) = fetch_both_raw(&client, &token, &p).await;
         assert_eq!(go_status, status, "{p}");
@@ -97,7 +107,11 @@ async fn an_invalid_channel_id_still_gets_the_licence_error() {
     let client = client();
     let token = go_minted_token(&client).await;
 
-    for (p, status) in [(moderations("abc"), 403), (bookmarks("abc"), 501)] {
+    for (p, status) in [
+        (moderations("abc"), 403),
+        (bookmarks("abc"), 501),
+        (member_counts("abc"), 403),
+    ] {
         let ((go_status, go), (rs_status, rs)) = fetch_both_raw(&client, &token, &p).await;
         assert_eq!(
             go_status,
@@ -173,7 +187,11 @@ async fn a_license_row_hands_both_routes_back_to_go() {
     };
 
     set_active_licence_id(None).await;
-    for p in [moderations(&fixture.channel), bookmarks(&fixture.channel)] {
+    for p in [
+        moderations(&fixture.channel),
+        bookmarks(&fixture.channel),
+        member_counts(&fixture.channel),
+    ] {
         assert_eq!(
             served_by(&p).await.as_deref(),
             Some("rust"),
@@ -185,6 +203,7 @@ async fn a_license_row_hands_both_routes_back_to_go() {
     let forwarded: Vec<Option<String>> = vec![
         served_by(&moderations(&fixture.channel)).await,
         served_by(&bookmarks(&fixture.channel)).await,
+        served_by(&member_counts(&fixture.channel)).await,
     ];
 
     set_active_licence_id(None).await;
@@ -192,6 +211,7 @@ async fn a_license_row_hands_both_routes_back_to_go() {
     for (p, served) in [
         (moderations(&fixture.channel), &forwarded[0]),
         (bookmarks(&fixture.channel), &forwarded[1]),
+        (member_counts(&fixture.channel), &forwarded[2]),
     ] {
         assert_eq!(
             served.as_deref(),
@@ -212,7 +232,11 @@ async fn a_non_mux_segment_is_forwarded_and_not_licence_gated() {
     let client = client();
     let token = go_minted_token(&client).await;
 
-    for p in [moderations("not-an-id"), bookmarks("not-an-id")] {
+    for p in [
+        moderations("not-an-id"),
+        bookmarks("not-an-id"),
+        member_counts("not-an-id"),
+    ] {
         let ours = client
             .get(format!("{RUST}{p}"))
             .header("Authorization", format!("Bearer {token}"))

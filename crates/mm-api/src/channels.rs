@@ -2747,7 +2747,40 @@ pub async fn list_channel_bookmarks(
     }
 }
 
-/// What the two licence-gated channel routes should do.
+/// Port of `channelMemberCountsByGroup` (api4/channel.go:2937) —
+/// `GET /api/v4/channels/{channel_id}/member_counts_by_group`.
+///
+/// The **third** channel route whose first statement is the licence check, and the third distinct
+/// error id for it. Its status matches `getChannelModerations` — a 403 — and not the bookmarks
+/// route's 501, so the three gates are two statuses and three ids between them.
+///
+/// A licensed installation is forwarded: the counts come from the group-membership tables, which
+/// are enterprise-only and unported.
+#[tracing::instrument(skip_all, fields(channel_id = %channel_id, licensed))]
+pub async fn get_channel_member_counts_by_group(
+    State(state): State<AppState>,
+    Path(channel_id): Path<String>,
+    _session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    match licence_gate(&state, request).await {
+        LicenceGate::Forward(response) => response,
+        LicenceGate::Unlicensed => {
+            let _ = &channel_id;
+            ApiError::from(mm_model::utils::AppError::new(
+                "Api4.channelMemberCountsByGroup",
+                "api.channel.channel_member_counts_by_group.license.error",
+                None,
+                String::new(),
+                403,
+            ))
+            .into_response()
+        }
+        LicenceGate::Failed(err) => err.into_response(),
+    }
+}
+
+/// What the three licence-gated channel routes should do.
 enum LicenceGate {
     /// A licence is installed; the work behind the gate is not ported.
     Forward(Response),
@@ -2756,7 +2789,7 @@ enum LicenceGate {
     Failed(ApiError),
 }
 
-/// Shared by the two routes above, because the *decision* is shared and only the error differs.
+/// Shared by the three routes above, because the *decision* is shared and only the error differs.
 ///
 /// See `mm_app::license::LicenseState` for what "licensed" can be established from here: the
 /// `MM_LICENSE` environment variable and `Systems.ActiveLicenseId`, which between them cover every
