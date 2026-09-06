@@ -177,6 +177,19 @@ pub struct Config {
     /// The companion of [`Config::show_full_name`], with the same readers and the same history.
     pub show_email_address: bool,
 
+    /// `ServiceSettings.SiteURL` (config.go, defaulted to `""` by `Store.Load` at store.go:280).
+    ///
+    /// Two readers, and they want different things from it:
+    ///
+    /// - [`Config::from_document`] reads its **presence** as Go's `isUpdate` discriminator
+    ///   (config.go:4289), which decides two defaults.
+    /// - [`Config::subpath`] reads its **value**, to find the path a session cookie is scoped to.
+    ///
+    /// So an absent key and an empty string are genuinely different inputs to the first reader and
+    /// identical to the second. Modelled as `Option<String>` for exactly that reason: collapsing
+    /// it to `String` would silently make every document look like a fresh install.
+    pub site_url: Option<String>,
+
     /// `ServiceSettings.SessionIdleTimeoutInMinutes` (config.go:429, defaulted at :799). Go
     /// default **43200** — thirty days, not zero.
     ///
@@ -208,6 +221,43 @@ pub struct Config {
 }
 
 impl Config {
+    /// Port of `utils.GetSubpathFromConfig` (channels/utils/subpath.go:242).
+    ///
+    /// The path a session cookie is scoped to. Go throws the error away at the one call site this
+    /// server reproduces — `RemoveSessionCookie` writes `subpath, _ :=` (context.go:181) — so a
+    /// SiteURL that will not parse yields the **empty string**, and `net/http` then omits `Path`
+    /// from the `Set-Cookie` header entirely rather than sending `Path=/`. That distinction is the
+    /// reason this returns a plain `String` with `""` for failure instead of a `Result`: there is
+    /// no caller that could do anything else with the error, and typing it would invite one to.
+    ///
+    /// Three inputs reach `"/"` by three different routes — an absent SiteURL, one whose parsed
+    /// path is empty (`http://host`), and one whose path cleans to nothing (`http://host/..`) —
+    /// and `fixtures/behaviour_subpath.json` records all of them separately, so a port that
+    /// collapsed the branches would still be caught when any one of them moved.
+    ///
+    /// `path.Clean` runs on the **decoded** path, so `https://host/mattermost%2Fx` is a subpath
+    /// two segments deep. Go's, not ours.
+    pub fn subpath(&self) -> String {
+        let Some(site_url) = self.site_url.as_deref() else {
+            return "/".to_owned();
+        };
+
+        let Ok(url) = mm_model::go_url::go_parse(site_url) else {
+            // Go: `return "", errors.Wrap(err, ...)`, and the caller drops the error.
+            return String::new();
+        };
+
+        if url.path.is_empty() {
+            return "/".to_owned();
+        }
+
+        // `u.Path` is `[]byte` here because Go's decoded path can hold bytes no `str` can — see
+        // [`mm_model::go_url::GoUrl`]. A cookie `Path` is a header value, so anything non-UTF-8
+        // could not be sent anyway; the lossy conversion keeps the failure inside this function
+        // instead of at the header builder.
+        mm_model::go_path::clean(&String::from_utf8_lossy(&url.path))
+    }
+
     /// Port of `app.App.isBurnOnReadEnabled` (post_helpers.go:270).
     ///
     /// **Both halves default to true**, so on a stock server this is on — which is why
@@ -238,6 +288,10 @@ impl Default for Config {
             enable_oauth_service_provider: true,
             show_full_name: true,
             show_email_address: true,
+            // Absent, not empty: `SetDefaults` never fills `SiteURL`, and this constructor
+            // models a config that has not been through `Store.Load` — which is the only thing
+            // that plants the `""`.
+            site_url: None,
             session_idle_timeout_in_minutes: 43200,
             // `new(!isUpdate)` with `isUpdate == false`: this constructor models `SetDefaults` on
             // an **empty** config, which has no `SiteURL` and is therefore a fresh install. Every
@@ -358,6 +412,12 @@ impl Config {
                 "MM_PRIVACYSETTINGS_SHOWEMAILADDRESS",
                 default.show_email_address,
             ),
+            // `MM_SERVICESETTINGS_SITEURL` is the variable the running Go server beside us is
+            // configured with on this stack, and it is the one setting where the document and the
+            // process genuinely disagree — see the module doc. An override always *sets* the
+            // value, so it also makes `isUpdate` true, matching `applyEnvKey`, which dereferences
+            // the pointer `SetDefaults` already planted.
+            site_url: lookup("MM_SERVICESETTINGS_SITEURL").or(default.site_url),
             session_idle_timeout_in_minutes: lookup_int(
                 lookup,
                 "MM_SERVICESETTINGS_SESSIONIDLETIMEOUTINMINUTES",
@@ -404,6 +464,9 @@ impl Config {
         // key both land here as `false`, matching Go's nil pointer.
         let is_update = service.site_url.is_some();
         Ok(Self {
+            // Moved, not cloned: `is_update` above already took the only other thing anything
+            // wants from this field, and the remaining `service` reads are all `Option<bool>`.
+            site_url: service.site_url,
             restrict_system_admin: parsed
                 .experimental_settings
                 .unwrap_or_default()
@@ -812,6 +875,41 @@ mod tests {
             "and it moved off the fresh-config default of true"
         );
     }
+
+    /// `MM_SERVICESETTINGS_SITEURL` reaches the overlay too — which matters more than it looks,
+    /// because it is the one variable the Go container beside us actually sets, and it moves both
+    /// [`Config::subpath`] and (by making the value present) the `isUpdate` defaults.
+    ///
+    /// Added after a mutation that dropped the override survived the whole suite: nothing had ever
+    /// driven this variable, and the document's value alone is indistinguishable from no overlay.
+    #[test]
+    fn the_site_url_is_overridable_by_environment() {
+        let from_document = Config {
+            site_url: Some("http://from-the-document".to_owned()),
+            ..Config::default()
+        };
+
+        let overridden = from_document.clone().apply_env_from(&|key| match key {
+            "MM_SERVICESETTINGS_SITEURL" => Some("https://example.com/mattermost".to_owned()),
+            _ => None,
+        });
+        assert_eq!(
+            overridden.site_url.as_deref(),
+            Some("https://example.com/mattermost")
+        );
+        assert_eq!(
+            overridden.subpath(),
+            "/mattermost",
+            "and the override is what the cookie is scoped to"
+        );
+
+        let untouched = from_document.apply_env_from(&|_| None);
+        assert_eq!(
+            untouched.site_url.as_deref(),
+            Some("http://from-the-document"),
+            "with nothing set, the document survives"
+        );
+    }
 }
 
 /// Parity tests against `fixtures/config_active.json` — the configuration a real Go server booted
@@ -830,18 +928,20 @@ mod go_parity {
     /// all — `defaults_match_gos_set_defaults` asserts the same values against line numbers a
     /// human read, which catches a typo in the test and nothing in the world.
     ///
-    /// # One field is expected to differ, and it is the interesting one
+    /// # Two fields are expected to differ, and they are the same fact twice
     ///
-    /// `ExtendSessionLengthWithActivity` defaults to `!isUpdate`, and `isUpdate` is
-    /// `ServiceSettings.SiteURL != nil`. [`Config::default`] models a **fresh** config — no
-    /// `SiteURL`, so `true`; every document a running server persists carries a `SiteURL` (Go
-    /// plants `""` when the document has none, config/store.go:280), so `false`. Both are correct
-    /// for their input, which is why this compares against the adjusted default rather than
-    /// widening the assertion to let a genuine drift through.
+    /// `Store.Load` plants a `SiteURL` of `""` before calling `SetDefaults` (config/store.go:280),
+    /// so a persisted document always **has** one where [`Config::default`] — which models a
+    /// config that has never been through `Load` — does not. That is the first difference, and it
+    /// causes the second: `ExtendSessionLengthWithActivity` defaults to `!isUpdate` and `isUpdate`
+    /// is `SiteURL != nil`, so the fresh config gets `true` and every real document `false`. Both
+    /// are correct for their input, which is why this compares against the adjusted default rather
+    /// than widening the assertion to let a genuine drift through.
     #[test]
     fn every_default_matches_what_go_actually_wrote() {
         let from_go = Config::from_document(ACTIVE).expect("the fixture is a config document");
         let transcribed = Config {
+            site_url: Some(String::new()),
             extend_session_length_with_activity: false,
             ..Config::default()
         };
@@ -850,6 +950,82 @@ mod go_parity {
             from_go, transcribed,
             "a default transcribed from config.go disagrees with the one Go wrote"
         );
+    }
+
+    /// [`Config::subpath`] against Go's own answers for every corpus input.
+    ///
+    /// The two ingredients — `go_url::go_parse` and `go_path::clean` — each have an oracle
+    /// already. This covers what neither does: the eight lines of glue between them, whose three
+    /// branches all reach `"/"` or `""` from different places.
+    #[test]
+    fn subpath_matches_go_for_every_corpus_input() {
+        let oracle: serde_json::Value =
+            serde_json::from_str(include_str!("../../../fixtures/behaviour_subpath.json"))
+                .expect("behaviour_subpath.json is generated by reference/dump");
+        let cases = oracle["get_subpath_from_config"]
+            .as_array()
+            .expect("an array of cases");
+        assert!(
+            cases.len() >= 25,
+            "the corpus should cover the parse, empty-path and clean branches"
+        );
+
+        let mut failures = 0;
+        for case in cases {
+            let site_url = case["site_url"].as_str().map(str::to_owned);
+            let config = Config {
+                site_url: site_url.clone(),
+                ..Config::default()
+            };
+            assert_eq!(
+                config.subpath(),
+                case["subpath"].as_str().expect("a subpath"),
+                "GetSubpathFromConfig({site_url:?})"
+            );
+            if case["failed"].as_bool() == Some(true) {
+                failures += 1;
+            }
+        }
+
+        assert!(
+            failures >= 2,
+            "the corpus must contain SiteURLs Go refuses to parse, or the empty-string return \
+             is never exercised"
+        );
+    }
+
+    /// The three routes to `"/"` are separately reachable, so the branches cannot be collapsed
+    /// without one of them moving.
+    #[test]
+    fn the_three_paths_to_a_root_subpath_are_distinct() {
+        let with = |site_url: Option<&str>| {
+            Config {
+                site_url: site_url.map(str::to_owned),
+                ..Config::default()
+            }
+            .subpath()
+        };
+
+        assert_eq!(with(None), "/", "no SiteURL at all");
+        assert_eq!(with(Some("http://localhost:8065")), "/", "an empty u.Path");
+        assert_eq!(with(Some("https://example.com/..")), "/", "cleaned away");
+        assert_eq!(
+            with(Some("http://%zz/sub")),
+            "",
+            "and a parse failure is the empty string, not a root"
+        );
+    }
+
+    /// A real subpath deployment, which the development stack cannot produce — both its SiteURLs
+    /// (the document's `""` and the container's `http://localhost:8065`) have an empty path and
+    /// therefore agree on `/`. Pinned here instead.
+    #[test]
+    fn a_configured_subpath_is_cleaned_not_copied() {
+        let config = Config {
+            site_url: Some("https://example.com/mattermost/".to_owned()),
+            ..Config::default()
+        };
+        assert_eq!(config.subpath(), "/mattermost", "the trailing slash goes");
     }
 
     /// The `isUpdate` rule, both directions, on the fixture and on a document without a `SiteURL`.
@@ -928,9 +1104,8 @@ mod go_parity {
     /// *default* against its default and passes, having proved nothing about the new field. The
     /// count is the cheapest thing that fails instead.
     ///
-    /// Seventeen: the sixteen document-sourced settings, minus `feature_flag_burn_on_read` and
-    /// `license` (which come from nowhere near the document), plus `SiteURL` — not a setting at
-    /// all, but the `isUpdate` discriminator two of those defaults are computed from.
+    /// Seventeen: the nineteen fields [`Config`] carries, minus `feature_flag_burn_on_read` and
+    /// `license`, which come from nowhere near the document.
     #[test]
     fn the_fixture_covers_every_document_sourced_setting() {
         let fixture: serde_json::Value = serde_json::from_str(ACTIVE).expect("the fixture is JSON");
@@ -1127,6 +1302,7 @@ mod go_parity {
         assert_eq!(
             config,
             Config {
+                site_url: Some("x".to_owned()),
                 extend_session_length_with_activity: false,
                 ..Config::default()
             }

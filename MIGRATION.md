@@ -7119,3 +7119,63 @@ deleting the `WHERE` from `Remove`. It runs against the shared development datab
 `DELETE FROM sessions` with no predicate would log out the Go server and every other suite's
 fixture token mid-run; `remove_matches_either_the_id_or_the_token` covers the same decision by
 asserting the *other* seeded session survives.
+
+## The cookie half of the same branch — [D-169], closed the same day (2026-09-06)
+
+Raised and paid off in one sitting, because it is the other statement in `handlers.go:277-280` and
+leaving it open would have meant re-deriving the whole branch later. New:
+`crates/mm-model/src/go_path.rs` (moved), `reference/dump/behaviour_subpath.go`,
+`fixtures/behaviour_subpath.json`, `scripts/mutations/session-cookie.plan`. Changed:
+`crates/mm-api/src/auth.rs`, `crates/mm-app/src/config.rs`,
+`crates/mm-model/src/command_autocomplete.rs`, `crates/mm-model/src/lib.rs`,
+`crates/mm-api/tests/parity/session_activity.rs`, `reference/dump/main.go`.
+
+| Go file | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| web/context.go (`RemoveSessionCookie`) | `mm-api/src/auth.rs` | DONE | 6 unit, 2 parity | `MaxAge: -1` renders as `Max-Age=0`, and an empty `Path` is omitted rather than sent empty. |
+| utils/subpath.go (`GetSubpathFromConfig`) | `mm-app/src/config.rs` | DONE | 3 go_parity | Four outcomes from three branches: `/` three ways, `""` on a parse failure. |
+| net/http (`sanitizeCookiePath`) | `mm-api/src/auth.rs` | DONE | 1 unit | `0x20..0x7f` except `;`. A **space is valid** in a cookie path, which looks wrong and is not. |
+
+**The error is thrown away at the call site, and that changes the answer.** `RemoveSessionCookie`
+writes `subpath, _ := GetSubpathFromConfig(...)` (context.go:181), so a `SiteURL` Go cannot parse
+gives `subpath == ""` and the header carries **no `Path` at all** — not `Path=/`. A port that
+mapped the error onto the root would widen the cookie's scope on precisely the misconfiguration
+where a narrow scope was the point. `Config::subpath` therefore returns a `String` rather than a
+`Result`: there is no caller that could act on the error, and typing it would invite one to.
+
+### The oracle is transcribed glue over Go's own ingredients
+
+`channels/utils` imports goldmark, which is not in the generator's `go.sum`, so
+`behaviour_subpath.go` cannot call `GetSubpathFromConfig` directly. Instead its eight lines are
+transcribed and the two things that actually do the work — `url.Parse` and `path.Clean` — are Go's
+own. Same arrangement `behaviour.go` uses for the unexported identifier regexes, with the same
+standing rule: copy any upstream change character for character. Two invariants are asserted inside
+the generator so a botched transcription fails there rather than downstream.
+
+`go_path` moved out of `command_autocomplete.rs` into its own module when this became its second
+caller. It sits beside `go_url` now, which is where a Go stdlib port with its own oracle belongs.
+
+### Two mutations survived, and both were real gaps
+
+- **The 500 arm of the session rejection was unreachable from any test.** Getting there needs the
+  session store to fail, which no parity test can arrange against a healthy database — so a
+  mutation that cleared the cookie on a database error survived the whole suite. The mapping is now
+  `SessionRejection::for_get_session_error`, a named function over the error and a subpath closure,
+  and both arms are unit-tested. The closure also means the config is not consulted on the branch
+  that does not need it, and the test asserts that by panicking if it is.
+- **Nothing had ever driven `MM_SERVICESETTINGS_SITEURL`** — the one variable the Go container
+  beside us actually sets. With no test setting it, the document's value alone is indistinguishable
+  from no overlay at all.
+
+Mutation run: **18 run, 16 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/session-cookie.plan`), after the two survivors above were closed rather than
+recorded.
+
+### An unrelated fixture drift, left alone
+
+Re-running the generator rewrote `behaviour_scheduled_post.json` and
+`behaviour_scheduled_post_recurrence.json`: `time.LoadLocation("america/new_york")` **fails** on
+this machine where the committed fixture says it succeeds. That is this host's tzdata, not a Go
+change and not this session's work, so both files were reverted rather than committed. Worth
+knowing before the next generator run: the corpus is zone-dependent by design ([D-032]'s
+neighbour), and a lowercase zone name is apparently loadable on some systems and not others.

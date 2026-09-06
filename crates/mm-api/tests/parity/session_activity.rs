@@ -524,3 +524,93 @@ async fn an_unknown_token_gets_the_same_refusal_as_an_idle_one() {
     );
     assert_eq!(go["id"], "api.context.session_expired.app_error");
 }
+
+/// The `Set-Cookie` Go writes when it rejects a token, on every location a token can arrive from.
+///
+/// [D-169], closed. `handlers.go:278` calls `RemoveSessionCookie` immediately before substituting
+/// the generic error id, so the two halves of that branch were found together and are asserted
+/// together. The header is compared verbatim rather than parsed: `Max-Age=0` (Go maps `MaxAge:
+/// -1` onto the literal zero) and the attribute order are both things a re-rendering could get
+/// subtly wrong.
+///
+/// # The `Path` here can only ever be `/`, and that is worth saying
+///
+/// `RemoveSessionCookie` scopes the cookie to `GetSubpathFromConfig(SiteURL)`. On this stack the
+/// document holds `SiteURL = ""` and the Go container runs on `http://localhost:8065` — and both
+/// have an **empty URL path**, so both produce `/`. The two servers therefore agree here for a
+/// reason that has nothing to do with the port being right, and a real subpath deployment cannot
+/// be produced without reconfiguring the container. The subpath logic itself is pinned against Go
+/// by `fixtures/behaviour_subpath.json` instead; this test covers the rest of the branch.
+#[tokio::test]
+async fn a_rejected_token_clears_the_session_cookie_on_both_servers() {
+    if !stack_enabled() {
+        return;
+    }
+    const BAD: &str = "mmrsnosuchtokennosuchtok02";
+    const EXPECTED: &str = "MMAUTHTOKEN=; Path=/; Max-Age=0; HttpOnly";
+
+    for base in [GO, RUST] {
+        // Every location `parse_auth_token` accepts. Go clears the cookie for all of them: the
+        // branch turns on the token being *present and rejected*, not on where it came from.
+        let requests = [
+            (
+                "bearer",
+                client()
+                    .get(format!("{base}/api/v4/users/me"))
+                    .header("Authorization", format!("Bearer {BAD}")),
+            ),
+            (
+                "cookie",
+                client()
+                    .get(format!("{base}/api/v4/users/me"))
+                    .header("Cookie", format!("MMAUTHTOKEN={BAD}")),
+            ),
+            (
+                "query",
+                client().get(format!("{base}/api/v4/users/me?access_token={BAD}")),
+            ),
+        ];
+
+        for (location, request) in requests {
+            let response = request.send().await.expect("the server is reachable");
+            assert_eq!(response.status().as_u16(), 401, "{base} via {location}");
+            let cookies: Vec<&str> = response
+                .headers()
+                .get_all("set-cookie")
+                .iter()
+                .filter_map(|v| v.to_str().ok())
+                .collect();
+            assert_eq!(
+                cookies,
+                vec![EXPECTED],
+                "{base} via {location} did not clear the session cookie"
+            );
+        }
+    }
+}
+
+/// …and it is **not** cleared when no token was presented at all.
+///
+/// Go only enters that branch when `token != ""` (handlers.go:270); a request with no credential
+/// gets its 401 from `ApiSessionRequired`'s `TokenRequired` arm, which does not touch the cookie.
+/// Nothing to clear is not the same as something to clear, and a port that cleared unconditionally
+/// would look correct on every test above.
+#[tokio::test]
+async fn a_request_with_no_token_gets_no_cookie_on_either_server() {
+    if !stack_enabled() {
+        return;
+    }
+    for base in [GO, RUST] {
+        let response = client()
+            .get(format!("{base}/api/v4/users/me"))
+            .send()
+            .await
+            .expect("the server is reachable");
+        assert_eq!(response.status().as_u16(), 401);
+        assert_eq!(
+            response.headers().get_all("set-cookie").iter().count(),
+            0,
+            "{base} cleared a cookie for a request that carried none"
+        );
+    }
+}

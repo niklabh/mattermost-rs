@@ -1,0 +1,149 @@
+{
+    "get_subpath_from_config": [
+        {
+            "failed": false,
+            "site_url": null,
+            "subpath": "/"
+        },
+        {
+            "failed": false,
+            "site_url": "",
+            "subpath": "/"
+        },
+        {
+            "failed": false,
+            "site_url": "/",
+            "subpath": "/"
+        },
+        {
+            "failed": false,
+            "site_url": "http://localhost:8065",
+            "subpath": "/"
+        },
+        {
+            "failed": false,
+            "site_url": "http://localhost:8065/",
+            "subpath": "/"
+        },
+        {
+            "failed": false,
+            "site_url": "https://mattermost.example.com",
+            "subpath": "/"
+        },
+        {
+            "failed": false,
+            "site_url": "https://mattermost.example.com/",
+            "subpath": "/"
+        },
+        {
+            "failed": false,
+            "site_url": "https://example.com/mattermost",
+            "subpath": "/mattermost"
+        },
+        {
+            "failed": false,
+            "site_url": "https://example.com/mattermost/",
+            "subpath": "/mattermost"
+        },
+        {
+            "failed": false,
+            "site_url": "https://example.com/a/b",
+            "subpath": "/a/b"
+        },
+        {
+            "failed": false,
+            "site_url": "https://example.com/a/b/",
+            "subpath": "/a/b"
+        },
+        {
+            "failed": false,
+            "site_url": "https://example.com/a//b",
+            "subpath": "/a/b"
+        },
+        {
+            "failed": false,
+            "site_url": "https://example.com/a/./b",
+            "subpath": "/a/b"
+        },
+        {
+            "failed": false,
+            "site_url": "https://example.com/a/../b",
+            "subpath": "/b"
+        },
+        {
+            "failed": false,
+            "site_url": "https://example.com/..",
+            "subpath": "/"
+        },
+        {
+            "failed": false,
+            "site_url": "https://example.com/.",
+            "subpath": "/"
+        },
+        {
+            "failed": false,
+            "site_url": "https://example.com//",
+            "subpath": "/"
+        },
+        {
+            "failed": false,
+            "site_url": "https://example.com/mattermost%2Fx",
+            "subpath": "/mattermost/x"
+        },
+        {
+            "failed": false,
+            "site_url": "https://example.com/spaced%20path",
+            "subpath": "/spaced path"
+        },
+        {
+            "failed": false,
+            "site_url": "https://user:pw@example.com/sub",
+            "subpath": "/sub"
+        },
+        {
+            "failed": false,
+            "site_url": "https://example.com:8065/sub?q=1",
+            "subpath": "/sub"
+        },
+        {
+            "failed": false,
+            "site_url": "https://example.com/sub#frag",
+            "subpath": "/sub"
+        },
+        {
+            "failed": false,
+            "site_url": "mattermost",
+            "subpath": "mattermost"
+        },
+        {
+            "failed": false,
+            "site_url": "/mattermost",
+            "subpath": "/mattermost"
+        },
+        {
+            "failed": false,
+            "site_url": "//example.com/sub",
+            "subpath": "/sub"
+        },
+        {
+            "failed": true,
+            "site_url": "http://%zz/sub",
+            "subpath": ""
+        },
+        {
+            "failed": false,
+            "site_url": "http://[::1]:8065/sub",
+            "subpath": "/sub"
+        },
+        {
+            "failed": true,
+            "site_url": "http://exa mple.com/sub",
+            "subpath": ""
+        },
+        {
+            "failed": true,
+            "site_url": "",
+            "subpath": ""
+        }
+    ]
+}

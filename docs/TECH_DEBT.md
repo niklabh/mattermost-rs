@@ -5770,7 +5770,17 @@ test's premise, not the answer.
 
 ## D-169 · A 401 from an invalid token does not clear the session cookie
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-06 (phase 2, session-activity pair)
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-09-06 (phase 2, session-activity pair)
+**Closed** 2026-09-06, same day — `ServiceSettings.SiteURL` is a modelled setting,
+`GetSubpathFromConfig` is ported against a Go corpus (`fixtures/behaviour_subpath.json`), and the
+extractor's rejection carries the cookie. Asserted against the running Go server across all three
+token locations, and asserted *absent* when no token was sent — the branch turns on a token being
+present and rejected, not on the 401.
+
+The estimate below was right about the work and wrong about one thing: the parse-failure case
+returns the **empty string**, not `/`, and `net/http` then omits the `Path` attribute entirely. A
+port that treated the error as "no subpath, so root" would have scoped the cookie one level too
+wide on exactly the misconfiguration where it matters.
 
 `handlers.go:278` calls `c.RemoveSessionCookie(w, r)` immediately before substituting
 `api.context.session_expired.app_error`, so Go's 401 carries

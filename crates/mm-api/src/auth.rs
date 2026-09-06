@@ -3,6 +3,7 @@
 
 use axum::extract::FromRequestParts;
 use axum::http::request::Parts;
+use axum::response::{IntoResponse, Response};
 use mm_model::session::Session;
 
 use crate::AppState;
@@ -108,8 +109,122 @@ fn parse_auth_token_untruncated(parts: &Parts) -> Option<(String, TokenLocation)
 #[derive(Debug, Clone)]
 pub struct AuthenticatedSession(pub Session);
 
+/// The extractor's rejection: an [`ApiError`], plus whether Go would also have cleared the session
+/// cookie on the way out.
+///
+/// A separate type rather than a field on `ApiError` because the cookie belongs to **one branch of
+/// one extractor** — `handlers.go:278` — and every other 401 in the tree must not grow one. Go
+/// draws the same line: `RemoveSessionCookie` is called there and in the logout handler, not by
+/// the error renderer.
+pub struct SessionRejection {
+    error: ApiError,
+    /// Port of `c.RemoveSessionCookie(w, r)` (web/context.go:180) — `Some(subpath)` when Go would
+    /// clear the cookie, carrying the `Path` it would scope it to.
+    clear_session_cookie: Option<String>,
+}
+
+impl SessionRejection {
+    /// The `TokenRequired` branch (web/context.go:154): no token was presented at all.
+    ///
+    /// **Go does not clear the cookie here**, and that is measured rather than read: a request
+    /// with no `Authorization` header and no cookie gets a bare 401 from the running server,
+    /// while the same request with a bad token gets a `Set-Cookie`. Nothing to clear is not the
+    /// same as something to clear.
+    fn no_token() -> Self {
+        Self {
+            error: ApiError::unauthenticated(),
+            clear_session_cookie: None,
+        }
+    }
+
+    /// Port of `handlers.go:273-280` — what the web layer does with `GetSession`'s error.
+    ///
+    /// A named function rather than a closure inside the extractor, because the 500 arm is
+    /// otherwise **unreachable from any test**: getting there needs the session store to fail,
+    /// which a parity test cannot arrange against a healthy database. A mutation that cleared the
+    /// cookie on a 500 survived the whole suite until this existed.
+    ///
+    /// `subpath` is a closure so the config is not consulted on the branch that does not need it.
+    fn for_get_session_error(
+        err: Box<mm_model::utils::AppError>,
+        subpath: impl FnOnce() -> String,
+    ) -> Self {
+        if err.status_code == 500 {
+            // Go keeps a 500 as-is (`c.Err = err`) and never reaches `RemoveSessionCookie`, which
+            // lives in the `else if` below it. A database failure must not log the user out — and
+            // it must not be reported to the client as a bad token either.
+            Self {
+                error: ApiError::from(err),
+                clear_session_cookie: None,
+            }
+        } else {
+            Self {
+                error: ApiError::unauthenticated(),
+                clear_session_cookie: Some(subpath()),
+            }
+        }
+    }
+}
+
+/// Render `RemoveSessionCookie`'s cookie the way `net/http` writes it.
+///
+/// ```text
+/// MMAUTHTOKEN=; Path=/; Max-Age=0; HttpOnly
+/// ```
+///
+/// Three details, all measured against the running Go server rather than inferred:
+///
+/// - **`MaxAge: -1` serialises as `Max-Age=0`**, not `-1`. Go maps negative to the literal zero
+///   (net/http/cookie.go), which is the spelling browsers treat as "delete now".
+/// - **An empty `Path` is omitted entirely**, header attribute and all. That is the shape a
+///   SiteURL Go cannot parse produces — see [`mm_app::config::Config::subpath`] — so it is a
+///   reachable case rather than a defensive one.
+/// - **The attribute order is `Path`, `Max-Age`, `HttpOnly`**, which is the order `Cookie.String`
+///   emits them in. Nothing parses cookies positionally, but the parity assertion compares the
+///   header verbatim and it costs nothing to be right.
+fn remove_session_cookie_header(subpath: &str) -> String {
+    let path = sanitize_cookie_path(subpath);
+    let mut cookie = format!("{SESSION_COOKIE_TOKEN}=");
+    if !path.is_empty() {
+        cookie.push_str("; Path=");
+        cookie.push_str(&path);
+    }
+    cookie.push_str("; Max-Age=0; HttpOnly");
+    cookie
+}
+
+/// Port of `sanitizeCookiePath` / `validCookiePathByte` (net/http/cookie.go:524).
+///
+/// Keeps `0x20..0x7f` except `;`. Go logs and drops the invalid bytes rather than refusing, and a
+/// dropped byte here is far better than a rejected header: `axum` would otherwise turn a
+/// pathological `SiteURL` into a 500 on the *authentication* path.
+fn sanitize_cookie_path(value: &str) -> String {
+    value
+        .bytes()
+        .filter(|&b| (0x20..0x7f).contains(&b) && b != b';')
+        .map(char::from)
+        .collect()
+}
+
+impl IntoResponse for SessionRejection {
+    fn into_response(self) -> Response {
+        let cookie = self
+            .clear_session_cookie
+            .map(|subpath| remove_session_cookie_header(&subpath));
+        let mut response = self.error.into_response();
+        if let Some(cookie) = cookie
+            && let Ok(value) = axum::http::HeaderValue::from_str(&cookie)
+        {
+            response
+                .headers_mut()
+                .insert(axum::http::header::SET_COOKIE, value);
+        }
+        response
+    }
+}
+
 impl FromRequestParts<AppState> for AuthenticatedSession {
-    type Rejection = ApiError;
+    type Rejection = SessionRejection;
 
     async fn from_request_parts(
         parts: &mut Parts,
@@ -118,7 +233,7 @@ impl FromRequestParts<AppState> for AuthenticatedSession {
         let Some((token, _location)) = parse_auth_token(parts) else {
             // Go's `ApiSessionRequired` with no token at all returns
             // `api.context.session_expired.app_error` rather than a "missing token" id.
-            return Err(ApiError::unauthenticated());
+            return Err(SessionRejection::no_token());
         };
 
         // Port of `handlers.go:273-280`. **`GetSession`'s error id does not reach the client.**
@@ -138,11 +253,7 @@ impl FromRequestParts<AppState> for AuthenticatedSession {
         //
         // Not ported: `c.RemoveSessionCookie(w, r)`, which Go calls first. See [D-169].
         let session = state.app.get_session(&token).await.map_err(|err| {
-            if err.status_code == 500 {
-                ApiError::from(err)
-            } else {
-                ApiError::unauthenticated()
-            }
+            SessionRejection::for_get_session_error(err, || state.app.config().subpath())
         })?;
         Ok(AuthenticatedSession(session))
     }
@@ -159,6 +270,88 @@ mod tests {
             builder = builder.header(*name, *value);
         }
         builder.body(()).expect("request builds").into_parts().0
+    }
+
+    /// The 500 arm: the store failed, so the error propagates unchanged and **no cookie is
+    /// cleared**.
+    ///
+    /// Unreachable from the parity suite — it needs a broken database — and therefore the one
+    /// branch here that only a unit test can hold down.
+    #[test]
+    fn a_store_failure_propagates_and_clears_nothing() {
+        let inner = mm_model::utils::AppError::boxed(
+            "GetSession",
+            "app.session.get.app_error",
+            None,
+            String::new(),
+            500,
+        );
+        let rejection = SessionRejection::for_get_session_error(inner, || {
+            panic!("the subpath must not be consulted on the 500 path")
+        });
+
+        assert!(rejection.clear_session_cookie.is_none());
+        assert_eq!(rejection.error.0.id, "app.session.get.app_error");
+        assert_eq!(rejection.error.0.status_code, 500);
+    }
+
+    /// Every other status becomes the generic 401 **and** clears the cookie, scoped to the
+    /// configured subpath.
+    #[test]
+    fn a_rejected_token_becomes_the_generic_401_and_clears_the_cookie() {
+        let inner = mm_model::utils::AppError::boxed(
+            "GetSession",
+            "api.context.invalid_token.error",
+            None,
+            String::new(),
+            401,
+        );
+        let rejection = SessionRejection::for_get_session_error(inner, || "/mattermost".to_owned());
+
+        assert_eq!(
+            rejection.clear_session_cookie.as_deref(),
+            Some("/mattermost")
+        );
+        assert_eq!(
+            rejection.error.0.id, "api.context.session_expired.app_error",
+            "GetSession's own id is discarded by the web layer"
+        );
+        assert_eq!(rejection.error.0.status_code, 401);
+    }
+
+    /// The cookie Go writes on a rejected token, byte for byte.
+    #[test]
+    fn the_removal_cookie_matches_gos_rendering() {
+        assert_eq!(
+            remove_session_cookie_header("/"),
+            "MMAUTHTOKEN=; Path=/; Max-Age=0; HttpOnly"
+        );
+        assert_eq!(
+            remove_session_cookie_header("/mattermost"),
+            "MMAUTHTOKEN=; Path=/mattermost; Max-Age=0; HttpOnly"
+        );
+    }
+
+    /// An empty subpath — what a `SiteURL` Go cannot parse produces — omits the attribute
+    /// entirely rather than sending `Path=`.
+    #[test]
+    fn an_empty_subpath_omits_the_path_attribute() {
+        assert_eq!(
+            remove_session_cookie_header(""),
+            "MMAUTHTOKEN=; Max-Age=0; HttpOnly"
+        );
+    }
+
+    /// `sanitizeCookiePath` keeps `0x20..0x7f` except `;`. A space is **valid** in a cookie path,
+    /// which is worth pinning because it looks like it should not be — and a `SiteURL` of
+    /// `https://host/spaced%20path` really does produce one.
+    #[test]
+    fn the_cookie_path_is_sanitized_like_go() {
+        assert_eq!(sanitize_cookie_path("/spaced path"), "/spaced path");
+        assert_eq!(sanitize_cookie_path("/a;b"), "/ab", "semicolons go");
+        assert_eq!(sanitize_cookie_path("/a\u{7f}b"), "/ab", "DEL goes");
+        assert_eq!(sanitize_cookie_path("/a\nb"), "/ab", "control bytes go");
+        assert_eq!(sanitize_cookie_path("/caf\u{e9}"), "/caf", "and non-ASCII");
     }
 
     #[test]
