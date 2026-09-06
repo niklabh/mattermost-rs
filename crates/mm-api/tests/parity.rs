@@ -73,6 +73,7 @@ mod parity {
     pub mod preferences;
     pub mod recommended_channels;
     pub mod roles;
+    pub mod server_limits;
     pub mod session_team_members;
     pub mod sessions_for_user;
     pub mod sidebar_categories;

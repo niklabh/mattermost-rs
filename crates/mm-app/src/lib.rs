@@ -13,6 +13,7 @@ pub mod emoji;
 /// The read side of `app/file.go` — `FileInfo` rows, never file bytes.
 pub mod file;
 pub mod license;
+pub mod limits;
 pub mod oauth;
 pub mod password;
 pub mod post;

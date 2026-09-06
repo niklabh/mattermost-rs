@@ -1,0 +1,36 @@
+# Mutation plan for GET /api/v4/limits/server (getServerLimits).
+#
+#   scripts/mutate-batch.sh scripts/mutations/server-limits.plan
+#
+# On an unlicensed server the route decides one thing — **who is an admin** — and answers two
+# constants plus one `COUNT(*)` either way. "Admin" is an `&&` of two system-scoped permissions,
+# so dropping either half is a mutation; and the non-admin answer is rebuilt by the handler after
+# the app layer has already computed the limits, so zeroing is a second, separate decision.
+#
+# `api-admin-is-one-permission` runs under `unit`: the only role granting `manage_system` on a
+# stock server also grants the sysconsole read, so no caller can hold one without the other and the
+# `&&` has no reachable branch over HTTP. It is a named function with a truth table instead. The
+# filter is a **test name**.
+#
+# **One mutation was dropped rather than carried as a survivor.** `app-count-options` turns
+# `include_deleted` on, which should raise the count — except that the development database holds
+# **zero** deleted users (measured, `SELECT count(*) FROM users WHERE deleteat <> 0`), so both
+# options return the same number and no fixture in this binary changes that: `DELETE /users/{id}`
+# through the API left no `DeleteAt != 0` row behind when it was tried. Making one means writing a
+# `Users` row by hand, and `parity/roles.rs` records what a hand-written row missing a column Go
+# scans into a non-pointer field once did to the whole stack. Not worth it for one predicate.
+#
+# The last two lines are the no-op controls and must SURVIVE.
+
+app-soft-limit	crates/mm-app/src/limits.rs	pub const MAX_USERS_LIMIT: i64 = 200;	pub const MAX_USERS_LIMIT: i64 = 250;	api	server_limits
+app-hard-limit	crates/mm-app/src/limits.rs	pub const MAX_USERS_HARD_LIMIT: i64 = 250;	pub const MAX_USERS_HARD_LIMIT: i64 = 200;	api	server_limits
+app-count-skipped-for-admins	crates/mm-app/src/limits.rs	        if !include_user_counts {	        if true {	api	server_limits
+api-admin-is-one-permission	crates/mm-api/src/limits.rs	    manages_system && reads_user_management	    manages_system	unit	both_permissions_are_required
+api-everyone-is-an-admin	crates/mm-api/src/limits.rs	    tracing::Span::current().record("admin", is_admin);	    let is_admin = true;\n    tracing::Span::current().record("admin", is_admin);	api	server_limits
+api-nobody-is-an-admin	crates/mm-api/src/limits.rs	    tracing::Span::current().record("admin", is_admin);	    let is_admin = false;\n    tracing::Span::current().record("admin", is_admin);	api	server_limits
+api-licensed-answers-anyway	crates/mm-api/src/limits.rs	    if licence == mm_app::license::LicenseState::Licensed {\n        tracing::Span::current().record("licensed", true);\n        return proxy::forward_to_go(State(state), request).await;\n    }	    if false {\n        tracing::Span::current().record("licensed", true);\n        return proxy::forward_to_go(State(state), request).await;\n    }	api	server_limits
+api-trailing-newline	crates/mm-api/src/limits.rs	        Ok(mut body) => {\n            body.push(b'\\n');	        Ok(body) => {	api	server_limits
+#
+# --- no-op controls: these must SURVIVE ---
+control-rename-binding	crates/mm-api/src/limits.rs	    let limits = match state.app.get_server_limits(is_admin).await {\n        Ok(limits) => limits,	    let limits = match state.app.get_server_limits(is_admin).await {\n        Ok(computed) => computed,	api	server_limits
+control-reorder-independent-fields	crates/mm-api/src/limits.rs	            single_channel_guest_count: 0,\n            single_channel_guest_limit: 0,\n            last_accessible_post_time: limits.last_accessible_post_time,	            single_channel_guest_limit: 0,\n            single_channel_guest_count: 0,\n            last_accessible_post_time: limits.last_accessible_post_time,	api	server_limits

@@ -6869,3 +6869,42 @@ Mutation run: **8 run, 6 caught, 2 controls survived, 0 harness faults**
 and therefore the licence check, never runs. Our charset middleware forwards it for the same
 reason, so the two agree by construction rather than by copying the gate. Asserted, because "the
 licence error comes first" is true only *within* the handler.
+
+## `GET /api/v4/limits/server` — `getServerLimits` (2026-09-06)
+
+Served, for an unlicensed installation. `crates/mm-api/src/limits.rs`,
+`crates/mm-app/src/limits.rs`; 5 parity tests in `crates/mm-api/tests/parity/server_limits.rs`.
+`loadMe()` fans out to this on **every** login and config refresh, which is why Go goes to the
+trouble of skipping the count queries for non-admins.
+
+**The one thing a reader would otherwise get wrong: the non-admin answer is built by the
+*handler*, not the app layer.** `App.GetServerLimits(false)` still returns the seat limits and only
+skips the counts (app/limits.go:59); the handler then throws even those away and rebuilds a
+`ServerLimits` with five explicit zeros, keeping the two post-history fields (limits.go:32-43). The
+same call answers differently depending on who asked, and the difference is applied twice in two
+places. Both are ported where Go put them.
+
+Two more. **There is no refusal** — every session gets a 200, and a non-admin's answer is all
+zeros. And "admin" is an **and of two system-scoped permissions**, `manage_system` *and*
+`sysconsole_read_user_management_users`, not a role check.
+
+On the unlicensed path the answer is two constants (200 and 250, hard-coded in `app/limits.go`),
+one `COUNT(*)`, and five zeros — every one of the five is licence-derived, and
+`shouldTrackSingleChannelGuests` returns false the moment the licence is nil, so the guest scan
+never runs and `activeUserCount` is the *unadjusted* count. A licensed installation is forwarded.
+
+Mutation run: **10 run, 8 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/server-limits.plan`).
+
+### Two survivors, one fixed and one measured away
+
+- **The `&&` of the two permissions** has no reachable branch: the only role granting
+  `manage_system` also grants the sysconsole read. It is now `counts_are_visible_to`, a named
+  function with a truth table, tested where it can be — the fourth time this session that a rule
+  had to move below the edge to be testable.
+- **`include_deleted`** could not be distinguished, because the development database holds **zero**
+  deleted users — measured, not assumed — and `DELETE /users/{id}` through the API left no
+  `DeleteAt != 0` row behind when the fixture tried to make one. Making one means writing a `Users`
+  row by hand, and `parity/roles.rs` records what a hand-written row missing a column Go scans into
+  a non-pointer field once did to the whole stack. The mutation was dropped with that reason rather
+  than carried.

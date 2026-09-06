@@ -15,6 +15,7 @@ pub mod error;
 /// `getFileInfo` — the one `/files/` route that returns JSON rather than bytes.
 pub mod files;
 pub mod license;
+pub mod limits;
 pub mod oauth;
 pub mod posts;
 pub mod preferences;
@@ -637,6 +638,10 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/channels/{channel_id}/bookmarks",
             partially_migrated_with_ids(&state, get(channels::list_channel_bookmarks)),
+        )
+        .route(
+            "/api/v4/limits/server",
+            partially_migrated(get(limits::get_server_limits)),
         )
         .route(
             "/api/v4/terms_of_service",
