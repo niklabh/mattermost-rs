@@ -883,6 +883,19 @@ impl Post {
             // before the decode rather than after is equivalent — a nil element cannot be the
             // reason a decode fails in Go, since `[]*T` accepts one.
             let mut element = element.clone();
+            // Go's decoder matches a field name case-insensitively when nothing matches exactly
+            // (decode.go:699), so `{"Title":"x"}` is an attachment title over there and was
+            // nothing at all over here — [D-040], measured through this very function. The keys
+            // are rewritten to their exact spellings before serde sees them; see
+            // [`crate::go_json`] for why that is the whole of it and for the one ordering rule it
+            // cannot observe.
+            //
+            // Before the nil filters, because `strip_nil_elements` looks for the exact keys
+            // `actions` and `fields` and a payload may well have written `Actions`.
+            crate::go_json::remap_object_keys(
+                &mut element,
+                &crate::message_attachment::MESSAGE_ATTACHMENT_FIELDS,
+            );
             strip_nil_elements(&mut element, "actions");
             strip_nil_elements(&mut element, "fields");
             if let Ok(decoded) = serde_json::from_value::<MessageAttachment>(element) {
@@ -2506,12 +2519,12 @@ mod attachments_go_parity {
         }
     }
 
-    /// The two corpus cases we cannot reproduce, each for a reason asserted separately below.
-    const DIVERGENT: [&str; 3] = [
-        "action_option_null",
-        "action_option_null_then_real",
-        "case_insensitive_keys",
-    ];
+    /// The corpus cases we cannot reproduce, each for a reason asserted separately below.
+    ///
+    /// `case_insensitive_keys` was here until [D-040] closed — Go's case-insensitive field
+    /// matching is ported now, so that case runs through the general comparison below like any
+    /// other. Shrinking this list is the only honest way to claim a divergence is gone.
+    const DIVERGENT: [&str; 2] = ["action_option_null", "action_option_null_then_real"];
 
     #[test]
     fn attachments_matches_go() {
@@ -2574,10 +2587,15 @@ mod attachments_go_parity {
         }
     }
 
-    /// [D-040]: `encoding/json` matches struct fields case-insensitively; serde does not. Go
-    /// reads `{"Title":"t","TEXT":"x"}` as a populated attachment, we read it as an empty one.
+    /// [D-040], closed: `encoding/json` matches struct fields case-insensitively and now so do
+    /// we. Go reads `{"Title":"t","TEXT":"x"}` as a **populated** attachment, and this is the
+    /// case that used to sit on [`DIVERGENT`] recording that we read it as an empty one.
+    ///
+    /// Kept as its own test rather than folded into `attachments_matches_go` — which now covers
+    /// it — because the values are worth naming: a general comparison that started passing tells
+    /// you nothing about *which* keys began to land.
     #[test]
-    fn case_insensitive_keys_are_go_only() {
+    fn case_insensitive_keys_now_land_like_go() {
         let case = cases("attachments")
             .into_iter()
             .find(|c| s(c, "name") == "case_insensitive_keys")
@@ -2588,8 +2606,8 @@ mod attachments_go_parity {
 
         let ours = post_from(&case, "post").attachments();
         assert_eq!(ours.len(), 1);
-        assert_eq!(ours[0].title, "");
-        assert_eq!(ours[0].text, "");
+        assert_eq!(ours[0].title, "t", "`Title` populated `title`");
+        assert_eq!(ours[0].text, "x", "and `TEXT` populated `text`");
     }
 
     #[test]

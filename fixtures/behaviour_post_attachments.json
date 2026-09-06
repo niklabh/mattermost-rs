@@ -618,6 +618,42 @@
             "attachments": "[{\"id\":0,\"fallback\":\"\",\"color\":\"\",\"pretext\":\"\",\"author_name\":\"\",\"author_link\":\"\",\"author_icon\":\"\",\"title\":\"t\",\"title_link\":\"\",\"text\":\"x\",\"fields\":null,\"image_url\":\"\",\"thumb_url\":\"\",\"footer\":\"\",\"footer_icon\":\"\",\"ts\":null}]"
         },
         {
+            "name": "case_insensitive_nested_fields",
+            "post": "{\"props\":{\"attachments\":[{\"FIELDS\":[{\"TITLE\":\"ft\",\"Value\":\"fv\",\"SHORT\":true}]}]}}",
+            "count": 1,
+            "attachments": "[{\"id\":0,\"fallback\":\"\",\"color\":\"\",\"pretext\":\"\",\"author_name\":\"\",\"author_link\":\"\",\"author_icon\":\"\",\"title\":\"\",\"title_link\":\"\",\"text\":\"\",\"fields\":[{\"title\":\"ft\",\"value\":\"fv\",\"short\":true}],\"image_url\":\"\",\"thumb_url\":\"\",\"footer\":\"\",\"footer_icon\":\"\",\"ts\":null}]"
+        },
+        {
+            "name": "case_insensitive_nested_actions",
+            "post": "{\"props\":{\"attachments\":[{\"Actions\":[{\"NAME\":\"n\",\"Type\":\"button\",\"Integration\":{\"URL\":\"https://x.example.com\"}}]}]}}",
+            "count": 1,
+            "attachments": "[{\"id\":0,\"fallback\":\"\",\"color\":\"\",\"pretext\":\"\",\"author_name\":\"\",\"author_link\":\"\",\"author_icon\":\"\",\"title\":\"\",\"title_link\":\"\",\"text\":\"\",\"fields\":null,\"image_url\":\"\",\"thumb_url\":\"\",\"footer\":\"\",\"footer_icon\":\"\",\"ts\":null,\"actions\":[{\"type\":\"button\",\"name\":\"n\",\"integration\":{\"url\":\"https://x.example.com\"}}]}]"
+        },
+        {
+            "name": "case_insensitive_deep_options",
+            "post": "{\"props\":{\"attachments\":[{\"ACTIONS\":[{\"name\":\"n\",\"OPTIONS\":[{\"TEXT\":\"o\",\"Value\":\"v\"}]}]}]}}",
+            "count": 1,
+            "attachments": "[{\"id\":0,\"fallback\":\"\",\"color\":\"\",\"pretext\":\"\",\"author_name\":\"\",\"author_link\":\"\",\"author_icon\":\"\",\"title\":\"\",\"title_link\":\"\",\"text\":\"\",\"fields\":null,\"image_url\":\"\",\"thumb_url\":\"\",\"footer\":\"\",\"footer_icon\":\"\",\"ts\":null,\"actions\":[{\"name\":\"n\",\"options\":[{\"text\":\"o\",\"value\":\"v\"}]}]}]"
+        },
+        {
+            "name": "case_insensitive_exact_wins",
+            "post": "{\"props\":{\"attachments\":[{\"title\":\"exact\",\"TiTlE\":\"folded\"}]}}",
+            "count": 1,
+            "attachments": "[{\"id\":0,\"fallback\":\"\",\"color\":\"\",\"pretext\":\"\",\"author_name\":\"\",\"author_link\":\"\",\"author_icon\":\"\",\"title\":\"exact\",\"title_link\":\"\",\"text\":\"\",\"fields\":null,\"image_url\":\"\",\"thumb_url\":\"\",\"footer\":\"\",\"footer_icon\":\"\",\"ts\":null}]"
+        },
+        {
+            "name": "case_insensitive_unknown_stays_unknown",
+            "post": "{\"props\":{\"attachments\":[{\"TITLEX\":\"x\",\"authorname\":\"a\"}]}}",
+            "count": 1,
+            "attachments": "[{\"id\":0,\"fallback\":\"\",\"color\":\"\",\"pretext\":\"\",\"author_name\":\"\",\"author_link\":\"\",\"author_icon\":\"\",\"title\":\"\",\"title_link\":\"\",\"text\":\"\",\"fields\":null,\"image_url\":\"\",\"thumb_url\":\"\",\"footer\":\"\",\"footer_icon\":\"\",\"ts\":null}]"
+        },
+        {
+            "name": "case_insensitive_nil_action",
+            "post": "{\"props\":{\"attachments\":[{\"Actions\":[null,{\"name\":\"n\"}]}]}}",
+            "count": 1,
+            "attachments": "[{\"id\":0,\"fallback\":\"\",\"color\":\"\",\"pretext\":\"\",\"author_name\":\"\",\"author_link\":\"\",\"author_icon\":\"\",\"title\":\"\",\"title_link\":\"\",\"text\":\"\",\"fields\":null,\"image_url\":\"\",\"thumb_url\":\"\",\"footer\":\"\",\"footer_icon\":\"\",\"ts\":null,\"actions\":[{\"name\":\"n\"}]}]"
+        },
+        {
             "name": "duplicate_keys_last_wins",
             "post": "{\"props\":{\"attachments\":[{\"title\":\"a\",\"title\":\"b\"}]}}",
             "count": 1,

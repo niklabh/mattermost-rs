@@ -1331,7 +1331,30 @@ numbers through `f64` and is used by `MessageAttachment::equals`,
 
 ## D-040 · Go's `encoding/json` matches keys case-insensitively; serde does not
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-08-14 (phase 1, `post.go` chunk 2)
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-08-14 (phase 1, `post.go` chunk 2)
+**Closed** 2026-09-06 at the exposure it was measured through — `Post::attachments`.
+`mm_model::go_json::remap_object_keys` rewrites folded keys to their exact spellings before serde
+sees them, driven by a per-type `GoFields` schema; `case_insensitive_keys` came off the corpus's
+`DIVERGENT` list and five nested cases were added beside it.
+
+**Option (b) was the right one, and cheaper than the entry assumed.** It says a case-insensitive
+deserializer "must lowercase with `utils::go_to_lower`, and Go's own rule is a *simple ASCII-ish
+fold* rather than full Unicode case folding, so the helper needs its own oracle before it can be
+trusted". The oracle exists now, and it says something better: Go folds ASCII **up**, not down, and
+a sweep of every scalar value finds exactly **two** non-ASCII runes whose fold lands in ASCII —
+U+017F and U+212A. Since every `json:` name in the tree is ASCII, those two are the entire Unicode
+surface, and the port needs no fold table beyond them. `go_to_lower` was the wrong tool.
+
+**Not crate-wide, and that is deliberate.** The remap is opt-in per type, and the types that opted
+in are the ones reachable from client-supplied JSON: `MessageAttachment` and everything under it.
+Option (a)'s objection — "the reachable set is every casing of every key" — applied to `alias`
+attributes, not to this; what remains is that 66 other modules still match strictly, and none of
+them decodes anything a client wrote. Adding one is two consts and a call.
+
+`encoding/json` falls back to a **case-insensitive** match when no field carries the exact JSON
+name (`{"Title":"t"}` populates `Title`, and so does `{"TITLE":"t"}` and `{"tItLe":"t"}`). serde
+matches the `rename` string byte-for-byte and treats anything else as an unknown field, which it
+silently ignores.
 
 `encoding/json` falls back to a **case-insensitive** match when no field carries the exact JSON
 name (`{"Title":"t"}` populates `Title`, and so does `{"TITLE":"t"}` and `{"tItLe":"t"}`). serde

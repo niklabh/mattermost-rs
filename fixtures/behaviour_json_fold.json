@@ -1,0 +1,794 @@
+{
+    "ascii_fold_sources": [
+        {
+            "folded": 83,
+            "name": "U+017F",
+            "rune": 383
+        },
+        {
+            "folded": 75,
+            "name": "U+212A",
+            "rune": 8490
+        }
+    ],
+    "decode": [
+        {
+            "failed": false,
+            "in": "{\"title\":\"t\"}",
+            "out": {
+                "TITLE": "",
+                "author_name": "",
+                "id": 0,
+                "text": "",
+                "title": "t",
+                "title_link": "",
+                "ts": null
+            },
+            "sorted_failed": false,
+            "sorted_in": "{\"title\":\"t\"}",
+            "sorted_out": {
+                "TITLE": "",
+                "author_name": "",
+                "id": 0,
+                "text": "",
+                "title": "t",
+                "title_link": "",
+                "ts": null
+            }
+        },
+        {
+            "failed": false,
+            "in": "{\"Title\":\"t\"}",
+            "out": {
+                "TITLE": "",
+                "author_name": "",
+                "id": 0,
+                "text": "",
+                "title": "t",
+                "title_link": "",
+                "ts": null
+            },
+            "sorted_failed": false,
+            "sorted_in": "{\"Title\":\"t\"}",
+            "sorted_out": {
+                "TITLE": "",
+                "author_name": "",
+                "id": 0,
+                "text": "",
+                "title": "t",
+                "title_link": "",
+                "ts": null
+            }
+        },
+        {
+            "failed": false,
+            "in": "{\"TITLE\":\"t\"}",
+            "out": {
+                "TITLE": "t",
+                "author_name": "",
+                "id": 0,
+                "text": "",
+                "title": "",
+                "title_link": "",
+                "ts": null
+            },
+            "sorted_failed": false,
+            "sorted_in": "{\"TITLE\":\"t\"}",
+            "sorted_out": {
+                "TITLE": "t",
+                "author_name": "",
+                "id": 0,
+                "text": "",
+                "title": "",
+                "title_link": "",
+                "ts": null
+            }
+        },
+        {
+            "failed": false,
+            "in": "{\"tItLe\":\"t\"}",
+            "out": {
+                "TITLE": "",
+                "author_name": "",
+                "id": 0,
+                "text": "",
+                "title": "t",
+                "title_link": "",
+                "ts": null
+            },
+            "sorted_failed": false,
+            "sorted_in": "{\"tItLe\":\"t\"}",
+            "sorted_out": {
+                "TITLE": "",
+                "author_name": "",
+                "id": 0,
+                "text": "",
+                "title": "t",
+                "title_link": "",
+                "ts": null
+            }
+        },
+        {
+            "failed": false,
+            "in": "{\"title\":\"exact\",\"TITLE\":\"upper\"}",
+            "out": {
+                "TITLE": "upper",
+                "author_name": "",
+                "id": 0,
+                "text": "",
+                "title": "exact",
+                "title_link": "",
+                "ts": null
+            },
+            "sorted_failed": false,
+            "sorted_in": "{\"TITLE\":\"upper\",\"title\":\"exact\"}",
+            "sorted_out": {
+                "TITLE": "upper",
+                "author_name": "",
+                "id": 0,
+                "text": "",
+                "title": "exact",
+                "title_link": "",
+                "ts": null
+            }
+        },
+        {
+            "failed": false,
+            "in": "{\"TITLE\":\"upper\",\"title\":\"exact\"}",
+            "out": {
+                "TITLE": "upper",
+                "author_name": "",
+                "id": 0,
+                "text": "",
+                "title": "exact",
+                "title_link": "",
+                "ts": null
+            },
+            "sorted_failed": false,
+            "sorted_in": "{\"TITLE\":\"upper\",\"title\":\"exact\"}",
+            "sorted_out": {
+                "TITLE": "upper",
+                "author_name": "",
+                "id": 0,
+                "text": "",
+                "title": "exact",
+                "title_link": "",
+                "ts": null
+            }
+        },
+        {
+            "failed": false,
+            "in": "{\"TiTlE\":\"folded\",\"title\":\"exact\"}",
+            "out": {
+                "TITLE": "",
+                "author_name": "",
+                "id": 0,
+                "text": "",
+                "title": "exact",
+                "title_link": "",
+                "ts": null
+            },
+            "sorted_failed": false,
+            "sorted_in": "{\"TiTlE\":\"folded\",\"title\":\"exact\"}",
+            "sorted_out": {
+                "TITLE": "",
+                "author_name": "",
+                "id": 0,
+                "text": "",
+                "title": "exact",
+                "title_link": "",
+                "ts": null
+            }
+        },
+        {
+            "failed": false,
+            "in": "{\"title\":\"exact\",\"TiTlE\":\"folded\"}",
+            "out": {
+                "TITLE": "",
+                "author_name": "",
+                "id": 0,
+                "text": "",
+                "title": "folded",
+                "title_link": "",
+                "ts": null
+            },
+            "sorted_failed": false,
+            "sorted_in": "{\"TiTlE\":\"folded\",\"title\":\"exact\"}",
+            "sorted_out": {
+                "TITLE": "",
+                "author_name": "",
+                "id": 0,
+                "text": "",
+                "title": "exact",
+                "title_link": "",
+                "ts": null
+            }
+        },
+        {
+            "failed": false,
+            "in": "{\"TiTlE\":\"a\",\"tItLe\":\"b\"}",
+            "out": {
+                "TITLE": "",
+                "author_name": "",
+                "id": 0,
+                "text": "",
+                "title": "b",
+                "title_link": "",
+                "ts": null
+            },
+            "sorted_failed": false,
+            "sorted_in": "{\"TiTlE\":\"a\",\"tItLe\":\"b\"}",
+            "sorted_out": {
+                "TITLE": "",
+                "author_name": "",
+                "id": 0,
+                "text": "",
+                "title": "b",
+                "title_link": "",
+                "ts": null
+            }
+        },
+        {
+            "failed": false,
+            "in": "{\"AUTHOR_NAME\":\"a\"}",
+            "out": {
+                "TITLE": "",
+                "author_name": "a",
+                "id": 0,
+                "text": "",
+                "title": "",
+                "title_link": "",
+                "ts": null
+            },
+            "sorted_failed": false,
+            "sorted_in": "{\"AUTHOR_NAME\":\"a\"}",
+            "sorted_out": {
+                "TITLE": "",
+                "author_name": "a",
+                "id": 0,
+                "text": "",
+                "title": "",
+                "title_link": "",
+                "ts": null
+            }
+        },
+        {
+            "failed": false,
+            "in": "{\"Author_Name\":\"a\"}",
+            "out": {
+                "TITLE": "",
+                "author_name": "a",
+                "id": 0,
+                "text": "",
+                "title": "",
+                "title_link": "",
+                "ts": null
+            },
+            "sorted_failed": false,
+            "sorted_in": "{\"Author_Name\":\"a\"}",
+            "sorted_out": {
+                "TITLE": "",
+                "author_name": "a",
+                "id": 0,
+                "text": "",
+                "title": "",
+                "title_link": "",
+                "ts": null
+            }
+        },
+        {
+            "failed": false,
+            "in": "{\"authorname\":\"a\"}",
+            "out": {
+                "TITLE": "",
+                "author_name": "",
+                "id": 0,
+                "text": "",
+                "title": "",
+                "title_link": "",
+                "ts": null
+            },
+            "sorted_failed": false,
+            "sorted_in": "{\"authorname\":\"a\"}",
+            "sorted_out": {
+                "TITLE": "",
+                "author_name": "",
+                "id": 0,
+                "text": "",
+                "title": "",
+                "title_link": "",
+                "ts": null
+            }
+        },
+        {
+            "failed": false,
+            "in": "{\"author-name\":\"a\"}",
+            "out": {
+                "TITLE": "",
+                "author_name": "",
+                "id": 0,
+                "text": "",
+                "title": "",
+                "title_link": "",
+                "ts": null
+            },
+            "sorted_failed": false,
+            "sorted_in": "{\"author-name\":\"a\"}",
+            "sorted_out": {
+                "TITLE": "",
+                "author_name": "",
+                "id": 0,
+                "text": "",
+                "title": "",
+                "title_link": "",
+                "ts": null
+            }
+        },
+        {
+            "failed": false,
+            "in": "{\"TITLE_LINK\":\"l\"}",
+            "out": {
+                "TITLE": "",
+                "author_name": "",
+                "id": 0,
+                "text": "",
+                "title": "",
+                "title_link": "l",
+                "ts": null
+            },
+            "sorted_failed": false,
+            "sorted_in": "{\"TITLE_LINK\":\"l\"}",
+            "sorted_out": {
+                "TITLE": "",
+                "author_name": "",
+                "id": 0,
+                "text": "",
+                "title": "",
+                "title_link": "l",
+                "ts": null
+            }
+        },
+        {
+            "failed": false,
+            "in": "{\"Title_Link\":\"l\"}",
+            "out": {
+                "TITLE": "",
+                "author_name": "",
+                "id": 0,
+                "text": "",
+                "title": "",
+                "title_link": "l",
+                "ts": null
+            },
+            "sorted_failed": false,
+            "sorted_in": "{\"Title_Link\":\"l\"}",
+            "sorted_out": {
+                "TITLE": "",
+                "author_name": "",
+                "id": 0,
+                "text": "",
+                "title": "",
+                "title_link": "l",
+                "ts": null
+            }
+        },
+        {
+            "failed": false,
+            "in": "{\"TEXT\":\"x\",\"TITLE\":\"t\"}",
+            "out": {
+                "TITLE": "t",
+                "author_name": "",
+                "id": 0,
+                "text": "x",
+                "title": "",
+                "title_link": "",
+                "ts": null
+            },
+            "sorted_failed": false,
+            "sorted_in": "{\"TEXT\":\"x\",\"TITLE\":\"t\"}",
+            "sorted_out": {
+                "TITLE": "t",
+                "author_name": "",
+                "id": 0,
+                "text": "x",
+                "title": "",
+                "title_link": "",
+                "ts": null
+            }
+        },
+        {
+            "failed": false,
+            "in": "{\"ID\":7}",
+            "out": {
+                "TITLE": "",
+                "author_name": "",
+                "id": 7,
+                "text": "",
+                "title": "",
+                "title_link": "",
+                "ts": null
+            },
+            "sorted_failed": false,
+            "sorted_in": "{\"ID\":7}",
+            "sorted_out": {
+                "TITLE": "",
+                "author_name": "",
+                "id": 7,
+                "text": "",
+                "title": "",
+                "title_link": "",
+                "ts": null
+            }
+        },
+        {
+            "failed": false,
+            "in": "{\"Id\":7}",
+            "out": {
+                "TITLE": "",
+                "author_name": "",
+                "id": 7,
+                "text": "",
+                "title": "",
+                "title_link": "",
+                "ts": null
+            },
+            "sorted_failed": false,
+            "sorted_in": "{\"Id\":7}",
+            "sorted_out": {
+                "TITLE": "",
+                "author_name": "",
+                "id": 7,
+                "text": "",
+                "title": "",
+                "title_link": "",
+                "ts": null
+            }
+        },
+        {
+            "failed": false,
+            "in": "{\"TS\":123}",
+            "out": {
+                "TITLE": "",
+                "author_name": "",
+                "id": 0,
+                "text": "",
+                "title": "",
+                "title_link": "",
+                "ts": 123
+            },
+            "sorted_failed": false,
+            "sorted_in": "{\"TS\":123}",
+            "sorted_out": {
+                "TITLE": "",
+                "author_name": "",
+                "id": 0,
+                "text": "",
+                "title": "",
+                "title_link": "",
+                "ts": 123
+            }
+        },
+        {
+            "failed": false,
+            "in": "{\"Key\":\"k\"}",
+            "out": {
+                "TITLE": "",
+                "author_name": "",
+                "id": 0,
+                "text": "",
+                "title": "",
+                "title_link": "",
+                "ts": null
+            },
+            "sorted_failed": false,
+            "sorted_in": "{\"Key\":\"k\"}",
+            "sorted_out": {
+                "TITLE": "",
+                "author_name": "",
+                "id": 0,
+                "text": "",
+                "title": "",
+                "title_link": "",
+                "ts": null
+            }
+        },
+        {
+            "failed": false,
+            "in": "{\"ſ\":\"s\"}",
+            "out": {
+                "TITLE": "",
+                "author_name": "",
+                "id": 0,
+                "text": "",
+                "title": "",
+                "title_link": "",
+                "ts": null
+            },
+            "sorted_failed": false,
+            "sorted_in": "{\"ſ\":\"s\"}",
+            "sorted_out": {
+                "TITLE": "",
+                "author_name": "",
+                "id": 0,
+                "text": "",
+                "title": "",
+                "title_link": "",
+                "ts": null
+            }
+        },
+        {
+            "failed": false,
+            "in": "{\"t\\u017f\":123}",
+            "out": {
+                "TITLE": "",
+                "author_name": "",
+                "id": 0,
+                "text": "",
+                "title": "",
+                "title_link": "",
+                "ts": 123
+            },
+            "sorted_failed": false,
+            "sorted_in": "{\"tſ\":123}",
+            "sorted_out": {
+                "TITLE": "",
+                "author_name": "",
+                "id": 0,
+                "text": "",
+                "title": "",
+                "title_link": "",
+                "ts": 123
+            }
+        },
+        {
+            "failed": false,
+            "in": "{\"title_lin\\u212a\":\"l\"}",
+            "out": {
+                "TITLE": "",
+                "author_name": "",
+                "id": 0,
+                "text": "",
+                "title": "",
+                "title_link": "l",
+                "ts": null
+            },
+            "sorted_failed": false,
+            "sorted_in": "{\"title_linK\":\"l\"}",
+            "sorted_out": {
+                "TITLE": "",
+                "author_name": "",
+                "id": 0,
+                "text": "",
+                "title": "",
+                "title_link": "l",
+                "ts": null
+            }
+        },
+        {
+            "failed": false,
+            "in": "{\"tit\\u017fe\":\"no-such-field\"}",
+            "out": {
+                "TITLE": "",
+                "author_name": "",
+                "id": 0,
+                "text": "",
+                "title": "",
+                "title_link": "",
+                "ts": null
+            },
+            "sorted_failed": false,
+            "sorted_in": "{\"titſe\":\"no-such-field\"}",
+            "sorted_out": {
+                "TITLE": "",
+                "author_name": "",
+                "id": 0,
+                "text": "",
+                "title": "",
+                "title_link": "",
+                "ts": null
+            }
+        },
+        {
+            "failed": false,
+            "in": "{\"nosuchkey\":\"x\"}",
+            "out": {
+                "TITLE": "",
+                "author_name": "",
+                "id": 0,
+                "text": "",
+                "title": "",
+                "title_link": "",
+                "ts": null
+            },
+            "sorted_failed": false,
+            "sorted_in": "{\"nosuchkey\":\"x\"}",
+            "sorted_out": {
+                "TITLE": "",
+                "author_name": "",
+                "id": 0,
+                "text": "",
+                "title": "",
+                "title_link": "",
+                "ts": null
+            }
+        },
+        {
+            "failed": false,
+            "in": "{\"\":\"x\"}",
+            "out": {
+                "TITLE": "",
+                "author_name": "",
+                "id": 0,
+                "text": "",
+                "title": "",
+                "title_link": "",
+                "ts": null
+            },
+            "sorted_failed": false,
+            "sorted_in": "{\"\":\"x\"}",
+            "sorted_out": {
+                "TITLE": "",
+                "author_name": "",
+                "id": 0,
+                "text": "",
+                "title": "",
+                "title_link": "",
+                "ts": null
+            }
+        }
+    ],
+    "fold_name": [
+        {
+            "in": "",
+            "out": ""
+        },
+        {
+            "in": "title",
+            "out": "TITLE"
+        },
+        {
+            "in": "Title",
+            "out": "TITLE"
+        },
+        {
+            "in": "TITLE",
+            "out": "TITLE"
+        },
+        {
+            "in": "tItLe",
+            "out": "TITLE"
+        },
+        {
+            "in": "TiTlE",
+            "out": "TITLE"
+        },
+        {
+            "in": "author_name",
+            "out": "AUTHOR_NAME"
+        },
+        {
+            "in": "Author_Name",
+            "out": "AUTHOR_NAME"
+        },
+        {
+            "in": "AUTHOR_NAME",
+            "out": "AUTHOR_NAME"
+        },
+        {
+            "in": "authorname",
+            "out": "AUTHORNAME"
+        },
+        {
+            "in": "author-name",
+            "out": "AUTHOR-NAME"
+        },
+        {
+            "in": "ts",
+            "out": "TS"
+        },
+        {
+            "in": "TS",
+            "out": "TS"
+        },
+        {
+            "in": "Ts",
+            "out": "TS"
+        },
+        {
+            "in": "tS",
+            "out": "TS"
+        },
+        {
+            "in": "id",
+            "out": "ID"
+        },
+        {
+            "in": "ID",
+            "out": "ID"
+        },
+        {
+            "in": "iD",
+            "out": "ID"
+        },
+        {
+            "in": "k",
+            "out": "K"
+        },
+        {
+            "in": "K",
+            "out": "K"
+        },
+        {
+            "in": "K",
+            "out": "K"
+        },
+        {
+            "in": "s",
+            "out": "S"
+        },
+        {
+            "in": "S",
+            "out": "S"
+        },
+        {
+            "in": "ſ",
+            "out": "S"
+        },
+        {
+            "in": "µ",
+            "out": "µ"
+        },
+        {
+            "in": "μ",
+            "out": "µ"
+        },
+        {
+            "in": "Σ",
+            "out": "Σ"
+        },
+        {
+            "in": "σ",
+            "out": "Σ"
+        },
+        {
+            "in": "ς",
+            "out": "Σ"
+        },
+        {
+            "in": "İ",
+            "out": "İ"
+        },
+        {
+            "in": "ı",
+            "out": "ı"
+        },
+        {
+            "in": "café",
+            "out": "CAFÉ"
+        },
+        {
+            "in": "CAFÉ",
+            "out": "CAFÉ"
+        },
+        {
+            "in": "a1",
+            "out": "A1"
+        },
+        {
+            "in": "A1",
+            "out": "A1"
+        },
+        {
+            "in": "_",
+            "out": "_"
+        },
+        {
+            "in": "__",
+            "out": "__"
+        },
+        {
+            "in": "-",
+            "out": "-"
+        }
+    ]
+}

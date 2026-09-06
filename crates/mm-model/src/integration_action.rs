@@ -78,6 +78,43 @@ fn string_interface_is_empty(m: &StringInterface) -> bool {
 
 // --- PostAction ----------------------------------------------------------------------------
 
+/// The `json:` names of [`PostAction`], in declaration order. See
+/// [`crate::message_attachment::MESSAGE_ATTACHMENT_FIELDS`] for what these are for.
+pub const POST_ACTION_FIELDS: crate::go_json::GoFields = crate::go_json::GoFields {
+    names: &[
+        "id",
+        "type",
+        "name",
+        "tooltip",
+        "disabled",
+        "style",
+        "data_source",
+        "options",
+        "default_option",
+        "integration",
+        "cookie",
+    ],
+    nested: &[
+        ("options", &POST_ACTION_OPTIONS_FIELDS),
+        ("integration", &POST_ACTION_INTEGRATION_FIELDS),
+    ],
+};
+
+/// The names of [`PostActionOptions`].
+pub const POST_ACTION_OPTIONS_FIELDS: crate::go_json::GoFields = crate::go_json::GoFields {
+    names: &["text", "value"],
+    nested: &[],
+};
+
+/// The names of [`PostActionIntegration`].
+///
+/// `context` is a `map[string]any` on both servers, so it has no field names of its own and is
+/// deliberately not nested: Go matches nothing inside a map, it just stores the keys as written.
+pub const POST_ACTION_INTEGRATION_FIELDS: crate::go_json::GoFields = crate::go_json::GoFields {
+    names: &["url", "context"],
+    nested: &[],
+};
+
 /// Port of `model.PostAction` (integration_action.go:162).
 ///
 /// Every field carries `omitempty`, so a zero `PostAction` serialises as `{}`.

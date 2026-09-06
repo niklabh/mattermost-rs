@@ -7179,3 +7179,66 @@ this machine where the committed fixture says it succeeds. That is this host's t
 change and not this session's work, so both files were reverted rather than committed. Worth
 knowing before the next generator run: the corpus is zone-dependent by design ([D-032]'s
 neighbour), and a lowercase zone name is apparently loadable on some systems and not others.
+
+## Go's lenient JSON key matching — [D-040], the third standing decision (2026-09-06)
+
+New: `crates/mm-model/src/go_json.rs`, `reference/dump/behaviour_json_fold.go`,
+`fixtures/behaviour_json_fold.json`, `scripts/mutations/json-fold.plan`. Changed:
+`crates/mm-model/src/post.rs`, `crates/mm-model/src/message_attachment.rs`,
+`crates/mm-model/src/integration_action.rs`, `crates/mm-model/src/lib.rs`,
+`reference/dump/behaviour_post_attachments.go`, `fixtures/behaviour_post_attachments.json`,
+`reference/dump/main.go`.
+
+| Go file | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| encoding/json fold.go, decode.go:699 | `mm-model/src/go_json.rs` | DONE | 19 (3 go_parity) | Exact name first, then the fold. Keys are rewritten to their exact spellings; the derived `Deserialize` is untouched. |
+| model/message_attachment.go, integration_action.go | five `GoFields` consts | DONE | 4 schema | Hand-maintained name lists, checked against the structs by a test that fails to compile when a field is added. |
+
+**Go folds ASCII *up*, and the whole non-ASCII surface is two runes.** [D-040] expected this to
+need `utils::go_to_lower` and a Unicode fold table. It does not: `foldName` upper-cases ASCII and
+pushes everything else through `foldRune`, and a sweep of every scalar value — recorded in the
+fixture, so a Unicode revision would fail the test rather than open a hole — finds exactly **two**
+runes whose fold lands on an ASCII byte: U+017F LATIN SMALL LETTER LONG S → `S`, and U+212A KELVIN
+SIGN → `K`. Every `json:` name in the tree is ASCII, so those two are the entire reachable set, and
+a rune that folds to something non-ASCII can be passed through unchanged and still give the right
+*answer*. The oracle proves both are live: `{"tſ":123}` populates `ts`, and `{"title_linK":"l"}`
+populates `title_link`, on the real Go decoder.
+
+### Two rules that look like one
+
+`{"title":"exact","TiTlE":"folded"}` and `{"TiTlE":"folded","title":"exact"}` give **different**
+answers in Go: it resolves each key as it reads it and the last assignment wins. So "exact beats
+folded" is not a rule at all — it is a consequence of ordering. Two *folded* keys resolve the same
+way, last-wins, which is why the exact-name set is captured **before** any rename rather than
+tested with `contains_key` as renames land; the tidier spelling makes the second folded key lose
+and a mutation of it is caught.
+
+**The ordering itself is not ours to reproduce, and does not need to be.** `serde_json::Map` is a
+`BTreeMap` — `preserve_order` is deliberately off, because Go marshals a `map[string]any` with
+sorted keys and turning it on would change every props object we emit — so the author's order is
+gone before the remap runs. It is gone on Go's side too: both servers read these props out of the
+same `jsonb` column, and Postgres orders keys by (length, bytewise). Two keys that fold together
+differ only by case and therefore have equal length, which is exactly where `jsonb`'s ordering and
+`BTreeMap`'s coincide. The generator now records Go's answer for the **sorted** spelling of each
+corpus document alongside the author's, and the parity test asserts against that one; comparing
+against the author's order would be asserting a fact neither server can observe.
+
+### The remap must run before the nil strip, and a corpus case says so
+
+`strip_nil_elements` looks for the literal keys `actions` and `fields`, because `Vec<PostAction>`
+cannot hold the nil that Go's `[]*PostAction` can. Run it first and a payload writing `Actions`
+keeps its nil into the decode, which drops the whole attachment. Reversing the two lines survived
+the entire suite until `case_insensitive_nil_action` was added.
+
+### Schemas are hand-maintained, so they are checked
+
+`every_schema_covers_its_struct` builds each type with an **explicit struct literal** — no
+`..Default::default()` — so adding a field to `MessageAttachment` or `PostAction` fails to compile
+there until someone updates the schema too. Three further tests assert no two names in a schema
+fold together (so declaration order cannot decide anything), every name is ASCII (the precondition
+the two-rune table rests on), and every nested key is also one of the schema's own names.
+
+Mutation run: **18 run, 16 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/json-fold.plan`). The first run had a **harness fault** — a mutation that
+produced uncompilable Rust — and one survivor, the step-ordering one above; both were fixed and the
+plan re-run whole, since a harness fault voids the tally.

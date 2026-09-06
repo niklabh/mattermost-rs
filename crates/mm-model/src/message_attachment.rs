@@ -43,6 +43,48 @@ pub(crate) fn hex_color_regex() -> &'static regex::Regex {
     &RE
 }
 
+/// The `json:` names Go matches against when decoding a `MessageAttachment`, in declaration order.
+///
+/// Go falls back to a case-insensitive match when no field carries the exact name (decode.go:699),
+/// so `{"Title":"x"}` populates `title` on that server and nothing on this one. [D-040] measured
+/// exactly that through [`crate::post::Post::attachments`], which is where a webhook or
+/// slash-command payload becomes a model type. [`crate::go_json::remap_object_keys`] closes it.
+///
+/// **Declaration order matters** — Go's folded index keeps the first name of a colliding pair
+/// (encode.go:1306) — and so does completeness: a name missing here is a field that silently keeps
+/// serde's stricter matching while its neighbours do not.
+pub const MESSAGE_ATTACHMENT_FIELDS: crate::go_json::GoFields = crate::go_json::GoFields {
+    names: &[
+        "id",
+        "fallback",
+        "color",
+        "pretext",
+        "author_name",
+        "author_link",
+        "author_icon",
+        "title",
+        "title_link",
+        "text",
+        "fields",
+        "image_url",
+        "thumb_url",
+        "footer",
+        "footer_icon",
+        "ts",
+        "actions",
+    ],
+    nested: &[
+        ("fields", &MESSAGE_ATTACHMENT_FIELD_FIELDS),
+        ("actions", &crate::integration_action::POST_ACTION_FIELDS),
+    ],
+};
+
+/// The names of [`MessageAttachmentField`]. See [`MESSAGE_ATTACHMENT_FIELDS`].
+pub const MESSAGE_ATTACHMENT_FIELD_FIELDS: crate::go_json::GoFields = crate::go_json::GoFields {
+    names: &["title", "value", "short"],
+    nested: &[],
+};
+
 // --- MessageAttachment -----------------------------------------------------------------------
 
 /// Port of `model.MessageAttachment` (message_attachment.go:20).
@@ -758,5 +800,178 @@ mod go_parity {
                 "{name}: props"
             );
         }
+    }
+}
+
+/// The [`crate::go_json::GoFields`] schemas that make [D-040] closed, checked against the structs
+/// they describe.
+///
+/// A schema is a hand-maintained list of names, which is exactly the kind of thing that rots: a
+/// field added to `MessageAttachment` and not to `MESSAGE_ATTACHMENT_FIELDS` keeps serde's stricter
+/// matching while every field beside it has Go's, and nothing else in the tree would notice.
+#[cfg(test)]
+mod schema_tests {
+    use super::*;
+    use crate::go_json::{GoFields, fold_name, non_ascii_field_name};
+    use crate::integration_action::{
+        POST_ACTION_FIELDS, POST_ACTION_INTEGRATION_FIELDS, POST_ACTION_OPTIONS_FIELDS, PostAction,
+        PostActionIntegration, PostActionOptions,
+    };
+
+    /// The keys `serde` actually emits for a value, which is the same set it will accept.
+    fn serialized_keys<T: serde::Serialize>(value: &T) -> Vec<String> {
+        let json = serde_json::to_value(value).expect("serialises");
+        json.as_object()
+            .expect("a struct is an object")
+            .keys()
+            .cloned()
+            .collect()
+    }
+
+    fn assert_schema_covers<T: serde::Serialize>(value: &T, schema: &GoFields, what: &str) {
+        let mut names: Vec<String> = schema.names.iter().map(|n| (*n).to_owned()).collect();
+        names.sort();
+        assert_eq!(
+            serialized_keys(value),
+            names,
+            "{what}: the schema and the struct disagree about which JSON names exist. A name \
+             missing from the schema is a field that silently keeps serde's stricter matching."
+        );
+    }
+
+    /// Every field of every schema'd struct is in its schema.
+    ///
+    /// The values are built with explicit struct literals rather than `..Default::default()`, so
+    /// **adding a field to any of these structs fails to compile here** until someone comes back
+    /// and updates both the literal and the schema. That is the point: a serialisation test alone
+    /// would miss a new field carrying `skip_serializing_if`.
+    #[test]
+    fn every_schema_covers_its_struct() {
+        let option = PostActionOptions {
+            text: "o".to_owned(),
+            value: "v".to_owned(),
+        };
+        assert_schema_covers(&option, &POST_ACTION_OPTIONS_FIELDS, "PostActionOptions");
+
+        let integration = PostActionIntegration {
+            url: "https://x.example.com".to_owned(),
+            // Populated: `context` carries `skip_serializing_if`, so an empty map would make
+            // this test pass with the field absent — exactly the blind spot it exists to close.
+            context: {
+                let mut context = crate::utils::StringInterface::new();
+                context.insert("k".to_owned(), serde_json::Value::from("v"));
+                context
+            },
+        };
+        assert_schema_covers(
+            &integration,
+            &POST_ACTION_INTEGRATION_FIELDS,
+            "PostActionIntegration",
+        );
+
+        let action = PostAction {
+            id: "a".to_owned(),
+            action_type: "button".to_owned(),
+            name: "n".to_owned(),
+            tooltip: "t".to_owned(),
+            disabled: true,
+            style: "primary".to_owned(),
+            data_source: "users".to_owned(),
+            options: vec![option],
+            default_option: "d".to_owned(),
+            integration: Some(integration),
+            cookie: "c".to_owned(),
+        };
+        assert_schema_covers(&action, &POST_ACTION_FIELDS, "PostAction");
+
+        let field = MessageAttachmentField {
+            title: "ft".to_owned(),
+            value: serde_json::Value::String("fv".to_owned()),
+            short: crate::slack_compatibility::SlackCompatibleBool(true),
+        };
+        assert_schema_covers(
+            &field,
+            &MESSAGE_ATTACHMENT_FIELD_FIELDS,
+            "MessageAttachmentField",
+        );
+
+        let attachment = MessageAttachment {
+            id: 1,
+            fallback: "f".to_owned(),
+            color: "#112233".to_owned(),
+            pretext: "p".to_owned(),
+            author_name: "an".to_owned(),
+            author_link: "al".to_owned(),
+            author_icon: "ai".to_owned(),
+            title: "t".to_owned(),
+            title_link: "tl".to_owned(),
+            text: "x".to_owned(),
+            fields: Some(vec![field]),
+            image_url: "iu".to_owned(),
+            thumb_url: "tu".to_owned(),
+            footer: "fo".to_owned(),
+            footer_icon: "fi".to_owned(),
+            timestamp: serde_json::Value::from(1_700_000_000_i64),
+            actions: vec![action],
+        };
+        assert_schema_covers(&attachment, &MESSAGE_ATTACHMENT_FIELDS, "MessageAttachment");
+    }
+
+    /// No two names inside one schema fold together.
+    ///
+    /// Go breaks such a tie by declaration order (encode.go:1306) and this port relies on the same
+    /// ordering — but only where a tie exists. Asserting there is none is stronger than
+    /// reproducing the tiebreak: it says the schemas are in a shape where declaration order cannot
+    /// change any answer, so a future reorder of the `names` list is safe.
+    #[test]
+    fn no_two_names_in_a_schema_fold_together() {
+        for (what, schema) in schemas() {
+            let mut seen: Vec<(String, &str)> = Vec::new();
+            for name in schema.names {
+                let folded = fold_name(name);
+                if let Some((_, other)) = seen.iter().find(|(f, _)| *f == folded) {
+                    panic!(
+                        "{what}: `{name}` and `{other}` fold to the same name, so declaration order decides which wins"
+                    );
+                }
+                seen.push((folded, name));
+            }
+        }
+    }
+
+    /// The precondition [`crate::go_json::fold_name`]'s two-rune table rests on.
+    #[test]
+    fn every_schema_name_is_ascii() {
+        for (what, schema) in schemas() {
+            assert_eq!(
+                non_ascii_field_name(schema),
+                None,
+                "{what}: a non-ASCII json name would need Go's whole SimpleFold table"
+            );
+        }
+    }
+
+    /// Every nested key names a field the schema also declares — otherwise the recursion is aimed
+    /// at a key that can never be present under its exact spelling.
+    #[test]
+    fn every_nested_key_is_also_a_name() {
+        for (what, schema) in schemas() {
+            for (key, _) in schema.nested {
+                assert!(
+                    schema.names.contains(key),
+                    "{what}: nested key `{key}` is not one of the schema's own names"
+                );
+            }
+        }
+    }
+
+    fn schemas() -> Vec<(&'static str, &'static GoFields)> {
+        vec![
+            ("MessageAttachment", &MESSAGE_ATTACHMENT_FIELDS),
+            ("MessageAttachmentField", &MESSAGE_ATTACHMENT_FIELD_FIELDS),
+            ("PostAction", &POST_ACTION_FIELDS),
+            ("PostActionOptions", &POST_ACTION_OPTIONS_FIELDS),
+            ("PostActionIntegration", &POST_ACTION_INTEGRATION_FIELDS),
+        ]
     }
 }
