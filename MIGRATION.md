@@ -6933,3 +6933,18 @@ A mutation of the **blank `where`** was written and then dropped: `AppError.Wher
 `json:"-"` in Go and `#[serde(skip)]` here, so no parity test can see it and it survived exactly as
 it had to. That Go leaves it blank on purpose, where every other error in the tree names its
 caller, is recorded in the module doc — which is where someone changing the line will look.
+
+### And a check the harness did not have: `scripts/preflight-plans.sh`
+
+Every mutation plan is committed so a later session can re-run it. Nothing checked that they still
+*apply*. Running the same pre-flight `mutate-batch.sh` does, over all 42 plans at once, reports
+**42 stale anchors out of 700 lines** — some old, several introduced today, because a route that
+adds a handler to a file an earlier plan anchors on can turn a unique pattern into an ambiguous
+one. `mutate.sh` replaces the **first** occurrence, so an ambiguous anchor silently moves the
+verdict to a function nobody meant to test. [D-168] records the backlog; the tallies reported this
+session are unaffected, because each plan passed its own pre-flight at the moment it ran.
+
+The first version of this checker unescaped `\n` in Python and reported **77** problems — it
+disagreed with the runner on every pattern containing an escaped backslash. `mutate.sh`'s own
+header already says why that is worthless: *a validator that decodes differently from the runner is
+not a validator.* The committed script uses `printf %b`, as the runner does.

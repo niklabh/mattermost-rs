@@ -4663,6 +4663,39 @@ route whose live shape does not match the source is **skipped and recorded**, no
 
 ---
 
+## D-168 · 42 of 700 mutation-plan anchors no longer match the tree
+
+**Status** OPEN · **Severity** unverified · **Raised** 2026-09-06 (phase 2, mutation harness)
+
+`scripts/preflight-plans.sh` — new, and the point of the entry — checks every committed plan's
+`from` pattern against the current source using the same `printf %b` the runner uses. Today it
+reports **42 stale anchors out of 700 plan lines**, spread over roughly a dozen plans.
+
+Two failure modes, and the second is why this is not cosmetic:
+
+| | what `mutate.sh` does | cost |
+|---|---|---|
+| **0 matches** | exits 3; `set -e` aborts the batch | loud — every mutation after it is thrown away |
+| **2+ matches** | replaces the **first** occurrence | **silent** — the verdict belongs to a function nobody meant to test |
+
+Both kinds are present. Some anchors rotted long ago; several rotted **today**, because a route
+added handlers to a file an earlier plan already anchored on — `incoming-hooks.plan`'s
+`api-trailing-newline` matched once when it was written and matches three times now that
+`webhooks.rs` holds four handlers.
+
+**What this does *not* invalidate.** Every plan run this session passed `mutate-batch.sh`'s own
+pre-flight at the moment it ran, so each reported tally was measured against an unambiguous anchor.
+The staleness is about **re-running** them later, which is exactly what a committed plan is for.
+
+**What is owed:** re-anchor the 42, one plan at a time, re-running each to confirm the verdicts
+still hold. Deliberately not attempted in the session that found it: fixing an ambiguous anchor
+without re-running its plan trades a known-stale line for an unverified one, and there were a dozen
+plans' worth.
+
+**Where the pin lives:** the header comment on `scripts/preflight-plans.sh`, which explains both
+failure modes and why the unescaping has to be the runner's own.
+
+---
 ## D-131 · The role and scheme stores are read-only
 
 **Status** OPEN · **Severity** incomplete · **Raised** 2026-08-19 (phase 2, role/scheme stores)
