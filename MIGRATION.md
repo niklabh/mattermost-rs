@@ -6599,3 +6599,70 @@ mutations here were then filtered on `refused_for_ownership` — a *function* na
 were reported SURVIVED against a run of zero tests. The rule is worth restating as a check rather
 than a fact: **a SURVIVED verdict on a mutation you predicted would be caught is a claim about the
 filter until the CAUGHT lines around it name real tests.**
+
+## `GET /api/v4/channels/{channel_id}/common_teams` — `getDirectOrGroupMessageMembersCommonTeams` (2026-09-06)
+
+Served, except for one branch. `crates/mm-api/src/common_teams.rs`,
+`crates/mm-app/src/common_teams.rs`, two new queries in `crates/mm-store/src/team_store.rs`; 10
+parity tests in `crates/mm-api/tests/parity/common_teams.rs` and 1 store test in
+`crates/mm-store/tests/db_team_get_many.rs`. The webapp asks it before offering to convert a group
+message into a channel.
+
+**The one thing a reader would otherwise get wrong: a bot member makes this route unanswerable.**
+Go skips a bot when `IsBotExemptFromDMRestrictions` says so, and that function's last test reads
+`pluginsEnvironment.Available()` — the plugin manifests **loaded in the running server's memory**.
+A plugin-owned bot is exempt in Go and unknowable here, so a channel with an active bot member is
+forwarded. The two earlier branches (the system bot by username, a bot the caller owns) are
+portable and deliberately **not** implemented alone: answering two thirds of a rule is how a port
+gets a wrong answer confidently.
+
+Three more. A channel that does not exist is a **403**, not a 404 — nothing looks it up before the
+permission check, and the check answers false when it cannot fetch it, which is the same answer a
+stranger gets and the reason this route cannot be used to probe for DMs. The **guest gate runs
+first**, before any permission question, and its id names group-message *conversion*
+(`api.channel.gm_to_channel_conversion.not_allowed_for_user.request_error`) on a route that only
+reads. And there are **three empty answers**: `[]` for no common team, `null` for a caller who is
+not an active member (Go's nil slice, channel.go:4275), and the forward.
+
+Mutation run: **20 run, 18 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/common-teams.plan`).
+
+### Five survivors, and each named a row the fixture did not have
+
+- a **left** team membership (`TeamMembers.DeleteAt != 0`),
+- an **archived** team (`Teams.DeleteAt != 0`) that everyone is in,
+- a **deactivated** channel member,
+- a caller the team sanitiser actually strips fields for — the fixture admin has `manage_system`,
+  so nothing was stripped and dropping `SanitizeTeams` was invisible,
+- and `GetMany`'s two unreachable behaviours: it has **no `DeleteAt` predicate**, and it turns an
+  empty result into a typed not-found the app layer answers **404** to. Its only migrated caller
+  never passes an empty list and never passes an archived team's id, so both are tested at the
+  store instead.
+
+The guest branch is reachable only in one order: **log in first, then promote to `system_guest`.**
+Guest accounts are disabled on this server so a guest cannot log in, but an existing session
+survives the role change and `IsGuest()` reads the user row, not the session.
+
+`createGroupChannel` puts the **requesting user** in the channel, so the "not a member" fixture had
+to be created with another user's token — listing three other users is not enough to stay out of
+it.
+
+### A mutation that could not be written in SQL
+
+Forcing the intersection into a union by rewriting `HAVING COUNT(...) = $2` changes the type sqlx
+infers for the column, and the mutated source stops compiling — a harness fault, not a verdict.
+The plan mutates the **bound value** instead (`1` rather than the id count), which is the same
+semantic change with the query untouched. Worth remembering for any `query_as!` whose shape a
+mutation would disturb.
+
+### A store test's fixture took another suite's module down
+
+`db_team_get_many.rs` planted two teams sharing the display name "mmrs get many".
+`parity/teams_all.rs` reads the whole `Teams` table and **refuses to run** when two rows share a
+display name, because `ORDER BY DisplayName` has no tiebreak — so all sixteen of its tests failed,
+fifteen of them on the `OnceCell` retry rather than on the real cause. `cargo test --workspace`
+runs the store tests and the parity binary against the same database at the same time; a store
+fixture is not private just because it lives in `mm-store`.
+
+The rule this adds to the ones already recorded: **a planted row must be unique in whatever column
+some other suite sorts by.** Distinct ids are not enough.

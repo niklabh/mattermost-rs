@@ -6,6 +6,7 @@
 pub mod audit;
 pub mod authorization;
 pub mod channel;
+pub mod common_teams;
 pub mod config;
 pub mod draft;
 pub mod emoji;

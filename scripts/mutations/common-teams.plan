@@ -1,0 +1,47 @@
+# Mutation plan for GET /api/v4/channels/{channel_id}/common_teams
+# (getDirectOrGroupMessageMembersCommonTeams).
+#
+#   scripts/mutate-batch.sh scripts/mutations/common-teams.plan
+#
+# The decisions here: `HAVING COUNT = len(userIDs)` is what makes the answer an *intersection*
+# rather than a union; the two `DeleteAt = 0`s (a membership someone left, and a deleted team) do
+# different jobs and `GetMany` beside them has neither; the guest gate runs **before** the
+# permission check, so which of two 403s a guest gets depends on the order; and the three empty
+# answers — `[]`, `null`, and a forward — are three different bytes.
+#
+# **Three lines run under `store`.** `GetMany` has no `DeleteAt` predicate and turns an empty
+# result into a typed not-found, and neither is reachable over HTTP: its only migrated caller
+# feeds it ids that a query has already filtered archived teams out of, and never an empty list.
+# `tests/db_team_get_many.rs` exercises both directly. The filter is a **test name**, not a file
+# name — see `scripts/mutate.sh`.
+#
+# `store-common-having-count` mutates the **bound value** rather than the `HAVING` expression:
+# rewriting the SQL to force a union changes the type sqlx infers for the column and the mutated
+# source stops compiling, which is a harness fault and not a verdict. Passing `1` instead of the
+# id count is the same semantic change — "any member" instead of "every member" — with the query
+# untouched.
+#
+# The last two lines are the no-op controls and must SURVIVE.
+
+store-common-having-count	crates/mm-store/src/team_store.rs	        i64::try_from(user_ids.len()).unwrap_or(i64::MAX)	        1i64	api	common_teams
+store-common-membership-deleteat	crates/mm-store/src/team_store.rs	                 WHERE userid = ANY($1)\n                   AND deleteat = 0	                 WHERE userid = ANY($1)\n                   AND deleteat >= 0	api	common_teams
+store-common-team-deleteat	crates/mm-store/src/team_store.rs	         WHERE t.deleteat = 0\n         GROUP BY t.id	         WHERE t.deleteat >= 0\n         GROUP BY t.id	api	common_teams
+store-get-many-empty-is-not-found	crates/mm-store/src/team_store.rs	        return Err(StoreError::NotFound {\n            entity: "Team",\n            criteria: format!("ids={ids:?}"),\n        });	        return Ok(Vec::new());	store	get_many_returns_archived
+store-get-many-deleteat-filter	crates/mm-store/src/team_store.rs	          FROM teams t\n         WHERE t.id = ANY($1)\n        "#,\n        ids	          FROM teams t\n         WHERE t.id = ANY($1) AND t.deleteat = 0\n        "#,\n        ids	store	get_many_returns_archived
+store-get-many-id-filter	crates/mm-store/src/team_store.rs	          FROM teams t\n         WHERE t.id = ANY($1)\n        "#,\n        ids	          FROM teams t\n         WHERE t.id = ANY($1) OR TRUE\n        "#,\n        ids	store	get_many_returns_archived
+app-active-members-only	crates/mm-app/src/common_teams.rs	            .get_profiles_in_channel(channel_id, 0, CHANNEL_GROUP_MAX_USERS as i64, Some(false))	            .get_profiles_in_channel(channel_id, 0, CHANNEL_GROUP_MAX_USERS as i64, None)	api	common_teams
+app-channel-type-check	crates/mm-app/src/common_teams.rs	        if channel.channel_type != CHANNEL_TYPE_GROUP && channel.channel_type != CHANNEL_TYPE_DIRECT\n        {	        if false {	api	common_teams
+app-direct-is-not-allowed	crates/mm-app/src/common_teams.rs	        if channel.channel_type != CHANNEL_TYPE_GROUP && channel.channel_type != CHANNEL_TYPE_DIRECT\n        {	        if channel.channel_type != CHANNEL_TYPE_GROUP {	api	common_teams
+app-bot-member-not-forwarded	crates/mm-app/src/common_teams.rs	        if members.iter().any(|member| member.is_bot) {\n            return Ok(CommonTeams::BotMember);\n        }	        if false {\n            return Ok(CommonTeams::BotMember);\n        }	api	common_teams
+app-non-member-short-circuit	crates/mm-app/src/common_teams.rs	        if !user_ids.iter().any(|id| id == requesting_user_id) {\n            return Ok(CommonTeams::NotAMember);\n        }	        if false {\n            return Ok(CommonTeams::NotAMember);\n        }	api	common_teams
+app-empty-ids-becomes-not-found	crates/mm-app/src/common_teams.rs	        if team_ids.is_empty() {	        if false {	api	common_teams
+api-guest-gate-removed	crates/mm-api/src/common_teams.rs	    if user.is_guest() {	    if false {	api	common_teams
+api-guest-gate-after-permission	crates/mm-api/src/common_teams.rs	    let user = match state.app.get_user(&session.0.user_id).await {	    let (early_allowed, _) = state\n        .app\n        .session_has_permission_to_channel(&session.0, channel_id, &PERMISSION_READ_CHANNEL)\n        .await;\n    if !early_allowed {\n        return Outcome::Failed(ApiError::from(make_permission_error(\n            &session.0,\n            &[&PERMISSION_READ_CHANNEL],\n        )));\n    }\n    let user = match state.app.get_user(&session.0.user_id).await {	api	common_teams
+api-permission-check-removed	crates/mm-api/src/common_teams.rs	    if !allowed {\n        tracing::Span::current().record("outcome", "refused");	    if false {\n        tracing::Span::current().record("outcome", "refused");	api	common_teams
+api-not-a-member-is-empty-array	crates/mm-api/src/common_teams.rs	            b"null".to_vec()	            b"[]".to_vec()	api	common_teams
+api-trailing-newline	crates/mm-api/src/common_teams.rs	    let mut body = body;\n    body.push(b'\\n');	    let body = body;	api	common_teams
+api-sanitize-dropped	crates/mm-api/src/common_teams.rs	            state.app.sanitize_teams(&session.0, &mut teams).await;	            let _ = &mut teams;	api	common_teams
+#
+# --- no-op controls: these must SURVIVE ---
+control-rename-binding	crates/mm-app/src/common_teams.rs	        let user_ids: Vec<String> = members.into_iter().map(|member| member.id).collect();	        let active_ids: Vec<String> = members.into_iter().map(|member| member.id).collect();\n        let user_ids = active_ids;	api	common_teams
+control-reorder-independent-selects	crates/mm-store/src/team_store.rs	               t.companyname,\n               t.alloweddomains,\n               t.inviteid,\n               t.allowopeninvite,\n               t.lastteamiconupdate,\n               t.schemeid,\n               t.groupconstrained,\n               t.cloudlimitsarchived,\n               EXISTS (\n                   SELECT 1 FROM accesscontrolpolicies acp\n                    WHERE acp.id = t.id AND acp.type = 'team'\n               ) AS "policy_enforced!",\n               COALESCE((\n                   SELECT acp.active FROM accesscontrolpolicies acp\n                    WHERE acp.id = t.id AND acp.type = 'team' AND acp.active = TRUE\n                    LIMIT 1\n               ), false) AS "policy_is_active!"\n          FROM teams t\n         WHERE t.id = ANY($1)	               t.alloweddomains,\n               t.companyname,\n               t.inviteid,\n               t.allowopeninvite,\n               t.lastteamiconupdate,\n               t.schemeid,\n               t.groupconstrained,\n               t.cloudlimitsarchived,\n               EXISTS (\n                   SELECT 1 FROM accesscontrolpolicies acp\n                    WHERE acp.id = t.id AND acp.type = 'team'\n               ) AS "policy_enforced!",\n               COALESCE((\n                   SELECT acp.active FROM accesscontrolpolicies acp\n                    WHERE acp.id = t.id AND acp.type = 'team' AND acp.active = TRUE\n                    LIMIT 1\n               ), false) AS "policy_is_active!"\n          FROM teams t\n         WHERE t.id = ANY($1)	api	common_teams

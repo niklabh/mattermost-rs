@@ -8,6 +8,7 @@
 pub mod audits;
 pub mod auth;
 pub mod channels;
+pub mod common_teams;
 pub mod drafts;
 pub mod emoji;
 pub mod error;
@@ -598,6 +599,10 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/users/{user_id}/audits",
             partially_migrated_with_ids(&state, get(audits::get_user_audits)),
+        )
+        .route(
+            "/api/v4/channels/{channel_id}/common_teams",
+            partially_migrated_with_ids(&state, get(common_teams::get_common_teams)),
         )
         .route(
             "/api/v4/hooks/incoming",

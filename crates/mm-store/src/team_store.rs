@@ -216,6 +216,24 @@ pub trait TeamStore {
         user_id: &str,
     ) -> impl std::future::Future<Output = Result<Vec<ChannelUnread>, StoreError>> + Send;
 
+    /// Port of `SqlTeamStore.GetMany` (team_store.go:372) — every team whose id is listed.
+    ///
+    /// Go turns an **empty result** into `ErrNotFound` (team_store.go:381) rather than an empty
+    /// slice, and the app layer then answers 404. Reproduced: the caller
+    /// (`getDirectOrGroupMessageMembersCommonTeams`) only calls it with a non-empty id list, so
+    /// the branch needs a team that was deleted between the two queries to fire at all — but it is
+    /// the difference between a 404 and a `[]` on the wire.
+    fn get_many(
+        &self,
+        ids: &[String],
+    ) -> impl std::future::Future<Output = Result<Vec<Team>, StoreError>> + Send;
+
+    /// Port of `SqlTeamStore.GetCommonTeamIDsForMultipleUsers` (team_store.go:1606).
+    fn get_common_team_ids_for_multiple_users(
+        &self,
+        user_ids: &[String],
+    ) -> impl std::future::Future<Output = Result<Vec<String>, StoreError>> + Send;
+
     /// Port of `SqlTeamStore.GetAllPage` (team_store.go:653) — see [`get_all_page`] for the
     /// three things a reader gets wrong about it.
     fn get_all_page(
@@ -338,6 +356,127 @@ impl TeamStore for SqlTeamStore {
     async fn analytics_team_count(&self, opts: &TeamSearch) -> Result<i64, StoreError> {
         analytics_team_count(&self.pool, opts).await
     }
+
+    #[tracing::instrument(skip_all, fields(asked = ids.len(), found))]
+    async fn get_many(&self, ids: &[String]) -> Result<Vec<Team>, StoreError> {
+        get_many(&self.pool, ids).await
+    }
+
+    #[tracing::instrument(skip_all, fields(users = user_ids.len(), found))]
+    async fn get_common_team_ids_for_multiple_users(
+        &self,
+        user_ids: &[String],
+    ) -> Result<Vec<String>, StoreError> {
+        get_common_team_ids_for_multiple_users(&self.pool, user_ids).await
+    }
+}
+
+/// Port of `SqlTeamStore.GetMany` (team_store.go:372).
+///
+/// **No `DeleteAt` predicate.** `teamsQuery` is `SELECT … FROM Teams` with nothing added but the
+/// id list, so a soft-deleted team is returned. That matters here: the caller's *other* query,
+/// [`get_common_team_ids_for_multiple_users`], does filter deleted teams out — so the two
+/// disagree, and the id list is what narrows this one.
+///
+/// **And no `ORDER BY`.** The row order is the heap's, on both servers, over one table.
+pub async fn get_many(pool: &PgPool, ids: &[String]) -> Result<Vec<Team>, StoreError> {
+    let rows = sqlx::query_as!(
+        TeamRow,
+        r#"
+        SELECT t.id,
+               t.createat,
+               t.updateat,
+               t.deleteat,
+               t.displayname,
+               t.name,
+               t.description,
+               t.email,
+               t.type::text AS "team_type",
+               t.companyname,
+               t.alloweddomains,
+               t.inviteid,
+               t.allowopeninvite,
+               t.lastteamiconupdate,
+               t.schemeid,
+               t.groupconstrained,
+               t.cloudlimitsarchived,
+               EXISTS (
+                   SELECT 1 FROM accesscontrolpolicies acp
+                    WHERE acp.id = t.id AND acp.type = 'team'
+               ) AS "policy_enforced!",
+               COALESCE((
+                   SELECT acp.active FROM accesscontrolpolicies acp
+                    WHERE acp.id = t.id AND acp.type = 'team' AND acp.active = TRUE
+                    LIMIT 1
+               ), false) AS "policy_is_active!"
+          FROM teams t
+         WHERE t.id = ANY($1)
+        "#,
+        ids
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: format!("failed to get teams with ids {ids:?}"),
+        source,
+    })?;
+
+    if rows.is_empty() {
+        // Go's own branch (team_store.go:381): *no* rows is a typed not-found, not an empty list.
+        return Err(StoreError::NotFound {
+            entity: "Team",
+            criteria: format!("ids={ids:?}"),
+        });
+    }
+
+    tracing::Span::current().record("found", rows.len());
+    Ok(rows.into_iter().map(team_from_row).collect())
+}
+
+/// Port of `SqlTeamStore.GetCommonTeamIDsForMultipleUsers` (team_store.go:1606).
+///
+/// # `HAVING COUNT(UserId) = len(userIDs)` is why a duplicate id would be a bug
+///
+/// The predicate is "as many memberships of this team as there are ids asked about", so it means
+/// *every* user only because the caller's list is distinct. `GetProfilesInChannel` returns one row
+/// per user, so it is — but the count is over `TeamMembers.UserId` with no `DISTINCT`, and a
+/// repeated id would make a team where one user is a member look like a team everyone is in.
+/// Reproduced exactly, including the missing `DISTINCT`, because that is Go's answer.
+///
+/// # Two `DeleteAt = 0`s, doing different jobs
+///
+/// The membership's (a user who left a team is not counted) and the **team's** (a soft-deleted
+/// team is not common to anyone). [`get_many`] beside it has neither.
+pub async fn get_common_team_ids_for_multiple_users(
+    pool: &PgPool,
+    user_ids: &[String],
+) -> Result<Vec<String>, StoreError> {
+    let ids: Vec<String> = sqlx::query_scalar!(
+        r#"
+        SELECT t.id AS "id!"
+          FROM teams t
+          JOIN (
+                SELECT teamid, userid
+                  FROM teammembers
+                 WHERE userid = ANY($1)
+                   AND deleteat = 0
+               ) AS tm ON t.id = tm.teamid
+         WHERE t.deleteat = 0
+         GROUP BY t.id
+        HAVING COUNT(tm.userid) = $2
+        "#,
+        user_ids,
+        i64::try_from(user_ids.len()).unwrap_or(i64::MAX)
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: "failed to get common team ids".to_owned(),
+        source,
+    })?;
+
+    tracing::Span::current().record("found", ids.len());
+    Ok(ids)
 }
 
 /// Port of `SqlTeamStore.GetTotalMemberCount` (team_store.go:1106), restrictions-free — see the
