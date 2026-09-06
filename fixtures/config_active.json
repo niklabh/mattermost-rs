@@ -1,0 +1,28 @@
+{
+  "ComplianceSettings": {
+    "Enable": false
+  },
+  "ExperimentalSettings": {
+    "RestrictSystemAdmin": false
+  },
+  "FileSettings": {
+    "DriverName": "local"
+  },
+  "ImageProxySettings": {
+    "Enable": false
+  },
+  "PrivacySettings": {
+    "ShowEmailAddress": true,
+    "ShowFullName": true
+  },
+  "ServiceSettings": {
+    "AllowSyncedDrafts": true,
+    "EnableBurnOnRead": true,
+    "EnableCustomEmoji": true,
+    "EnableIncomingWebhooks": true,
+    "EnableOAuthServiceProvider": true,
+    "EnableOutgoingWebhooks": true,
+    "EnablePostIconOverride": false,
+    "PostPriority": true
+  }
+}

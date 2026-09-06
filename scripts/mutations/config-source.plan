@@ -1,0 +1,49 @@
+# Mutation plan for the configuration source: SqlConfigStore::load_active and
+# mm_app::config::Config::{from_document, apply_env, load}.
+#
+#   scripts/mutate-batch.sh scripts/mutations/config-source.plan
+#
+# The decisions a reader could plausibly get wrong, and what each mutation is asking:
+#
+#   * `WHERE active` is not a tidy spelling of `active = true`. Go deactivates with `Active = NULL`
+#     (config/database.go:199), so any predicate that admits NULL returns superseded revisions.
+#     Only testable because `a_superseded_revision_is_not_returned` seeds one.
+#   * An absent key is Go's **default**, not the zero value — eight of the modelled settings
+#     default to `true`, so `unwrap_or_default()` would quietly turn eight features off.
+#   * The environment layers **over** the document (config/store.go:292 after :285), and the
+#     document is the pre-overlay config (store.go:321). Reversing them, or dropping either, gives
+#     a server that disagrees with the one beside it on exactly the settings someone configured.
+#   * `FeatureFlags` is never persisted (store.go:306-310), so it must not be sourced from the row.
+#   * Settings that share a default and a type are separate keys: the two privacy settings and the
+#     two webhook toggles are both `true`/`true` pairs, which is precisely where a swapped wiring
+#     hides.
+#
+# MEASURED SURVIVORS — both store predicate mutations survive, and the cause is physical row order,
+# not a weak assertion. The active row is at ctid (0,1) and a seeded superseded row lands after it,
+# so a widened predicate's sequential scan reaches the correct row first and fetch_optional takes
+# it. See the doc comment on `a_superseded_revision_is_not_returned`. They are kept in the plan
+# because the mutation is a real defect that a reordered table would expose; do not delete them to
+# tidy the tally.
+#
+# The last two lines are the no-op controls and must SURVIVE.
+
+store-active-predicate-admits-null	crates/mm-store/src/config_store.rs	SELECT value FROM configurations WHERE active	SELECT value FROM configurations WHERE active IS NOT FALSE	store	revision
+store-active-predicate-dropped	crates/mm-store/src/config_store.rs	SELECT value FROM configurations WHERE active	SELECT value FROM configurations	store	revision
+doc-absent-becomes-zero-value	crates/mm-app/src/config.rs	            enable_custom_emoji: service\n                .enable_custom_emoji\n                .unwrap_or(default.enable_custom_emoji),	            enable_custom_emoji: service.enable_custom_emoji.unwrap_or_default(),	unit	config::
+doc-absent-webhooks-become-zero-value	crates/mm-app/src/config.rs	            enable_incoming_webhooks: service\n                .enable_incoming_webhooks\n                .unwrap_or(default.enable_incoming_webhooks),	            enable_incoming_webhooks: service.enable_incoming_webhooks.unwrap_or_default(),	unit	config::
+doc-privacy-settings-swapped	crates/mm-app/src/config.rs	            show_full_name: parsed\n                .privacy_settings\n                .as_ref()\n                .and_then(|p| p.show_full_name)	            show_full_name: parsed\n                .privacy_settings\n                .as_ref()\n                .and_then(|p| p.show_email_address)	unit	config::
+doc-webhook-toggles-swapped	crates/mm-app/src/config.rs	            enable_outgoing_webhooks: service\n                .enable_outgoing_webhooks	            enable_outgoing_webhooks: service\n                .enable_incoming_webhooks	unit	config::
+doc-feature-flag-confused-with-the-setting	crates/mm-app/src/config.rs	            feature_flag_burn_on_read: default.feature_flag_burn_on_read,	            feature_flag_burn_on_read: service\n                .enable_burn_on_read\n                .unwrap_or(default.feature_flag_burn_on_read),	unit	config::
+doc-driver-name-defaults-to-empty	crates/mm-app/src/config.rs	                .driver_name\n                .unwrap_or(default.file_driver_name),	                .driver_name\n                .unwrap_or_default(),	unit	config::
+doc-compliance-and-image-proxy-renames-swapped	crates/mm-app/src/config.rs	    #[serde(rename = "ComplianceSettings")]\n    compliance_settings: Option<EnableOnlyDocument>,	    #[serde(rename = "ImageProxySettings")]\n    compliance_settings: Option<EnableOnlyDocument>,	unit	config::
+load-ignores-the-document	crates/mm-app/src/config.rs	        let base = match document.as_deref() {\n            Some(raw) => Self::from_document(raw)?,	        let base = match document.as_deref() {\n            Some(_raw) => Self::default(),	unit	config::
+load-drops-the-env-overlay	crates/mm-app/src/config.rs	        Ok(base.apply_env_from(lookup))	        Ok(base)	unit	config::
+load-env-overlay-ignores-the-document	crates/mm-app/src/config.rs	        Ok(base.apply_env_from(lookup))	        Ok(Self::default().apply_env_from(lookup))	unit	config::
+load-swallows-a-malformed-document	crates/mm-app/src/config.rs	            Some(raw) => Self::from_document(raw)?,	            Some(raw) => Self::from_document(raw).unwrap_or_default(),	unit	config::
+env-overlay-lookup-always-absent	crates/mm-app/src/config.rs	    fn apply_env_from(self, lookup: &impl Fn(&str) -> Option<String>) -> Self {	    fn apply_env_from(self, lookup: &impl Fn(&str) -> Option<String>) -> Self {\n        let lookup = &|_: &str| None;	unit	config::
+env-overlay-forgets-its-base	crates/mm-app/src/config.rs	        let default = self;	        let default = Self::default();	unit	config::
+api-privacy-accessors-swapped	crates/mm-api/src/lib.rs	    pub fn show_full_name(&self) -> bool {\n        self.app.config().show_full_name	    pub fn show_full_name(&self) -> bool {\n        self.app.config().show_email_address	unit	privacy_accessors
+#
+# --- no-op controls: these must SURVIVE ---
+control-rename-binding	crates/mm-app/src/config.rs	        let parsed: Document =\n            serde_json::from_str(document).map_err(|source| ConfigError::Malformed { source })?;\n        let default = Self::default();	        let decoded: Document =\n            serde_json::from_str(document).map_err(|source| ConfigError::Malformed { source })?;\n        let parsed = decoded;\n        let default = Self::default();	unit	config::
+control-reorder-independent-document-fields	crates/mm-app/src/config.rs	    #[serde(rename = "ComplianceSettings")]\n    compliance_settings: Option<EnableOnlyDocument>,\n    #[serde(rename = "ExperimentalSettings")]\n    experimental_settings: Option<ExperimentalSettingsDocument>,	    #[serde(rename = "ExperimentalSettings")]\n    experimental_settings: Option<ExperimentalSettingsDocument>,\n    #[serde(rename = "ComplianceSettings")]\n    compliance_settings: Option<EnableOnlyDocument>,	unit	config::

@@ -86,6 +86,23 @@ services:
     ports:
       - "8065:8065"
     environment:
+      # THE CONFIG STORE LIVES IN THE SHARED DATABASE, NOT ON THE CONFIG VOLUME. Setting MM_CONFIG
+      # to a postgres DSN makes `config.IsDatabaseDSN` pick `config.DatabaseStore` over the file
+      # store (config/store.go:91), which creates a `Configurations` table and writes the whole
+      # `model.Config` into its `Value` column as JSON (config/database.go:211, via
+      # `json.MarshalIndent`). Exactly one row has `Active` true.
+      #
+      # This is what lets the Rust server read the SAME configuration the Go server is running
+      # on, rather than guessing at it. Before this, Go kept config in `config.json` on the
+      # `mattermost-config` volume — a filesystem the Rust process cannot see — so the two
+      # servers shared a database but not a configuration, and every ported permission check
+      # that consults a setting was reading an assumption. That was D-156, and this line is
+      # what closes it. Do not remove it to "simplify" the stack.
+      #
+      # The `mattermost-config` volume below is deliberately kept: the server still writes
+      # non-config files there, and leaving it mounted keeps this change reversible by deleting
+      # one line.
+      MM_CONFIG: "postgres://mmuser:mmuser_password@postgres:5432/mattermost?sslmode=disable&connect_timeout=10"
       MM_SQLSETTINGS_DRIVERNAME: postgres
       MM_SQLSETTINGS_DATASOURCE: "postgres://mmuser:mmuser_password@postgres:5432/mattermost?sslmode=disable&connect_timeout=10"
       MM_SERVICESETTINGS_SITEURL: "http://localhost:8065"

@@ -107,7 +107,7 @@ async fn respond_with_user(
     }
 
     // `user.Etag(*c.App.Config().PrivacySettings.ShowFullName, *...ShowEmailAddress)`.
-    let etag = user.etag(state.show_full_name, state.show_email_address);
+    let etag = user.etag(state.show_full_name(), state.show_email_address());
 
     // Port of `Context.HandleEtag`. Go compares the raw header against the computed value; it
     // does not implement weak comparison or a list of candidates.
@@ -124,7 +124,7 @@ async fn respond_with_user(
         // (which additionally blanks auth data, notify props and failed attempts for a
         // non-admin), then `Sanitize` with the populated map.
         user.sanitize_profile(
-            &sanitize_options(state.show_full_name, state.show_email_address, is_admin),
+            &sanitize_options(state.show_full_name(), state.show_email_address(), is_admin),
             is_admin,
         );
     }
@@ -582,9 +582,9 @@ pub async fn search_users(
         .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)
         .await;
     let search_options = mm_store::user_store::UserSearchOptions {
-        allow_emails: is_admin || state.show_email_address,
+        allow_emails: is_admin || state.show_email_address(),
         allow_inactive: props.allow_inactive,
-        allow_full_names: is_admin || state.show_full_name,
+        allow_full_names: is_admin || state.show_full_name(),
         limit,
     };
 
@@ -598,7 +598,7 @@ pub async fn search_users(
     };
     tracing::Span::current().record("found", users.len());
 
-    let options = sanitize_options(state.show_full_name, state.show_email_address, is_admin);
+    let options = sanitize_options(state.show_full_name(), state.show_email_address(), is_admin);
     for user in &mut users {
         user.sanitize_profile(&options, is_admin);
     }
@@ -720,7 +720,7 @@ async fn serve_users_by_names(
         .await;
 
     let mut users = state.app.get_users_by_usernames(&usernames).await?;
-    let options = sanitize_options(state.show_full_name, state.show_email_address, is_admin);
+    let options = sanitize_options(state.show_full_name(), state.show_email_address(), is_admin);
     for user in &mut users {
         user.sanitize_profile(&options, is_admin);
     }
@@ -797,7 +797,7 @@ pub async fn get_user_by_email(
         .app
         .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)
         .await;
-    let options = sanitize_options(state.show_full_name, state.show_email_address, is_admin);
+    let options = sanitize_options(state.show_full_name(), state.show_email_address(), is_admin);
     if options.get("email") != Some(&true) {
         return ApiError::from(AppError::boxed(
             "getUserByEmail",
@@ -832,7 +832,7 @@ pub async fn get_user_by_email(
     // `UserCanSeeOtherUser`: self is its first branch, nil restrictions its second. True by
     // construction after the fast path above.
 
-    let etag = user.etag(state.show_full_name, state.show_email_address);
+    let etag = user.etag(state.show_full_name(), state.show_email_address());
     if let Some(if_none_match) = headers.get(IF_NONE_MATCH).and_then(|v| v.to_str().ok())
         && if_none_match == etag
     {
@@ -1006,7 +1006,7 @@ async fn serve_users_by_ids(
         .app
         .get_users_by_ids(&parsed.user_ids, parsed.since)
         .await?;
-    let options = sanitize_options(state.show_full_name, state.show_email_address, is_admin);
+    let options = sanitize_options(state.show_full_name(), state.show_email_address(), is_admin);
     for user in &mut users {
         user.sanitize_profile(&options, is_admin);
     }
@@ -1342,8 +1342,8 @@ async fn serve_users(
                 .app
                 .get_users_not_in_team_etag(
                     &query.in_team,
-                    state.show_full_name,
-                    state.show_email_address,
+                    state.show_full_name(),
+                    state.show_email_address(),
                 )
                 .await;
             if etag_matches(headers, &etag) {
@@ -1370,8 +1370,8 @@ async fn serve_users(
                 .app
                 .get_users_in_team_etag(
                     &query.in_team,
-                    state.show_full_name,
-                    state.show_email_address,
+                    state.show_full_name(),
+                    state.show_email_address(),
                 )
                 .await;
             if etag_matches(headers, &etag) {
@@ -1429,7 +1429,7 @@ async fn serve_users(
         .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)
         .await;
     let mut users = users;
-    let options = sanitize_options(state.show_full_name, state.show_email_address, is_admin);
+    let options = sanitize_options(state.show_full_name(), state.show_email_address(), is_admin);
     for user in &mut users {
         user.sanitize_profile(&options, is_admin);
     }
@@ -1618,7 +1618,7 @@ pub async fn autocomplete_users(
     let options = mm_store::user_store::UserSearchOptions {
         allow_emails: false,
         allow_inactive: false,
-        allow_full_names: allow_full_names(is_admin, state.show_full_name),
+        allow_full_names: allow_full_names(is_admin, state.show_full_name()),
         limit: parsed.limit,
     };
 
@@ -1725,7 +1725,7 @@ async fn serve_autocomplete(
     // away (and the key dropped by `omitempty`) and its own `auth_data` blanked to `""` — which
     // `omitempty` keeps, because a pointer to the empty string is not nil. Measured, not
     // reasoned: `sanitisation_matches_go_for_both_an_admin_and_a_plain_caller`.
-    let sanitize = sanitize_options(state.show_full_name, state.show_email_address, is_admin);
+    let sanitize = sanitize_options(state.show_full_name(), state.show_email_address(), is_admin);
     for user in autocomplete.users.iter_mut().flatten() {
         user.sanitize_profile(&sanitize, is_admin);
     }
@@ -2183,7 +2183,7 @@ pub async fn get_thread_for_user(
 
     // `sanitizeProfiles(thread.Participants, false)` — a non-admin's options whoever asks, the
     // same literal `false` the list route carries.
-    let options = sanitize_options(state.show_full_name, state.show_email_address, false);
+    let options = sanitize_options(state.show_full_name(), state.show_email_address(), false);
     for participant in thread.participants.iter_mut().flatten() {
         participant.sanitize_profile(&options, false);
     }
@@ -2852,7 +2852,7 @@ pub async fn get_users_by_group_channel_ids(
         .await?;
     tracing::Span::current().record("found", by_channel.len());
 
-    let options = sanitize_options(state.show_full_name, state.show_email_address, is_admin);
+    let options = sanitize_options(state.show_full_name(), state.show_email_address(), is_admin);
     for users in by_channel.values_mut() {
         for user in users.iter_mut() {
             user.sanitize_profile(&options, is_admin);
@@ -3041,7 +3041,7 @@ async fn serve_threads(
 
     // `sanitizeProfiles(thread.Participants, false)` — the literal `false`, so participants are
     // sanitised as a non-admin even when a system admin is asking. See the app layer.
-    let options = sanitize_options(state.show_full_name, state.show_email_address, false);
+    let options = sanitize_options(state.show_full_name(), state.show_email_address(), false);
     for thread in threads.threads.iter_mut().flatten() {
         for participant in thread.participants.iter_mut().flatten() {
             participant.sanitize_profile(&options, false);
