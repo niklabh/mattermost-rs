@@ -2780,8 +2780,8 @@ pub async fn get_channel_member_counts_by_group(
     }
 }
 
-/// What the three licence-gated channel routes should do.
-enum LicenceGate {
+/// What a licence-gated route should do.
+pub(crate) enum LicenceGate {
     /// A licence is installed; the work behind the gate is not ported.
     Forward(Response),
     /// Nothing we can see says this server is licensed — answer the route's own error.
@@ -2794,7 +2794,7 @@ enum LicenceGate {
 /// See `mm_app::license::LicenseState` for what "licensed" can be established from here: the
 /// `MM_LICENSE` environment variable and `Systems.ActiveLicenseId`, which between them cover every
 /// way Go loads a licence except one that is set on Go's environment and not on ours.
-async fn licence_gate(state: &AppState, request: Request) -> LicenceGate {
+pub(crate) async fn licence_gate(state: &AppState, request: Request) -> LicenceGate {
     match state.app.license_state().await {
         Ok(mm_app::license::LicenseState::Licensed) => {
             tracing::Span::current().record("licensed", true);

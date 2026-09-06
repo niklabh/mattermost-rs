@@ -14,6 +14,7 @@ pub mod emoji;
 pub mod error;
 /// `getFileInfo` — the one `/files/` route that returns JSON rather than bytes.
 pub mod files;
+pub mod groups;
 pub mod license;
 pub mod limits;
 pub mod oauth;
@@ -642,6 +643,14 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/channels/{channel_id}/member_counts_by_group",
             partially_migrated_with_ids(&state, get(channels::get_channel_member_counts_by_group)),
+        )
+        .route(
+            "/api/v4/groups",
+            partially_migrated(get(groups::get_groups)),
+        )
+        .route(
+            "/api/v4/users/{user_id}/groups",
+            partially_migrated_with_ids(&state, get(groups::get_groups_by_user_id)),
         )
         .route(
             "/api/v4/limits/server",

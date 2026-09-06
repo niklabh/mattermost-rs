@@ -1,0 +1,24 @@
+# Mutation plan for GET /api/v4/groups and /api/v4/users/{user_id}/groups.
+#
+#   scripts/mutate-batch.sh scripts/mutations/groups.plan
+#
+# `requireLicense` (api4/handlers.go:237) is the **generic** licence error — one id, one status,
+# shared by every group route — where the three channel gates each have their own and two of them
+# answer 403. So the mutations here are: the status, the id, the blank `where`, and forwarding a
+# licensed installation rather than answering it.
+#
+# **A mutation of the blank `where` was written and then dropped.** `AppError.Where` carries
+# `json:"-"` in Go and `#[serde(skip)]` here, so it is on nobody's wire and no parity test can see
+# it — it survived, as it had to. That Go leaves it blank on purpose (handlers.go:239) where every
+# other error in the tree names its caller is recorded in the module doc instead, which is where a
+# reader changing the line will look.
+#
+# The last two lines are the no-op controls and must SURVIVE.
+
+api-groups-status	crates/mm-api/src/groups.rs	            "api.license_error",\n            None,\n            String::new(),\n            501,	            "api.license_error",\n            None,\n            String::new(),\n            403,	api	parity::groups
+api-groups-id	crates/mm-api/src/groups.rs	            "api.license_error",	            "api.ldap_groups.license_error",	api	parity::groups
+api-groups-licensed-answers-anyway	crates/mm-api/src/groups.rs	        LicenceGate::Forward(response) => response,	        LicenceGate::Forward(_) => crate::error::ApiError::from(mm_model::utils::AppError::new(\n            "",\n            "api.license_error",\n            None,\n            String::new(),\n            501,\n        ))\n        .into_response(),	api	parity::groups
+#
+# --- no-op controls: these must SURVIVE ---
+control-rename-binding	crates/mm-api/src/groups.rs	async fn answer(state: &AppState, request: Request) -> Response {\n    match licence_gate(state, request).await {	async fn answer(state: &AppState, request: Request) -> Response {\n    let gate = licence_gate(state, request).await;\n    match gate {	api	parity::groups
+control-rename-parameter	crates/mm-api/src/groups.rs	pub async fn get_groups(\n    State(state): State<AppState>,\n    _session: AuthenticatedSession,\n    request: Request,\n) -> Response {\n    answer(&state, request).await\n}	pub async fn get_groups(\n    State(state): State<AppState>,\n    _session: AuthenticatedSession,\n    incoming: Request,\n) -> Response {\n    answer(&state, incoming).await\n}	api	parity::groups

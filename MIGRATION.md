@@ -6909,3 +6909,27 @@ Mutation run: **10 run, 8 caught, 2 controls survived, 0 harness faults**
   row by hand, and `parity/roles.rs` records what a hand-written row missing a column Go scans into
   a non-pointer field once did to the whole stack. The mutation was dropped with that reason rather
   than carried.
+
+## `GET /api/v4/groups` and `/api/v4/users/{user_id}/groups` — a fourth licence gate (2026-09-06)
+
+Served, for an unlicensed installation. `crates/mm-api/src/groups.rs`; 7 parity tests in
+`crates/mm-api/tests/parity/groups.rs`. The System Console's *User Management → Groups* page and
+the group list on a user's profile.
+
+**The one thing a reader would otherwise get wrong: this gate is the *generic* one.**
+`requireLicense` (api4/handlers.go:237) returns `api.license_error` at **501** with a blank
+`where`, shared by every group route — where the three channel gates each have an id of their own
+and two of them answer **403**. Four gates in this session, four conventions; each is asserted
+rather than assumed to match its neighbour.
+
+It is the first statement in both handlers, so `/users/abc/groups` and a request about *someone
+else's* groups both get the licence error rather than the 400 and the 403 that a licensed server
+would give. Query parameters are never read.
+
+Mutation run: **5 run, 3 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/groups.plan`).
+
+A mutation of the **blank `where`** was written and then dropped: `AppError.Where` carries
+`json:"-"` in Go and `#[serde(skip)]` here, so no parity test can see it and it survived exactly as
+it had to. That Go leaves it blank on purpose, where every other error in the tree names its
+caller, is recorded in the module doc — which is where someone changing the line will look.
