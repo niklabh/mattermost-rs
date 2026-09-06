@@ -6666,3 +6666,35 @@ fixture is not private just because it lives in `mm-store`.
 
 The rule this adds to the ones already recorded: **a planted row must be unique in whatever column
 some other suite sorts by.** Distinct ids are not enough.
+
+## `GET /api/v4/teams/{team_id}/channels/recommended` — `getRecommendedChannelsForTeam` (2026-09-06)
+
+Served, for an unlicensed installation. `crates/mm-api/src/channels.rs`
+(`get_recommended_channels_for_team`); 7 parity tests in
+`crates/mm-api/tests/parity/recommended_channels.rs`. The browse-channels modal asks it every time
+it opens.
+
+**The one thing a reader would otherwise get wrong: the whole reachable answer is three bytes.**
+`GetRecommendedPublicChannelsForUser` (app/channel.go:4620) returns `model.ChannelList{}` before
+doing anything unless the licence is **Enterprise Advanced** *and*
+`AccessControlSettings.EnableAttributeBasedAccessControl` is on. Neither holds here, so the
+attribute-based scan below that gate is unreachable and the answer is `[]` — for a member, for an
+admin, for a team with a hundred channels. A licensed installation is forwarded, the same boundary
+`getClientLicense` draws.
+
+That makes the **permission check** the only thing this route decides: `list_team_channels` on
+that team, checked before the licence gate, so a non-member gets a 403 where a member gets `[]`.
+And the empty answer is `[]`, never `null` — a composite literal, not a nil slice, which is the
+same distinction [`getUserAudits`] resolves the other way.
+
+Mutation run: **10 run, 8 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/recommended-channels.plan`).
+
+### The licence-row lock moved into `common`
+
+Removing the forward survived the first run: on an unlicensed server the branch never fires.
+`license_client` already had the answer — plant a valid `Systems.ActiveLicenseId` and assert
+`x-mmrs-served-by: go` — but its `RwLock` was module-private, and two suites writing one global
+row need one lock between them. It now lives in `common::ACTIVE_LICENCE_ROW`, with
+`common::set_active_licence_id`, and both suites take it: shared while they expect us to answer,
+exclusive while they make the server look licensed.

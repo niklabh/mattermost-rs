@@ -207,6 +207,49 @@ pub async fn a_team_and_channel_the_user_is_in(
     (team_id.to_owned(), channel_id)
 }
 
+/// **`Systems.ActiveLicenseId` is one row for the whole installation**, and more than one suite
+/// writes it: every route that answers only for an unlicensed server proves its boundary by
+/// planting a licence id and checking that the request is forwarded instead.
+///
+/// A read/write lock rather than a mutex, and shared here rather than per module: everything that
+/// expects an unlicensed answer holds it **shared** and still runs in parallel; the tests that
+/// make the server look licensed hold it **exclusively**, across suites. Two modules with their
+/// own locks would not exclude each other, and the symptom would be a neighbouring suite finding
+/// `x-mmrs-served-by: go` where it asserted `rust`.
+pub static ACTIVE_LICENCE_ROW: tokio::sync::RwLock<()> = tokio::sync::RwLock::const_new(());
+
+/// Write `Systems.ActiveLicenseId`, or clear it when `id` is `None`.
+///
+/// A 26-character value passes `IsValidId`, which is all `LoadLicense` checks before it looks the
+/// licence up — so the row alone is enough to make this side believe the installation is licensed.
+/// **Go is unmoved by it**: it loaded its licence at startup and re-reads only on a save, so its
+/// answers do not change and the observable difference is which server produced them.
+pub async fn set_active_licence_id(id: Option<&str>) {
+    let Ok(url) = std::env::var("DATABASE_URL") else {
+        return;
+    };
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .acquire_timeout(std::time::Duration::from_secs(5))
+        .connect(&url)
+        .await
+        .expect("the shared database is reachable");
+
+    sqlx::query("DELETE FROM systems WHERE name = 'ActiveLicenseId'")
+        .execute(&pool)
+        .await
+        .expect("the active licence id is cleared");
+
+    if let Some(id) = id {
+        assert_eq!(id.len(), 26, "`IsValidId` requires 26 characters");
+        sqlx::query("INSERT INTO systems (name, value) VALUES ('ActiveLicenseId', $1)")
+            .bind(id)
+            .execute(&pool)
+            .await
+            .expect("the active licence id is written");
+    }
+}
+
 /// Compare two error bodies and assert they differ in **exactly** the two keys that are known to,
 /// returning the parsed Go body for further assertions.
 ///

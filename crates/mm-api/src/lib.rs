@@ -601,6 +601,10 @@ pub fn router(state: AppState) -> Router {
             partially_migrated_with_ids(&state, get(audits::get_user_audits)),
         )
         .route(
+            "/api/v4/teams/{team_id}/channels/recommended",
+            partially_migrated_with_ids(&state, get(channels::get_recommended_channels_for_team)),
+        )
+        .route(
             "/api/v4/channels/{channel_id}/common_teams",
             partially_migrated_with_ids(&state, get(common_teams::get_common_teams)),
         )

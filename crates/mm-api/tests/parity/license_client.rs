@@ -26,15 +26,10 @@ const PATH: &str = "/api/v4/license/client";
 /// `w.Write([]byte(model.MapToJSON(...)))` with no encoder (license.go:51).
 const UNLICENSED: &[u8] = br#"{"IsLicensed":"false"}"#;
 
-/// **`Systems.ActiveLicenseId` is one row for the whole installation**, and this suite's last test
-/// writes it. The harness runs these tests concurrently, so without a gate that write lands while
-/// the others are mid-request and every one of them is forwarded — which they notice, because
-/// `x-mmrs-served-by` is asserted, but only after five minutes of reading the wrong handler.
-///
-/// A read/write lock rather than a mutex: everything that expects the route to answer holds it
-/// shared and still runs in parallel; the one test that makes the route *not* answer holds it
-/// exclusively. Nothing outside this module reads or writes that row.
-static ACTIVE_LICENCE_ROW: tokio::sync::RwLock<()> = tokio::sync::RwLock::const_new(());
+/// The lock now lives in [`common::ACTIVE_LICENCE_ROW`]: a second suite
+/// (`recommended_channels`) proves the same boundary the same way, and two module-private locks
+/// would not exclude each other.
+use common::ACTIVE_LICENCE_ROW;
 
 /// Fetch a path from both servers with **no credentials at all**.
 ///

@@ -68,6 +68,7 @@ mod parity {
     pub mod posts_by_ids;
     pub mod preference_reads;
     pub mod preferences;
+    pub mod recommended_channels;
     pub mod roles;
     pub mod session_team_members;
     pub mod sessions_for_user;

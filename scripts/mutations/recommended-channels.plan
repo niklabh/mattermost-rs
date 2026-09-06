@@ -1,0 +1,24 @@
+# Mutation plan for GET /api/v4/teams/{team_id}/channels/recommended
+# (getRecommendedChannelsForTeam).
+#
+#   scripts/mutate-batch.sh scripts/mutations/recommended-channels.plan
+#
+# The reachable surface is a permission check and three bytes, so the mutations are about exactly
+# that: the scope the permission is asked at, that the id is validated first, that a licensed
+# installation is forwarded rather than answered, and that the empty answer is `[]` and not `null`
+# — the same distinction `getUserAudits` resolves the other way.
+#
+# The last two lines are the no-op controls and must SURVIVE.
+
+api-recommended-permission-check	crates/mm-api/src/channels.rs	        .session_has_permission_to_team(&session.0, &team_id, &PERMISSION_LIST_TEAM_CHANNELS)\n        .await\n    {\n        return ApiError::from(make_permission_error(\n            &session.0,\n            &[&PERMISSION_LIST_TEAM_CHANNELS],\n        ))\n        .into_response();	        .session_has_permission_to_team(&session.0, &team_id, &PERMISSION_LIST_TEAM_CHANNELS)\n        .await\n        && false\n    {\n        return ApiError::from(make_permission_error(\n            &session.0,\n            &[&PERMISSION_LIST_TEAM_CHANNELS],\n        ))\n        .into_response();	api	recommended_channels
+api-recommended-permission-scope	crates/mm-api/src/channels.rs	        .session_has_permission_to_team(&session.0, &team_id, &PERMISSION_LIST_TEAM_CHANNELS)\n        .await\n    {\n        return ApiError::from(make_permission_error(	        .session_has_permission_to(&session.0, &PERMISSION_LIST_TEAM_CHANNELS)\n        .await\n    {\n        return ApiError::from(make_permission_error(	api	recommended_channels
+api-recommended-id-validation	crates/mm-api/src/channels.rs	    if !is_valid_id(&team_id) {\n        return ApiError::invalid_url_param("team_id").into_response();\n    }\n\n    if !state	    if false {\n        return ApiError::invalid_url_param("team_id").into_response();\n    }\n\n    if !state	api	recommended_channels
+api-recommended-licensed-answers-anyway	crates/mm-api/src/channels.rs	    if licence == mm_app::license::LicenseState::Licensed {\n        return proxy::forward_to_go(State(state), request).await;\n    }	    if false {\n        return proxy::forward_to_go(State(state), request).await;\n    }	api	recommended_channels
+api-recommended-forward-inverted	crates/mm-api/src/channels.rs	    if licence == mm_app::license::LicenseState::Licensed {\n        return proxy::forward_to_go(State(state), request).await;\n    }	    if licence != mm_app::license::LicenseState::Licensed {\n        return proxy::forward_to_go(State(state), request).await;\n    }	api	recommended_channels
+api-recommended-null-instead-of-array	crates/mm-api/src/channels.rs	        b"[]\\n".to_vec(),	        b"null\\n".to_vec(),	api	recommended_channels
+api-recommended-trailing-newline	crates/mm-api/src/channels.rs	        b"[]\\n".to_vec(),	        b"[]".to_vec(),	api	recommended_channels
+api-recommended-status	crates/mm-api/src/channels.rs	    (\n        StatusCode::OK,\n        [\n            ("Content-Type", "application/json"),\n            ("x-mmrs-served-by", "rust"),\n        ],\n        // `model.ChannelList{}` through `json.NewEncoder(w).Encode` — an empty array and a\n        // newline, never `null`.\n        b"[]\\n".to_vec(),	    (\n        StatusCode::NO_CONTENT,\n        [\n            ("Content-Type", "application/json"),\n            ("x-mmrs-served-by", "rust"),\n        ],\n        // `model.ChannelList{}` through `json.NewEncoder(w).Encode` — an empty array and a\n        // newline, never `null`.\n        b"[]\\n".to_vec(),	api	recommended_channels
+#
+# --- no-op controls: these must SURVIVE ---
+control-rename-binding	crates/mm-api/src/channels.rs	    let licence = match state.app.license_state().await {\n        Ok(licence) => licence,	    let licence = match state.app.license_state().await {\n        Ok(state_of_licence) => state_of_licence,	api	recommended_channels
+control-reorder-independent-headers	crates/mm-api/src/channels.rs	            ("Content-Type", "application/json"),\n            ("x-mmrs-served-by", "rust"),\n        ],\n        // `model.ChannelList{}` through	            ("x-mmrs-served-by", "rust"),\n            ("Content-Type", "application/json"),\n        ],\n        // `model.ChannelList{}` through	api	recommended_channels

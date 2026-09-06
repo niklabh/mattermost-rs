@@ -53,6 +53,7 @@ use mm_model::utils::{is_valid_id, parse_go_bool, sorted_array_from_json};
 use crate::AppState;
 use crate::auth::AuthenticatedSession;
 use crate::error::ApiError;
+use crate::proxy;
 
 /// `model.Me` (user.go:26) — the literal a client may send instead of its own id.
 pub(crate) const ME: &str = "me";
@@ -2598,6 +2599,85 @@ async fn serve_public_channels_by_ids(
         body,
     )
         .into_response())
+}
+
+/// Port of `getRecommendedChannelsForTeam` (api4/channel.go:1252) —
+/// `GET /api/v4/teams/{team_id}/channels/recommended`, the browse-channels modal's suggestions.
+///
+/// # On this installation the answer is always `[]`, and that is the route
+///
+/// `GetRecommendedPublicChannelsForUser` (app/channel.go:4619) opens with
+///
+/// ```text
+/// if l := a.License(); !model.MinimumEnterpriseAdvancedLicense(l) ||
+///     !*a.Config().AccessControlSettings.EnableAttributeBasedAccessControl {
+///     return model.ChannelList{}, nil
+/// }
+/// ```
+///
+/// so without an **Enterprise Advanced** licence the whole attribute-based scan below it is
+/// unreachable and the answer is an empty — and deliberately non-nil — list. That is the entire
+/// reachable behaviour here, and it is what this serves.
+///
+/// A licensed installation is **forwarded**: we cannot tell one SKU from another (the client
+/// licence map is Go's, see `crate::license`), and the branch behind the gate evaluates access
+/// control policies against a subject this port does not build. Same boundary as
+/// `getClientLicense`, drawn for the same reason.
+///
+/// # The permission is checked first, and it is *not* the one that would refuse a stranger
+///
+/// `list_team_channels` on the team — so a member of the team gets `[]` and a non-member gets a
+/// 403, even though the answer would have been `[]` either way. The order is wire-visible and is
+/// reproduced.
+///
+/// `json.NewEncoder(w).Encode`, so **three bytes**: `[`, `]`, and a newline.
+#[tracing::instrument(skip_all, fields(team_id = %team_id, licensed))]
+pub async fn get_recommended_channels_for_team(
+    State(state): State<AppState>,
+    Path(team_id): Path<String>,
+    session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    if !is_valid_id(&team_id) {
+        return ApiError::invalid_url_param("team_id").into_response();
+    }
+
+    if !state
+        .app
+        .session_has_permission_to_team(&session.0, &team_id, &PERMISSION_LIST_TEAM_CHANNELS)
+        .await
+    {
+        return ApiError::from(make_permission_error(
+            &session.0,
+            &[&PERMISSION_LIST_TEAM_CHANNELS],
+        ))
+        .into_response();
+    }
+
+    let licence = match state.app.license_state().await {
+        Ok(licence) => licence,
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+    tracing::Span::current().record(
+        "licensed",
+        licence == mm_app::license::LicenseState::Licensed,
+    );
+
+    if licence == mm_app::license::LicenseState::Licensed {
+        return proxy::forward_to_go(State(state), request).await;
+    }
+
+    (
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        // `model.ChannelList{}` through `json.NewEncoder(w).Encode` — an empty array and a
+        // newline, never `null`.
+        b"[]\n".to_vec(),
+    )
+        .into_response()
 }
 
 #[cfg(test)]
