@@ -6758,3 +6758,38 @@ The window widened on 2026-09-06 when `create_plain_user` started awaiting the p
 see the first commit of the day). The fix is to close it in the same direction: `create_team` and
 `create_channel_typed` await it too, so the purge is guaranteed to be the earliest write of the
 run. **Every path that creates a fixture purges first**, and the `OnceCell` makes that once.
+
+## `GET /api/v4/users/{user_id}/oauth/apps/authorized` — `getAuthorizedOAuthApps` (2026-09-06)
+
+Served. Extends `crates/mm-api/src/oauth.rs`, `crates/mm-app/src/oauth.rs` and
+`crates/mm-store/src/oauth_store.rs`; 7 parity tests in
+`crates/mm-api/tests/parity/authorized_oauth_apps.rs`. The *Security → OAuth 2.0 Applications*
+panel in a user's own settings.
+
+**The one thing a reader would otherwise get wrong: the join ignores the preference category.**
+`InnerJoin("Preferences AS p ON p.Name = o.Id AND p.UserId = ?")` (oauth_store.go:151) and nothing
+else. Authorizing an app writes a preference in the `oauth_app` category, but the query never says
+so — **any** preference row whose `Name` equals an app id authorises that app for that user. The
+fixture plants one in a different category to pin it. Narrowing the join to the category is the
+obvious fix, it is a security *improvement*, and it would answer differently from the server we
+forward to.
+
+Two more. **This list is sanitised and the admin list is not** — `GetAuthorizedAppsForUser` blanks
+`client_secret` on every app (app/oauth.go:642), so the same rows come back with the secret through
+`GET /api/v4/oauth/apps` and without it here. Of the four OAuth reads, two sanitise and two do not,
+and the two that do sanitise in **different layers** (the app layer here, the handler for `/info`);
+each is ported where Go put it. And the gate is `SessionHasPermissionToUser`, not `manage_oauth` —
+its refusal names `edit_other_users`, a write permission on a read, as `getUserAudits` does.
+
+`json.Marshal` + `w.Write`, so no trailing newline.
+
+Mutation run: **14 run, 12 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/authorized-oauth-apps.plan`).
+
+### Two suites, one table
+
+This suite plants apps under `mmrsauthzd%` because `parity/oauth_apps.rs` purges `mmrsoauth%` on
+the way in — two suites sharing a prefix would delete each other's rows mid-run. And because
+`getOAuthApps` has **no filter at all**, that suite's pagination test could no longer assert its
+pages *equal* the whole table; it asserts they are disjoint and drawn from it. Disjointness is what
+catches an offset of `page` rather than `page * per_page`; the union never could.

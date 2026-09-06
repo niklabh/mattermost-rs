@@ -1,0 +1,28 @@
+# Mutation plan for GET /api/v4/users/{user_id}/oauth/apps/authorized
+# (getAuthorizedOAuthApps).
+#
+#   scripts/mutate-batch.sh scripts/mutations/authorized-oauth-apps.plan
+#
+# The decisions: the join is on `Name` **and** `UserId` and reads **no category** — narrowing it to
+# `oauth_app` looks like a security fix and answers differently from the server we forward to; this
+# list **is** sanitised where the admin list is not, and only the secret is; and the gate is
+# `SessionHasPermissionToUser`, which has nothing to do with `manage_oauth`.
+#
+# The last two lines are the no-op controls and must SURVIVE.
+
+store-authorized-user-join	crates/mm-store/src/oauth_store.rs	              JOIN preferences p ON p.name = o.id AND p.userid = $1	              JOIN preferences p ON p.name = o.id AND ($1 = $1)	api	authorized_oauth_apps
+store-authorized-name-join	crates/mm-store/src/oauth_store.rs	              JOIN preferences p ON p.name = o.id AND p.userid = $1	              JOIN preferences p ON p.name = p.name AND p.userid = $1	api	authorized_oauth_apps
+store-authorized-category-narrowed	crates/mm-store/src/oauth_store.rs	              JOIN preferences p ON p.name = o.id AND p.userid = $1	              JOIN preferences p ON p.name = o.id AND p.userid = $1 AND p.category = 'oauth_app'	api	authorized_oauth_apps
+store-authorized-limit-offset-swap	crates/mm-store/src/oauth_store.rs	              JOIN preferences p ON p.name = o.id AND p.userid = $1\n             LIMIT $2 OFFSET $3\n            "#,\n            user_id,\n            limit,\n            offset	              JOIN preferences p ON p.name = o.id AND p.userid = $1\n             LIMIT $2 OFFSET $3\n            "#,\n            user_id,\n            offset,\n            limit	api	authorized_oauth_apps
+app-authorized-sanitize-dropped	crates/mm-app/src/oauth.rs	        for app in &mut apps {\n            // `OAuthApp.Sanitize` (model/oauth.go:164): one field.\n            app.client_secret = String::new();\n        }	        for app in &mut apps {\n            // `OAuthApp.Sanitize` (model/oauth.go:164): one field.\n            let _ = app;\n        }	api	authorized_oauth_apps
+app-authorized-sanitizes-too-much	crates/mm-app/src/oauth.rs	            app.client_secret = String::new();\n        }\n\n        tracing::Span::current().record("found", apps.len());	            app.client_secret = String::new();\n            app.homepage = String::new();\n        }\n\n        tracing::Span::current().record("found", apps.len());	api	authorized_oauth_apps
+app-authorized-offset	crates/mm-app/src/oauth.rs	            .get_authorized_apps(user_id, page * per_page, per_page)	            .get_authorized_apps(user_id, page, per_page)	api	authorized_oauth_apps
+app-authorized-disabled-gate	crates/mm-app/src/oauth.rs	        if !self.config().enable_oauth_service_provider {\n            return Err(disabled("GetAuthorizedAppsForUser"));	        if self.config().enable_oauth_service_provider {\n            return Err(disabled("GetAuthorizedAppsForUser"));	api	authorized_oauth_apps
+api-authorized-permission-check	crates/mm-api/src/oauth.rs	        .session_has_permission_to_user(&session.0, user_id)\n        .await\n    {	        .session_has_permission_to_user(&session.0, user_id)\n        .await\n        && false\n    {	api	authorized_oauth_apps
+api-authorized-me-not-resolved	crates/mm-api/src/oauth.rs	    let user_id = crate::channels::resolve_me(&user_id, &session);	    let user_id = user_id.as_str();	api	authorized_oauth_apps
+api-authorized-id-validation	crates/mm-api/src/oauth.rs	    let user_id = crate::channels::resolve_me(&user_id, &session);\n    if !is_valid_id(user_id) {	    let user_id = crate::channels::resolve_me(&user_id, &session);\n    if false {	api	authorized_oauth_apps
+api-authorized-trailing-newline	crates/mm-api/src/oauth.rs	    Ok(json_ok(encode(&apps)?, false))\n}\n\n/// `model.NewAppError("getOAuthApps"	    Ok(json_ok(encode(&apps)?, true))\n}\n\n/// `model.NewAppError("getOAuthApps"	api	authorized_oauth_apps
+#
+# --- no-op controls: these must SURVIVE ---
+control-rename-binding	crates/mm-api/src/oauth.rs	    let apps = state\n        .app\n        .get_authorized_apps_for_user(user_id, page, per_page)\n        .await?;\n    tracing::Span::current().record("count", apps.len());	    let authorized = state\n        .app\n        .get_authorized_apps_for_user(user_id, page, per_page)\n        .await?;\n    let apps = authorized;\n    tracing::Span::current().record("count", apps.len());	api	authorized_oauth_apps
+control-reorder-independent-selects	crates/mm-store/src/oauth_store.rs	                   COALESCE(o.homepage, '')              AS "homepage!",\n                   COALESCE(o.istrusted, FALSE)          AS "istrusted!",\n                   o.mattermostappid                     AS "mattermostappid!",\n                   COALESCE(o.isdynamicallyregistered, FALSE) AS "isdynamicallyregistered!"\n              FROM oauthapps o\n              JOIN preferences p	                   COALESCE(o.istrusted, FALSE)          AS "istrusted!",\n                   COALESCE(o.homepage, '')              AS "homepage!",\n                   o.mattermostappid                     AS "mattermostappid!",\n                   COALESCE(o.isdynamicallyregistered, FALSE) AS "isdynamicallyregistered!"\n              FROM oauthapps o\n              JOIN preferences p	api	authorized_oauth_apps

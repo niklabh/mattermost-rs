@@ -626,6 +626,10 @@ pub fn router(state: AppState) -> Router {
             partially_migrated_with_ids(&state, get(webhooks::get_outgoing_hook)),
         )
         .route(
+            "/api/v4/users/{user_id}/oauth/apps/authorized",
+            partially_migrated_with_ids(&state, get(oauth::get_authorized_oauth_apps)),
+        )
+        .route(
             "/api/v4/oauth/apps",
             partially_migrated(get(oauth::get_oauth_apps)),
         )

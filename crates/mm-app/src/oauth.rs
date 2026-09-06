@@ -97,6 +97,49 @@ impl App {
             )
         })
     }
+
+    /// Port of `App.GetAuthorizedAppsForUser` (oauth.go:632).
+    ///
+    /// **This list is sanitised and the admin one is not.** Every app goes through `Sanitize()`
+    /// before it is returned (oauth.go:642-645), so a user reading their own authorisations never
+    /// sees a client secret — while `GetOAuthApps`, five hundred lines away in the same file,
+    /// hands every secret to an admin. The sanitising lives in the *app* layer here and in the
+    /// *handler* for `/info`; both are ported where Go put them, because "where" is what a reader
+    /// checks.
+    #[tracing::instrument(skip_all, fields(user_id, page, per_page, found))]
+    pub async fn get_authorized_apps_for_user(
+        &self,
+        user_id: &str,
+        page: i64,
+        per_page: i64,
+    ) -> AppResult<Vec<OAuthApp>> {
+        if !self.config().enable_oauth_service_provider {
+            return Err(disabled("GetAuthorizedAppsForUser"));
+        }
+
+        let mut apps = self
+            .store()
+            .oauth()
+            .get_authorized_apps(user_id, page * per_page, per_page)
+            .await
+            .map_err(|err| {
+                failure(
+                    "GetAuthorizedAppsForUser",
+                    // The **same id as `GetOAuthApps`**, not the `by_user` one its neighbour uses
+                    // — Go reaches for `get_apps.find` here (oauth.go:639).
+                    "app.oauth.get_apps.find.app_error",
+                    err,
+                )
+            })?;
+
+        for app in &mut apps {
+            // `OAuthApp.Sanitize` (model/oauth.go:164): one field.
+            app.client_secret = String::new();
+        }
+
+        tracing::Span::current().record("found", apps.len());
+        Ok(apps)
+    }
 }
 
 fn disabled(where_: &str) -> Box<AppError> {

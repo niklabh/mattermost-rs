@@ -349,13 +349,13 @@ async fn the_pages_split_the_list() {
         "page 1 must start where page 0 stopped — the offset is page * per_page, not page: \
          {paged:?}"
     );
-    assert_eq!(
-        distinct
-            .into_iter()
-            .cloned()
-            .collect::<std::collections::BTreeSet<_>>(),
-        all,
-        "and together they are the whole table"
+    // A **subset**, not an equality: `parity/authorized_oauth_apps.rs` plants its own apps in this
+    // same table (under a different id prefix, so neither suite purges the other's), and this
+    // route has no filter at all — so the table is larger than one suite's fixture. Disjointness
+    // is what catches an offset of `page` rather than `page * per_page`; the union never could.
+    assert!(
+        distinct.iter().all(|id| all.contains(*id)),
+        "the pages are drawn from the table: {distinct:?} vs {all:?}"
     );
 }
 

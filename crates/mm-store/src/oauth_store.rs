@@ -32,6 +32,15 @@ pub trait OAuthStore {
         &self,
         id: &str,
     ) -> impl std::future::Future<Output = Result<OAuthApp, StoreError>> + Send;
+
+    /// Port of `SqlOAuthStore.GetAuthorizedApps` (oauth_store.go:147) — the apps a user has
+    /// granted, found by joining `Preferences`.
+    fn get_authorized_apps(
+        &self,
+        user_id: &str,
+        offset: i64,
+        limit: i64,
+    ) -> impl std::future::Future<Output = Result<Vec<OAuthApp>, StoreError>> + Send;
 }
 
 /// Postgres-backed implementation.
@@ -228,6 +237,59 @@ impl OAuthStore for SqlOAuthStore {
 
         tracing::Span::current().record("found", true);
         row.into_model()
+    }
+
+    /// # The join ignores the preference **category**
+    ///
+    /// `InnerJoin("Preferences AS p ON p.Name = o.Id AND p.UserId = ?")` (oauth_store.go:151) —
+    /// and nothing else. Authorizing an app writes a preference in the `oauth_app` category, but
+    /// the query never says so, so **any** preference row whose `Name` happens to equal an app id
+    /// authorises that app for that user. Reproduced exactly: narrowing it to the category would
+    /// be a security *improvement* that answers differently from the server we forward to.
+    ///
+    /// `Preferences` is keyed on `(UserId, Category, Name)`, so two categories naming the same app
+    /// join twice and the app appears **twice** in the answer. That is Go's too — there is no
+    /// `DISTINCT`.
+    #[tracing::instrument(skip_all, fields(user_id, offset, limit, found))]
+    async fn get_authorized_apps(
+        &self,
+        user_id: &str,
+        offset: i64,
+        limit: i64,
+    ) -> Result<Vec<OAuthApp>, StoreError> {
+        let rows = sqlx::query_as!(
+            OAuthAppRow,
+            r#"
+            SELECT o.id                                  AS "id!",
+                   COALESCE(o.creatorid, '')             AS "creatorid!",
+                   COALESCE(o.createat, 0)               AS "createat!",
+                   COALESCE(o.updateat, 0)               AS "updateat!",
+                   COALESCE(o.clientsecret, '')          AS "clientsecret!",
+                   COALESCE(o.name, '')                  AS "name!",
+                   COALESCE(o.description, '')           AS "description!",
+                   COALESCE(o.iconurl, '')               AS "iconurl!",
+                   o.callbackurls                        AS "callbackurls?",
+                   COALESCE(o.homepage, '')              AS "homepage!",
+                   COALESCE(o.istrusted, FALSE)          AS "istrusted!",
+                   o.mattermostappid                     AS "mattermostappid!",
+                   COALESCE(o.isdynamicallyregistered, FALSE) AS "isdynamicallyregistered!"
+              FROM oauthapps o
+              JOIN preferences p ON p.name = o.id AND p.userid = $1
+             LIMIT $2 OFFSET $3
+            "#,
+            user_id,
+            limit,
+            offset
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to find OAuthApps with userId={user_id}"),
+            source,
+        })?;
+
+        tracing::Span::current().record("found", rows.len());
+        rows.into_iter().map(OAuthAppRow::into_model).collect()
     }
 }
 

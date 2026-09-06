@@ -1,17 +1,21 @@
-//! Port of `getOAuthApps`, `getOAuthApp` and `getOAuthAppInfo` (channels/api4/oauth.go:145, :178,
-//! :205) — the three OAuth **app** reads, reached as `GET /api/v4/oauth/apps`,
-//! `.../{app_id}` and `.../{app_id}/info`.
+//! Port of `getOAuthApps`, `getOAuthApp`, `getOAuthAppInfo` and `getAuthorizedOAuthApps`
+//! (channels/api4/oauth.go:145, :178, :205, :313) — the four OAuth **app** reads, reached as
+//! `GET /api/v4/oauth/apps`, `.../{app_id}`, `.../{app_id}/info` and
+//! `GET /api/v4/users/{user_id}/oauth/apps/authorized`.
 //!
 //! The System Console's *Integrations → OAuth 2.0 Applications* page. Every write, and the whole
 //! authorization flow, is still forwarded.
 //!
-//! # `client_secret` is on the wire for two of the three
+//! # `client_secret` is on the wire for two of the four
 //!
-//! `getOAuthAppInfo` calls `Sanitize()` (oauth.go:216), which blanks `ClientSecret`. The other two
-//! **do not** — the list hands every app's secret to anyone with `manage_oauth`, and the
-//! single-app read hands it to the creator or a system-wide admin. That is Go's, it is what the
-//! console relies on to show the secret, and it is the one thing here a "safe-looking" tidy-up
-//! would break.
+//! `getOAuthAppInfo` sanitises in the **handler** (oauth.go:216) and `getAuthorizedOAuthApps` in
+//! the **app layer** (app/oauth.go:642). The other two do not sanitise at all — the admin list
+//! hands every app's secret to anyone with `manage_oauth`, and the single-app read hands it to the
+//! creator or a system-wide admin. That is Go's, it is what the console relies on to show the
+//! secret, and it is the one thing here a "safe-looking" tidy-up would break.
+//!
+//! Two of the four sanitise, two do not, and the two that do sanitise in **different layers**.
+//! Each is ported where Go put it, because "where" is what a reader checks.
 
 use axum::extract::{Path, RawQuery, State};
 use axum::http::StatusCode;
@@ -151,6 +155,55 @@ pub async fn get_oauth_app_info(
     app.client_secret = String::new();
 
     Ok(json_ok(encode(&app)?, true))
+}
+
+/// Port of `getAuthorizedOAuthApps` (oauth.go:313) —
+/// `GET /api/v4/users/{user_id}/oauth/apps/authorized`, the *Security → OAuth 2.0 Applications*
+/// panel in a user's own settings.
+///
+/// # A user route, not an admin one
+///
+/// The gate is `SessionHasPermissionToUser` — yourself, or an admin — and its refusal names
+/// **`edit_other_users`**, a write permission on a read, exactly as `getUserAudits` does. So
+/// `manage_oauth` has nothing to do with this route: a plain user reads their own authorisations
+/// and is refused someone else's.
+///
+/// The apps come back **sanitised** (see `mm_app::oauth`), and `json.Marshal` + `w.Write`
+/// (oauth.go:330, :336) means **no trailing newline** — the same shape as the admin list.
+#[tracing::instrument(skip_all, fields(user_id = %user_id, count))]
+pub async fn get_authorized_oauth_apps(
+    State(state): State<AppState>,
+    Path(user_id): Path<String>,
+    RawQuery(query): RawQuery,
+    session: AuthenticatedSession,
+) -> Result<Response, ApiError> {
+    // `me` first, then `RequireUserId` (web/context.go:301).
+    let user_id = crate::channels::resolve_me(&user_id, &session);
+    if !is_valid_id(user_id) {
+        return Err(ApiError::invalid_url_param("user_id"));
+    }
+
+    if !state
+        .app
+        .session_has_permission_to_user(&session.0, user_id)
+        .await
+    {
+        return Err(ApiError::from(make_permission_error(
+            &session.0,
+            &[&mm_model::permission::PERMISSION_EDIT_OTHER_USERS],
+        )));
+    }
+
+    let page = parse_page(query.as_deref());
+    let per_page = parse_per_page(query.as_deref());
+
+    let apps = state
+        .app
+        .get_authorized_apps_for_user(user_id, page, per_page)
+        .await?;
+    tracing::Span::current().record("count", apps.len());
+
+    Ok(json_ok(encode(&apps)?, false))
 }
 
 /// `model.NewAppError("getOAuthApps", "api.command.admin_only.app_error", nil, "", 403)`.
