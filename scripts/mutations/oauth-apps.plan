@@ -1,0 +1,37 @@
+# Mutation plan for the three OAuth app reads (getOAuthApps, getOAuthApp, getOAuthAppInfo).
+#
+#   scripts/mutate-batch.sh scripts/mutations/oauth-apps.plan
+#
+# The decisions worth mutating: **who is sanitised** — only `/info` is, and both directions are
+# wrong answers; which of two error ids each refusal carries (the list's is a *command* id built by
+# hand, the single read's is the ordinary permission error); which routes end in a newline (the
+# single reads do, the list does not); and the not-found id, which is one word from the 500's.
+#
+# `store-by-creator-predicate` runs under `store`: `GetAppByUser` is selected only for a caller
+# with `manage_oauth` and **not** `manage_system_wide_oauth`, and the one role granting either
+# grants both — so the branch is unreachable over HTTP. The filter is a **test name**.
+#
+# The last two lines are the no-op controls and must SURVIVE.
+
+store-single-app-id-filter	crates/mm-store/src/oauth_store.rs	              FROM oauthapps o\n             WHERE o.id = $1	              FROM oauthapps o\n             WHERE o.id = $1 OR TRUE	api	oauth_apps
+store-null-callbacks-become-empty	crates/mm-store/src/oauth_store.rs	            None => None,	            None => Some(Vec::new()),	api	oauth_apps
+store-columns-swapped	crates/mm-store/src/oauth_store.rs	            client_secret: self.clientsecret,\n            name: self.name,	            client_secret: self.name,\n            name: self.clientsecret,	api	oauth_apps
+store-list-limit-offset-swap	crates/mm-store/src/oauth_store.rs	             LIMIT $1 OFFSET $2\n            "#,\n            limit,\n            offset	             LIMIT $1 OFFSET $2\n            "#,\n            offset,\n            limit	api	oauth_apps
+store-by-creator-predicate	crates/mm-store/src/oauth_store.rs	             WHERE o.creatorid = $1\n             LIMIT $2 OFFSET $3	             WHERE o.creatorid = $1 OR TRUE\n             LIMIT $2 OFFSET $3	store	by_creator_narrows
+app-single-not-found-status	crates/mm-app/src/oauth.rs	                if not_found { 404 } else { 500 },	                if not_found { 500 } else { 500 },	api	oauth_apps
+app-single-not-found-id	crates/mm-app/src/oauth.rs	                    "app.oauth.get_app.find.app_error"	                    "app.oauth.get_app.finding.app_error"	api	oauth_apps
+app-list-offset	crates/mm-app/src/oauth.rs	            .get_apps(page * per_page, per_page)	            .get_apps(page, per_page)	api	oauth_apps
+app-disabled-gate	crates/mm-app/src/oauth.rs	        if !self.config().enable_oauth_service_provider {\n            return Err(disabled("GetOAuthApps"));	        if self.config().enable_oauth_service_provider {\n            return Err(disabled("GetOAuthApps"));	api	oauth_apps
+api-list-permission-check	crates/mm-api/src/oauth.rs	        .session_has_permission_to(&session.0, &PERMISSION_MANAGE_OAUTH)\n        .await\n    {\n        return Err(admin_only());\n    }	        .session_has_permission_to(&session.0, &PERMISSION_MANAGE_OAUTH)\n        .await\n        && false\n    {\n        return Err(admin_only());\n    }	api	oauth_apps
+api-list-refusal-id	crates/mm-api/src/oauth.rs	        "api.command.admin_only.app_error",	        "api.context.permissions.app_error",	api	oauth_apps
+api-list-scope-branch	crates/mm-api/src/oauth.rs	        .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM_WIDE_OAUTH)\n        .await\n    {\n        tracing::Span::current().record("scope", "every app");	        .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM_WIDE_OAUTH)\n        .await\n        && false\n    {\n        tracing::Span::current().record("scope", "every app");	api	oauth_apps
+api-single-permission-check	crates/mm-api/src/oauth.rs	        .session_has_permission_to(&session.0, &PERMISSION_MANAGE_OAUTH)\n        .await\n    {\n        return Err(ApiError::from(make_permission_error(\n            &session.0,\n            &[&PERMISSION_MANAGE_OAUTH],\n        )));	        .session_has_permission_to(&session.0, &PERMISSION_MANAGE_OAUTH)\n        .await\n        && false\n    {\n        return Err(ApiError::from(make_permission_error(\n            &session.0,\n            &[&PERMISSION_MANAGE_OAUTH],\n        )));	api	oauth_apps
+api-info-does-not-sanitize	crates/mm-api/src/oauth.rs	    app.client_secret = String::new();	    app.client_secret = app.client_secret.clone();	api	oauth_apps
+api-info-sanitizes-too-much	crates/mm-api/src/oauth.rs	    app.client_secret = String::new();	    app.client_secret = String::new();\n    app.callback_urls = None;	api	oauth_apps
+api-single-sanitizes	crates/mm-api/src/oauth.rs	    Ok(json_ok(encode(&app)?, true))\n}\n\n/// Port of `getOAuthAppInfo`	    let app = {\n        let mut app = app;\n        app.client_secret = String::new();\n        app\n    };\n    Ok(json_ok(encode(&app)?, true))\n}\n\n/// Port of `getOAuthAppInfo`	api	oauth_apps
+api-list-trailing-newline	crates/mm-api/src/oauth.rs	    Ok(json_ok(encode(&apps)?, false))	    Ok(json_ok(encode(&apps)?, true))	api	oauth_apps
+api-single-no-newline	crates/mm-api/src/oauth.rs	    Ok(json_ok(encode(&app)?, true))\n}\n\n/// Port of `getOAuthAppInfo`	    Ok(json_ok(encode(&app)?, false))\n}\n\n/// Port of `getOAuthAppInfo`	api	oauth_apps
+#
+# --- no-op controls: these must SURVIVE ---
+control-rename-binding	crates/mm-api/src/oauth.rs	    let app = state.app.get_oauth_app(&app_id).await?;\n    tracing::Span::current().record("creator", &app.creator_id);	    let found = state.app.get_oauth_app(&app_id).await?;\n    let app = found;\n    tracing::Span::current().record("creator", &app.creator_id);	api	oauth_apps
+control-reorder-independent-selects	crates/mm-store/src/oauth_store.rs	                   COALESCE(o.homepage, '')              AS "homepage!",\n                   COALESCE(o.istrusted, FALSE)          AS "istrusted!",\n                   o.mattermostappid                     AS "mattermostappid!",\n                   COALESCE(o.isdynamicallyregistered, FALSE) AS "isdynamicallyregistered!"\n              FROM oauthapps o\n             WHERE o.id = $1	                   COALESCE(o.istrusted, FALSE)          AS "istrusted!",\n                   COALESCE(o.homepage, '')              AS "homepage!",\n                   o.mattermostappid                     AS "mattermostappid!",\n                   COALESCE(o.isdynamicallyregistered, FALSE) AS "isdynamicallyregistered!"\n              FROM oauthapps o\n             WHERE o.id = $1	api	oauth_apps

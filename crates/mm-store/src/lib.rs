@@ -19,6 +19,7 @@ pub mod draft_store;
 pub mod emoji_store;
 pub mod error;
 pub mod file_info_store;
+pub mod oauth_store;
 pub mod post_store;
 pub mod preference_store;
 pub mod reaction_store;
@@ -41,6 +42,7 @@ pub use draft_store::{DraftStore, SqlDraftStore};
 pub use emoji_store::{EmojiStore, SqlEmojiStore};
 pub use error::StoreError;
 pub use file_info_store::{FileInfoStore, SqlFileInfoStore};
+pub use oauth_store::{OAuthStore, SqlOAuthStore};
 pub use post_store::{PostStore, SqlPostStore};
 pub use preference_store::{PreferenceStore, SqlPreferenceStore};
 pub use reaction_store::{ReactionStore, SqlReactionStore};
@@ -71,6 +73,7 @@ pub struct SqlStore {
     emoji: SqlEmojiStore,
     draft: SqlDraftStore,
     file_info: SqlFileInfoStore,
+    oauth: SqlOAuthStore,
     post: SqlPostStore,
     reaction: SqlReactionStore,
     thread: SqlThreadStore,
@@ -114,6 +117,7 @@ impl SqlStore {
             emoji: SqlEmojiStore::new(pool.clone()),
             draft: SqlDraftStore::new(pool.clone()),
             file_info: SqlFileInfoStore::new(pool.clone()),
+            oauth: SqlOAuthStore::new(pool.clone()),
             post: SqlPostStore::new(pool.clone()),
             reaction: SqlReactionStore::new(pool.clone()),
             thread: SqlThreadStore::new(pool.clone()),
@@ -134,6 +138,11 @@ impl SqlStore {
     /// Port of `store.Store.Audit()`.
     pub fn audit(&self) -> &SqlAuditStore {
         &self.audit
+    }
+
+    /// Port of `store.Store.OAuth()`.
+    pub fn oauth(&self) -> &SqlOAuthStore {
+        &self.oauth
     }
 
     /// Port of `store.Store.Webhook()`.

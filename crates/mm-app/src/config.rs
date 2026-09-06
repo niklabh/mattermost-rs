@@ -142,6 +142,14 @@ pub struct Config {
     /// `api.outgoing_webhook.disabled.app_error`. Two settings, two ids, one status.
     pub enable_outgoing_webhooks: bool,
 
+    /// `ServiceSettings.EnableOAuthServiceProvider` (config.go, defaulted at :595). Go default
+    /// **`true`**.
+    ///
+    /// Gates all three OAuth **app** reads with `api.oauth.allow_oauth.turn_off.app_error` at
+    /// **501** (app/oauth.go:75, :138, :151) — a third feature toggle with a third error id at the
+    /// same status. Read by [`crate::App::get_oauth_apps`] and its two neighbours.
+    pub enable_oauth_service_provider: bool,
+
     /// The `MM_LICENSE` environment variable (`platform.LicenseEnv`, platform/license.go:26).
     ///
     /// Not an `MM_<SECTION>_<SETTING>` config overlay — it is its own variable, holding a whole
@@ -180,6 +188,7 @@ impl Default for Config {
             file_driver_name: "local".to_owned(),
             enable_incoming_webhooks: true,
             enable_outgoing_webhooks: true,
+            enable_oauth_service_provider: true,
             license: String::new(),
         }
     }
@@ -234,6 +243,10 @@ impl Config {
             enable_outgoing_webhooks: env_bool(
                 "MM_SERVICESETTINGS_ENABLEOUTGOINGWEBHOOKS",
                 default.enable_outgoing_webhooks,
+            ),
+            enable_oauth_service_provider: env_bool(
+                "MM_SERVICESETTINGS_ENABLEOAUTHSERVICEPROVIDER",
+                default.enable_oauth_service_provider,
             ),
             // Its own variable, not part of the `MM_<SECTION>_<SETTING>` overlay, and Go treats
             // any non-empty value as "a licence was supplied" before it ever tries to parse it.

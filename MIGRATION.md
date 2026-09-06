@@ -6698,3 +6698,63 @@ Removing the forward survived the first run: on an unlicensed server the branch 
 row need one lock between them. It now lives in `common::ACTIVE_LICENCE_ROW`, with
 `common::set_active_licence_id`, and both suites take it: shared while they expect us to answer,
 exclusive while they make the server look licensed.
+
+## `GET /api/v4/oauth/apps`, `.../{app_id}`, `.../{app_id}/info` — the three OAuth app reads (2026-09-06)
+
+Served. `crates/mm-api/src/oauth.rs`, `crates/mm-app/src/oauth.rs`,
+`crates/mm-store/src/oauth_store.rs`, plus `Config::enable_oauth_service_provider`; 8 parity tests
+in `crates/mm-api/tests/parity/oauth_apps.rs` and 1 store test in
+`crates/mm-store/tests/db_oauth_apps_by_creator.rs`. The System Console's *Integrations → OAuth
+2.0 Applications* page, and the consent screen behind `/info`.
+
+**The one thing a reader would otherwise get wrong: `client_secret` is on the wire for two of the
+three.** Only `/info` calls `Sanitize()` (model/oauth.go:164), which blanks that one field and
+nothing else. The list hands every app's secret to anyone with `manage_oauth`, and the single read
+hands it to the creator or a system-wide admin — which is what the console page needs, and what a
+"safe-looking" tidy-up would break. Both directions are asserted.
+
+Three more. The **list's refusal is not a permission error**: Go builds
+`api.command.admin_only.app_error` by hand (oauth.go:147), so a *command* id refuses an OAuth
+route, while the single read beside it uses `api.context.permissions.app_error` for the same
+missing permission. The single read's not-found and failure ids differ by one word
+(`get_app.find` / `get_app.finding`) — unlike the webhook single reads, which share one id and
+change only the status. And `/info` has **no permission check at all**: any session may read any
+app's public description.
+
+`GetApps` has no `ORDER BY` and the table has no `DeleteAt` column, so paging is over the heap and
+there is nothing to filter.
+
+Mutation run: **20 run, 18 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/oauth-apps.plan`).
+
+### Three survivors, all of them shapes seen earlier this session
+
+- **`page * per_page` tested at `per_page = 1`**, where it equals `page`. Now two pages of two over
+  three rows, asserting the pages are **disjoint** — the union is the same either way.
+- **The single read's first gate**, invisible because its 403 and the second gate's are the same
+  bytes. It is now tested against an app the caller **created**: only then does the second gate
+  pass, so only then is the first the one refusing. The same trick the single-hook routes needed.
+- **`GetAppByUser` is unreachable over HTTP**: it is selected only for a caller with `manage_oauth`
+  and not `manage_system_wide_oauth`, and the one role granting either grants both. Tested at the
+  store, where the *unconditional* creator predicate — Go adds it with a plain `Where`, unlike the
+  webhook stores' guarded ones — makes an empty id match nothing rather than everything.
+
+### `sqlx::query_as!` cannot share a column list
+
+The three queries repeat thirteen columns. A `macro_rules!` expresses that, and breaks compile-time
+checking: `query_as!` needs a string **literal**, so a macro-assembled query is not verified
+against the database at all. The repetition is deliberate — checked repetition beats reuse the
+compiler cannot see.
+
+### The purge has to precede *every* fixture write, not most of them
+
+The full run failed once in `channel_posts_unread` with *"No team member found for that user ID
+and team ID"* — a suite that had never touched OAuth, failing to add a user to a channel. The
+cause was ordering: `purge_api_fixtures` is a `OnceCell`, and the **first** caller runs it. A suite
+that created a team without purging first, and only later triggered the purge through some other
+suite's helper, had its own team deleted out from under it.
+
+The window widened on 2026-09-06 when `create_plain_user` started awaiting the purge (it had to —
+see the first commit of the day). The fix is to close it in the same direction: `create_team` and
+`create_channel_typed` await it too, so the purge is guaranteed to be the earliest write of the
+run. **Every path that creates a fixture purges first**, and the `OnceCell` makes that once.

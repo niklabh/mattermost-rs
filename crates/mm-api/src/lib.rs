@@ -15,6 +15,7 @@ pub mod error;
 /// `getFileInfo` — the one `/files/` route that returns JSON rather than bytes.
 pub mod files;
 pub mod license;
+pub mod oauth;
 pub mod posts;
 pub mod preferences;
 pub mod proxy;
@@ -623,6 +624,18 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/hooks/outgoing/{hook_id}",
             partially_migrated_with_ids(&state, get(webhooks::get_outgoing_hook)),
+        )
+        .route(
+            "/api/v4/oauth/apps",
+            partially_migrated(get(oauth::get_oauth_apps)),
+        )
+        .route(
+            "/api/v4/oauth/apps/{app_id}",
+            partially_migrated_with_ids(&state, get(oauth::get_oauth_app)),
+        )
+        .route(
+            "/api/v4/oauth/apps/{app_id}/info",
+            partially_migrated_with_ids(&state, get(oauth::get_oauth_app_info)),
         )
         .route(
             "/api/v4/license/client",

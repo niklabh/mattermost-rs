@@ -450,6 +450,9 @@ pub async fn create_channel_typed(
     tag: &str,
     channel_type: &str,
 ) -> String {
+    // The purge precedes every fixture write — see [`create_team`].
+    purge_api_fixtures().await;
+
     let name = format!("mmrs-parity-{tag}");
     let response = client
         .post(format!("{GO}/api/v4/channels"))
@@ -728,6 +731,12 @@ pub async fn fetch_both_stable(
 /// where the sequential one left one. `OnceCell` makes every later caller wait for the first
 /// purge rather than start its own, so the clearing happens strictly before any test creates
 /// anything.
+///
+/// **"Before any test creates anything" is only true if every creation path awaits it**, and that
+/// is now enforced: [`create_team`], [`create_channel_typed`] and [`create_plain_user`] all call
+/// this first. Until they did, a suite could create a team, and a *later* first-caller elsewhere
+/// would then run the purge and delete it — surfacing as an unrelated suite failing to add a user
+/// to a channel whose team had lost its members.
 static PURGED: tokio::sync::OnceCell<()> = tokio::sync::OnceCell::const_new();
 
 /// Delete every row the api suites author, once per test binary.
@@ -1305,6 +1314,13 @@ pub async fn set_user_roles(user_id: &str, roles: &str) -> bool {
 /// `town-square` and `off-topic` Go creates alongside carry no prefix and are orphaned rather
 /// than deleted.
 pub async fn create_team(client: &reqwest::Client, admin_token: &str, tag: &str) -> String {
+    // See [`purge_api_fixtures`]: **every** path that creates a fixture awaits the purge first, so
+    // the purge is guaranteed to be the earliest write of the run. A suite that created a team and
+    // only later triggered the purge — through some other suite's `create_plain_user`, say — had
+    // its own team deleted out from under it, and the symptom was a *different* suite failing to
+    // add a user to a channel on a team that no longer had members.
+    purge_api_fixtures().await;
+
     let response = client
         .post(format!("{GO}/api/v4/teams"))
         .header("Authorization", format!("Bearer {admin_token}"))
