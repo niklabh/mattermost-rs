@@ -6940,7 +6940,7 @@ Every mutation plan is committed so a later session can re-run it. Nothing check
 *apply*. Running the same pre-flight `mutate-batch.sh` does, over all 42 plans at once, reports
 **42 stale anchors out of 700 lines** — some old, several introduced today, because a route that
 adds a handler to a file an earlier plan anchors on can turn a unique pattern into an ambiguous
-one. `mutate.sh` replaces the **first** occurrence, so an ambiguous anchor silently moves the
+one. One was fixed and its plan re-run to the same tally, as a worked example; 41 remain. `mutate.sh` replaces the **first** occurrence, so an ambiguous anchor silently moves the
 verdict to a function nobody meant to test. [D-168] records the backlog; the tallies reported this
 session are unaffected, because each plan passed its own pre-flight at the moment it ran.
 

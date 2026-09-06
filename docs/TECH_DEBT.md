@@ -4663,7 +4663,7 @@ route whose live shape does not match the source is **skipped and recorded**, no
 
 ---
 
-## D-168 · 42 of 700 mutation-plan anchors no longer match the tree
+## D-168 · 41 of 700 mutation-plan anchors no longer match the tree
 
 **Status** OPEN · **Severity** unverified · **Raised** 2026-09-06 (phase 2, mutation harness)
 
@@ -4687,10 +4687,14 @@ added handlers to a file an earlier plan already anchored on — `incoming-hooks
 pre-flight at the moment it ran, so each reported tally was measured against an unambiguous anchor.
 The staleness is about **re-running** them later, which is exactly what a committed plan is for.
 
-**What is owed:** re-anchor the 42, one plan at a time, re-running each to confirm the verdicts
-still hold. Deliberately not attempted in the session that found it: fixing an ambiguous anchor
-without re-running its plan trades a known-stale line for an unverified one, and there were a dozen
-plans' worth.
+**What is owed:** re-anchor the rest, one plan at a time, re-running each to confirm the verdicts
+still hold. **One of the 42 is done** — `oauth-apps.plan`'s `api-list-trailing-newline`, which had
+gone ambiguous the same day when `getAuthorizedOAuthApps` landed in `oauth.rs` with a
+byte-identical last line; the anchor now includes the two lines above the return and the re-run
+reproduced the original tally exactly. **41 remain**, and that is the shape the rest should take:
+re-anchor, then re-run. Fixing an ambiguous anchor *without* re-running its plan trades a
+known-stale line for an unverified one, which is why the other dozen plans were left alone in the
+session that found them.
 
 **Where the pin lives:** the header comment on `scripts/preflight-plans.sh`, which explains both
 failure modes and why the unescaping has to be the runner's own.
