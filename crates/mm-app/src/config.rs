@@ -177,6 +177,26 @@ pub struct Config {
     /// The companion of [`Config::show_full_name`], with the same readers and the same history.
     pub show_email_address: bool,
 
+    /// `ServiceSettings.SessionIdleTimeoutInMinutes` (config.go:429, defaulted at :799). Go
+    /// default **43200** — thirty days, not zero.
+    ///
+    /// Read by [`crate::App::get_session`]: a positive value arms the idle-timeout check that
+    /// revokes a session whose `LastActivityAt` is older than it. Zero disarms it entirely, which
+    /// is why the default's *value* matters here in a way the boolean settings' does not — a port
+    /// that guessed `0` would never revoke anything and would accept every session Go rejects.
+    pub session_idle_timeout_in_minutes: i64,
+
+    /// `ServiceSettings.ExtendSessionLengthWithActivity` (config.go:415, defaulted at :728).
+    ///
+    /// **Its default is not a constant.** Go writes `new(!isUpdate)`, and `isUpdate` is
+    /// `ServiceSettings.SiteURL != nil` (config.go:4289) — so a fresh config defaults it `true`
+    /// and a pre-existing one `false`. See [`Config::from_document`], which is where that
+    /// distinction is actually made; [`Config::default`] models the fresh case.
+    ///
+    /// Read by [`crate::App::get_session`], where it **disarms** the idle-timeout check: Go
+    /// treats sliding expiry and idle revocation as alternatives, never both.
+    pub extend_session_length_with_activity: bool,
+
     /// The `MM_LICENSE` environment variable (`platform.LicenseEnv`, platform/license.go:26).
     ///
     /// Not an `MM_<SECTION>_<SETTING>` config overlay — it is its own variable, holding a whole
@@ -218,6 +238,12 @@ impl Default for Config {
             enable_oauth_service_provider: true,
             show_full_name: true,
             show_email_address: true,
+            session_idle_timeout_in_minutes: 43200,
+            // `new(!isUpdate)` with `isUpdate == false`: this constructor models `SetDefaults` on
+            // an **empty** config, which has no `SiteURL` and is therefore a fresh install. Every
+            // document a running Go server persists takes the other branch — see
+            // [`Config::from_document`].
+            extend_session_length_with_activity: true,
             license: String::new(),
         }
     }
@@ -332,6 +358,16 @@ impl Config {
                 "MM_PRIVACYSETTINGS_SHOWEMAILADDRESS",
                 default.show_email_address,
             ),
+            session_idle_timeout_in_minutes: lookup_int(
+                lookup,
+                "MM_SERVICESETTINGS_SESSIONIDLETIMEOUTINMINUTES",
+                default.session_idle_timeout_in_minutes,
+            ),
+            extend_session_length_with_activity: lookup_bool(
+                lookup,
+                "MM_SERVICESETTINGS_EXTENDSESSIONLENGTHWITHACTIVITY",
+                default.extend_session_length_with_activity,
+            ),
             // Its own variable, not part of the `MM_<SECTION>_<SETTING>` overlay, and Go treats
             // any non-empty value as "a licence was supplied" before it ever tries to parse it.
             license: lookup("MM_LICENSE").unwrap_or(default.license),
@@ -361,6 +397,12 @@ impl Config {
         let default = Self::default();
 
         let service = parsed.service_settings.unwrap_or_default();
+        // Port of `Config.isUpdate` (config.go:4289): "a pre-existing config" is detected by
+        // `ServiceSettings.SiteURL != nil` and nothing else. `Store.Load` plants a `SiteURL` of
+        // `""` before calling `SetDefaults` when the document has none (config/store.go:280), so
+        // every document a running server persists is an *update* — a JSON `null` and an absent
+        // key both land here as `false`, matching Go's nil pointer.
+        let is_update = service.site_url.is_some();
         Ok(Self {
             restrict_system_admin: parsed
                 .experimental_settings
@@ -417,6 +459,17 @@ impl Config {
                 .privacy_settings
                 .and_then(|p| p.show_email_address)
                 .unwrap_or(default.show_email_address),
+            session_idle_timeout_in_minutes: service
+                .session_idle_timeout_in_minutes
+                .unwrap_or(default.session_idle_timeout_in_minutes),
+            // The one setting here whose default is computed rather than looked up. `new(!isUpdate)`
+            // (config.go:729), and the comment above it in the Go source says why: "Must be
+            // manually enabled for existing installations." Resolving it against
+            // `Config::default` like every neighbour would read an absent key on a real server's
+            // document as `true` and silently disarm the idle-timeout check.
+            extend_session_length_with_activity: service
+                .extend_session_length_with_activity
+                .unwrap_or(!is_update),
             // Not a config field on either server — `MM_LICENSE` is its own variable, read by
             // `apply_env`.
             license: default.license,
@@ -496,6 +549,16 @@ struct Document {
 
 #[derive(Debug, Default, serde::Deserialize)]
 struct ServiceSettingsDocument {
+    /// Not a setting anything ported reads — the **`isUpdate` discriminator**, and the only
+    /// reason it is modelled. `Config.isUpdate` is `ServiceSettings.SiteURL != nil`
+    /// (config.go:4289), and two settings' defaults are `!isUpdate`. Only its presence is
+    /// consulted, never its value, which is just as well: the live document holds `""`.
+    #[serde(rename = "SiteURL")]
+    site_url: Option<String>,
+    #[serde(rename = "SessionIdleTimeoutInMinutes")]
+    session_idle_timeout_in_minutes: Option<i64>,
+    #[serde(rename = "ExtendSessionLengthWithActivity")]
+    extend_session_length_with_activity: Option<bool>,
     #[serde(rename = "EnablePostIconOverride")]
     enable_post_icon_override: Option<bool>,
     #[serde(rename = "EnableCustomEmoji")]
@@ -569,6 +632,18 @@ fn lookup_bool(lookup: &impl Fn(&str) -> Option<String>, key: &str, default: boo
         .unwrap_or(default)
 }
 
+/// The integer arm of `applyEnvKey` (config/environment.go:64): `strconv.ParseInt(value, 10, 0)`,
+/// with an unparseable value leaving the setting at its default.
+///
+/// Base 10 is explicit in Go, so `0x10` and `1_000` are **not** accepted — which matches
+/// `i64::from_str`. The fallback direction is the same as [`lookup_bool`]'s and for the same
+/// reason: Go's `if err == nil { ... }` simply never assigns.
+fn lookup_int(lookup: &impl Fn(&str) -> Option<String>, key: &str, default: i64) -> i64 {
+    lookup(key)
+        .and_then(|raw| raw.parse::<i64>().ok())
+        .unwrap_or(default)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -596,6 +671,14 @@ mod tests {
         assert!(
             config.burn_on_read(),
             "post_helpers.go:270 — both halves true"
+        );
+        assert_eq!(
+            config.session_idle_timeout_in_minutes, 43_200,
+            "config.go:800 — new(43200), thirty days"
+        );
+        assert!(
+            config.extend_session_length_with_activity,
+            "config.go:729 — new(!isUpdate), and this constructor is the fresh case"
         );
         // The one string setting. `model.ImageDriverLocal` is the literal `"local"`; the emoji
         // reads compare it against `""`, so a default of `""` here would 403 every one of them.
@@ -683,6 +766,52 @@ mod tests {
             true
         ));
     }
+
+    /// [`lookup_int`] against `strconv.ParseInt(value, 10, 0)`, which is the conversion
+    /// `applyEnvKey` runs for an `int` field (config/environment.go:64).
+    ///
+    /// Base 10 is explicit on the Go side, so the hex and underscore spellings a base-0 parse
+    /// would accept are **not** overrides on either server — they leave the setting alone.
+    #[test]
+    fn lookup_int_matches_gos_parse_int() {
+        let with = |v: &'static str| lookup_int(&move |_: &str| Some(v.to_owned()), "MM_X", 43_200);
+
+        assert_eq!(with("5"), 5);
+        assert_eq!(with("0"), 0, "zero is a value, not an absence — it disarms");
+        assert_eq!(with("-1"), -1);
+        assert_eq!(
+            with("+7"),
+            7,
+            "strconv accepts a leading plus and so does Rust"
+        );
+
+        for rejected in ["", " 5", "5 ", "5m", "0x10", "1_000", "1.0", "yes"] {
+            assert_eq!(
+                lookup_int(&|_: &str| Some(rejected.to_owned()), "MM_X", 43_200),
+                43_200,
+                "`{rejected}` must leave the default alone"
+            );
+        }
+
+        assert_eq!(lookup_int(&|_: &str| None, "MM_X", 43_200), 43_200);
+    }
+
+    /// Both new settings reach [`Config`] through the overlay, under the variable names Go's own
+    /// `MM_<SECTION>_<SETTING>` rule produces.
+    #[test]
+    fn the_session_settings_are_overridable_by_environment() {
+        let config = Config::default().apply_env_from(&|key| match key {
+            "MM_SERVICESETTINGS_SESSIONIDLETIMEOUTINMINUTES" => Some("15".to_owned()),
+            "MM_SERVICESETTINGS_EXTENDSESSIONLENGTHWITHACTIVITY" => Some("false".to_owned()),
+            _ => None,
+        });
+
+        assert_eq!(config.session_idle_timeout_in_minutes, 15);
+        assert!(
+            !config.extend_session_length_with_activity,
+            "and it moved off the fresh-config default of true"
+        );
+    }
 }
 
 /// Parity tests against `fixtures/config_active.json` — the configuration a real Go server booted
@@ -700,14 +829,94 @@ mod go_parity {
     /// Before the config document was reachable there was no way to check the transcription at
     /// all — `defaults_match_gos_set_defaults` asserts the same values against line numbers a
     /// human read, which catches a typo in the test and nothing in the world.
+    ///
+    /// # One field is expected to differ, and it is the interesting one
+    ///
+    /// `ExtendSessionLengthWithActivity` defaults to `!isUpdate`, and `isUpdate` is
+    /// `ServiceSettings.SiteURL != nil`. [`Config::default`] models a **fresh** config — no
+    /// `SiteURL`, so `true`; every document a running server persists carries a `SiteURL` (Go
+    /// plants `""` when the document has none, config/store.go:280), so `false`. Both are correct
+    /// for their input, which is why this compares against the adjusted default rather than
+    /// widening the assertion to let a genuine drift through.
     #[test]
     fn every_default_matches_what_go_actually_wrote() {
         let from_go = Config::from_document(ACTIVE).expect("the fixture is a config document");
-        let transcribed = Config::default();
+        let transcribed = Config {
+            extend_session_length_with_activity: false,
+            ..Config::default()
+        };
 
         assert_eq!(
             from_go, transcribed,
             "a default transcribed from config.go disagrees with the one Go wrote"
+        );
+    }
+
+    /// The `isUpdate` rule, both directions, on the fixture and on a document without a `SiteURL`.
+    ///
+    /// This is the only default in the module that is computed rather than looked up, and getting
+    /// it backwards would **disarm the idle-timeout check on every real server** — a session Go
+    /// revokes would authenticate here indefinitely. The live document proves the arming half; a
+    /// hand-built document with no `SiteURL` proves the other, since no real server writes one.
+    #[test]
+    fn the_extend_session_default_follows_is_update() {
+        let from_go = Config::from_document(ACTIVE).expect("the fixture is a config document");
+        assert!(
+            !from_go.extend_session_length_with_activity,
+            "a persisted document has a SiteURL, so isUpdate is true and the default is false"
+        );
+        assert!(
+            ACTIVE.contains("\"SiteURL\""),
+            "and the fixture is the evidence for that — the key must stay projected"
+        );
+
+        let fresh = Config::from_document(r#"{"ServiceSettings":{"PostPriority":true}}"#)
+            .expect("valid document");
+        assert!(
+            fresh.extend_session_length_with_activity,
+            "no SiteURL means a fresh config, and Go defaults it true there"
+        );
+    }
+
+    /// Presence decides it, not truthiness. An empty `SiteURL` is a non-nil pointer in Go and it
+    /// is exactly what the live row holds, so reading `""` as "unset" would invert the default on
+    /// every stock server.
+    #[test]
+    fn an_empty_site_url_still_counts_as_an_update() {
+        let config =
+            Config::from_document(r#"{"ServiceSettings":{"SiteURL":""}}"#).expect("valid document");
+        assert!(!config.extend_session_length_with_activity);
+    }
+
+    /// An explicit value in the document beats the computed default in both directions — the
+    /// field is read, not merely defaulted.
+    #[test]
+    fn an_explicit_extend_session_value_wins_over_is_update() {
+        let on = Config::from_document(
+            r#"{"ServiceSettings":{"SiteURL":"x","ExtendSessionLengthWithActivity":true}}"#,
+        )
+        .expect("valid document");
+        assert!(on.extend_session_length_with_activity);
+
+        let off = Config::from_document(
+            r#"{"ServiceSettings":{"ExtendSessionLengthWithActivity":false}}"#,
+        )
+        .expect("valid document");
+        assert!(!off.extend_session_length_with_activity);
+    }
+
+    /// The idle timeout is an integer, so it is the one setting where the *value* of the default
+    /// matters rather than just its polarity. 43200 minutes is thirty days.
+    #[test]
+    fn the_idle_timeout_default_is_thirty_days() {
+        let from_go = Config::from_document(ACTIVE).expect("the fixture is a config document");
+        assert_eq!(from_go.session_idle_timeout_in_minutes, 43_200);
+        assert_eq!(
+            Config::from_document("{}")
+                .expect("valid document")
+                .session_idle_timeout_in_minutes,
+            43_200,
+            "an absent key takes Go's default, not zero — zero would disarm the check"
         );
     }
 
@@ -719,8 +928,9 @@ mod go_parity {
     /// *default* against its default and passes, having proved nothing about the new field. The
     /// count is the cheapest thing that fails instead.
     ///
-    /// Fourteen, not sixteen: `feature_flag_burn_on_read` and `license` are the two settings that
-    /// do not come from the document at all.
+    /// Seventeen: the sixteen document-sourced settings, minus `feature_flag_burn_on_read` and
+    /// `license` (which come from nowhere near the document), plus `SiteURL` — not a setting at
+    /// all, but the `isUpdate` discriminator two of those defaults are computed from.
     #[test]
     fn the_fixture_covers_every_document_sourced_setting() {
         let fixture: serde_json::Value = serde_json::from_str(ACTIVE).expect("the fixture is JSON");
@@ -732,8 +942,8 @@ mod go_parity {
             .sum();
 
         assert_eq!(
-            keys, 14,
-            "the fixture covers {keys} settings and Config reads 14 from the document. \
+            keys, 17,
+            "the fixture covers {keys} settings and Config reads 17 from the document. \
              Add the new key to scripts/dump-config-fixture.sh and re-run it — a modelled \
              setting the fixture does not carry is a setting Go's own output never checked"
         );
@@ -753,7 +963,9 @@ mod go_parity {
                 "EnableBurnOnRead": false,
                 "EnableIncomingWebhooks": false,
                 "EnableOutgoingWebhooks": false,
-                "EnableOAuthServiceProvider": false
+                "EnableOAuthServiceProvider": false,
+                "SessionIdleTimeoutInMinutes": 17,
+                "ExtendSessionLengthWithActivity": true
             },
             "ComplianceSettings": { "Enable": true },
             "ExperimentalSettings": { "RestrictSystemAdmin": true },
@@ -777,6 +989,11 @@ mod go_parity {
         assert_eq!(config.file_driver_name, "amazons3");
         assert!(!config.show_full_name);
         assert!(!config.show_email_address);
+        assert_eq!(config.session_idle_timeout_in_minutes, 17);
+        // Inverted against the *fresh* default, which this document has too: no `SiteURL`, so
+        // `!isUpdate` is `true` and an unread field would also read `true`. The 17 above is what
+        // makes the pair honest — an integer has no default to coincide with.
+        assert!(config.extend_session_length_with_activity);
     }
 
     /// The two privacy settings are read from **different** keys.
@@ -897,13 +1114,23 @@ mod go_parity {
 
     /// The document holds all 47 sections and this struct models six of them. Ignoring the rest is
     /// what makes growing the struct one reader at a time safe.
+    ///
+    /// `SiteURL` stopped being an unknown key when the `isUpdate` rule landed, which is why the
+    /// expectation carries the one field it moves — see
+    /// [`the_extend_session_default_follows_is_update`].
     #[test]
     fn unknown_sections_and_keys_are_ignored() {
         let config = Config::from_document(
             r#"{"SqlSettings":{"DataSource":"secret"},"ServiceSettings":{"SiteURL":"x"}}"#,
         )
         .expect("valid document");
-        assert_eq!(config, Config::default());
+        assert_eq!(
+            config,
+            Config {
+                extend_session_length_with_activity: false,
+                ..Config::default()
+            }
+        );
     }
 
     /// Go refuses to start on a configuration it cannot parse (`HumanizeJSONError`,

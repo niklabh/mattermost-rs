@@ -7034,3 +7034,88 @@ check has caught a regression it was written for.
 `.sqlx` is committed for offline builds and has not been regenerated since `910ad66`; the new query
 validated against the live database instead. `sqlx-cli` is not installed here, so it stays stale —
 pre-existing, and not something this session should install a toolchain to fix.
+
+## The session-activity pair — [D-084] and [D-088] close together (2026-09-06)
+
+Not a route: the second of the project owner's three standing decisions, and the half of session
+handling that only makes sense as one change. New: `crates/mm-api/tests/parity/session_activity.rs`,
+`crates/mm-store/tests/db_session_activity.rs`, `scripts/mutations/session-activity.plan`.
+Changed: `crates/mm-store/src/session_store.rs`, `crates/mm-app/src/session.rs`,
+`crates/mm-app/src/config.rs`, `crates/mm-api/src/auth.rs`, `crates/mm-api/src/users.rs`,
+`scripts/dump-config-fixture.sh`, `fixtures/config_active.json`.
+
+| Go file | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| platform/status.go (`UpdateLastActivityAtIfNeeded`) | `mm-app/src/session.rs` | DONE | 4 unit, 4 parity | The "if needed" is a five-minute throttle on `model.SessionActivityTimeout`, not a cache lookup — [D-084]'s own guess. Called on `getUser` and `getUsers` and deliberately **not** on `getUserByUsername`, which shares the whole rest of its tail. |
+| app/session.go (`GetSession` idle branch) | `mm-app/src/session.rs` | DONE | 13 unit, 4 parity | Four exemptions, each asserted alone: a conjunction passes with three of them dropped. |
+| store/sqlstore/session_store.go (`UpdateLastActivityAt`, `Remove`) | `mm-store/src/session_store.rs` | DONE | 4 DB | The first writes this store makes. `UPDATE` matches `Id` **only** where `Get` and `Remove` take an id *or* a token — and an `UPDATE` matching nothing succeeds, so getting it wrong is silent. |
+| config.go (`SessionIdleTimeoutInMinutes`, `ExtendSessionLengthWithActivity`) | `mm-app/src/config.rs` | PARTIAL | 8 pass | Seventeen settings now. One of these has no constant default — see below. |
+
+**`ExtendSessionLengthWithActivity` has no constant default, and that is the finding.** Go writes
+`new(!isUpdate)` (config.go:729) where `isUpdate` is `ServiceSettings.SiteURL != nil`
+(config.go:4289). `Store.Load` plants a `SiteURL` of `""` before calling `SetDefaults` when the
+document has none (store.go:280), so **every document a running server persists is an update** and
+the value is `false` — while a fresh config defaults it `true`. Since `true` disarms the
+idle-timeout check outright, resolving this default the way every neighbouring field resolves
+would have silently switched off the thing this session ported. The live row confirms it: `SiteURL
+= ""`, `ExtendSessionLengthWithActivity = false`, `SessionIdleTimeoutInMinutes = 43200`.
+
+This also broke `every_default_matches_what_go_actually_wrote`, which had been asserting
+`from_document(fixture) == Config::default()`. Both values are correct for their input; the test
+now compares against the adjusted default and a second test pins the rule in both directions.
+
+### The parity suite found a divergence on every migrated route
+
+Nothing had ever compared a **401 body** against Go's. The idle timeout needed one, and it failed
+on its first run:
+
+```
+go:   "id": "api.context.session_expired.app_error"
+ours: "id": "api.context.invalid_token.error"
+```
+
+`App::GetSession`'s error id never reaches a client. `handlers.go:277-280` keeps a 500 and
+replaces every other failure with the generic `session_expired` — so a wrong token, an expired
+session, a session id used as a token and a session revoked for idleness are one indistinguishable
+answer, which is deliberate: none of them tells a caller whether the credential exists. We were
+returning the inner id, on every route that takes a session. Fixed in `auth.rs`, and
+`an_unknown_token_gets_the_same_refusal_as_an_idle_one` is the regression test.
+
+The same branch also calls `RemoveSessionCookie`, which we still do not — [D-169], left open
+because it needs `SiteURL` as a *setting* and a port of `GetSubpathFromConfig`.
+
+### Two clocks became parameters, and that is what made the boundaries testable
+
+`session_is_idle_past_timeout(config, session, now)` and `activity_write_is_due(now, last)` take
+the time rather than reading `get_millis()`. With the clock inlined, "idle by exactly the timeout"
+cannot be constructed — every fixture is already a few milliseconds past it by the time the
+comparison runs — so `>` and `>=` are the same function and a mutation of one into the other
+survives. Both boundaries are now asserted at the millisecond, and both mutations are caught. Same
+shape as `apply_env_from`'s lookup parameter in the config session.
+
+### Planting a session is the vertical slice in reverse
+
+Go caches sessions **by token** (platform/session.go:50), so a row this suite edits behind its back
+is invisible to a Go server that has already seen that token. Every assertion therefore plants a
+session with a fresh, never-seen token: Go's first request with it is a guaranteed cache miss. A
+row *neither* server minted authenticates against both, which is only true because they share one
+`Sessions` table — the same fact the vertical slice proved, running the other way.
+
+The shared `go_minted_token` session is never used here: one of these tests deliberately gets a
+session revoked, and revoking the suite-wide credential would take every other file down with it.
+
+### A prefix purge is a race, not a cleanup
+
+The first run failed with `LastActivityAt` reading back as `None` — nothing to do with the port.
+The parity tests share one binary and run concurrently, and each test was ending with a
+`DELETE ... WHERE id LIKE 'mmrssessactv%'` sweep that deleted the sessions its neighbours were
+midway through asserting on. Purging by exact token fixed it. [D-160]'s class, self-inflicted.
+
+Mutation run: **27 run, 25 caught, 2 controls survived, 0 harness faults** — no genuine
+survivors, which is unusual enough to say plainly: the two clock parameters above are why, since
+both boundary mutations would otherwise have been unkillable.
+(`scripts/mutations/session-activity.plan`). One mutation was written and dropped before the run:
+deleting the `WHERE` from `Remove`. It runs against the shared development database, so a
+`DELETE FROM sessions` with no predicate would log out the Go server and every other suite's
+fixture token mid-run; `remove_matches_either_the_id_or_the_token` covers the same decision by
+asserting the *other* seeded session survives.

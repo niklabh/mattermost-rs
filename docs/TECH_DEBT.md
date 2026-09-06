@@ -2947,18 +2947,21 @@ is wrong too.
 
 ## D-084 · `UpdateLastActivityAtIfNeeded` is not called on the read path
 
-**Status** OPEN · **Severity** incomplete · **Raised** 2026-08-17 (phase 2, `api4/user.go`)
+**Status** CLOSED · **Severity** incomplete · **Raised** 2026-08-17 (phase 2, `api4/user.go`)
+**Closed** 2026-09-06 — ported with [D-088] in one change, as the entry asked. `getUser` (both
+variants) and `getUsers` refresh `Sessions.LastActivityAt`; `getUserByUsername`, which shares the
+whole rest of its tail, deliberately does not, because Go does not. The five-minute throttle is
+`model.SessionActivityTimeout`, not a cache lookup — the entry's "to pay off" note guessed
+otherwise, and the cache turns out to be irrelevant to the *write*: Go's `session.LastActivityAt =
+now` afterwards mutates a by-value copy on its way into a cache we do not have.
 
 Go's `getUser` ends with `UpdateLastActivityAtIfNeeded(session)` — a **write** on a GET, which is
-how session idle timeouts stay accurate. Ours does not.
+how session idle timeouts stay accurate. Ours did not.
 
-Consequence while both servers run: a user whose traffic is served by the migrated route stops
-refreshing `Sessions.LastActivityAt`, so a Go server enforcing `SessionIdleTimeoutInMinutes` may
+Consequence while both servers ran: a user whose traffic was served by the migrated route stopped
+refreshing `Sessions.LastActivityAt`, so a Go server enforcing `SessionIdleTimeoutInMinutes` could
 revoke a session belonging to an active user. Goes together with [D-088]'s idle-timeout check —
 one writes the value, the other reads it, and porting either alone is worse than neither.
-
-**To pay off** port it with the session cache, since Go's "if needed" is a cache-backed
-throttle rather than an unconditional write.
 
 ---
 
@@ -3129,18 +3132,23 @@ proves us right rather than hiding a difference.
 
 ## D-088 · The session idle timeout is not enforced
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-08-17 (phase 2, `app/session.go`)
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-08-17 (phase 2, `app/session.go`)
+**Closed** 2026-09-06 — ported with [D-084], as the entry required. All four exemptions are
+reproduced and each is asserted separately; the revoke is a synchronous `Sessions` delete where Go
+uses a goroutine it does not wait for, which is unobservable in the response and removes a race
+from the tests. Both settings now come from the configuration document ([D-156]).
+
+The one thing the entry did not anticipate: `ExtendSessionLengthWithActivity` has **no constant
+default**. Go writes `new(!isUpdate)` where `isUpdate` is `ServiceSettings.SiteURL != nil`, so a
+fresh config defaults it `true` — which would have disarmed this check on every real server, since
+every persisted document carries a `SiteURL`.
 
 `GetSession` revokes a session when `ServiceSettings.SessionIdleTimeoutInMinutes > 0` and the
 session is not OAuth, not a mobile app, not a user access token, and
-`ExtendSessionLengthWithActivity` is off (session.go:118-137). Ours checks expiry only.
+`ExtendSessionLengthWithActivity` is off (session.go:118-137). Ours checked expiry only.
 
-So a session idle past the configured timeout authenticates against the migrated route and is
-revoked by Go. Needs config ([D-085]) and the revoke path; pairs with [D-084], which is the
-write that keeps `LastActivityAt` accurate in the first place.
-
-**To pay off** with config, and with [D-084] in the same change — porting the check without the
-write would revoke sessions that are in fact active.
+So a session idle past the configured timeout authenticated against the migrated route and was
+revoked by Go.
 
 ---
 
@@ -5757,3 +5765,36 @@ teams concurrently, so the pressure only grows.
 
 Not a port divergence: both servers read the same database, and every failure so far has been the
 test's premise, not the answer.
+
+---
+
+## D-169 · A 401 from an invalid token does not clear the session cookie
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-06 (phase 2, session-activity pair)
+
+`handlers.go:278` calls `c.RemoveSessionCookie(w, r)` immediately before substituting
+`api.context.session_expired.app_error`, so Go's 401 carries
+
+```
+Set-Cookie: MMAUTHTOKEN=; Path=/; Max-Age=0; HttpOnly
+```
+
+and ours carries no `Set-Cookie` at all. Measured against both servers with a bad bearer token.
+
+The **id** half of that same branch was fixed in the session-activity session — we were returning
+`App::GetSession`'s inner `api.context.invalid_token.error`, which Go discards. The cookie half was
+not, because it needs something the id did not: `RemoveSessionCookie` sets the cookie's `Path` to
+`GetSubpathFromConfig(c.App.Config())`, so paying this off means modelling
+`ServiceSettings.SiteURL` as a **setting** (it is currently read only for its presence, as the
+`isUpdate` discriminator) and porting the subpath extraction. That is its own small unit of work
+and it belongs to no route.
+
+Consequence: a browser whose session was revoked — by idle timeout, by an admin, or by the token
+simply being wrong — keeps a dead `MMAUTHTOKEN` cookie when the 401 came from this server, and
+sheds it when the same 401 came from Go. The webapp re-authenticates on the 401 regardless, so
+this is a divergence in cleanup rather than in access.
+
+**To pay off** add `site_url` to `mm_app::config::Config`, port `GetSubpathFromConfig`, and set the
+cookie in `ApiError::unauthenticated`'s response. The parity assertion is one line against
+`Set-Cookie` in `parity/session_activity.rs`, which already compares the bodies of this exact
+branch.

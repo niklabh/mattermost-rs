@@ -1,0 +1,74 @@
+# Mutation plan for the session-activity pair: UpdateLastActivityAtIfNeeded (D-084) and the
+# SessionIdleTimeoutInMinutes revoke (D-088), plus the web layer's error-id substitution the
+# parity suite found on the way.
+#
+#   scripts/mutate-batch.sh scripts/mutations/session-activity.plan
+#
+# The decisions a reader could plausibly get wrong, and what each mutation is asking:
+#
+#   * The two halves read and write the same column. Break either and the pair is worse than
+#     neither — which is exactly why D-084 and D-088 were one change.
+#   * The idle check has FOUR exemptions and they are `&&`-ed in Go. Each one, dropped, logs out
+#     a whole class of client the Go server keeps: an OAuth integration, a phone, a bot with a
+#     personal access token, or everybody on a server configured for sliding expiry.
+#   * `SessionIdleTimeoutInMinutes > 0` is a guard, not a comparison against a value. Zero
+#     **disarms** revocation; a port that read it as "instant timeout" logs everyone out.
+#   * The unit is minutes and the column is milliseconds. `* 1000 * 60`, and a dropped factor of
+#     sixty turns thirty days into twelve hours.
+#   * `UpdateLastActivityAtIfNeeded` is called on TWO of the four handlers this server serves and
+#     is deliberately absent from `getUserByUsername`, which shares the whole rest of its tail.
+#   * `UPDATE ... WHERE Id` matches the id column ONLY, where `Get` and `Remove` both accept an id
+#     or a token. An UPDATE that matches nothing succeeds, so getting this wrong is silent.
+#   * `App::GetSession`'s error id never reaches a client: `handlers.go:277-280` keeps a 500 and
+#     replaces everything else with `api.context.session_expired.app_error`.
+#
+# NOT MUTATED, deliberately: dropping the `WHERE` from `Remove`. The mutation runs against the
+# shared development database, so a `DELETE FROM sessions` with no predicate would log out the Go
+# server and every other parity suite's fixture token mid-run. The column choice is covered by
+# `remove_matches_either_the_id_or_the_token` instead, which asserts the *other* seeded session
+# survives.
+#
+# The last two lines are the no-op controls and must SURVIVE.
+
+# --- the store: which column, which rows ---
+store-activity-writes-the-wrong-column	crates/mm-store/src/session_store.rs	UPDATE sessions SET lastactivityat = $1 WHERE id = $2	UPDATE sessions SET createat = $1 WHERE id = $2	store	activity_write
+store-activity-matches-the-token-too	crates/mm-store/src/session_store.rs	UPDATE sessions SET lastactivityat = $1 WHERE id = $2	UPDATE sessions SET lastactivityat = $1 WHERE id = $2 OR token = $2	store	activity_write
+store-remove-matches-the-id-only	crates/mm-store/src/session_store.rs	DELETE FROM sessions WHERE id = $1 OR token = $1	DELETE FROM sessions WHERE id = $1	store	remove_matches
+
+# --- the idle predicate: the guard, the exemptions, the arithmetic ---
+idle-zero-arms-the-check	crates/mm-app/src/session.rs	    if minutes <= 0\n        || session.is_oauth	    if minutes < 0\n        || session.is_oauth	unit	session::
+idle-exemption-oauth-dropped	crates/mm-app/src/session.rs	        || session.is_oauth\n        || session.is_mobile_app()	        || session.is_mobile_app()	unit	session::
+idle-exemption-mobile-dropped	crates/mm-app/src/session.rs	        || session.is_mobile_app()\n        // Go spells this	        // Go spells this	unit	session::
+idle-exemption-access-token-dropped	crates/mm-app/src/session.rs	        || session.is_user_access_token()\n        || config.extend_session_length_with_activity	        || config.extend_session_length_with_activity	unit	session::
+idle-extend-flag-inverted	crates/mm-app/src/session.rs	        || config.extend_session_length_with_activity\n    {	        || !config.extend_session_length_with_activity\n    {	unit	session::
+idle-timeout-is-seconds-not-minutes	crates/mm-app/src/session.rs	    let timeout = minutes.saturating_mul(1000).saturating_mul(60);	    let timeout = minutes.saturating_mul(1000);	unit	session::
+idle-boundary-off-by-one	crates/mm-app/src/session.rs	    (now - session.last_activity_at) > timeout	    (now - session.last_activity_at) >= timeout	unit	session::
+idle-comparison-reversed	crates/mm-app/src/session.rs	    (now - session.last_activity_at) > timeout	    (now - session.last_activity_at) < timeout	unit	session::
+
+# --- the throttle ---
+throttle-boundary-off-by-one	crates/mm-app/src/session.rs	    (now - last_activity_at) >= SESSION_ACTIVITY_TIMEOUT	    (now - last_activity_at) > SESSION_ACTIVITY_TIMEOUT	unit	session::
+throttle-inverted	crates/mm-app/src/session.rs	    (now - last_activity_at) >= SESSION_ACTIVITY_TIMEOUT	    (now - last_activity_at) <= SESSION_ACTIVITY_TIMEOUT	unit	session::
+
+# --- the app: the revoke, and the write it protects ---
+revoke-does-not-delete	crates/mm-app/src/session.rs	            if let Err(err) = self.store().session().remove(&session.id).await {	            if let Err(err) = self.store().session().get(&session.id).await.map(|_| ()) {	api	session_activity
+activity-write-skipped-entirely	crates/mm-app/src/session.rs	        if !activity_write_is_due(now, session.last_activity_at) {	        if true {	api	session_activity
+
+# --- the API: which handlers count as activity ---
+api-users-me-stops-counting	crates/mm-api/src/users.rs	    respond_with_user(&state, &headers, &session, user, ActivityUpdate::Touch).await\n}	    respond_with_user(&state, &headers, &session, user, ActivityUpdate::Skip).await\n}	api	session_activity
+api-username-route-starts-counting	crates/mm-api/src/users.rs	    match respond_with_user(&state, &headers, &session, user, ActivityUpdate::Skip).await {	    match respond_with_user(&state, &headers, &session, user, ActivityUpdate::Touch).await {	api	session_activity
+api-users-page-stops-counting	crates/mm-api/src/users.rs	    state\n        .app\n        .update_last_activity_at_if_needed(&session.0)\n        .await;\n\n    let body = serde_json::to_vec(&users)	    let body = serde_json::to_vec(&users)	api	session_activity
+api-activity-flag-ignored	crates/mm-api/src/users.rs	    if activity == ActivityUpdate::Touch {	    if activity == ActivityUpdate::Touch || activity == ActivityUpdate::Skip {	api	session_activity
+api-etag-304-counts-as-activity	crates/mm-api/src/users.rs	        && if_none_match == etag\n    {\n        return Ok((StatusCode::NOT_MODIFIED, [(ETAG, etag)]).into_response());	        && if_none_match == etag\n    {\n        if activity == ActivityUpdate::Touch {\n            state\n                .app\n                .update_last_activity_at_if_needed(&session.0)\n                .await;\n        }\n        return Ok((StatusCode::NOT_MODIFIED, [(ETAG, etag)]).into_response());	api	session_activity
+
+# --- the error id the web layer substitutes ---
+auth-inner-error-id-leaks	crates/mm-api/src/auth.rs	            if err.status_code == 500 {\n                ApiError::from(err)\n            } else {\n                ApiError::unauthenticated()\n            }	            ApiError::from(err)	api	session_activity
+auth-500-becomes-a-401	crates/mm-api/src/auth.rs	            if err.status_code == 500 {	            if err.status_code == 401 {	api	session_activity
+
+# --- config: the isUpdate rule ---
+config-extend-default-is-a-constant	crates/mm-app/src/config.rs	                .extend_session_length_with_activity\n                .unwrap_or(!is_update),	                .extend_session_length_with_activity\n                .unwrap_or(default.extend_session_length_with_activity),	unit	config::
+config-is-update-reads-the-value-not-the-presence	crates/mm-app/src/config.rs	    let is_update = service.site_url.is_some();	    let is_update = service.site_url.as_deref().is_some_and(|url| !url.is_empty());	unit	config::
+config-idle-timeout-defaults-to-zero	crates/mm-app/src/config.rs	                .session_idle_timeout_in_minutes\n                .unwrap_or(default.session_idle_timeout_in_minutes),	                .session_idle_timeout_in_minutes\n                .unwrap_or_default(),	unit	config::
+
+# --- no-op controls: these must SURVIVE ---
+control-rename-binding	crates/mm-app/src/session.rs	    let minutes = config.session_idle_timeout_in_minutes;	    let configured_minutes = config.session_idle_timeout_in_minutes;\n    let minutes = configured_minutes;	unit	session::
+control-reorder-independent-select-columns	crates/mm-store/src/session_store.rs	                   roles,\n                   isoauth,\n                   props,\n                   expirednotify\n              FROM sessions\n             WHERE token = $1 OR id = $1	                   isoauth,\n                   roles,\n                   props,\n                   expirednotify\n              FROM sessions\n             WHERE token = $1 OR id = $1	store	session

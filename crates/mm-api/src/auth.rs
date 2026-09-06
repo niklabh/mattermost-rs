@@ -121,11 +121,29 @@ impl FromRequestParts<AppState> for AuthenticatedSession {
             return Err(ApiError::unauthenticated());
         };
 
-        let session = state
-            .app
-            .get_session(&token)
-            .await
-            .map_err(ApiError::from)?;
+        // Port of `handlers.go:273-280`. **`GetSession`'s error id does not reach the client.**
+        // The web layer keeps a 500 as-is and replaces every other failure with the generic
+        // `api.context.session_expired.app_error`, so a wrong token, an expired session, a
+        // session revoked for idleness and a session id used as a token all produce one
+        // indistinguishable 401 — which is the point: none of them tells a caller whether the
+        // credential ever existed.
+        //
+        // This server used to return `api.context.invalid_token.error` here, which is the id
+        // `App::GetSession` builds and Go then discards. Clients switch on the id, so that was a
+        // wire divergence on every migrated route; it was found by the parity suite for the idle
+        // timeout, which is the first test to compare a 401 body against Go's.
+        //
+        // `h.RequireSession` is true for every route that takes this extractor at all — a handler
+        // that did not need a session would not name it.
+        //
+        // Not ported: `c.RemoveSessionCookie(w, r)`, which Go calls first. See [D-169].
+        let session = state.app.get_session(&token).await.map_err(|err| {
+            if err.status_code == 500 {
+                ApiError::from(err)
+            } else {
+                ApiError::unauthenticated()
+            }
+        })?;
         Ok(AuthenticatedSession(session))
     }
 }

@@ -27,6 +27,28 @@ pub trait SessionStore {
         &self,
         user_id: &str,
     ) -> impl std::future::Future<Output = Result<Vec<Session>, StoreError>> + Send;
+
+    /// Port of `SqlSessionStore.UpdateLastActivityAt` (session_store.go:323).
+    ///
+    /// The first **write** in this store, and the reason it exists is that `LastActivityAt` is
+    /// shared state: Go's idle-timeout check revokes a session whose value is stale, so a request
+    /// this server answers without refreshing it moves a live user closer to being logged out by
+    /// the process next door. See [`SessionStore::remove`], which is the other half.
+    fn update_last_activity_at(
+        &self,
+        session_id: &str,
+        time: i64,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlSessionStore.Remove` (session_store.go:290).
+    ///
+    /// Go's parameter really is "id **or** token" and the statement compares the one value
+    /// against both columns — the same shape as [`SessionStore::get`], and for the same reason:
+    /// callers hold one or the other and the store does not care which.
+    fn remove(
+        &self,
+        session_id_or_token: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 }
 
 /// One row of `me.sessionSelectQuery`, named so both queries share a mapping.
@@ -227,6 +249,49 @@ impl SessionStore for SqlSessionStore {
 
         tracing::Span::current().record("count", sessions.len());
         Ok(sessions)
+    }
+
+    #[tracing::instrument(skip_all, fields(session_id = %session_id, time = time))]
+    async fn update_last_activity_at(&self, session_id: &str, time: i64) -> Result<(), StoreError> {
+        // `UPDATE Sessions SET LastActivityAt = ? WHERE Id = ?` verbatim. **Id only** — unlike
+        // `Get` and `Remove`, this one does not also match `Token`, so passing a token here
+        // updates nothing and reports success. Go has the same hole; the caller holds a whole
+        // session and passes `session.Id`.
+        sqlx::query!(
+            "UPDATE sessions SET lastactivityat = $1 WHERE id = $2",
+            time,
+            session_id
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to update Session with id={session_id}"),
+            source,
+        })?;
+
+        Ok(())
+    }
+
+    #[tracing::instrument(skip_all, fields(deleted))]
+    async fn remove(&self, session_id_or_token: &str) -> Result<(), StoreError> {
+        // `DELETE FROM Sessions WHERE Id = ? Or Token = ?`, one bind against two columns.
+        //
+        // Go ignores the affected-row count and so does this: removing a session that is already
+        // gone is the success case, not a miss. Returning `NotFound` here would turn the revoke
+        // half of an idle-timeout rejection into a 500 the moment two requests raced.
+        let result = sqlx::query!(
+            "DELETE FROM sessions WHERE id = $1 OR token = $1",
+            session_id_or_token
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to delete Session by id or token".to_owned(),
+            source,
+        })?;
+
+        tracing::Span::current().record("deleted", result.rows_affected());
+        Ok(())
     }
 }
 
