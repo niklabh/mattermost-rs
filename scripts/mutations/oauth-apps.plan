@@ -11,6 +11,11 @@
 # with `manage_oauth` and **not** `manage_system_wide_oauth`, and the one role granting either
 # grants both — so the branch is unreachable over HTTP. The filter is a **test name**.
 #
+# `api-list-trailing-newline` anchors on the `};` above the return as well as the return itself:
+# `getAuthorizedOAuthApps` landed in this file later with a byte-identical last line, and
+# `mutate.sh` replaces the **first** occurrence — so the shorter anchor would have mutated the
+# wrong handler and reported a verdict about it. See [D-168] and `scripts/preflight-plans.sh`.
+#
 # The last two lines are the no-op controls and must SURVIVE.
 
 store-single-app-id-filter	crates/mm-store/src/oauth_store.rs	              FROM oauthapps o\n             WHERE o.id = $1	              FROM oauthapps o\n             WHERE o.id = $1 OR TRUE	api	oauth_apps
@@ -29,7 +34,7 @@ api-single-permission-check	crates/mm-api/src/oauth.rs	        .session_has_perm
 api-info-does-not-sanitize	crates/mm-api/src/oauth.rs	    app.client_secret = String::new();	    app.client_secret = app.client_secret.clone();	api	oauth_apps
 api-info-sanitizes-too-much	crates/mm-api/src/oauth.rs	    app.client_secret = String::new();	    app.client_secret = String::new();\n    app.callback_urls = None;	api	oauth_apps
 api-single-sanitizes	crates/mm-api/src/oauth.rs	    Ok(json_ok(encode(&app)?, true))\n}\n\n/// Port of `getOAuthAppInfo`	    let app = {\n        let mut app = app;\n        app.client_secret = String::new();\n        app\n    };\n    Ok(json_ok(encode(&app)?, true))\n}\n\n/// Port of `getOAuthAppInfo`	api	oauth_apps
-api-list-trailing-newline	crates/mm-api/src/oauth.rs	    Ok(json_ok(encode(&apps)?, false))	    Ok(json_ok(encode(&apps)?, true))	api	oauth_apps
+api-list-trailing-newline	crates/mm-api/src/oauth.rs	    };\n    tracing::Span::current().record("count", apps.len());\n\n    Ok(json_ok(encode(&apps)?, false))	    };\n    tracing::Span::current().record("count", apps.len());\n\n    Ok(json_ok(encode(&apps)?, true))	api	oauth_apps
 api-single-no-newline	crates/mm-api/src/oauth.rs	    Ok(json_ok(encode(&app)?, true))\n}\n\n/// Port of `getOAuthAppInfo`	    Ok(json_ok(encode(&app)?, false))\n}\n\n/// Port of `getOAuthAppInfo`	api	oauth_apps
 #
 # --- no-op controls: these must SURVIVE ---
