@@ -25,6 +25,7 @@ pub mod sessions;
 pub mod sidebar;
 pub mod status;
 pub mod teams;
+pub mod terms_of_service;
 pub mod users;
 pub mod webhooks;
 
@@ -628,6 +629,10 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/users/{user_id}/oauth/apps/authorized",
             partially_migrated_with_ids(&state, get(oauth::get_authorized_oauth_apps)),
+        )
+        .route(
+            "/api/v4/terms_of_service",
+            partially_migrated(get(terms_of_service::get_latest_terms_of_service)),
         )
         .route(
             "/api/v4/oauth/apps",

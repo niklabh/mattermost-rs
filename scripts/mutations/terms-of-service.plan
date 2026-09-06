@@ -1,0 +1,36 @@
+# Mutation plan for GET /api/v4/terms_of_service (getLatestTermsOfService).
+#
+#   scripts/mutate-batch.sh scripts/mutations/terms-of-service.plan
+#
+# Two revisions are planted, so "the latest" is a claim about `ORDER BY CreateAt DESC LIMIT 1` and
+# not about there being one row. The 404 branch runs under `unit`: reaching it means emptying the
+# table, and Go caches the *success* under `"latest"` with no invalidation a direct write can
+# reach, so a run that emptied the table would leave Go serving a row that no longer exists.
+#
+# **Two mutations were dropped rather than carried as survivors.**
+#
+# `store-empty-is-not-found` — turning the store's `ok_or_else(NotFound)` into an all-empty row —
+# needs an **empty table**, and this suite exists to keep two rows in it. Emptying it even briefly
+# would leave Go's `"latest"` cache serving a row that no longer exists for the rest of the run, so
+# there is no arrangement in which the branch is both reachable and safe. The app layer's mapping
+# of that error to a 404 *is* tested (`unit`, above); what is untested is the store returning it,
+# which is one `ok_or_else`.
+#
+# `api-session-requirement` — the session is enforced by the **extractor's type**
+# (`AuthenticatedSession` in the handler signature), so the only "mutation" of it is one that does
+# not compile. There is nothing here for a test to catch that the type system does not already
+# refuse.
+#
+# The last two lines are the no-op controls and must SURVIVE.
+
+store-order-direction	crates/mm-store/src/terms_of_service_store.rs	             ORDER BY createat DESC	             ORDER BY createat ASC	api	parity::terms_of_service
+store-limit	crates/mm-store/src/terms_of_service_store.rs	             ORDER BY createat DESC\n             LIMIT 1	             ORDER BY createat DESC\n             LIMIT 1 OFFSET 1	api	parity::terms_of_service
+store-columns-swapped	crates/mm-store/src/terms_of_service_store.rs	            user_id: row.userid,\n            text: row.text,	            user_id: row.text,\n            text: row.userid,	api	parity::terms_of_service
+app-not-found-status	crates/mm-app/src/terms_of_service.rs	        if not_found { 404 } else { 500 },	        if not_found { 500 } else { 500 },	unit	an_empty_table_and_a_broken_query
+app-not-found-id	crates/mm-app/src/terms_of_service.rs	            "app.terms_of_service.get.no_rows.app_error"	            "app.terms_of_service.get.app_error"	unit	an_empty_table_and_a_broken_query
+api-trailing-newline	crates/mm-api/src/terms_of_service.rs	    body.push(b'\\n');\n\n    Ok((	\n    Ok((	api	parity::terms_of_service
+api-status	crates/mm-api/src/terms_of_service.rs	    Ok((\n        StatusCode::OK,	    Ok((\n        StatusCode::ACCEPTED,	api	parity::terms_of_service
+#
+# --- no-op controls: these must SURVIVE ---
+control-rename-binding	crates/mm-api/src/terms_of_service.rs	    let terms = state.app.get_latest_terms_of_service().await?;\n    tracing::Span::current().record("id", &terms.id);	    let latest = state.app.get_latest_terms_of_service().await?;\n    let terms = latest;\n    tracing::Span::current().record("id", &terms.id);	api	parity::terms_of_service
+control-reorder-independent-selects	crates/mm-store/src/terms_of_service_store.rs	            SELECT id                    AS "id!",\n                   COALESCE(createat, 0) AS "createat!",\n                   COALESCE(userid, '')  AS "userid!",\n                   COALESCE(text, '')    AS "text!"	            SELECT id                    AS "id!",\n                   COALESCE(userid, '')  AS "userid!",\n                   COALESCE(createat, 0) AS "createat!",\n                   COALESCE(text, '')    AS "text!"	api	parity::terms_of_service

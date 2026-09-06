@@ -88,6 +88,7 @@ mod parity {
     pub mod teams_all;
     pub mod teams_for_user;
     pub mod teams_unread;
+    pub mod terms_of_service;
     pub mod thread_for_user;
     pub mod threads_for_user;
     pub mod user_audits;

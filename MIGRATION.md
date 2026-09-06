@@ -6793,3 +6793,47 @@ the way in — two suites sharing a prefix would delete each other's rows mid-ru
 `getOAuthApps` has **no filter at all**, that suite's pagination test could no longer assert its
 pages *equal* the whole table; it asserts they are disjoint and drawn from it. Disjointness is what
 catches an offset of `page` rather than `page * per_page`; the union never could.
+
+## `GET /api/v4/terms_of_service` — `getLatestTermsOfService` (2026-09-06)
+
+Served. `crates/mm-api/src/terms_of_service.rs`, `crates/mm-app/src/terms_of_service.rs`,
+`crates/mm-store/src/terms_of_service_store.rs`; 4 parity tests in
+`crates/mm-api/tests/parity/terms_of_service.rs`. The webapp asks for this at login when custom
+terms of service are switched on.
+
+**The one thing a reader would otherwise get wrong: the not-found and failure ids do not resemble
+each other.** `app.terms_of_service.get.no_rows.app_error` at 404 and
+`app.terms_of_service.get.app_error` at 500. That is a **third** convention in one tree: the
+webhook single reads share one id and change only the status, the OAuth single read has two ids one
+word apart, and this one has two that are plainly different. Each is reproduced as found.
+
+Two more. A session is required and **nothing else** — no permission, because the terms are what a
+user must read before they can use the server. And `ORDER BY CreateAt DESC LIMIT 1` has **no
+tiebreak**, so two revisions published in the same millisecond have no defined order on either
+server.
+
+Mutation run: **9 run, 7 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/terms-of-service.plan`).
+
+### The fixture cannot be torn down, because Go caches the success
+
+Go caches the answer under the key `"latest"` (localcachelayer/terms_of_service_layer.go:47) and
+invalidates it only on `Save` — which is licence-gated here, so the table can only be written by
+hand and a direct write is invisible to that cache for as long as it holds a row. The suite
+therefore plants **fixed ids, fixed timestamps and fixed text** with `ON CONFLICT DO NOTHING`:
+every run writes the same two rows, so whatever Go cached earlier is byte-identical to what the
+table holds. *Changing the fixture text will make one run disagree*, and the fix is to wait the
+cache out.
+
+Note the miss is **not** cached (`if allowFromCache && err == nil`), so an empty table is a live
+query on both servers — it is the success that is sticky.
+
+### Two mutations dropped rather than carried
+
+- **The store's "empty table is not-found"** needs an empty table, and this suite exists to keep two
+  rows in it; emptying it even briefly would leave Go serving a row that no longer exists. There is
+  no arrangement in which the branch is both reachable and safe. The app layer's mapping of that
+  error to a 404 is unit-tested; what is untested is one `ok_or_else`.
+- **The session requirement** is enforced by the extractor's *type*, so the only mutation of it is
+  one that does not compile. There is nothing for a test to catch that the type system does not
+  already refuse.

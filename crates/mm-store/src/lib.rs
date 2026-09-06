@@ -31,6 +31,7 @@ pub mod sidebar_category_store;
 pub mod status_store;
 pub mod system_store;
 pub mod team_store;
+pub mod terms_of_service_store;
 pub mod thread_store;
 pub mod user_store;
 pub mod user_terms_of_service_store;
@@ -53,6 +54,7 @@ pub use sidebar_category_store::{SidebarCategoryStore, SqlSidebarCategoryStore};
 pub use status_store::{SqlStatusStore, StatusStore};
 pub use system_store::{SYSTEM_ACTIVE_LICENSE_ID, SqlSystemStore, SystemStore};
 pub use team_store::{SqlTeamStore, TeamStore};
+pub use terms_of_service_store::{SqlTermsOfServiceStore, TermsOfServiceStore};
 pub use thread_store::{SqlThreadStore, ThreadStore};
 pub use user_store::{SqlUserStore, UserStore};
 pub use user_terms_of_service_store::{SqlUserTermsOfServiceStore, UserTermsOfServiceStore};
@@ -76,6 +78,7 @@ pub struct SqlStore {
     oauth: SqlOAuthStore,
     post: SqlPostStore,
     reaction: SqlReactionStore,
+    terms_of_service: SqlTermsOfServiceStore,
     thread: SqlThreadStore,
     preference: SqlPreferenceStore,
     role: SqlRoleStore,
@@ -120,6 +123,7 @@ impl SqlStore {
             oauth: SqlOAuthStore::new(pool.clone()),
             post: SqlPostStore::new(pool.clone()),
             reaction: SqlReactionStore::new(pool.clone()),
+            terms_of_service: SqlTermsOfServiceStore::new(pool.clone()),
             thread: SqlThreadStore::new(pool.clone()),
             preference: SqlPreferenceStore::new(pool.clone()),
             role: SqlRoleStore::new(pool.clone()),
@@ -138,6 +142,11 @@ impl SqlStore {
     /// Port of `store.Store.Audit()`.
     pub fn audit(&self) -> &SqlAuditStore {
         &self.audit
+    }
+
+    /// Port of `store.Store.TermsOfService()`.
+    pub fn terms_of_service(&self) -> &SqlTermsOfServiceStore {
+        &self.terms_of_service
     }
 
     /// Port of `store.Store.OAuth()`.

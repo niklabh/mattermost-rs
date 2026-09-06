@@ -24,6 +24,7 @@ pub mod session;
 pub mod sidebar;
 pub mod status;
 pub mod team;
+pub mod terms_of_service;
 pub mod thread;
 pub mod user;
 pub mod user_terms_of_service;
