@@ -120,6 +120,12 @@ The image tag is **pinned** to the minor the reference SHA belongs to, and must 
 `latest` silently drifted a minor ahead of the source and every parity claim in this repo was
 measured against the wrong server for a while. See D-130.
 
+**Both servers also share one configuration**, not just one database. `MM_CONFIG` points the Go
+server at the shared Postgres, so it keeps `model.Config` in a `Configurations` row instead of a
+`config.json` on a volume the Rust process cannot see — and `mm-api` reads that row at startup.
+If you have a container from before this change, recreate it (`docker compose up -d mattermost`)
+or `mm-api` will refuse to start and tell you so. See D-156.
+
 **On a fresh volume** the database has no users and no teams, and the tests need both. Two calls,
 after the server is up:
 

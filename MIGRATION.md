@@ -6948,3 +6948,89 @@ The first version of this checker unescaped `\n` in Python and reported **77** p
 disagreed with the runner on every pattern containing an escaped backslash. `mutate.sh`'s own
 header already says why that is worthless: *a validator that decodes differently from the runner is
 not a validator.* The committed script uses `printf %b`, as the runner does.
+
+## Configuration gets a shared source of truth (2026-09-06)
+
+Not a route. The project owner took three standing decisions — port config properly, reproduce
+Go's lenient JSON decoding, and close the session-activity pair — and this session is the first of
+them. New: `crates/mm-store/src/config_store.rs`, `crates/mm-store/tests/db_config_active.rs`,
+`crates/mm-api/tests/parity/config_source.rs`, `scripts/dump-config-fixture.sh`,
+`scripts/mutations/config-source.plan`, `fixtures/config_active.json`. Changed:
+`crates/mm-app/src/config.rs`, `crates/mm-api/src/lib.rs`, `crates/mm-api/src/main.rs`,
+`docker-compose.yml`.
+
+| Go file | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| config/database.go (`Load`) | `mm-store/src/config_store.rs` | PARTIAL | 5 DB | The read half. `WHERE active` is not a tidy spelling of `active = true`: Go deactivates by setting `Active = NULL` (database.go:199) and leans on a UNIQUE constraint, so a widened predicate returns superseded revisions. |
+| config/store.go (`Load` layering) | `mm-app/src/config.rs` | PARTIAL | 26 pass | Document then environment, in Go's order. Fifteen settings, grown by named reader; the document already holds all 47 sections, so each new field is one line plus an assertion. |
+
+**The decision that shaped it: `MM_CONFIG` now points at the shared Postgres.** Go's default
+backing store is `config.FileStore` over a Docker volume this process cannot see, which is why
+[D-156] existed at all — the two servers shared a database but not a configuration, and every
+ported permission gate that consults a setting was reading an assumption. Pointing `MM_CONFIG` at
+the shared DSN makes Go select `config.DatabaseStore` (store.go:91) and keep the whole
+`model.Config` as one JSON document in `Configurations.Value`. That closes [D-156] and [D-085]
+outright rather than accepting either.
+
+### Three facts about the document, all measured rather than read
+
+1. **It is the config Go persists, not the one it runs on.** `Store.Load` builds two configs and
+   writes back the one *without* the environment applied (`s.backingStore.Set(loadedCfgNoEnv)`,
+   store.go:321). The live row says `ServiceSettings.SiteURL == ""` while the server beside it runs
+   on `MM_SERVICESETTINGS_SITEURL=http://localhost:8065`. So a reader that stops at the document
+   disagrees with the running server on exactly the settings someone bothered to change — the
+   overlay is mandatory, and `parity/config_source.rs` pins the difference against both servers
+   using the unauthenticated `/api/v4/config/client`.
+2. **`FeatureFlags` is not in the document at all** — the section is cleared before persisting when
+   `readOnlyFF` is set, which is the default (store.go:306-310). A flag can only come from the
+   environment. This is why [D-153] is **not** unblocked by any of this, which was the outcome
+   worth knowing.
+3. **Absent means Go's *default*, not the zero value.** Every setting in config.go is a pointer and
+   `SetDefaults` fills the nil ones, so eight of the fifteen modelled settings default to `true`. A
+   `#[serde(default)]` — the tidier spelling — would have read an empty document as eight features
+   switched off.
+
+### The document is its own oracle, and it caught nothing, which is the good outcome
+
+Thirteen defaults had been transcribed by hand from a 5,795-line Go file and asserted against line
+numbers a human read — which catches a typo in the test and nothing in the world.
+`every_default_matches_what_go_actually_wrote` now asserts all fifteen against what a Go server
+wrote after running `SetDefaults` itself. Every one agreed. That is the first evidence the
+transcription was right rather than merely self-consistent.
+
+### Two survivors that physical row order explains
+
+18 mutations run, 14 caught, 2 no-op controls survived — plus **2 genuine survivors**, both
+mutations of the store's `WHERE active`. The cause is not a weak assertion: the active row was
+written at first boot and sits at `ctid (0,1)`, a seeded superseded row lands at `(0,6)`, and a
+widened predicate's sequential scan therefore reaches the correct row first and `fetch_optional`
+takes it. The wrong answer *is* reachable in production — a long-lived server accumulates revisions
+and any reordering can put one first — so they stay in the plan rather than being deleted to tidy
+the tally. Closing them needs the seeded row to physically precede a row that belongs to the Go
+server, which this suite will not rewrite.
+
+The first run of the plan was **void**: `MUTATE_FILTER=config_active` is a *file* name, matches no
+test name, ran zero tests and reported two SURVIVEDs that meant nothing. That is the exact trap
+`mutate.sh`'s own header documents, hit again.
+
+### The overlay was untestable, and two mutations proved it
+
+`Config::apply_env` read `std::env` directly. No `MM_` variable is set in a test process, and
+`std::env::set_var` races every other test in the binary — so the overlay could only ever be
+exercised with nothing set, under which it is indistinguishable from doing nothing. Two mutations
+that deleted it entirely survived. `apply_env_from` and `load_with_env` now take the lookup as a
+parameter, and three tests drive a fake environment in both directions. Both mutations are caught.
+
+### A rename broke five committed anchors, and they are repaired
+
+`AppState`'s two privacy fields became accessors, so `state.show_full_name` gained parentheses in
+25 call sites — and in five anchors across four plans, which `preflight-plans.sh` then reported as
+0-match. Re-anchored mechanically. Stale anchors are back to **41 of 718**, the pre-existing
+[D-168] level, rather than the 46 this change briefly caused. This is the first time the pre-flight
+check has caught a regression it was written for.
+
+### Not done, and owed
+
+`.sqlx` is committed for offline builds and has not been regenerated since `910ad66`; the new query
+validated against the live database instead. `sqlx-cli` is not installed here, so it stays stale —
+pre-existing, and not something this session should install a toolchain to fix.

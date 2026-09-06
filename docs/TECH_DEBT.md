@@ -876,6 +876,14 @@ target.
 **(c) is recommended**, and it needs a decision from the project owner because it changes
 deployment. Until then the mime type is whatever the caller passes.
 
+**Decided 2026-09-06: (c).** Ship a `mime.types` file alongside the binary and load it at startup, making
+the answer a deployment artifact rather than a host accident. It is the only option that can be
+made to agree with Go *on purpose* rather than by coincidence of table contents, and the
+deployment cost it was weighed against is now a smaller objection than it was: [D-156] already
+established that this stack is configured deliberately rather than by whatever the host provides.
+Not yet implemented — it lands with the first route that returns a `FileInfo` this server
+constructs, rather than one it reads back from a row Go wrote.
+
 ---
 
 ## D-031 · The project licence must become AGPL-3.0 before phase 2 lands
@@ -1653,9 +1661,17 @@ on `StripActionIntegrations`.
 `to_json`/`encode_json` deferral and `generate_action_ids` closed [D-035]. `GetAction` did not —
 it needs `MergeQueryIntoURL`, which is a `net/url` port rather than a crypto one. See [D-047].
 
-**To pay off** the crypto needs a decision on crates (`p256`/`ecdsa` and `aes-gcm`, or `ring`) and
-an oracle that records Go's *ciphertext* for a fixed key and nonce — a round-trip test in Rust
-alone would prove nothing about cross-server compatibility.
+**To pay off** the crypto needs an oracle that records Go's *ciphertext* for a fixed key and
+nonce — a round-trip test in Rust alone would prove nothing about cross-server compatibility.
+
+**Crate choice decided 2026-09-06: RustCrypto** — `p256` with `ecdsa` for the trigger-id signature, and
+`aes-gcm` for the post-action cookies, rather than `ring`. Two reasons, both about being able to
+match Go rather than about ergonomics. `ecdsa::Signature` exposes the ASN.1 DER encoding directly
+(`to_der`/`from_der`), which is the encoding Go's `crypto.Signer` produces and the thing that has
+to agree byte-for-byte; `ring` steers callers towards its own fixed-width form. And `aes-gcm` lets
+the nonce be supplied and read back explicitly, which matters because Go prepends it to the
+ciphertext — a library that manages nonces internally cannot decrypt a cookie Go wrote. The
+implementation still waits for a route that needs it.
 
 ---
 
@@ -2948,8 +2964,13 @@ throttle rather than an unconditional write.
 
 ## D-085 · Privacy settings are hardcoded to Go's defaults
 
-**Status** OPEN · **Severity** incomplete · **Raised** 2026-08-17 (phase 2, `mm-api`)
-**Depends on** config being ported (`model/config.go`, out of scope for hand-translation).
+**Status** CLOSED · **Severity** incomplete · **Raised** 2026-08-17 (phase 2, `mm-api`)
+**Closed** 2026-09-06 — `PrivacySettings.ShowFullName` and `ShowEmailAddress` are read from the
+configuration document alongside every other setting ([D-156]). The `DEFAULT_SHOW_*` constants and
+the two `AppState` fields are deleted; `AppState::show_full_name` and `show_email_address` are now
+accessors onto `App::config`, so there is exactly one place either value lives and a reload cannot
+leave a copy stale. The dependency line this entry carried — "out of scope for hand-translation" —
+turned out to be the wrong frame: the document did not need translating, only reading.
 
 `getUser` reads `PrivacySettings.ShowFullName` and `ShowEmailAddress` and passes both to
 `User.Etag`. `AppState` carries `true`/`true` — Go's defaults — as named constants.
@@ -3665,8 +3686,12 @@ makes the decision different:
 - **(c) Leave the OpenGraph link-preview path proxied to Go**, as [D-044] does for interactive
   webhooks. Costs nothing and is reversible.
 
-**Not decided.** The portable half — the hash, the hour rounding, `IsSVGImageURL`, the wire type
-and `PreSave` — is ported and pinned; nothing depends on the rest yet.
+**Decided 2026-09-06: (c)** — leave the OpenGraph link-preview path proxied to Go, as [D-044] does for
+interactive webhooks. It costs nothing, it is reversible, and the alternative is the failure this
+project exists to avoid: (b) would have us match `dyatlov`'s struct tags by reading a Rust crate
+written to a different specification, and (a) buys a port of types nothing currently reads. The
+portable half — the hash, the hour rounding, `IsSVGImageURL`, the wire type and `PreSave` — is
+ported and pinned; nothing depends on the rest.
 
 **Worth knowing before choosing:** `truncateText` uses `fmt.Sprintf("%.300s[...]", …)`, where Go's
 precision for `%s` is measured in **runes**, not bytes. It is unexported and only reachable
@@ -4021,7 +4046,12 @@ part of what is being matched — so the time is the price of the assertion, not
 
 ## D-110 · FIPS mode is not modelled
 
-**Status** OPEN · **Severity** incomplete · **Raised** 2026-08-17 (phase 2, `hashers/`)
+**Status** ACCEPTED · **Severity** incomplete · **Raised** 2026-08-17 (phase 2, `hashers/`)
+**Accepted** 2026-09-06 — a permanent decision, not deferred work. A FIPS Mattermost is a different
+binary built with a build tag; the Rust equivalent is a cargo feature, and this repo has no FIPS
+deployment to shape one against. Choosing a feature layout with no caller is the speculative
+porting CLAUDE.md forbids. The behaviour stays recorded below because it is counter-intuitive and
+someone will eventually meet it — but nothing is owed, so it does not belong on a backlog.
 
 `hashers/fips.go` and `fips_default.go` are build-tagged: under `requirefips`, `fipsMinKeyLength`
 becomes `model.PasswordFIPSMinimumLength` and `PBKDF2.CompareHashAndPassword` short-circuits to
@@ -4293,7 +4323,11 @@ error**, by an early return that predates the layout; and extra precision is **t
 
 ## D-119 · `Job`'s YAML codec is unported
 
-**Status** OPEN · **Severity** incomplete · **Raised** 2026-08-18 (phase 1, `job.go`)
+**Status** ACCEPTED · **Accepted** 2026-09-06 — nothing on the REST path reads YAML. These codecs exist
+for Mattermost's own config-as-code tooling, not for any route this server answers or forwards, so
+no wire format depends on them. If a route ever needs one, reopen with the route named.
+
+**Superseded status line:** OPEN · **Severity** incomplete · **Raised** 2026-08-18 (phase 1, `job.go`)
 
 `(*Job).MarshalYAML` (job.go:118) and `UnmarshalYAML` (job.go:142) render the three timestamps as
 **formatted strings** rather than integers, via `timeutils`. They exist for the CLI export/import
@@ -4513,7 +4547,10 @@ can reproduce without an `unwrap` that `CLAUDE.md` forbids in library code. Same
 
 ## D-128 · The `Role` and `Scheme` YAML codecs are unported
 
-**Status** OPEN · **Severity** incomplete · **Raised** 2026-08-19 (phase 1, role.go)
+**Status** ACCEPTED · **Accepted** 2026-09-06 — same reasoning as [D-119]: no served or forwarded route
+reads YAML, so there is no wire format to get wrong. Reopen with a route if that changes.
+
+**Superseded status line:** OPEN · **Severity** incomplete · **Raised** 2026-08-19 (phase 1, role.go)
 
 `(*Role).MarshalYAML` and `UnmarshalYAML` (role.go:471, 499) are not ported, the same call as
 [D-119] made for `Job`. They round-trip the three timestamps through
@@ -5411,6 +5448,16 @@ servers answer a non-member's GET differently, and nothing would fail loudly.
 
 **Where the pin lives:** the doc comment on `channel_read_denied` in `mm-api/src/channels.rs`.
 
+**2026-09-06 — and this is NOT unblocked by the config work, which is the point worth recording.**
+[D-156] gave this server the configuration document Go persists, but `Store.Load` **clears
+`FeatureFlags` before persisting** when `readOnlyFF` is set, which is the default
+(config/store.go:306-310). Measured against the live row: it has no `FeatureFlags` key at all. So
+`FeatureFlags.DiscoverableChannels` is precisely the class of setting the new source of truth
+cannot see. Reading it needs the environment (`MM_FEATUREFLAGS_DISCOVERABLECHANNELS`), which only
+agrees with Go when the operator sets flags that way — the same weaker guarantee the whole config
+change was meant to escape. The deployment constraint therefore stands unchanged: run Go with this
+flag at its default.
+
 ## D-154 · `getUsers` cannot see the licence, so ABAC-narrowed `not_in_channel` would diverge
 
 **Status** OPEN · **Severity** deferred-feature · **Raised** 2026-08-21 (api4/user.go `getUsers`)
@@ -5428,10 +5475,17 @@ half a query parameter can name. The half it cannot: on a licensed server with A
 policy-enforced private channel's `not_in_channel` list would come back **unnarrowed** from this
 port — a listing Go was configured to restrict.
 
-**What is owed:** `License()` plus `AccessControlSettings`, the same config gap as [D-085], and
-then either the ABAC query or a forward on `ChannelAccessControlled`. Until then this route must
-not be deployed against a licensed Enterprise Advanced server with attribute-based access
-control enabled.
+**What is owed:** `License()` plus `AccessControlSettings`, and then either the ABAC query or a
+forward on `ChannelAccessControlled`. Until then this route must not be deployed against a licensed
+Enterprise Advanced server with attribute-based access control enabled.
+
+**2026-09-06 — half unblocked.** The config gap this entry pointed at ([D-085]) is closed:
+`AccessControlSettings` is an ordinary section of the document `mm_app::config` now reads, so
+`EnableAttributeBasedAccessControl` is two fields away rather than a subsystem away. The licence is
+already reachable too, via `App::license_state`. What remains is genuinely the access-control
+service, not the plumbing — so the honest next step here is a **forward** on
+`ChannelAccessControlled` rather than the ABAC query, which would close the divergence without
+porting an Enterprise surface this build cannot exercise.
 
 **Where the pin lives:** the doc comment on `users::get_users` in `mm-api/src/users.rs`.
 
@@ -5468,7 +5522,15 @@ here only because `common/mod.rs` was shared by four concurrent agents.
 
 ## D-156 · The two config settings the permission checks read cannot be read from Go's config
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-08-21 (phase 2, authorization.go)
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-08-21 (phase 2, authorization.go)
+**Closed** 2026-09-06 — the project owner chose to port config properly, and the first thing that needed
+was a shared source of truth. `docker-compose.yml` now sets `MM_CONFIG` to the shared Postgres DSN,
+so Go selects `config.DatabaseStore` (config/store.go:91) and persists the whole `model.Config` into
+`Configurations.Value`. `mm_store::SqlConfigStore` reads that row and `mm_app::config::Config::load`
+layers the `MM_<SECTION>_<SETTING>` overlay on top, which is Go's own order (store.go:285 → :292).
+An operator editing configuration by *any* route — file, environment or System Console — now moves
+both servers together, because there is no longer a file involved. The environment-only reading
+this entry described is gone, not accepted.
 
 `authorization.go` consults `model.Config` in exactly two places, and both are now ported:
 

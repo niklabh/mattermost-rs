@@ -45,12 +45,32 @@ async fn main() -> anyhow::Result<()> {
         .context("could not connect to the shared Postgres")?;
     tracing::info!("connected to the shared database");
 
-    // `Config::from_env`, not `App::new` — the latter takes Go's *defaults* and ignores the
-    // environment. Every `MM_<SECTION>_<SETTING>` the Go server beside us reads is read here too
-    // (see `mm_app::config`), and `MM_LICENSE` decides whether `/license/client` answers or
-    // forwards. Constructing on defaults made this server disagree with a configured Go server on
-    // every one of those settings, silently.
-    let app = App::with_config(store, mm_app::config::Config::from_env());
+    // Read the configuration the Go server is actually running on, rather than guessing at it:
+    // the active `Configurations` row it persists, with the `MM_<SECTION>_<SETTING>` overlay on
+    // top, in that order. See `mm_app::config` for why the order is not interchangeable, and
+    // `docker-compose.yml` for the `MM_CONFIG` line that puts the document in the shared database
+    // in the first place.
+    //
+    // This is fatal on failure. A server that cannot read its configuration would answer on
+    // *defaults*, and the settings it would then get wrong are permission gates — every one of
+    // `RestrictSystemAdmin` and `ComplianceSettings.Enable` fails towards over-granting. Starting
+    // anyway and hoping is the failure mode this whole change exists to remove.
+    let config = mm_app::config::Config::load(store.config()).await.context(
+        "could not load the active configuration from the shared database. If this says the \
+             `configurations` relation does not exist, the Go server is still on its config.json \
+             file store: add the MM_CONFIG line from docker-compose.yml and recreate the \
+             container with `docker compose up -d mattermost`",
+    )?;
+    tracing::info!(
+        restrict_system_admin = config.restrict_system_admin,
+        compliance_enable = config.compliance_enable,
+        show_full_name = config.show_full_name,
+        show_email_address = config.show_email_address,
+        licensed = !config.license.is_empty(),
+        "loaded configuration from the shared database"
+    );
+
+    let app = App::with_config(store, config);
     let state = AppState::new(app, go_upstream.clone());
     let listener = tokio::net::TcpListener::bind(&listen)
         .await

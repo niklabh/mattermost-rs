@@ -38,11 +38,6 @@ use axum::response::Response;
 use axum::routing::{MethodRouter, get, post};
 use mm_app::App;
 
-/// Go's `PrivacySettings.ShowFullName` default (model/config.go).
-pub const DEFAULT_SHOW_FULL_NAME: bool = true;
-/// Go's `PrivacySettings.ShowEmailAddress` default (model/config.go).
-pub const DEFAULT_SHOW_EMAIL_ADDRESS: bool = true;
-
 /// Shared state. Cloned per request, so every field is cheap to clone — `reqwest::Client` and
 /// `PgPool` are both handles over shared internals.
 #[derive(Clone)]
@@ -51,9 +46,6 @@ pub struct AppState {
     pub http: reqwest::Client,
     /// Base URL of the Go server, without a trailing slash.
     pub go_upstream: String,
-    /// Stand-ins for `ServiceSettings.PrivacySettings` until config is ported (D-085).
-    pub show_full_name: bool,
-    pub show_email_address: bool,
 }
 
 impl std::fmt::Debug for AppState {
@@ -62,8 +54,8 @@ impl std::fmt::Debug for AppState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AppState")
             .field("go_upstream", &self.go_upstream)
-            .field("show_full_name", &self.show_full_name)
-            .field("show_email_address", &self.show_email_address)
+            .field("show_full_name", &self.show_full_name())
+            .field("show_email_address", &self.show_email_address())
             .finish_non_exhaustive()
     }
 }
@@ -74,9 +66,23 @@ impl AppState {
             app,
             http: reqwest::Client::new(),
             go_upstream: go_upstream.trim_end_matches('/').to_owned(),
-            show_full_name: DEFAULT_SHOW_FULL_NAME,
-            show_email_address: DEFAULT_SHOW_EMAIL_ADDRESS,
         }
+    }
+
+    /// `PrivacySettings.ShowFullName`, read through to the app's configuration.
+    ///
+    /// An accessor rather than a field on purpose. These were `AppState` fields hardcoded to
+    /// Go's defaults while there was no configuration to read ([D-085]); now that
+    /// [`mm_app::config::Config`] loads the document the Go server persists, a copy on `AppState`
+    /// would be a second source of truth that a reload could leave stale. There is exactly one
+    /// place either value lives.
+    pub fn show_full_name(&self) -> bool {
+        self.app.config().show_full_name
+    }
+
+    /// `PrivacySettings.ShowEmailAddress`. See [`AppState::show_full_name`].
+    pub fn show_email_address(&self) -> bool {
+        self.app.config().show_email_address
     }
 }
 
@@ -871,5 +877,34 @@ mod tests {
         ));
         let state = AppState::new(app, "http://localhost:8065/".to_owned());
         assert_eq!(state.go_upstream, "http://localhost:8065");
+    }
+
+    /// The two privacy accessors read **different** settings.
+    ///
+    /// Both default to `true` and the development stack leaves them there, so a swapped wiring is
+    /// invisible to every parity test in the repo — the two servers would agree because the two
+    /// values agree. The only way to see it is a configuration where they differ, which is what
+    /// this builds. `Sanitize` consults them independently and "names but not emails" is an
+    /// ordinary deployment, so the swap is reachable in the real world even though the stack
+    /// cannot show it.
+    #[tokio::test]
+    async fn the_privacy_accessors_do_not_read_the_same_setting() {
+        let config = mm_app::config::Config {
+            show_full_name: true,
+            show_email_address: false,
+            ..mm_app::config::Config::default()
+        };
+        let app = App::with_config(
+            mm_store::SqlStore::from_pool(
+                sqlx::postgres::PgPoolOptions::new()
+                    .connect_lazy("postgres://x/y")
+                    .expect("a lazy pool needs no server"),
+            ),
+            config,
+        );
+        let state = AppState::new(app, "http://localhost:8065".to_owned());
+
+        assert!(state.show_full_name(), "names are shown");
+        assert!(!state.show_email_address(), "emails are not");
     }
 }

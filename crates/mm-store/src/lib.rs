@@ -15,6 +15,7 @@
 
 pub mod audit_store;
 pub mod channel_store;
+pub mod config_store;
 pub mod draft_store;
 pub mod emoji_store;
 pub mod error;
@@ -39,6 +40,7 @@ pub mod webhook_store;
 
 pub use audit_store::{AUDIT_LIMIT_MAXIMUM, AuditStore, SqlAuditStore};
 pub use channel_store::{ChannelStore, SqlChannelStore};
+pub use config_store::{ConfigStore, SqlConfigStore};
 pub use draft_store::{DraftStore, SqlDraftStore};
 pub use emoji_store::{EmojiStore, SqlEmojiStore};
 pub use error::StoreError;
@@ -72,6 +74,7 @@ use sqlx::postgres::PgPoolOptions;
 pub struct SqlStore {
     audit: SqlAuditStore,
     channel: SqlChannelStore,
+    config: SqlConfigStore,
     emoji: SqlEmojiStore,
     draft: SqlDraftStore,
     file_info: SqlFileInfoStore,
@@ -117,6 +120,7 @@ impl SqlStore {
         Self {
             audit: SqlAuditStore::new(pool.clone()),
             channel: SqlChannelStore::new(pool.clone()),
+            config: SqlConfigStore::new(pool.clone()),
             emoji: SqlEmojiStore::new(pool.clone()),
             draft: SqlDraftStore::new(pool.clone()),
             file_info: SqlFileInfoStore::new(pool.clone()),
@@ -162,6 +166,15 @@ impl SqlStore {
     /// Port of `store.Store.Channel()`.
     pub fn channel(&self) -> &SqlChannelStore {
         &self.channel
+    }
+
+    /// The configuration document store.
+    ///
+    /// Go has no `store.Store.Config()` — its config store is a separate `config.Store` built
+    /// before the app store and injected into `Platform`. It is folded in here because it is a
+    /// table read against the same pool and splitting it would buy nothing but a second pool.
+    pub fn config(&self) -> &SqlConfigStore {
+        &self.config
     }
 
     /// Port of `store.Store.Session()`.
