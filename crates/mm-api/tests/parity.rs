@@ -58,6 +58,7 @@ mod parity {
     pub mod file_info;
     pub mod flagged_posts;
     pub mod incoming_hooks;
+    pub mod licence_gated_channels;
     pub mod license_client;
     pub mod me_alias;
     pub mod oauth_apps;

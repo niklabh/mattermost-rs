@@ -6837,3 +6837,35 @@ query on both servers — it is the success that is sticky.
 - **The session requirement** is enforced by the extractor's *type*, so the only mutation of it is
   one that does not compile. There is nothing for a test to catch that the type system does not
   already refuse.
+
+## `GET /channels/{id}/moderations` and `/channels/{id}/bookmarks` — the two licence gates (2026-09-06)
+
+Served, for an unlicensed installation. `crates/mm-api/src/channels.rs`
+(`get_channel_moderations`, `list_channel_bookmarks`, `licence_gate`); 6 parity tests in
+`crates/mm-api/tests/parity/licence_gated_channels.rs`. Both are real client routes on a licensed
+server — the System Console's moderation panel and the channel bookmark bar.
+
+**The one thing a reader would otherwise get wrong: the licence check is the *first* statement in
+each handler**, ahead of `RequireChannelId` and ahead of every permission question
+(channel.go:2973, channel_bookmark.go:447). So `/channels/abc/moderations` — an id far too short
+to be valid — answers the **licence** error rather than a 400, and a plain user who cannot read
+the channel gets the licence error rather than a permission one. On moderations that is two
+different 403s, and the ordering decides which.
+
+The two errors are **not the same shape**: a `403` for moderations and a `501` for bookmarks. Two
+licence gates twenty files apart, one calling itself "not permitted" and the other "not
+implemented".
+
+A licensed installation is forwarded — everything behind either gate (scheme-derived moderations,
+the bookmark store) is unported. That is now the third pair of routes drawing this boundary, so
+the decision lives in one `licence_gate` helper rather than three copies.
+
+Mutation run: **8 run, 6 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/licence-gated-channels.plan`).
+
+### A segment outside the mux charset is refused *before* the licence gate
+
+`/channels/not-an-id/bookmarks` is Go's own 404, because gorilla never routes it — the handler,
+and therefore the licence check, never runs. Our charset middleware forwards it for the same
+reason, so the two agree by construction rather than by copying the gate. Asserted, because "the
+licence error comes first" is true only *within* the handler.

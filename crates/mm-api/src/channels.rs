@@ -2680,6 +2680,101 @@ pub async fn get_recommended_channels_for_team(
         .into_response()
 }
 
+/// Port of `getChannelModerations` (api4/channel.go:2972) —
+/// `GET /api/v4/channels/{channel_id}/moderations`, the System Console's per-channel moderation
+/// panel.
+///
+/// # The licence check runs **before** the id is validated
+///
+/// `if c.App.Channels().License() == nil` is the first statement, ahead of `RequireChannelId` and
+/// ahead of every permission question (channel.go:2973). So `/channels/abc/moderations` — an id
+/// far too short to be valid — answers the **licence** error, not a 400. Measured against the
+/// running server, and it is the only ordering this route has to get right.
+///
+/// A licensed installation is forwarded: the moderations are computed from the channel's scheme
+/// roles against the team's, and that machinery is not ported.
+#[tracing::instrument(skip_all, fields(channel_id = %channel_id, licensed))]
+pub async fn get_channel_moderations(
+    State(state): State<AppState>,
+    Path(channel_id): Path<String>,
+    _session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    match licence_gate(&state, request).await {
+        LicenceGate::Forward(response) => response,
+        LicenceGate::Unlicensed => {
+            let _ = &channel_id;
+            ApiError::from(mm_model::utils::AppError::new(
+                "Api4.GetChannelModerations",
+                "api.channel.get_channel_moderations.license.error",
+                None,
+                String::new(),
+                403,
+            ))
+            .into_response()
+        }
+        LicenceGate::Failed(err) => err.into_response(),
+    }
+}
+
+/// Port of `listChannelBookmarksForChannel` (api4/channel_bookmark.go:446) —
+/// `GET /api/v4/channels/{channel_id}/bookmarks`.
+///
+/// The same shape as [`get_channel_moderations`] and **a different status**: a **501**, not a 403.
+/// Two licence gates twenty files apart, one calling itself "not implemented" and the other "not
+/// permitted", and a client branching on the status sees them differently.
+#[tracing::instrument(skip_all, fields(channel_id = %channel_id, licensed))]
+pub async fn list_channel_bookmarks(
+    State(state): State<AppState>,
+    Path(channel_id): Path<String>,
+    _session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    match licence_gate(&state, request).await {
+        LicenceGate::Forward(response) => response,
+        LicenceGate::Unlicensed => {
+            let _ = &channel_id;
+            ApiError::from(mm_model::utils::AppError::new(
+                "listChannelBookmarksForChannel",
+                "api.channel.bookmark.channel_bookmark.license.error",
+                None,
+                String::new(),
+                501,
+            ))
+            .into_response()
+        }
+        LicenceGate::Failed(err) => err.into_response(),
+    }
+}
+
+/// What the two licence-gated channel routes should do.
+enum LicenceGate {
+    /// A licence is installed; the work behind the gate is not ported.
+    Forward(Response),
+    /// Nothing we can see says this server is licensed — answer the route's own error.
+    Unlicensed,
+    Failed(ApiError),
+}
+
+/// Shared by the two routes above, because the *decision* is shared and only the error differs.
+///
+/// See `mm_app::license::LicenseState` for what "licensed" can be established from here: the
+/// `MM_LICENSE` environment variable and `Systems.ActiveLicenseId`, which between them cover every
+/// way Go loads a licence except one that is set on Go's environment and not on ours.
+async fn licence_gate(state: &AppState, request: Request) -> LicenceGate {
+    match state.app.license_state().await {
+        Ok(mm_app::license::LicenseState::Licensed) => {
+            tracing::Span::current().record("licensed", true);
+            LicenceGate::Forward(proxy::forward_to_go(State(state.clone()), request).await)
+        }
+        Ok(mm_app::license::LicenseState::Unlicensed) => {
+            tracing::Span::current().record("licensed", false);
+            LicenceGate::Unlicensed
+        }
+        Err(err) => LicenceGate::Failed(ApiError::from(err)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     /// The name in the 400 for a malformed id, pinned in-process because HTTP cannot see it —

@@ -631,6 +631,14 @@ pub fn router(state: AppState) -> Router {
             partially_migrated_with_ids(&state, get(oauth::get_authorized_oauth_apps)),
         )
         .route(
+            "/api/v4/channels/{channel_id}/moderations",
+            partially_migrated_with_ids(&state, get(channels::get_channel_moderations)),
+        )
+        .route(
+            "/api/v4/channels/{channel_id}/bookmarks",
+            partially_migrated_with_ids(&state, get(channels::list_channel_bookmarks)),
+        )
+        .route(
             "/api/v4/terms_of_service",
             partially_migrated(get(terms_of_service::get_latest_terms_of_service)),
         )

@@ -1,0 +1,26 @@
+# Mutation plan for the two licence-gated channel reads (getChannelModerations,
+# listChannelBookmarksForChannel).
+#
+#   scripts/mutate-batch.sh scripts/mutations/licence-gated-channels.plan
+#
+# On an unlicensed server each route is one statement: which error id, at which status. The two
+# differ — **403** for moderations and **501** for bookmarks — so swapping either is a wire change
+# a client branching on the status would see. The gate itself is the third decision: forwarding a
+# licensed installation rather than answering it.
+#
+# There is nothing to mutate about ordering: the licence check being first is what the tests
+# assert, and a mutation moving it would have to move code the handler does not contain — the id
+# validation and the permission check are behind the forward.
+#
+# The last two lines are the no-op controls and must SURVIVE.
+
+api-moderations-status	crates/mm-api/src/channels.rs	                "api.channel.get_channel_moderations.license.error",\n                None,\n                String::new(),\n                403,	                "api.channel.get_channel_moderations.license.error",\n                None,\n                String::new(),\n                501,	api	licence_gated_channels
+api-bookmarks-status	crates/mm-api/src/channels.rs	                "api.channel.bookmark.channel_bookmark.license.error",\n                None,\n                String::new(),\n                501,	                "api.channel.bookmark.channel_bookmark.license.error",\n                None,\n                String::new(),\n                403,	api	licence_gated_channels
+api-moderations-id	crates/mm-api/src/channels.rs	                "api.channel.get_channel_moderations.license.error",	                "api.channel.bookmark.channel_bookmark.license.error",	api	licence_gated_channels
+api-bookmarks-id	crates/mm-api/src/channels.rs	                "api.channel.bookmark.channel_bookmark.license.error",	                "api.channel.get_channel_moderations.license.error",	api	licence_gated_channels
+api-licence-gate-inverted	crates/mm-api/src/channels.rs	        Ok(mm_app::license::LicenseState::Licensed) => {\n            tracing::Span::current().record("licensed", true);\n            LicenceGate::Forward(proxy::forward_to_go(State(state.clone()), request).await)\n        }\n        Ok(mm_app::license::LicenseState::Unlicensed) => {	        Ok(mm_app::license::LicenseState::Unlicensed) => {\n            tracing::Span::current().record("licensed", true);\n            LicenceGate::Forward(proxy::forward_to_go(State(state.clone()), request).await)\n        }\n        Ok(mm_app::license::LicenseState::Licensed) => {	api	licence_gated_channels
+api-licensed-answers-anyway	crates/mm-api/src/channels.rs	            LicenceGate::Forward(proxy::forward_to_go(State(state.clone()), request).await)	            {\n                let _ = request;\n                LicenceGate::Unlicensed\n            }	api	licence_gated_channels
+#
+# --- no-op controls: these must SURVIVE ---
+control-rename-binding	crates/mm-api/src/channels.rs	async fn licence_gate(state: &AppState, request: Request) -> LicenceGate {\n    match state.app.license_state().await {	async fn licence_gate(state: &AppState, request: Request) -> LicenceGate {\n    let licence = state.app.license_state().await;\n    match licence {	api	licence_gated_channels
+control-reorder-independent-arms	crates/mm-api/src/channels.rs	        Err(err) => LicenceGate::Failed(ApiError::from(err)),\n    }\n}	        Err(error) => LicenceGate::Failed(ApiError::from(error)),\n    }\n}	api	licence_gated_channels
