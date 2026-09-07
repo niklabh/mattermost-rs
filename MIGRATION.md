@@ -7462,3 +7462,87 @@ to break three tests that had nothing to do with schemes:
   really testing how many users happened to exist; it now walks the pages.
 - `system_usage::the_usage_counters_need_no_permission` byte-compared a live `COUNT(*)` of teams
   with no retry. The status check stays unretried — 200 is 200 — and only the body is bracketed.
+
+## Fifteen `/data_retention` routes: a 501, and the checks in front of it (2026-09-07)
+
+New: `crates/mm-api/src/data_retention.rs`, `crates/mm-api/tests/parity/data_retention.rs`,
+`scripts/mutations/data-retention.plan`. Changed: `crates/mm-api/src/lib.rs`.
+
+117 → **132 of 764**.
+
+`App.DataRetention()` is `einterfaces.DataRetentionInterface`, registered only by the enterprise
+build, so on the Team Edition binary beside us it is always nil and every app function in
+`app/data_retention.go` answers `ent.data_retention.generic.license.error` at 501 before touching
+anything. That refusal is the whole of each route here; a licensed installation is forwarded.
+
+### The routes are worth porting because their check *order* differs in almost every handler
+
+| Route | Order before the refusal |
+|---|---|
+| `getGlobalPolicy` | nothing — Go's comment says "No permission check required" |
+| `getPolicies`, `getPoliciesCount` | permission |
+| `getPolicy`, `getTeamsForPolicy`, `getChannelsForPolicy` | permission, **then** the id |
+| `deletePolicy` | the id, **then** permission |
+| `createPolicy` | body, then permission |
+| `patchPolicy` | body, then the id, then permission |
+| `addTeamsToPolicy` and three siblings | the id, then body, then permission |
+| the two per-user routes | the user id, then self-or-`manage_system` |
+
+### `RequirePolicyId` is dead on eleven routes, and reproducing it would be the bug
+
+Go calls `c.RequirePolicyId()` and **does not check `c.Err`** — `getPolicy` goes straight on to
+`c.App.GetRetentionPolicy(...)`, whose error *overwrites* the 400 the id check just set. So
+`GET /api/v4/data_retention/policies/short` is a **501, not a 400**. Measured against the running
+Go server, because no reading of the handler suggests it, and a port that "helpfully" validated
+the id would answer 400 to eight requests Go answers 501 to.
+
+The two per-user routes are the exception — they do check — so a malformed user id there really is
+a 400. Two conventions in one file, forty lines apart.
+
+### Two body shapes, two different 400s, and a `null` that is not an error
+
+`createPolicy` and `patchPolicy` decode a `RetentionPolicyWithTeamAndChannelIDs` and fail with
+`api.context.invalid_body_param.app_error` naming `policy`; the four id-list routes use
+`model.SortedArrayFromJSON` and fail with `api.payload.parse.error`, which names nothing. And
+`SortedArrayFromJSON` returns `(nil, nil)` for a JSON `null` — no error — so `null` reaches the
+licence refusal while `[` does not.
+
+### The two `/search` children are **not** migrated, and they look identical
+
+`searchTeamsInPolicy` and `searchChannelsInPolicy` sit in the same file with the same shape and are
+not licence-gated at all: they call `SearchAllTeams` / `SearchAllChannels` with a `policy_id`
+filter and answer **200** on this server — measured, not assumed. They belong with `/teams/search`
+and `/channels/search`, where the search machinery will land. `scripts/routes.py --todo` lists
+them.
+
+### The handler bodies are one line each, and the variation is data
+
+Fifteen near-identical functions would have buried the orderings that are the whole content of
+this file. A `Route { name, body, gate, body_first }` makes the table above reviewable against the
+code, and the `route!` macro keeps each handler to its Go name.
+
+### The mutation run
+
+**24 run, 22 caught, 2 controls survived, 0 harness faults.** One real survivor, and it was the
+one gate the fixture could not see: the per-user routes use `manage_system`, and the readers held
+neither that nor it — a plain user is refused by both rules and an admin is admitted by both. The
+suite now asks with the *read* permission alone, which only the correct rule refuses.
+
+Notably the "reproducing the dead id check" mutation was **caught**: adding a `policy_id`
+validation makes eight routes answer 400 where Go answers 501.
+
+### Two more churn flakes, and the number behind them
+
+The suite creates **about 240 users and dozens of teams per run** — measured, not estimated: the
+oldest `mmrsplain%` row is four minutes old on a database holding 246 users. The purge works; that
+is simply the load. Adding three fixtures pushed two long-standing tests over the edge, and both
+were asking a question the population had outgrown:
+
+- `users_list::the_four_filtered_arms_match_go` checked that the outsider appears in the
+  `not_in_team` arm. That arm returns nearly every user, and `per_page` is clamped to 200, so page
+  0 no longer contains them. The byte comparisons are unchanged — they compare the same page on
+  both servers — and only the membership assertion walks.
+- `session_team_members` compared the admin's membership count between Go and our store. **Creating
+  a team makes the creator a member**, and every suite that needs a team creates one with that same
+  admin token, so the count moves between the two reads. It now brackets Go either side, like the
+  other moving-target comparisons.

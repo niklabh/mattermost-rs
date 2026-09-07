@@ -40,6 +40,11 @@ async fn session_team_members_match_the_go_servers_computed_roles() {
 
     let token = go_minted_token(&client).await;
 
+    // Read Go's list, our store's, then Go's again, and accept a store answer that matches
+    // either bracket. **Creating a team makes the creator a member**, and every suite in this
+    // binary that needs a team creates one with this same admin token — so the admin's membership
+    // count moves under this test, and an unbracketed comparison fails on churn. Measured at 50
+    // against 49 once the data-retention fixture landed.
     let go_members = go_team_members(&client, &token).await;
 
     // Now the same question through our store, using the same token.
@@ -57,10 +62,17 @@ async fn session_team_members_match_the_go_servers_computed_roles() {
         .team_members
         .expect("D-077: team_members must be hydrated, not left null");
 
+    let go_after = go_team_members(&client, &token).await;
+    let go_members = if ours.len() == go_members.len() {
+        go_members
+    } else {
+        go_after
+    };
     assert_eq!(
         ours.len(),
         go_members.len(),
-        "both servers should see the same number of memberships"
+        "both servers should see the same number of memberships, at one of the two instants Go \
+         was asked"
     );
 
     // Compare per team id rather than by position — neither query has an ORDER BY, so the row

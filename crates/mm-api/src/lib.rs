@@ -9,6 +9,7 @@ pub mod audits;
 pub mod auth;
 pub mod channels;
 pub mod common_teams;
+pub mod data_retention;
 pub mod drafts;
 pub mod emoji;
 pub mod error;
@@ -858,6 +859,67 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/users/{user_id}/teams/{team_id}/channels/categories/{category}",
             partially_migrated_with_ids(&state, get(sidebar::get_category_for_team_for_user)),
+        )
+        // ---- data retention (2026-09-07) ----
+        //
+        // Fifteen routes whose whole behaviour on an unlicensed server is a 501 with the checks
+        // ahead of it — see `data_retention.rs`. `/policies` carries a GET and a POST;
+        // `/policies/{policy_id}` a GET, a PATCH and a DELETE; the two `/teams` and `/channels`
+        // children each carry three methods. The two `/search` children are **not** registered:
+        // they are ordinary searches with no licence gate, and they belong with `/teams/search`.
+        //
+        // `{policy_id}` is id-shaped, so `partially_migrated_with_ids` forwards a segment Go's
+        // mux would not have matched — but note that a segment which *does* match and is still
+        // not a valid id reaches the handler and is deliberately **not** rejected there.
+        .route(
+            "/api/v4/data_retention/policy",
+            partially_migrated(get(data_retention::get_global_policy)),
+        )
+        .route(
+            "/api/v4/data_retention/policies_count",
+            partially_migrated(get(data_retention::get_policies_count)),
+        )
+        .route(
+            "/api/v4/data_retention/policies",
+            partially_migrated(
+                get(data_retention::get_policies).post(data_retention::create_policy),
+            ),
+        )
+        .route(
+            "/api/v4/data_retention/policies/{policy_id}",
+            partially_migrated_with_ids(
+                &state,
+                get(data_retention::get_policy)
+                    .patch(data_retention::patch_policy)
+                    .delete(data_retention::delete_policy),
+            ),
+        )
+        .route(
+            "/api/v4/data_retention/policies/{policy_id}/teams",
+            partially_migrated_with_ids(
+                &state,
+                get(data_retention::get_teams_for_policy)
+                    .post(data_retention::add_teams_to_policy)
+                    .delete(data_retention::remove_teams_from_policy),
+            ),
+        )
+        .route(
+            "/api/v4/data_retention/policies/{policy_id}/channels",
+            partially_migrated_with_ids(
+                &state,
+                get(data_retention::get_channels_for_policy)
+                    .post(data_retention::add_channels_to_policy)
+                    .delete(data_retention::remove_channels_from_policy),
+            ),
+        )
+        // Two segments deeper than `/users/{user_id}`, so they shadow nothing.
+        .route(
+            "/api/v4/users/{user_id}/data_retention/team_policies",
+            partially_migrated_with_ids(&state, get(data_retention::get_team_policies_for_user)),
+        )
+        .route(
+            "/api/v4/users/{user_id}/data_retention/channel_policies",
+            partially_migrated_with_ids(&state, get(data_retention::get_channel_policies_for_user)),
         )
         // ---- schemes (2026-09-07) ----
         //

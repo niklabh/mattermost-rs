@@ -253,6 +253,31 @@ async fn the_four_filtered_arms_match_go() {
     let (go_chan, rs_chan) = fetch_both_stable(&client, &token, &in_channel).await;
     let (go_not_chan, rs_not_chan) = fetch_both_stable(&client, &token, &not_in_channel).await;
     let (go_not_team, rs_not_team) = fetch_both_stable(&client, &token, &not_in_team).await;
+
+    // **`not_in_team` needs paging.** It returns every user who is *not* in the fixture team,
+    // which on this database is nearly all of them — the suite creates about 240 users per run —
+    // and `per_page` is clamped to 200. The outsider is therefore not guaranteed to be on page 0,
+    // and the byte comparisons above are still exact because they compare the same page. Only the
+    // membership assertion needs the rest.
+    let mut not_team_ids = ids_of(&rs_not_team, "not_in_team");
+    for page in 1..12 {
+        if not_team_ids.contains(&f.outsider.id) {
+            break;
+        }
+        let (_, more) = common::fetch_both_stable_within(
+            &client,
+            &token,
+            &format!("{not_in_team}&page={page}"),
+            60,
+        )
+        .await;
+        let page_ids = ids_of(&more, "not_in_team");
+        if page_ids.is_empty() {
+            break;
+        }
+        not_team_ids.extend(page_ids);
+    }
+
     teardown(&client, &f).await;
 
     assert_eq!(rs_team, go_team, "in_team");
@@ -266,7 +291,7 @@ async fn the_four_filtered_arms_match_go() {
     let team = ids_of(&rs_team, "in_team");
     let chan = ids_of(&rs_chan, "in_channel");
     let not_chan = ids_of(&rs_not_chan, "not_in_channel");
-    let not_team = ids_of(&rs_not_team, "not_in_team");
+    let not_team = not_team_ids;
 
     assert!(team.contains(&f.members[0].id) && team.contains(&f.members[1].id));
     assert!(

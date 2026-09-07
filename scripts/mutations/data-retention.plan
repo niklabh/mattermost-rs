@@ -1,0 +1,42 @@
+# Mutation plan for the 2026-09-07 /data_retention group — fifteen routes.
+#
+#   scripts/mutate-batch.sh scripts/mutations/data-retention.plan
+#
+# Every route answers 501 on this deployment, so the whole risk is in the checks **ahead** of the
+# refusal, and they are in a different order in almost every handler:
+#
+#   * the body is decoded **first** on the five routes that take one, so a malformed body is a 400
+#     even for a caller with no permission;
+#   * the two body shapes produce two **different** error ids — `invalid_body_param` for a policy,
+#     `api.payload.parse.error` for an id list — and a JSON `null` id list is not an error at all;
+#   * `RequirePolicyId`'s result is **thrown away** on eleven routes, so a malformed policy id is a
+#     501 and not a 400. Reproducing the check would be the bug;
+#   * the two per-user routes are the exception: their id check is live, and their gate is
+#     self-or-`manage_system`, not a sysconsole read;
+#   * `getGlobalPolicy` has no permission check at all.
+#
+# The last two lines are the no-op controls and must SURVIVE.
+dataret-body-decoded-after-the-permission	crates/mm-api/src/data_retention.rs	    if route.body_first\n        && let Err(err) = decode(route.body, &bytes)	    if !route.body_first\n        && let Err(err) = decode(route.body, &bytes)	api	data_retention
+dataret-policy-body-not-decoded	crates/mm-api/src/data_retention.rs	        Body::Policy => serde_json::from_slice::<serde_json::Value>(bytes)\n            .map(|_| ())\n            .map_err(|_| ApiError::invalid_param("policy")),	        Body::Policy => Ok(()),	api	data_retention
+dataret-id-list-not-decoded	crates/mm-api/src/data_retention.rs	        Body::IdList => sorted_array_from_json(bytes).map(|_| ()).map_err(|_| {	        Body::IdList => Ok::<(), ApiError>(()).map_err(|_: ApiError| {	api	data_retention
+dataret-id-list-uses-the-body-param-error	crates/mm-api/src/data_retention.rs	            ApiError::from(AppError::new(\n                "dataRetention",\n                PAYLOAD_PARSE_ERROR,\n                None,\n                String::new(),\n                400,\n            ))\n        }),	            ApiError::invalid_param("policy")\n        }),	api	data_retention
+dataret-null-id-list-is-an-error	crates/mm-api/src/data_retention.rs	        Body::IdList => sorted_array_from_json(bytes).map(|_| ()).map_err(|_| {	        Body::IdList => sorted_array_from_json(bytes)\n            .and_then(|v| if v.is_empty() { serde_json::from_slice::<Vec<String>>(b"[") } else { Ok(v) })\n            .map(|_| ())\n            .map_err(|_| {	api	data_retention
+dataret-policy-id-is-validated	crates/mm-api/src/data_retention.rs	/// `model.SortedArrayFromJSON` / the policy decode, as a pass-or-400.\nfn decode(body: Body, bytes: &[u8]) -> Result<(), ApiError> {	/// `model.SortedArrayFromJSON` / the policy decode, as a pass-or-400.\nfn decode(body: Body, bytes: &[u8]) -> Result<(), ApiError> {\n    if bytes.is_empty() {\n        return Err(ApiError::invalid_url_param("policy_id"));\n    }	api	data_retention
+dataret-read-gate-uses-the-write-permission	crates/mm-api/src/data_retention.rs	        Gate::Read => {\n            state\n                .app\n                .session_has_permission_to(\n                    session,\n                    &PERMISSION_SYSCONSOLE_READ_COMPLIANCE_DATA_RETENTION_POLICY,\n                )	        Gate::Read => {\n            state\n                .app\n                .session_has_permission_to(\n                    session,\n                    &PERMISSION_SYSCONSOLE_WRITE_COMPLIANCE_DATA_RETENTION_POLICY,\n                )	api	data_retention
+dataret-write-gate-uses-the-read-permission	crates/mm-api/src/data_retention.rs	        Gate::Write => {\n            state\n                .app\n                .session_has_permission_to(\n                    session,\n                    &PERMISSION_SYSCONSOLE_WRITE_COMPLIANCE_DATA_RETENTION_POLICY,\n                )	        Gate::Write => {\n            state\n                .app\n                .session_has_permission_to(\n                    session,\n                    &PERMISSION_SYSCONSOLE_READ_COMPLIANCE_DATA_RETENTION_POLICY,\n                )	api	data_retention
+dataret-global-policy-gains-a-gate	crates/mm-api/src/data_retention.rs	        Gate::None => true,	        Gate::None => false,	api	data_retention
+dataret-permission-check-dropped	crates/mm-api/src/data_retention.rs	    if !permitted {	    if false {	api	data_retention
+dataret-policies-list-is-a-write	crates/mm-api/src/data_retention.rs	route!(\n    get_policies,\n    "App.GetRetentionPolicies",\n    Body::None,\n    Gate::Read\n);	route!(\n    get_policies,\n    "App.GetRetentionPolicies",\n    Body::None,\n    Gate::Write\n);	api	data_retention
+dataret-create-is-a-read	crates/mm-api/src/data_retention.rs	route!(\n    create_policy,\n    "App.CreateRetentionPolicy",\n    Body::Policy,\n    Gate::Write\n);	route!(\n    create_policy,\n    "App.CreateRetentionPolicy",\n    Body::Policy,\n    Gate::Read\n);	api	data_retention
+dataret-delete-decodes-a-body	crates/mm-api/src/data_retention.rs	route!(\n    delete_policy,\n    "App.DeleteRetentionPolicy",\n    Body::None,\n    Gate::Write\n);	route!(\n    delete_policy,\n    "App.DeleteRetentionPolicy",\n    Body::Policy,\n    Gate::Write\n);	api	data_retention
+dataret-add-teams-takes-a-policy-body	crates/mm-api/src/data_retention.rs	route!(\n    add_teams_to_policy,\n    "App.AddTeamsToRetentionPolicy",\n    Body::IdList,\n    Gate::Write\n);	route!(\n    add_teams_to_policy,\n    "App.AddTeamsToRetentionPolicy",\n    Body::Policy,\n    Gate::Write\n);	api	data_retention
+dataret-licence-gate-inverted	crates/mm-api/src/data_retention.rs	    if licensed {\n        let request = Request::from_parts(parts, axum::body::Body::from(body));	    if !licensed {\n        let request = Request::from_parts(parts, axum::body::Body::from(body));	api	data_retention
+dataret-refusal-is-a-500	crates/mm-api/src/data_retention.rs	ApiError::from(AppError::new(name, LICENSE_ERROR, None, String::new(), 501))	ApiError::from(AppError::new(name, LICENSE_ERROR, None, String::new(), 500))	api	data_retention
+dataret-refusal-error-id-changed	crates/mm-api/src/data_retention.rs	const LICENSE_ERROR: &str = "ent.data_retention.generic.license.error";	const LICENSE_ERROR: &str = "ent.data_retention.license.error";	api	data_retention
+dataret-per-user-self-check-dropped	crates/mm-api/src/data_retention.rs	    if user_id != session.0.user_id\n        && !state	    if !state	api	data_retention
+dataret-per-user-self-check-inverted	crates/mm-api/src/data_retention.rs	    if user_id != session.0.user_id\n        && !state	    if user_id == session.0.user_id\n        && !state	api	data_retention
+dataret-per-user-id-not-validated	crates/mm-api/src/data_retention.rs	    if !is_valid_id(&user_id) {\n        return ApiError::invalid_url_param("user_id").into_response();\n    }	    if false {\n        return ApiError::invalid_url_param("user_id").into_response();\n    }	api	data_retention
+dataret-per-user-me-not-resolved	crates/mm-api/src/data_retention.rs	    let user_id = if user_id == ME {\n        session.0.user_id.clone()\n    } else {\n        user_id\n    };	    let user_id = user_id;	api	data_retention
+dataret-per-user-uses-a-sysconsole-read	crates/mm-api/src/data_retention.rs	            .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)\n            .await	            .session_has_permission_to(\n                &session.0,\n                &PERMISSION_SYSCONSOLE_READ_COMPLIANCE_DATA_RETENTION_POLICY,\n            )\n            .await	api	data_retention
+control-rename-dataret-permitted-binding	crates/mm-api/src/data_retention.rs	    if !permitted {	    let allowed = permitted;\n    if !allowed {	api	data_retention
+control-reorder-dataret-independent-lets	crates/mm-api/src/data_retention.rs	    let (parts, body) = request.into_parts();\n    let bytes = axum::body::to_bytes(body, usize::MAX)\n        .await\n        .unwrap_or_default();\n    refuse_or_forward(&state, name, parts, bytes).await	    let _unused_marker = ();\n    let (parts, body) = request.into_parts();\n    let bytes = axum::body::to_bytes(body, usize::MAX)\n        .await\n        .unwrap_or_default();\n    refuse_or_forward(&state, name, parts, bytes).await	api	data_retention
