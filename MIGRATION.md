@@ -7675,3 +7675,69 @@ question to show the difference is the configuration and not the build.
 
 That helper is reusable: several more families ahead are gated on settings that live only in the
 environment.
+
+## Cloud and connected workspaces: twenty-five routes, three shapes (2026-09-07)
+
+New: `crates/mm-api/src/{cloud,connected_workspaces}.rs`,
+`crates/mm-api/tests/parity/cloud_and_workspaces.rs`, `scripts/mutations/cloud-workspaces.plan`.
+Changed: `crates/mm-api/src/lib.rs`.
+
+164 → **189 of 764**. Twelve `/cloud` routes and thirteen across `remote_cluster.go` and
+`shared_channel.go`.
+
+### The cloud family refuses with a **400**, and everything around it with a 501
+
+`c.App.Cloud()` is an enterprise interface, nil on Team Edition, so every one of these handlers
+answers `api.server.cws.needs_enterprise_edition` at **400 Bad Request** (cloud.go:58). Every other
+licence-shaped refusal this server produces is a 501. A port that reached for the neighbouring
+shape would answer the right id with the wrong status, which is what a client branches on.
+
+The same nine-line helper has a second arm — `CloudSettings.Disable`, answering
+`api.server.cws.disabled` at **422** — reached only after the interface exists. Three ids and three
+statuses in one helper, and this server can produce exactly one of them.
+
+### The connected-workspace gate moves relative to the permission check
+
+`startRemoteClusterService` refuses without a licence *before* it looks at the config, so
+`GetRemoteClusterService()` is always nil here and all thirteen answer
+`api.remote_cluster.service_not_enabled.app_error` at 501. What makes them worth porting is where
+that gate sits:
+
+- `remote_cluster.go` checks a permission **first** — two different ones, and one is an *either* —
+  so an unauthorised caller gets 403;
+- **two `shared_channel.go` routes consult the service before the permission**, so the same caller
+  gets 501 instead;
+- `getRemoteClusterInfo` has no permission check at all.
+
+### `RequireRemoteId` is not `IsValidId`, and the port got it wrong
+
+`RequireRemoteId` (web/context.go:745) tests `== ""` and nothing else — so `short` passes it and
+the service gate answers 501 — while `RequireTeamId` and `RequireChannelId`, used on the two
+`/sharedchannels` routes in the *adjacent file*, are the usual `IsValidId` and answer 400. The
+first version of this port applied the familiar shape to all six and answered 400 on four routes
+Go answers 501 to. The parity suite caught it on its first run.
+
+Since gorilla's `{remote_id:[A-Za-z0-9]+}` cannot produce an empty segment, the check is
+unreachable through the router — but it is ported as written, because reproducing the *other*
+convention is what went wrong.
+
+### Six routes in these files are deliberately not migrated
+
+`remoteClusterAcceptMessage`, `remoteClusterPing` and `remoteClusterConfirmInvite` use
+`api.RemoteClusterTokenRequired` — a remote cluster's own token, not a session — as do the two
+file-streaming routes. `handleCWSWebhook` uses `api.CloudAPIKeyRequired`. Answering any of them
+from a session-authenticated handler would change who can reach them. `getPreviewModalData` has no
+cloud gate at all (404, measured) and `canUserDirectMessage` is an ordinary read that answers 200.
+
+### The mutation run
+
+**14 run, 12 caught, 2 controls survived, 0 harness faults.** Both survivors were the same gap:
+`manage_secure_connections` and `manage_shared_channels` are two permissions, one route accepts
+*either*, and **no stock role separates them** — an admin holds both, a plain user neither. Planted
+single-permission roles make the three cases distinguishable: the create wants the first only, the
+invite wants the second only, and the listing accepts either, which is what tells
+`SessionHasPermissionToAny` from a single check.
+
+That is the third group whose survivors were all "no stock role can tell these apart". It is worth
+stating as a rule: **a permission check is untested until a session exists that holds exactly one
+side of it**, and on this server that nearly always means planting a role.

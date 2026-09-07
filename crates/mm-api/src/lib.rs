@@ -8,7 +8,9 @@
 pub mod audits;
 pub mod auth;
 pub mod channels;
+pub mod cloud;
 pub mod common_teams;
+pub mod connected_workspaces;
 pub mod data_retention;
 pub mod drafts;
 pub mod emoji;
@@ -868,6 +870,129 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/users/{user_id}/teams/{team_id}/channels/categories/{category}",
             partially_migrated_with_ids(&state, get(sidebar::get_category_for_team_for_user)),
+        )
+        // ---- cloud and connected workspaces (2026-09-07) ----
+        //
+        // Twelve cloud routes refusing with a **400** and thirteen connected-workspace routes
+        // refusing with a 501 — three neighbouring families, three shapes. See `cloud.rs` and
+        // `connected_workspaces.rs`.
+        //
+        // `/cloud/preview/modal_data` and `/cloud/webhook` are deliberately absent: the first has
+        // no cloud gate and the second uses a different authentication wrapper.
+        .route(
+            "/api/v4/cloud/products",
+            partially_migrated(get(cloud::get_cloud_products)),
+        )
+        .route(
+            "/api/v4/cloud/limits",
+            partially_migrated(get(cloud::get_cloud_limits)),
+        )
+        .route(
+            "/api/v4/cloud/installation",
+            partially_migrated(get(cloud::get_installation)),
+        )
+        .route(
+            "/api/v4/cloud/check-cws-connection",
+            partially_migrated(get(cloud::handle_check_cws_connection)),
+        )
+        .route(
+            "/api/v4/cloud/customer",
+            partially_migrated(get(cloud::get_cloud_customer).put(cloud::update_cloud_customer)),
+        )
+        .route(
+            "/api/v4/cloud/customer/address",
+            partially_migrated(put(cloud::update_cloud_customer_address)),
+        )
+        .route(
+            "/api/v4/cloud/subscription",
+            partially_migrated(get(cloud::get_subscription)),
+        )
+        .route(
+            "/api/v4/cloud/subscription/invoices",
+            partially_migrated(get(cloud::get_invoices_for_subscription)),
+        )
+        // `{invoice_id}` is `[_A-Za-z0-9]+` in Go — it allows an underscore, so it is **not**
+        // id-shaped and must not get the id-charset middleware.
+        .route(
+            "/api/v4/cloud/subscription/invoices/{invoice_id}/pdf",
+            partially_migrated(get(cloud::get_subscription_invoice_pdf)),
+        )
+        .route(
+            "/api/v4/cloud/validate-business-email",
+            partially_migrated(post(cloud::validate_business_email)),
+        )
+        .route(
+            "/api/v4/cloud/validate-workspace-business-email",
+            partially_migrated(post(cloud::validate_workspace_business_email)),
+        )
+        .route(
+            "/api/v4/remotecluster",
+            partially_migrated(
+                get(connected_workspaces::get_remote_clusters)
+                    .post(connected_workspaces::create_remote_cluster),
+            ),
+        )
+        .route(
+            "/api/v4/remotecluster/accept_invite",
+            partially_migrated(post(connected_workspaces::remote_cluster_accept_invite)),
+        )
+        // `accept_invite`, `confirm_invite`, `msg`, `ping` and `upload` are literal siblings of
+        // `{remote_id}` — all contain `_` or are shorter than an id, so Go's
+        // `[A-Za-z0-9]+` class routes them to their own handlers and axum prefers the literal.
+        // Only `accept_invite` is registered here; the rest use a different auth wrapper.
+        .route(
+            "/api/v4/remotecluster/{remote_id}",
+            partially_migrated_with_ids(
+                &state,
+                get(connected_workspaces::get_remote_cluster)
+                    .patch(connected_workspaces::patch_remote_cluster)
+                    .delete(connected_workspaces::delete_remote_cluster),
+            ),
+        )
+        .route(
+            "/api/v4/remotecluster/{remote_id}/generate_invite",
+            partially_migrated_with_ids(
+                &state,
+                post(connected_workspaces::generate_remote_cluster_invite),
+            ),
+        )
+        .route(
+            "/api/v4/remotecluster/{remote_id}/sharedchannelremotes",
+            partially_migrated_with_ids(
+                &state,
+                get(connected_workspaces::get_shared_channel_remotes_by_remote_cluster),
+            ),
+        )
+        .route(
+            "/api/v4/remotecluster/{remote_id}/channels/{channel_id}/invite",
+            partially_migrated_with_ids(
+                &state,
+                post(connected_workspaces::invite_remote_cluster_to_channel),
+            ),
+        )
+        .route(
+            "/api/v4/remotecluster/{remote_id}/channels/{channel_id}/uninvite",
+            partially_migrated_with_ids(
+                &state,
+                post(connected_workspaces::uninvite_remote_cluster_to_channel),
+            ),
+        )
+        // `remote_info` contains an underscore, so Go's `{team_id:[A-Za-z0-9]+}` never matches it
+        // and the literal is the only route either router can pick.
+        .route(
+            "/api/v4/sharedchannels/remote_info/{remote_id}",
+            partially_migrated_with_ids(&state, get(connected_workspaces::get_remote_cluster_info)),
+        )
+        .route(
+            "/api/v4/sharedchannels/{team_id}",
+            partially_migrated_with_ids(&state, get(connected_workspaces::get_shared_channels)),
+        )
+        .route(
+            "/api/v4/sharedchannels/{channel_id}/remotes",
+            partially_migrated_with_ids(
+                &state,
+                get(connected_workspaces::get_shared_channel_remotes),
+            ),
         )
         // ---- recaps (2026-09-07) ----
         //
