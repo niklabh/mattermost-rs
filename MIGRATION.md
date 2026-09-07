@@ -7892,3 +7892,139 @@ bug:
 
 The two harness faults were the same mistake twice: a mutation that referenced a constant not
 imported at module scope, which fails to compile rather than failing a test.
+
+## The first two writes that mutate a row and broadcast (2026-09-08)
+
+New: `crates/mm-api/tests/parity/reaction_writes.rs`, `scripts/mutations/reaction-writes.plan`.
+Changed: `crates/mm-store/src/{reaction_store,post_store}.rs`,
+`crates/mm-app/src/{reaction,channel,common_teams,config}.rs`,
+`crates/mm-api/src/{reactions,lib}.rs`, `scripts/routes.py`.
+
+204 → **206 of 764**: `POST /api/v4/reactions` and
+`DELETE /api/v4/users/{user_id}/posts/{post_id}/reactions/{emoji_name}`.
+
+Every earlier "write" this server serves is a POST-shaped read or a licence refusal. These two are
+the first that change a row, and the first that publish through the hub built in the previous
+commit.
+
+### A write is tested on three surfaces, and each server reads back its own
+
+The answer, the row, and the event. The third is new and the second turned out to be the hard one:
+
+**Go's reaction cache cannot be made to see our write, and `POST /api/v4/caches/invalidate` does
+not help.** `InvalidateAllCachesSkipSend` (platform/cluster_handlers.go:137) clears the session,
+status, team, channel, user, post, fileinfo, webhook and link caches. `reactionCache` is cleared
+only by `LocalCacheStore.Invalidate()`, which is reached **only from the cluster-message handler**.
+Measured: a reaction deleted through `:8066` had `DeleteAt` set in the table and was gone from
+`:8066`'s own read, while `:8065` listed it after three explicit invalidations. Recorded as
+[D-190], whose most important consequence is a rule for every future write group: **read a Rust
+write back through Rust**. An hour went into this one looking like a failed delete.
+
+Each server therefore writes to its **own** post. Sending the same reaction to both would make the
+second call an upsert over the first's row, and an upsert returning the original `create_at` looks
+exactly like agreement.
+
+### The answer and the row disagree about `create_at`, on both servers
+
+`PreSave` mints a fresh `CreateAt` because the incoming reaction has none, and the response is
+marshalled from that struct — but the insert is `ON CONFLICT (UserId, PostId, EmojiName) DO
+UPDATE` over four columns and `CreateAt` is not among them. So re-reacting after a withdrawal
+answers with a new timestamp while the stored row keeps its original. Both halves are asserted;
+"fixing" either would diverge from Go on the other.
+
+### Two framings, ten lines apart in one Go file
+
+`saveReaction` uses `json.NewEncoder(w).Encode` and its body carries a **trailing newline**;
+`getReactions` beside it uses `json.Marshal` + `w.Write` and does not. The delete answers
+`ReturnStatusOK`, also unframed. Asserted, not assumed.
+
+### gorilla decides two of the delete's four refusals
+
+The path is
+`/users/{user_id:[A-Za-z0-9]+}/posts/{post_id:[A-Za-z0-9]+}/reactions/{emoji_name:[A-Za-z0-9\_\-\+]+}`
+(api.go:127). `short` is inside the id class, so the route matches and `RequireUserId` answers
+**400**; `not an emoji` is outside the emoji class, so **no route matches** and Go answers its 404
+page — `RequireEmojiName`'s 400 is unreachable through the router, exactly as `RequireRemoteId`'s
+check was in the connected-workspaces group. axum's `{emoji_name}` matches anything, so the port
+answered 400 where Go answers 404 until the classes were reproduced; the segment is now checked
+and a failure **forwards**, which reproduces the 404 body byte for byte including the URL quoted
+in its `detailed_error`.
+
+### Three things this server declines rather than approximates
+
+`ReactionWrite::Forward` carries the reason, and the handler hands the whole request to Go:
+
+| Reason | Why |
+|---|---|
+| a `burn_on_read` post | needs the `ReadReceipts` store |
+| a live `PersistentNotifications` row | Go runs `ResolvePersistentNotification` **after** the insert and returns its error, so declining afterwards is not reproducible |
+| a bot in a restricted DM | `IsBotExemptFromDMRestrictions` is a plugin decision |
+
+The middle one nearly swallowed the whole group. `IsPersistentNotificationsEnabled()` is
+`PostPriority && AllowPersistentNotifications` and **both default to true**, so the first version
+forwarded every reaction and the parity suite's first run reported `x-mmrs-served-by: go`. Go's own
+function gives up on its first three lines — the post's author is exempt, the feature can be off,
+and above all the post has to *be* a persistent-notification post — so those three are ported and
+only a live row forwards. That needed one new store query
+(`PostStore::has_persistent_notification`), which is the smallest thing that turns "always
+forward" into "almost never".
+
+### `CheckIfChannelIsRestrictedDM`, and a guard that was missing
+
+Ported in full, which needed the `requestingUserID != ""` guard added to
+`get_direct_or_group_message_members_common_teams_as_user`. Go's two entry points differ only in
+whether they pass a user, and the empty one exists **precisely to skip** the membership
+short-circuit (channel.go:4227). Without the guard the new caller would be told nobody is a member
+and get `NotAMember` every time. Unreachable before, because the only existing caller passes a
+session's user.
+
+`len(teams) == 0` means **restricted**, which reads backwards until you notice the function's name
+is a question about restriction rather than permission.
+
+### The mutation run found a real bug: `str::to_lowercase` is not `strings.ToLower`
+
+**Twenty-seven mutations, and the one that mattered survived the first pass.** Removing the
+handler's lower-casing changed nothing the suite could see, which led to asking *why* — and the
+answer was that the port had the wrong lowercase entirely.
+
+Go's `strings.ToLower` is the **simple** per-rune case mapping. Rust's `str::to_lowercase` is the
+**full** Unicode one. They disagree on input a client can send:
+
+| input × 22 | raw | Go | `str::to_lowercase` |
+|---|---|---|---|
+| `İ` U+0130 | 44 bytes | 22 bytes (`i`) | 66 bytes (`i` + U+0307) |
+| `Ⱥ` U+023A | 44 bytes | 66 bytes (`ⱥ`) | 66 bytes |
+
+The emoji name is lower-cased **before** the 64-byte cap, so the first row is a 404 from the emoji
+lookup on Go and was a 400 from our own length check; the second is a 400 on both, and only
+because the cap is applied after lowering. Both measured against the running server, and both are
+now fixtures.
+
+`mm_model::utils::go_to_lower` already existed, pinned against a Go corpus over 30 inputs, and its
+doc comment names this case in as many words: *"an emoji name that lowercases differently in the
+two servers is a divergence on a shared database."* The port used the wrong one anyway. Three call
+sites fixed.
+
+The *app* layer's lower-casing is now an **equivalent mutant** — the handler has already
+normalised — and is recorded as such in the plan rather than left as a standing survivor. Go
+carries the same redundancy.
+
+### A harness fix that was not optional
+
+`channel_members_list::pages_split_cover_and_run_out_identically` failed two full-suite runs in a
+row and passed alone. The cause is not paging: `purge_api_fixtures` deletes `channelmembers` for
+every `mmrsplain%` user, and a `OnceCell` on the purge alone runs it whenever the *first* test
+trips it — which is while other suites already have fixtures up. This group added two
+`create_plain_user` calls and made the window wider.
+
+The purge now runs inside `go_minted_token`'s `OnceCell`. No stack-backed test can build anything
+before it has a token, so the sweep finishes before any fixture exists — which is what the purge's
+own comment always asked for. See [D-167], where the remaining instance is narrowed to an
+intra-suite race in `threads_for_user` that predates this work.
+
+### The route inventory was under-counting by one, and it was the websocket
+
+`scripts/routes.py` normalised `{websocket:websocket(?:\/)?}` to `{websocket}` — a *parameter* —
+so `/api/v4/websocket`, the literal path every client uses, failed to match its own inventory row
+and the previous commit's route read as unserved. Fixed and verified: exactly one of 764 paths
+changed. [D-189].

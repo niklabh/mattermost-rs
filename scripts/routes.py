@@ -37,9 +37,33 @@ LIBRS = ROOT / "crates/mm-api/src/lib.rs"
 # lazily up to the closing brace that ends the parameter.
 PARAM = re.compile(r"\{([a-z_0-9]+):[^}]*\}")
 
+# A gorilla parameter whose pattern is a *literal* is not a parameter at all. The websocket route
+# is registered as `{websocket:websocket(?:\/)?}` — the braces exist only to attach the optional
+# trailing slash — and reading it as `{websocket}` made the axum route `/api/v4/websocket`, which
+# is the literal path every client uses, fail to match its own inventory row. It reported an
+# unserved route this server has been answering.
+#
+# The optional-trailing-slash suffix is stripped first, then the remainder is a literal if it
+# holds no regex metacharacter.
+TRAILING_SLASH_SUFFIX = re.compile(r"(?:\(\?:)?\\?/(?:\)?)?\?$")
+REGEX_METACHARACTERS = set("[]().*+?|^$\\{}")
+
+
+def literal_param(name: str, pattern: str) -> str | None:
+    """`{name:pattern}` as a literal segment, or None when the pattern really is a pattern."""
+    body = TRAILING_SLASH_SUFFIX.sub("", pattern)
+    if body and not (set(body) & REGEX_METACHARACTERS):
+        return body
+    return None
+
 
 def normalise(path: str) -> str:
-    path = PARAM.sub(r"{\1}", path)
+    def replace(match: "re.Match[str]") -> str:
+        name = match.group(1)
+        pattern = match.group(0)[len(name) + 2 : -1]
+        return literal_param(name, pattern) or "{%s}" % name
+
+    path = PARAM.sub(replace, path)
     return path if path == "/" else path.rstrip("/")
 
 

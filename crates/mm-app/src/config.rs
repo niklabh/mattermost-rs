@@ -106,6 +106,31 @@ pub struct Config {
     /// so the branch is live on Team Edition.
     pub post_priority: bool,
 
+    /// `ServiceSettings.AllowPersistentNotifications` (config.go:467, defaulted **`true`** at
+    /// :997).
+    ///
+    /// The other half of `IsPersistentNotificationsEnabled()`
+    /// (post_persistent_notification.go:430), which is `IsPostPriorityEnabled() && this`. Both
+    /// default to `true`, so **the feature is on by default** — and `SaveReactionForPost` calls
+    /// `ResolvePersistentNotification` on every reaction to a root post when it is. See
+    /// `App::save_reaction_for_post` for what this server does about that.
+    pub allow_persistent_notifications: bool,
+
+    /// `ServiceSettings.UniqueEmojiReactionLimitPerPost` (config.go:489).
+    ///
+    /// Defaulted to **50** and *clamped* to 500 at :1025 — the clamp is a `SetDefaults` step, so
+    /// a document holding 900 is read back as 500 by a running server and this port applies the
+    /// same ceiling. Read once per reaction, and only when the emoji is not already on the post:
+    /// an existing emoji never counts against the limit.
+    pub unique_emoji_reaction_limit_per_post: i64,
+
+    /// `TeamSettings.RestrictDirectMessage` (config.go:2553, defaulted **`"any"`** at :2620).
+    ///
+    /// Two accepted values, `any` and `team` (config.go:4552). Only `team` does anything:
+    /// `CheckIfChannelIsRestrictedDM` returns early on anything else, so a DM between two users
+    /// with no team in common is refused only on a server that has been configured for it.
+    pub restrict_direct_message: String,
+
     /// `ServiceSettings.AllowSyncedDrafts` (config.go:488). Go default **`true`**.
     ///
     /// Gates the whole drafts feature. Every one of `getDrafts`, `upsertDraft` and `deleteDraft`
@@ -379,6 +404,12 @@ impl Default for Config {
             enable_post_icon_override: false,
             enable_custom_emoji: true,
             post_priority: true,
+            // config.go:997 — `new(true)`.
+            allow_persistent_notifications: true,
+            // config.go:1021 — `ServiceSettingsDefaultUniqueReactionsPerPost` is 50.
+            unique_emoji_reaction_limit_per_post: 50,
+            // config.go:2620 — `new(DirectMessageAny)`.
+            restrict_direct_message: DIRECT_MESSAGE_ANY.to_owned(),
             allow_synced_drafts: true,
             enable_burn_on_read: true,
             feature_flag_burn_on_read: true,
@@ -482,6 +513,18 @@ impl Config {
                 "MM_SERVICESETTINGS_ENABLECUSTOMEMOJI",
                 default.enable_custom_emoji,
             ),
+            allow_persistent_notifications: lookup_bool(
+                lookup,
+                "MM_SERVICESETTINGS_ALLOWPERSISTENTNOTIFICATIONS",
+                default.allow_persistent_notifications,
+            ),
+            unique_emoji_reaction_limit_per_post: clamp_unique_reactions(lookup_int(
+                lookup,
+                "MM_SERVICESETTINGS_UNIQUEEMOJIREACTIONLIMITPERPOST",
+                default.unique_emoji_reaction_limit_per_post,
+            )),
+            restrict_direct_message: lookup("MM_TEAMSETTINGS_RESTRICTDIRECTMESSAGE")
+                .unwrap_or(default.restrict_direct_message),
             post_priority: lookup_bool(
                 lookup,
                 "MM_SERVICESETTINGS_POSTPRIORITY",
@@ -654,6 +697,23 @@ impl Config {
                 .enable_custom_emoji
                 .unwrap_or(default.enable_custom_emoji),
             post_priority: service.post_priority.unwrap_or(default.post_priority),
+            allow_persistent_notifications: service
+                .allow_persistent_notifications
+                .unwrap_or(default.allow_persistent_notifications),
+            // The clamp is Go's, and it is applied on *load*: `SetDefaults` rewrites a document
+            // value above 500 down to 500 (config.go:1025), so a running server never operates on
+            // the number the document holds. Reading it without the clamp would let a
+            // misconfigured document raise this server's limit above the Go server's.
+            unique_emoji_reaction_limit_per_post: clamp_unique_reactions(
+                service
+                    .unique_emoji_reaction_limit_per_post
+                    .unwrap_or(default.unique_emoji_reaction_limit_per_post),
+            ),
+            restrict_direct_message: parsed
+                .team_settings
+                .unwrap_or_default()
+                .restrict_direct_message
+                .unwrap_or(default.restrict_direct_message),
             allow_synced_drafts: service
                 .allow_synced_drafts
                 .unwrap_or(default.allow_synced_drafts),
@@ -815,6 +875,15 @@ struct Document {
     elasticsearch_settings: Option<ElasticsearchSettingsDocument>,
     #[serde(rename = "AIRecapSettings")]
     ai_recap_settings: Option<AIRecapSettingsDocument>,
+    #[serde(rename = "TeamSettings")]
+    team_settings: Option<TeamSettingsDocument>,
+}
+
+/// The one field of `TeamSettings` a migrated route reads.
+#[derive(Debug, Default, serde::Deserialize)]
+struct TeamSettingsDocument {
+    #[serde(rename = "RestrictDirectMessage")]
+    restrict_direct_message: Option<String>,
 }
 
 /// The one field of `AIRecapSettings` a migrated route reads. `Option<bool>` all the way through:
@@ -877,6 +946,10 @@ struct ServiceSettingsDocument {
     enable_custom_emoji: Option<bool>,
     #[serde(rename = "PostPriority")]
     post_priority: Option<bool>,
+    #[serde(rename = "AllowPersistentNotifications")]
+    allow_persistent_notifications: Option<bool>,
+    #[serde(rename = "UniqueEmojiReactionLimitPerPost")]
+    unique_emoji_reaction_limit_per_post: Option<i64>,
     #[serde(rename = "AllowSyncedDrafts")]
     allow_synced_drafts: Option<bool>,
     #[serde(rename = "EnableBurnOnRead")]
@@ -943,6 +1016,24 @@ fn lookup_bool(lookup: &impl Fn(&str) -> Option<String>, key: &str, default: boo
         .and_then(|raw| parse_bool(&raw))
         .unwrap_or(default)
 }
+
+/// Go's `ServiceSettingsMaxUniqueReactionsPerPost` ceiling (config.go:139-141), applied in
+/// `SetDefaults` (config.go:1025) — so it is part of *loading* a document, not of using the value.
+///
+/// Go clamps only the upper end; a zero or negative document value is left alone and makes
+/// `count >= limit` true for the first reaction, refusing every one. Reproduced rather than
+/// sanitised: a server configured that way accepts no reactions on either side.
+fn clamp_unique_reactions(value: i64) -> i64 {
+    value.min(MAX_UNIQUE_REACTIONS_PER_POST)
+}
+
+/// `model.ServiceSettingsMaxUniqueReactionsPerPost` (config.go:141).
+const MAX_UNIQUE_REACTIONS_PER_POST: i64 = 500;
+
+/// `model.DirectMessageAny` (config.go:80).
+pub const DIRECT_MESSAGE_ANY: &str = "any";
+/// `model.DirectMessageTeam` (config.go:81) — the only value that restricts anything.
+pub const DIRECT_MESSAGE_TEAM: &str = "team";
 
 /// The integer arm of `applyEnvKey` (config/environment.go:64): `strconv.ParseInt(value, 10, 0)`,
 /// with an unparseable value leaving the setting at its default.

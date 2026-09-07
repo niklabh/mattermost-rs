@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 
-use mm_model::channel::{Channel, ChannelSearchOpts};
+use mm_model::channel::{CHANNEL_TYPE_DIRECT, CHANNEL_TYPE_GROUP, Channel, ChannelSearchOpts};
 use mm_model::channel_list::ChannelList;
 use mm_model::channel_member::{
     CHANNEL_MARK_UNREAD_MENTION, ChannelMember, ChannelMembersWithTeamData, ChannelUnread,
@@ -1624,5 +1624,76 @@ mod tests {
             .expect_err("the store is unreachable and a mention forces a query");
         assert_eq!(err.status_code, 500);
         assert_eq!(err.id, "app.channel.get_by_name.existing.app_error");
+    }
+}
+
+/// What [`App::check_if_channel_is_restricted_dm`] could determine.
+///
+/// Three states rather than a `bool` because one of the inputs is not available to this server:
+/// a bot member's exemption is decided by `IsBotExemptFromDMRestrictions`, which needs the plugin
+/// environment. See [`CommonTeams::BotMember`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RestrictedDm {
+    No,
+    Yes,
+    /// A bot is an active member, so the answer depends on a plugin decision this server cannot
+    /// make. The caller forwards.
+    Undecidable,
+}
+
+impl App {
+    /// Port of `app.App.CheckIfChannelIsRestrictedDM` (app/channel.go:4498).
+    ///
+    /// Answers "is this a DM or group message between users who share no team, on a server that
+    /// forbids that". Three early exits and one real query, and the first exit is the one that
+    /// matters: `TeamSettings.RestrictDirectMessage` defaults to `"any"`, so on a stock server
+    /// this is [`RestrictedDm::No`] without touching the database.
+    ///
+    /// The final line is `len(teams) == 0` — **restricted when there are no common teams**, which
+    /// reads backwards until you notice the function's name is a question about restriction, not
+    /// about permission. Inverting it would refuse exactly the DMs Go allows and allow the ones
+    /// it refuses.
+    #[tracing::instrument(skip(self, channel), fields(channel_id = %channel.id, channel_type = %channel.channel_type))]
+    pub async fn check_if_channel_is_restricted_dm(
+        &self,
+        channel: &Channel,
+    ) -> AppResult<RestrictedDm> {
+        if self.config().restrict_direct_message != crate::config::DIRECT_MESSAGE_TEAM {
+            return Ok(RestrictedDm::No);
+        }
+
+        if channel.channel_type != CHANNEL_TYPE_DIRECT && channel.channel_type != CHANNEL_TYPE_GROUP
+        {
+            return Ok(RestrictedDm::No);
+        }
+
+        match self
+            .get_direct_or_group_message_members_common_teams(&channel.id)
+            .await
+        {
+            Ok(crate::common_teams::CommonTeams::Teams(teams)) => {
+                if teams.is_empty() {
+                    Ok(RestrictedDm::Yes)
+                } else {
+                    Ok(RestrictedDm::No)
+                }
+            }
+            Ok(crate::common_teams::CommonTeams::BotMember) => Ok(RestrictedDm::Undecidable),
+            // Unreachable: `NotAMember` requires a non-empty requesting user, and this caller
+            // passes none. Treated as "not restricted" rather than as an error, which is what Go's
+            // `len(nil) == 0`… would *not* say — so it is folded into the undecidable arm instead
+            // of guessing.
+            Ok(crate::common_teams::CommonTeams::NotAMember) => Ok(RestrictedDm::Undecidable),
+            Err(err) => {
+                tracing::error!(error = %err, "common teams lookup failed");
+                Err(AppError::boxed(
+                    "CheckIfChannelIsRestrictedDM",
+                    "app.channel.get_common_teams.app_error",
+                    None,
+                    String::new(),
+                    500,
+                ))
+            }
+        }
     }
 }

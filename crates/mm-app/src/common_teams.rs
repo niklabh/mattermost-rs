@@ -82,7 +82,11 @@ impl App {
         // where to create the replacement channel" (channel.go:4271-4275). Note it is checked
         // against the list above, so a **deactivated** member asking about their own channel
         // lands here too.
-        if !user_ids.iter().any(|id| id == requesting_user_id) {
+        // **`requestingUserID != "" &&`** — the guard matters, because the other entry point
+        // (`GetDirectOrGroupMessageMembersCommonTeams`, channel.go:4227) passes the empty string
+        // precisely to skip this. Without it, the caller that asks "does this channel have a
+        // common team at all" would be told nobody is a member and get `NotAMember` every time.
+        if !requesting_user_id.is_empty() && !user_ids.iter().any(|id| id == requesting_user_id) {
             return Ok(CommonTeams::NotAMember);
         }
 
@@ -111,6 +115,21 @@ impl App {
         let teams = self.get_teams(&team_ids).await?;
         tracing::Span::current().record("teams", teams.len());
         Ok(CommonTeams::Teams(teams))
+    }
+
+    /// Port of `App.GetDirectOrGroupMessageMembersCommonTeams` (channel.go:4227) — the same
+    /// function with **no** requesting user, which is what disables the membership short-circuit.
+    ///
+    /// Go's own doc says to prefer the `AsUser` form "unless the request context is independent of
+    /// any given user". `CheckIfChannelIsRestrictedDM` is such a caller: it is asking about the
+    /// channel, not about whoever is holding it.
+    #[tracing::instrument(skip_all, fields(channel_id = %channel_id))]
+    pub async fn get_direct_or_group_message_members_common_teams(
+        &self,
+        channel_id: &str,
+    ) -> AppResult<CommonTeams> {
+        self.get_direct_or_group_message_members_common_teams_as_user("", channel_id)
+            .await
     }
 
     /// Port of `App.GetTeams` (app/team.go:912).

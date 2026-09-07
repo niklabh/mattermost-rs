@@ -22,6 +22,42 @@ pub trait ReactionStore {
         &self,
         post_ids: &[String],
     ) -> impl std::future::Future<Output = Result<Vec<Reaction>, StoreError>> + Send;
+
+    /// Port of `SqlReactionStore.Save` (reaction_store.go:28).
+    fn save(
+        &self,
+        reaction: &Reaction,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlReactionStore.Delete` (reaction_store.go:68).
+    fn delete(
+        &self,
+        reaction: &Reaction,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlReactionStore.ExistsOnPost` (reaction_store.go:105).
+    fn exists_on_post(
+        &self,
+        post_id: &str,
+        emoji_name: &str,
+    ) -> impl std::future::Future<Output = Result<bool, StoreError>> + Send;
+
+    /// Port of `SqlReactionStore.GetUniqueCountForPost` (reaction_store.go:149).
+    fn get_unique_count_for_post(
+        &self,
+        post_id: &str,
+    ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
+
+    /// The `SELECT ChannelId FROM Posts WHERE Id = ?` inside `Save`'s transaction
+    /// (reaction_store.go:41).
+    ///
+    /// Separate here because `SaveReactionForPost` pre-populates `ChannelId` from the post it has
+    /// already fetched, so the query is reachable only from a caller that did not — and Go's
+    /// comment on that line says as much ("get channelId, if not already populated").
+    fn channel_id_for_post(
+        &self,
+        post_id: &str,
+    ) -> impl std::future::Future<Output = Result<Option<String>, StoreError>> + Send;
 }
 
 #[derive(Debug, Clone)]
@@ -161,5 +197,198 @@ impl ReactionStore for SqlReactionStore {
                 channel_id: row.channel_id,
             })
             .collect())
+    }
+
+    /// # The insert is an upsert, and the transaction spans two tables
+    ///
+    /// Go's `saveReactionAndUpdatePost` writes the reaction with `ON CONFLICT (UserId, PostId,
+    /// EmojiName) DO UPDATE`, then sets `Posts.HasReactions = True` and bumps `Posts.UpdateAt` —
+    /// **both inside one transaction**, because a client that sees `HasReactions` false while the
+    /// row exists renders a post with no reaction bar.
+    ///
+    /// The conflict clause is why re-reacting is not an error: it revives a soft-deleted row by
+    /// writing `DeleteAt = 0` over it, keeping the original `CreateAt`. Go's caller has a
+    /// `IsUniqueConstraintError` arm around this for the same case, but the `ON CONFLICT` target
+    /// is exactly the primary key, so that arm is unreachable — it is not reproduced.
+    ///
+    /// `Posts.UpdateAt` is set from a **second** `GetMillis()` call in Go, taken after the
+    /// reaction's own `PreSave`. The two can differ by a millisecond; this port takes its own
+    /// reading at the same point for the same reason.
+    #[tracing::instrument(skip(self, reaction), fields(post_id = %reaction.post_id, emoji = %reaction.emoji_name))]
+    async fn save(&self, reaction: &Reaction) -> Result<(), StoreError> {
+        let mut tx = self.pool.begin().await.map_err(|source| StoreError::Db {
+            context: "unable to begin the reaction save transaction".to_owned(),
+            source,
+        })?;
+
+        sqlx::query!(
+            r#"
+            INSERT INTO reactions
+                (userid, postid, emojiname, createat, updateat, deleteat, remoteid, channelid)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            ON CONFLICT (userid, postid, emojiname)
+                DO UPDATE SET updateat  = $5,
+                              deleteat  = $6,
+                              remoteid  = $7,
+                              channelid = $8
+            "#,
+            reaction.user_id,
+            reaction.post_id,
+            reaction.emoji_name,
+            reaction.create_at,
+            reaction.update_at,
+            reaction.delete_at,
+            reaction.remote_id.as_deref().unwrap_or_default(),
+            reaction.channel_id,
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed while saving reaction".to_owned(),
+            source,
+        })?;
+
+        sqlx::query!(
+            r#"UPDATE posts SET hasreactions = TRUE, updateat = $1 WHERE id = $2"#,
+            mm_model::utils::get_millis(),
+            reaction.post_id,
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed while updating post for reactions on insert".to_owned(),
+            source,
+        })?;
+
+        tx.commit().await.map_err(|source| StoreError::Db {
+            context: "unable to commit the reaction save transaction".to_owned(),
+            source,
+        })
+    }
+
+    /// # A delete is an UPDATE, and `HasReactions` is recomputed rather than cleared
+    ///
+    /// `deleteReactionAndUpdatePost` soft-deletes: `UpdateAt` and `DeleteAt` both take the
+    /// reaction's `UpdateAt`, so a withdrawn reaction keeps its row and its `CreateAt`.
+    ///
+    /// The post update then sets `HasReactions` to `count(0) > 0` over the *remaining*
+    /// undeleted reactions — not to `FALSE`. Removing the last of two reactions must leave the
+    /// flag set, and a port that wrote `FALSE` here would clear the bar for every other
+    /// reaction on the post.
+    ///
+    /// The `WHERE` has no `DeleteAt` predicate, so deleting an already-deleted reaction rewrites
+    /// its timestamps and succeeds. Go returns no not-found error from this path at all.
+    #[tracing::instrument(skip(self, reaction), fields(post_id = %reaction.post_id, emoji = %reaction.emoji_name))]
+    async fn delete(&self, reaction: &Reaction) -> Result<(), StoreError> {
+        let mut tx = self.pool.begin().await.map_err(|source| StoreError::Db {
+            context: "unable to begin the reaction delete transaction".to_owned(),
+            source,
+        })?;
+
+        sqlx::query!(
+            r#"
+            UPDATE reactions
+               SET updateat = $1, deleteat = $1, remoteid = $2
+             WHERE postid = $3 AND userid = $4 AND emojiname = $5
+            "#,
+            reaction.update_at,
+            reaction.remote_id.as_deref().unwrap_or_default(),
+            reaction.post_id,
+            reaction.user_id,
+            reaction.emoji_name,
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed while deleting reaction".to_owned(),
+            source,
+        })?;
+
+        sqlx::query!(
+            r#"
+            UPDATE posts
+               SET updateat     = $1,
+                   hasreactions = (SELECT count(0) > 0
+                                     FROM reactions
+                                    WHERE postid = $2 AND COALESCE(deleteat, 0) = 0)
+             WHERE id = $2
+            "#,
+            mm_model::utils::get_millis(),
+            reaction.post_id,
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed while updating post for reactions on delete".to_owned(),
+            source,
+        })?;
+
+        tx.commit().await.map_err(|source| StoreError::Db {
+            context: "unable to commit the reaction delete transaction".to_owned(),
+            source,
+        })
+    }
+
+    /// The `COALESCE(DeleteAt, 0) = 0` here is the same NULL-tolerance the read path carries: a
+    /// row written before the backfill migration holds NULL, and without the coalesce it compares
+    /// as unknown and the reaction reads as absent — which would let the unique-count limit be
+    /// exceeded.
+    #[tracing::instrument(skip(self), fields(post_id = %post_id, emoji = %emoji_name))]
+    async fn exists_on_post(&self, post_id: &str, emoji_name: &str) -> Result<bool, StoreError> {
+        let row = sqlx::query_scalar!(
+            r#"
+            SELECT 1 AS "one!"
+              FROM reactions
+             WHERE postid = $1 AND emojiname = $2 AND COALESCE(deleteat, 0) = 0
+             LIMIT 1
+            "#,
+            post_id,
+            emoji_name,
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to check for existing reaction".to_owned(),
+            source,
+        })?;
+
+        Ok(row.is_some())
+    }
+
+    /// **`DeleteAt = 0`, not `COALESCE(DeleteAt, 0) = 0`.**
+    ///
+    /// Go writes the bare comparison here and the coalesced one three functions above, in
+    /// `ExistsOnPost`. That is an inconsistency in the Go source, not a transcription slip: on a
+    /// database holding pre-migration NULLs the two disagree, and the count is the smaller. It is
+    /// reproduced, because the number it produces is compared against a configured limit and
+    /// "fixing" it would refuse reactions Go accepts.
+    #[tracing::instrument(skip(self), fields(post_id = %post_id))]
+    async fn get_unique_count_for_post(&self, post_id: &str) -> Result<i64, StoreError> {
+        let count = sqlx::query_scalar!(
+            r#"SELECT COUNT(DISTINCT emojiname) AS "count!" FROM reactions WHERE postid = $1 AND deleteat = 0"#,
+            post_id,
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to count Reactions".to_owned(),
+            source,
+        })?;
+
+        Ok(count)
+    }
+
+    #[tracing::instrument(skip(self), fields(post_id = %post_id))]
+    async fn channel_id_for_post(&self, post_id: &str) -> Result<Option<String>, StoreError> {
+        sqlx::query_scalar!(
+            r#"SELECT channelid AS "channel_id!" FROM posts WHERE id = $1"#,
+            post_id,
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed while getting channelId from Posts".to_owned(),
+            source,
+        })
     }
 }

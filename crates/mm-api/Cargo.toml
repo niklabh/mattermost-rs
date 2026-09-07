@@ -32,4 +32,7 @@ sqlx.workspace = true
 reqwest = { workspace = true, features = ["json"] }
 # The parity suite connects a real websocket to both servers and compares the frames.
 tokio-tungstenite.workspace = true
+# `plant_persistent_notification` needs an epoch-millisecond timestamp for a column no REST route
+# writes.
+chrono.workspace = true
 futures-util = "0.3"

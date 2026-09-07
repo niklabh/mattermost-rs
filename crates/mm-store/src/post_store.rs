@@ -59,6 +59,22 @@ use crate::error::StoreError;
 
 /// Port of `store.PostStore`, narrowed to what `GET /posts/{post_id}` reaches.
 pub trait PostStore {
+    /// Port of `SqlPostPersistentNotificationStore.GetSingle`
+    /// (post_persistent_notification_store.go:25), narrowed to the one question its only reachable
+    /// caller asks: **does an undeleted persistent-notification row exist for this post**.
+    ///
+    /// It lives on `PostStore` rather than in a store of its own because nothing else in the
+    /// migrated surface touches `PersistentNotifications`, and a five-column table with one live
+    /// reader does not earn a file. Note the table is named `PersistentNotifications` while the
+    /// Go store is named for the *post*.
+    ///
+    /// Returns a bool rather than the row: `ResolvePersistentNotification` discards everything but
+    /// the existence, and a row this server cannot act on is not worth modelling.
+    fn has_persistent_notification(
+        &self,
+        post_id: &str,
+    ) -> impl std::future::Future<Output = Result<bool, StoreError>> + Send;
+
     /// Port of `SqlPostStore.GetSingle` (post_store.go:918).
     fn get_single(
         &self,
@@ -1242,6 +1258,23 @@ pub(crate) fn post_from_row(row: PostRow) -> Result<Post, StoreError> {
 }
 
 impl PostStore for SqlPostStore {
+    #[tracing::instrument(skip(self), fields(post_id = %post_id))]
+    async fn has_persistent_notification(&self, post_id: &str) -> Result<bool, StoreError> {
+        // `DeleteAt = 0` bare, not coalesced — the column is NOT NULL here, unlike `Reactions`.
+        let row = sqlx::query_scalar!(
+            r#"SELECT 1 AS "one!" FROM persistentnotifications WHERE deleteat = 0 AND postid = $1"#,
+            post_id,
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to get the persistent notification post={post_id}"),
+            source,
+        })?;
+
+        Ok(row.is_some())
+    }
+
     /// `COUNT(*) FROM Posts p WHERE p.Type = '' AND p.UserId NOT IN (SELECT UserId FROM Bots)
     /// AND p.DeleteAt = 0`.
     ///

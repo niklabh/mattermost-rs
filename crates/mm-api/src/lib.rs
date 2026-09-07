@@ -767,6 +767,20 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/posts/ids/reactions",
             partially_migrated(post(reactions::get_bulk_reactions)),
         )
+        // `BaseRoutes.Reactions.Handle("")` (api4/reaction.go:15) — POST only. There is no GET
+        // on this path in Go at all, so `partially_migrated` forwards one and Go 404s it, which
+        // is what it did before.
+        .route(
+            "/api/v4/reactions",
+            partially_migrated(post(reactions::save_reaction)),
+        )
+        // `BaseRoutes.ReactionByNameForPostForUser.Handle("")` (api4/reaction.go:17) — the
+        // deepest path under `/users`, four segments below `{user_id}`. Nothing else claims it,
+        // so no precedence question arises with the `{user_id}` reads above.
+        .route(
+            "/api/v4/users/{user_id}/posts/{post_id}/reactions/{emoji_name}",
+            partially_migrated(axum::routing::delete(reactions::delete_reaction)),
+        )
         // `BaseRoutes.Post.Handle("/edit_history")` (api4/post.go:30) — another sibling of
         // `/thread` and `/reactions`, one segment deeper than `/posts/{post_id}`.
         .route(

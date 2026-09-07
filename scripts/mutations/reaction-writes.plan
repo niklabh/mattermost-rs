@@ -1,0 +1,47 @@
+# Mutation plan for the two reaction writes — the first mutating routes.
+#
+#   scripts/mutate-batch.sh scripts/mutations/reaction-writes.plan
+#
+# Three families of decision are worth mutating here:
+#
+#   * the **gate order and statuses** in `SaveReactionForPost`. Seven checks, two of which are
+#     adjacent in the Go source and differ only in status (restricted DM is 400, archived channel
+#     is 403);
+#   * the **SQL**, where a soft delete, an upsert's conflict target and a recomputed
+#     `HasReactions` are each one token from being wrong in a way the answer does not show;
+#   * the **permissions**, where `remove_others_reactions` is a system permission and its
+#     neighbour is a channel one.
+#
+# **Not in this plan, deliberately.** Mutating the *app* layer's `go_to_lower` to
+# `str::to_lowercase` is an equivalent mutant: the handler has already normalised the name by then,
+# and lowering an already-lowered string is a no-op. Measured — it survives, and it is not a gap in
+# the tests. Go carries the same redundancy (`saveReaction` and `SaveReactionForPost` both call
+# `strings.ToLower`), so both layers keep the call and only the handler's is mutation-tested.
+#
+# The last two lines are the no-op controls and must SURVIVE.
+reaction-save-archived-channel-is-a-400	crates/mm-app/src/reaction.rs	                "api.reaction.save.archived_channel.app_error",\n                None,\n                String::new(),\n                403,	                "api.reaction.save.archived_channel.app_error",\n                None,\n                String::new(),\n                400,	api	reaction_writes
+reaction-delete-archived-channel-is-a-400	crates/mm-app/src/reaction.rs	                "api.reaction.delete.archived_channel.app_error",\n                None,\n                String::new(),\n                403,	                "api.reaction.delete.archived_channel.app_error",\n                None,\n                String::new(),\n                400,	api	reaction_writes
+reaction-save-archived-check-inverted	crates/mm-app/src/reaction.rs	        if channel.delete_at > 0 {\n            return Err(AppError::boxed(\n                "SaveReactionForPost",	        if channel.delete_at == 0 {\n            return Err(AppError::boxed(\n                "SaveReactionForPost",	api	reaction_writes
+reaction-save-emoji-check-skipped	crates/mm-app/src/reaction.rs	        if mm_model::emoji::get_system_emoji_id(&reaction.emoji_name).is_none() {\n            self.get_emoji_by_name(&reaction.emoji_name).await?;\n        }	        if false {\n            self.get_emoji_by_name(&reaction.emoji_name).await?;\n        }	api	reaction_writes
+reaction-save-emoji-check-inverted	crates/mm-app/src/reaction.rs	        if mm_model::emoji::get_system_emoji_id(&reaction.emoji_name).is_none() {	        if mm_model::emoji::get_system_emoji_id(&reaction.emoji_name).is_some() {	api	reaction_writes
+reaction-save-limit-applies-to-existing-emoji	crates/mm-app/src/reaction.rs	        if !existing {	        if true {	api	reaction_writes
+reaction-save-channel-id-from-the-request	crates/mm-app/src/reaction.rs	        reaction.channel_id = post.channel_id.clone();	        // channel_id left as the request sent it	api	reaction_writes
+reaction-handler-emoji-not-lowercased	crates/mm-api/src/reactions.rs	    reaction.emoji_name = go_to_lower(&reaction.emoji_name);	    // the handler leaves the case alone	api	reaction_writes
+reaction-handler-uses-rusts-full-case-mapping	crates/mm-api/src/reactions.rs	    reaction.emoji_name = go_to_lower(&reaction.emoji_name);	    reaction.emoji_name = reaction.emoji_name.to_lowercase();	api	reaction_writes
+reaction-persistent-notification-author-exemption-dropped	crates/mm-app/src/reaction.rs	            && post.user_id != reaction.user_id\n            && self.is_persistent_notifications_enabled()	            && self.is_persistent_notifications_enabled()	api	reaction_writes
+reaction-handler-user-id-check-dropped	crates/mm-api/src/reactions.rs	    if reaction.user_id != session.0.user_id {	    if false {	api	reaction_writes
+reaction-handler-user-id-mismatch-is-a-400	crates/mm-api/src/reactions.rs	            "api.reaction.save_reaction.user_id.app_error",\n            None,\n            String::new(),\n            403,	            "api.reaction.save_reaction.user_id.app_error",\n            None,\n            String::new(),\n            400,	api	reaction_writes
+reaction-handler-emoji-length-cap-dropped	crates/mm-api/src/reactions.rs	        || reaction.emoji_name.len() > EMOJI_NAME_MAX_LENGTH	        || false	api	reaction_writes
+reaction-handler-empty-emoji-allowed	crates/mm-api/src/reactions.rs	        || reaction.emoji_name.is_empty()	        || false	api	reaction_writes
+reaction-handler-post-id-not-validated	crates/mm-api/src/reactions.rs	        || !is_valid_id(&reaction.post_id)	        || false	api	reaction_writes
+reaction-delete-uses-the-add-permission	crates/mm-api/src/reactions.rs	            &post_id,\n            &PERMISSION_REMOVE_REACTION,	            &post_id,\n            &PERMISSION_ADD_REACTION,	api	reaction_writes
+reaction-delete-others-check-dropped	crates/mm-api/src/reactions.rs	    if user_id != session.0.user_id\n        && !state	    if false\n        && !state	api	reaction_writes
+reaction-delete-router-class-not-applied	crates/mm-api/src/reactions.rs	    if !matches_gorilla_class(&user_id, false)\n        || !matches_gorilla_class(&post_id, false)\n        || !matches_gorilla_class(&emoji_name, true)	    if false\n        || false\n        || false	api	reaction_writes
+reaction-delete-emoji-class-lacks-the-punctuation	crates/mm-api/src/reactions.rs	            .all(|c| c.is_ascii_alphanumeric() || (emoji && (c == '_' || c == '-' || c == '+')))	            .all(|c| c.is_ascii_alphanumeric())	api	reaction_writes
+reaction-save-body-is-not-encoder-framed	crates/mm-api/src/reactions.rs	                    json + "\\n",	                    json,	api	reaction_writes
+reaction-store-delete-does-not-set-delete-at	crates/mm-store/src/reaction_store.rs	               SET updateat = $1, deleteat = $1, remoteid = $2	               SET updateat = $1, deleteat = 0, remoteid = $2	api	reaction_writes
+reaction-store-upsert-overwrites-create-at	crates/mm-store/src/reaction_store.rs	                DO UPDATE SET updateat  = $5,	                DO UPDATE SET createat  = $4,\n                              updateat  = $5,	api	reaction_writes
+reaction-store-has-reactions-cleared-on-delete	crates/mm-store/src/reaction_store.rs	                   hasreactions = (SELECT count(0) > 0\n                                     FROM reactions\n                                    WHERE postid = $2 AND COALESCE(deleteat, 0) = 0)	                   hasreactions = FALSE	api	reaction_writes
+reaction-store-exists-ignores-deleted	crates/mm-store/src/reaction_store.rs	             WHERE postid = $1 AND emojiname = $2 AND COALESCE(deleteat, 0) = 0	             WHERE postid = $1 AND emojiname = $2	api	reaction_writes
+control-rename-reaction-existing-binding	crates/mm-app/src/reaction.rs	        if !existing {\n            let count = self	        let already_there = existing;\n        if !already_there {\n            let count = self	api	reaction_writes
+control-reorder-independent-reaction-select-columns	crates/mm-store/src/reaction_store.rs	            INSERT INTO reactions\n                (userid, postid, emojiname, createat, updateat, deleteat, remoteid, channelid)\n            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)	            INSERT INTO reactions\n                (postid, userid, emojiname, createat, updateat, deleteat, remoteid, channelid)\n            VALUES ($2, $1, $3, $4, $5, $6, $7, $8)	api	reaction_writes

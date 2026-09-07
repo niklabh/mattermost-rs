@@ -5789,6 +5789,29 @@ teams concurrently, so the pressure only grows.
 Not a port divergence: both servers read the same database, and every failure so far has been the
 test's premise, not the answer.
 
+**Update 2026-09-08 (reaction writes).** One instance of this was found, explained and closed, and
+it was not a read race at all:
+
+`purge_api_fixtures` deletes by shared prefix — including `channelmembers` and `teammembers` for
+every `mmrsplain%` user — and its own comment asks for it to run "before any fixture is built". A
+`OnceCell` on the purge alone cannot deliver that: whichever test trips it first runs the sweep
+while other suites already have fixtures up, and their rows go with it. Measured twice in a row —
+`channel_members_list::pages_split_cover_and_run_out_identically` lost two of its four members to a
+purge triggered by another suite's `create_plain_user`.
+
+The fix is one line: the purge now runs **inside `go_minted_token`'s `OnceCell`**. No stack-backed
+test can build anything before it has a token, so the first caller holds every other one until the
+sweep is done. That test has passed every run since. Every existing `purge_api_fixtures()` call
+site keeps working as a no-op on an already-initialised cell.
+
+**What remains is narrower than the entry above suggests.**
+`threads_for_user::per_page_limits_the_list_and_not_the_totals` still fails roughly one run in
+two. It passes on its own and fails when its **own module's** sixteen tests run together, so it is
+an intra-suite race like the `roles` one — not a cross-suite purge, and not this port. It predates
+the write-route work: it failed on the first full-suite run of the websocket-hub session, before
+any of that code existed. Owed: the deliberate pass over that module's shared fixture, which is
+one `OnceCell` mutated by several tests.
+
 ---
 
 ## D-169 · A 401 from an invalid token does not clear the session cookie
@@ -5966,3 +5989,58 @@ process. It needs measuring before it is ported, not translating.
 
 **Two of the six are nearly free** (`ping`, `get_statuses_by_ids`) and should go first, with the
 rest following the status-write routes that give them their app layer.
+
+## D-189 · The route inventory read a literal gorilla segment as a parameter — CLOSED 2026-09-08
+
+**Status** CLOSED · **Severity** unverified · **Raised and closed** 2026-09-08 (reaction writes)
+
+`scripts/routes.py` normalised every `{name:regex}` to `{name}`. The websocket route is registered
+as `{websocket:websocket(?:\/)?}` — braces used only to attach an optional trailing slash — so its
+inventory path became `/api/v4/{websocket}` and the axum route `/api/v4/websocket`, the literal
+path every client uses, failed to match it. The tool reported an unserved route this server had
+been answering since the previous commit.
+
+`normalise` now recognises a pattern that is a literal (after stripping an optional trailing-slash
+suffix) and emits the literal segment. Verified against the whole inventory: exactly one of 764
+paths changed.
+
+Kept as a CLOSED entry rather than deleted because the *number* is the project's headline metric
+and this is the first time the tool that produces it has been wrong.
+
+## D-190 · A write served by mm-api leaves Go's local caches stale, and `/caches/invalidate` does not fix the reaction cache
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-08 (reaction writes)
+
+Go's store is wrapped in `localcachelayer`. Each cached read is memoised, and each cached *write*
+purges its own entry — through `doInvalidateCacheCluster`, which touches the local cache **and**
+sends a cluster message. This server writes the same database and does neither, so a row it
+changes is invisible to Go for as long as Go's entry lives.
+
+That much was expected. What is not is the second half, which was measured rather than assumed:
+
+- `POST /api/v4/caches/invalidate` runs `InvalidateAllCachesSkipSend`
+  (platform/cluster_handlers.go:137), which clears the **session**, **status**, **team**,
+  **channel**, **user**, **post**, **fileinfo**, **webhook** and **link** caches;
+- `LocalCacheStore.Invalidate()` (localcachelayer/layer.go:704) is the function that also clears
+  `reactionCache`, `schemeCache`, `roleCache`, `emojiCache…` and the rest — and it is reached
+  **only from the cluster-message handler**.
+
+So on a single node there is no way to make Go re-read reactions. Measured: a reaction deleted
+through `:8066` had `DeleteAt` set in the `Reactions` table and was gone from `:8066`'s own read,
+while `:8065` still listed it after three explicit invalidations.
+
+**Consequences, in order of importance:**
+
+1. **A parity test must read back a Rust write through Rust.** Reading through Go asserts against
+   a cache, and the failure looks exactly like a write that did not happen — it cost an hour here
+   before the cause was found. `crates/mm-api/tests/parity/reaction_writes.rs` documents the rule
+   at `reactions_on`.
+2. **A real client on `:8065` sees a stale reaction list** after somebody else reacts through
+   `:8066`. Not fixable from this side.
+3. The set of affected reads grows with every write route: emoji, roles, schemes and channel
+   member counts are all in the same "cluster-only" group.
+
+**This is not owed work on the port** — it is a property of running two servers over one database,
+and it disappears when the Go server does. It is OPEN rather than ACCEPTED because the *test* rule
+it implies has to be applied by every future write group, and a group that forgets it will chase a
+phantom bug.

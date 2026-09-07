@@ -18,7 +18,7 @@ S6 priority booleans swapped	crates/mm-store/src/post_store.rs	requestedack     
 # --- store: SqlReactionStore --------------------------------------------------------------
 S7 reaction order reversed	crates/mm-store/src/reaction_store.rs	ORDER BY createat	ORDER BY createat DESC	api
 S8 UpdateAt coalesce falls back to zero	crates/mm-store/src/reaction_store.rs	COALESCE(updateat, createat) AS "update_at!"	COALESCE(updateat, 0) AS "update_at!"	api
-S9 DeleteAt coalesce dropped from the predicate	crates/mm-store/src/reaction_store.rs	AND COALESCE(deleteat, 0) = 0	AND deleteat = 0	api
+S9 DeleteAt coalesce dropped from the predicate	crates/mm-store/src/reaction_store.rs	             WHERE postid = $1\n               AND COALESCE(deleteat, 0) = 0	             WHERE postid = $1\n               AND deleteat = 0	api
 # --- store: SqlEmojiStore -----------------------------------------------------------------
 S10 soft-deleted emoji filter dropped	crates/mm-store/src/emoji_store.rs	WHERE deleteat = 0\n               AND name = ANY($1)	WHERE name = ANY($1)	api
 # --- store: SqlFileInfoStore --------------------------------------------------------------

@@ -11,7 +11,7 @@ react-null-vs-empty-array	crates/mm-api/src/reactions.rs	b"null".to_vec()	b"[]".
 react-permission-gate	crates/mm-api/src/reactions.rs	if !allowed {	if false {	api
 react-requireid	crates/mm-api/src/reactions.rs	require_id(&post_id, "post_id")?;	let _ = &post_id;	api
 react-order-by	crates/mm-store/src/reaction_store.rs	ORDER BY createat	ORDER BY emojiname	api
-react-soft-delete	crates/mm-store/src/reaction_store.rs	AND COALESCE(deleteat, 0) = 0	AND COALESCE(deleteat, 0) >= 0	api
+react-soft-delete	crates/mm-store/src/reaction_store.rs	             WHERE postid = ANY($1::text[])\n               AND COALESCE(deleteat, 0) = 0	             WHERE postid = ANY($1::text[])\n               AND COALESCE(deleteat, 0) >= 0	api
 
 # --- getEmoji / getEmojiByName ----------------------------------------------------------------
 emoji-get-deleteat	crates/mm-store/src/emoji_store.rs	WHERE deleteat = 0\n               AND id = $1	WHERE deleteat >= 0\n               AND id = $1	api

@@ -45,6 +45,24 @@ static TOKEN: tokio::sync::OnceCell<String> = tokio::sync::OnceCell::const_new()
 pub async fn go_minted_token(client: &reqwest::Client) -> String {
     TOKEN
         .get_or_init(|| async {
+            // **The purge runs here, and this is the only place it can run safely.**
+            //
+            // `purge_api_fixtures` deletes by shared prefix — every `mmrsplain%` user's channel
+            // and team memberships among them — and its own comment asks for it to happen
+            // "before any fixture is built". A `OnceCell` on the purge alone cannot deliver that:
+            // whichever test trips it first runs the sweep *while other suites already have
+            // fixtures up*, and their rows go with it. Measured twice in a row —
+            // `channel_members_list::pages_split_cover_and_run_out_identically` lost two of its
+            // four members to a purge triggered by another suite's `create_plain_user`, and
+            // `threads_for_user` has failed the same way.
+            //
+            // Nesting it inside the token's `OnceCell` fixes it, because **no stack-backed test
+            // can build anything before it has a token**: they all await this cell, and the first
+            // caller holds every other one here until the sweep and the login are both done.
+            // Later `purge_api_fixtures()` calls become no-ops on an already-initialised cell,
+            // so the existing call sites keep working and keep documenting their intent.
+            purge_api_fixtures().await;
+
             let response = client
                 .post(format!("{GO}/api/v4/users/login"))
                 .json(&serde_json::json!({ "login_id": LOGIN_ID, "password": PASSWORD }))
@@ -102,7 +120,7 @@ pub fn logged_in_user_id() -> &'static str {
 /// session still held port 8066 and the freshly built binary had silently failed to bind. Five
 /// green tests, zero of them touching the code under test. The header was already there; nothing
 /// was checking it.
-fn assert_served_by_rust(headers: &reqwest::header::HeaderMap, path: &str) {
+pub fn assert_served_by_rust(headers: &reqwest::header::HeaderMap, path: &str) {
     let served_by = headers
         .get("x-mmrs-served-by")
         .and_then(|v| v.to_str().ok());
