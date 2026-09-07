@@ -312,6 +312,20 @@ pub fn router(state: AppState) -> Router {
         )
         // `{category}` and `{preference_name}` are not id-shaped, so the id-charset middleware
         // leaves them alone; the handlers carry Go's own `[A-Za-z0-9_]+` mux class instead.
+        // `BaseRoutes.Preferences.Handle("/delete")` (api4/preference.go:19). A literal sibling
+        // of `{category}` below, so axum's literal-first precedence puts it here; the `{category}`
+        // route never saw `delete` as a category on Go either, because Go registers this path
+        // explicitly.
+        .route(
+            "/api/v4/users/{user_id}/preferences/delete",
+            partially_migrated_with_ids(
+                &state,
+                post(preferences::delete_preferences)
+                    // gorilla falls a GET past the POST-only `/delete` route onto `{category}`;
+                    // axum does not fall through, so the literal route has to answer it too.
+                    .get(preferences::get_preferences_named_delete),
+            ),
+        )
         .route(
             "/api/v4/users/{user_id}/preferences/{category}",
             partially_migrated_with_ids(&state, get(preferences::get_preferences_by_category)),
@@ -770,6 +784,22 @@ pub fn router(state: AppState) -> Router {
         // `BaseRoutes.Reactions.Handle("")` (api4/reaction.go:15) — POST only. There is no GET
         // on this path in Go at all, so `partially_migrated` forwards one and Go 404s it, which
         // is what it did before.
+        // `BaseRoutes.Drafts.Handle("")` (api4/drafts.go:15) — POST only.
+        .route(
+            "/api/v4/drafts",
+            partially_migrated(post(drafts::upsert_draft)),
+        )
+        // The two `deleteDraft` registrations (api4/drafts.go:19-20). They are one handler; the
+        // shallower path leaves `thread_id` empty, which is the root id a channel-level draft
+        // has.
+        .route(
+            "/api/v4/users/{user_id}/channels/{channel_id}/drafts",
+            partially_migrated(axum::routing::delete(drafts::delete_draft)),
+        )
+        .route(
+            "/api/v4/users/{user_id}/channels/{channel_id}/drafts/{thread_id}",
+            partially_migrated(axum::routing::delete(drafts::delete_draft)),
+        )
         .route(
             "/api/v4/reactions",
             partially_migrated(post(reactions::save_reaction)),

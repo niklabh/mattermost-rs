@@ -306,18 +306,23 @@ async fn an_unmigrated_method_on_a_migrated_path_still_reaches_go() {
     let client = client();
     let token = go_minted_token(&client).await;
 
+    // **This used to probe `POST /preferences/delete`, which is now migrated.** The point of the
+    // test is the method fallback, not that particular route, so it moved to a method Go does not
+    // register on a path this server does serve: `DELETE /users/me/preferences`. Go answers its
+    // 404 page; what matters is that the request reached Go at all rather than meeting a 405 from
+    // axum's method router.
     let response = client
-        .post(format!("{RUST}{PATH}/delete"))
+        .delete(format!("{RUST}{PATH}"))
         .header("Authorization", format!("Bearer {token}"))
-        .json(&body("mmrs_parity_delete_probe", ""))
         .send()
         .await
         .expect("reachable");
 
     assert_eq!(
         response.status(),
-        200,
-        "POST is not migrated, so it must be proxied — 405 here means the method fallback is gone"
+        404,
+        "DELETE is not a method Go registers here, so Go's own 404 is the answer — a 405 would \
+         mean the method fallback is gone"
     );
     assert_eq!(
         response

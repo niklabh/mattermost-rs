@@ -350,6 +350,120 @@ pub async fn update_preferences_me(
         .into_response()
 }
 
+/// `GET /api/v4/users/{user_id}/preferences/delete`, which is **not a route Go registers**.
+///
+/// gorilla registers `/delete` for `POST` only, so a `GET` falls past it to
+/// `{category:[A-Za-z0-9_]+}` and is answered by `getPreferencesByCategory` — with `delete` as the
+/// category, which no user has, so it is a 404. axum does not fall through: a literal route claims
+/// the path for **every** method, and registering `POST` alone would hand the `GET` to the proxy.
+///
+/// The answer would still be Go's 404, so no client could tell — but this server would have
+/// stopped serving a read it used to serve, and `preference_reads::the_refusals_match_by_status_and_id`
+/// asserts `x-mmrs-served-by: rust` on exactly this path. It caught the regression on the first
+/// full-suite run after the POST was added.
+#[tracing::instrument(skip_all, fields(user_id = %session.0.user_id))]
+pub async fn get_preferences_named_delete(
+    State(state): State<AppState>,
+    Path(user_id): Path<String>,
+    session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    get_preferences_by_category(
+        State(state),
+        Path((user_id, "delete".to_owned())),
+        session,
+        request,
+    )
+    .await
+}
+
+/// Port of `deletePreferences` (api4/preference.go:152) —
+/// `POST /api/v4/users/{user_id}/preferences/delete`.
+///
+/// # Unlike the drafts routes, this one *does* honour `{user_id}`
+///
+/// `RequireUserId` validates it and `SessionHasPermissionToUser` gates it, so an admin can delete
+/// another user's preferences and an ordinary user cannot. The app layer then re-checks every
+/// preference's own `user_id` against the path's, with a **403** — a batch mixing two users is
+/// refused whole, before anything is deleted.
+///
+/// # Nothing is forwarded
+///
+/// The update path hands `flagged_post`, `direct_channel_show` and `group_channel_show` to Go,
+/// because Go's *update* runs a channel-content permission check and a sidebar sync that were not
+/// ported. **Neither applies here**: `deletePreferences` has no flagged-post branch at all, and
+/// its sidebar cleanup touches only `favorite_channel`, which is ported
+/// (`ChannelStore::delete_sidebar_channels_by_preferences`).
+///
+/// # The bounds are the update path's, and an empty batch is an error
+///
+/// `len == 0 || len > 100` is `invalid_param`, the same as `updatePreferences` — so "delete
+/// nothing" is a 400 rather than a no-op.
+#[tracing::instrument(skip_all, fields(user_id = %session.0.user_id, count))]
+pub async fn delete_preferences(
+    State(state): State<AppState>,
+    session: AuthenticatedSession,
+    Path(user_id): Path<String>,
+    request: Request,
+) -> Response {
+    let user_id = if user_id == ME {
+        session.0.user_id.clone()
+    } else {
+        user_id
+    };
+    if let Err(err) = require_id(&user_id, "user_id") {
+        return err.into_response();
+    }
+
+    if !state
+        .app
+        .session_has_permission_to_user(&session.0, &user_id)
+        .await
+    {
+        return ApiError::from(*make_permission_error(
+            &session.0,
+            &[&PERMISSION_EDIT_OTHER_USERS],
+        ))
+        .into_response();
+    }
+
+    let bytes = match axum::body::to_bytes(request.into_body(), usize::MAX).await {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            tracing::warn!(error = %err, "could not read the request body");
+            return ApiError::invalid_param("preferences").into_response();
+        }
+    };
+
+    let preferences: Vec<mm_model::preference::Preference> = match serde_json::from_slice(&bytes) {
+        Ok(preferences) => preferences,
+        Err(err) => {
+            tracing::debug!(error = %err, "preferences body did not decode");
+            return ApiError::invalid_param("preferences").into_response();
+        }
+    };
+
+    if preferences.is_empty() || preferences.len() > MAX_UPDATE_PREFERENCES {
+        return ApiError::invalid_param("preferences").into_response();
+    }
+    tracing::Span::current().record("count", preferences.len());
+
+    let preferences = Preferences(preferences);
+    if let Err(app_error) = state.app.delete_preferences(&user_id, &preferences).await {
+        return ApiError::from(app_error).into_response();
+    }
+
+    (
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        r#"{"status":"OK"}"#,
+    )
+        .into_response()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

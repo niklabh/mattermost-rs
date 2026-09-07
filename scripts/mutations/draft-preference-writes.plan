@@ -1,0 +1,38 @@
+# Mutation plan for the three drafts writes and deletePreferences.
+#
+#   scripts/mutate-batch.sh scripts/mutations/draft-preference-writes.plan
+#
+# The decisions worth mutating here are the ones a reader would "tidy":
+#
+#   * the empty-message upsert, which **deletes** and answers 201 null;
+#   * the missing-draft delete, which is a 200 and not a 404;
+#   * `thread_id`, which is the whole difference between the two delete routes;
+#   * the connection id, which decides *who is skipped* rather than how many events go out;
+#   * the two-loop validate-then-delete in `DeletePreferences`, where fusing the loops turns a
+#     refusal into a partial write.
+#
+# The last two lines are the no-op controls and must SURVIVE.
+draft-empty-message-does-not-delete	crates/mm-app/src/draft.rs	        if draft.message.is_empty() {	        if false {	api	draft_and_preference
+draft-empty-message-answers-200	crates/mm-api/src/drafts.rs	        StatusCode::CREATED,	        StatusCode::OK,	api	draft_and_preference
+draft-upsert-body-not-encoder-framed	crates/mm-api/src/drafts.rs	                Ok(json) => created(json + "\\n"),	                Ok(json) => created(json),	api	draft_and_preference
+draft-empty-upsert-answers-an-object	crates/mm-api/src/drafts.rs	            created("null\\n".to_owned())	            created("{}\\n".to_owned())	api	draft_and_preference
+draft-missing-delete-is-a-404	crates/mm-api/src/drafts.rs	        Err(err) if err.status_code == 404 => return status_ok(),	        Err(err) if false => return status_ok(),	api	draft_and_preference
+draft-delete-ignores-the-thread-id	crates/mm-api/src/drafts.rs	    let root_id = params\n        .iter()\n        .find(|(name, _)| name == "thread_id")	    let root_id = params\n        .iter()\n        .find(|(name, _)| name == "no_such_param")	api	draft_and_preference
+draft-connection-id-header-has-an-x-prefix	crates/mm-api/src/drafts.rs	const CONNECTION_ID_HEADER: &str = "Connection-Id";	const CONNECTION_ID_HEADER: &str = "X-Connection-Id";	api	draft_and_preference
+draft-event-drops-the-connection-id	crates/mm-app/src/draft.rs	            connection_id,\n        );\n        match serde_json::to_string(draft) {	            "",\n        );\n        match serde_json::to_string(draft) {	api	draft_and_preference
+draft-created-event-is-not-published	crates/mm-app/src/draft.rs	        self.publish_draft_event(\n            mm_model::websocket_message::WEBSOCKET_EVENT_DRAFT_CREATED,	        #[allow(unreachable_code)]\n        self.publish_draft_event(\n            return Ok(DraftWrite::Saved(Box::new(draft))),	api	draft_and_preference
+draft-deleted-event-uses-the-created-type	crates/mm-app/src/draft.rs	            mm_model::websocket_message::WEBSOCKET_EVENT_DRAFT_DELETED,	            mm_model::websocket_message::WEBSOCKET_EVENT_DRAFT_CREATED,	api	draft_and_preference
+draft-event-omits-the-user	crates/mm-app/src/draft.rs	            &draft.channel_id,\n            &draft.user_id,	            &draft.channel_id,\n            "",	api	draft_and_preference
+draft-archived-channel-is-not-refused	crates/mm-app/src/draft.rs	        if channel.delete_at != 0 {	        if false {	api	draft_and_preference
+draft-store-delete-is-scoped-to-the-channel-only	crates/mm-store/src/draft_store.rs	            "DELETE FROM drafts WHERE userid = $1 AND channelid = $2 AND rootid = $3",	            "DELETE FROM drafts WHERE userid = $1 AND channelid = $2 AND $3 = $3",	api	draft_and_preference
+draft-store-upsert-overwrites-create-at	crates/mm-store/src/draft_store.rs	                DO UPDATE SET updateat = $2,	                DO UPDATE SET createat = $1,\n                              updateat = $2,	api	draft_and_preference
+draft-store-upsert-does-not-update-the-message	crates/mm-store/src/draft_store.rs	                              message  = $4,	                              message  = drafts.message,	api	draft_and_preference
+draft-metadata-is-left-unset	crates/mm-app/src/draft.rs	            draft.metadata = Some(PostMetadata::default());\n            return Ok(());	            draft.metadata = None;\n            return Ok(());	api	draft_and_preference
+prefs-delete-validates-inside-the-delete-loop	crates/mm-app/src/preference.rs	        for preference in &preferences.0 {\n            if user_id != preference.user_id {	        for preference in std::iter::empty::<&Preference>() {\n            if user_id != preference.user_id {	api	draft_and_preference
+prefs-delete-cross-user-is-a-400	crates/mm-app/src/preference.rs	                    "api.preference.delete_preferences.delete.app_error",\n                    None,\n                    format!("userId={user_id}, preference.UserId={}", preference.user_id),\n                    403,	                    "api.preference.delete_preferences.delete.app_error",\n                    None,\n                    format!("userId={user_id}, preference.UserId={}", preference.user_id),\n                    400,	api	draft_and_preference
+prefs-delete-publishes-only-one-event	crates/mm-app/src/preference.rs	            mm_model::websocket_message::WEBSOCKET_EVENT_SIDEBAR_CATEGORY_UPDATED,\n            "",\n            "",\n            user_id,\n            None,\n            "",\n        ))\n        .await;	            mm_model::websocket_message::WEBSOCKET_EVENT_PREFERENCES_DELETED,\n            "",\n            "",\n            user_id,\n            None,\n            "",\n        ))\n        .await;	api	draft_and_preference
+prefs-delete-empty-batch-allowed	crates/mm-api/src/preferences.rs	    if preferences.is_empty() || preferences.len() > MAX_UPDATE_PREFERENCES {\n        return ApiError::invalid_param("preferences").into_response();\n    }\n    tracing::Span::current().record("count", preferences.len());	    if false {\n        return ApiError::invalid_param("preferences").into_response();\n    }\n    tracing::Span::current().record("count", preferences.len());	api	draft_and_preference
+control-rename-draft-channel-binding	crates/mm-app/src/draft.rs	        if channel.delete_at != 0 {	        let target = &channel;\n        if target.delete_at != 0 {	api	draft_and_preference
+control-reorder-independent-draft-insert-columns	crates/mm-store/src/draft_store.rs	                (createat, updateat, deleteat, message, rootid, channelid, userid,\n                 fileids, props, priority, type)\n            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)	                (updateat, createat, deleteat, message, rootid, channelid, userid,\n                 fileids, props, priority, type)\n            VALUES ($2, $1, $3, $4, $5, $6, $7, $8, $9, $10, $11)	api	draft_and_preference
+draft-upsert-feature-gate-inverted	crates/mm-api/src/drafts.rs	    if !state.app.config().allow_synced_drafts {\n        return ApiError::from(AppError::new(\n            "upsertDraft",	    if state.app.config().allow_synced_drafts {\n        return ApiError::from(AppError::new(\n            "upsertDraft",	api	draft_and_preference
+draft-delete-feature-gate-inverted	crates/mm-api/src/drafts.rs	    if !state.app.config().allow_synced_drafts {\n        return ApiError::from(AppError::new(\n            "deleteDraft",	    if state.app.config().allow_synced_drafts {\n        return ApiError::from(AppError::new(\n            "deleteDraft",	api	draft_and_preference

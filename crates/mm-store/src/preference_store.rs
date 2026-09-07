@@ -33,6 +33,17 @@ pub trait PreferenceStore {
     ) -> impl std::future::Future<Output = Result<Preferences, StoreError>> + Send;
 
     /// Port of `SqlPreferenceStore.Get` (preference_store.go:113).
+    /// Port of `SqlPreferenceStore.Delete` (preference_store.go:175).
+    ///
+    /// Three equality predicates and no not-found: deleting a preference that was never there is
+    /// a successful zero-row DELETE, which is why `deletePreferences` cannot 404.
+    fn delete(
+        &self,
+        user_id: &str,
+        category: &str,
+        name: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
     fn get(
         &self,
         user_id: &str,
@@ -78,6 +89,26 @@ impl SqlPreferenceStore {
 }
 
 impl PreferenceStore for SqlPreferenceStore {
+    #[tracing::instrument(skip(self), fields(user_id = %user_id, category = %category))]
+    async fn delete(&self, user_id: &str, category: &str, name: &str) -> Result<(), StoreError> {
+        sqlx::query!(
+            "DELETE FROM preferences WHERE userid = $1 AND category = $2 AND name = $3",
+            user_id,
+            category,
+            name,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!(
+                "failed to delete Preference with userId={user_id}, category={category} and \
+                 name={name}"
+            ),
+            source,
+        })?;
+        Ok(())
+    }
+
     /// Port of `Save` (preference_store.go:44) together with `saveTx` (:89), which it calls per
     /// preference.
     ///

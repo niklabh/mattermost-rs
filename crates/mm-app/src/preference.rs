@@ -4,7 +4,7 @@
 
 use mm_model::preference::{Preference, Preferences};
 use mm_model::utils::{AppError, AppResult};
-use mm_store::{PreferenceStore, StoreError};
+use mm_store::{ChannelStore, PreferenceStore, StoreError};
 
 use crate::App;
 
@@ -168,6 +168,133 @@ impl App {
                     )
                 }
             })
+    }
+}
+
+impl App {
+    /// Port of `app.App.DeletePreferences` (app/preference.go:89).
+    ///
+    /// # Two loops, not one
+    ///
+    /// Go validates the **whole batch** before deleting any of it: the first loop rejects a
+    /// preference naming a different user with a **403**, and only then does the second loop
+    /// delete. Fusing them would delete the rows preceding a bad entry and then fail — a partial
+    /// write where Go performs none.
+    ///
+    /// The 403's `detailed_error` carries both ids, and is the only place this handler tells a
+    /// caller anything specific.
+    ///
+    /// # The delete's failure is a **400**
+    ///
+    /// `app.preference.delete.app_error` at `StatusBadRequest`, for what is a database error.
+    /// That is Go's, and it is the odd one out: the sidebar cleanup below it is a 500 for the
+    /// same class of failure.
+    ///
+    /// # Two events, and the first carries nothing
+    ///
+    /// `sidebar_category_updated` is published with an **empty data map** — Go's own comment says
+    /// "TODO this needs to be updated to include information on which categories changed" — and
+    /// then `preferences_deleted` carries the batch as a JSON string. Both are addressed to the
+    /// user and to nothing else. A port that published only the second would leave the webapp's
+    /// sidebar stale after unfavouriting a channel.
+    #[tracing::instrument(skip(self, preferences), fields(user_id = %user_id, count = preferences.0.len()))]
+    pub async fn delete_preferences(
+        &self,
+        user_id: &str,
+        preferences: &Preferences,
+    ) -> AppResult<()> {
+        for preference in &preferences.0 {
+            if user_id != preference.user_id {
+                return Err(AppError::boxed(
+                    "DeletePreferences",
+                    "api.preference.delete_preferences.delete.app_error",
+                    None,
+                    format!("userId={user_id}, preference.UserId={}", preference.user_id),
+                    403,
+                ));
+            }
+        }
+
+        for preference in &preferences.0 {
+            self.store()
+                .preference()
+                .delete(user_id, &preference.category, &preference.name)
+                .await
+                .map_err(|err| {
+                    tracing::error!(error = %err, "preference delete failed");
+                    AppError::boxed(
+                        "DeletePreferences",
+                        "app.preference.delete.app_error",
+                        None,
+                        String::new(),
+                        400,
+                    )
+                })?;
+        }
+
+        // Go passes the whole batch and filters inside the store; the filter is applied here
+        // instead, because the store's signature takes the pairs it actually uses.
+        let favourites: Vec<(String, String)> = preferences
+            .0
+            .iter()
+            .filter(|preference| {
+                preference.category == mm_model::preference::PREFERENCE_CATEGORY_FAVORITE_CHANNEL
+            })
+            .map(|preference| (preference.user_id.clone(), preference.name.clone()))
+            .collect();
+
+        self.store()
+            .channel()
+            .delete_sidebar_channels_by_preferences(&favourites)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "sidebar cleanup failed");
+                AppError::boxed(
+                    "DeletePreferences",
+                    "api.preference.delete_preferences.update_sidebar.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })?;
+
+        self.publish(mm_model::websocket_message::WebSocketEvent::new(
+            mm_model::websocket_message::WEBSOCKET_EVENT_SIDEBAR_CATEGORY_UPDATED,
+            "",
+            "",
+            user_id,
+            None,
+            "",
+        ))
+        .await;
+
+        let mut message = mm_model::websocket_message::WebSocketEvent::new(
+            mm_model::websocket_message::WEBSOCKET_EVENT_PREFERENCES_DELETED,
+            "",
+            "",
+            user_id,
+            None,
+            "",
+        );
+        // Go returns `api.marshal_error` at 500 when this fails — **after** both deletes and one
+        // published event, so the rows are gone and the client is told the call failed. The
+        // encoding cannot fail for a `Vec<Preference>`, so the arm is unreachable rather than
+        // dropped.
+        match serde_json::to_string(&preferences.0) {
+            Ok(json) => message.add("preferences", serde_json::Value::String(json)),
+            Err(err) => {
+                return Err(AppError::boxed(
+                    "DeletePreferences",
+                    "api.marshal_error",
+                    None,
+                    err.to_string(),
+                    500,
+                ));
+            }
+        }
+        self.publish(message).await;
+
+        Ok(())
     }
 }
 

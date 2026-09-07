@@ -6044,3 +6044,41 @@ while `:8065` still listed it after three explicit invalidations.
 and it disappears when the Go server does. It is OPEN rather than ACCEPTED because the *test* rule
 it implies has to be applied by every future write group, and a group that forgets it will chase a
 phantom bug.
+
+## D-191 · The five status writes need a status cache before they can be ported
+
+**Status** OPEN · **Severity** blocking · **Raised** 2026-09-08 (write-route loop)
+
+`PUT /users/{id}/status` and its four `custom` siblings are the first write family where **the
+cache is the model rather than an optimisation**, and porting them mechanically would be wrong in
+a way the tests would not immediately show.
+
+`PlatformService.SetStatusOnline` (app/platform/status.go) reads the previous status from
+`ps.GetStatus`, which is the **in-memory status cache**, and three separate decisions branch on
+what it finds:
+
+- `status.Manual && !manual` returns early — a manually set status overrides a non-manual one;
+- `broadcast` is set only when the status *changed*, so a redundant write publishes nothing;
+- the row is written with `SaveOrUpdate` when something changed and with `UpdateLastActivityAt`
+  otherwise, and **only** when `LastActivityAt - oldTime > StatusMinUpdateTime`. A status touched
+  more often than that never reaches the database at all.
+
+So the previous value is not the `Status` row; it is whatever the process last put in its cache.
+A port that read the row would take a different branch from Go on exactly the requests that
+matter, and would write rows Go throttles away.
+
+**What is owed is a decision, not code.** Two shapes:
+
+1. **Give `mm-app` its own status cache**, mirroring `platform.statusCache`. Correct in isolation
+   and *incoherent while Go runs*: two processes would each hold an authoritative previous value
+   and disagree about whether to broadcast. This is [D-182] again, sharper — statuses are the
+   highest-frequency write in the product.
+2. **Serve the status writes only once Go is gone**, and forward them until then.
+
+Related: `getUserStatus` is already served here and reads the **table**, which is why
+`common::set_user_status` in the parity harness exists and says so. The read is safe because Go
+writes the row on the paths a test uses; the write is not.
+
+The four `custom` routes are lighter — they write `Users.Props["customStatus"]` rather than the
+`Status` row — but they publish through the same `BroadcastStatus`, so they inherit the same
+question about who decides that a status changed.

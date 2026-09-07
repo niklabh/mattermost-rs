@@ -8028,3 +8028,95 @@ intra-suite race in `threads_for_user` that predates this work.
 so `/api/v4/websocket`, the literal path every client uses, failed to match its own inventory row
 and the previous commit's route read as unserved. Fixed and verified: exactly one of 764 paths
 changed. [D-189].
+
+## Drafts and deletePreferences: four writes, three of them idempotent (2026-09-08)
+
+New: `crates/mm-api/tests/parity/draft_and_preference_writes.rs`,
+`scripts/mutations/draft-preference-writes.plan`.
+Changed: `crates/mm-store/src/{draft_store,preference_store,channel_store}.rs`,
+`crates/mm-app/src/{draft,preference}.rs`, `crates/mm-api/src/{drafts,preferences,lib}.rs`.
+
+206 → **210 of 764**: `POST /drafts`, the two `deleteDraft` registrations, and
+`POST /users/{user_id}/preferences/delete`.
+
+### `POST /drafts` with an empty message deletes the row and answers `201 null`
+
+Go returns `(nil, nil)` after deleting and the handler writes `http.StatusCreated` and *then*
+encodes the nil pointer. So the answer to a request that destroyed a row is **`201` with a body of
+the four bytes `null`**, newline-terminated. Three independent things a port gets wrong — the
+status, the body, and whether it deleted at all — and each has its own mutation.
+
+It also publishes **nothing**: Go returns before the `draft_created` publish, so a draft removed
+this way is invisible to the user's other sessions until they refetch. `deleteDraft` does publish
+`draft_deleted`.
+
+### The header is `Connection-Id`, with no `X-`
+
+Measured, not read: the first version used `X-Connection-Id` and Go published an empty
+`omit_connection_id` for a request that carried the header. The constant lives in `client4.go`,
+which this project never reads, so the value is repeated in `mm_api::drafts` — the same choice
+`mm-model` made for `StatusFail`.
+
+It matters more than a header name usually does. `omit_connection_id` is read by the hub **before**
+`user_id`, so getting it wrong changes *who is skipped* rather than how many events go out — the
+tab that saved the draft would be told about its own save.
+
+### The answer and the row disagree about `create_at`, again
+
+Same shape as the reaction upsert and for the same reason: `PreSave` mints a fresh `CreateAt`
+because the incoming draft has none, the response is marshalled from that struct, and the conflict
+clause updates seven columns of which `CreateAt` is not one. Both halves asserted.
+
+### `deletePreferences` validates the whole batch before deleting any of it
+
+Two loops, not one. A batch naming another user is a **403** with *nothing* deleted; fusing the
+loops would delete the entries preceding the bad one. The parity suite checks the survivor count
+after the refusal, which is the only way to see the difference.
+
+It publishes **two** events, and the first — `sidebar_category_updated` — carries an empty data
+map, with Go's own `TODO` beside it. A port that published only `preferences_deleted` would leave
+the webapp's sidebar stale after unfavouriting a channel.
+
+Nothing is forwarded here, unlike the *update* path: `deletePreferences` has no flagged-post
+branch, and its sidebar cleanup touches only `favorite_channel`, which is now ported.
+
+### The mutation run, and two mutations that did not compile
+
+**22 run, 20 caught, 2 controls survived, 0 harness faults** — after a first pass of 17 caught, 1
+survived and **2 harness faults**, which void a tally rather than reduce it.
+
+Both faults were the mutation's fault, not the code's, and are worth naming because they are easy
+to repeat: `message = message` inside `ON CONFLICT DO UPDATE` is an *ambiguous column reference* in
+Postgres (the name exists on both the target and `excluded`), and a replacement that removed a
+call left unbalanced braces. The first is now `message = drafts.message`; the second replaces the
+event type rather than the call.
+
+The one real survivor was a missing fixture: nothing drafted to an **archived** channel. That gate
+is only reachable because Go fetches the channel with `Get(id, true)` — `allowFromCache`, not
+include-deleted — so the read does not filter `DeleteAt` and an archived channel comes back.
+
+### A literal route in axum does not fall through, and gorilla's does
+
+`/preferences/delete` is registered `POST`-only in Go, so a `GET` falls past it onto
+`{category:[A-Za-z0-9_]+}` and is answered by `getPreferencesByCategory` — with `delete` as the
+category, which nobody has, so it is a 404. **axum has no fall-through**: a literal route claims
+the path for every method, and registering `POST` alone handed the `GET` to the proxy.
+
+No client could tell — Go's answer is the same 404 either way — but this server stopped *serving*
+a read it used to serve, and `preference_reads::the_refusals_match_by_status_and_id` asserts
+`x-mmrs-served-by: rust` on exactly that path. It failed on the first full-suite run after the
+POST was added, which is the served-by header doing the job it was added for. The literal route
+now answers the `GET` too, by delegating to the category handler.
+
+The same change broke `preferences::an_unmigrated_method_on_a_migrated_path_still_reaches_go`,
+whose probe *was* `POST /preferences/delete` — a route that is no longer unmigrated. It now probes
+`DELETE /users/me/preferences`, a method Go does not register on a path this server does serve, so
+it still tests the method fallback rather than this route.
+
+### `max_draft_size` is a deployment artifact
+
+`determineMaxDraftSize` reads `character_maximum_length` for `Drafts.Message` out of
+`information_schema` and divides by four ("assume a worst-case representation of four bytes per
+rune"). It is **16383** on this stack and 1000 on a server that never widened the column, so
+hard-coding either would refuse messages Go accepts or accept ones it refuses. Queried, like the
+tzdata lookup in `ScheduledPost`.

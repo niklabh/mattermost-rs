@@ -52,6 +52,7 @@ mod parity {
     pub mod common_teams;
     pub mod config_source;
     pub mod data_retention;
+    pub mod draft_and_preference_writes;
     pub mod drafts;
     pub mod emoji_autocomplete;
     pub mod emoji_by_names;

@@ -139,6 +139,19 @@ pub fn get_channel_roles(
 
 /// The subset of Go's `store.ChannelStore` (store/store.go:200-386) that is ported.
 pub trait ChannelStore {
+    /// Port of `SqlChannelStore.DeleteSidebarChannelsByPreferences`
+    /// (channel_store_categories.go:953).
+    ///
+    /// Unfavouriting a channel has to take it out of the sidebar's Favorites category as well as
+    /// out of `Preferences`, or the channel keeps appearing there. Go loops the batch inside one
+    /// transaction, **skipping every preference whose category is not `favorite_channel`** — so a
+    /// batch of ordinary preferences opens and commits an empty transaction, which is reproduced
+    /// rather than short-circuited.
+    fn delete_sidebar_channels_by_preferences(
+        &self,
+        preferences: &[(String, String)],
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
     /// Port of `SqlChannelStore.Get` (channel_store.go:985).
     fn get(
         &self,
@@ -435,6 +448,55 @@ impl SqlChannelStore {
 }
 
 impl ChannelStore for SqlChannelStore {
+    /// `preferences` is the `(user_id, channel_id)` pairs of the favourite-channel preferences in
+    /// the batch — the caller has already applied Go's category filter, since it is the only
+    /// thing the category is used for here.
+    ///
+    /// The DELETE joins `SidebarCategories` to scope the removal to the **Favorites** category:
+    /// a channel the user also placed in a custom category stays there. Dropping the join would
+    /// remove it from every category the user has.
+    #[tracing::instrument(skip_all, fields(pairs = preferences.len()))]
+    async fn delete_sidebar_channels_by_preferences(
+        &self,
+        preferences: &[(String, String)],
+    ) -> Result<(), StoreError> {
+        if preferences.is_empty() {
+            return Ok(());
+        }
+
+        let mut tx = self.pool.begin().await.map_err(|source| StoreError::Db {
+            context: "DeleteSidebarChannelsByPreferences: begin_transaction".to_owned(),
+            source,
+        })?;
+
+        for (user_id, channel_id) in preferences {
+            sqlx::query!(
+                r#"
+                DELETE FROM sidebarchannels
+                 USING sidebarcategories
+                 WHERE sidebarchannels.categoryid = sidebarcategories.id
+                   AND sidebarchannels.userid = $1
+                   AND sidebarchannels.channelid = $2
+                   AND sidebarcategories.type = $3
+                "#,
+                user_id,
+                channel_id,
+                mm_model::sidebar_category::SIDEBAR_CATEGORY_FAVORITES,
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(|source| StoreError::Db {
+                context: "Failed to remove sidebar entries for preference".to_owned(),
+                source,
+            })?;
+        }
+
+        tx.commit().await.map_err(|source| StoreError::Db {
+            context: "DeleteSidebarChannelsByPreferences: commit_transaction".to_owned(),
+            source,
+        })
+    }
+
     #[tracing::instrument(skip_all, fields(scheme_id = %scheme_id, offset, limit, found))]
     async fn get_channels_by_scheme(
         &self,

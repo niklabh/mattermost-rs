@@ -2,7 +2,8 @@
 
 use mm_model::draft::Draft;
 use mm_model::post_metadata::PostMetadata;
-use mm_model::utils::AppError;
+use mm_model::utils::{AppError, AppResult};
+use mm_store::UserStore;
 use mm_store::draft_store::DraftStore;
 use mm_store::file_info_store::FileInfoStore;
 
@@ -120,4 +121,266 @@ impl App {
         });
         Ok(())
     }
+}
+
+/// What [`App::upsert_draft`] did, or why it declined.
+#[derive(Debug)]
+pub enum DraftWrite {
+    /// The draft was written. Carries it with `metadata` filled in, which is what the handler
+    /// echoes back.
+    Saved(Box<Draft>),
+    /// **The message was empty, so the draft was deleted instead** and Go answers `201` with a
+    /// body of `null`. See [`App::upsert_draft`].
+    DeletedBecauseEmpty,
+    /// A file on the draft would have had a mini-preview generated. Forward.
+    Forward(&'static str),
+}
+
+impl App {
+    /// Port of `app.App.UpsertDraft` (app/draft.go:36).
+    ///
+    /// # An empty message is a delete, and the answer is `201 null`
+    ///
+    /// Go returns `(nil, nil)` after deleting, and the handler writes `201 Created` and then
+    /// encodes the nil pointer — so the body is the four bytes `null` with a trailing newline,
+    /// at a *created* status, for a request that destroyed a row. Reproduced exactly; a port that
+    /// answered 200, or `{}`, or omitted the body, would each be wrong in a different way.
+    ///
+    /// # Five gates, and the channel one is a 400 with a `Name` param
+    ///
+    /// 1. the feature gate (501, and the handler's fires first);
+    /// 2. the channel must exist — **`api.context.invalid_param.app_error` at 400** with
+    ///    `Name: "draft.channel_id"`, not a 404;
+    /// 3. an archived channel is a 400 of its own;
+    /// 4. a restricted DM is a 400 of its own;
+    /// 5. the **user** must exist, and its failure is a flat 500 with no not-found arm — Go wraps
+    ///    every `User().Get` error as `app.user.get.app_error` at 500 here, including the
+    ///    not-found it would report as 404 anywhere else.
+    ///
+    /// Go fetches the channel through the **store** rather than `App.GetChannel`, so *any* store
+    /// error becomes gate 2's 400 — including the not-found that `GetChannel` would report as a
+    /// 404 with its own id. `Get(id, true)`'s second argument is `allowFromCache`, not
+    /// include-deleted; the query does not filter `DeleteAt`, which is what makes gate 3
+    /// reachable.
+    #[tracing::instrument(skip(self, draft), fields(user_id = %draft.user_id, channel_id = %draft.channel_id))]
+    pub async fn upsert_draft(&self, draft: &Draft, connection_id: &str) -> AppResult<DraftWrite> {
+        let mut draft = draft.clone();
+
+        let channel = self.get_channel(&draft.channel_id).await.map_err(|_| {
+            let mut params: std::collections::HashMap<String, serde_json::Value> =
+                std::collections::HashMap::new();
+            params.insert(
+                "Name".to_owned(),
+                serde_json::Value::String("draft.channel_id".to_owned()),
+            );
+            AppError::boxed(
+                "CreateDraft",
+                "api.context.invalid_param.app_error",
+                Some(params),
+                String::new(),
+                400,
+            )
+        })?;
+
+        if channel.delete_at != 0 {
+            return Err(AppError::boxed(
+                "CreateDraft",
+                "api.draft.create_draft.can_not_draft_to_deleted.error",
+                None,
+                String::new(),
+                400,
+            ));
+        }
+
+        match self.check_if_channel_is_restricted_dm(&channel).await? {
+            crate::channel::RestrictedDm::No => {}
+            crate::channel::RestrictedDm::Yes => {
+                return Err(AppError::boxed(
+                    "CreateDraft",
+                    "api.draft.create_draft.can_not_draft_to_restricted_dm.error",
+                    None,
+                    String::new(),
+                    400,
+                ));
+            }
+            crate::channel::RestrictedDm::Undecidable => {
+                return Ok(DraftWrite::Forward(
+                    "a bot's exemption from DM restrictions is a plugin decision",
+                ));
+            }
+        }
+
+        // Go's error here has **no not-found arm**: every failure is 500.
+        self.store()
+            .user()
+            .get(&draft.user_id)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "draft author lookup failed");
+                AppError::boxed(
+                    "CreateDraft",
+                    "app.user.get.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })?;
+
+        if draft.message.is_empty() {
+            self.store()
+                .draft()
+                .delete(&draft.user_id, &draft.channel_id, &draft.root_id)
+                .await
+                .map_err(draft_save_error)?;
+            tracing::debug!("Draft deleted via empty-message upsert");
+            // **No websocket event.** Go returns before the publish, so a draft removed this way
+            // is invisible to other sessions until they refetch — unlike `deleteDraft`, which
+            // publishes `draft_deleted`.
+            return Ok(DraftWrite::DeletedBecauseEmpty);
+        }
+
+        // `runGuardedDraftWillBeUpserted` is a plugin hook; with no plugin environment it is the
+        // identity, so the draft goes to the store unchanged.
+        draft.pre_save();
+
+        let max_draft_size = self
+            .store()
+            .draft()
+            .max_draft_size()
+            .await
+            .map_err(draft_save_error)?;
+        // `IsValid` runs **inside** the store in Go, so its error reaches the handler unwrapped —
+        // a message over the limit answers `model.draft.is_valid.msg.app_error` with `Length` and
+        // `MaxLength` params, not `app.draft.save.app_error`.
+        draft.is_valid(max_draft_size)?;
+
+        self.store()
+            .draft()
+            .upsert(&draft)
+            .await
+            .map_err(draft_save_error)?;
+
+        // Go re-reads nothing: the value published and returned is the struct it just saved, with
+        // file infos hung off it.
+        match self.prepare_draft_with_file_infos(&mut draft).await {
+            Ok(()) => {}
+            Err(PrepareError::Unreproducible(why)) => return Ok(DraftWrite::Forward(why)),
+            Err(PrepareError::App(err)) => return Err(err),
+        }
+
+        self.publish_draft_event(
+            mm_model::websocket_message::WEBSOCKET_EVENT_DRAFT_CREATED,
+            &draft,
+            connection_id,
+        )
+        .await;
+
+        Ok(DraftWrite::Saved(Box::new(draft)))
+    }
+
+    /// Port of `app.App.DeleteDraft` (app/draft.go:158).
+    ///
+    /// No gates beyond the feature one: the caller has already fetched the draft (which is what
+    /// produces the 404) and checked that it belongs to the session.
+    #[tracing::instrument(skip(self, draft), fields(user_id = %draft.user_id, channel_id = %draft.channel_id))]
+    pub async fn delete_draft(&self, draft: &Draft, connection_id: &str) -> AppResult<()> {
+        self.store()
+            .draft()
+            .delete(&draft.user_id, &draft.channel_id, &draft.root_id)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "draft delete failed");
+                AppError::boxed(
+                    "DeleteDraft",
+                    "app.draft.delete.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })?;
+
+        self.publish_draft_event(
+            mm_model::websocket_message::WEBSOCKET_EVENT_DRAFT_DELETED,
+            draft,
+            connection_id,
+        )
+        .await;
+
+        Ok(())
+    }
+
+    /// Port of `app.App.GetDraft` (app/draft.go:17).
+    ///
+    /// Both arms of Go's error carry the **same id**, `app.draft.get.app_error`, and differ only
+    /// in status: 404 for not-found and 500 otherwise. `deleteDraft` branches on the status, not
+    /// the id, which is why the pair matters.
+    #[tracing::instrument(skip(self), fields(user_id = %user_id, channel_id = %channel_id))]
+    pub async fn get_draft(
+        &self,
+        user_id: &str,
+        channel_id: &str,
+        root_id: &str,
+    ) -> AppResult<Draft> {
+        match self
+            .store()
+            .draft()
+            .get(user_id, channel_id, root_id, false)
+            .await
+        {
+            Ok(Some(draft)) => Ok(draft),
+            Ok(None) => Err(AppError::boxed(
+                "GetDraft",
+                "app.draft.get.app_error",
+                None,
+                String::new(),
+                404,
+            )),
+            Err(err) => {
+                tracing::error!(error = %err, "draft lookup failed");
+                Err(AppError::boxed(
+                    "GetDraft",
+                    "app.draft.get.app_error",
+                    None,
+                    String::new(),
+                    500,
+                ))
+            }
+        }
+    }
+
+    /// The two draft events share a shape: addressed to the **channel and the user both**, with
+    /// the draft as a JSON string under `draft`, and omitting the originating connection.
+    ///
+    /// `omit_connection_id` is the client's own `X-Connection-Id` header. It is what stops the
+    /// tab that saved the draft from being told about its own save — and the hub's fan-out reads
+    /// it *before* `user_id`, so getting it wrong changes who is skipped rather than merely how
+    /// many events go out.
+    async fn publish_draft_event(&self, event: &str, draft: &Draft, connection_id: &str) {
+        let mut message = mm_model::websocket_message::WebSocketEvent::new(
+            event,
+            "",
+            &draft.channel_id,
+            &draft.user_id,
+            None,
+            connection_id,
+        );
+        match serde_json::to_string(draft) {
+            Ok(json) => message.add("draft", serde_json::Value::String(json)),
+            Err(err) => tracing::warn!(error = %err, "Failed to encode draft to JSON"),
+        }
+        self.publish(message).await;
+    }
+}
+
+/// `app.draft.save.app_error` at 500 — the id Go gives both the empty-message delete and the
+/// upsert, though they are different operations.
+fn draft_save_error(err: mm_store::StoreError) -> Box<AppError> {
+    tracing::error!(error = %err, "draft save failed");
+    AppError::boxed(
+        "CreateDraft",
+        "app.draft.save.app_error",
+        None,
+        String::new(),
+        500,
+    )
 }
