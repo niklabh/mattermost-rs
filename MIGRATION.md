@@ -7034,3 +7034,211 @@ check has caught a regression it was written for.
 `.sqlx` is committed for offline builds and has not been regenerated since `910ad66`; the new query
 validated against the live database instead. `sqlx-cli` is not installed here, so it stays stale —
 pre-existing, and not something this session should install a toolchain to fix.
+
+## The session-activity pair — [D-084] and [D-088] close together (2026-09-06)
+
+Not a route: the second of the project owner's three standing decisions, and the half of session
+handling that only makes sense as one change. New: `crates/mm-api/tests/parity/session_activity.rs`,
+`crates/mm-store/tests/db_session_activity.rs`, `scripts/mutations/session-activity.plan`.
+Changed: `crates/mm-store/src/session_store.rs`, `crates/mm-app/src/session.rs`,
+`crates/mm-app/src/config.rs`, `crates/mm-api/src/auth.rs`, `crates/mm-api/src/users.rs`,
+`scripts/dump-config-fixture.sh`, `fixtures/config_active.json`.
+
+| Go file | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| platform/status.go (`UpdateLastActivityAtIfNeeded`) | `mm-app/src/session.rs` | DONE | 4 unit, 4 parity | The "if needed" is a five-minute throttle on `model.SessionActivityTimeout`, not a cache lookup — [D-084]'s own guess. Called on `getUser` and `getUsers` and deliberately **not** on `getUserByUsername`, which shares the whole rest of its tail. |
+| app/session.go (`GetSession` idle branch) | `mm-app/src/session.rs` | DONE | 13 unit, 4 parity | Four exemptions, each asserted alone: a conjunction passes with three of them dropped. |
+| store/sqlstore/session_store.go (`UpdateLastActivityAt`, `Remove`) | `mm-store/src/session_store.rs` | DONE | 4 DB | The first writes this store makes. `UPDATE` matches `Id` **only** where `Get` and `Remove` take an id *or* a token — and an `UPDATE` matching nothing succeeds, so getting it wrong is silent. |
+| config.go (`SessionIdleTimeoutInMinutes`, `ExtendSessionLengthWithActivity`) | `mm-app/src/config.rs` | PARTIAL | 8 pass | Seventeen settings now. One of these has no constant default — see below. |
+
+**`ExtendSessionLengthWithActivity` has no constant default, and that is the finding.** Go writes
+`new(!isUpdate)` (config.go:729) where `isUpdate` is `ServiceSettings.SiteURL != nil`
+(config.go:4289). `Store.Load` plants a `SiteURL` of `""` before calling `SetDefaults` when the
+document has none (store.go:280), so **every document a running server persists is an update** and
+the value is `false` — while a fresh config defaults it `true`. Since `true` disarms the
+idle-timeout check outright, resolving this default the way every neighbouring field resolves
+would have silently switched off the thing this session ported. The live row confirms it: `SiteURL
+= ""`, `ExtendSessionLengthWithActivity = false`, `SessionIdleTimeoutInMinutes = 43200`.
+
+This also broke `every_default_matches_what_go_actually_wrote`, which had been asserting
+`from_document(fixture) == Config::default()`. Both values are correct for their input; the test
+now compares against the adjusted default and a second test pins the rule in both directions.
+
+### The parity suite found a divergence on every migrated route
+
+Nothing had ever compared a **401 body** against Go's. The idle timeout needed one, and it failed
+on its first run:
+
+```
+go:   "id": "api.context.session_expired.app_error"
+ours: "id": "api.context.invalid_token.error"
+```
+
+`App::GetSession`'s error id never reaches a client. `handlers.go:277-280` keeps a 500 and
+replaces every other failure with the generic `session_expired` — so a wrong token, an expired
+session, a session id used as a token and a session revoked for idleness are one indistinguishable
+answer, which is deliberate: none of them tells a caller whether the credential exists. We were
+returning the inner id, on every route that takes a session. Fixed in `auth.rs`, and
+`an_unknown_token_gets_the_same_refusal_as_an_idle_one` is the regression test.
+
+The same branch also calls `RemoveSessionCookie`, which we still do not — [D-169], left open
+because it needs `SiteURL` as a *setting* and a port of `GetSubpathFromConfig`.
+
+### Two clocks became parameters, and that is what made the boundaries testable
+
+`session_is_idle_past_timeout(config, session, now)` and `activity_write_is_due(now, last)` take
+the time rather than reading `get_millis()`. With the clock inlined, "idle by exactly the timeout"
+cannot be constructed — every fixture is already a few milliseconds past it by the time the
+comparison runs — so `>` and `>=` are the same function and a mutation of one into the other
+survives. Both boundaries are now asserted at the millisecond, and both mutations are caught. Same
+shape as `apply_env_from`'s lookup parameter in the config session.
+
+### Planting a session is the vertical slice in reverse
+
+Go caches sessions **by token** (platform/session.go:50), so a row this suite edits behind its back
+is invisible to a Go server that has already seen that token. Every assertion therefore plants a
+session with a fresh, never-seen token: Go's first request with it is a guaranteed cache miss. A
+row *neither* server minted authenticates against both, which is only true because they share one
+`Sessions` table — the same fact the vertical slice proved, running the other way.
+
+The shared `go_minted_token` session is never used here: one of these tests deliberately gets a
+session revoked, and revoking the suite-wide credential would take every other file down with it.
+
+### A prefix purge is a race, not a cleanup
+
+The first run failed with `LastActivityAt` reading back as `None` — nothing to do with the port.
+The parity tests share one binary and run concurrently, and each test was ending with a
+`DELETE ... WHERE id LIKE 'mmrssessactv%'` sweep that deleted the sessions its neighbours were
+midway through asserting on. Purging by exact token fixed it. [D-160]'s class, self-inflicted.
+
+Mutation run: **27 run, 25 caught, 2 controls survived, 0 harness faults** — no genuine
+survivors, which is unusual enough to say plainly: the two clock parameters above are why, since
+both boundary mutations would otherwise have been unkillable.
+(`scripts/mutations/session-activity.plan`). One mutation was written and dropped before the run:
+deleting the `WHERE` from `Remove`. It runs against the shared development database, so a
+`DELETE FROM sessions` with no predicate would log out the Go server and every other suite's
+fixture token mid-run; `remove_matches_either_the_id_or_the_token` covers the same decision by
+asserting the *other* seeded session survives.
+
+## The cookie half of the same branch — [D-169], closed the same day (2026-09-06)
+
+Raised and paid off in one sitting, because it is the other statement in `handlers.go:277-280` and
+leaving it open would have meant re-deriving the whole branch later. New:
+`crates/mm-model/src/go_path.rs` (moved), `reference/dump/behaviour_subpath.go`,
+`fixtures/behaviour_subpath.json`, `scripts/mutations/session-cookie.plan`. Changed:
+`crates/mm-api/src/auth.rs`, `crates/mm-app/src/config.rs`,
+`crates/mm-model/src/command_autocomplete.rs`, `crates/mm-model/src/lib.rs`,
+`crates/mm-api/tests/parity/session_activity.rs`, `reference/dump/main.go`.
+
+| Go file | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| web/context.go (`RemoveSessionCookie`) | `mm-api/src/auth.rs` | DONE | 6 unit, 2 parity | `MaxAge: -1` renders as `Max-Age=0`, and an empty `Path` is omitted rather than sent empty. |
+| utils/subpath.go (`GetSubpathFromConfig`) | `mm-app/src/config.rs` | DONE | 3 go_parity | Four outcomes from three branches: `/` three ways, `""` on a parse failure. |
+| net/http (`sanitizeCookiePath`) | `mm-api/src/auth.rs` | DONE | 1 unit | `0x20..0x7f` except `;`. A **space is valid** in a cookie path, which looks wrong and is not. |
+
+**The error is thrown away at the call site, and that changes the answer.** `RemoveSessionCookie`
+writes `subpath, _ := GetSubpathFromConfig(...)` (context.go:181), so a `SiteURL` Go cannot parse
+gives `subpath == ""` and the header carries **no `Path` at all** — not `Path=/`. A port that
+mapped the error onto the root would widen the cookie's scope on precisely the misconfiguration
+where a narrow scope was the point. `Config::subpath` therefore returns a `String` rather than a
+`Result`: there is no caller that could act on the error, and typing it would invite one to.
+
+### The oracle is transcribed glue over Go's own ingredients
+
+`channels/utils` imports goldmark, which is not in the generator's `go.sum`, so
+`behaviour_subpath.go` cannot call `GetSubpathFromConfig` directly. Instead its eight lines are
+transcribed and the two things that actually do the work — `url.Parse` and `path.Clean` — are Go's
+own. Same arrangement `behaviour.go` uses for the unexported identifier regexes, with the same
+standing rule: copy any upstream change character for character. Two invariants are asserted inside
+the generator so a botched transcription fails there rather than downstream.
+
+`go_path` moved out of `command_autocomplete.rs` into its own module when this became its second
+caller. It sits beside `go_url` now, which is where a Go stdlib port with its own oracle belongs.
+
+### Two mutations survived, and both were real gaps
+
+- **The 500 arm of the session rejection was unreachable from any test.** Getting there needs the
+  session store to fail, which no parity test can arrange against a healthy database — so a
+  mutation that cleared the cookie on a database error survived the whole suite. The mapping is now
+  `SessionRejection::for_get_session_error`, a named function over the error and a subpath closure,
+  and both arms are unit-tested. The closure also means the config is not consulted on the branch
+  that does not need it, and the test asserts that by panicking if it is.
+- **Nothing had ever driven `MM_SERVICESETTINGS_SITEURL`** — the one variable the Go container
+  beside us actually sets. With no test setting it, the document's value alone is indistinguishable
+  from no overlay at all.
+
+Mutation run: **18 run, 16 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/session-cookie.plan`), after the two survivors above were closed rather than
+recorded.
+
+### An unrelated fixture drift, left alone
+
+Re-running the generator rewrote `behaviour_scheduled_post.json` and
+`behaviour_scheduled_post_recurrence.json`: `time.LoadLocation("america/new_york")` **fails** on
+this machine where the committed fixture says it succeeds. That is this host's tzdata, not a Go
+change and not this session's work, so both files were reverted rather than committed. Worth
+knowing before the next generator run: the corpus is zone-dependent by design ([D-032]'s
+neighbour), and a lowercase zone name is apparently loadable on some systems and not others.
+
+## Go's lenient JSON key matching — [D-040], the third standing decision (2026-09-06)
+
+New: `crates/mm-model/src/go_json.rs`, `reference/dump/behaviour_json_fold.go`,
+`fixtures/behaviour_json_fold.json`, `scripts/mutations/json-fold.plan`. Changed:
+`crates/mm-model/src/post.rs`, `crates/mm-model/src/message_attachment.rs`,
+`crates/mm-model/src/integration_action.rs`, `crates/mm-model/src/lib.rs`,
+`reference/dump/behaviour_post_attachments.go`, `fixtures/behaviour_post_attachments.json`,
+`reference/dump/main.go`.
+
+| Go file | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| encoding/json fold.go, decode.go:699 | `mm-model/src/go_json.rs` | DONE | 19 (3 go_parity) | Exact name first, then the fold. Keys are rewritten to their exact spellings; the derived `Deserialize` is untouched. |
+| model/message_attachment.go, integration_action.go | five `GoFields` consts | DONE | 4 schema | Hand-maintained name lists, checked against the structs by a test that fails to compile when a field is added. |
+
+**Go folds ASCII *up*, and the whole non-ASCII surface is two runes.** [D-040] expected this to
+need `utils::go_to_lower` and a Unicode fold table. It does not: `foldName` upper-cases ASCII and
+pushes everything else through `foldRune`, and a sweep of every scalar value — recorded in the
+fixture, so a Unicode revision would fail the test rather than open a hole — finds exactly **two**
+runes whose fold lands on an ASCII byte: U+017F LATIN SMALL LETTER LONG S → `S`, and U+212A KELVIN
+SIGN → `K`. Every `json:` name in the tree is ASCII, so those two are the entire reachable set, and
+a rune that folds to something non-ASCII can be passed through unchanged and still give the right
+*answer*. The oracle proves both are live: `{"tſ":123}` populates `ts`, and `{"title_linK":"l"}`
+populates `title_link`, on the real Go decoder.
+
+### Two rules that look like one
+
+`{"title":"exact","TiTlE":"folded"}` and `{"TiTlE":"folded","title":"exact"}` give **different**
+answers in Go: it resolves each key as it reads it and the last assignment wins. So "exact beats
+folded" is not a rule at all — it is a consequence of ordering. Two *folded* keys resolve the same
+way, last-wins, which is why the exact-name set is captured **before** any rename rather than
+tested with `contains_key` as renames land; the tidier spelling makes the second folded key lose
+and a mutation of it is caught.
+
+**The ordering itself is not ours to reproduce, and does not need to be.** `serde_json::Map` is a
+`BTreeMap` — `preserve_order` is deliberately off, because Go marshals a `map[string]any` with
+sorted keys and turning it on would change every props object we emit — so the author's order is
+gone before the remap runs. It is gone on Go's side too: both servers read these props out of the
+same `jsonb` column, and Postgres orders keys by (length, bytewise). Two keys that fold together
+differ only by case and therefore have equal length, which is exactly where `jsonb`'s ordering and
+`BTreeMap`'s coincide. The generator now records Go's answer for the **sorted** spelling of each
+corpus document alongside the author's, and the parity test asserts against that one; comparing
+against the author's order would be asserting a fact neither server can observe.
+
+### The remap must run before the nil strip, and a corpus case says so
+
+`strip_nil_elements` looks for the literal keys `actions` and `fields`, because `Vec<PostAction>`
+cannot hold the nil that Go's `[]*PostAction` can. Run it first and a payload writing `Actions`
+keeps its nil into the decode, which drops the whole attachment. Reversing the two lines survived
+the entire suite until `case_insensitive_nil_action` was added.
+
+### Schemas are hand-maintained, so they are checked
+
+`every_schema_covers_its_struct` builds each type with an **explicit struct literal** — no
+`..Default::default()` — so adding a field to `MessageAttachment` or `PostAction` fails to compile
+there until someone updates the schema too. Three further tests assert no two names in a schema
+fold together (so declaration order cannot decide anything), every name is ASCII (the precondition
+the two-rune table rests on), and every nested key is also one of the schema's own names.
+
+Mutation run: **18 run, 16 caught, 2 controls survived, 0 harness faults**
+(`scripts/mutations/json-fold.plan`). The first run had a **harness fault** — a mutation that
+produced uncompilable Rust — and one survivor, the step-ordering one above; both were fixed and the
+plan re-run whole, since a harness fault voids the tally.

@@ -1,0 +1,45 @@
+# Mutation plan for [D-040]: Go's case-insensitive JSON field matching.
+#
+#   scripts/mutate-batch.sh scripts/mutations/json-fold.plan
+#
+# The decisions a reader could plausibly get wrong:
+#
+#   * The fold is UPPER-case, and only for ASCII. Lower-casing gives the same *answer* for every
+#     ASCII pair, so a mutation to `to_ascii_lowercase` is the one that has to be caught by the
+#     two-rune table rather than by a casing test.
+#   * Only case folds. `authorname` and `author-name` match nothing — punctuation is not a
+#     separator, it is a byte.
+#   * An exact key beats a folded one; two folded keys resolve last-wins in sorted order. Those
+#     are different rules and the second is not "the exact one wins" with a wider net.
+#   * The recursion happens AFTER this level, so a nested key that arrived folded is found.
+#   * The remap runs BEFORE `strip_nil_elements`, which looks for the exact keys.
+#
+# The last two lines are the no-op controls and must SURVIVE.
+
+# --- the fold itself ---
+fold-lowercases-instead-of-upper	crates/mm-model/src/go_json.rs	            out.push(c.to_ascii_uppercase());	            out.push(c.to_ascii_lowercase());	unit	go_json
+fold-passes-ascii-through	crates/mm-model/src/go_json.rs	        if c.is_ascii() {\n            out.push(c.to_ascii_uppercase());	        if c.is_ascii() {\n            out.push(c);	unit	go_json
+fold-drops-the-long-s	crates/mm-model/src/go_json.rs	const ASCII_FOLD_SOURCES: [(char, u8); 2] = [('\\u{017F}', b'S'), ('\\u{212A}', b'K')];	const ASCII_FOLD_SOURCES: [(char, u8); 1] = [('\\u{212A}', b'K')];	unit	go_json
+fold-sources-swapped	crates/mm-model/src/go_json.rs	const ASCII_FOLD_SOURCES: [(char, u8); 2] = [('\\u{017F}', b'S'), ('\\u{212A}', b'K')];	const ASCII_FOLD_SOURCES: [(char, u8); 2] = [('\\u{017F}', b'K'), ('\\u{212A}', b'S')];	unit	go_json
+
+# --- the matching rules ---
+remap-ignores-the-exact-branch	crates/mm-model/src/go_json.rs	        if schema.names.contains(&key.as_str()) {\n            continue;\n        }	        if false {\n            continue;\n        }	unit	go_json
+remap-lets-a-folded-key-beat-an-exact-one	crates/mm-model/src/go_json.rs	        if exact_present.contains(&to) {\n            object.remove(&from);\n            continue;\n        }	        if false {\n            object.remove(&from);\n            continue;\n        }	unit	go_json
+remap-exact-set-taken-after-renames	crates/mm-model/src/go_json.rs	        if exact_present.contains(&to) {	        if object.contains_key(to) {	unit	go_json
+remap-first-folded-name-does-not-win	crates/mm-model/src/go_json.rs	            .find(|name| fold_name(name) == folded)	            .rfind(|name| fold_name(name) == folded)	unit	go_json
+remap-drops-the-value	crates/mm-model/src/go_json.rs	        if let Some(moved) = object.remove(&from) {\n            object.insert(to.to_owned(), moved);\n        }	        object.remove(&from);	unit	go_json
+
+# --- the recursion ---
+remap-does-not-recurse	crates/mm-model/src/go_json.rs	    for (key, nested) in schema.nested {\n        let Some(child) = object.get_mut(*key) else {\n            continue;\n        };	    for (key, nested) in schema.nested {\n        let Some(child) = object.get_mut(*key) else {\n            continue;\n        };\n        let _ = child;\n        continue;\n        #[allow(unreachable_code)]	unit	go_json
+remap-recurses-before-this-level	crates/mm-model/src/post.rs	            crate::go_json::remap_object_keys(\n                &mut element,\n                &crate::message_attachment::MESSAGE_ATTACHMENT_FIELDS,\n            );\n            strip_nil_elements(&mut element, "actions");	            strip_nil_elements(&mut element, "actions");\n            crate::go_json::remap_object_keys(\n                &mut element,\n                &crate::message_attachment::MESSAGE_ATTACHMENT_FIELDS,\n            );	unit	post::attachments
+remap-not-applied-to-attachments	crates/mm-model/src/post.rs	            crate::go_json::remap_object_keys(\n                &mut element,\n                &crate::message_attachment::MESSAGE_ATTACHMENT_FIELDS,\n            );	            let _ = &crate::message_attachment::MESSAGE_ATTACHMENT_FIELDS;	unit	post::attachments
+
+# --- the schemas ---
+schema-drops-a-name	crates/mm-model/src/message_attachment.rs	        "author_name",\n        "author_link",	        "author_link",	unit	message_attachment
+schema-drops-a-nested-arm	crates/mm-model/src/message_attachment.rs	        ("fields", &MESSAGE_ATTACHMENT_FIELD_FIELDS),\n        ("actions", &crate::integration_action::POST_ACTION_FIELDS),	        ("fields", &MESSAGE_ATTACHMENT_FIELD_FIELDS),	unit	post::attachments
+schema-nested-arms-swapped	crates/mm-model/src/message_attachment.rs	        ("fields", &MESSAGE_ATTACHMENT_FIELD_FIELDS),\n        ("actions", &crate::integration_action::POST_ACTION_FIELDS),	        ("fields", &crate::integration_action::POST_ACTION_FIELDS),\n        ("actions", &MESSAGE_ATTACHMENT_FIELD_FIELDS),	unit	post::attachments
+schema-post-action-drops-options	crates/mm-model/src/integration_action.rs	        ("options", &POST_ACTION_OPTIONS_FIELDS),\n        ("integration", &POST_ACTION_INTEGRATION_FIELDS),	        ("integration", &POST_ACTION_INTEGRATION_FIELDS),	unit	post::attachments
+
+# --- no-op controls: these must SURVIVE ---
+control-rename-fold-binding	crates/mm-model/src/go_json.rs	    let mut out = String::with_capacity(name.len());	    let mut folded_out = String::with_capacity(name.len());\n    let mut out = folded_out;\n    let _ = &mut out;	unit	go_json
+control-reorder-independent-schema-tests-helper	crates/mm-model/src/go_json.rs	pub fn non_ascii_field_name(schema: &GoFields) -> Option<&'static str> {	#[allow(clippy::needless_pass_by_value)]\npub fn non_ascii_field_name(schema: &GoFields) -> Option<&'static str> {	unit	go_json

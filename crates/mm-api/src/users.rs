@@ -75,15 +75,40 @@ fn sanitize_options(
 /// populated map is the strict mode. Getting the two backwards blanks every user's own email.
 /// Measured against the running Go server, not inferred.
 ///
+/// Whether this response counts as session activity — the two-valued parameter of
+/// [`respond_with_user`] and [`serve_users`].
+///
+/// Named rather than a `bool` because the interesting half is which handlers pass `Skip`, and a
+/// bare `true` at a call site says nothing about the Go line it is reproducing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ActivityUpdate {
+    /// Go calls `UpdateLastActivityAtIfNeeded` on this path.
+    Touch,
+    /// Go does not — the session's idle clock keeps running.
+    Skip,
+}
+
+/// # The activity write belongs to two of the four callers, not to this helper
+///
+/// Go calls `UpdateLastActivityAtIfNeeded` in `getUser` (api4/user.go:352) and **nowhere else in
+/// this family** — `getUserByUsername` and `getUserByEmail` end without it, though they are
+/// otherwise the same handler. Putting the call in here, where it would read as shared cleanup,
+/// would refresh a session on two routes the Go server leaves alone; a client polling
+/// `/users/email/...` would then keep a session alive here and lose it there. Hence
+/// [`ActivityUpdate`] as a parameter rather than a line in the body.
+///
+/// Its position is Go's: **after** the 304 early return, so a cache hit does not count as
+/// activity, and after the sanitize split.
+///
 /// # Not ported
 ///
-/// `UpdateLastActivityAtIfNeeded` — a write on the read path, deferred with the session cache it
-/// belongs to (D-084). Privacy settings are the stand-ins from `AppState` (D-085).
+/// Privacy settings are the stand-ins from `AppState` (D-085).
 async fn respond_with_user(
     state: &AppState,
     headers: &HeaderMap,
     session: &AuthenticatedSession,
     mut user: User,
+    activity: ActivityUpdate,
 ) -> Result<Response, ApiError> {
     // `c.IsSystemAdmin()` is `SessionHasPermissionTo(manage_system)` (web/context.go:134) — the
     // session's roles, not the user row's.
@@ -129,6 +154,13 @@ async fn respond_with_user(
         );
     }
 
+    if activity == ActivityUpdate::Touch {
+        state
+            .app
+            .update_last_activity_at_if_needed(&session.0)
+            .await;
+    }
+
     // Go writes the etag header and then `json.NewEncoder(w).Encode(user)` (user.go:353).
     //
     // `Encode` appends a newline; `json.Marshal` does not. That one byte was once the entire
@@ -171,7 +203,7 @@ pub async fn get_user_me(
     session: AuthenticatedSession,
 ) -> Result<Response, ApiError> {
     let user = state.app.get_user(&session.0.user_id).await?;
-    respond_with_user(&state, &headers, &session, user).await
+    respond_with_user(&state, &headers, &session, user, ActivityUpdate::Touch).await
 }
 
 /// Port of `getUser` (api4/user.go:305) for an explicit id — `GET /api/v4/users/{user_id}`.
@@ -226,7 +258,7 @@ pub async fn get_user(
         Err(err) => return ApiError::from(err).into_response(),
     };
 
-    match respond_with_user(&state, &headers, &session, user).await {
+    match respond_with_user(&state, &headers, &session, user, ActivityUpdate::Touch).await {
         Ok(response) => response,
         Err(err) => err.into_response(),
     }
@@ -314,7 +346,9 @@ pub async fn get_user_by_username(
     // `UserCanSeeOtherUser(session.UserId, user.Id)`: self is its first branch, and nil
     // restrictions — established by the fast path above — is its second. True by construction
     // here; the remainder was forwarded.
-    match respond_with_user(&state, &headers, &session, user).await {
+    // `getUserByUsername` ends at the encoder — no `UpdateLastActivityAtIfNeeded`, unlike
+    // `getUser` three handlers up. See [`ActivityUpdate`].
+    match respond_with_user(&state, &headers, &session, user, ActivityUpdate::Skip).await {
         Ok(response) => response,
         Err(err) => err.into_response(),
     }
@@ -1433,6 +1467,15 @@ async fn serve_users(
     for user in &mut users {
         user.sanitize_profile(&options, is_admin);
     }
+
+    // `c.App.Srv().Platform().UpdateLastActivityAtIfNeeded(*c.AppContext.Session())`
+    // (api4/user.go:1169) — the second of Go's four call sites, and the second this server
+    // reaches. It sits after the two etag arms, so the 304s returned above do not refresh the
+    // session, exactly as in `respond_with_user`. See [`ActivityUpdate`].
+    state
+        .app
+        .update_last_activity_at_if_needed(&session.0)
+        .await;
 
     let body = serde_json::to_vec(&users).map_err(|err| {
         tracing::error!(error = %err, "failed to serialise the user list");

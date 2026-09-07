@@ -51,7 +51,13 @@ MODELLED = {
     "ServiceSettings": [
         "EnablePostIconOverride", "EnableCustomEmoji", "PostPriority", "AllowSyncedDrafts",
         "EnableBurnOnRead", "EnableIncomingWebhooks", "EnableOutgoingWebhooks",
-        "EnableOAuthServiceProvider",
+        "EnableOAuthServiceProvider", "SessionIdleTimeoutInMinutes",
+        "ExtendSessionLengthWithActivity",
+        # Not a setting Config carries — the `isUpdate` discriminator. `Config.isUpdate` is
+        # `ServiceSettings.SiteURL != nil` (config.go:4289) and two defaults are `!isUpdate`, so
+        # the fixture has to record that a real document *has* the key. The value is "" here and
+        # is never read; it is projected so the presence is measured rather than asserted.
+        "SiteURL",
     ],
     "ComplianceSettings": ["Enable"],
     "ExperimentalSettings": ["RestrictSystemAdmin"],

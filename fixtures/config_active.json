@@ -23,6 +23,9 @@
     "EnableOAuthServiceProvider": true,
     "EnableOutgoingWebhooks": true,
     "EnablePostIconOverride": false,
-    "PostPriority": true
+    "ExtendSessionLengthWithActivity": false,
+    "PostPriority": true,
+    "SessionIdleTimeoutInMinutes": 43200,
+    "SiteURL": ""
   }
 }

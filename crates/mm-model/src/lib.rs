@@ -68,6 +68,8 @@ pub mod fips;
 pub mod github_release;
 pub mod gitlab;
 pub mod go_bytes;
+pub mod go_json;
+pub mod go_path;
 /// Go's `unicode.IsPrint`, `IsLetter` and `IsNumber` as range tables, emitted from the Go
 /// toolchain. Private: `utils` wraps them, and they are Go's `unicode` package rather than a
 /// Mattermost source file. Not to be confused with `unicode_generated`, which is the four CJK

@@ -1,0 +1,48 @@
+# Mutation plan for [D-169]: RemoveSessionCookie, the subpath it scopes the cookie to, and
+# SiteURL becoming a modelled setting.
+#
+#   scripts/mutate-batch.sh scripts/mutations/session-cookie.plan
+#
+# The decisions a reader could plausibly get wrong:
+#
+#   * The cookie is cleared when a token was **present and rejected** — not on every 401, and not
+#     on a 500. Go's branch is `else if h.RequireSession` under `if token != ""`, and a database
+#     failure must not log anybody out.
+#   * `MaxAge: -1` renders as `Max-Age=0`, and an empty Path is **omitted** rather than sent as
+#     `Path=`.
+#   * `GetSubpathFromConfig` reaches "/" from three different places (no SiteURL, an empty parsed
+#     path, a path that cleans away) and "" from a fourth (a parse failure). Collapsing any two is
+#     right today and wrong the moment one moves.
+#   * `path.Clean` runs on the **decoded** path, so `%2F` becomes a real separator.
+#   * `SiteURL`'s presence is `isUpdate`; its value is the subpath. An `Option<String>` flattened
+#     to `String` makes every document look like a fresh install.
+#
+# The last two lines are the no-op controls and must SURVIVE.
+
+# --- the subpath ---
+subpath-parse-failure-becomes-root	crates/mm-app/src/config.rs	        let Ok(url) = mm_model::go_url::go_parse(site_url) else {\n            // Go: `return "", errors.Wrap(err, ...)`, and the caller drops the error.\n            return String::new();	        let Ok(url) = mm_model::go_url::go_parse(site_url) else {\n            // Go: `return "", errors.Wrap(err, ...)`, and the caller drops the error.\n            return "/".to_owned();	unit	config::
+subpath-absent-site-url-becomes-empty	crates/mm-app/src/config.rs	        let Some(site_url) = self.site_url.as_deref() else {\n            return "/".to_owned();	        let Some(site_url) = self.site_url.as_deref() else {\n            return String::new();	unit	config::
+subpath-empty-path-is-not-special-cased	crates/mm-app/src/config.rs	        if url.path.is_empty() {\n            return "/".to_owned();\n        }	        if false {\n            return "/".to_owned();\n        }	unit	config::
+subpath-skips-the-clean	crates/mm-app/src/config.rs	        mm_model::go_path::clean(&String::from_utf8_lossy(&url.path))	        String::from_utf8_lossy(&url.path).into_owned()	unit	config::
+subpath-cleans-the-raw-path	crates/mm-app/src/config.rs	        mm_model::go_path::clean(&String::from_utf8_lossy(&url.path))	        mm_model::go_path::clean(&String::from_utf8_lossy(&url.raw_path))	unit	config::
+
+# --- the cookie rendering ---
+cookie-max-age-is-minus-one	crates/mm-api/src/auth.rs	    cookie.push_str("; Max-Age=0; HttpOnly");	    cookie.push_str("; Max-Age=-1; HttpOnly");	api	session_activity
+cookie-empty-path-is-emitted	crates/mm-api/src/auth.rs	    if !path.is_empty() {\n        cookie.push_str("; Path=");	    if true {\n        cookie.push_str("; Path=");	unit	auth::
+cookie-drops-httponly	crates/mm-api/src/auth.rs	    cookie.push_str("; Max-Age=0; HttpOnly");	    cookie.push_str("; Max-Age=0");	api	session_activity
+cookie-path-sanitizer-keeps-semicolons	crates/mm-api/src/auth.rs	        .filter(|&b| (0x20..0x7f).contains(&b) && b != b';')	        .filter(|&b| (0x20..0x7f).contains(&b))	unit	auth::
+cookie-path-sanitizer-keeps-del	crates/mm-api/src/auth.rs	        .filter(|&b| (0x20..0x7f).contains(&b) && b != b';')	        .filter(|&b| (0x20..=0x7f).contains(&b) && b != b';')	unit	auth::
+
+# --- which branch clears it ---
+cookie-cleared-when-no-token-was-sent	crates/mm-api/src/auth.rs	            error: ApiError::unauthenticated(),\n            clear_session_cookie: None,	            error: ApiError::unauthenticated(),\n            clear_session_cookie: Some("/".to_owned()),	api	session_activity
+cookie-cleared-on-a-500	crates/mm-api/src/auth.rs	                error: ApiError::from(err),\n                clear_session_cookie: None,	                error: ApiError::from(err),\n                clear_session_cookie: Some(subpath()),	unit	auth::
+cookie-never-cleared	crates/mm-api/src/auth.rs	                clear_session_cookie: Some(subpath()),\n            }\n        }\n    }	                clear_session_cookie: None,\n            }\n        }\n    }	api	session_activity
+auth-500-guard-inverted	crates/mm-api/src/auth.rs	        if err.status_code == 500 {	        if err.status_code != 500 {	unit	auth::
+
+# --- SiteURL as a setting ---
+config-site-url-not-read-from-the-document	crates/mm-app/src/config.rs	            site_url: service.site_url,	            site_url: default.site_url,	unit	config::
+config-site-url-env-overrides-nothing	crates/mm-app/src/config.rs	            site_url: lookup("MM_SERVICESETTINGS_SITEURL").or(default.site_url),	            site_url: default.site_url,	unit	config::
+
+# --- no-op controls: these must SURVIVE ---
+control-rename-cookie-binding	crates/mm-api/src/auth.rs	    let path = sanitize_cookie_path(subpath);	    let sanitized = sanitize_cookie_path(subpath);\n    let path = sanitized;	unit	auth::
+control-reorder-independent-subpath-locals	crates/mm-app/src/config.rs	        let Some(site_url) = self.site_url.as_deref() else {	        let _unused_marker = ();\n        let Some(site_url) = self.site_url.as_deref() else {	unit	config::

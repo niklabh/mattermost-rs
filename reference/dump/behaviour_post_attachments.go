@@ -98,9 +98,22 @@ func postAttachmentsAll() []postAttachmentsCase {
 			`"thumb_url":"https://th.example.com","footer":"foot",` +
 			`"footer_icon":"https://fi.example.com","ts":"1700000000"}]}}`},
 		{"unknown_keys_ignored", `{"props":{"attachments":[{"title":"t","nope":1,"deeper":{"a":[1]}}]}}`},
-		// encoding/json matches struct fields case-insensitively; serde does not. Crate-wide
-		// divergence, measured here because this is where a decode of client data happens.
+		// encoding/json matches struct fields case-insensitively; serde does not. Measured here
+		// because this is where a decode of client data happens — [D-040], closed 2026-09-06 by
+		// crates/mm-model/src/go_json.rs. The nested cases below are what prove the port recurses:
+		// a folded key naming a nested array, and folded keys *inside* it, at two depths.
 		{"case_insensitive_keys", `{"props":{"attachments":[{"Title":"t","TEXT":"x"}]}}`},
+		{"case_insensitive_nested_fields", `{"props":{"attachments":[{"FIELDS":[{"TITLE":"ft","Value":"fv","SHORT":true}]}]}}`},
+		{"case_insensitive_nested_actions", `{"props":{"attachments":[{"Actions":[{"NAME":"n","Type":"button","Integration":{"URL":"https://x.example.com"}}]}]}}`},
+		{"case_insensitive_deep_options", `{"props":{"attachments":[{"ACTIONS":[{"name":"n","OPTIONS":[{"TEXT":"o","Value":"v"}]}]}]}}`},
+		{"case_insensitive_exact_wins", `{"props":{"attachments":[{"title":"exact","TiTlE":"folded"}]}}`},
+		{"case_insensitive_unknown_stays_unknown", `{"props":{"attachments":[{"TITLEX":"x","authorname":"a"}]}}`},
+		// A nil element under a *folded* key. The Rust port strips nils before decoding, because
+		// `Vec<PostAction>` cannot hold one where Go's `[]*PostAction` can — and that strip looks
+		// for the exact key `actions`. So this case pins the ORDER of the two steps: remap first,
+		// strip second. Reversed, the strip finds no `actions`, the nil survives into the decode
+		// and the whole attachment is dropped.
+		{"case_insensitive_nil_action", `{"props":{"attachments":[{"Actions":[null,{"name":"n"}]}]}}`},
 		{"duplicate_keys_last_wins", `{"props":{"attachments":[{"title":"a","title":"b"}]}}`},
 
 		// A type error anywhere in the element drops the whole element.
