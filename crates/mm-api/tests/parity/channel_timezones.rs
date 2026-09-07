@@ -289,35 +289,57 @@ async fn a_malformed_channel_id_is_a_400_on_both() {
     let go = assert_error_bodies_match_except_known_gaps(&go_body, &rs_body, path);
     assert_eq!(go["id"], "api.context.invalid_url_param.app_error");
 }
-
-/// `/api/v4/system/timezones` is a different subtree and must stay Go's — the one path this
-/// route's name could plausibly have been confused with.
+/// `/api/v4/system/timezones` is a **different route**, and since 2026-09-07 both are ours.
+///
+/// This test used to assert that the system list was still forwarded — a canary for the two paths
+/// not colliding, which worked only while one of them was Go's. Now that both are answered here,
+/// the collision it was guarding against is a live possibility rather than a hypothetical, so the
+/// assertion is the stronger one: the two routes return **different** bodies, and the system one
+/// returns the global table rather than this channel's members' zones.
 #[tokio::test]
-async fn the_system_timezone_route_is_still_forwarded() {
+async fn the_system_timezone_route_is_a_different_answer() {
     if !stack_enabled() {
         return;
     }
     let client = client();
     let token = go_minted_token(&client).await;
-    let _ = fixture(&client, &token).await;
+    let fixture = fixture(&client, &token).await;
 
-    for base in [GO, RUST] {
+    let get = async |base: &str, path: &str| {
         let response = client
-            .get(format!("{base}/api/v4/system/timezones"))
+            .get(format!("{base}{path}"))
             .header("Authorization", format!("Bearer {token}"))
             .send()
             .await
             .expect("reachable");
-        assert_eq!(response.status(), 200, "{base}");
-        if base == RUST {
-            assert_eq!(
-                response
-                    .headers()
-                    .get("x-mmrs-served-by")
-                    .and_then(|v| v.to_str().ok()),
-                Some("go"),
-                "the system timezone list is not this route"
-            );
-        }
-    }
+        assert_eq!(response.status(), 200, "{base}{path}");
+        response.bytes().await.expect("reads").to_vec()
+    };
+
+    let system_path = "/api/v4/system/timezones";
+    let channel_path = format!("/api/v4/channels/{}/timezones", fixture.channel_id);
+
+    let system = get(RUST, system_path).await;
+    assert_eq!(
+        system,
+        get(GO, system_path).await,
+        "the system list must still match Go's"
+    );
+
+    let channel_zones = get(RUST, &channel_path).await;
+    assert_ne!(
+        String::from_utf8_lossy(&system),
+        String::from_utf8_lossy(&channel_zones),
+        "the global table and this channel's members' zones must not be the same answer"
+    );
+
+    let system: Vec<String> = serde_json::from_slice(&system).expect("an array of strings");
+    let channel_zones: Vec<String> =
+        serde_json::from_slice(&channel_zones).expect("an array of strings");
+    assert!(
+        system.len() > channel_zones.len(),
+        "592 supported zones against a handful of members': {} vs {}",
+        system.len(),
+        channel_zones.len()
+    );
 }

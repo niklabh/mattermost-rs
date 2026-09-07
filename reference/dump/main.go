@@ -1103,6 +1103,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err := writeRoundOffBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: round-off behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+
 	if err := writeJSONFoldBehaviourFixture(*out); err != nil {
 		fmt.Fprintf(os.Stderr, "FAIL: json fold behaviour fixture: %v\n", err)
 		os.Exit(1)

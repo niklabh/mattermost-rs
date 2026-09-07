@@ -249,6 +249,13 @@ pub trait TeamStore {
         &self,
         opts: &TeamSearch,
     ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
+
+    /// Port of `SqlTeamStore.GetAll` (team_store.go:637) — every team, deleted ones included.
+    ///
+    /// `teamsQuery` with nothing but `ORDER BY DisplayName`: no `DeleteAt` predicate, no paging,
+    /// no filter. `App.GetAllTeams` is a straight pass-through, and `GetTeamsUsage` is the caller
+    /// that needs it.
+    fn get_all(&self) -> impl std::future::Future<Output = Result<Vec<Team>, StoreError>> + Send;
 }
 
 /// Postgres-backed implementation.
@@ -355,6 +362,11 @@ impl TeamStore for SqlTeamStore {
     #[tracing::instrument(skip_all)]
     async fn analytics_team_count(&self, opts: &TeamSearch) -> Result<i64, StoreError> {
         analytics_team_count(&self.pool, opts).await
+    }
+
+    #[tracing::instrument(skip_all, fields(found))]
+    async fn get_all(&self) -> Result<Vec<Team>, StoreError> {
+        get_all(&self.pool).await
     }
 
     #[tracing::instrument(skip_all, fields(asked = ids.len(), found))]
@@ -1480,6 +1492,65 @@ pub async fn analytics_team_count(pool: &PgPool, opts: &TeamSearch) -> Result<i6
         context: "failed to count Teams".to_owned(),
         source,
     })
+}
+
+/// Port of `SqlTeamStore.GetAll` (team_store.go:637).
+///
+/// # The whole table, in display-name order
+///
+/// There is no `WHERE`. A soft-deleted team is in this result, which is not incidental: the only
+/// migrated caller, `App.GetTeamsUsage`, counts precisely the teams with `DeleteAt > 0`, so a
+/// helpful `deleteat = 0` added here would make that counter permanently zero.
+///
+/// # `ORDER BY DisplayName` alone
+///
+/// Go sorts on a non-unique column with no tiebreak, so two teams sharing a display name have no
+/// defined order in either server. Reproduced verbatim; adding `Id` would make our order more
+/// defined than Go's, which is a divergence that surfaces as a flake elsewhere. See the same note
+/// on the audit query.
+pub async fn get_all(pool: &PgPool) -> Result<Vec<Team>, StoreError> {
+    let rows = sqlx::query_as!(
+        TeamRow,
+        r#"
+        SELECT t.id,
+               t.createat,
+               t.updateat,
+               t.deleteat,
+               t.displayname,
+               t.name,
+               t.description,
+               t.email,
+               t.type::text AS "team_type",
+               t.companyname,
+               t.alloweddomains,
+               t.inviteid,
+               t.allowopeninvite,
+               t.lastteamiconupdate,
+               t.schemeid,
+               t.groupconstrained,
+               t.cloudlimitsarchived,
+               EXISTS (
+                   SELECT 1 FROM accesscontrolpolicies acp
+                    WHERE acp.id = t.id AND acp.type = 'team'
+               ) AS "policy_enforced!",
+               COALESCE((
+                   SELECT acp.active FROM accesscontrolpolicies acp
+                    WHERE acp.id = t.id AND acp.type = 'team' AND acp.active = TRUE
+                    LIMIT 1
+               ), false) AS "policy_is_active!"
+          FROM teams t
+         ORDER BY t.displayname
+        "#
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: "failed to find Teams".to_owned(),
+        source,
+    })?;
+
+    tracing::Span::current().record("found", rows.len());
+    Ok(rows.into_iter().map(team_from_row).collect())
 }
 
 #[cfg(test)]

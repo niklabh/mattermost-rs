@@ -18,6 +18,7 @@ pub mod groups;
 pub mod license;
 pub mod limits;
 pub mod oauth;
+pub mod permissions;
 pub mod posts;
 pub mod preferences;
 pub mod proxy;
@@ -26,8 +27,10 @@ pub mod roles;
 pub mod sessions;
 pub mod sidebar;
 pub mod status;
+pub mod system;
 pub mod teams;
 pub mod terms_of_service;
+pub mod usage;
 pub mod users;
 pub mod webhooks;
 
@@ -854,6 +857,58 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/users/{user_id}/teams/{team_id}/channels/categories/{category}",
             partially_migrated_with_ids(&state, get(sidebar::get_category_for_team_for_user)),
+        )
+        // ---- system, usage and permissions (2026-09-07) ----
+        //
+        // Nine of these ten paths have no parameters at all, so nothing about them can collide
+        // with the user/team/channel tree above; `/api/v4/audits` is a literal directly under the
+        // API root, where Go registers it too (`BaseRoutes.APIRoot`, system.go:44).
+        //
+        // `/system/ping` is the one route here registered without `AuthenticatedSession`: Go uses
+        // `api.APIHandler`, so it answers an anonymous request.
+        .route(
+            "/api/v4/system/ping",
+            partially_migrated(get(system::get_system_ping)),
+        )
+        .route(
+            "/api/v4/system/timezones",
+            partially_migrated(get(system::get_supported_timezones)),
+        )
+        .route(
+            "/api/v4/system/schema/version",
+            partially_migrated(get(system::get_applied_schema_migrations)),
+        )
+        // Go registers a GET and a POST on this path; only the GET is migrated, so the POST falls
+        // to `partially_migrated`'s fallback and Go still completes onboarding. That is not a
+        // deferral of convenience: `completeOnboarding` installs marketplace plugins in
+        // goroutines, and there is no plugin host here.
+        .route(
+            "/api/v4/system/onboarding/complete",
+            partially_migrated(get(system::get_onboarding)),
+        )
+        .route(
+            "/api/v4/cluster/status",
+            partially_migrated(get(system::get_cluster_status)),
+        )
+        .route(
+            "/api/v4/audits",
+            partially_migrated(get(audits::get_audits)),
+        )
+        .route(
+            "/api/v4/usage/posts",
+            partially_migrated(get(usage::get_posts_usage)),
+        )
+        .route(
+            "/api/v4/usage/storage",
+            partially_migrated(get(usage::get_storage_usage)),
+        )
+        .route(
+            "/api/v4/usage/teams",
+            partially_migrated(get(usage::get_teams_usage)),
+        )
+        .route(
+            "/api/v4/permissions/ancillary",
+            partially_migrated(post(permissions::append_ancillary_permissions_post)),
         )
         .fallback(proxy::forward_to_go)
         .with_state(state)

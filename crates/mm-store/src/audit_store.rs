@@ -1,8 +1,10 @@
 //! Port of `SqlAuditStore` (channels/store/sqlstore/audit_store.go), `Get` only.
 //!
-//! Ported for `getUserAudits` (api4/user.go:2827) — the webapp's *View Access History* panel. The
-//! write side (`Save`, `PermanentDeleteByUser`) is not ported: nothing migrated writes an audit
-//! row, and `Audits` is append-only from the Go server's side of the shared database.
+//! Ported for `getUserAudits` (api4/user.go:2827) — the webapp's *View Access History* panel —
+//! and for `getAudits` (api4/system.go:44), the system console's server-wide audit log, which is
+//! the same store call with an **empty** user id. The write side (`Save`,
+//! `PermanentDeleteByUser`) is not ported: nothing migrated writes an audit row, and `Audits` is
+//! append-only from the Go server's side of the shared database.
 
 use mm_model::audit::{Audit, Audits};
 use sqlx::PgPool;
@@ -12,9 +14,9 @@ use crate::error::StoreError;
 /// `SqlAuditStore.Get`'s own bound (audit_store.go:54), **not** a page-size default.
 ///
 /// Reached before any query runs and answered with `ErrOutOfBounds`, which the app layer turns
-/// into a 400. Through `getUserAudits` it is unreachable — `web.ParamsFromRequest` clamps
+/// into a 400. Through either audit route it is unreachable — `web.ParamsFromRequest` clamps
 /// `per_page` to 200 first — so it is ported for fidelity and the app layer's 400 has no test
-/// through the route. See `mm_app::audit`.
+/// through a route. See `mm_app::audit`.
 pub const AUDIT_LIMIT_MAXIMUM: i64 = 1000;
 
 /// The subset of Go's `store.AuditStore` (store/store.go) that is ported.
@@ -84,39 +86,69 @@ impl AuditStore for SqlAuditStore {
     /// defined than Go's, which is a divergence that only shows up as a flake somewhere else.
     /// The parity suite compares such a page as a set. See the note in `parity/user_audits.rs`.
     ///
-    /// # The empty-`user_id` branch is not reproduced as a branch
+    /// # The empty-`user_id` branch is real, and it is a *different route*
     ///
-    /// Go drops the `WHERE` entirely when `userId` is empty, returning **every** user's audits.
-    /// `getUserAudits` calls `RequireUserId` first, so nothing reachable passes an empty id; the
-    /// predicate is unconditional here and an empty id simply matches nothing. Turning "no filter"
-    /// into "match nothing" is the safe direction for a table holding other users' IP addresses.
+    /// Go drops the `WHERE` entirely when `userId` is empty (audit_store.go:56), returning
+    /// **every** user's audits. That is not a defensive corner: `getAudits`
+    /// (`GET /api/v4/audits`, the system console's audit log) calls `GetAuditsPage` with an empty
+    /// id precisely to get the unfiltered page, while `getUserAudits`
+    /// (`/users/{user_id}/audits`) passes a `RequireUserId`-checked id.
+    ///
+    /// An earlier port collapsed this to "an empty id matches nothing", on the reasoning that
+    /// nothing reachable passed one. That was true of the only route migrated at the time and
+    /// false of the API: it would have answered `GET /api/v4/audits` with `[]` on a server whose
+    /// audit table has thousands of rows — a wrong answer, not a safe one. The two queries are
+    /// separate constants here rather than one built at runtime, because `query_as!` checks a
+    /// literal and a `format!`ed predicate is exactly where an injection or a typo hides.
     #[tracing::instrument(skip_all, fields(user_id, offset, limit, found))]
     async fn get(&self, user_id: &str, offset: i64, limit: i64) -> Result<Audits, StoreError> {
         if limit > AUDIT_LIMIT_MAXIMUM {
             return Err(StoreError::OutOfBounds { limit });
         }
 
-        let rows = sqlx::query_as!(
-            AuditRow,
-            r#"
-            SELECT id                        AS "id!",
-                   COALESCE(createat, 0)     AS "createat!",
-                   COALESCE(userid, '')      AS "userid!",
-                   COALESCE(action, '')      AS "action!",
-                   COALESCE(extrainfo, '')   AS "extrainfo!",
-                   COALESCE(ipaddress, '')   AS "ipaddress!",
-                   COALESCE(sessionid, '')   AS "sessionid!"
-              FROM audits
-             WHERE userid = $1
-             ORDER BY createat DESC
-             LIMIT $2 OFFSET $3
-            "#,
-            user_id,
-            limit,
-            offset
-        )
-        .fetch_all(&self.pool)
-        .await
+        let rows = if user_id.is_empty() {
+            sqlx::query_as!(
+                AuditRow,
+                r#"
+                SELECT id                        AS "id!",
+                       COALESCE(createat, 0)     AS "createat!",
+                       COALESCE(userid, '')      AS "userid!",
+                       COALESCE(action, '')      AS "action!",
+                       COALESCE(extrainfo, '')   AS "extrainfo!",
+                       COALESCE(ipaddress, '')   AS "ipaddress!",
+                       COALESCE(sessionid, '')   AS "sessionid!"
+                  FROM audits
+                 ORDER BY createat DESC
+                 LIMIT $1 OFFSET $2
+                "#,
+                limit,
+                offset
+            )
+            .fetch_all(&self.pool)
+            .await
+        } else {
+            sqlx::query_as!(
+                AuditRow,
+                r#"
+                SELECT id                        AS "id!",
+                       COALESCE(createat, 0)     AS "createat!",
+                       COALESCE(userid, '')      AS "userid!",
+                       COALESCE(action, '')      AS "action!",
+                       COALESCE(extrainfo, '')   AS "extrainfo!",
+                       COALESCE(ipaddress, '')   AS "ipaddress!",
+                       COALESCE(sessionid, '')   AS "sessionid!"
+                  FROM audits
+                 WHERE userid = $1
+                 ORDER BY createat DESC
+                 LIMIT $2 OFFSET $3
+                "#,
+                user_id,
+                limit,
+                offset
+            )
+            .fetch_all(&self.pool)
+            .await
+        }
         .map_err(|source| StoreError::Db {
             context: format!("failed to get Audit list for userId={user_id}"),
             source,

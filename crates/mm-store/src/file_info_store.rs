@@ -47,6 +47,17 @@ pub trait FileInfoStore {
         &self,
         id: &str,
     ) -> impl std::future::Future<Output = Result<FileInfo, StoreError>> + Send;
+
+    /// Port of `SqlFileInfoStore.GetStorageUsage` (file_info_store.go:739).
+    ///
+    /// Go's signature is `GetStorageUsage(_, includeDeleted bool)` — the **first** parameter is
+    /// unnamed and unused, so `GetStorageUsage(true, false)` in `App.GetStorageUsage` reads as
+    /// though it asked for something it did not. Only the second argument does anything, and it
+    /// is the one this takes.
+    fn get_storage_usage(
+        &self,
+        include_deleted: bool,
+    ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
 }
 
 #[derive(Debug, Clone)]
@@ -61,6 +72,50 @@ impl SqlFileInfoStore {
 }
 
 impl FileInfoStore for SqlFileInfoStore {
+    /// # Two different sources, and the default one is a materialized view
+    ///
+    /// With `includeDeleted` false — the only value `App.GetStorageUsage` passes — Go reads
+    /// `SELECT usage FROM file_stats`, a **materialized view** the Go server refreshes on a
+    /// schedule. So the answer is as stale as the last refresh, on both servers equally, and
+    /// summing `FileInfo.Size` here instead would make us *more* current than Go and produce a
+    /// parity failure that looks like a bug in the sum.
+    ///
+    /// With it true the query is `COALESCE(SUM(Size), 0) FROM FileInfo` — live, and over deleted
+    /// rows as well. Nothing migrated passes true; it is here because the two halves are one
+    /// function in Go and splitting them invites the next caller to guess which it got.
+    ///
+    /// `file_stats` has exactly one row on a migrated schema. `fetch_one` therefore matches Go's
+    /// `Get`, which errors on no rows — an empty view is a broken migration, not an empty server.
+    ///
+    /// # The cast to `bigint` is Go's scan, written down
+    ///
+    /// `SUM(Size)` is `numeric` in Postgres and so is `file_stats.usage`, while Go scans both
+    /// into a plain `int64` and lets `lib/pq` narrow them. sqlx refuses to guess and asks for
+    /// `bigdecimal`; casting in the query is the same narrowing Go's driver performs, at the same
+    /// point, and keeps the compile-time checker. Both servers therefore truncate identically —
+    /// and neither can represent a total above `i64::MAX`, which is nine exabytes of files.
+    #[tracing::instrument(skip_all, fields(include_deleted, bytes))]
+    async fn get_storage_usage(&self, include_deleted: bool) -> Result<i64, StoreError> {
+        let bytes = if include_deleted {
+            sqlx::query_scalar!(
+                r#"SELECT COALESCE(SUM(size), 0)::bigint AS "usage!" FROM fileinfo"#
+            )
+            .fetch_one(&self.pool)
+            .await
+        } else {
+            sqlx::query_scalar!(r#"SELECT COALESCE(usage, 0)::bigint AS "usage!" FROM file_stats"#)
+                .fetch_one(&self.pool)
+                .await
+        }
+        .map_err(|source| StoreError::Db {
+            context: "failed to get storage usage".to_owned(),
+            source,
+        })?;
+
+        tracing::Span::current().record("bytes", bytes);
+        Ok(bytes)
+    }
+
     /// # `ORDER BY CreateAt DESC` is not the order a client sees
     ///
     /// Go sorts newest-first here and then **re-orders the result by `post.FileIds`** in

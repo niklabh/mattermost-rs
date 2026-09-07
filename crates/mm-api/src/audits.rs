@@ -1,9 +1,22 @@
-//! Port of `getUserAudits` (channels/api4/user.go:2827), reached as
-//! `GET /api/v4/users/{user_id}/audits`.
+//! The two routes over the `Audits` table: `getUserAudits` (channels/api4/user.go:2827) at
+//! `GET /api/v4/users/{user_id}/audits`, and `getAudits` (channels/api4/system.go:44) at
+//! `GET /api/v4/audits`.
 //!
-//! The webapp's *Profile → Security → View Access History* panel, and the system console's
-//! per-user activity view. A separate module rather than another handler in `users.rs` because it
-//! is the only route over the `Audits` table and the whole of its store and app layer is new.
+//! The first is the webapp's *Profile → Security → View Access History* panel; the second is the
+//! system console's server-wide audit log. They are the **same app call** with a different user
+//! id — the server-wide one passes the empty string, which the store reads as "no filter".
+//!
+//! # They agree on almost nothing else
+//!
+//! | | `getUserAudits` | `getAudits` |
+//! |---|---|---|
+//! | permission | `edit_other_users`, via `SessionHasPermissionToUser` | `read_audits`, system-scoped |
+//! | user id | `RequireUserId`, `me` resolved | empty, always |
+//! | empty page | `null` | `null` |
+//!
+//! The last row is the one worth checking rather than assuming: both go through
+//! `SqlAuditStore.Get`, whose `var audits model.Audits` is a nil slice, so **both** answer `null`
+//! and not `[]`. See [`encode_audits`].
 //!
 //! # No etag, unlike its neighbours
 //!
@@ -15,7 +28,9 @@
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use mm_model::permission::{PERMISSION_EDIT_OTHER_USERS, make_permission_error};
+use mm_model::permission::{
+    PERMISSION_EDIT_OTHER_USERS, PERMISSION_READ_AUDITS, make_permission_error,
+};
 use mm_model::utils::{AppError, is_valid_id};
 
 use crate::AppState;
@@ -120,6 +135,69 @@ fn encode_audits(audits: &mm_model::audit::Audits) -> Result<Vec<u8>, ApiError> 
             500,
         ))
     })
+}
+
+/// Port of `getAudits` (api4/system.go:44).
+///
+/// # `read_audits` is system-scoped, and it is not a sysconsole permission
+///
+/// `PermissionReadAudits` is one of the original coarse permissions, granted to `system_admin`
+/// only on a stock server. A role holding `sysconsole_read_compliance_custom_policies` — which
+/// *is* how the console usually gates this page — does not get in here.
+///
+/// # No user filter, and that is the difference from its sibling
+///
+/// `GetAuditsPage(c.AppContext, "", page, perPage)` — the empty id is deliberate and the store
+/// drops its `WHERE` for it, returning every user's rows. See
+/// [`mm_store::AuditStore::get`], where the earlier port of that branch was wrong.
+///
+/// # The audit record's two meta keys disagree about the page size
+///
+/// Go records `"page": c.Params.Page` and `"audits_per_page": c.Params.LogsPerPage` — the
+/// **logs** per-page parameter, not the `PerPage` the query actually used (system.go:57-58). We
+/// write no audit rows ([D-087]: the `Audits` table is Go's to write), so nothing here reproduces
+/// it; it is recorded because a reader comparing the two servers' audit logs will notice.
+///
+/// Wire format is `getUserAudits`'s exactly: `json.NewEncoder(w).Encode`, trailing newline, and
+/// `null` for an empty page.
+#[tracing::instrument(skip_all, fields(page, per_page, count))]
+pub async fn get_audits(
+    State(state): State<AppState>,
+    axum::extract::RawQuery(query): axum::extract::RawQuery,
+    session: AuthenticatedSession,
+) -> Result<Response, ApiError> {
+    if !state
+        .app
+        .session_has_permission_to(&session.0, &PERMISSION_READ_AUDITS)
+        .await
+    {
+        return Err(ApiError::from(make_permission_error(
+            &session.0,
+            &[&PERMISSION_READ_AUDITS],
+        )));
+    }
+
+    let page = parse_page(query.as_deref());
+    let per_page = parse_per_page(query.as_deref());
+    tracing::Span::current().record("page", page);
+    tracing::Span::current().record("per_page", per_page);
+
+    // The empty user id is the route. See the store's `get`.
+    let audits = state.app.get_audits_page("", page, per_page).await?;
+    tracing::Span::current().record("count", audits.0.len());
+
+    let mut body = encode_audits(&audits)?;
+    body.push(b'\n');
+
+    Ok((
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
+    )
+        .into_response())
 }
 
 #[cfg(test)]

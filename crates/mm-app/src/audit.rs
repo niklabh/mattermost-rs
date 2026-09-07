@@ -17,6 +17,10 @@ impl App {
     /// `web.ParamsFromRequest`, which clamps `per_page` to 200 and floors `page` at 0, so the
     /// product cannot overflow through the REST API; `i64` here removes even the theoretical
     /// question without changing any reachable answer.
+    ///
+    /// **An empty `user_id` is not a bug here.** `getAudits` (`GET /api/v4/audits`) passes one
+    /// deliberately, and the store answers it with the unfiltered page — see
+    /// [`mm_store::AuditStore::get`]. Only `getUserAudits` narrows by user.
     #[tracing::instrument(skip_all, fields(user_id, page, per_page, found))]
     pub async fn get_audits_page(
         &self,
@@ -38,10 +42,9 @@ impl App {
 
 /// Go's `switch` on the store error (audit.go:62-69), which is two ids and two statuses.
 ///
-/// `app.audit.get.limit.app_error` / 400 is unreachable through `getUserAudits` — `per_page` is
-/// clamped to 200 long before the store's own 1000 — so it is ported for fidelity and has no test
-/// through the route. It is *not* dead in principle: `GetAuditsPage` is also called by the
-/// system-console log routes, which are not migrated.
+/// `app.audit.get.limit.app_error` / 400 is unreachable through either audit route — `per_page`
+/// is clamped to 200 long before the store's own 1000 — so it is ported for fidelity and has no
+/// test through a route.
 fn audits_error(err: StoreError) -> Box<AppError> {
     if err.is_out_of_bounds() {
         return AppError::boxed(

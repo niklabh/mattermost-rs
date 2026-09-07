@@ -1,0 +1,65 @@
+# Mutation plan for the 2026-09-07 system/usage/permissions group — ten routes.
+#
+#   scripts/mutate-batch.sh scripts/mutations/system-usage.plan
+#
+# The decisions a reader could plausibly get wrong:
+#
+#   * `GetAuditsPage("")` is the **unfiltered** page, not a defensive no-op. An earlier port made
+#     an empty user id match nothing, which would have answered `GET /api/v4/audits` with `[]` on
+#     a server holding thousands of rows.
+#   * `UsersPostsOnly` is **two** predicates — an exact empty `Type` *and* the bot exclusion — and
+#     it is not the same as `ExcludeSystemPosts`, which is `Type NOT LIKE 'system_%'`.
+#   * The rounding resolution is an **upper bound**: `min(zeroes, resolution)`. Posts round at 3
+#     and storage at 8, in two different layers.
+#   * The `-9..=9` window returns `n` only when the resolution is 0, and `0` otherwise.
+#   * `getSystemPing`'s five boundaries each compare a literal: `"true"`, non-empty, `> 0`.
+#   * `getOnboarding` **synthesises** `"false"` for a missing row rather than 404ing, and the
+#     value is a string.
+#   * Three different writers across the ten routes: `model.ToJSON` (no newline),
+#     `json.Marshal` + `Write` (no newline) and `json.NewEncoder(w).Encode` (newline).
+#
+# The last two lines are the no-op controls and must SURVIVE.
+audits-empty-id-matches-nothing	crates/mm-store/src/audit_store.rs	        let rows = if user_id.is_empty() {	        let rows = if false {	api	system_usage
+audits-unfiltered-query-is-always-used	crates/mm-store/src/audit_store.rs	        let rows = if user_id.is_empty() {	        let rows = if true {	api	user_audits
+audits-page-ignores-the-permission	crates/mm-api/src/audits.rs	        .session_has_permission_to(&session.0, &PERMISSION_READ_AUDITS)\n        .await\n    {	        .session_has_permission_to(&session.0, &PERMISSION_READ_AUDITS)\n        .await\n    {\n        // mutated\n    }\n    if false {	api	system_usage
+audits-server-wide-passes-the-session-user	crates/mm-api/src/audits.rs	    let audits = state.app.get_audits_page("", page, per_page).await?;	    let audits = state\n        .app\n        .get_audits_page(&session.0.user_id, page, per_page)\n        .await?;	api	system_usage
+posts-usage-counts-system-posts	crates/mm-store/src/post_store.rs	             WHERE p.type = ''\n               AND p.userid NOT IN (SELECT userid FROM bots)\n               AND p.deleteat = 0	             WHERE p.userid NOT IN (SELECT userid FROM bots)\n               AND p.deleteat = 0	api	system_usage
+posts-usage-counts-bot-posts	crates/mm-store/src/post_store.rs	               AND p.userid NOT IN (SELECT userid FROM bots)	               AND p.userid IN (SELECT userid FROM bots)	api	system_usage
+posts-usage-counts-deleted-posts	crates/mm-store/src/post_store.rs	               AND p.userid NOT IN (SELECT userid FROM bots)\n               AND p.deleteat = 0	               AND p.userid NOT IN (SELECT userid FROM bots)	api	system_usage
+posts-usage-uses-the-system-prefix-instead	crates/mm-store/src/post_store.rs	             WHERE p.type = ''	             WHERE p.type NOT LIKE 'system_%'	api	system_usage
+round-off-posts-resolution-is-eight	crates/mm-app/src/usage.rs	const POSTS_RESOLUTION: i32 = 3;	const POSTS_RESOLUTION: i32 = 8;	unit	usage::
+round-off-storage-resolution-is-three	crates/mm-api/src/usage.rs	const STORAGE_RESOLUTION: i32 = 8;	const STORAGE_RESOLUTION: i32 = 3;	unit	usage::
+round-off-window-returns-n	crates/mm-app/src/utils.rs	        if resolution == 0 {\n            return n as i64;\n        }\n        return 0;	        return n as i64;	unit	utils::
+round-off-window-is-exclusive	crates/mm-app/src/utils.rs	    if (-9.0..=9.0).contains(&n) {	    if (-9.0..9.0).contains(&n) {	unit	utils::
+round-off-negative-resolution-is-not-clamped	crates/mm-app/src/utils.rs	    let mut resolution = min_resolution.max(0);	    let mut resolution = min_resolution;	unit	utils::
+round-off-magnitude-does-not-clamp	crates/mm-app/src/utils.rs	    resolution = zeroes.min(resolution);	    resolution = resolution;	unit	utils::
+round-off-magnitude-clamps-upward	crates/mm-app/src/utils.rs	    resolution = zeroes.min(resolution);	    resolution = zeroes.max(resolution);	unit	utils::
+round-off-magnitude-is-off-by-one	crates/mm-app/src/utils.rs	    while zeroes < 22 && x >= bound {	    while zeroes < 22 && x > bound {	unit	utils::
+teams-usage-counts-deleted-as-active	crates/mm-app/src/usage.rs	            include_deleted: Some(false),	            include_deleted: Some(true),	api	system_usage
+teams-usage-archived-drops-the-delete-check	crates/mm-app/src/usage.rs	    team.delete_at > 0 && team.cloud_limits_archived	    team.cloud_limits_archived	unit	usage::
+teams-usage-archived-drops-the-flag-check	crates/mm-app/src/usage.rs	    team.delete_at > 0 && team.cloud_limits_archived	    team.delete_at > 0	api	system_usage
+teams-get-all-filters-deleted	crates/mm-store/src/team_store.rs	          FROM teams t\n         ORDER BY t.displayname\n        "#	          FROM teams t\n         WHERE t.deleteat = 0\n         ORDER BY t.displayname\n        "#	api	system_usage
+storage-usage-includes-deleted	crates/mm-app/src/usage.rs	            .get_storage_usage(false)	            .get_storage_usage(true)	api	system_usage
+storage-usage-branch-inverted	crates/mm-store/src/file_info_store.rs	        let bytes = if include_deleted {	        let bytes = if !include_deleted {	api	system_usage
+ping-serves-the-extended-check	crates/mm-api/src/system.rs	    if get_server_status == Some("true") {	    if false {	api	system_usage
+ping-forwards-any-get-server-status	crates/mm-api/src/system.rs	    if get_server_status == Some("true") {	    if get_server_status.is_some() {	api	system_usage
+ping-forwards-an-empty-device-id	crates/mm-api/src/system.rs	    if device_id.is_some_and(|id| !id.is_empty()) {	    if device_id.is_some() {	api	system_usage
+ping-serves-a-device-id	crates/mm-api/src/system.rs	    if device_id.is_some_and(|id| !id.is_empty()) {	    if false {	api	system_usage
+ping-goroutine-threshold-is-not-strict	crates/mm-api/src/system.rs	    if goroutine_health_threshold > 0 {	    if goroutine_health_threshold >= 0 {	unit	system::
+ping-goroutine-threshold-ignored	crates/mm-api/src/system.rs	    if goroutine_health_threshold > 0 {	    if false {	unit	system::
+ping-search-backend-inverted	crates/mm-api/src/system.rs	    if disable_database_search {\n        "none"\n    } else {\n        "database"\n    }	    if disable_database_search {\n        "database"\n    } else {\n        "none"\n    }	api	system_usage
+ping-emits-the-test-feature-flag	crates/mm-api/src/system.rs	    if config.feature_flag_test_feature != "off" {	    if true {	api	system_usage
+ping-body-gains-a-trailing-newline	crates/mm-api/src/system.rs	    match serde_json::to_vec(&body) {	    match serde_json::to_vec(&body).map(|mut b| {\n        b.push(b'\\n');\n        b\n    }) {	api	system_usage
+onboarding-missing-row-is-true	crates/mm-app/src/system.rs	        value: stored.unwrap_or_else(|| "false".to_owned()),	        value: stored.unwrap_or_else(|| "true".to_owned()),	api	system_usage
+onboarding-stored-value-is-overridden	crates/mm-app/src/system.rs	        value: stored.unwrap_or_else(|| "false".to_owned()),	        value: "false".to_owned(),	unit	system::
+onboarding-name-is-the-go-identifier	crates/mm-app/src/system.rs	        name: SYSTEM_FIRST_ADMIN_SETUP_COMPLETE.to_owned(),	        name: "FirstAdminCompleteSetup".to_owned(),	api	system_usage
+onboarding-body-loses-its-newline	crates/mm-api/src/system.rs	    body.push(b'\\n');\n\n    Ok((\n        StatusCode::OK,\n        [\n            ("Content-Type", "application/json"),\n            ("x-mmrs-served-by", "rust"),\n        ],\n        body,\n    )\n        .into_response())\n}\n\n/// Port of `getClusterStatus`	    Ok((\n        StatusCode::OK,\n        [\n            ("Content-Type", "application/json"),\n            ("x-mmrs-served-by", "rust"),\n        ],\n        body,\n    )\n        .into_response())\n}\n\n/// Port of `getClusterStatus`	api	system_usage
+migrations-ordered-ascending	crates/mm-store/src/lib.rs	FROM db_migrations ORDER BY version DESC	FROM db_migrations ORDER BY version ASC	api	system_usage
+migrations-permission-is-all-not-any	crates/mm-api/src/system.rs	        .session_has_permission_to_any(&session.0, SYSCONSOLE_READ_PERMISSIONS)	        .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)	api	system_usage
+cluster-status-is-null	crates/mm-app/src/system.rs	    pub async fn get_cluster_status(&self) -> AppResult<Vec<ClusterInfo>> {\n        Ok(Vec::new())	    pub async fn get_cluster_status(&self) -> AppResult<Vec<ClusterInfo>> {\n        Ok(vec![ClusterInfo::default()])	api	system_usage
+cluster-status-licence-gate-inverted	crates/mm-app/src/system.rs	        Ok(self.license_state().await? == LicenseState::Unlicensed)	        Ok(self.license_state().await? != LicenseState::Unlicensed)	api	system_usage
+ancillary-empty-list-is-accepted	crates/mm-api/src/permissions.rs	    (!deduped.is_empty()).then_some(deduped)	    Some(deduped)	api	system_usage
+ancillary-input-is-not-deduplicated	crates/mm-api/src/permissions.rs	    let deduped = remove_duplicate_strings_non_sort(&parsed);	    let deduped = parsed;	api	system_usage
+ancillary-output-is-deduplicated	crates/mm-api/src/permissions.rs	    let expanded = add_ancillary_permissions(permissions);	    let expanded = remove_duplicate_strings_non_sort(&add_ancillary_permissions(permissions));	api	system_usage
+control-rename-ping-config-binding	crates/mm-api/src/system.rs	    let config = state.app.config();	    let ping_config = state.app.config();\n    let config = ping_config;	unit	system::
+control-reorder-independent-usage-selects	crates/mm-store/src/post_store.rs	               AND p.userid NOT IN (SELECT userid FROM bots)\n               AND p.deleteat = 0	               AND p.deleteat = 0\n               AND p.userid NOT IN (SELECT userid FROM bots)	api	system_usage

@@ -27,3 +27,4 @@
 
 # Compiled fixture generator (go build ./... in reference/dump drops it here).
 /reference/dump/dump
+__pycache__/

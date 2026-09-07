@@ -196,6 +196,25 @@ pub trait PostStore {
         id: &str,
         opts: GetPostThreadOptions<'_>,
     ) -> impl std::future::Future<Output = Result<PostList, StoreError>> + Send;
+
+    /// Port of `SqlPostStore.AnalyticsPostCount` (post_store.go:2523) for the **one** option set
+    /// any migrated route asks for: `{ExcludeDeleted: true, UsersPostsOnly: true,
+    /// AllowFromCache: true}`, which is what `App.GetPostsUsage` (app/usage.go:15) passes.
+    ///
+    /// Go builds the query from a nine-field `model.PostCountOptions`. Only three of those fields
+    /// are set by anything this server answers, and the other six each add a predicate — a team
+    /// join, a file-or-filenames disjunction, a hashtag test, a `system_%` exclusion and an
+    /// update-at cursor pair. Porting them behind flags would mean `query_as!` could no longer
+    /// check the SQL, since the predicate would have to be assembled at runtime; porting them as
+    /// six more literal queries would mean six untested branches. So the reachable combination is
+    /// one checked literal and the rest arrives with the route that needs it.
+    ///
+    /// `AllowFromCache` is not a query option at all — it is read by the cache layer above the
+    /// store, which we do not have ([D-087]), so it has no effect here and none in the SQL Go
+    /// runs either.
+    fn analytics_posts_usage_count(
+        &self,
+    ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
 }
 
 /// Port of `model.GetPostsOptions` (post.go:456), narrowed to the fields the page branch of
@@ -1223,6 +1242,44 @@ pub(crate) fn post_from_row(row: PostRow) -> Result<Post, StoreError> {
 }
 
 impl PostStore for SqlPostStore {
+    /// `COUNT(*) FROM Posts p WHERE p.Type = '' AND p.UserId NOT IN (SELECT UserId FROM Bots)
+    /// AND p.DeleteAt = 0`.
+    ///
+    /// # `Type = ''` is half of `UsersPostsOnly`, and it is not the same as "not a system post"
+    ///
+    /// The option sets **two** predicates (post_store.go:2534-2539): an exact empty `Type` and
+    /// the bot exclusion. `ExcludeSystemPosts` — a *different* option, unset here — is
+    /// `Type NOT LIKE 'system_%'`. They differ on any post whose type is set but does not start
+    /// with `system_`, which the integrations do write, so collapsing one into the other changes
+    /// the count on a real server.
+    ///
+    /// # The bot exclusion is a subquery, not a join
+    ///
+    /// `NOT IN (SELECT UserId FROM Bots)` — and `Bots.UserId` is `NOT NULL` in the schema, which
+    /// is what makes `NOT IN` safe here: a single NULL in that subquery would make the predicate
+    /// answer `UNKNOWN` for *every* row and return zero posts.
+    #[tracing::instrument(skip_all, fields(count))]
+    async fn analytics_posts_usage_count(&self) -> Result<i64, StoreError> {
+        let count = sqlx::query_scalar!(
+            r#"
+            SELECT COUNT(*) AS "value!"
+              FROM posts p
+             WHERE p.type = ''
+               AND p.userid NOT IN (SELECT userid FROM bots)
+               AND p.deleteat = 0
+            "#
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to count Posts".to_owned(),
+            source,
+        })?;
+
+        tracing::Span::current().record("count", count);
+        Ok(count)
+    }
+
     /// Port of `SqlPostStore.getFlaggedPosts` (post_store.go:535).
     ///
     /// Go builds this one by string substitution rather than with squirrel, and two of its

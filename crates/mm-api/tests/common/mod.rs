@@ -358,8 +358,8 @@ pub async fn create_plain_user(
     // site. It is a `OnceCell`, so this costs nothing after the first caller.
     purge_api_fixtures().await;
 
-    let username = format!("mmrsplain{tag}");
-    let password = "Mmrs-Plain-1234";
+    let username = plain_username(tag);
+    let password = PLAIN_USER_PASSWORD;
 
     let response = client
         .post(format!("{GO}/api/v4/users"))
@@ -393,22 +393,47 @@ pub async fn create_plain_user(
         joined.text().await.unwrap_or_default()
     );
 
+    PlainUser {
+        id,
+        token: login_plain_user(client, tag).await,
+    }
+}
+
+/// The password [`create_plain_user`] sets. Exposed so a fixture can log the same user in again.
+pub const PLAIN_USER_PASSWORD: &str = "Mmrs-Plain-1234";
+
+/// The username [`create_plain_user`] derives from a tag.
+pub fn plain_username(tag: &str) -> String {
+    format!("mmrsplain{tag}")
+}
+
+/// Log a plain user in again, returning a **fresh** token.
+///
+/// # Why a role change needs this
+///
+/// `SessionHasPermissionTo` reads `session.Roles` (web/context.go), not `Users.Roles` — the roles
+/// are copied onto the session row at login and never re-read. So granting a role, by SQL *or*
+/// through `PUT /users/{id}/roles`, leaves every existing token holding the old set, and a fixture
+/// that grants `system_read_only_admin` and reuses its token gets a 403 from **Go**. Measured, in
+/// the 2026-09-07 run; the test looked like a port bug and was a fixture bug.
+pub async fn login_plain_user(client: &reqwest::Client, tag: &str) -> String {
     let login = client
         .post(format!("{GO}/api/v4/users/login"))
-        .json(&serde_json::json!({ "login_id": username, "password": password }))
+        .json(&serde_json::json!({
+            "login_id": plain_username(tag),
+            "password": PLAIN_USER_PASSWORD,
+        }))
         .send()
         .await
         .expect("Go answers");
     assert_eq!(login.status(), 200, "the plain user cannot log in");
-    let token = login
+    login
         .headers()
         .get("token")
         .expect("Go returns a token header")
         .to_str()
         .expect("ASCII")
-        .to_owned();
-
-    PlainUser { id, token }
+        .to_owned()
 }
 
 /// Best-effort teardown; deliberately ignores failures so a panicking test still tries.
@@ -670,7 +695,23 @@ pub async fn fetch_both_stable(
     token: &str,
     path: &str,
 ) -> (Vec<u8>, Vec<u8>) {
-    const ATTEMPTS: u64 = 12;
+    fetch_both_stable_within(client, token, path, 12).await
+}
+
+/// [`fetch_both_stable`] with the retry budget spelled out.
+///
+/// Twelve windows is enough for a list that churns when a test writes to it. It is **not** enough
+/// for `GET /api/v4/audits`, whose page-0 shifts on every login anywhere in this binary — including
+/// the logins other tests are doing concurrently — so that one asks for more. Measured: a no-op
+/// control mutation was reported CAUGHT because this call exhausted its budget, which is the
+/// harness lying about a verdict rather than a port being wrong.
+pub async fn fetch_both_stable_within(
+    client: &reqwest::Client,
+    token: &str,
+    path: &str,
+    attempts: u64,
+) -> (Vec<u8>, Vec<u8>) {
+    let max_attempts = attempts;
 
     let get = async |base: &str| {
         let response = client
@@ -687,7 +728,7 @@ pub async fn fetch_both_stable(
     };
 
     let mut last = (Vec::new(), Vec::new(), Vec::new());
-    for attempt in 1..=ATTEMPTS {
+    for attempt in 1..=max_attempts {
         let before = get(GO).await;
         let ours = get(RUST).await;
         let after = get(GO).await;
@@ -1393,4 +1434,184 @@ pub async fn create_direct_channel(
     );
     let created: serde_json::Value = response.json().await.expect("the channel decodes");
     created["id"].as_str().expect("an id").to_owned()
+}
+
+/// Clear the Go server's in-process caches through `POST /api/v4/caches/invalidate`.
+///
+/// # Why a parity test is allowed to do this
+///
+/// [D-087] says the Rust side never caches and is therefore never staler than Go. Most routes
+/// that would expose the difference read a cache Go refreshes on write, so the window closes on
+/// its own within a request or two. `GET /api/v4/usage/posts` does not: its count sits in a
+/// **size-1, thirty-minute** cache (`localcachelayer/layer.go:342`) that nothing invalidates on a
+/// new post, so a stack that has been up for a while answers with a number that can be minutes or
+/// half an hour old. Measured on this deployment: Go said `400` where the table held `18`.
+///
+/// A byte comparison against that is not a test of the port — it is a test of when Go last
+/// looked. Clearing the cache first makes the comparison about the query, which is the thing that
+/// can actually be wrong.
+///
+/// # It is safe for the rest of the suite
+///
+/// Invalidation can only make Go **fresher**, and every other staleness assertion here is
+/// one-sided in that direction — `users_me` asserts Go's `update_at` "can be stale but never
+/// ahead of the row". A fresher Go satisfies all of them.
+///
+/// Requires a system-admin token. Panics if Go refuses, because a silently skipped invalidation
+/// would turn this into a flake rather than a failure.
+pub async fn invalidate_go_caches(client: &reqwest::Client, admin_token: &str) {
+    let response = client
+        .post(format!("{GO}/api/v4/caches/invalidate"))
+        .header("Authorization", format!("Bearer {admin_token}"))
+        .send()
+        .await
+        .expect("Go answers");
+    assert_eq!(
+        response.status(),
+        200,
+        "cache invalidation needs a system admin: {}",
+        response.text().await.unwrap_or_default()
+    );
+}
+
+/// Open a one-connection pool on `DATABASE_URL`, or [`None`] when the suite is running without
+/// one.
+///
+/// Five helpers below plant rows no REST call can create. They each opened their own pool; this
+/// is that, once.
+async fn fixture_pool() -> Option<sqlx::PgPool> {
+    let url = std::env::var("DATABASE_URL").ok()?;
+    sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .acquire_timeout(std::time::Duration::from_secs(5))
+        .connect(&url)
+        .await
+        .ok()
+}
+
+/// Set `Teams.CloudLimitsArchived` directly.
+///
+/// **No REST route writes this column.** It is set by the cloud billing job when a team is
+/// archived for exceeding a plan's team limit, and `GET /api/v4/usage/teams` reports the count of
+/// such teams. Without planting one, the archived counter is zero on every read and three separate
+/// mutations of its predicate survive the whole suite — measured, in the 2026-09-07 run.
+pub async fn set_team_cloud_limits_archived(team_id: &str, archived: bool) -> bool {
+    let Some(pool) = fixture_pool().await else {
+        return false;
+    };
+    sqlx::query("UPDATE teams SET cloudlimitsarchived = $2 WHERE id = $1")
+        .bind(team_id)
+        .bind(archived)
+        .execute(&pool)
+        .await
+        .expect("the fixture team's archived flag is written");
+    true
+}
+
+/// Insert a post whose `Type` is set but is **not** a `system_` type, returning its id.
+///
+/// `UsersPostsOnly` is `Type = '' AND UserId NOT IN (SELECT UserId FROM Bots)`, while the
+/// neighbouring `ExcludeSystemPosts` option is `Type NOT LIKE 'system_%'`. On a server whose posts
+/// are all either untyped or `system_*`, those two predicates return the same count and a mutation
+/// swapping them survives. No REST route creates a post with an arbitrary custom type — the API
+/// rejects unknown types — so the row is planted directly.
+///
+/// The caller must delete it; leaving it behind would change the post count every other suite sees.
+pub async fn plant_custom_typed_post(
+    channel_id: &str,
+    user_id: &str,
+    post_type: &str,
+) -> Option<String> {
+    let pool = fixture_pool().await?;
+    let id: String = format!("mmrscustomtype{:012}", rand_suffix());
+    let now = i64::try_from(rand_suffix()).unwrap_or(0) + 1_788_000_000_000;
+    sqlx::query(
+        "INSERT INTO posts (id, createat, updateat, deleteat, userid, channelid, rootid, \
+         originalid, message, type, props, hashtags, filenames, fileids, hasreactions, editat, \
+         ispinned, remoteid) \
+         VALUES ($1, $2, $2, 0, $3, $4, '', '', 'planted by the parity suite', $5, '{}'::jsonb, \
+         '', '[]', '[]', false, 0, false, NULL)",
+    )
+    .bind(&id)
+    .bind(now)
+    .bind(user_id)
+    .bind(channel_id)
+    .bind(post_type)
+    .execute(&pool)
+    .await
+    .expect("the custom-typed post is written");
+    Some(id)
+}
+
+/// Delete a row planted by [`plant_custom_typed_post`].
+pub async fn delete_planted_post(post_id: &str) {
+    let Some(pool) = fixture_pool().await else {
+        return;
+    };
+    sqlx::query("DELETE FROM posts WHERE id = $1")
+        .bind(post_id)
+        .execute(&pool)
+        .await
+        .expect("the planted post is removed");
+}
+
+/// Read a `Systems` row, so a fixture can restore whatever was there.
+///
+/// Three states, and the fixture needs all three: no row at all, a row whose `Value` is SQL NULL,
+/// and a row with text. The outer `Option` is "the suite has no database"; the middle one is
+/// "no row"; the inner one is the nullable column.
+pub async fn system_value(name: &str) -> Option<Option<Option<String>>> {
+    let pool = fixture_pool().await?;
+    let row: Option<(Option<String>,)> =
+        sqlx::query_as("SELECT value FROM systems WHERE name = $1")
+            .bind(name)
+            .fetch_optional(&pool)
+            .await
+            .expect("the systems table is readable");
+    Some(row.map(|row| row.0))
+}
+
+/// Set — or, with [`None`], delete — a `Systems` row.
+///
+/// `getOnboarding` synthesises `"false"` when the row is **absent**, and a real server already has
+/// the row set to `"false"`, so the synthesised branch and the stored branch produce the same bytes
+/// and two mutations of the decision survive. Planting a distinctive value is the only way for the
+/// route to tell them apart. Go reads this through — there is no local cache layer over
+/// `SystemStore.GetByName` — so both servers see the change immediately.
+pub async fn set_system_value(name: &str, value: Option<&str>) -> bool {
+    let Some(pool) = fixture_pool().await else {
+        return false;
+    };
+    match value {
+        Some(value) => {
+            sqlx::query(
+                "INSERT INTO systems (name, value) VALUES ($1, $2) \
+                 ON CONFLICT (name) DO UPDATE SET value = EXCLUDED.value",
+            )
+            .bind(name)
+            .bind(value)
+            .execute(&pool)
+            .await
+            .expect("the systems row is written");
+        }
+        None => {
+            sqlx::query("DELETE FROM systems WHERE name = $1")
+                .bind(name)
+                .execute(&pool)
+                .await
+                .expect("the systems row is removed");
+        }
+    }
+    true
+}
+
+/// A monotonic-enough suffix for a planted row id, and — offset into 2026 — its `CreateAt`.
+///
+/// Not `rand`: the suite is deterministic everywhere else, and a clock in microseconds is unique
+/// enough for a row this test deletes moments later.
+fn rand_suffix() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_micros() as u64 % 1_000_000_000_000)
+        .unwrap_or(0)
 }

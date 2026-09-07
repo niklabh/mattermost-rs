@@ -1,0 +1,5192 @@
+{
+    "log10_magnitude": [
+        {
+            "n": 10,
+            "zeroes": 1
+        },
+        {
+            "n": 11,
+            "zeroes": 1
+        },
+        {
+            "n": 99,
+            "zeroes": 1
+        },
+        {
+            "n": 100,
+            "zeroes": 2
+        },
+        {
+            "n": 101,
+            "zeroes": 2
+        },
+        {
+            "n": 999,
+            "zeroes": 2
+        },
+        {
+            "n": 1000,
+            "zeroes": 3
+        },
+        {
+            "n": 1001,
+            "zeroes": 3
+        },
+        {
+            "n": 1099,
+            "zeroes": 3
+        },
+        {
+            "n": 1100,
+            "zeroes": 3
+        },
+        {
+            "n": 9999,
+            "zeroes": 3
+        },
+        {
+            "n": 10000,
+            "zeroes": 4
+        },
+        {
+            "n": 10001,
+            "zeroes": 4
+        },
+        {
+            "n": 99999,
+            "zeroes": 4
+        },
+        {
+            "n": 100000,
+            "zeroes": 5
+        },
+        {
+            "n": 100001,
+            "zeroes": 5
+        },
+        {
+            "n": 999999,
+            "zeroes": 5
+        },
+        {
+            "n": 1000000,
+            "zeroes": 6
+        },
+        {
+            "n": 1000001,
+            "zeroes": 6
+        },
+        {
+            "n": 12345678,
+            "zeroes": 7
+        },
+        {
+            "n": 99999999,
+            "zeroes": 7
+        },
+        {
+            "n": 100000000,
+            "zeroes": 8
+        },
+        {
+            "n": 100000001,
+            "zeroes": 8
+        },
+        {
+            "n": 123456789012,
+            "zeroes": 11
+        },
+        {
+            "n": 999999999999999,
+            "zeroes": 14
+        },
+        {
+            "n": 1000000000000000,
+            "zeroes": 14
+        },
+        {
+            "n": -10,
+            "zeroes": 1
+        },
+        {
+            "n": -11,
+            "zeroes": 1
+        },
+        {
+            "n": -99,
+            "zeroes": 1
+        },
+        {
+            "n": -100,
+            "zeroes": 2
+        },
+        {
+            "n": -101,
+            "zeroes": 2
+        },
+        {
+            "n": -1001,
+            "zeroes": 3
+        },
+        {
+            "n": -12345,
+            "zeroes": 4
+        },
+        {
+            "n": 5200,
+            "zeroes": 3
+        },
+        {
+            "n": 1234567890,
+            "zeroes": 9
+        },
+        {
+            "n": 987654321098765,
+            "zeroes": 14
+        },
+        {
+            "n": -999,
+            "zeroes": 2
+        },
+        {
+            "n": -1000,
+            "zeroes": 3
+        },
+        {
+            "n": -9999,
+            "zeroes": 3
+        },
+        {
+            "n": -10000,
+            "zeroes": 4
+        },
+        {
+            "n": -10001,
+            "zeroes": 4
+        },
+        {
+            "n": -99999,
+            "zeroes": 4
+        },
+        {
+            "n": -100000,
+            "zeroes": 5
+        },
+        {
+            "n": -100001,
+            "zeroes": 5
+        },
+        {
+            "n": -999999,
+            "zeroes": 5
+        },
+        {
+            "n": -1000000,
+            "zeroes": 6
+        },
+        {
+            "n": -1000001,
+            "zeroes": 6
+        },
+        {
+            "n": 9999999,
+            "zeroes": 6
+        },
+        {
+            "n": -9999999,
+            "zeroes": 6
+        },
+        {
+            "n": 10000000,
+            "zeroes": 7
+        },
+        {
+            "n": -10000000,
+            "zeroes": 7
+        },
+        {
+            "n": 10000001,
+            "zeroes": 7
+        },
+        {
+            "n": -10000001,
+            "zeroes": 7
+        },
+        {
+            "n": -99999999,
+            "zeroes": 7
+        },
+        {
+            "n": -100000000,
+            "zeroes": 8
+        },
+        {
+            "n": -100000001,
+            "zeroes": 8
+        },
+        {
+            "n": 999999999,
+            "zeroes": 8
+        },
+        {
+            "n": -999999999,
+            "zeroes": 8
+        },
+        {
+            "n": 1000000000,
+            "zeroes": 9
+        },
+        {
+            "n": -1000000000,
+            "zeroes": 9
+        },
+        {
+            "n": 1000000001,
+            "zeroes": 9
+        },
+        {
+            "n": -1000000001,
+            "zeroes": 9
+        },
+        {
+            "n": 9999999999,
+            "zeroes": 9
+        },
+        {
+            "n": -9999999999,
+            "zeroes": 9
+        },
+        {
+            "n": 10000000000,
+            "zeroes": 10
+        },
+        {
+            "n": -10000000000,
+            "zeroes": 10
+        },
+        {
+            "n": 10000000001,
+            "zeroes": 10
+        },
+        {
+            "n": -10000000001,
+            "zeroes": 10
+        },
+        {
+            "n": 99999999999,
+            "zeroes": 10
+        },
+        {
+            "n": -99999999999,
+            "zeroes": 10
+        },
+        {
+            "n": 100000000000,
+            "zeroes": 11
+        },
+        {
+            "n": -100000000000,
+            "zeroes": 11
+        },
+        {
+            "n": 100000000001,
+            "zeroes": 11
+        },
+        {
+            "n": -100000000001,
+            "zeroes": 11
+        },
+        {
+            "n": 999999999999,
+            "zeroes": 11
+        },
+        {
+            "n": -999999999999,
+            "zeroes": 11
+        },
+        {
+            "n": 1000000000000,
+            "zeroes": 12
+        },
+        {
+            "n": -1000000000000,
+            "zeroes": 12
+        },
+        {
+            "n": 1000000000001,
+            "zeroes": 12
+        },
+        {
+            "n": -1000000000001,
+            "zeroes": 12
+        },
+        {
+            "n": 9999999999999,
+            "zeroes": 12
+        },
+        {
+            "n": -9999999999999,
+            "zeroes": 12
+        },
+        {
+            "n": 10000000000000,
+            "zeroes": 13
+        },
+        {
+            "n": -10000000000000,
+            "zeroes": 13
+        },
+        {
+            "n": 10000000000001,
+            "zeroes": 13
+        },
+        {
+            "n": -10000000000001,
+            "zeroes": 13
+        },
+        {
+            "n": 99999999999999,
+            "zeroes": 13
+        },
+        {
+            "n": -99999999999999,
+            "zeroes": 13
+        },
+        {
+            "n": 100000000000000,
+            "zeroes": 14
+        },
+        {
+            "n": -100000000000000,
+            "zeroes": 14
+        },
+        {
+            "n": 100000000000001,
+            "zeroes": 14
+        },
+        {
+            "n": -100000000000001,
+            "zeroes": 14
+        },
+        {
+            "n": -999999999999999,
+            "zeroes": 14
+        },
+        {
+            "n": -1000000000000000,
+            "zeroes": 14
+        },
+        {
+            "n": 1000000000000001,
+            "zeroes": 14
+        },
+        {
+            "n": -1000000000000001,
+            "zeroes": 14
+        },
+        {
+            "n": 10000000000000000,
+            "zeroes": 16
+        },
+        {
+            "n": -10000000000000000,
+            "zeroes": 16
+        },
+        {
+            "n": 100000000000000000,
+            "zeroes": 17
+        },
+        {
+            "n": -100000000000000000,
+            "zeroes": 17
+        },
+        {
+            "n": 1000000000000000000,
+            "zeroes": 18
+        },
+        {
+            "n": -1000000000000000000,
+            "zeroes": 18
+        },
+        {
+            "n": 9007199254740992,
+            "zeroes": 15
+        },
+        {
+            "n": 9223372036854775807,
+            "zeroes": 18
+        }
+    ],
+    "round_off_to_zeroes_resolution": [
+        {
+            "min_resolution": 0,
+            "n": 0,
+            "result": 0
+        },
+        {
+            "min_resolution": 0,
+            "n": 1,
+            "result": 1
+        },
+        {
+            "min_resolution": 0,
+            "n": 5,
+            "result": 5
+        },
+        {
+            "min_resolution": 0,
+            "n": 9,
+            "result": 9
+        },
+        {
+            "min_resolution": 0,
+            "n": 10,
+            "result": 10
+        },
+        {
+            "min_resolution": 0,
+            "n": 11,
+            "result": 11
+        },
+        {
+            "min_resolution": 0,
+            "n": 99,
+            "result": 99
+        },
+        {
+            "min_resolution": 0,
+            "n": 100,
+            "result": 100
+        },
+        {
+            "min_resolution": 0,
+            "n": 101,
+            "result": 101
+        },
+        {
+            "min_resolution": 0,
+            "n": 999,
+            "result": 999
+        },
+        {
+            "min_resolution": 0,
+            "n": 1000,
+            "result": 1000
+        },
+        {
+            "min_resolution": 0,
+            "n": 1001,
+            "result": 1001
+        },
+        {
+            "min_resolution": 0,
+            "n": 1099,
+            "result": 1099
+        },
+        {
+            "min_resolution": 0,
+            "n": 1100,
+            "result": 1100
+        },
+        {
+            "min_resolution": 0,
+            "n": 9999,
+            "result": 9999
+        },
+        {
+            "min_resolution": 0,
+            "n": 10000,
+            "result": 10000
+        },
+        {
+            "min_resolution": 0,
+            "n": 10001,
+            "result": 10001
+        },
+        {
+            "min_resolution": 0,
+            "n": 99999,
+            "result": 99999
+        },
+        {
+            "min_resolution": 0,
+            "n": 100000,
+            "result": 100000
+        },
+        {
+            "min_resolution": 0,
+            "n": 100001,
+            "result": 100001
+        },
+        {
+            "min_resolution": 0,
+            "n": 999999,
+            "result": 999999
+        },
+        {
+            "min_resolution": 0,
+            "n": 1000000,
+            "result": 1000000
+        },
+        {
+            "min_resolution": 0,
+            "n": 1000001,
+            "result": 1000001
+        },
+        {
+            "min_resolution": 0,
+            "n": 12345678,
+            "result": 12345678
+        },
+        {
+            "min_resolution": 0,
+            "n": 99999999,
+            "result": 99999999
+        },
+        {
+            "min_resolution": 0,
+            "n": 100000000,
+            "result": 100000000
+        },
+        {
+            "min_resolution": 0,
+            "n": 100000001,
+            "result": 100000001
+        },
+        {
+            "min_resolution": 0,
+            "n": 123456789012,
+            "result": 123456789012
+        },
+        {
+            "min_resolution": 0,
+            "n": 999999999999999,
+            "result": 999999999999999
+        },
+        {
+            "min_resolution": 0,
+            "n": 1000000000000000,
+            "result": 1000000000000000
+        },
+        {
+            "min_resolution": 0,
+            "n": -1,
+            "result": -1
+        },
+        {
+            "min_resolution": 0,
+            "n": -9,
+            "result": -9
+        },
+        {
+            "min_resolution": 0,
+            "n": -10,
+            "result": -10
+        },
+        {
+            "min_resolution": 0,
+            "n": -11,
+            "result": -11
+        },
+        {
+            "min_resolution": 0,
+            "n": -99,
+            "result": -99
+        },
+        {
+            "min_resolution": 0,
+            "n": -100,
+            "result": -100
+        },
+        {
+            "min_resolution": 0,
+            "n": -101,
+            "result": -101
+        },
+        {
+            "min_resolution": 0,
+            "n": -1001,
+            "result": -1001
+        },
+        {
+            "min_resolution": 0,
+            "n": -12345,
+            "result": -12345
+        },
+        {
+            "min_resolution": 0,
+            "n": 5200,
+            "result": 5200
+        },
+        {
+            "min_resolution": 0,
+            "n": 1234567890,
+            "result": 1234567890
+        },
+        {
+            "min_resolution": 0,
+            "n": 987654321098765,
+            "result": 987654321098765
+        },
+        {
+            "min_resolution": 0,
+            "n": 0,
+            "result": 0
+        },
+        {
+            "min_resolution": 0,
+            "n": 0,
+            "result": 0
+        },
+        {
+            "min_resolution": 0,
+            "n": 1,
+            "result": 1
+        },
+        {
+            "min_resolution": 0,
+            "n": -1,
+            "result": -1
+        },
+        {
+            "min_resolution": 0,
+            "n": 2,
+            "result": 2
+        },
+        {
+            "min_resolution": 0,
+            "n": -2,
+            "result": -2
+        },
+        {
+            "min_resolution": 0,
+            "n": 9,
+            "result": 9
+        },
+        {
+            "min_resolution": 0,
+            "n": -9,
+            "result": -9
+        },
+        {
+            "min_resolution": 0,
+            "n": 10,
+            "result": 10
+        },
+        {
+            "min_resolution": 0,
+            "n": -10,
+            "result": -10
+        },
+        {
+            "min_resolution": 0,
+            "n": 11,
+            "result": 11
+        },
+        {
+            "min_resolution": 0,
+            "n": -11,
+            "result": -11
+        },
+        {
+            "min_resolution": 0,
+            "n": 99,
+            "result": 99
+        },
+        {
+            "min_resolution": 0,
+            "n": -99,
+            "result": -99
+        },
+        {
+            "min_resolution": 0,
+            "n": 100,
+            "result": 100
+        },
+        {
+            "min_resolution": 0,
+            "n": -100,
+            "result": -100
+        },
+        {
+            "min_resolution": 0,
+            "n": 101,
+            "result": 101
+        },
+        {
+            "min_resolution": 0,
+            "n": -101,
+            "result": -101
+        },
+        {
+            "min_resolution": 0,
+            "n": 999,
+            "result": 999
+        },
+        {
+            "min_resolution": 0,
+            "n": -999,
+            "result": -999
+        },
+        {
+            "min_resolution": 0,
+            "n": 1000,
+            "result": 1000
+        },
+        {
+            "min_resolution": 0,
+            "n": -1000,
+            "result": -1000
+        },
+        {
+            "min_resolution": 0,
+            "n": 1001,
+            "result": 1001
+        },
+        {
+            "min_resolution": 0,
+            "n": -1001,
+            "result": -1001
+        },
+        {
+            "min_resolution": 0,
+            "n": 9999,
+            "result": 9999
+        },
+        {
+            "min_resolution": 0,
+            "n": -9999,
+            "result": -9999
+        },
+        {
+            "min_resolution": 0,
+            "n": 10000,
+            "result": 10000
+        },
+        {
+            "min_resolution": 0,
+            "n": -10000,
+            "result": -10000
+        },
+        {
+            "min_resolution": 0,
+            "n": 10001,
+            "result": 10001
+        },
+        {
+            "min_resolution": 0,
+            "n": -10001,
+            "result": -10001
+        },
+        {
+            "min_resolution": 0,
+            "n": 99999,
+            "result": 99999
+        },
+        {
+            "min_resolution": 0,
+            "n": -99999,
+            "result": -99999
+        },
+        {
+            "min_resolution": 0,
+            "n": 100000,
+            "result": 100000
+        },
+        {
+            "min_resolution": 0,
+            "n": -100000,
+            "result": -100000
+        },
+        {
+            "min_resolution": 0,
+            "n": 100001,
+            "result": 100001
+        },
+        {
+            "min_resolution": 0,
+            "n": -100001,
+            "result": -100001
+        },
+        {
+            "min_resolution": 0,
+            "n": 999999,
+            "result": 999999
+        },
+        {
+            "min_resolution": 0,
+            "n": -999999,
+            "result": -999999
+        },
+        {
+            "min_resolution": 0,
+            "n": 1000000,
+            "result": 1000000
+        },
+        {
+            "min_resolution": 0,
+            "n": -1000000,
+            "result": -1000000
+        },
+        {
+            "min_resolution": 0,
+            "n": 1000001,
+            "result": 1000001
+        },
+        {
+            "min_resolution": 0,
+            "n": -1000001,
+            "result": -1000001
+        },
+        {
+            "min_resolution": 0,
+            "n": 9999999,
+            "result": 9999999
+        },
+        {
+            "min_resolution": 0,
+            "n": -9999999,
+            "result": -9999999
+        },
+        {
+            "min_resolution": 0,
+            "n": 10000000,
+            "result": 10000000
+        },
+        {
+            "min_resolution": 0,
+            "n": -10000000,
+            "result": -10000000
+        },
+        {
+            "min_resolution": 0,
+            "n": 10000001,
+            "result": 10000001
+        },
+        {
+            "min_resolution": 0,
+            "n": -10000001,
+            "result": -10000001
+        },
+        {
+            "min_resolution": 0,
+            "n": 99999999,
+            "result": 99999999
+        },
+        {
+            "min_resolution": 0,
+            "n": -99999999,
+            "result": -99999999
+        },
+        {
+            "min_resolution": 0,
+            "n": 100000000,
+            "result": 100000000
+        },
+        {
+            "min_resolution": 0,
+            "n": -100000000,
+            "result": -100000000
+        },
+        {
+            "min_resolution": 0,
+            "n": 100000001,
+            "result": 100000001
+        },
+        {
+            "min_resolution": 0,
+            "n": -100000001,
+            "result": -100000001
+        },
+        {
+            "min_resolution": 0,
+            "n": 999999999,
+            "result": 999999999
+        },
+        {
+            "min_resolution": 0,
+            "n": -999999999,
+            "result": -999999999
+        },
+        {
+            "min_resolution": 0,
+            "n": 1000000000,
+            "result": 1000000000
+        },
+        {
+            "min_resolution": 0,
+            "n": -1000000000,
+            "result": -1000000000
+        },
+        {
+            "min_resolution": 0,
+            "n": 1000000001,
+            "result": 1000000001
+        },
+        {
+            "min_resolution": 0,
+            "n": -1000000001,
+            "result": -1000000001
+        },
+        {
+            "min_resolution": 0,
+            "n": 9999999999,
+            "result": 9999999999
+        },
+        {
+            "min_resolution": 0,
+            "n": -9999999999,
+            "result": -9999999999
+        },
+        {
+            "min_resolution": 0,
+            "n": 10000000000,
+            "result": 10000000000
+        },
+        {
+            "min_resolution": 0,
+            "n": -10000000000,
+            "result": -10000000000
+        },
+        {
+            "min_resolution": 0,
+            "n": 10000000001,
+            "result": 10000000001
+        },
+        {
+            "min_resolution": 0,
+            "n": -10000000001,
+            "result": -10000000001
+        },
+        {
+            "min_resolution": 0,
+            "n": 99999999999,
+            "result": 99999999999
+        },
+        {
+            "min_resolution": 0,
+            "n": -99999999999,
+            "result": -99999999999
+        },
+        {
+            "min_resolution": 0,
+            "n": 100000000000,
+            "result": 100000000000
+        },
+        {
+            "min_resolution": 0,
+            "n": -100000000000,
+            "result": -100000000000
+        },
+        {
+            "min_resolution": 0,
+            "n": 100000000001,
+            "result": 100000000001
+        },
+        {
+            "min_resolution": 0,
+            "n": -100000000001,
+            "result": -100000000001
+        },
+        {
+            "min_resolution": 0,
+            "n": 999999999999,
+            "result": 999999999999
+        },
+        {
+            "min_resolution": 0,
+            "n": -999999999999,
+            "result": -999999999999
+        },
+        {
+            "min_resolution": 0,
+            "n": 1000000000000,
+            "result": 1000000000000
+        },
+        {
+            "min_resolution": 0,
+            "n": -1000000000000,
+            "result": -1000000000000
+        },
+        {
+            "min_resolution": 0,
+            "n": 1000000000001,
+            "result": 1000000000001
+        },
+        {
+            "min_resolution": 0,
+            "n": -1000000000001,
+            "result": -1000000000001
+        },
+        {
+            "min_resolution": 0,
+            "n": 9999999999999,
+            "result": 9999999999999
+        },
+        {
+            "min_resolution": 0,
+            "n": -9999999999999,
+            "result": -9999999999999
+        },
+        {
+            "min_resolution": 0,
+            "n": 10000000000000,
+            "result": 10000000000000
+        },
+        {
+            "min_resolution": 0,
+            "n": -10000000000000,
+            "result": -10000000000000
+        },
+        {
+            "min_resolution": 0,
+            "n": 10000000000001,
+            "result": 10000000000001
+        },
+        {
+            "min_resolution": 0,
+            "n": -10000000000001,
+            "result": -10000000000001
+        },
+        {
+            "min_resolution": 0,
+            "n": 99999999999999,
+            "result": 99999999999999
+        },
+        {
+            "min_resolution": 0,
+            "n": -99999999999999,
+            "result": -99999999999999
+        },
+        {
+            "min_resolution": 0,
+            "n": 100000000000000,
+            "result": 100000000000000
+        },
+        {
+            "min_resolution": 0,
+            "n": -100000000000000,
+            "result": -100000000000000
+        },
+        {
+            "min_resolution": 0,
+            "n": 100000000000001,
+            "result": 100000000000001
+        },
+        {
+            "min_resolution": 0,
+            "n": -100000000000001,
+            "result": -100000000000001
+        },
+        {
+            "min_resolution": 0,
+            "n": 999999999999999,
+            "result": 999999999999999
+        },
+        {
+            "min_resolution": 0,
+            "n": -999999999999999,
+            "result": -999999999999999
+        },
+        {
+            "min_resolution": 0,
+            "n": 1000000000000000,
+            "result": 1000000000000000
+        },
+        {
+            "min_resolution": 0,
+            "n": -1000000000000000,
+            "result": -1000000000000000
+        },
+        {
+            "min_resolution": 0,
+            "n": 1000000000000001,
+            "result": 1000000000000001
+        },
+        {
+            "min_resolution": 0,
+            "n": -1000000000000001,
+            "result": -1000000000000001
+        },
+        {
+            "min_resolution": 0,
+            "n": 10000000000000000,
+            "result": 10000000000000000
+        },
+        {
+            "min_resolution": 0,
+            "n": -10000000000000000,
+            "result": -10000000000000000
+        },
+        {
+            "min_resolution": 0,
+            "n": 10000000000000000,
+            "result": 10000000000000000
+        },
+        {
+            "min_resolution": 0,
+            "n": -10000000000000000,
+            "result": -10000000000000000
+        },
+        {
+            "min_resolution": 0,
+            "n": 10000000000000000,
+            "result": 10000000000000000
+        },
+        {
+            "min_resolution": 0,
+            "n": -10000000000000000,
+            "result": -10000000000000000
+        },
+        {
+            "min_resolution": 0,
+            "n": 100000000000000000,
+            "result": 100000000000000000
+        },
+        {
+            "min_resolution": 0,
+            "n": -100000000000000000,
+            "result": -100000000000000000
+        },
+        {
+            "min_resolution": 0,
+            "n": 100000000000000000,
+            "result": 100000000000000000
+        },
+        {
+            "min_resolution": 0,
+            "n": -100000000000000000,
+            "result": -100000000000000000
+        },
+        {
+            "min_resolution": 0,
+            "n": 100000000000000000,
+            "result": 100000000000000000
+        },
+        {
+            "min_resolution": 0,
+            "n": -100000000000000000,
+            "result": -100000000000000000
+        },
+        {
+            "min_resolution": 0,
+            "n": 1000000000000000000,
+            "result": 1000000000000000000
+        },
+        {
+            "min_resolution": 0,
+            "n": -1000000000000000000,
+            "result": -1000000000000000000
+        },
+        {
+            "min_resolution": 0,
+            "n": 1000000000000000000,
+            "result": 1000000000000000000
+        },
+        {
+            "min_resolution": 0,
+            "n": -1000000000000000000,
+            "result": -1000000000000000000
+        },
+        {
+            "min_resolution": 0,
+            "n": 1000000000000000000,
+            "result": 1000000000000000000
+        },
+        {
+            "min_resolution": 0,
+            "n": -1000000000000000000,
+            "result": -1000000000000000000
+        },
+        {
+            "min_resolution": 0,
+            "n": 9007199254740992,
+            "result": 9007199254740992
+        },
+        {
+            "min_resolution": 0,
+            "n": 9007199254740992,
+            "result": 9007199254740992
+        },
+        {
+            "min_resolution": 0,
+            "n": 9223372036854775807,
+            "result": 9223372036854775807
+        },
+        {
+            "min_resolution": 1,
+            "n": 0,
+            "result": 0
+        },
+        {
+            "min_resolution": 1,
+            "n": 1,
+            "result": 0
+        },
+        {
+            "min_resolution": 1,
+            "n": 5,
+            "result": 0
+        },
+        {
+            "min_resolution": 1,
+            "n": 9,
+            "result": 0
+        },
+        {
+            "min_resolution": 1,
+            "n": 10,
+            "result": 10
+        },
+        {
+            "min_resolution": 1,
+            "n": 11,
+            "result": 10
+        },
+        {
+            "min_resolution": 1,
+            "n": 99,
+            "result": 90
+        },
+        {
+            "min_resolution": 1,
+            "n": 100,
+            "result": 100
+        },
+        {
+            "min_resolution": 1,
+            "n": 101,
+            "result": 100
+        },
+        {
+            "min_resolution": 1,
+            "n": 999,
+            "result": 990
+        },
+        {
+            "min_resolution": 1,
+            "n": 1000,
+            "result": 1000
+        },
+        {
+            "min_resolution": 1,
+            "n": 1001,
+            "result": 1000
+        },
+        {
+            "min_resolution": 1,
+            "n": 1099,
+            "result": 1090
+        },
+        {
+            "min_resolution": 1,
+            "n": 1100,
+            "result": 1100
+        },
+        {
+            "min_resolution": 1,
+            "n": 9999,
+            "result": 9990
+        },
+        {
+            "min_resolution": 1,
+            "n": 10000,
+            "result": 10000
+        },
+        {
+            "min_resolution": 1,
+            "n": 10001,
+            "result": 10000
+        },
+        {
+            "min_resolution": 1,
+            "n": 99999,
+            "result": 99990
+        },
+        {
+            "min_resolution": 1,
+            "n": 100000,
+            "result": 100000
+        },
+        {
+            "min_resolution": 1,
+            "n": 100001,
+            "result": 100000
+        },
+        {
+            "min_resolution": 1,
+            "n": 999999,
+            "result": 999990
+        },
+        {
+            "min_resolution": 1,
+            "n": 1000000,
+            "result": 1000000
+        },
+        {
+            "min_resolution": 1,
+            "n": 1000001,
+            "result": 1000000
+        },
+        {
+            "min_resolution": 1,
+            "n": 12345678,
+            "result": 12345670
+        },
+        {
+            "min_resolution": 1,
+            "n": 99999999,
+            "result": 99999990
+        },
+        {
+            "min_resolution": 1,
+            "n": 100000000,
+            "result": 100000000
+        },
+        {
+            "min_resolution": 1,
+            "n": 100000001,
+            "result": 100000000
+        },
+        {
+            "min_resolution": 1,
+            "n": 123456789012,
+            "result": 123456789010
+        },
+        {
+            "min_resolution": 1,
+            "n": 999999999999999,
+            "result": 999999999999990
+        },
+        {
+            "min_resolution": 1,
+            "n": 1000000000000000,
+            "result": 1000000000000000
+        },
+        {
+            "min_resolution": 1,
+            "n": -1,
+            "result": 0
+        },
+        {
+            "min_resolution": 1,
+            "n": -9,
+            "result": 0
+        },
+        {
+            "min_resolution": 1,
+            "n": -10,
+            "result": -10
+        },
+        {
+            "min_resolution": 1,
+            "n": -11,
+            "result": -10
+        },
+        {
+            "min_resolution": 1,
+            "n": -99,
+            "result": -90
+        },
+        {
+            "min_resolution": 1,
+            "n": -100,
+            "result": -100
+        },
+        {
+            "min_resolution": 1,
+            "n": -101,
+            "result": -100
+        },
+        {
+            "min_resolution": 1,
+            "n": -1001,
+            "result": -1000
+        },
+        {
+            "min_resolution": 1,
+            "n": -12345,
+            "result": -12340
+        },
+        {
+            "min_resolution": 1,
+            "n": 5200,
+            "result": 5200
+        },
+        {
+            "min_resolution": 1,
+            "n": 1234567890,
+            "result": 1234567890
+        },
+        {
+            "min_resolution": 1,
+            "n": 987654321098765,
+            "result": 987654321098760
+        },
+        {
+            "min_resolution": 1,
+            "n": 0,
+            "result": 0
+        },
+        {
+            "min_resolution": 1,
+            "n": 0,
+            "result": 0
+        },
+        {
+            "min_resolution": 1,
+            "n": 1,
+            "result": 0
+        },
+        {
+            "min_resolution": 1,
+            "n": -1,
+            "result": 0
+        },
+        {
+            "min_resolution": 1,
+            "n": 2,
+            "result": 0
+        },
+        {
+            "min_resolution": 1,
+            "n": -2,
+            "result": 0
+        },
+        {
+            "min_resolution": 1,
+            "n": 9,
+            "result": 0
+        },
+        {
+            "min_resolution": 1,
+            "n": -9,
+            "result": 0
+        },
+        {
+            "min_resolution": 1,
+            "n": 10,
+            "result": 10
+        },
+        {
+            "min_resolution": 1,
+            "n": -10,
+            "result": -10
+        },
+        {
+            "min_resolution": 1,
+            "n": 11,
+            "result": 10
+        },
+        {
+            "min_resolution": 1,
+            "n": -11,
+            "result": -10
+        },
+        {
+            "min_resolution": 1,
+            "n": 99,
+            "result": 90
+        },
+        {
+            "min_resolution": 1,
+            "n": -99,
+            "result": -90
+        },
+        {
+            "min_resolution": 1,
+            "n": 100,
+            "result": 100
+        },
+        {
+            "min_resolution": 1,
+            "n": -100,
+            "result": -100
+        },
+        {
+            "min_resolution": 1,
+            "n": 101,
+            "result": 100
+        },
+        {
+            "min_resolution": 1,
+            "n": -101,
+            "result": -100
+        },
+        {
+            "min_resolution": 1,
+            "n": 999,
+            "result": 990
+        },
+        {
+            "min_resolution": 1,
+            "n": -999,
+            "result": -990
+        },
+        {
+            "min_resolution": 1,
+            "n": 1000,
+            "result": 1000
+        },
+        {
+            "min_resolution": 1,
+            "n": -1000,
+            "result": -1000
+        },
+        {
+            "min_resolution": 1,
+            "n": 1001,
+            "result": 1000
+        },
+        {
+            "min_resolution": 1,
+            "n": -1001,
+            "result": -1000
+        },
+        {
+            "min_resolution": 1,
+            "n": 9999,
+            "result": 9990
+        },
+        {
+            "min_resolution": 1,
+            "n": -9999,
+            "result": -9990
+        },
+        {
+            "min_resolution": 1,
+            "n": 10000,
+            "result": 10000
+        },
+        {
+            "min_resolution": 1,
+            "n": -10000,
+            "result": -10000
+        },
+        {
+            "min_resolution": 1,
+            "n": 10001,
+            "result": 10000
+        },
+        {
+            "min_resolution": 1,
+            "n": -10001,
+            "result": -10000
+        },
+        {
+            "min_resolution": 1,
+            "n": 99999,
+            "result": 99990
+        },
+        {
+            "min_resolution": 1,
+            "n": -99999,
+            "result": -99990
+        },
+        {
+            "min_resolution": 1,
+            "n": 100000,
+            "result": 100000
+        },
+        {
+            "min_resolution": 1,
+            "n": -100000,
+            "result": -100000
+        },
+        {
+            "min_resolution": 1,
+            "n": 100001,
+            "result": 100000
+        },
+        {
+            "min_resolution": 1,
+            "n": -100001,
+            "result": -100000
+        },
+        {
+            "min_resolution": 1,
+            "n": 999999,
+            "result": 999990
+        },
+        {
+            "min_resolution": 1,
+            "n": -999999,
+            "result": -999990
+        },
+        {
+            "min_resolution": 1,
+            "n": 1000000,
+            "result": 1000000
+        },
+        {
+            "min_resolution": 1,
+            "n": -1000000,
+            "result": -1000000
+        },
+        {
+            "min_resolution": 1,
+            "n": 1000001,
+            "result": 1000000
+        },
+        {
+            "min_resolution": 1,
+            "n": -1000001,
+            "result": -1000000
+        },
+        {
+            "min_resolution": 1,
+            "n": 9999999,
+            "result": 9999990
+        },
+        {
+            "min_resolution": 1,
+            "n": -9999999,
+            "result": -9999990
+        },
+        {
+            "min_resolution": 1,
+            "n": 10000000,
+            "result": 10000000
+        },
+        {
+            "min_resolution": 1,
+            "n": -10000000,
+            "result": -10000000
+        },
+        {
+            "min_resolution": 1,
+            "n": 10000001,
+            "result": 10000000
+        },
+        {
+            "min_resolution": 1,
+            "n": -10000001,
+            "result": -10000000
+        },
+        {
+            "min_resolution": 1,
+            "n": 99999999,
+            "result": 99999990
+        },
+        {
+            "min_resolution": 1,
+            "n": -99999999,
+            "result": -99999990
+        },
+        {
+            "min_resolution": 1,
+            "n": 100000000,
+            "result": 100000000
+        },
+        {
+            "min_resolution": 1,
+            "n": -100000000,
+            "result": -100000000
+        },
+        {
+            "min_resolution": 1,
+            "n": 100000001,
+            "result": 100000000
+        },
+        {
+            "min_resolution": 1,
+            "n": -100000001,
+            "result": -100000000
+        },
+        {
+            "min_resolution": 1,
+            "n": 999999999,
+            "result": 999999990
+        },
+        {
+            "min_resolution": 1,
+            "n": -999999999,
+            "result": -999999990
+        },
+        {
+            "min_resolution": 1,
+            "n": 1000000000,
+            "result": 1000000000
+        },
+        {
+            "min_resolution": 1,
+            "n": -1000000000,
+            "result": -1000000000
+        },
+        {
+            "min_resolution": 1,
+            "n": 1000000001,
+            "result": 1000000000
+        },
+        {
+            "min_resolution": 1,
+            "n": -1000000001,
+            "result": -1000000000
+        },
+        {
+            "min_resolution": 1,
+            "n": 9999999999,
+            "result": 9999999990
+        },
+        {
+            "min_resolution": 1,
+            "n": -9999999999,
+            "result": -9999999990
+        },
+        {
+            "min_resolution": 1,
+            "n": 10000000000,
+            "result": 10000000000
+        },
+        {
+            "min_resolution": 1,
+            "n": -10000000000,
+            "result": -10000000000
+        },
+        {
+            "min_resolution": 1,
+            "n": 10000000001,
+            "result": 10000000000
+        },
+        {
+            "min_resolution": 1,
+            "n": -10000000001,
+            "result": -10000000000
+        },
+        {
+            "min_resolution": 1,
+            "n": 99999999999,
+            "result": 99999999990
+        },
+        {
+            "min_resolution": 1,
+            "n": -99999999999,
+            "result": -99999999990
+        },
+        {
+            "min_resolution": 1,
+            "n": 100000000000,
+            "result": 100000000000
+        },
+        {
+            "min_resolution": 1,
+            "n": -100000000000,
+            "result": -100000000000
+        },
+        {
+            "min_resolution": 1,
+            "n": 100000000001,
+            "result": 100000000000
+        },
+        {
+            "min_resolution": 1,
+            "n": -100000000001,
+            "result": -100000000000
+        },
+        {
+            "min_resolution": 1,
+            "n": 999999999999,
+            "result": 999999999990
+        },
+        {
+            "min_resolution": 1,
+            "n": -999999999999,
+            "result": -999999999990
+        },
+        {
+            "min_resolution": 1,
+            "n": 1000000000000,
+            "result": 1000000000000
+        },
+        {
+            "min_resolution": 1,
+            "n": -1000000000000,
+            "result": -1000000000000
+        },
+        {
+            "min_resolution": 1,
+            "n": 1000000000001,
+            "result": 1000000000000
+        },
+        {
+            "min_resolution": 1,
+            "n": -1000000000001,
+            "result": -1000000000000
+        },
+        {
+            "min_resolution": 1,
+            "n": 9999999999999,
+            "result": 9999999999990
+        },
+        {
+            "min_resolution": 1,
+            "n": -9999999999999,
+            "result": -9999999999990
+        },
+        {
+            "min_resolution": 1,
+            "n": 10000000000000,
+            "result": 10000000000000
+        },
+        {
+            "min_resolution": 1,
+            "n": -10000000000000,
+            "result": -10000000000000
+        },
+        {
+            "min_resolution": 1,
+            "n": 10000000000001,
+            "result": 10000000000000
+        },
+        {
+            "min_resolution": 1,
+            "n": -10000000000001,
+            "result": -10000000000000
+        },
+        {
+            "min_resolution": 1,
+            "n": 99999999999999,
+            "result": 99999999999990
+        },
+        {
+            "min_resolution": 1,
+            "n": -99999999999999,
+            "result": -99999999999990
+        },
+        {
+            "min_resolution": 1,
+            "n": 100000000000000,
+            "result": 100000000000000
+        },
+        {
+            "min_resolution": 1,
+            "n": -100000000000000,
+            "result": -100000000000000
+        },
+        {
+            "min_resolution": 1,
+            "n": 100000000000001,
+            "result": 100000000000000
+        },
+        {
+            "min_resolution": 1,
+            "n": -100000000000001,
+            "result": -100000000000000
+        },
+        {
+            "min_resolution": 1,
+            "n": 999999999999999,
+            "result": 999999999999990
+        },
+        {
+            "min_resolution": 1,
+            "n": -999999999999999,
+            "result": -999999999999990
+        },
+        {
+            "min_resolution": 1,
+            "n": 1000000000000000,
+            "result": 1000000000000000
+        },
+        {
+            "min_resolution": 1,
+            "n": -1000000000000000,
+            "result": -1000000000000000
+        },
+        {
+            "min_resolution": 1,
+            "n": 1000000000000001,
+            "result": 1000000000000000
+        },
+        {
+            "min_resolution": 1,
+            "n": -1000000000000001,
+            "result": -1000000000000000
+        },
+        {
+            "min_resolution": 1,
+            "n": 10000000000000000,
+            "result": 10000000000000000
+        },
+        {
+            "min_resolution": 1,
+            "n": -10000000000000000,
+            "result": -10000000000000000
+        },
+        {
+            "min_resolution": 1,
+            "n": 10000000000000000,
+            "result": 10000000000000000
+        },
+        {
+            "min_resolution": 1,
+            "n": -10000000000000000,
+            "result": -10000000000000000
+        },
+        {
+            "min_resolution": 1,
+            "n": 10000000000000000,
+            "result": 10000000000000000
+        },
+        {
+            "min_resolution": 1,
+            "n": -10000000000000000,
+            "result": -10000000000000000
+        },
+        {
+            "min_resolution": 1,
+            "n": 100000000000000000,
+            "result": 100000000000000000
+        },
+        {
+            "min_resolution": 1,
+            "n": -100000000000000000,
+            "result": -100000000000000000
+        },
+        {
+            "min_resolution": 1,
+            "n": 100000000000000000,
+            "result": 100000000000000000
+        },
+        {
+            "min_resolution": 1,
+            "n": -100000000000000000,
+            "result": -100000000000000000
+        },
+        {
+            "min_resolution": 1,
+            "n": 100000000000000000,
+            "result": 100000000000000000
+        },
+        {
+            "min_resolution": 1,
+            "n": -100000000000000000,
+            "result": -100000000000000000
+        },
+        {
+            "min_resolution": 1,
+            "n": 1000000000000000000,
+            "result": 1000000000000000000
+        },
+        {
+            "min_resolution": 1,
+            "n": -1000000000000000000,
+            "result": -1000000000000000000
+        },
+        {
+            "min_resolution": 1,
+            "n": 1000000000000000000,
+            "result": 1000000000000000000
+        },
+        {
+            "min_resolution": 1,
+            "n": -1000000000000000000,
+            "result": -1000000000000000000
+        },
+        {
+            "min_resolution": 1,
+            "n": 1000000000000000000,
+            "result": 1000000000000000000
+        },
+        {
+            "min_resolution": 1,
+            "n": -1000000000000000000,
+            "result": -1000000000000000000
+        },
+        {
+            "min_resolution": 1,
+            "n": 9007199254740992,
+            "result": 9007199254740990
+        },
+        {
+            "min_resolution": 1,
+            "n": 9007199254740992,
+            "result": 9007199254740990
+        },
+        {
+            "min_resolution": 1,
+            "n": 9223372036854775807,
+            "result": 9223372036854775800
+        },
+        {
+            "min_resolution": 3,
+            "n": 0,
+            "result": 0
+        },
+        {
+            "min_resolution": 3,
+            "n": 1,
+            "result": 0
+        },
+        {
+            "min_resolution": 3,
+            "n": 5,
+            "result": 0
+        },
+        {
+            "min_resolution": 3,
+            "n": 9,
+            "result": 0
+        },
+        {
+            "min_resolution": 3,
+            "n": 10,
+            "result": 10
+        },
+        {
+            "min_resolution": 3,
+            "n": 11,
+            "result": 10
+        },
+        {
+            "min_resolution": 3,
+            "n": 99,
+            "result": 90
+        },
+        {
+            "min_resolution": 3,
+            "n": 100,
+            "result": 100
+        },
+        {
+            "min_resolution": 3,
+            "n": 101,
+            "result": 100
+        },
+        {
+            "min_resolution": 3,
+            "n": 999,
+            "result": 900
+        },
+        {
+            "min_resolution": 3,
+            "n": 1000,
+            "result": 1000
+        },
+        {
+            "min_resolution": 3,
+            "n": 1001,
+            "result": 1000
+        },
+        {
+            "min_resolution": 3,
+            "n": 1099,
+            "result": 1000
+        },
+        {
+            "min_resolution": 3,
+            "n": 1100,
+            "result": 1000
+        },
+        {
+            "min_resolution": 3,
+            "n": 9999,
+            "result": 9000
+        },
+        {
+            "min_resolution": 3,
+            "n": 10000,
+            "result": 10000
+        },
+        {
+            "min_resolution": 3,
+            "n": 10001,
+            "result": 10000
+        },
+        {
+            "min_resolution": 3,
+            "n": 99999,
+            "result": 99000
+        },
+        {
+            "min_resolution": 3,
+            "n": 100000,
+            "result": 100000
+        },
+        {
+            "min_resolution": 3,
+            "n": 100001,
+            "result": 100000
+        },
+        {
+            "min_resolution": 3,
+            "n": 999999,
+            "result": 999000
+        },
+        {
+            "min_resolution": 3,
+            "n": 1000000,
+            "result": 1000000
+        },
+        {
+            "min_resolution": 3,
+            "n": 1000001,
+            "result": 1000000
+        },
+        {
+            "min_resolution": 3,
+            "n": 12345678,
+            "result": 12345000
+        },
+        {
+            "min_resolution": 3,
+            "n": 99999999,
+            "result": 99999000
+        },
+        {
+            "min_resolution": 3,
+            "n": 100000000,
+            "result": 100000000
+        },
+        {
+            "min_resolution": 3,
+            "n": 100000001,
+            "result": 100000000
+        },
+        {
+            "min_resolution": 3,
+            "n": 123456789012,
+            "result": 123456789000
+        },
+        {
+            "min_resolution": 3,
+            "n": 999999999999999,
+            "result": 999999999999000
+        },
+        {
+            "min_resolution": 3,
+            "n": 1000000000000000,
+            "result": 1000000000000000
+        },
+        {
+            "min_resolution": 3,
+            "n": -1,
+            "result": 0
+        },
+        {
+            "min_resolution": 3,
+            "n": -9,
+            "result": 0
+        },
+        {
+            "min_resolution": 3,
+            "n": -10,
+            "result": -10
+        },
+        {
+            "min_resolution": 3,
+            "n": -11,
+            "result": -10
+        },
+        {
+            "min_resolution": 3,
+            "n": -99,
+            "result": -90
+        },
+        {
+            "min_resolution": 3,
+            "n": -100,
+            "result": -100
+        },
+        {
+            "min_resolution": 3,
+            "n": -101,
+            "result": -100
+        },
+        {
+            "min_resolution": 3,
+            "n": -1001,
+            "result": -1000
+        },
+        {
+            "min_resolution": 3,
+            "n": -12345,
+            "result": -12000
+        },
+        {
+            "min_resolution": 3,
+            "n": 5200,
+            "result": 5000
+        },
+        {
+            "min_resolution": 3,
+            "n": 1234567890,
+            "result": 1234567000
+        },
+        {
+            "min_resolution": 3,
+            "n": 987654321098765,
+            "result": 987654321098000
+        },
+        {
+            "min_resolution": 3,
+            "n": 0,
+            "result": 0
+        },
+        {
+            "min_resolution": 3,
+            "n": 0,
+            "result": 0
+        },
+        {
+            "min_resolution": 3,
+            "n": 1,
+            "result": 0
+        },
+        {
+            "min_resolution": 3,
+            "n": -1,
+            "result": 0
+        },
+        {
+            "min_resolution": 3,
+            "n": 2,
+            "result": 0
+        },
+        {
+            "min_resolution": 3,
+            "n": -2,
+            "result": 0
+        },
+        {
+            "min_resolution": 3,
+            "n": 9,
+            "result": 0
+        },
+        {
+            "min_resolution": 3,
+            "n": -9,
+            "result": 0
+        },
+        {
+            "min_resolution": 3,
+            "n": 10,
+            "result": 10
+        },
+        {
+            "min_resolution": 3,
+            "n": -10,
+            "result": -10
+        },
+        {
+            "min_resolution": 3,
+            "n": 11,
+            "result": 10
+        },
+        {
+            "min_resolution": 3,
+            "n": -11,
+            "result": -10
+        },
+        {
+            "min_resolution": 3,
+            "n": 99,
+            "result": 90
+        },
+        {
+            "min_resolution": 3,
+            "n": -99,
+            "result": -90
+        },
+        {
+            "min_resolution": 3,
+            "n": 100,
+            "result": 100
+        },
+        {
+            "min_resolution": 3,
+            "n": -100,
+            "result": -100
+        },
+        {
+            "min_resolution": 3,
+            "n": 101,
+            "result": 100
+        },
+        {
+            "min_resolution": 3,
+            "n": -101,
+            "result": -100
+        },
+        {
+            "min_resolution": 3,
+            "n": 999,
+            "result": 900
+        },
+        {
+            "min_resolution": 3,
+            "n": -999,
+            "result": -900
+        },
+        {
+            "min_resolution": 3,
+            "n": 1000,
+            "result": 1000
+        },
+        {
+            "min_resolution": 3,
+            "n": -1000,
+            "result": -1000
+        },
+        {
+            "min_resolution": 3,
+            "n": 1001,
+            "result": 1000
+        },
+        {
+            "min_resolution": 3,
+            "n": -1001,
+            "result": -1000
+        },
+        {
+            "min_resolution": 3,
+            "n": 9999,
+            "result": 9000
+        },
+        {
+            "min_resolution": 3,
+            "n": -9999,
+            "result": -9000
+        },
+        {
+            "min_resolution": 3,
+            "n": 10000,
+            "result": 10000
+        },
+        {
+            "min_resolution": 3,
+            "n": -10000,
+            "result": -10000
+        },
+        {
+            "min_resolution": 3,
+            "n": 10001,
+            "result": 10000
+        },
+        {
+            "min_resolution": 3,
+            "n": -10001,
+            "result": -10000
+        },
+        {
+            "min_resolution": 3,
+            "n": 99999,
+            "result": 99000
+        },
+        {
+            "min_resolution": 3,
+            "n": -99999,
+            "result": -99000
+        },
+        {
+            "min_resolution": 3,
+            "n": 100000,
+            "result": 100000
+        },
+        {
+            "min_resolution": 3,
+            "n": -100000,
+            "result": -100000
+        },
+        {
+            "min_resolution": 3,
+            "n": 100001,
+            "result": 100000
+        },
+        {
+            "min_resolution": 3,
+            "n": -100001,
+            "result": -100000
+        },
+        {
+            "min_resolution": 3,
+            "n": 999999,
+            "result": 999000
+        },
+        {
+            "min_resolution": 3,
+            "n": -999999,
+            "result": -999000
+        },
+        {
+            "min_resolution": 3,
+            "n": 1000000,
+            "result": 1000000
+        },
+        {
+            "min_resolution": 3,
+            "n": -1000000,
+            "result": -1000000
+        },
+        {
+            "min_resolution": 3,
+            "n": 1000001,
+            "result": 1000000
+        },
+        {
+            "min_resolution": 3,
+            "n": -1000001,
+            "result": -1000000
+        },
+        {
+            "min_resolution": 3,
+            "n": 9999999,
+            "result": 9999000
+        },
+        {
+            "min_resolution": 3,
+            "n": -9999999,
+            "result": -9999000
+        },
+        {
+            "min_resolution": 3,
+            "n": 10000000,
+            "result": 10000000
+        },
+        {
+            "min_resolution": 3,
+            "n": -10000000,
+            "result": -10000000
+        },
+        {
+            "min_resolution": 3,
+            "n": 10000001,
+            "result": 10000000
+        },
+        {
+            "min_resolution": 3,
+            "n": -10000001,
+            "result": -10000000
+        },
+        {
+            "min_resolution": 3,
+            "n": 99999999,
+            "result": 99999000
+        },
+        {
+            "min_resolution": 3,
+            "n": -99999999,
+            "result": -99999000
+        },
+        {
+            "min_resolution": 3,
+            "n": 100000000,
+            "result": 100000000
+        },
+        {
+            "min_resolution": 3,
+            "n": -100000000,
+            "result": -100000000
+        },
+        {
+            "min_resolution": 3,
+            "n": 100000001,
+            "result": 100000000
+        },
+        {
+            "min_resolution": 3,
+            "n": -100000001,
+            "result": -100000000
+        },
+        {
+            "min_resolution": 3,
+            "n": 999999999,
+            "result": 999999000
+        },
+        {
+            "min_resolution": 3,
+            "n": -999999999,
+            "result": -999999000
+        },
+        {
+            "min_resolution": 3,
+            "n": 1000000000,
+            "result": 1000000000
+        },
+        {
+            "min_resolution": 3,
+            "n": -1000000000,
+            "result": -1000000000
+        },
+        {
+            "min_resolution": 3,
+            "n": 1000000001,
+            "result": 1000000000
+        },
+        {
+            "min_resolution": 3,
+            "n": -1000000001,
+            "result": -1000000000
+        },
+        {
+            "min_resolution": 3,
+            "n": 9999999999,
+            "result": 9999999000
+        },
+        {
+            "min_resolution": 3,
+            "n": -9999999999,
+            "result": -9999999000
+        },
+        {
+            "min_resolution": 3,
+            "n": 10000000000,
+            "result": 10000000000
+        },
+        {
+            "min_resolution": 3,
+            "n": -10000000000,
+            "result": -10000000000
+        },
+        {
+            "min_resolution": 3,
+            "n": 10000000001,
+            "result": 10000000000
+        },
+        {
+            "min_resolution": 3,
+            "n": -10000000001,
+            "result": -10000000000
+        },
+        {
+            "min_resolution": 3,
+            "n": 99999999999,
+            "result": 99999999000
+        },
+        {
+            "min_resolution": 3,
+            "n": -99999999999,
+            "result": -99999999000
+        },
+        {
+            "min_resolution": 3,
+            "n": 100000000000,
+            "result": 100000000000
+        },
+        {
+            "min_resolution": 3,
+            "n": -100000000000,
+            "result": -100000000000
+        },
+        {
+            "min_resolution": 3,
+            "n": 100000000001,
+            "result": 100000000000
+        },
+        {
+            "min_resolution": 3,
+            "n": -100000000001,
+            "result": -100000000000
+        },
+        {
+            "min_resolution": 3,
+            "n": 999999999999,
+            "result": 999999999000
+        },
+        {
+            "min_resolution": 3,
+            "n": -999999999999,
+            "result": -999999999000
+        },
+        {
+            "min_resolution": 3,
+            "n": 1000000000000,
+            "result": 1000000000000
+        },
+        {
+            "min_resolution": 3,
+            "n": -1000000000000,
+            "result": -1000000000000
+        },
+        {
+            "min_resolution": 3,
+            "n": 1000000000001,
+            "result": 1000000000000
+        },
+        {
+            "min_resolution": 3,
+            "n": -1000000000001,
+            "result": -1000000000000
+        },
+        {
+            "min_resolution": 3,
+            "n": 9999999999999,
+            "result": 9999999999000
+        },
+        {
+            "min_resolution": 3,
+            "n": -9999999999999,
+            "result": -9999999999000
+        },
+        {
+            "min_resolution": 3,
+            "n": 10000000000000,
+            "result": 10000000000000
+        },
+        {
+            "min_resolution": 3,
+            "n": -10000000000000,
+            "result": -10000000000000
+        },
+        {
+            "min_resolution": 3,
+            "n": 10000000000001,
+            "result": 10000000000000
+        },
+        {
+            "min_resolution": 3,
+            "n": -10000000000001,
+            "result": -10000000000000
+        },
+        {
+            "min_resolution": 3,
+            "n": 99999999999999,
+            "result": 99999999999000
+        },
+        {
+            "min_resolution": 3,
+            "n": -99999999999999,
+            "result": -99999999999000
+        },
+        {
+            "min_resolution": 3,
+            "n": 100000000000000,
+            "result": 100000000000000
+        },
+        {
+            "min_resolution": 3,
+            "n": -100000000000000,
+            "result": -100000000000000
+        },
+        {
+            "min_resolution": 3,
+            "n": 100000000000001,
+            "result": 100000000000000
+        },
+        {
+            "min_resolution": 3,
+            "n": -100000000000001,
+            "result": -100000000000000
+        },
+        {
+            "min_resolution": 3,
+            "n": 999999999999999,
+            "result": 999999999999000
+        },
+        {
+            "min_resolution": 3,
+            "n": -999999999999999,
+            "result": -999999999999000
+        },
+        {
+            "min_resolution": 3,
+            "n": 1000000000000000,
+            "result": 1000000000000000
+        },
+        {
+            "min_resolution": 3,
+            "n": -1000000000000000,
+            "result": -1000000000000000
+        },
+        {
+            "min_resolution": 3,
+            "n": 1000000000000001,
+            "result": 1000000000000000
+        },
+        {
+            "min_resolution": 3,
+            "n": -1000000000000001,
+            "result": -1000000000000000
+        },
+        {
+            "min_resolution": 3,
+            "n": 10000000000000000,
+            "result": 10000000000000000
+        },
+        {
+            "min_resolution": 3,
+            "n": -10000000000000000,
+            "result": -10000000000000000
+        },
+        {
+            "min_resolution": 3,
+            "n": 10000000000000000,
+            "result": 10000000000000000
+        },
+        {
+            "min_resolution": 3,
+            "n": -10000000000000000,
+            "result": -10000000000000000
+        },
+        {
+            "min_resolution": 3,
+            "n": 10000000000000000,
+            "result": 10000000000000000
+        },
+        {
+            "min_resolution": 3,
+            "n": -10000000000000000,
+            "result": -10000000000000000
+        },
+        {
+            "min_resolution": 3,
+            "n": 100000000000000000,
+            "result": 100000000000000000
+        },
+        {
+            "min_resolution": 3,
+            "n": -100000000000000000,
+            "result": -100000000000000000
+        },
+        {
+            "min_resolution": 3,
+            "n": 100000000000000000,
+            "result": 100000000000000000
+        },
+        {
+            "min_resolution": 3,
+            "n": -100000000000000000,
+            "result": -100000000000000000
+        },
+        {
+            "min_resolution": 3,
+            "n": 100000000000000000,
+            "result": 100000000000000000
+        },
+        {
+            "min_resolution": 3,
+            "n": -100000000000000000,
+            "result": -100000000000000000
+        },
+        {
+            "min_resolution": 3,
+            "n": 1000000000000000000,
+            "result": 1000000000000000000
+        },
+        {
+            "min_resolution": 3,
+            "n": -1000000000000000000,
+            "result": -1000000000000000000
+        },
+        {
+            "min_resolution": 3,
+            "n": 1000000000000000000,
+            "result": 1000000000000000000
+        },
+        {
+            "min_resolution": 3,
+            "n": -1000000000000000000,
+            "result": -1000000000000000000
+        },
+        {
+            "min_resolution": 3,
+            "n": 1000000000000000000,
+            "result": 1000000000000000000
+        },
+        {
+            "min_resolution": 3,
+            "n": -1000000000000000000,
+            "result": -1000000000000000000
+        },
+        {
+            "min_resolution": 3,
+            "n": 9007199254740992,
+            "result": 9007199254740000
+        },
+        {
+            "min_resolution": 3,
+            "n": 9007199254740992,
+            "result": 9007199254740000
+        },
+        {
+            "min_resolution": 3,
+            "n": 9223372036854775807,
+            "result": 9223372036854775000
+        },
+        {
+            "min_resolution": 8,
+            "n": 0,
+            "result": 0
+        },
+        {
+            "min_resolution": 8,
+            "n": 1,
+            "result": 0
+        },
+        {
+            "min_resolution": 8,
+            "n": 5,
+            "result": 0
+        },
+        {
+            "min_resolution": 8,
+            "n": 9,
+            "result": 0
+        },
+        {
+            "min_resolution": 8,
+            "n": 10,
+            "result": 10
+        },
+        {
+            "min_resolution": 8,
+            "n": 11,
+            "result": 10
+        },
+        {
+            "min_resolution": 8,
+            "n": 99,
+            "result": 90
+        },
+        {
+            "min_resolution": 8,
+            "n": 100,
+            "result": 100
+        },
+        {
+            "min_resolution": 8,
+            "n": 101,
+            "result": 100
+        },
+        {
+            "min_resolution": 8,
+            "n": 999,
+            "result": 900
+        },
+        {
+            "min_resolution": 8,
+            "n": 1000,
+            "result": 1000
+        },
+        {
+            "min_resolution": 8,
+            "n": 1001,
+            "result": 1000
+        },
+        {
+            "min_resolution": 8,
+            "n": 1099,
+            "result": 1000
+        },
+        {
+            "min_resolution": 8,
+            "n": 1100,
+            "result": 1000
+        },
+        {
+            "min_resolution": 8,
+            "n": 9999,
+            "result": 9000
+        },
+        {
+            "min_resolution": 8,
+            "n": 10000,
+            "result": 10000
+        },
+        {
+            "min_resolution": 8,
+            "n": 10001,
+            "result": 10000
+        },
+        {
+            "min_resolution": 8,
+            "n": 99999,
+            "result": 90000
+        },
+        {
+            "min_resolution": 8,
+            "n": 100000,
+            "result": 100000
+        },
+        {
+            "min_resolution": 8,
+            "n": 100001,
+            "result": 100000
+        },
+        {
+            "min_resolution": 8,
+            "n": 999999,
+            "result": 900000
+        },
+        {
+            "min_resolution": 8,
+            "n": 1000000,
+            "result": 1000000
+        },
+        {
+            "min_resolution": 8,
+            "n": 1000001,
+            "result": 1000000
+        },
+        {
+            "min_resolution": 8,
+            "n": 12345678,
+            "result": 10000000
+        },
+        {
+            "min_resolution": 8,
+            "n": 99999999,
+            "result": 90000000
+        },
+        {
+            "min_resolution": 8,
+            "n": 100000000,
+            "result": 100000000
+        },
+        {
+            "min_resolution": 8,
+            "n": 100000001,
+            "result": 100000000
+        },
+        {
+            "min_resolution": 8,
+            "n": 123456789012,
+            "result": 123400000000
+        },
+        {
+            "min_resolution": 8,
+            "n": 999999999999999,
+            "result": 999999900000000
+        },
+        {
+            "min_resolution": 8,
+            "n": 1000000000000000,
+            "result": 1000000000000000
+        },
+        {
+            "min_resolution": 8,
+            "n": -1,
+            "result": 0
+        },
+        {
+            "min_resolution": 8,
+            "n": -9,
+            "result": 0
+        },
+        {
+            "min_resolution": 8,
+            "n": -10,
+            "result": -10
+        },
+        {
+            "min_resolution": 8,
+            "n": -11,
+            "result": -10
+        },
+        {
+            "min_resolution": 8,
+            "n": -99,
+            "result": -90
+        },
+        {
+            "min_resolution": 8,
+            "n": -100,
+            "result": -100
+        },
+        {
+            "min_resolution": 8,
+            "n": -101,
+            "result": -100
+        },
+        {
+            "min_resolution": 8,
+            "n": -1001,
+            "result": -1000
+        },
+        {
+            "min_resolution": 8,
+            "n": -12345,
+            "result": -10000
+        },
+        {
+            "min_resolution": 8,
+            "n": 5200,
+            "result": 5000
+        },
+        {
+            "min_resolution": 8,
+            "n": 1234567890,
+            "result": 1200000000
+        },
+        {
+            "min_resolution": 8,
+            "n": 987654321098765,
+            "result": 987654300000000
+        },
+        {
+            "min_resolution": 8,
+            "n": 0,
+            "result": 0
+        },
+        {
+            "min_resolution": 8,
+            "n": 0,
+            "result": 0
+        },
+        {
+            "min_resolution": 8,
+            "n": 1,
+            "result": 0
+        },
+        {
+            "min_resolution": 8,
+            "n": -1,
+            "result": 0
+        },
+        {
+            "min_resolution": 8,
+            "n": 2,
+            "result": 0
+        },
+        {
+            "min_resolution": 8,
+            "n": -2,
+            "result": 0
+        },
+        {
+            "min_resolution": 8,
+            "n": 9,
+            "result": 0
+        },
+        {
+            "min_resolution": 8,
+            "n": -9,
+            "result": 0
+        },
+        {
+            "min_resolution": 8,
+            "n": 10,
+            "result": 10
+        },
+        {
+            "min_resolution": 8,
+            "n": -10,
+            "result": -10
+        },
+        {
+            "min_resolution": 8,
+            "n": 11,
+            "result": 10
+        },
+        {
+            "min_resolution": 8,
+            "n": -11,
+            "result": -10
+        },
+        {
+            "min_resolution": 8,
+            "n": 99,
+            "result": 90
+        },
+        {
+            "min_resolution": 8,
+            "n": -99,
+            "result": -90
+        },
+        {
+            "min_resolution": 8,
+            "n": 100,
+            "result": 100
+        },
+        {
+            "min_resolution": 8,
+            "n": -100,
+            "result": -100
+        },
+        {
+            "min_resolution": 8,
+            "n": 101,
+            "result": 100
+        },
+        {
+            "min_resolution": 8,
+            "n": -101,
+            "result": -100
+        },
+        {
+            "min_resolution": 8,
+            "n": 999,
+            "result": 900
+        },
+        {
+            "min_resolution": 8,
+            "n": -999,
+            "result": -900
+        },
+        {
+            "min_resolution": 8,
+            "n": 1000,
+            "result": 1000
+        },
+        {
+            "min_resolution": 8,
+            "n": -1000,
+            "result": -1000
+        },
+        {
+            "min_resolution": 8,
+            "n": 1001,
+            "result": 1000
+        },
+        {
+            "min_resolution": 8,
+            "n": -1001,
+            "result": -1000
+        },
+        {
+            "min_resolution": 8,
+            "n": 9999,
+            "result": 9000
+        },
+        {
+            "min_resolution": 8,
+            "n": -9999,
+            "result": -9000
+        },
+        {
+            "min_resolution": 8,
+            "n": 10000,
+            "result": 10000
+        },
+        {
+            "min_resolution": 8,
+            "n": -10000,
+            "result": -10000
+        },
+        {
+            "min_resolution": 8,
+            "n": 10001,
+            "result": 10000
+        },
+        {
+            "min_resolution": 8,
+            "n": -10001,
+            "result": -10000
+        },
+        {
+            "min_resolution": 8,
+            "n": 99999,
+            "result": 90000
+        },
+        {
+            "min_resolution": 8,
+            "n": -99999,
+            "result": -90000
+        },
+        {
+            "min_resolution": 8,
+            "n": 100000,
+            "result": 100000
+        },
+        {
+            "min_resolution": 8,
+            "n": -100000,
+            "result": -100000
+        },
+        {
+            "min_resolution": 8,
+            "n": 100001,
+            "result": 100000
+        },
+        {
+            "min_resolution": 8,
+            "n": -100001,
+            "result": -100000
+        },
+        {
+            "min_resolution": 8,
+            "n": 999999,
+            "result": 900000
+        },
+        {
+            "min_resolution": 8,
+            "n": -999999,
+            "result": -900000
+        },
+        {
+            "min_resolution": 8,
+            "n": 1000000,
+            "result": 1000000
+        },
+        {
+            "min_resolution": 8,
+            "n": -1000000,
+            "result": -1000000
+        },
+        {
+            "min_resolution": 8,
+            "n": 1000001,
+            "result": 1000000
+        },
+        {
+            "min_resolution": 8,
+            "n": -1000001,
+            "result": -1000000
+        },
+        {
+            "min_resolution": 8,
+            "n": 9999999,
+            "result": 9000000
+        },
+        {
+            "min_resolution": 8,
+            "n": -9999999,
+            "result": -9000000
+        },
+        {
+            "min_resolution": 8,
+            "n": 10000000,
+            "result": 10000000
+        },
+        {
+            "min_resolution": 8,
+            "n": -10000000,
+            "result": -10000000
+        },
+        {
+            "min_resolution": 8,
+            "n": 10000001,
+            "result": 10000000
+        },
+        {
+            "min_resolution": 8,
+            "n": -10000001,
+            "result": -10000000
+        },
+        {
+            "min_resolution": 8,
+            "n": 99999999,
+            "result": 90000000
+        },
+        {
+            "min_resolution": 8,
+            "n": -99999999,
+            "result": -90000000
+        },
+        {
+            "min_resolution": 8,
+            "n": 100000000,
+            "result": 100000000
+        },
+        {
+            "min_resolution": 8,
+            "n": -100000000,
+            "result": -100000000
+        },
+        {
+            "min_resolution": 8,
+            "n": 100000001,
+            "result": 100000000
+        },
+        {
+            "min_resolution": 8,
+            "n": -100000001,
+            "result": -100000000
+        },
+        {
+            "min_resolution": 8,
+            "n": 999999999,
+            "result": 900000000
+        },
+        {
+            "min_resolution": 8,
+            "n": -999999999,
+            "result": -900000000
+        },
+        {
+            "min_resolution": 8,
+            "n": 1000000000,
+            "result": 1000000000
+        },
+        {
+            "min_resolution": 8,
+            "n": -1000000000,
+            "result": -1000000000
+        },
+        {
+            "min_resolution": 8,
+            "n": 1000000001,
+            "result": 1000000000
+        },
+        {
+            "min_resolution": 8,
+            "n": -1000000001,
+            "result": -1000000000
+        },
+        {
+            "min_resolution": 8,
+            "n": 9999999999,
+            "result": 9900000000
+        },
+        {
+            "min_resolution": 8,
+            "n": -9999999999,
+            "result": -9900000000
+        },
+        {
+            "min_resolution": 8,
+            "n": 10000000000,
+            "result": 10000000000
+        },
+        {
+            "min_resolution": 8,
+            "n": -10000000000,
+            "result": -10000000000
+        },
+        {
+            "min_resolution": 8,
+            "n": 10000000001,
+            "result": 10000000000
+        },
+        {
+            "min_resolution": 8,
+            "n": -10000000001,
+            "result": -10000000000
+        },
+        {
+            "min_resolution": 8,
+            "n": 99999999999,
+            "result": 99900000000
+        },
+        {
+            "min_resolution": 8,
+            "n": -99999999999,
+            "result": -99900000000
+        },
+        {
+            "min_resolution": 8,
+            "n": 100000000000,
+            "result": 100000000000
+        },
+        {
+            "min_resolution": 8,
+            "n": -100000000000,
+            "result": -100000000000
+        },
+        {
+            "min_resolution": 8,
+            "n": 100000000001,
+            "result": 100000000000
+        },
+        {
+            "min_resolution": 8,
+            "n": -100000000001,
+            "result": -100000000000
+        },
+        {
+            "min_resolution": 8,
+            "n": 999999999999,
+            "result": 999900000000
+        },
+        {
+            "min_resolution": 8,
+            "n": -999999999999,
+            "result": -999900000000
+        },
+        {
+            "min_resolution": 8,
+            "n": 1000000000000,
+            "result": 1000000000000
+        },
+        {
+            "min_resolution": 8,
+            "n": -1000000000000,
+            "result": -1000000000000
+        },
+        {
+            "min_resolution": 8,
+            "n": 1000000000001,
+            "result": 1000000000000
+        },
+        {
+            "min_resolution": 8,
+            "n": -1000000000001,
+            "result": -1000000000000
+        },
+        {
+            "min_resolution": 8,
+            "n": 9999999999999,
+            "result": 9999900000000
+        },
+        {
+            "min_resolution": 8,
+            "n": -9999999999999,
+            "result": -9999900000000
+        },
+        {
+            "min_resolution": 8,
+            "n": 10000000000000,
+            "result": 10000000000000
+        },
+        {
+            "min_resolution": 8,
+            "n": -10000000000000,
+            "result": -10000000000000
+        },
+        {
+            "min_resolution": 8,
+            "n": 10000000000001,
+            "result": 10000000000000
+        },
+        {
+            "min_resolution": 8,
+            "n": -10000000000001,
+            "result": -10000000000000
+        },
+        {
+            "min_resolution": 8,
+            "n": 99999999999999,
+            "result": 99999900000000
+        },
+        {
+            "min_resolution": 8,
+            "n": -99999999999999,
+            "result": -99999900000000
+        },
+        {
+            "min_resolution": 8,
+            "n": 100000000000000,
+            "result": 100000000000000
+        },
+        {
+            "min_resolution": 8,
+            "n": -100000000000000,
+            "result": -100000000000000
+        },
+        {
+            "min_resolution": 8,
+            "n": 100000000000001,
+            "result": 100000000000000
+        },
+        {
+            "min_resolution": 8,
+            "n": -100000000000001,
+            "result": -100000000000000
+        },
+        {
+            "min_resolution": 8,
+            "n": 999999999999999,
+            "result": 999999900000000
+        },
+        {
+            "min_resolution": 8,
+            "n": -999999999999999,
+            "result": -999999900000000
+        },
+        {
+            "min_resolution": 8,
+            "n": 1000000000000000,
+            "result": 1000000000000000
+        },
+        {
+            "min_resolution": 8,
+            "n": -1000000000000000,
+            "result": -1000000000000000
+        },
+        {
+            "min_resolution": 8,
+            "n": 1000000000000001,
+            "result": 1000000000000000
+        },
+        {
+            "min_resolution": 8,
+            "n": -1000000000000001,
+            "result": -1000000000000000
+        },
+        {
+            "min_resolution": 8,
+            "n": 10000000000000000,
+            "result": 10000000000000000
+        },
+        {
+            "min_resolution": 8,
+            "n": -10000000000000000,
+            "result": -10000000000000000
+        },
+        {
+            "min_resolution": 8,
+            "n": 10000000000000000,
+            "result": 10000000000000000
+        },
+        {
+            "min_resolution": 8,
+            "n": -10000000000000000,
+            "result": -10000000000000000
+        },
+        {
+            "min_resolution": 8,
+            "n": 10000000000000000,
+            "result": 10000000000000000
+        },
+        {
+            "min_resolution": 8,
+            "n": -10000000000000000,
+            "result": -10000000000000000
+        },
+        {
+            "min_resolution": 8,
+            "n": 100000000000000000,
+            "result": 100000000000000000
+        },
+        {
+            "min_resolution": 8,
+            "n": -100000000000000000,
+            "result": -100000000000000000
+        },
+        {
+            "min_resolution": 8,
+            "n": 100000000000000000,
+            "result": 100000000000000000
+        },
+        {
+            "min_resolution": 8,
+            "n": -100000000000000000,
+            "result": -100000000000000000
+        },
+        {
+            "min_resolution": 8,
+            "n": 100000000000000000,
+            "result": 100000000000000000
+        },
+        {
+            "min_resolution": 8,
+            "n": -100000000000000000,
+            "result": -100000000000000000
+        },
+        {
+            "min_resolution": 8,
+            "n": 1000000000000000000,
+            "result": 1000000000000000000
+        },
+        {
+            "min_resolution": 8,
+            "n": -1000000000000000000,
+            "result": -1000000000000000000
+        },
+        {
+            "min_resolution": 8,
+            "n": 1000000000000000000,
+            "result": 1000000000000000000
+        },
+        {
+            "min_resolution": 8,
+            "n": -1000000000000000000,
+            "result": -1000000000000000000
+        },
+        {
+            "min_resolution": 8,
+            "n": 1000000000000000000,
+            "result": 1000000000000000000
+        },
+        {
+            "min_resolution": 8,
+            "n": -1000000000000000000,
+            "result": -1000000000000000000
+        },
+        {
+            "min_resolution": 8,
+            "n": 9007199254740992,
+            "result": 9007199200000000
+        },
+        {
+            "min_resolution": 8,
+            "n": 9007199254740992,
+            "result": 9007199200000000
+        },
+        {
+            "min_resolution": 8,
+            "n": 9223372036854775807,
+            "result": 9223372036800000000
+        },
+        {
+            "min_resolution": 20,
+            "n": 0,
+            "result": 0
+        },
+        {
+            "min_resolution": 20,
+            "n": 1,
+            "result": 0
+        },
+        {
+            "min_resolution": 20,
+            "n": 5,
+            "result": 0
+        },
+        {
+            "min_resolution": 20,
+            "n": 9,
+            "result": 0
+        },
+        {
+            "min_resolution": 20,
+            "n": 10,
+            "result": 10
+        },
+        {
+            "min_resolution": 20,
+            "n": 11,
+            "result": 10
+        },
+        {
+            "min_resolution": 20,
+            "n": 99,
+            "result": 90
+        },
+        {
+            "min_resolution": 20,
+            "n": 100,
+            "result": 100
+        },
+        {
+            "min_resolution": 20,
+            "n": 101,
+            "result": 100
+        },
+        {
+            "min_resolution": 20,
+            "n": 999,
+            "result": 900
+        },
+        {
+            "min_resolution": 20,
+            "n": 1000,
+            "result": 1000
+        },
+        {
+            "min_resolution": 20,
+            "n": 1001,
+            "result": 1000
+        },
+        {
+            "min_resolution": 20,
+            "n": 1099,
+            "result": 1000
+        },
+        {
+            "min_resolution": 20,
+            "n": 1100,
+            "result": 1000
+        },
+        {
+            "min_resolution": 20,
+            "n": 9999,
+            "result": 9000
+        },
+        {
+            "min_resolution": 20,
+            "n": 10000,
+            "result": 10000
+        },
+        {
+            "min_resolution": 20,
+            "n": 10001,
+            "result": 10000
+        },
+        {
+            "min_resolution": 20,
+            "n": 99999,
+            "result": 90000
+        },
+        {
+            "min_resolution": 20,
+            "n": 100000,
+            "result": 100000
+        },
+        {
+            "min_resolution": 20,
+            "n": 100001,
+            "result": 100000
+        },
+        {
+            "min_resolution": 20,
+            "n": 999999,
+            "result": 900000
+        },
+        {
+            "min_resolution": 20,
+            "n": 1000000,
+            "result": 1000000
+        },
+        {
+            "min_resolution": 20,
+            "n": 1000001,
+            "result": 1000000
+        },
+        {
+            "min_resolution": 20,
+            "n": 12345678,
+            "result": 10000000
+        },
+        {
+            "min_resolution": 20,
+            "n": 99999999,
+            "result": 90000000
+        },
+        {
+            "min_resolution": 20,
+            "n": 100000000,
+            "result": 100000000
+        },
+        {
+            "min_resolution": 20,
+            "n": 100000001,
+            "result": 100000000
+        },
+        {
+            "min_resolution": 20,
+            "n": 123456789012,
+            "result": 100000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": 999999999999999,
+            "result": 900000000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": 1000000000000000,
+            "result": 1000000000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": -1,
+            "result": 0
+        },
+        {
+            "min_resolution": 20,
+            "n": -9,
+            "result": 0
+        },
+        {
+            "min_resolution": 20,
+            "n": -10,
+            "result": -10
+        },
+        {
+            "min_resolution": 20,
+            "n": -11,
+            "result": -10
+        },
+        {
+            "min_resolution": 20,
+            "n": -99,
+            "result": -90
+        },
+        {
+            "min_resolution": 20,
+            "n": -100,
+            "result": -100
+        },
+        {
+            "min_resolution": 20,
+            "n": -101,
+            "result": -100
+        },
+        {
+            "min_resolution": 20,
+            "n": -1001,
+            "result": -1000
+        },
+        {
+            "min_resolution": 20,
+            "n": -12345,
+            "result": -10000
+        },
+        {
+            "min_resolution": 20,
+            "n": 5200,
+            "result": 5000
+        },
+        {
+            "min_resolution": 20,
+            "n": 1234567890,
+            "result": 1000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": 987654321098765,
+            "result": 900000000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": 0,
+            "result": 0
+        },
+        {
+            "min_resolution": 20,
+            "n": 0,
+            "result": 0
+        },
+        {
+            "min_resolution": 20,
+            "n": 1,
+            "result": 0
+        },
+        {
+            "min_resolution": 20,
+            "n": -1,
+            "result": 0
+        },
+        {
+            "min_resolution": 20,
+            "n": 2,
+            "result": 0
+        },
+        {
+            "min_resolution": 20,
+            "n": -2,
+            "result": 0
+        },
+        {
+            "min_resolution": 20,
+            "n": 9,
+            "result": 0
+        },
+        {
+            "min_resolution": 20,
+            "n": -9,
+            "result": 0
+        },
+        {
+            "min_resolution": 20,
+            "n": 10,
+            "result": 10
+        },
+        {
+            "min_resolution": 20,
+            "n": -10,
+            "result": -10
+        },
+        {
+            "min_resolution": 20,
+            "n": 11,
+            "result": 10
+        },
+        {
+            "min_resolution": 20,
+            "n": -11,
+            "result": -10
+        },
+        {
+            "min_resolution": 20,
+            "n": 99,
+            "result": 90
+        },
+        {
+            "min_resolution": 20,
+            "n": -99,
+            "result": -90
+        },
+        {
+            "min_resolution": 20,
+            "n": 100,
+            "result": 100
+        },
+        {
+            "min_resolution": 20,
+            "n": -100,
+            "result": -100
+        },
+        {
+            "min_resolution": 20,
+            "n": 101,
+            "result": 100
+        },
+        {
+            "min_resolution": 20,
+            "n": -101,
+            "result": -100
+        },
+        {
+            "min_resolution": 20,
+            "n": 999,
+            "result": 900
+        },
+        {
+            "min_resolution": 20,
+            "n": -999,
+            "result": -900
+        },
+        {
+            "min_resolution": 20,
+            "n": 1000,
+            "result": 1000
+        },
+        {
+            "min_resolution": 20,
+            "n": -1000,
+            "result": -1000
+        },
+        {
+            "min_resolution": 20,
+            "n": 1001,
+            "result": 1000
+        },
+        {
+            "min_resolution": 20,
+            "n": -1001,
+            "result": -1000
+        },
+        {
+            "min_resolution": 20,
+            "n": 9999,
+            "result": 9000
+        },
+        {
+            "min_resolution": 20,
+            "n": -9999,
+            "result": -9000
+        },
+        {
+            "min_resolution": 20,
+            "n": 10000,
+            "result": 10000
+        },
+        {
+            "min_resolution": 20,
+            "n": -10000,
+            "result": -10000
+        },
+        {
+            "min_resolution": 20,
+            "n": 10001,
+            "result": 10000
+        },
+        {
+            "min_resolution": 20,
+            "n": -10001,
+            "result": -10000
+        },
+        {
+            "min_resolution": 20,
+            "n": 99999,
+            "result": 90000
+        },
+        {
+            "min_resolution": 20,
+            "n": -99999,
+            "result": -90000
+        },
+        {
+            "min_resolution": 20,
+            "n": 100000,
+            "result": 100000
+        },
+        {
+            "min_resolution": 20,
+            "n": -100000,
+            "result": -100000
+        },
+        {
+            "min_resolution": 20,
+            "n": 100001,
+            "result": 100000
+        },
+        {
+            "min_resolution": 20,
+            "n": -100001,
+            "result": -100000
+        },
+        {
+            "min_resolution": 20,
+            "n": 999999,
+            "result": 900000
+        },
+        {
+            "min_resolution": 20,
+            "n": -999999,
+            "result": -900000
+        },
+        {
+            "min_resolution": 20,
+            "n": 1000000,
+            "result": 1000000
+        },
+        {
+            "min_resolution": 20,
+            "n": -1000000,
+            "result": -1000000
+        },
+        {
+            "min_resolution": 20,
+            "n": 1000001,
+            "result": 1000000
+        },
+        {
+            "min_resolution": 20,
+            "n": -1000001,
+            "result": -1000000
+        },
+        {
+            "min_resolution": 20,
+            "n": 9999999,
+            "result": 9000000
+        },
+        {
+            "min_resolution": 20,
+            "n": -9999999,
+            "result": -9000000
+        },
+        {
+            "min_resolution": 20,
+            "n": 10000000,
+            "result": 10000000
+        },
+        {
+            "min_resolution": 20,
+            "n": -10000000,
+            "result": -10000000
+        },
+        {
+            "min_resolution": 20,
+            "n": 10000001,
+            "result": 10000000
+        },
+        {
+            "min_resolution": 20,
+            "n": -10000001,
+            "result": -10000000
+        },
+        {
+            "min_resolution": 20,
+            "n": 99999999,
+            "result": 90000000
+        },
+        {
+            "min_resolution": 20,
+            "n": -99999999,
+            "result": -90000000
+        },
+        {
+            "min_resolution": 20,
+            "n": 100000000,
+            "result": 100000000
+        },
+        {
+            "min_resolution": 20,
+            "n": -100000000,
+            "result": -100000000
+        },
+        {
+            "min_resolution": 20,
+            "n": 100000001,
+            "result": 100000000
+        },
+        {
+            "min_resolution": 20,
+            "n": -100000001,
+            "result": -100000000
+        },
+        {
+            "min_resolution": 20,
+            "n": 999999999,
+            "result": 900000000
+        },
+        {
+            "min_resolution": 20,
+            "n": -999999999,
+            "result": -900000000
+        },
+        {
+            "min_resolution": 20,
+            "n": 1000000000,
+            "result": 1000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": -1000000000,
+            "result": -1000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": 1000000001,
+            "result": 1000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": -1000000001,
+            "result": -1000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": 9999999999,
+            "result": 9000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": -9999999999,
+            "result": -9000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": 10000000000,
+            "result": 10000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": -10000000000,
+            "result": -10000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": 10000000001,
+            "result": 10000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": -10000000001,
+            "result": -10000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": 99999999999,
+            "result": 90000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": -99999999999,
+            "result": -90000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": 100000000000,
+            "result": 100000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": -100000000000,
+            "result": -100000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": 100000000001,
+            "result": 100000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": -100000000001,
+            "result": -100000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": 999999999999,
+            "result": 900000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": -999999999999,
+            "result": -900000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": 1000000000000,
+            "result": 1000000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": -1000000000000,
+            "result": -1000000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": 1000000000001,
+            "result": 1000000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": -1000000000001,
+            "result": -1000000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": 9999999999999,
+            "result": 9000000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": -9999999999999,
+            "result": -9000000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": 10000000000000,
+            "result": 10000000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": -10000000000000,
+            "result": -10000000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": 10000000000001,
+            "result": 10000000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": -10000000000001,
+            "result": -10000000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": 99999999999999,
+            "result": 90000000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": -99999999999999,
+            "result": -90000000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": 100000000000000,
+            "result": 100000000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": -100000000000000,
+            "result": -100000000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": 100000000000001,
+            "result": 100000000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": -100000000000001,
+            "result": -100000000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": 999999999999999,
+            "result": 900000000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": -999999999999999,
+            "result": -900000000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": 1000000000000000,
+            "result": 1000000000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": -1000000000000000,
+            "result": -1000000000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": 1000000000000001,
+            "result": 1000000000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": -1000000000000001,
+            "result": -1000000000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": 10000000000000000,
+            "result": 10000000000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": -10000000000000000,
+            "result": -10000000000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": 10000000000000000,
+            "result": 10000000000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": -10000000000000000,
+            "result": -10000000000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": 10000000000000000,
+            "result": 10000000000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": -10000000000000000,
+            "result": -10000000000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": 100000000000000000,
+            "result": 100000000000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": -100000000000000000,
+            "result": -100000000000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": 100000000000000000,
+            "result": 100000000000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": -100000000000000000,
+            "result": -100000000000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": 100000000000000000,
+            "result": 100000000000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": -100000000000000000,
+            "result": -100000000000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": 1000000000000000000,
+            "result": 1000000000000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": -1000000000000000000,
+            "result": -1000000000000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": 1000000000000000000,
+            "result": 1000000000000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": -1000000000000000000,
+            "result": -1000000000000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": 1000000000000000000,
+            "result": 1000000000000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": -1000000000000000000,
+            "result": -1000000000000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": 9007199254740992,
+            "result": 9000000000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": 9007199254740992,
+            "result": 9000000000000000
+        },
+        {
+            "min_resolution": 20,
+            "n": 9223372036854775807,
+            "result": 9000000000000000000
+        },
+        {
+            "min_resolution": -1,
+            "n": 0,
+            "result": 0
+        },
+        {
+            "min_resolution": -1,
+            "n": 1,
+            "result": 1
+        },
+        {
+            "min_resolution": -1,
+            "n": 5,
+            "result": 5
+        },
+        {
+            "min_resolution": -1,
+            "n": 9,
+            "result": 9
+        },
+        {
+            "min_resolution": -1,
+            "n": 10,
+            "result": 10
+        },
+        {
+            "min_resolution": -1,
+            "n": 11,
+            "result": 11
+        },
+        {
+            "min_resolution": -1,
+            "n": 99,
+            "result": 99
+        },
+        {
+            "min_resolution": -1,
+            "n": 100,
+            "result": 100
+        },
+        {
+            "min_resolution": -1,
+            "n": 101,
+            "result": 101
+        },
+        {
+            "min_resolution": -1,
+            "n": 999,
+            "result": 999
+        },
+        {
+            "min_resolution": -1,
+            "n": 1000,
+            "result": 1000
+        },
+        {
+            "min_resolution": -1,
+            "n": 1001,
+            "result": 1001
+        },
+        {
+            "min_resolution": -1,
+            "n": 1099,
+            "result": 1099
+        },
+        {
+            "min_resolution": -1,
+            "n": 1100,
+            "result": 1100
+        },
+        {
+            "min_resolution": -1,
+            "n": 9999,
+            "result": 9999
+        },
+        {
+            "min_resolution": -1,
+            "n": 10000,
+            "result": 10000
+        },
+        {
+            "min_resolution": -1,
+            "n": 10001,
+            "result": 10001
+        },
+        {
+            "min_resolution": -1,
+            "n": 99999,
+            "result": 99999
+        },
+        {
+            "min_resolution": -1,
+            "n": 100000,
+            "result": 100000
+        },
+        {
+            "min_resolution": -1,
+            "n": 100001,
+            "result": 100001
+        },
+        {
+            "min_resolution": -1,
+            "n": 999999,
+            "result": 999999
+        },
+        {
+            "min_resolution": -1,
+            "n": 1000000,
+            "result": 1000000
+        },
+        {
+            "min_resolution": -1,
+            "n": 1000001,
+            "result": 1000001
+        },
+        {
+            "min_resolution": -1,
+            "n": 12345678,
+            "result": 12345678
+        },
+        {
+            "min_resolution": -1,
+            "n": 99999999,
+            "result": 99999999
+        },
+        {
+            "min_resolution": -1,
+            "n": 100000000,
+            "result": 100000000
+        },
+        {
+            "min_resolution": -1,
+            "n": 100000001,
+            "result": 100000001
+        },
+        {
+            "min_resolution": -1,
+            "n": 123456789012,
+            "result": 123456789012
+        },
+        {
+            "min_resolution": -1,
+            "n": 999999999999999,
+            "result": 999999999999999
+        },
+        {
+            "min_resolution": -1,
+            "n": 1000000000000000,
+            "result": 1000000000000000
+        },
+        {
+            "min_resolution": -1,
+            "n": -1,
+            "result": -1
+        },
+        {
+            "min_resolution": -1,
+            "n": -9,
+            "result": -9
+        },
+        {
+            "min_resolution": -1,
+            "n": -10,
+            "result": -10
+        },
+        {
+            "min_resolution": -1,
+            "n": -11,
+            "result": -11
+        },
+        {
+            "min_resolution": -1,
+            "n": -99,
+            "result": -99
+        },
+        {
+            "min_resolution": -1,
+            "n": -100,
+            "result": -100
+        },
+        {
+            "min_resolution": -1,
+            "n": -101,
+            "result": -101
+        },
+        {
+            "min_resolution": -1,
+            "n": -1001,
+            "result": -1001
+        },
+        {
+            "min_resolution": -1,
+            "n": -12345,
+            "result": -12345
+        },
+        {
+            "min_resolution": -1,
+            "n": 5200,
+            "result": 5200
+        },
+        {
+            "min_resolution": -1,
+            "n": 1234567890,
+            "result": 1234567890
+        },
+        {
+            "min_resolution": -1,
+            "n": 987654321098765,
+            "result": 987654321098765
+        },
+        {
+            "min_resolution": -1,
+            "n": 0,
+            "result": 0
+        },
+        {
+            "min_resolution": -1,
+            "n": 0,
+            "result": 0
+        },
+        {
+            "min_resolution": -1,
+            "n": 1,
+            "result": 1
+        },
+        {
+            "min_resolution": -1,
+            "n": -1,
+            "result": -1
+        },
+        {
+            "min_resolution": -1,
+            "n": 2,
+            "result": 2
+        },
+        {
+            "min_resolution": -1,
+            "n": -2,
+            "result": -2
+        },
+        {
+            "min_resolution": -1,
+            "n": 9,
+            "result": 9
+        },
+        {
+            "min_resolution": -1,
+            "n": -9,
+            "result": -9
+        },
+        {
+            "min_resolution": -1,
+            "n": 10,
+            "result": 10
+        },
+        {
+            "min_resolution": -1,
+            "n": -10,
+            "result": -10
+        },
+        {
+            "min_resolution": -1,
+            "n": 11,
+            "result": 11
+        },
+        {
+            "min_resolution": -1,
+            "n": -11,
+            "result": -11
+        },
+        {
+            "min_resolution": -1,
+            "n": 99,
+            "result": 99
+        },
+        {
+            "min_resolution": -1,
+            "n": -99,
+            "result": -99
+        },
+        {
+            "min_resolution": -1,
+            "n": 100,
+            "result": 100
+        },
+        {
+            "min_resolution": -1,
+            "n": -100,
+            "result": -100
+        },
+        {
+            "min_resolution": -1,
+            "n": 101,
+            "result": 101
+        },
+        {
+            "min_resolution": -1,
+            "n": -101,
+            "result": -101
+        },
+        {
+            "min_resolution": -1,
+            "n": 999,
+            "result": 999
+        },
+        {
+            "min_resolution": -1,
+            "n": -999,
+            "result": -999
+        },
+        {
+            "min_resolution": -1,
+            "n": 1000,
+            "result": 1000
+        },
+        {
+            "min_resolution": -1,
+            "n": -1000,
+            "result": -1000
+        },
+        {
+            "min_resolution": -1,
+            "n": 1001,
+            "result": 1001
+        },
+        {
+            "min_resolution": -1,
+            "n": -1001,
+            "result": -1001
+        },
+        {
+            "min_resolution": -1,
+            "n": 9999,
+            "result": 9999
+        },
+        {
+            "min_resolution": -1,
+            "n": -9999,
+            "result": -9999
+        },
+        {
+            "min_resolution": -1,
+            "n": 10000,
+            "result": 10000
+        },
+        {
+            "min_resolution": -1,
+            "n": -10000,
+            "result": -10000
+        },
+        {
+            "min_resolution": -1,
+            "n": 10001,
+            "result": 10001
+        },
+        {
+            "min_resolution": -1,
+            "n": -10001,
+            "result": -10001
+        },
+        {
+            "min_resolution": -1,
+            "n": 99999,
+            "result": 99999
+        },
+        {
+            "min_resolution": -1,
+            "n": -99999,
+            "result": -99999
+        },
+        {
+            "min_resolution": -1,
+            "n": 100000,
+            "result": 100000
+        },
+        {
+            "min_resolution": -1,
+            "n": -100000,
+            "result": -100000
+        },
+        {
+            "min_resolution": -1,
+            "n": 100001,
+            "result": 100001
+        },
+        {
+            "min_resolution": -1,
+            "n": -100001,
+            "result": -100001
+        },
+        {
+            "min_resolution": -1,
+            "n": 999999,
+            "result": 999999
+        },
+        {
+            "min_resolution": -1,
+            "n": -999999,
+            "result": -999999
+        },
+        {
+            "min_resolution": -1,
+            "n": 1000000,
+            "result": 1000000
+        },
+        {
+            "min_resolution": -1,
+            "n": -1000000,
+            "result": -1000000
+        },
+        {
+            "min_resolution": -1,
+            "n": 1000001,
+            "result": 1000001
+        },
+        {
+            "min_resolution": -1,
+            "n": -1000001,
+            "result": -1000001
+        },
+        {
+            "min_resolution": -1,
+            "n": 9999999,
+            "result": 9999999
+        },
+        {
+            "min_resolution": -1,
+            "n": -9999999,
+            "result": -9999999
+        },
+        {
+            "min_resolution": -1,
+            "n": 10000000,
+            "result": 10000000
+        },
+        {
+            "min_resolution": -1,
+            "n": -10000000,
+            "result": -10000000
+        },
+        {
+            "min_resolution": -1,
+            "n": 10000001,
+            "result": 10000001
+        },
+        {
+            "min_resolution": -1,
+            "n": -10000001,
+            "result": -10000001
+        },
+        {
+            "min_resolution": -1,
+            "n": 99999999,
+            "result": 99999999
+        },
+        {
+            "min_resolution": -1,
+            "n": -99999999,
+            "result": -99999999
+        },
+        {
+            "min_resolution": -1,
+            "n": 100000000,
+            "result": 100000000
+        },
+        {
+            "min_resolution": -1,
+            "n": -100000000,
+            "result": -100000000
+        },
+        {
+            "min_resolution": -1,
+            "n": 100000001,
+            "result": 100000001
+        },
+        {
+            "min_resolution": -1,
+            "n": -100000001,
+            "result": -100000001
+        },
+        {
+            "min_resolution": -1,
+            "n": 999999999,
+            "result": 999999999
+        },
+        {
+            "min_resolution": -1,
+            "n": -999999999,
+            "result": -999999999
+        },
+        {
+            "min_resolution": -1,
+            "n": 1000000000,
+            "result": 1000000000
+        },
+        {
+            "min_resolution": -1,
+            "n": -1000000000,
+            "result": -1000000000
+        },
+        {
+            "min_resolution": -1,
+            "n": 1000000001,
+            "result": 1000000001
+        },
+        {
+            "min_resolution": -1,
+            "n": -1000000001,
+            "result": -1000000001
+        },
+        {
+            "min_resolution": -1,
+            "n": 9999999999,
+            "result": 9999999999
+        },
+        {
+            "min_resolution": -1,
+            "n": -9999999999,
+            "result": -9999999999
+        },
+        {
+            "min_resolution": -1,
+            "n": 10000000000,
+            "result": 10000000000
+        },
+        {
+            "min_resolution": -1,
+            "n": -10000000000,
+            "result": -10000000000
+        },
+        {
+            "min_resolution": -1,
+            "n": 10000000001,
+            "result": 10000000001
+        },
+        {
+            "min_resolution": -1,
+            "n": -10000000001,
+            "result": -10000000001
+        },
+        {
+            "min_resolution": -1,
+            "n": 99999999999,
+            "result": 99999999999
+        },
+        {
+            "min_resolution": -1,
+            "n": -99999999999,
+            "result": -99999999999
+        },
+        {
+            "min_resolution": -1,
+            "n": 100000000000,
+            "result": 100000000000
+        },
+        {
+            "min_resolution": -1,
+            "n": -100000000000,
+            "result": -100000000000
+        },
+        {
+            "min_resolution": -1,
+            "n": 100000000001,
+            "result": 100000000001
+        },
+        {
+            "min_resolution": -1,
+            "n": -100000000001,
+            "result": -100000000001
+        },
+        {
+            "min_resolution": -1,
+            "n": 999999999999,
+            "result": 999999999999
+        },
+        {
+            "min_resolution": -1,
+            "n": -999999999999,
+            "result": -999999999999
+        },
+        {
+            "min_resolution": -1,
+            "n": 1000000000000,
+            "result": 1000000000000
+        },
+        {
+            "min_resolution": -1,
+            "n": -1000000000000,
+            "result": -1000000000000
+        },
+        {
+            "min_resolution": -1,
+            "n": 1000000000001,
+            "result": 1000000000001
+        },
+        {
+            "min_resolution": -1,
+            "n": -1000000000001,
+            "result": -1000000000001
+        },
+        {
+            "min_resolution": -1,
+            "n": 9999999999999,
+            "result": 9999999999999
+        },
+        {
+            "min_resolution": -1,
+            "n": -9999999999999,
+            "result": -9999999999999
+        },
+        {
+            "min_resolution": -1,
+            "n": 10000000000000,
+            "result": 10000000000000
+        },
+        {
+            "min_resolution": -1,
+            "n": -10000000000000,
+            "result": -10000000000000
+        },
+        {
+            "min_resolution": -1,
+            "n": 10000000000001,
+            "result": 10000000000001
+        },
+        {
+            "min_resolution": -1,
+            "n": -10000000000001,
+            "result": -10000000000001
+        },
+        {
+            "min_resolution": -1,
+            "n": 99999999999999,
+            "result": 99999999999999
+        },
+        {
+            "min_resolution": -1,
+            "n": -99999999999999,
+            "result": -99999999999999
+        },
+        {
+            "min_resolution": -1,
+            "n": 100000000000000,
+            "result": 100000000000000
+        },
+        {
+            "min_resolution": -1,
+            "n": -100000000000000,
+            "result": -100000000000000
+        },
+        {
+            "min_resolution": -1,
+            "n": 100000000000001,
+            "result": 100000000000001
+        },
+        {
+            "min_resolution": -1,
+            "n": -100000000000001,
+            "result": -100000000000001
+        },
+        {
+            "min_resolution": -1,
+            "n": 999999999999999,
+            "result": 999999999999999
+        },
+        {
+            "min_resolution": -1,
+            "n": -999999999999999,
+            "result": -999999999999999
+        },
+        {
+            "min_resolution": -1,
+            "n": 1000000000000000,
+            "result": 1000000000000000
+        },
+        {
+            "min_resolution": -1,
+            "n": -1000000000000000,
+            "result": -1000000000000000
+        },
+        {
+            "min_resolution": -1,
+            "n": 1000000000000001,
+            "result": 1000000000000001
+        },
+        {
+            "min_resolution": -1,
+            "n": -1000000000000001,
+            "result": -1000000000000001
+        },
+        {
+            "min_resolution": -1,
+            "n": 10000000000000000,
+            "result": 10000000000000000
+        },
+        {
+            "min_resolution": -1,
+            "n": -10000000000000000,
+            "result": -10000000000000000
+        },
+        {
+            "min_resolution": -1,
+            "n": 10000000000000000,
+            "result": 10000000000000000
+        },
+        {
+            "min_resolution": -1,
+            "n": -10000000000000000,
+            "result": -10000000000000000
+        },
+        {
+            "min_resolution": -1,
+            "n": 10000000000000000,
+            "result": 10000000000000000
+        },
+        {
+            "min_resolution": -1,
+            "n": -10000000000000000,
+            "result": -10000000000000000
+        },
+        {
+            "min_resolution": -1,
+            "n": 100000000000000000,
+            "result": 100000000000000000
+        },
+        {
+            "min_resolution": -1,
+            "n": -100000000000000000,
+            "result": -100000000000000000
+        },
+        {
+            "min_resolution": -1,
+            "n": 100000000000000000,
+            "result": 100000000000000000
+        },
+        {
+            "min_resolution": -1,
+            "n": -100000000000000000,
+            "result": -100000000000000000
+        },
+        {
+            "min_resolution": -1,
+            "n": 100000000000000000,
+            "result": 100000000000000000
+        },
+        {
+            "min_resolution": -1,
+            "n": -100000000000000000,
+            "result": -100000000000000000
+        },
+        {
+            "min_resolution": -1,
+            "n": 1000000000000000000,
+            "result": 1000000000000000000
+        },
+        {
+            "min_resolution": -1,
+            "n": -1000000000000000000,
+            "result": -1000000000000000000
+        },
+        {
+            "min_resolution": -1,
+            "n": 1000000000000000000,
+            "result": 1000000000000000000
+        },
+        {
+            "min_resolution": -1,
+            "n": -1000000000000000000,
+            "result": -1000000000000000000
+        },
+        {
+            "min_resolution": -1,
+            "n": 1000000000000000000,
+            "result": 1000000000000000000
+        },
+        {
+            "min_resolution": -1,
+            "n": -1000000000000000000,
+            "result": -1000000000000000000
+        },
+        {
+            "min_resolution": -1,
+            "n": 9007199254740992,
+            "result": 9007199254740992
+        },
+        {
+            "min_resolution": -1,
+            "n": 9007199254740992,
+            "result": 9007199254740992
+        },
+        {
+            "min_resolution": -1,
+            "n": 9223372036854775807,
+            "result": 9223372036854775807
+        }
+    ]
+}

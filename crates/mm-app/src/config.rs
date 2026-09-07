@@ -210,6 +210,54 @@ pub struct Config {
     /// treats sliding expiry and idle revocation as alternatives, never both.
     pub extend_session_length_with_activity: bool,
 
+    /// `ClientRequirements.AndroidLatestVersion` and its three siblings (config.go:2674-2677).
+    ///
+    /// The four version strings `GET /api/v4/system/ping` echoes back verbatim. They have **no**
+    /// `SetDefaults` — `ClientRequirements` is one of the few sections Go never defaults — so the
+    /// zero value is the empty string and that is what a stock server puts on the wire.
+    pub android_latest_version: String,
+    /// See [`Config::android_latest_version`].
+    pub android_min_version: String,
+    /// See [`Config::android_latest_version`].
+    pub ios_latest_version: String,
+    /// See [`Config::android_latest_version`].
+    pub ios_min_version: String,
+
+    /// `ServiceSettings.GoroutineHealthThreshold` (config.go:384, defaulted at :587). Go default
+    /// **-1**, not 0.
+    ///
+    /// `getSystemPing` downgrades `status` to `UNHEALTHY` when the live goroutine count reaches
+    /// it. The count is the *Go process's*, which this process cannot observe and whose own
+    /// number would mean nothing — so a positive threshold is a boundary, not a setting to read:
+    /// see `mm_api::system::get_system_ping`. Modelled so the boundary can be evaluated rather
+    /// than assumed, and the default's sign is the whole reason it is `i64` and not `u32`.
+    pub goroutine_health_threshold: i64,
+
+    /// `SqlSettings.DisableDatabaseSearch` (config.go, defaulted at :1592). Go default `false`.
+    ///
+    /// Half of `ActiveSearchBackend`: with no search engine registered, the broker answers
+    /// `"none"` when this is set and `"database"` when it is not
+    /// (searchengine/searchengine.go:47). Read by `getSystemPing`.
+    pub disable_database_search: bool,
+
+    /// `ElasticsearchSettings.EnableSearching`.
+    ///
+    /// **A boundary, not a behaviour.** The search broker only ever holds an Elasticsearch engine
+    /// if the *enterprise* build registered one (`platform/service.go:548`), so on the Team
+    /// Edition binary beside us `ActiveSearchBackend` cannot be anything but `"database"` or
+    /// `"none"`. This is read so that a deployment which does have the enterprise binary hands
+    /// `/system/ping` back to Go rather than confidently reporting the wrong backend.
+    pub elasticsearch_enable_searching: bool,
+
+    /// `FeatureFlags.TestFeature` (feature_flags.go:14, defaulted `"off"` at :160).
+    ///
+    /// `getSystemPing` adds a `TestFeatureFlag` key **only** when this is not `"off"`, so it is a
+    /// key that appears and disappears rather than a value that changes. Like
+    /// [`Config::feature_flag_burn_on_read`] it is deliberately not read from the persisted
+    /// document — Go strips `FeatureFlags` before writing (config/store.go:306) — so the
+    /// environment is its only source.
+    pub feature_flag_test_feature: String,
+
     /// The `MM_LICENSE` environment variable (`platform.LicenseEnv`, platform/license.go:26).
     ///
     /// Not an `MM_<SECTION>_<SETTING>` config overlay — it is its own variable, holding a whole
@@ -298,6 +346,17 @@ impl Default for Config {
             // document a running Go server persists takes the other branch — see
             // [`Config::from_document`].
             extend_session_length_with_activity: true,
+            // `ClientRequirements` has no `SetDefaults`; the zero value is the default.
+            android_latest_version: String::new(),
+            android_min_version: String::new(),
+            ios_latest_version: String::new(),
+            ios_min_version: String::new(),
+            // `new(-1)` (config.go:588) — negative, so the health check is off rather than
+            // triggering on the first goroutine.
+            goroutine_health_threshold: -1,
+            disable_database_search: false,
+            elasticsearch_enable_searching: false,
+            feature_flag_test_feature: "off".to_owned(),
             license: String::new(),
         }
     }
@@ -387,6 +446,31 @@ impl Config {
             // override of `""` is a deliberate empty driver and must survive as one.
             file_driver_name: lookup("MM_FILESETTINGS_DRIVERNAME")
                 .unwrap_or(default.file_driver_name),
+            android_latest_version: lookup("MM_CLIENTREQUIREMENTS_ANDROIDLATESTVERSION")
+                .unwrap_or(default.android_latest_version),
+            android_min_version: lookup("MM_CLIENTREQUIREMENTS_ANDROIDMINVERSION")
+                .unwrap_or(default.android_min_version),
+            ios_latest_version: lookup("MM_CLIENTREQUIREMENTS_IOSLATESTVERSION")
+                .unwrap_or(default.ios_latest_version),
+            ios_min_version: lookup("MM_CLIENTREQUIREMENTS_IOSMINVERSION")
+                .unwrap_or(default.ios_min_version),
+            feature_flag_test_feature: lookup("MM_FEATUREFLAGS_TESTFEATURE")
+                .unwrap_or(default.feature_flag_test_feature),
+            goroutine_health_threshold: lookup_int(
+                lookup,
+                "MM_SERVICESETTINGS_GOROUTINEHEALTHTHRESHOLD",
+                default.goroutine_health_threshold,
+            ),
+            disable_database_search: lookup_bool(
+                lookup,
+                "MM_SQLSETTINGS_DISABLEDATABASESEARCH",
+                default.disable_database_search,
+            ),
+            elasticsearch_enable_searching: lookup_bool(
+                lookup,
+                "MM_ELASTICSEARCHSETTINGS_ENABLESEARCHING",
+                default.elasticsearch_enable_searching,
+            ),
             enable_incoming_webhooks: lookup_bool(
                 lookup,
                 "MM_SERVICESETTINGS_ENABLEINCOMINGWEBHOOKS",
@@ -463,6 +547,7 @@ impl Config {
         // every document a running server persists is an *update* — a JSON `null` and an absent
         // key both land here as `false`, matching Go's nil pointer.
         let is_update = service.site_url.is_some();
+        let client_requirements = parsed.client_requirements.unwrap_or_default();
         Ok(Self {
             // Moved, not cloned: `is_update` above already took the only other thing anything
             // wants from this field, and the remaining `service` reads are all `Option<bool>`.
@@ -533,6 +618,34 @@ impl Config {
             extend_session_length_with_activity: service
                 .extend_session_length_with_activity
                 .unwrap_or(!is_update),
+            goroutine_health_threshold: service
+                .goroutine_health_threshold
+                .unwrap_or(default.goroutine_health_threshold),
+            android_latest_version: client_requirements
+                .android_latest_version
+                .unwrap_or(default.android_latest_version),
+            android_min_version: client_requirements
+                .android_min_version
+                .unwrap_or(default.android_min_version),
+            ios_latest_version: client_requirements
+                .ios_latest_version
+                .unwrap_or(default.ios_latest_version),
+            ios_min_version: client_requirements
+                .ios_min_version
+                .unwrap_or(default.ios_min_version),
+            disable_database_search: parsed
+                .sql_settings
+                .unwrap_or_default()
+                .disable_database_search
+                .unwrap_or(default.disable_database_search),
+            elasticsearch_enable_searching: parsed
+                .elasticsearch_settings
+                .unwrap_or_default()
+                .enable_searching
+                .unwrap_or(default.elasticsearch_enable_searching),
+            // Same rule as `feature_flag_burn_on_read` above: `FeatureFlags` is cleared before
+            // the document is persisted, so reading it here would turn an absence into a value.
+            feature_flag_test_feature: default.feature_flag_test_feature,
             // Not a config field on either server — `MM_LICENSE` is its own variable, read by
             // `apply_env`.
             license: default.license,
@@ -608,6 +721,40 @@ struct Document {
     file_settings: Option<FileSettingsDocument>,
     #[serde(rename = "PrivacySettings")]
     privacy_settings: Option<PrivacySettingsDocument>,
+    #[serde(rename = "ClientRequirements")]
+    client_requirements: Option<ClientRequirementsDocument>,
+    #[serde(rename = "SqlSettings")]
+    sql_settings: Option<SqlSettingsDocument>,
+    #[serde(rename = "ElasticsearchSettings")]
+    elasticsearch_settings: Option<ElasticsearchSettingsDocument>,
+}
+
+/// The four mobile version strings `getSystemPing` echoes. Every field is `Option<String>` for
+/// the usual reason: an absent key and an explicit `""` must both fall back to the same default,
+/// and here they happen to agree — but the shape is what stops the next field added from
+/// disagreeing silently.
+#[derive(Debug, Default, serde::Deserialize)]
+struct ClientRequirementsDocument {
+    #[serde(rename = "AndroidLatestVersion")]
+    android_latest_version: Option<String>,
+    #[serde(rename = "AndroidMinVersion")]
+    android_min_version: Option<String>,
+    #[serde(rename = "IosLatestVersion")]
+    ios_latest_version: Option<String>,
+    #[serde(rename = "IosMinVersion")]
+    ios_min_version: Option<String>,
+}
+
+#[derive(Debug, Default, serde::Deserialize)]
+struct SqlSettingsDocument {
+    #[serde(rename = "DisableDatabaseSearch")]
+    disable_database_search: Option<bool>,
+}
+
+#[derive(Debug, Default, serde::Deserialize)]
+struct ElasticsearchSettingsDocument {
+    #[serde(rename = "EnableSearching")]
+    enable_searching: Option<bool>,
 }
 
 #[derive(Debug, Default, serde::Deserialize)]
@@ -622,6 +769,8 @@ struct ServiceSettingsDocument {
     session_idle_timeout_in_minutes: Option<i64>,
     #[serde(rename = "ExtendSessionLengthWithActivity")]
     extend_session_length_with_activity: Option<bool>,
+    #[serde(rename = "GoroutineHealthThreshold")]
+    goroutine_health_threshold: Option<i64>,
     #[serde(rename = "EnablePostIconOverride")]
     enable_post_icon_override: Option<bool>,
     #[serde(rename = "EnableCustomEmoji")]

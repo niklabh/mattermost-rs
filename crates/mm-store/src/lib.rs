@@ -62,6 +62,7 @@ pub use user_store::{SqlUserStore, UserStore};
 pub use user_terms_of_service_store::{SqlUserTermsOfServiceStore, UserTermsOfServiceStore};
 pub use webhook_store::{SqlWebhookStore, WebhookStore};
 
+use mm_model::system::AppliedMigration;
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 
@@ -94,6 +95,11 @@ pub struct SqlStore {
     user: SqlUserStore,
     user_terms_of_service: SqlUserTermsOfServiceStore,
     webhook: SqlWebhookStore,
+    /// Go's `SqlStore` owns the connections and hands them to each sub-store; a handful of its
+    /// methods — [`SqlStore::get_applied_migrations`] is the first ported — query directly rather
+    /// than through a sub-store, which is why the pool is held here too. `PgPool` is a handle over
+    /// shared internals, so this is a clone of a pointer and not a second pool.
+    pool: PgPool,
 }
 
 impl SqlStore {
@@ -139,8 +145,34 @@ impl SqlStore {
             team: SqlTeamStore::new(pool.clone()),
             user_terms_of_service: SqlUserTermsOfServiceStore::new(pool.clone()),
             webhook: SqlWebhookStore::new(pool.clone()),
-            user: SqlUserStore::new(pool),
+            user: SqlUserStore::new(pool.clone()),
+            pool,
         }
+    }
+
+    /// Port of `SqlStore.GetAppliedMigrations` (sqlstore/store.go:1120).
+    ///
+    /// `SELECT Version, Name FROM db_migrations ORDER BY Version DESC` — newest first, and on
+    /// `GetMaster()` rather than the replica, which is Go making sure a migration that has just
+    /// finished is visible. There is one pool here, so that distinction has no effect.
+    ///
+    /// This lives on the store rather than on a sub-store because that is where Go puts it:
+    /// `db_migrations` is the migrator's own bookkeeping table and belongs to no entity.
+    #[tracing::instrument(skip_all, fields(found))]
+    pub async fn get_applied_migrations(&self) -> Result<Vec<AppliedMigration>, StoreError> {
+        let rows = sqlx::query_as!(
+            AppliedMigration,
+            r#"SELECT version AS "version!", name AS "name!" FROM db_migrations ORDER BY version DESC"#
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "unable to select from db_migrations".to_owned(),
+            source,
+        })?;
+
+        tracing::Span::current().record("found", rows.len());
+        Ok(rows)
     }
 
     /// Port of `store.Store.Audit()`.

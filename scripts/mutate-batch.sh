@@ -68,6 +68,16 @@ print(" ".join("\\" + c for c in bad))
     [ -z "$BADESC" ] || { echo "plan: $NAME has escapes printf %b will not expand: $BADESC"; PREFLIGHT=1; }
   done
 
+  # An **empty** `to` is rejected, and this is not fussiness. `read` with `IFS=$'\t'` treats a tab
+  # as IFS *whitespace*, so two adjacent tabs collapse into one separator: a line whose `to` is
+  # empty silently shifts every field after it left, and `mutate.sh` is then handed the suite name
+  # as its replacement text and the filter as its suite. The run does not fail loudly — it stops,
+  # with no tally, having reported verdicts only for the lines before it. That cost a
+  # forty-four-mutation run at line six. Write a real replacement (invert the predicate, drop the
+  # clause into a tautology) rather than deleting text.
+  [ -n "$TO" ] || { echo "plan: $NAME has an empty replacement; adjacent tabs shift every later field"; PREFLIGHT=1; }
+  [ -n "$FROM" ] || { echo "plan: $NAME has an empty pattern"; PREFLIGHT=1; }
+
   HITS=$(FROM=$(printf '%b' "$FROM") python3 -c '
 import io, os, sys
 print(io.open(sys.argv[1], encoding="utf-8").read().count(os.environ["FROM"]))

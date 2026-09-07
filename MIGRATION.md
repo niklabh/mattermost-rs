@@ -7242,3 +7242,132 @@ Mutation run: **18 run, 16 caught, 2 controls survived, 0 harness faults**
 (`scripts/mutations/json-fold.plan`). The first run had a **harness fault** — a mutation that
 produced uncompilable Rust — and one survivor, the step-ordering one above; both were fixed and the
 plan re-run whole, since a harness fault voids the tally.
+
+## Ten routes: system, usage, permissions — and a denominator that counts itself (2026-09-07)
+
+New: `scripts/routes.py`, `crates/mm-api/src/{system,usage,permissions}.rs`,
+`crates/mm-app/src/{system,usage,utils}.rs`, `reference/dump/behaviour_round_off.go`,
+`fixtures/behaviour_round_off.json`, `scripts/mutations/system-usage.plan`,
+`crates/mm-api/tests/parity/system_usage.rs`. Changed:
+`crates/mm-store/src/{audit_store,post_store,file_info_store,team_store,lib}.rs`,
+`crates/mm-app/src/{audit,config,lib}.rs`, `crates/mm-api/src/{audits,lib}.rs`,
+`crates/mm-api/tests/common/mod.rs`, `crates/mm-api/tests/parity/{users_me,channel_timezones}.rs`,
+`reference/dump/main.go`.
+
+**The numerator and denominator are now derived, not typed.** `scripts/routes.py` resolves
+gorilla's `BaseRoutes` table out of `api.go` — separately for `Init` and `InitLocal`, which
+register onto different routers — and matches parentheses rather than lines, because four
+registration shapes exist and half of them span lines. It lands on **764** route+method pairs, the
+figure CLAUDE.md already names. Served: **110**, up from 100. 593 pairs are on the HTTP router and
+171 on the local-mode socket; 483 HTTP pairs remain. `scripts/routes.py --todo` is the work queue.
+
+| Go file | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| api4/system.go (`getSystemPing`) | `mm-api/src/system.rs` | DONE | 5 unit, 2 parity | Five boundaries forward: `get_server_status=true`, a non-empty `device_id`, a positive goroutine threshold, a licence, Elasticsearch. |
+| api4/system.go (`getSupportedTimezones`) | `mm-api/src/system.rs` | DONE | 1 parity | A compile-time table on both servers, not the host's tzdata. |
+| api4/system.go (`getAppliedSchemaMigrations`) | `mm-api/src/system.rs`, `mm-store/src/lib.rs` | DONE | 1 parity | `ORDER BY Version DESC`; the permission is *any* sysconsole read. |
+| api4/system.go (`getOnboarding`) | `mm-app/src/system.rs` | DONE | 2 unit, 1 parity | A missing row is synthesised as the string `"false"` — never a 404, never a bool. |
+| api4/system.go (`getAudits`) | `mm-api/src/audits.rs` | DONE | 2 parity | The same app call as `getUserAudits` with an **empty** user id, which the store reads as "no filter". |
+| api4/usage.go (three counters) | `mm-api/src/usage.rs`, `mm-app/src/usage.rs` | DONE | 2 unit, 2 parity | No permission check on any of them. |
+| api4/permission.go (`appendAncillaryPermissionsPost`) | `mm-api/src/permissions.rs` | DONE | 4 unit, 1 parity | `null`, `[]` and a malformed body are one 400. |
+| api4/cluster.go (`getClusterStatus`) | `mm-api/src/system.rs`, `mm-app/src/system.rs` | DONE | 1 parity | `[]` and never `null`; licensed installations forward. |
+| channels/utils (`RoundOffToZeroesResolution`) | `mm-app/src/utils.rs` | DONE | 3 go_parity | See below — the corpus found a real float divergence. |
+
+### The empty user id was ported as "match nothing", and that was wrong
+
+`SqlAuditStore.Get` drops its `WHERE` when the user id is empty, returning every user's rows. The
+earlier port turned that into an unconditional predicate on the reasoning that nothing reachable
+passed an empty id — true of the one route migrated at the time, false of the API. `getAudits`
+passes one deliberately, so the old branch would have answered `GET /api/v4/audits` with `[]` on a
+server holding thousands of audit rows: a wrong answer dressed as a safe one. Two literal queries
+now, not one built at runtime, so `query_as!` still checks both.
+
+### Go's `math.Log10` is not the platform's, and it is off by one at 10^15
+
+`RoundOffToZeroesResolution` truncates `math.Log10(|n|)` to get a magnitude. Go implements `Log10`
+in pure Go as `Log(x) * (1/Ln10)` over the FreeBSD `e_log.c` polynomial, so it is a **different
+function** from C's `log10` — and the first run of the new corpus proved it: at
+`n = 999_999_999_999_999` Rust's `f64::log10` returns exactly `15.0` where Go returns `14.999…`,
+moving the answer from `900000000000000` to `0`. Going the other way, at `n = 10^15` **Go** is the
+one that is off by one against the exact magnitude.
+
+So neither float is trustworthy and they fail in opposite directions. The port computes the
+magnitude exactly instead, and the 954-row corpus is what says that is safe rather than merely
+tidier: every disagreement is at a magnitude of 15 or more, while the two real call sites pass
+resolutions **3** and **8**, where `min(zeroes, resolution)` clamps to the resolution regardless.
+A separate test pins *which* inputs disagree, so a change to Go's `Log10` that moved the
+divergence down to 10^8 would fail loudly rather than cancel out.
+
+### `/usage/posts` is the sharpest instance of [D-087] yet, and we are the correct one
+
+Go passes `AllowFromCache: true` into a **size-1, thirty-minute** cache that nothing invalidates
+when a post is written (`localcachelayer/layer.go:342`). Measured: Go answered `{"count":400}`
+against a table holding 18 user posts, and answered `{"count":10}` — our bytes exactly — the
+instant its caches were cleared. The parity test therefore calls
+`common::invalidate_go_caches` first, because a byte comparison against that cache tests when Go
+last looked rather than whether the query is right.
+
+### Three writers across ten routes, and they are not grouped by file
+
+`model.ToJSON` (ping), `json.Marshal` + `w.Write` (timezones, schema, cluster, all three usage
+counters, ancillary) and `json.NewEncoder(w).Encode` (onboarding, audits). The first two write no
+trailing newline and the third does — and `getOnboarding` sits within sixty lines of
+`getAppliedSchemaMigrations` in the same Go file using the other one. The ping additionally
+marshals a `map[string]any`, so its keys are **byte-sorted** and the lower-case `status` lands
+last; a struct would have emitted it first.
+
+### Two parity tests were using now-migrated routes as their "still forwarded" canary
+
+`users_me::an_unmigrated_route_is_forwarded_to_go` pointed at `/system/ping` and
+`channel_timezones` at `/system/timezones`. The first moved to
+`GET /api/v4/config/client?format=old`, chosen for the same properties (no session, no near-term
+migration); **move it again rather than deleting it** — it is the only assertion in the suite that
+the proxy fallback still exists. The second became the stronger assertion the collision now
+warrants: the global table and a channel's members' zones must be *different* answers.
+
+### `POST /system/onboarding/complete` is deliberately still Go's
+
+`CompleteOnboarding` installs marketplace plugins in goroutines and calls each plugin's `OnInstall`
+hook. There is no plugin host here, so the GET is migrated and the POST on the same path falls
+through `partially_migrated` to the proxy.
+
+### The mutation run, and the four passes it took
+
+**44 run, 42 caught, 2 controls survived, 0 harness faults** — reached over four passes, because the
+first one found twelve survivors and every one of them was a real gap:
+
+| Survivor | What the suite could not see |
+|---|---|
+| `audits-page-ignores-the-permission` | Every audit test used an **admin** token, so a deleted `read_audits` check looked identical to a present one — on a route that returns every user's IP addresses. |
+| `posts-usage-uses-the-system-prefix-instead` | Every post here is either untyped or `system_*`, so `Type = ''` and `Type NOT LIKE 'system_%'` agree. Fixed by planting typed posts — **twenty-five of them**, because the route rounds and one post rounds away. |
+| `round-off-posts-resolution-is-eight` | `min(zeroes, resolution)` makes 3 and 8 the same number below ten thousand posts. Fixed with a named `POSTS_RESOLUTION` and a unit test, which is the only thing that *can* see it. |
+| three `teams-usage-*` and `teams-get-all-filters-deleted` | Nothing ever set `CloudLimitsArchived`, so the counter was zero however it was computed. Fixed by planting a deleted, archived team. |
+| two `onboarding-*` | The stored value was already `"false"`, which is also what the missing-row branch synthesises. Fixed by planting `"true"` and then removing the row. |
+| `migrations-permission-is-all-not-any` | An admin holds `manage_system` *and* every sysconsole read. Fixed with `system_read_only_admin` — 53 sysconsole reads, no `manage_system`. |
+| `ancillary-output-is-deduplicated` | The inputs chosen had no ancillary permission in common. The table has exactly one overlapping pair; it is now the fixture. |
+
+Two of those fixes were **tests reimplementing the code they tested** — `onboarding_row` and
+`is_cloud_archived` each existed twice, once in the handler and once in the test module, so a
+mutation of the real one left the copy passing. Both now live in production code.
+
+### A no-op control came back CAUGHT, twice, and that was the suite's fault
+
+`GET /api/v4/audits` is append-only and newest-first, so page 0 shifts every time **anything** in
+this binary writes an audit row — and `getOnboarding` makes Go write one on every read. Byte-
+comparing that page is not an oracle, it is a race: at twelve retry windows it failed 2 runs in 5,
+and reported a control mutation of an unrelated SQL predicate as caught. It now issues both reads
+with `join!` and compares the **contiguous run** the two pages share, since new rows only ever
+prepend; six consecutive runs are clean where three of five were before. A control that fails means
+the verdicts mean nothing — this one meant it twice.
+
+### Two harness bugs, both fixed in `scripts/`
+
+- **A plan line with an empty `to` silently truncates the run.** `read` with `IFS=$'\t'` treats a
+  tab as IFS *whitespace*, so adjacent tabs collapse and every later field shifts left: `mutate.sh`
+  is handed the suite name as its replacement text. The run stops with no tally, having reported
+  verdicts only for the lines before it — and leaves the last mutation **applied**. That cost a
+  44-mutation run at line six and corrupted `post_store.rs` until it was noticed.
+  `mutate-batch.sh` now rejects an empty `from` or `to` in pre-flight.
+- **`set_user_roles` does not change what a session can do.** `SessionHasPermissionTo` reads
+  `session.Roles`, copied at login and never re-read, so granting a role and reusing the old token
+  gets a 403 from **Go**. `common::login_plain_user` mints a fresh one.

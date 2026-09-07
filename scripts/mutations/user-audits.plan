@@ -25,7 +25,7 @@
 # selects` reorders two columns inside the SELECT list — the row struct binds by name, so the
 # wire is unchanged.
 
-store-order-direction	crates/mm-store/src/audit_store.rs	             ORDER BY createat DESC	             ORDER BY createat ASC	api	user_audits
+store-order-direction	crates/mm-store/src/audit_store.rs	                 WHERE userid = $1\n                 ORDER BY createat DESC	                 WHERE userid = $1\n                 ORDER BY createat ASC	api	user_audits
 store-limit-offset-swap	crates/mm-store/src/audit_store.rs	             LIMIT $2 OFFSET $3	             LIMIT $3 OFFSET $2	api	user_audits
 store-user-filter-dropped	crates/mm-store/src/audit_store.rs	             WHERE userid = $1	             WHERE userid = $1 OR TRUE	api	user_audits
 store-columns-swapped	crates/mm-store/src/audit_store.rs	            action: row.action,\n            extra_info: row.extrainfo,	            action: row.extrainfo,\n            extra_info: row.action,	api	user_audits
@@ -35,11 +35,11 @@ app-out-of-bounds-status	crates/mm-app/src/audit.rs	            "app.audit.get.l
 app-out-of-bounds-branch	crates/mm-app/src/audit.rs	    if err.is_out_of_bounds() {	    if false {	unit	audit::
 store-out-of-bounds-guard	crates/mm-store/src/audit_store.rs	        if limit > AUDIT_LIMIT_MAXIMUM {	        if limit > AUDIT_LIMIT_MAXIMUM * 2 {	unit	audit_store::
 api-null-becomes-empty-array	crates/mm-api/src/audits.rs	        return Ok(b"null".to_vec());	        return Ok(b"[]".to_vec());	api	user_audits
-api-trailing-newline	crates/mm-api/src/audits.rs	    let mut body = encode_audits(&audits)?;\n    body.push(b'\\n');	    let body = encode_audits(&audits)?;	api	user_audits
+api-trailing-newline	crates/mm-api/src/audits.rs	    let audits = state.app.get_audits_page(user_id, page, per_page).await?;\n    tracing::Span::current().record("count", audits.0.len());\n\n    let mut body = encode_audits(&audits)?;\n    body.push(b'\\n');	    let audits = state.app.get_audits_page(user_id, page, per_page).await?;\n    tracing::Span::current().record("count", audits.0.len());\n\n    let mut body = encode_audits(&audits)?;	api	user_audits
 api-permission-check-removed	crates/mm-api/src/audits.rs	    if !state\n        .app\n        .session_has_permission_to_user(&session.0, user_id)\n        .await\n    {	    if false {	api	user_audits
 api-me-not-resolved	crates/mm-api/src/audits.rs	    let user_id = resolve_me(&user_id, &session);	    let user_id = user_id.as_str();	api	user_audits
 api-page-and-per-page-swapped	crates/mm-api/src/audits.rs	    let audits = state.app.get_audits_page(user_id, page, per_page).await?;	    let audits = state.app.get_audits_page(user_id, per_page, page).await?;	api	user_audits
 #
 # --- no-op controls: these must SURVIVE ---
 control-rename-binding	crates/mm-api/src/audits.rs	    let audits = state.app.get_audits_page(user_id, page, per_page).await?;\n    tracing::Span::current().record("count", audits.0.len());\n\n    let mut body = encode_audits(&audits)?;	    let page_of_audits = state.app.get_audits_page(user_id, page, per_page).await?;\n    tracing::Span::current().record("count", page_of_audits.0.len());\n\n    let mut body = encode_audits(&page_of_audits)?;	api	user_audits
-control-reorder-independent-selects	crates/mm-store/src/audit_store.rs	                   COALESCE(ipaddress, '')   AS "ipaddress!",\n                   COALESCE(sessionid, '')   AS "sessionid!"	                   COALESCE(sessionid, '')   AS "sessionid!",\n                   COALESCE(ipaddress, '')   AS "ipaddress!"	api	user_audits
+control-reorder-independent-selects	crates/mm-store/src/audit_store.rs	                       COALESCE(ipaddress, '')   AS "ipaddress!",\n                       COALESCE(sessionid, '')   AS "sessionid!"\n                  FROM audits\n                 WHERE userid = $1	                       COALESCE(sessionid, '')   AS "sessionid!",\n                       COALESCE(ipaddress, '')   AS "ipaddress!"\n                  FROM audits\n                 WHERE userid = $1	api	user_audits
