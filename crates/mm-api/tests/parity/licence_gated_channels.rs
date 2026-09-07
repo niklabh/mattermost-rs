@@ -258,9 +258,18 @@ async fn a_non_mux_segment_is_forwarded_and_not_licence_gated() {
     }
 }
 
-/// Registering the two `GET`s must not turn the `POST` beside them into our 405.
+/// The `POST` beside the bookmark `GET` is **also ours** since 2026-09-07, and answers the same
+/// refusal.
+///
+/// This test asserted the opposite until then — it was the canary for "registering a GET must not
+/// swallow the POST on the same path" — and the POST has now been migrated into
+/// `licensed_features.rs`, which holds the four bookmark writes. The assertion is inverted rather
+/// than deleted, because the property it was guarding is still the one that matters: the two
+/// methods on this path must agree, and they must both be Go's error.
+///
+/// An unregistered method on the same path is the canary now.
 #[tokio::test]
-async fn other_methods_are_forwarded() {
+async fn the_post_beside_the_get_is_the_same_refusal() {
     if !stack_enabled() {
         return;
     }
@@ -270,18 +279,32 @@ async fn other_methods_are_forwarded() {
     let fixture = fixture(&client, &token).await;
 
     let p = bookmarks(&fixture.channel);
-    let ours = client
-        .post(format!("{RUST}{p}"))
-        .header("Authorization", format!("Bearer {token}"))
-        .json(&serde_json::json!({}))
-        .send()
-        .await
-        .expect("we answer");
-    assert_eq!(
-        ours.headers()
+    let served_by = async |method: reqwest::Method| -> Option<String> {
+        client
+            .request(method, format!("{RUST}{p}"))
+            .header("Authorization", format!("Bearer {token}"))
+            .json(&serde_json::json!({}))
+            .send()
+            .await
+            .expect("we answer")
+            .headers()
             .get("x-mmrs-served-by")
-            .and_then(|v| v.to_str().ok()),
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned)
+    };
+
+    assert_eq!(
+        served_by(reqwest::Method::GET).await.as_deref(),
+        Some("rust")
+    );
+    assert_eq!(
+        served_by(reqwest::Method::POST).await.as_deref(),
+        Some("rust"),
+        "the bookmark POST is licence-gated too, and is now ours"
+    );
+    assert_eq!(
+        served_by(reqwest::Method::PUT).await.as_deref(),
         Some("go"),
-        "POST {p} must be forwarded"
+        "PUT {p} is registered by neither server's router here and must still be forwarded"
     );
 }

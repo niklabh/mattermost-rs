@@ -17,6 +17,7 @@ pub mod error;
 pub mod files;
 pub mod groups;
 pub mod license;
+pub mod licensed_features;
 pub mod limits;
 pub mod oauth;
 pub mod permissions;
@@ -649,7 +650,14 @@ pub fn router(state: AppState) -> Router {
         )
         .route(
             "/api/v4/channels/{channel_id}/bookmarks",
-            partially_migrated_with_ids(&state, get(channels::list_channel_bookmarks)),
+            // The `GET` is not licence-gated and lives in `channels`; the `POST` is, and lives in
+            // `licensed_features`. Both are declared here, where the path is, rather than the
+            // path being registered twice.
+            partially_migrated_with_ids(
+                &state,
+                get(channels::list_channel_bookmarks)
+                    .post(licensed_features::create_channel_bookmark),
+            ),
         )
         .route(
             "/api/v4/channels/{channel_id}/member_counts_by_group",
@@ -859,6 +867,88 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/users/{user_id}/teams/{team_id}/channels/categories/{category}",
             partially_migrated_with_ids(&state, get(sidebar::get_category_for_team_for_user)),
+        )
+        // ---- licence-gated families (2026-09-07) ----
+        //
+        // Seventeen routes whose first statement is a licence test — see `licensed_features.rs`.
+        // The `{post_id}`, `{team_id}` and `{content_reviewer_id}` segments are id-shaped and get
+        // the mux charset check; nothing downstream of the refusal reads them.
+        .route(
+            "/api/v4/content_flagging/flag/config",
+            partially_migrated(get(licensed_features::get_flagging_configuration)),
+        )
+        .route(
+            "/api/v4/content_flagging/fields",
+            partially_migrated(get(licensed_features::get_content_flagging_fields)),
+        )
+        .route(
+            "/api/v4/content_flagging/config",
+            partially_migrated(
+                get(licensed_features::get_content_flagging_settings)
+                    .put(licensed_features::save_content_flagging_settings),
+            ),
+        )
+        .route(
+            "/api/v4/content_flagging/team/{team_id}/status",
+            partially_migrated_with_ids(
+                &state,
+                get(licensed_features::get_team_post_flagging_feature_status),
+            ),
+        )
+        .route(
+            "/api/v4/content_flagging/team/{team_id}/reviewers/search",
+            partially_migrated_with_ids(&state, get(licensed_features::search_reviewers)),
+        )
+        .route(
+            "/api/v4/content_flagging/post/{post_id}",
+            partially_migrated_with_ids(&state, get(licensed_features::get_flagged_post)),
+        )
+        .route(
+            "/api/v4/content_flagging/post/{post_id}/flag",
+            partially_migrated_with_ids(&state, post(licensed_features::flag_post)),
+        )
+        .route(
+            "/api/v4/content_flagging/post/{post_id}/field_values",
+            partially_migrated_with_ids(&state, get(licensed_features::get_post_property_values)),
+        )
+        .route(
+            "/api/v4/content_flagging/post/{post_id}/remove",
+            partially_migrated_with_ids(&state, put(licensed_features::remove_flagged_post)),
+        )
+        .route(
+            "/api/v4/content_flagging/post/{post_id}/keep",
+            partially_migrated_with_ids(&state, put(licensed_features::keep_flagged_post)),
+        )
+        .route(
+            "/api/v4/content_flagging/post/{post_id}/report",
+            partially_migrated_with_ids(
+                &state,
+                post(licensed_features::generate_flagged_post_report),
+            ),
+        )
+        .route(
+            "/api/v4/content_flagging/post/{post_id}/assign/{content_reviewer_id}",
+            partially_migrated_with_ids(
+                &state,
+                post(licensed_features::assign_flagged_post_reviewer),
+            ),
+        )
+        // The bookmark writes on the item path. The collection's `POST` is declared beside its
+        // `GET` above, where the path already was.
+        .route(
+            "/api/v4/channels/{channel_id}/bookmarks/{bookmark_id}",
+            partially_migrated_with_ids(
+                &state,
+                axum::routing::patch(licensed_features::update_channel_bookmark)
+                    .delete(licensed_features::delete_channel_bookmark),
+            ),
+        )
+        .route(
+            "/api/v4/channels/{channel_id}/bookmarks/{bookmark_id}/sort_order",
+            partially_migrated_with_ids(
+                &state,
+                post(licensed_features::update_channel_bookmark_sort_order),
+            ),
         )
         // ---- data retention (2026-09-07) ----
         //

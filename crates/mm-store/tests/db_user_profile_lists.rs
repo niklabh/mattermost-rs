@@ -430,12 +430,21 @@ async fn not_in_team_lists_the_left_member_and_never_the_current_ones() {
 }
 
 /// Every page of `GetProfilesNotInTeam`, concatenated — see [`all_profiles_pages`] for why.
+///
+/// # The two store methods do **not** take the same second argument
+///
+/// `get_all_profiles` takes a **page**; `get_profiles_not_in_team` takes an **offset** — matching
+/// Go, where `GetAllProfiles` multiplies internally and `GetProfilesNotInTeam` does not. This
+/// helper passed a page index to both, so it walked offsets 0, 1, 2, … and re-read 199 of every
+/// 200 rows. Nothing noticed while the fixture was the only thing being asserted about, and the
+/// bound below then failed as soon as the development database crossed ~250 users: every "page"
+/// came back full and the walk ran out of iterations.
 async fn not_in_team_pages(store: &SqlUserStore) -> Vec<mm_model::user::User> {
     const PER_PAGE: i64 = 200;
     let mut all = Vec::new();
     for page in 0..50 {
         let mut chunk = store
-            .get_profiles_not_in_team(TEAM, page, PER_PAGE)
+            .get_profiles_not_in_team(TEAM, page * PER_PAGE, PER_PAGE)
             .await
             .expect("query runs");
         let short = (chunk.len() as i64) < PER_PAGE;
@@ -444,7 +453,11 @@ async fn not_in_team_pages(store: &SqlUserStore) -> Vec<mm_model::user::User> {
             return all;
         }
     }
-    panic!("more than fifty pages of users; the development database needs a purge");
+    panic!(
+        "more than fifty pages of users — ten thousand rows. Either the development database \
+         needs a purge, or the second argument is being passed a page where an offset belongs; \
+         see the note above."
+    );
 }
 
 /// Every page of `GetAllProfiles`, concatenated.

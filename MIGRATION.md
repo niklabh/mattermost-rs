@@ -7546,3 +7546,79 @@ were asking a question the population had outgrown:
   a team makes the creator a member**, and every suite that needs a team creates one with that same
   admin token, so the count moves between the two reads. It now brackets Go either side, like the
   other moving-target comparisons.
+
+## Seventeen routes whose first statement is a licence test (2026-09-07)
+
+New: `crates/mm-api/src/licensed_features.rs`,
+`crates/mm-api/tests/parity/licensed_features.rs`, `scripts/mutations/licensed-features.plan`,
+`scripts/probe-routes.py`. Changed: `crates/mm-api/src/lib.rs`.
+
+132 → **149 of 764**. All thirteen of `content_flagging.go` and the four write halves of
+`channel_bookmark.go`.
+
+### These are a different shape from `/data_retention`, and the module says so
+
+`/data_retention` is a family of refusals with *live* checks in front of them, and reproducing
+that ordering is most of the work. Here the licence test is the **first statement of every
+handler**, so nothing else on the request is ever consulted: not the body, not the permission, not
+the id. A caller with no permission and a malformed body gets the same 501 an administrator does,
+and the parity suite asserts each of those three separately — every one is a check a reader might
+add "for symmetry" with a neighbouring file, and every one would be a divergence on every request.
+
+The two gates are **not** the same test. Content flagging needs
+`MinimumEnterpriseAdvancedLicense` — a licence *tier*, so an Enterprise licence below Advanced is
+still refused — while channel bookmarks need only `License() != nil`. Both collapse to "refuse"
+with no licence at all, which is the only case this server answers.
+
+### `scripts/probe-routes.py` is how this group was chosen
+
+It asks the running Go server what each unmigrated route answers, with ids that do not exist and
+without sending anything that could create or destroy. The 461 remaining HTTP pairs group into
+families: 12 answer `api.data_spillage.error.license`, 12 `api.recap.disabled.app_error`, 11
+`api.remote_cluster.service_not_enabled.app_error`, 11 `api.license_error`. Reading seventeen
+handlers to discover they share one refusal costs more than asking once.
+
+**And it corrected a wrong assumption immediately.** `listChannelBookmarksForChannel` was assumed
+to be an ordinary read — the parity suite asserted so — and answers **501** like its four
+siblings. It was already ported, in `channels.rs`; all five bookmark routes are refusals, and this
+module holds four. `channels::licence_gate` is reused rather than re-derived, because "what counts
+as licensed" is one question with one answer.
+
+### The refusal that is not ours
+
+`requireContentFlaggingEnabled` has a second arm — `ContentFlaggingSettings.EnableContentFlagging`
+— answering `api.data_spillage.error.disabled` at the same status. It sits *behind* the licence
+test, so this server can never produce it. Recorded because the two ids differ by one word.
+
+### The mutation run
+
+**12 run, 10 caught, 2 controls survived, 0 harness faults.** The one survivor was the licensed
+branch: every test ran unlicensed, so "refuse" and "refuse or forward" were the same program. A
+mutation that never forwards would be silently wrong on any deployment that has a licence, and
+nothing here could see it. `a_licence_row_hands_every_route_back_to_go` flips the row for all
+seventeen and restores it before asserting, so a failure does not leave the stack licensed for the
+rest of the binary.
+
+Half the plan swaps one family's error id for the other's — which is the real risk when two
+families share a module — and all of those were caught.
+
+### A latent test bug the growing database finally exposed
+
+`db_user_profile_lists::not_in_team_pages` walks every page of `GetProfilesNotInTeam`. The two
+store methods it sits beside do **not** take the same second argument — `get_all_profiles` takes a
+**page**, `get_profiles_not_in_team` takes an **offset**, matching Go, where `GetAllProfiles`
+multiplies internally and `GetProfilesNotInTeam` does not — and the helper passed a page index to
+both. So it walked offsets 0, 1, 2, … and re-read 199 of every 200 rows.
+
+Nothing noticed while the only assertions were about the fixture's own users. It failed the moment
+the development database crossed ~250 users: every "page" came back full and the fifty-iteration
+guard ran out. The guard was doing its job; the bug was two arguments that look alike.
+
+### One more stale forwarding canary
+
+`licence_gated_channels::other_methods_are_forwarded` asserted that
+`POST /channels/{id}/bookmarks` was still Go's. It is now ours. The assertion is **inverted rather
+than deleted** — the property it guarded, that the two methods on that path agree, still matters —
+and an unregistered method on the same path is the canary now. That is the third time this session
+a "still forwarded" test has had to move; they are worth keeping, and worth moving rather than
+removing.
