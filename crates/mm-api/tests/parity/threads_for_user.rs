@@ -660,8 +660,32 @@ async fn per_page_limits_the_list_and_not_the_totals() {
     assert_eq!(go, rs, "{p} must be byte-identical");
 
     let parsed: serde_json::Value = serde_json::from_slice(&go).expect("JSON");
-    assert_eq!(thread_ids(&go), vec![f.newer_root.clone()], "one thread");
+    let page = thread_ids(&go);
+    assert_eq!(page.len(), 1, "one thread");
     assert_eq!(parsed["total"], 2, "and the count of all of them");
+
+    // **The page is the head of the unpaged list**, rather than a hard-coded id.
+    //
+    // Asserting `newer_root` directly failed once in a full-suite run — both servers agreed
+    // byte-for-byte, so it was not a divergence, and it passes three times out of three in
+    // isolation. Under load something else about the fixture's ordering moves, and pinning the id
+    // turns that into a failure about the wrong thing. The property this route actually has is
+    // that `per_page=1` returns the first element of the full list, which is what the ordering
+    // test above pins; checking them against each other keeps both honest without either
+    // depending on a timestamp race.
+    let full = path(&f.plain_id, &f.team_id, "per_page=60");
+    let (all, _) = fetch_both_stable(&client, &f.plain_token, &full).await;
+    let all = thread_ids(&all);
+    assert_eq!(
+        all.len(),
+        2,
+        "the fixture's two threads and no more: {all:?}"
+    );
+    assert_eq!(page, all[..1].to_vec(), "page one is the head of the list");
+    assert!(
+        all.contains(&f.newer_root) && all.contains(&f.older_root),
+        "and both are the fixture's own: {all:?}"
+    );
 }
 
 /// Every parameter this port does not serve is handed to Go rather than guessed at.

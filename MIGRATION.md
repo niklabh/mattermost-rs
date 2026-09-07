@@ -7741,3 +7741,58 @@ invite wants the second only, and the listing accepts either, which is what tell
 That is the third group whose survivors were all "no stock role can tell these apart". It is worth
 stating as a rule: **a permission check is untested until a session exists that holds exactly one
 side of it**, and on this server that nearly always means planting a role.
+
+## The last fourteen: four small families, four refusals, two statuses (2026-09-07)
+
+New: `crates/mm-api/src/{compliance,feature_gates}.rs`,
+`crates/mm-api/tests/parity/gated_families.rs`, `scripts/mutations/gated-families.plan`.
+Changed: `crates/mm-app/src/config.rs`, `crates/mm-api/src/lib.rs`.
+
+189 → **203 of 764**, which is 103 routes migrated in this session.
+
+| Family | Gate | Refusal |
+|---|---|---|
+| `compliance.go` | the enterprise interface | `ent.compliance.licence_disable.app_error`, 501 |
+| `ip_filtering.go` | a licence — **cloud**, at Enterprise tier | `api.context.ip_filtering.not_available.app_error`, 501 |
+| `ai_bridge_test_helper.go` | `ServiceSettings.EnableTesting`, default **false** | `api.ai_bridge_test_helper.disabled.app_error`, 501 |
+| `scheduled_post.go` | `ServiceSettings.ScheduledPosts` (default **true**), *then* a licence | `api.scheduled_posts.license_error`, **400** |
+
+### One gate, two arms, one status
+
+`requireScheduledPostsEnabled` answers `api.scheduled_posts.feature_disabled` when the setting is
+off and `api.scheduled_posts.license_error` when it is on and there is no licence — **both 400**.
+The setting defaults to `true`, so the licence arm is the one a stock server reaches; a second
+server with the setting off proves the other arm, and that the status does not move with it.
+
+### `ip_filtering` needs four things, and we can only establish one
+
+`ensureIPFilteringInterface` wants the interface **and** a licence **and** `license.IsCloud()`
+**and** `MinimumEnterpriseLicense`. A self-hosted Enterprise installation is refused as firmly as
+an unlicensed one. This server answers only the "no licence at all" case and forwards the rest,
+where Go applies the other three.
+
+### Compliance checks its own things first, and `RequireReportId`'s result **is** checked
+
+Three permissions across four routes — and the download's is not the read one its sibling uses on
+the same resource, so a role that may list and read reports may still not download one. Unlike
+`RequirePolicyId` in `/data_retention`, whose 400 the app error overwrites, both id checks here
+test `c.Err` and return: a malformed report id really is a 400. Two files, two conventions, and
+the parity suite asserts this one rather than inheriting it from the neighbour.
+
+### The mutation run
+
+**18 run, 16 caught, 2 controls survived, 0 harness faults — clean on the first pass**, the only
+group in this session to manage that. Half the plan swaps one family's id or status for a
+neighbour's, which is what four look-alike families invite, and the fixtures were built from the
+start with the four lessons the earlier groups paid for: a session holding exactly one side of
+each permission, a second server for each configuration gate, both bodies compared, and a
+neighbour row so a filter is distinguishable from no filter.
+
+### A pre-existing flake, fixed by asserting the property instead of the answer
+
+`threads_for_user::per_page_limits_the_list_and_not_the_totals` failed once in a full-suite run —
+both servers agreed byte-for-byte, and it passes three times out of three in isolation. It pinned a
+hard-coded thread id, so under load something about the fixture's ordering moved and the failure
+was about the wrong thing. It now asserts what the route actually guarantees: `per_page=1` returns
+the **head of the unpaged list**, checked against the list itself, which the ordering test beside it
+already pins. Neither depends on a timestamp race any more.

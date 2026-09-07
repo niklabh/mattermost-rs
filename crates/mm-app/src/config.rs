@@ -210,6 +210,24 @@ pub struct Config {
     /// treats sliding expiry and idle revocation as alternatives, never both.
     pub extend_session_length_with_activity: bool,
 
+    /// `ServiceSettings.EnableTesting` (config.go, defaulted **`false`** at :543).
+    ///
+    /// Gates the three `/system/e2e/ai_bridge` routes, which answer
+    /// `api.ai_bridge_test_helper.disabled.app_error` at 501 when it is off. It also decides
+    /// whether Go registers `/manualtest` at all (api.go:415) — a *route*, not a handler branch,
+    /// so that one is a difference in the router rather than in an answer and is left to the
+    /// proxy.
+    pub enable_testing: bool,
+
+    /// `ServiceSettings.ScheduledPosts` (config.go, defaulted **`true`** at :1057).
+    ///
+    /// The first half of `requireScheduledPostsEnabled`, whose second half is a licence check. The
+    /// two arms have **different error ids at the same status** — `api.scheduled_posts.feature_disabled`
+    /// and `api.scheduled_posts.license_error`, both 400 — so which one this server produces
+    /// depends on a setting an operator can change, and the default (`true`) means the licence arm
+    /// is the reachable one.
+    pub scheduled_posts: bool,
+
     /// `FeatureFlags.EnableAIRecaps` (feature_flags.go:96, defaulted **`false`** at :192).
     ///
     /// Half of `Config.AIRecapsEnabled()` (ai_recap_settings.go:143), which gates all fifteen
@@ -380,6 +398,10 @@ impl Default for Config {
             // document a running Go server persists takes the other branch — see
             // [`Config::from_document`].
             extend_session_length_with_activity: true,
+            enable_testing: false,
+            // **`true`** — one of the few settings here whose default is on, which is what makes
+            // the licence arm of the scheduled-post gate the reachable one.
+            scheduled_posts: true,
             // `f.EnableAIRecaps = false` (feature_flags.go:192).
             feature_flag_enable_ai_recaps: false,
             // Absent, and absent means **enabled** — see the field's note.
@@ -494,6 +516,16 @@ impl Config {
                 .unwrap_or(default.ios_min_version),
             feature_flag_test_feature: lookup("MM_FEATUREFLAGS_TESTFEATURE")
                 .unwrap_or(default.feature_flag_test_feature),
+            enable_testing: lookup_bool(
+                lookup,
+                "MM_SERVICESETTINGS_ENABLETESTING",
+                default.enable_testing,
+            ),
+            scheduled_posts: lookup_bool(
+                lookup,
+                "MM_SERVICESETTINGS_SCHEDULEDPOSTS",
+                default.scheduled_posts,
+            ),
             feature_flag_enable_ai_recaps: lookup_bool(
                 lookup,
                 "MM_FEATUREFLAGS_ENABLEAIRECAPS",
@@ -669,6 +701,8 @@ impl Config {
             goroutine_health_threshold: service
                 .goroutine_health_threshold
                 .unwrap_or(default.goroutine_health_threshold),
+            enable_testing: service.enable_testing.unwrap_or(default.enable_testing),
+            scheduled_posts: service.scheduled_posts.unwrap_or(default.scheduled_posts),
             android_latest_version: client_requirements
                 .android_latest_version
                 .unwrap_or(default.android_latest_version),
@@ -833,6 +867,10 @@ struct ServiceSettingsDocument {
     extend_session_length_with_activity: Option<bool>,
     #[serde(rename = "GoroutineHealthThreshold")]
     goroutine_health_threshold: Option<i64>,
+    #[serde(rename = "EnableTesting")]
+    enable_testing: Option<bool>,
+    #[serde(rename = "ScheduledPosts")]
+    scheduled_posts: Option<bool>,
     #[serde(rename = "EnablePostIconOverride")]
     enable_post_icon_override: Option<bool>,
     #[serde(rename = "EnableCustomEmoji")]

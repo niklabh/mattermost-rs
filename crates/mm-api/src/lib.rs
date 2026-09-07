@@ -10,11 +10,13 @@ pub mod auth;
 pub mod channels;
 pub mod cloud;
 pub mod common_teams;
+pub mod compliance;
 pub mod connected_workspaces;
 pub mod data_retention;
 pub mod drafts;
 pub mod emoji;
 pub mod error;
+pub mod feature_gates;
 /// `getFileInfo` — the one `/files/` route that returns JSON rather than bytes.
 pub mod files;
 pub mod groups;
@@ -870,6 +872,63 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/users/{user_id}/teams/{team_id}/channels/categories/{category}",
             partially_migrated_with_ids(&state, get(sidebar::get_category_for_team_for_user)),
+        )
+        // ---- compliance, IP filtering, the AI-bridge test helper and scheduled posts ----
+        //
+        // Fourteen routes across four small families with four different refusals between them —
+        // two at 501, two at 400, and one family whose gate has two arms sharing a status. See
+        // `compliance.rs` and `feature_gates.rs`.
+        .route(
+            "/api/v4/compliance/reports",
+            partially_migrated(
+                get(compliance::get_compliance_reports).post(compliance::create_compliance_report),
+            ),
+        )
+        .route(
+            "/api/v4/compliance/reports/{report_id}",
+            partially_migrated_with_ids(&state, get(compliance::get_compliance_report)),
+        )
+        .route(
+            "/api/v4/compliance/reports/{report_id}/download",
+            partially_migrated_with_ids(&state, get(compliance::download_compliance_report)),
+        )
+        .route(
+            "/api/v4/ip_filtering",
+            partially_migrated(
+                get(feature_gates::get_ip_filters).post(feature_gates::apply_ip_filters),
+            ),
+        )
+        .route(
+            "/api/v4/ip_filtering/my_ip",
+            partially_migrated(get(feature_gates::my_ip)),
+        )
+        // Three methods on one path, all gated on `ServiceSettings.EnableTesting`.
+        .route(
+            "/api/v4/system/e2e/ai_bridge",
+            partially_migrated(
+                get(feature_gates::get_ai_bridge_test_helper)
+                    .put(feature_gates::put_ai_bridge_test_helper)
+                    .delete(feature_gates::delete_ai_bridge_test_helper),
+            ),
+        )
+        // `/posts/schedule` and `/posts/scheduled` are two different literals under `/posts`, and
+        // both are literal siblings of `{post_id}` — axum prefers the literal and gorilla
+        // registers them first, so the routers agree.
+        .route(
+            "/api/v4/posts/schedule",
+            partially_migrated(post(feature_gates::create_schedule_post)),
+        )
+        .route(
+            "/api/v4/posts/schedule/{scheduled_post_id}",
+            partially_migrated_with_ids(
+                &state,
+                put(feature_gates::update_scheduled_post)
+                    .delete(feature_gates::delete_scheduled_post),
+            ),
+        )
+        .route(
+            "/api/v4/posts/scheduled/team/{team_id}",
+            partially_migrated_with_ids(&state, get(feature_gates::get_team_scheduled_posts)),
         )
         // ---- cloud and connected workspaces (2026-09-07) ----
         //
