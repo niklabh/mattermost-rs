@@ -8120,3 +8120,95 @@ it still tests the method fallback rather than this route.
 rune"). It is **16383** on this stack and 1000 on a server that never widened the column, so
 hard-coding either would refuse messages Go accepts or accept ones it refuses. Queried, like the
 tzdata lookup in `ScheduledPost`.
+
+## The seven webhook writes: two near-identical families that disagree everywhere (2026-09-08)
+
+New: `crates/mm-api/tests/parity/webhook_writes.rs`, `scripts/mutations/webhook-writes.plan`.
+Changed: `crates/mm-store/src/webhook_store.rs`, `crates/mm-app/src/{webhook,config}.rs`,
+`crates/mm-api/src/{webhooks,lib}.rs`, `crates/mm-api/tests/common/mod.rs`.
+
+210 → **217 of 764**. Pure CRUD with no websocket events, which is what makes it a good group
+after the reaction and draft ones: the interesting part is entirely in the *differences* between
+the incoming and outgoing families, and they differ in almost every place they could.
+
+| | incoming | outgoing |
+|---|---|---|
+| create answers | `201` | `201` |
+| **update answers** | **`201`** | **`200`** |
+| non-open channel | irrelevant | `api.outgoing_webhook.disabled.app_error` at **403** |
+| empty trigger words | irrelevant | **400** on create, **500** on update |
+| delete checks the channel | yes, via `restrictedChannel` | no |
+| update checks the channel read | **only when not open** | no |
+
+### One id, two statuses, in one function
+
+`CreateOutgoingWebhook` uses `api.outgoing_webhook.disabled.app_error` for its feature gate at
+**501** and again for a non-open channel at **403**. A client branching on the id alone cannot
+tell "the feature is off" from "that channel is private".
+
+The line below it is dead: `if channel.Type != Open || channel.TeamId != hook.TeamId` — the first
+disjunct already returned two lines earlier — so the second error is reachable only through the
+team mismatch. Ported as written, because the two ids differ.
+
+### An update that omits `token` destroys it
+
+`UpdateOutgoingWebhook` copies `CreatorId`, `CreateAt`, `DeleteAt`, `TeamId` and a fresh
+`UpdateAt` off the old hook. **`Token` is not in that list**, and the store's `SET` writes it —
+so editing a hook's display name without echoing the token back blanks the integration's
+credential. Measured on the running server before it was asserted, and reproduced: a port that
+preserved the token would answer a value Go does not have. `regen_token` is how you recover.
+
+### The intersection check has no `DeleteAt` predicate, and it broke the suite
+
+Two outgoing hooks collide when they share a channel **and** a callback URL **and** a trigger
+word — all three. `GetOutgoingByTeam(-1, -1)` fetches every hook on the team **including deleted
+ones**, so a trigger word freed by deleting a hook stays reserved for ever.
+
+That is a Go behaviour worth knowing, and it is also why `webhook_writes` passed on its first run
+and failed on its second: the first run's soft-deleted hooks blocked the second run's trigger
+words. `purge_api_fixtures` now sweeps `mmrs%`-named hooks and hooks whose team or channel is
+gone.
+
+### The channel lock is not a refusal
+
+Without `bypass_incoming_webhook_channel_lock` the hook is silently forced to
+`ChannelLocked = true` and pinned to the channel it named — a `201` that is not what was asked
+for. It is the only permission in this group that changes the *result* rather than refusing.
+
+### The mutation run, and a test edit that silently did not apply
+
+**23 run, 21 caught, 2 controls survived, 0 harness faults**, after two earlier passes. The three
+real survivors were each a different kind of gap:
+
+- **`trigger_words` absent and `trigger_words: []` are different inputs.** The guard is
+  `trigger_words.as_ref().is_none_or(|w| w.is_empty())`, and a fixture that only *omits* the key
+  short-circuits on the `None` — so replacing the emptiness test with `false` changed nothing it
+  could see. Both spellings are now sent.
+- **Two hooks in different channels never collide**, however much else they share, because the
+  intersection loop's first test is the channel. Nothing exercised that until a fixture with two
+  channels existed.
+- **The incoming update's answer is built by the app layer, not read back**, so a mutation
+  swapping `displayname` and `description` in the store's `SET` list was invisible. The test now
+  reads the row.
+
+The second of those cost an extra cycle for a duller reason worth recording: **a scripted edit to
+the test file matched nothing and reported no error**, so the fixture the mutation was supposed to
+catch never existed and the survivor looked like a puzzle about the code. The mutation was
+reproduced by hand against a running server before the real cause was found. An edit that must
+apply should assert that it did.
+
+### Migrating a method retires the test that watched it be forwarded
+
+Three `other_methods_are_forwarded` tests broke — `incoming_hooks`, `outgoing_hooks` and
+`single_hooks` — because their probes were `POST /hooks/incoming`, `POST /hooks/outgoing` and
+`DELETE /hooks/{incoming,outgoing}/{id}`, all now served here. Their *purpose* is that a method
+this server does not register still reaches Go rather than meeting axum's 405, so each now probes
+`PATCH`, which Go registers on neither path. The same repointing the preferences suite needed in
+the previous commit; expect one per group from here on.
+
+### `a_team_and_channel_the_user_is_in` returns a **direct message**
+
+The first channel of the fixture user's first team is a DM: type `D`, `team_id` empty. Every
+webhook permission here is team-scoped, so both servers answer 403 — agreement about the wrong
+thing. The test that used it now creates its own open channel. Worth recording because that helper
+is used by a dozen suites and the DM only matters where the team id does.

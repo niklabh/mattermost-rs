@@ -402,6 +402,10 @@ async fn an_unknown_team_id_is_an_empty_list_for_an_admin() {
 }
 
 /// Registering the `GET` must not turn the neighbouring `POST` into our 405.
+/// **Repointed when `POST` was migrated.** The point of this test is that a method this server
+/// does not register still reaches Go rather than meeting axum's 405 — not that any particular
+/// method is unmigrated. `POST` is now served here, so the probe is `PATCH`, which Go does not
+/// register on this path either (it answers its own 404).
 #[tokio::test]
 async fn other_methods_are_forwarded() {
     if !stack_enabled() {
@@ -411,7 +415,7 @@ async fn other_methods_are_forwarded() {
     let token = go_minted_token(&client).await;
 
     let ours = client
-        .post(format!("{RUST}{PATH}"))
+        .patch(format!("{RUST}{PATH}"))
         .header("Authorization", format!("Bearer {token}"))
         .json(&serde_json::json!({}))
         .send()
@@ -422,7 +426,7 @@ async fn other_methods_are_forwarded() {
             .get("x-mmrs-served-by")
             .and_then(|v| v.to_str().ok()),
         Some("go"),
-        "POST {PATH} must be forwarded"
+        "PATCH {PATH} must be forwarded"
     );
 }
 

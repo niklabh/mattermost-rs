@@ -861,6 +861,13 @@ async fn purge_api_fixtures_once() {
         // next run's flagged-post list and breaks any assertion about its contents. Deleting the
         // whole category is safe because `flagged_post` is authored by exactly one suite.
         "DELETE FROM preferences WHERE category = 'flagged_post'",
+        // Webhooks named by the parity suite. **These must be swept even though every test
+        // deletes its own**, because the outgoing store's `DeleteAt` is a *soft* delete and the
+        // intersection check `CreateOutgoingWebhook` runs carries **no `DeleteAt` predicate**
+        // (webhook.go) — so a deleted hook keeps its trigger words and callback URLs reserved
+        // for ever. The second run of `webhook_writes` failed against the first run's rows.
+        "DELETE FROM incomingwebhooks WHERE displayname LIKE 'mmrs%'",
+        "DELETE FROM outgoingwebhooks WHERE displayname LIKE 'mmrs%'",
         "DELETE FROM reactions WHERE emojiname LIKE 'mmrsparity%'",
         "DELETE FROM reactions WHERE postid IN (SELECT id FROM posts WHERE channelid IN (SELECT id FROM channels WHERE name LIKE 'mmrs-parity-%'))",
         "DELETE FROM postspriority WHERE postid IN (SELECT id FROM posts WHERE channelid IN (SELECT id FROM channels WHERE name LIKE 'mmrs-parity-%'))",
@@ -937,6 +944,11 @@ async fn purge_api_fixtures_once() {
         // they are the largest unbounded growth in the fixture database — 3,190 dangling thread
         // rows against 4 live ones when this sweep was written.
         "DELETE FROM posts WHERE NOT EXISTS (SELECT 1 FROM channels c WHERE c.id = posts.channelid)",
+        // Hooks whose team or channel is gone. The suite creates teams and channels per test and
+        // deletes them; a hook outliving its team is invisible to every REST route and still
+        // reserves its trigger words.
+        "DELETE FROM outgoingwebhooks WHERE teamid <> '' AND NOT EXISTS (SELECT 1 FROM teams t WHERE t.id = outgoingwebhooks.teamid)",
+        "DELETE FROM incomingwebhooks WHERE channelid <> '' AND NOT EXISTS (SELECT 1 FROM channels c WHERE c.id = incomingwebhooks.channelid)",
         "DELETE FROM threadmemberships WHERE NOT EXISTS (SELECT 1 FROM posts p WHERE p.id = threadmemberships.postid)",
         "DELETE FROM threads WHERE NOT EXISTS (SELECT 1 FROM posts p WHERE p.id = threads.postid)",
         // A `Drafts` row survives its channel the same way, and no API can reach it afterwards:

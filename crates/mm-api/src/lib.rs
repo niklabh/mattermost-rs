@@ -654,19 +654,39 @@ pub fn router(state: AppState) -> Router {
         )
         .route(
             "/api/v4/hooks/incoming",
-            partially_migrated(get(webhooks::get_incoming_hooks)),
+            partially_migrated(
+                get(webhooks::get_incoming_hooks).post(webhooks::create_incoming_hook),
+            ),
         )
         .route(
             "/api/v4/hooks/outgoing",
-            partially_migrated(get(webhooks::get_outgoing_hooks)),
+            partially_migrated(
+                get(webhooks::get_outgoing_hooks).post(webhooks::create_outgoing_hook),
+            ),
         )
         .route(
             "/api/v4/hooks/incoming/{hook_id}",
-            partially_migrated_with_ids(&state, get(webhooks::get_incoming_hook)),
+            partially_migrated_with_ids(
+                &state,
+                get(webhooks::get_incoming_hook)
+                    .put(webhooks::update_incoming_hook)
+                    .delete(webhooks::delete_incoming_hook),
+            ),
         )
         .route(
             "/api/v4/hooks/outgoing/{hook_id}",
-            partially_migrated_with_ids(&state, get(webhooks::get_outgoing_hook)),
+            partially_migrated_with_ids(
+                &state,
+                get(webhooks::get_outgoing_hook)
+                    .put(webhooks::update_outgoing_hook)
+                    .delete(webhooks::delete_outgoing_hook),
+            ),
+        )
+        // `BaseRoutes.OutgoingHooks.Handle("/{hook_id:[A-Za-z0-9]+}/regen_token")`
+        // (api4/webhook.go:22) — a segment deeper than `{hook_id}`, so no precedence question.
+        .route(
+            "/api/v4/hooks/outgoing/{hook_id}/regen_token",
+            partially_migrated_with_ids(&state, post(webhooks::regen_outgoing_hook_token)),
         )
         .route(
             "/api/v4/users/{user_id}/oauth/apps/authorized",

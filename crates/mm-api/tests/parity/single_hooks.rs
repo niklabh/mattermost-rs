@@ -453,10 +453,13 @@ async fn a_short_id_is_a_400_and_a_non_mux_segment_is_forwarded() {
 
 /// Registering the two `GET`s must not turn `DELETE` on the same paths into our 405.
 ///
-/// **Against the absent id, deliberately.** `DELETE /hooks/incoming/{id}` is forwarded, and
-/// forwarded means Go *performs* it: an earlier version of this test pointed at the fixture's own
-/// hook and soft-deleted it, so whichever test ran next found a 404 where it expected a 200. The
-/// forward is what is under test, not the deletion, and a missing id proves it just as well.
+/// **Repointed when `DELETE` was migrated.** The probe is now `PATCH`, which Go registers on
+/// neither hook path, so it still exercises the method fallback — a method this server does not
+/// register must reach Go rather than meet axum's 405.
+///
+/// Against the absent id, deliberately: a forwarded write is one Go *performs*, and an earlier
+/// version of this test pointed at the fixture's own hook and soft-deleted it, so whichever test
+/// ran next found a 404 where it expected a 200.
 #[tokio::test]
 async fn other_methods_are_forwarded() {
     if !stack_enabled() {
@@ -468,7 +471,7 @@ async fn other_methods_are_forwarded() {
 
     for p in [incoming(&fixture.absent), outgoing(&fixture.absent)] {
         let ours = client
-            .delete(format!("{RUST}{p}"))
+            .patch(format!("{RUST}{p}"))
             .header("Authorization", format!("Bearer {token}"))
             .send()
             .await
@@ -478,7 +481,7 @@ async fn other_methods_are_forwarded() {
                 .get("x-mmrs-served-by")
                 .and_then(|v| v.to_str().ok()),
             Some("go"),
-            "DELETE {p} must be forwarded"
+            "PATCH {p} must be forwarded"
         );
     }
 }

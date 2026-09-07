@@ -27,14 +27,15 @@
 //! observable through *this* route, and it is recorded rather than smoothed over because the
 //! store function is shared with routes that are not migrated.
 
-use axum::extract::{Path, RawQuery, State};
+use axum::extract::{Path, RawQuery, Request, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use mm_model::incoming_webhook::IncomingWebhooksWithCount;
+use mm_model::incoming_webhook::{IncomingWebhook, IncomingWebhooksWithCount};
+use mm_model::outgoing_webhook::OutgoingWebhook;
 use mm_model::permission::{
     PERMISSION_MANAGE_OTHERS_INCOMING_WEBHOOKS, PERMISSION_MANAGE_OTHERS_OUTGOING_WEBHOOKS,
     PERMISSION_MANAGE_OWN_INCOMING_WEBHOOKS, PERMISSION_MANAGE_OWN_OUTGOING_WEBHOOKS,
-    make_permission_error,
+    PERMISSION_READ_CHANNEL_CONTENT, make_permission_error,
 };
 use mm_model::utils::{AppError, is_valid_id};
 
@@ -481,6 +482,600 @@ fn encoded<T: serde::Serialize>(value: &T) -> Result<Response, ApiError> {
         body,
     )
         .into_response())
+}
+
+/// Port of `createIncomingHook` (api4/webhook.go:24) — `POST /api/v4/hooks/incoming`.
+///
+/// # Four permission checks, and the channel lock is not one of them
+///
+/// `manage_own_incoming_webhooks` on the channel's **team**, then `read_channel_content` on the
+/// channel, then — only when the body names somebody else as the owner —
+/// `manage_others_incoming_webhooks` plus [`mm_app::App::validate_incoming_webhook_user`].
+///
+/// The fourth, `bypass_incoming_webhook_channel_lock`, is **not a refusal**: without it the hook
+/// is silently forced to `ChannelLocked = true` and pinned to the channel it named. A caller who
+/// asked for an unlocked hook gets a locked one and a `201`.
+///
+/// # The channel is fetched before any permission check
+///
+/// So a body naming a channel that does not exist answers `GetChannel`'s **404**, not a 403 —
+/// the opposite order from `upsertDraft`, where the permission check swallows the lookup.
+#[tracing::instrument(skip_all, fields(user_id = %session.0.user_id))]
+pub async fn create_incoming_hook(
+    State(state): State<AppState>,
+    session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    let bytes = match axum::body::to_bytes(request.into_body(), usize::MAX).await {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            tracing::warn!(error = %err, "could not read the request body");
+            return ApiError::invalid_param("incoming_webhook").into_response();
+        }
+    };
+    let mut hook: IncomingWebhook = match serde_json::from_slice(&bytes) {
+        Ok(hook) => hook,
+        Err(err) => {
+            tracing::debug!(error = %err, "incoming_webhook body did not decode");
+            return ApiError::invalid_param("incoming_webhook").into_response();
+        }
+    };
+
+    let channel = match state.app.get_channel(&hook.channel_id).await {
+        Ok(channel) => channel,
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+
+    if !state
+        .app
+        .session_has_permission_to_team(
+            &session.0,
+            &channel.team_id,
+            &PERMISSION_MANAGE_OWN_INCOMING_WEBHOOKS,
+        )
+        .await
+    {
+        return permission_error(&session, &PERMISSION_MANAGE_OWN_INCOMING_WEBHOOKS);
+    }
+
+    let (can_read, _) = state
+        .app
+        .session_has_permission_to_read_channel(&session.0, &channel)
+        .await;
+    if !can_read {
+        return permission_error(&session, &PERMISSION_READ_CHANNEL_CONTENT);
+    }
+
+    let mut user_id = session.0.user_id.clone();
+    if !hook.user_id.is_empty() && hook.user_id != user_id {
+        if !state
+            .app
+            .session_has_permission_to_team(
+                &session.0,
+                &channel.team_id,
+                &PERMISSION_MANAGE_OTHERS_INCOMING_WEBHOOKS,
+            )
+            .await
+        {
+            return permission_error(&session, &PERMISSION_MANAGE_OTHERS_INCOMING_WEBHOOKS);
+        }
+
+        let hook_user = match state.app.get_user(&hook.user_id).await {
+            Ok(user) => user,
+            Err(err) => return ApiError::from(err).into_response(),
+        };
+        if let Err(err) = state
+            .app
+            .validate_incoming_webhook_user(&session.0, &hook_user, &channel)
+            .await
+        {
+            return ApiError::from(err).into_response();
+        }
+        user_id = hook.user_id.clone();
+    }
+
+    // Not a refusal — the hook is forced closed instead.
+    if !state
+        .app
+        .session_has_permission_to_team(
+            &session.0,
+            &channel.team_id,
+            &mm_model::permission::PERMISSION_BYPASS_INCOMING_WEBHOOK_CHANNEL_LOCK,
+        )
+        .await
+    {
+        hook.channel_locked = true;
+        hook.channel_id = channel.id.clone();
+    }
+
+    match state
+        .app
+        .create_incoming_webhook_for_channel(&user_id, &channel, &hook)
+        .await
+    {
+        Ok(saved) => created_json(&saved),
+        Err(err) => ApiError::from(err).into_response(),
+    }
+}
+
+/// Port of `updateIncomingHook` (api4/webhook.go:97) —
+/// `PUT /api/v4/hooks/incoming/{hook_id}`.
+///
+/// # `201 Created` for an update
+///
+/// `w.WriteHeader(http.StatusCreated)`, on a `PUT` that modifies an existing row. Reproduced.
+///
+/// # An empty `team_id` in the body is filled from the old hook, then compared to it
+///
+/// So omitting the field is allowed and naming a *different* team is
+/// `api.webhook.team_mismatch.app_error` at 400 — a check that can only fail when the client
+/// supplied a value.
+///
+/// The channel's team is then compared to the hook's, which is `SetInvalidParam("channel_id")`.
+/// Three id checks in a row, three different errors.
+#[tracing::instrument(skip_all, fields(hook_id = %hook_id))]
+pub async fn update_incoming_hook(
+    State(state): State<AppState>,
+    session: AuthenticatedSession,
+    Path(hook_id): Path<String>,
+    request: Request,
+) -> Response {
+    if let Err(err) = require_hook_id(&hook_id) {
+        return err.into_response();
+    }
+
+    let bytes = match axum::body::to_bytes(request.into_body(), usize::MAX).await {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            tracing::warn!(error = %err, "could not read the request body");
+            return ApiError::invalid_param("incoming_webhook").into_response();
+        }
+    };
+    let mut updated: IncomingWebhook = match serde_json::from_slice(&bytes) {
+        Ok(hook) => hook,
+        Err(err) => {
+            tracing::debug!(error = %err, "incoming_webhook body did not decode");
+            return ApiError::invalid_param("incoming_webhook").into_response();
+        }
+    };
+
+    if updated.id != hook_id {
+        return ApiError::invalid_param("hook_id").into_response();
+    }
+
+    let old_hook = match state.app.get_incoming_webhook(&hook_id).await {
+        Ok(hook) => hook,
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+
+    if updated.team_id.is_empty() {
+        updated.team_id = old_hook.team_id.clone();
+    }
+    if updated.team_id != old_hook.team_id {
+        return ApiError::from(AppError::new(
+            "updateIncomingHook",
+            "api.webhook.team_mismatch.app_error",
+            None,
+            format!("user_id={}", session.0.user_id),
+            400,
+        ))
+        .into_response();
+    }
+
+    let channel = match state.app.get_channel(&updated.channel_id).await {
+        Ok(channel) => channel,
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+
+    if channel.team_id != updated.team_id {
+        return ApiError::invalid_param("channel_id").into_response();
+    }
+
+    if !state
+        .app
+        .session_has_permission_to_team(
+            &session.0,
+            &channel.team_id,
+            &PERMISSION_MANAGE_OWN_INCOMING_WEBHOOKS,
+        )
+        .await
+    {
+        return permission_error(&session, &PERMISSION_MANAGE_OWN_INCOMING_WEBHOOKS);
+    }
+
+    if session.0.user_id != old_hook.user_id
+        && !state
+            .app
+            .session_has_permission_to_team(
+                &session.0,
+                &channel.team_id,
+                &PERMISSION_MANAGE_OTHERS_INCOMING_WEBHOOKS,
+            )
+            .await
+    {
+        return permission_error(&session, &PERMISSION_MANAGE_OTHERS_INCOMING_WEBHOOKS);
+    }
+
+    // **Only for a non-open channel.** An open channel skips the read check entirely, which the
+    // create path does not.
+    if channel.channel_type != mm_model::channel::CHANNEL_TYPE_OPEN {
+        let (can_read, _) = state
+            .app
+            .session_has_permission_to_read_channel(&session.0, &channel)
+            .await;
+        if !can_read {
+            return permission_error(&session, &PERMISSION_READ_CHANNEL_CONTENT);
+        }
+    }
+
+    if !state
+        .app
+        .session_has_permission_to_team(
+            &session.0,
+            &channel.team_id,
+            &mm_model::permission::PERMISSION_BYPASS_INCOMING_WEBHOOK_CHANNEL_LOCK,
+        )
+        .await
+    {
+        updated.channel_locked = true;
+        updated.channel_id = channel.id.clone();
+    }
+
+    match state.app.update_incoming_webhook(&old_hook, &updated).await {
+        Ok(saved) => created_json(&saved),
+        Err(err) => ApiError::from(err).into_response(),
+    }
+}
+
+/// Port of `deleteIncomingHook` (api4/webhook.go:174) —
+/// `DELETE /api/v4/hooks/incoming/{hook_id}`.
+///
+/// # The private-channel check is folded into the team check with an `||`
+///
+/// ```text
+/// if !SessionHasPermissionToTeam(..., manage_own) || restrictedChannel { refuse manage_own }
+/// ```
+///
+/// so a caller who *does* hold `manage_own` but cannot read a **private** channel is refused —
+/// and the error names `manage_own_incoming_webhooks`, not the channel permission they actually
+/// lack. An open channel never sets `restrictedChannel`, so the second disjunct is dead there.
+#[tracing::instrument(skip_all, fields(hook_id = %hook_id))]
+pub async fn delete_incoming_hook(
+    State(state): State<AppState>,
+    session: AuthenticatedSession,
+    Path(hook_id): Path<String>,
+) -> Response {
+    if let Err(err) = require_hook_id(&hook_id) {
+        return err.into_response();
+    }
+
+    let hook = match state.app.get_incoming_webhook(&hook_id).await {
+        Ok(hook) => hook,
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+    let channel = match state.app.get_channel(&hook.channel_id).await {
+        Ok(channel) => channel,
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+
+    let restricted_channel = if channel.channel_type != mm_model::channel::CHANNEL_TYPE_OPEN {
+        let (can_read, _) = state
+            .app
+            .session_has_permission_to_read_channel(&session.0, &channel)
+            .await;
+        !can_read
+    } else {
+        false
+    };
+
+    if !state
+        .app
+        .session_has_permission_to_team(
+            &session.0,
+            &hook.team_id,
+            &PERMISSION_MANAGE_OWN_INCOMING_WEBHOOKS,
+        )
+        .await
+        || restricted_channel
+    {
+        return permission_error(&session, &PERMISSION_MANAGE_OWN_INCOMING_WEBHOOKS);
+    }
+
+    if session.0.user_id != hook.user_id
+        && !state
+            .app
+            .session_has_permission_to_team(
+                &session.0,
+                &hook.team_id,
+                &PERMISSION_MANAGE_OTHERS_INCOMING_WEBHOOKS,
+            )
+            .await
+    {
+        return permission_error(&session, &PERMISSION_MANAGE_OTHERS_INCOMING_WEBHOOKS);
+    }
+
+    match state.app.delete_incoming_webhook(&hook_id).await {
+        Ok(()) => status_ok(),
+        Err(err) => ApiError::from(err).into_response(),
+    }
+}
+
+/// Port of `createOutgoingHook` (api4/webhook.go:398) — `POST /api/v4/hooks/outgoing`.
+///
+/// # The team comes from the **body**, and it is checked before anything exists
+///
+/// Unlike the incoming path, nothing is fetched first: `manage_own_outgoing_webhooks` is checked
+/// against `hook.TeamId` as submitted. A body naming a team the caller is not in is a 403 before
+/// any lookup.
+///
+/// `CreatorId` is filled from the session when absent; supplying somebody else's requires
+/// `manage_others_outgoing_webhooks` **and** that the user exists.
+#[tracing::instrument(skip_all, fields(user_id = %session.0.user_id))]
+pub async fn create_outgoing_hook(
+    State(state): State<AppState>,
+    session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    let bytes = match axum::body::to_bytes(request.into_body(), usize::MAX).await {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            tracing::warn!(error = %err, "could not read the request body");
+            return ApiError::invalid_param("outgoing_webhook").into_response();
+        }
+    };
+    let mut hook: OutgoingWebhook = match serde_json::from_slice(&bytes) {
+        Ok(hook) => hook,
+        Err(err) => {
+            tracing::debug!(error = %err, "outgoing_webhook body did not decode");
+            return ApiError::invalid_param("outgoing_webhook").into_response();
+        }
+    };
+
+    if !state
+        .app
+        .session_has_permission_to_team(
+            &session.0,
+            &hook.team_id,
+            &PERMISSION_MANAGE_OWN_OUTGOING_WEBHOOKS,
+        )
+        .await
+    {
+        return permission_error(&session, &PERMISSION_MANAGE_OWN_OUTGOING_WEBHOOKS);
+    }
+
+    if hook.creator_id.is_empty() {
+        hook.creator_id = session.0.user_id.clone();
+    } else {
+        if !state
+            .app
+            .session_has_permission_to_team(
+                &session.0,
+                &hook.team_id,
+                &PERMISSION_MANAGE_OTHERS_OUTGOING_WEBHOOKS,
+            )
+            .await
+        {
+            return permission_error(&session, &PERMISSION_MANAGE_OTHERS_OUTGOING_WEBHOOKS);
+        }
+        if let Err(err) = state.app.get_user(&hook.creator_id).await {
+            return ApiError::from(err).into_response();
+        }
+    }
+
+    match state.app.create_outgoing_webhook(&hook).await {
+        Ok(saved) => created_json(&saved),
+        Err(err) => ApiError::from(err).into_response(),
+    }
+}
+
+/// Port of `updateOutgoingHook` (api4/webhook.go:610) —
+/// `PUT /api/v4/hooks/outgoing/{hook_id}`.
+///
+/// `200`, not the `201` its incoming sibling answers for the same shape of request.
+#[tracing::instrument(skip_all, fields(hook_id = %hook_id))]
+pub async fn update_outgoing_hook(
+    State(state): State<AppState>,
+    session: AuthenticatedSession,
+    Path(hook_id): Path<String>,
+    request: Request,
+) -> Response {
+    if let Err(err) = require_hook_id(&hook_id) {
+        return err.into_response();
+    }
+
+    let bytes = match axum::body::to_bytes(request.into_body(), usize::MAX).await {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            tracing::warn!(error = %err, "could not read the request body");
+            return ApiError::invalid_param("outgoing_webhook").into_response();
+        }
+    };
+    let updated: OutgoingWebhook = match serde_json::from_slice(&bytes) {
+        Ok(hook) => hook,
+        Err(err) => {
+            tracing::debug!(error = %err, "outgoing_webhook body did not decode");
+            return ApiError::invalid_param("outgoing_webhook").into_response();
+        }
+    };
+
+    if updated.id != hook_id {
+        return ApiError::invalid_param("hook_id").into_response();
+    }
+
+    let old_hook = match state.app.get_outgoing_webhook(&hook_id).await {
+        Ok(hook) => hook,
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+
+    if !state
+        .app
+        .session_has_permission_to_team(
+            &session.0,
+            &old_hook.team_id,
+            &PERMISSION_MANAGE_OWN_OUTGOING_WEBHOOKS,
+        )
+        .await
+    {
+        return permission_error(&session, &PERMISSION_MANAGE_OWN_OUTGOING_WEBHOOKS);
+    }
+
+    if session.0.user_id != old_hook.creator_id
+        && !state
+            .app
+            .session_has_permission_to_team(
+                &session.0,
+                &old_hook.team_id,
+                &PERMISSION_MANAGE_OTHERS_OUTGOING_WEBHOOKS,
+            )
+            .await
+    {
+        return permission_error(&session, &PERMISSION_MANAGE_OTHERS_OUTGOING_WEBHOOKS);
+    }
+
+    match state.app.update_outgoing_webhook(&old_hook, &updated).await {
+        Ok(saved) => encoded_json(StatusCode::OK, &saved),
+        Err(err) => ApiError::from(err).into_response(),
+    }
+}
+
+/// Port of `deleteOutgoingHook` (api4/webhook.go:672) —
+/// `DELETE /api/v4/hooks/outgoing/{hook_id}`.
+///
+/// No channel check at all, unlike the incoming delete: the two permissions are both team-scoped.
+#[tracing::instrument(skip_all, fields(hook_id = %hook_id))]
+pub async fn delete_outgoing_hook(
+    State(state): State<AppState>,
+    session: AuthenticatedSession,
+    Path(hook_id): Path<String>,
+) -> Response {
+    match outgoing_hook_the_caller_may_manage(&state, &session, &hook_id).await {
+        Ok(hook) => match state.app.delete_outgoing_webhook(&hook.id).await {
+            Ok(()) => status_ok(),
+            Err(err) => ApiError::from(err).into_response(),
+        },
+        Err(response) => *response,
+    }
+}
+
+/// Port of `regenOutgoingHookToken` (api4/webhook.go:718) —
+/// `POST /api/v4/hooks/outgoing/{hook_id}/regen_token`.
+///
+/// Same two permissions as the delete, and the answer is the whole hook **with its new token** —
+/// encoder-framed, and at `200`.
+#[tracing::instrument(skip_all, fields(hook_id = %hook_id))]
+pub async fn regen_outgoing_hook_token(
+    State(state): State<AppState>,
+    session: AuthenticatedSession,
+    Path(hook_id): Path<String>,
+) -> Response {
+    match outgoing_hook_the_caller_may_manage(&state, &session, &hook_id).await {
+        Ok(hook) => match state.app.regen_outgoing_webhook_token(&hook).await {
+            Ok(saved) => encoded_json(StatusCode::OK, &saved),
+            Err(err) => ApiError::from(err).into_response(),
+        },
+        Err(response) => *response,
+    }
+}
+
+/// The preamble `deleteOutgoingHook` and `regenOutgoingHookToken` share: fetch, then
+/// `manage_own_outgoing_webhooks` on the hook's team, then `manage_others_…` when the caller is
+/// not its creator.
+async fn outgoing_hook_the_caller_may_manage(
+    state: &AppState,
+    session: &AuthenticatedSession,
+    hook_id: &str,
+) -> Result<OutgoingWebhook, Box<Response>> {
+    if let Err(err) = require_hook_id(hook_id) {
+        return Err(Box::new(err.into_response()));
+    }
+
+    let hook = match state.app.get_outgoing_webhook(hook_id).await {
+        Ok(hook) => hook,
+        Err(err) => return Err(Box::new(ApiError::from(err).into_response())),
+    };
+
+    if !state
+        .app
+        .session_has_permission_to_team(
+            &session.0,
+            &hook.team_id,
+            &PERMISSION_MANAGE_OWN_OUTGOING_WEBHOOKS,
+        )
+        .await
+    {
+        return Err(Box::new(permission_error(
+            session,
+            &PERMISSION_MANAGE_OWN_OUTGOING_WEBHOOKS,
+        )));
+    }
+
+    if session.0.user_id != hook.creator_id
+        && !state
+            .app
+            .session_has_permission_to_team(
+                &session.0,
+                &hook.team_id,
+                &PERMISSION_MANAGE_OTHERS_OUTGOING_WEBHOOKS,
+            )
+            .await
+    {
+        return Err(Box::new(permission_error(
+            session,
+            &PERMISSION_MANAGE_OTHERS_OUTGOING_WEBHOOKS,
+        )));
+    }
+
+    Ok(hook)
+}
+
+/// `RequireHookId` (web/context.go) — `IsValidId`, answering `invalid_url_param`.
+fn require_hook_id(hook_id: &str) -> Result<(), ApiError> {
+    if !is_valid_id(hook_id) {
+        return Err(ApiError::invalid_url_param("hook_id"));
+    }
+    Ok(())
+}
+
+fn permission_error(
+    session: &AuthenticatedSession,
+    permission: &'static mm_model::permission::Permission,
+) -> Response {
+    ApiError::from(*make_permission_error(&session.0, &[permission])).into_response()
+}
+
+/// `w.WriteHeader(http.StatusCreated)` then `json.NewEncoder(w).Encode` — a trailing newline.
+fn created_json<T: serde::Serialize>(value: &T) -> Response {
+    encoded_json(StatusCode::CREATED, value)
+}
+
+fn encoded_json<T: serde::Serialize>(status: StatusCode, value: &T) -> Response {
+    match mm_model::utils::go_json_marshal(value) {
+        Ok(json) => (
+            status,
+            [
+                ("Content-Type", "application/json"),
+                ("x-mmrs-served-by", "rust"),
+            ],
+            json + "\n",
+        )
+            .into_response(),
+        Err(err) => {
+            tracing::warn!(error = %err, "Error while writing response");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+
+fn status_ok() -> Response {
+    (
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        r#"{"status":"OK"}"#,
+    )
+        .into_response()
 }
 
 #[cfg(test)]

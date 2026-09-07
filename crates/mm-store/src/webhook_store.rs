@@ -76,6 +76,55 @@ pub trait WebhookStore {
     ) -> impl std::future::Future<Output = Result<IncomingWebhook, StoreError>> + Send;
 
     /// Port of `SqlWebhookStore.GetOutgoing` (webhook_store.go:263).
+    /// Port of `SqlWebhookStore.SaveIncoming` (webhook_store.go:60).
+    ///
+    /// Go refuses a hook that already carries an id — `ErrInvalidInput`, which the app layer
+    /// renders as `app.webhooks.save_incoming.existing.app_error` at **400**.
+    fn save_incoming(
+        &self,
+        hook: &IncomingWebhook,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlWebhookStore.UpdateIncoming` (webhook_store.go:87).
+    fn update_incoming(
+        &self,
+        hook: &IncomingWebhook,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlWebhookStore.DeleteIncoming` (webhook_store.go:151) — a **soft** delete.
+    fn delete_incoming(
+        &self,
+        hook_id: &str,
+        time: i64,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlWebhookStore.SaveOutgoing` (webhook_store.go:213).
+    fn save_outgoing(
+        &self,
+        hook: &OutgoingWebhook,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlWebhookStore.UpdateOutgoing` (webhook_store.go:298).
+    fn update_outgoing(
+        &self,
+        hook: &OutgoingWebhook,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlWebhookStore.DeleteOutgoing` (webhook_store.go:313) — a **soft** delete.
+    fn delete_outgoing(
+        &self,
+        hook_id: &str,
+        time: i64,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlWebhookStore.GetOutgoingByTeam` with `offset`/`limit` of `-1`
+    /// (webhook_store.go:262), which is how both write paths ask for **every** hook on a team to
+    /// run the trigger-word/callback intersection check.
+    fn get_outgoing_by_team_unpaged(
+        &self,
+        team_id: &str,
+    ) -> impl std::future::Future<Output = Result<Vec<OutgoingWebhook>, StoreError>> + Send;
+
     fn get_outgoing(
         &self,
         id: &str,
@@ -163,6 +212,29 @@ struct OutgoingWebhookRow {
     iconurl: String,
 }
 
+/// `OutgoingWebhooks.TriggerWhen` is an `integer` column and `OutgoingWebhook.trigger_when` is an
+/// `i64`, matching Go's `int`.
+fn trigger_when(value: i64) -> Result<i32, StoreError> {
+    i32::try_from(value).map_err(|_| StoreError::Db {
+        context: format!("trigger_when {value} does not fit the integer column"),
+        source: sqlx::Error::Protocol("trigger_when out of range".to_owned()),
+    })
+}
+
+/// The write half of [`string_array_column`]: `None` becomes SQL `NULL`, and anything else is
+/// the JSON text Go's `StringArray.Value` produces.
+fn string_array_text(value: Option<&StringArray>) -> Result<Option<String>, StoreError> {
+    value
+        .map(|value| {
+            serde_json::to_string(value).map_err(|source| StoreError::Decode {
+                entity: "Webhook",
+                column: "string array",
+                source,
+            })
+        })
+        .transpose()
+}
+
 /// `StringArray.Scan`: NULL leaves the field nil; anything else is `json.Unmarshal`ed, and a
 /// failure there fails the whole query on Go's side too.
 ///
@@ -212,6 +284,249 @@ impl OutgoingWebhookRow {
 }
 
 impl WebhookStore for SqlWebhookStore {
+    #[tracing::instrument(skip_all, fields(id = %hook.id))]
+    async fn save_incoming(&self, hook: &IncomingWebhook) -> Result<(), StoreError> {
+        sqlx::query!(
+            r#"
+            INSERT INTO incomingwebhooks
+                (id, createat, updateat, deleteat, userid, channelid, teamid, displayname,
+                 description, username, iconurl, channellocked, lastused)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+            "#,
+            hook.id,
+            hook.create_at,
+            hook.update_at,
+            hook.delete_at,
+            hook.user_id,
+            hook.channel_id,
+            hook.team_id,
+            hook.display_name,
+            hook.description,
+            hook.username,
+            hook.icon_url,
+            hook.channel_locked,
+            hook.last_used,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to save IncomingWebhook with id={}", hook.id),
+            source,
+        })?;
+        Ok(())
+    }
+
+    /// **Ten columns, and `UserId` and `LastUsed` are not among them.** Go's `SET` list omits
+    /// both, so an update cannot move a hook to a different creator and cannot rewrite its
+    /// last-used stamp — which is why `UpdateIncomingWebhook` copies them off the old hook first
+    /// and the store never has to.
+    #[tracing::instrument(skip_all, fields(id = %hook.id))]
+    async fn update_incoming(&self, hook: &IncomingWebhook) -> Result<(), StoreError> {
+        sqlx::query!(
+            r#"
+            UPDATE incomingwebhooks
+               SET createat = $2, updateat = $3, deleteat = $4, channelid = $5, teamid = $6,
+                   displayname = $7, description = $8, username = $9, iconurl = $10,
+                   channellocked = $11
+             WHERE id = $1
+            "#,
+            hook.id,
+            hook.create_at,
+            hook.update_at,
+            hook.delete_at,
+            hook.channel_id,
+            hook.team_id,
+            hook.display_name,
+            hook.description,
+            hook.username,
+            hook.icon_url,
+            hook.channel_locked,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to update IncomingWebhook with id={}", hook.id),
+            source,
+        })?;
+        Ok(())
+    }
+
+    /// **`UpdateAt` takes the same value as `DeleteAt`**, not a separate `GetMillis()`. The two
+    /// timestamps on a deleted hook are therefore always equal, which is observable through the
+    /// list queries' ordering.
+    #[tracing::instrument(skip(self), fields(id = %hook_id))]
+    async fn delete_incoming(&self, hook_id: &str, time: i64) -> Result<(), StoreError> {
+        sqlx::query!(
+            "UPDATE incomingwebhooks SET deleteat = $1, updateat = $1 WHERE id = $2",
+            time,
+            hook_id,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to update IncomingWebhook with id={hook_id}"),
+            source,
+        })?;
+        Ok(())
+    }
+
+    /// The two array columns are written as **JSON text in a `varchar`**, matching how the read
+    /// path decodes them — and a `None` becomes SQL `NULL`, which is the third state the model
+    /// distinguishes from `[]`.
+    #[tracing::instrument(skip_all, fields(id = %hook.id))]
+    async fn save_outgoing(&self, hook: &OutgoingWebhook) -> Result<(), StoreError> {
+        let trigger_words = string_array_text(hook.trigger_words.as_ref())?;
+        let callback_urls = string_array_text(hook.callback_urls.as_ref())?;
+
+        sqlx::query!(
+            r#"
+            INSERT INTO outgoingwebhooks
+                (id, token, createat, updateat, deleteat, creatorid, channelid, teamid,
+                 triggerwords, triggerwhen, callbackurls, displayname, description, contenttype,
+                 username, iconurl)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+            "#,
+            hook.id,
+            hook.token,
+            hook.create_at,
+            hook.update_at,
+            hook.delete_at,
+            hook.creator_id,
+            hook.channel_id,
+            hook.team_id,
+            trigger_words,
+            // The column is `integer`; the model keeps Go's `int`, which is 64-bit on every
+            // platform this runs on. `IsValid` caps the field at 1, so the narrowing cannot fail
+            // for a hook that passed validation — but it is checked rather than cast, because a
+            // silent wrap here would write a trigger rule nobody asked for.
+            trigger_when(hook.trigger_when)?,
+            callback_urls,
+            hook.display_name,
+            hook.description,
+            hook.content_type,
+            hook.username,
+            hook.icon_url,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to save OutgoingWebhook with id={}", hook.id),
+            source,
+        })?;
+        Ok(())
+    }
+
+    /// Unlike its incoming sibling, this `SET` list covers **every** column but `Id` — including
+    /// `Token` and `CreatorId`. That is what lets `RegenOutgoingWebhookToken` reuse it with
+    /// nothing changed but the token.
+    #[tracing::instrument(skip_all, fields(id = %hook.id))]
+    async fn update_outgoing(&self, hook: &OutgoingWebhook) -> Result<(), StoreError> {
+        let trigger_words = string_array_text(hook.trigger_words.as_ref())?;
+        let callback_urls = string_array_text(hook.callback_urls.as_ref())?;
+
+        sqlx::query!(
+            r#"
+            UPDATE outgoingwebhooks
+               SET createat = $2, updateat = $3, deleteat = $4, token = $5, creatorid = $6,
+                   channelid = $7, teamid = $8, triggerwords = $9, triggerwhen = $10,
+                   callbackurls = $11, displayname = $12, description = $13, contenttype = $14,
+                   username = $15, iconurl = $16
+             WHERE id = $1
+            "#,
+            hook.id,
+            hook.create_at,
+            hook.update_at,
+            hook.delete_at,
+            hook.token,
+            hook.creator_id,
+            hook.channel_id,
+            hook.team_id,
+            trigger_words,
+            // The column is `integer`; the model keeps Go's `int`, which is 64-bit on every
+            // platform this runs on. `IsValid` caps the field at 1, so the narrowing cannot fail
+            // for a hook that passed validation — but it is checked rather than cast, because a
+            // silent wrap here would write a trigger rule nobody asked for.
+            trigger_when(hook.trigger_when)?,
+            callback_urls,
+            hook.display_name,
+            hook.description,
+            hook.content_type,
+            hook.username,
+            hook.icon_url,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to update OutgoingWebhook with id={}", hook.id),
+            source,
+        })?;
+        Ok(())
+    }
+
+    #[tracing::instrument(skip(self), fields(id = %hook_id))]
+    async fn delete_outgoing(&self, hook_id: &str, time: i64) -> Result<(), StoreError> {
+        sqlx::query!(
+            "UPDATE outgoingwebhooks SET deleteat = $1, updateat = $1 WHERE id = $2",
+            time,
+            hook_id,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to update OutgoingWebhook with id={hook_id}"),
+            source,
+        })?;
+        Ok(())
+    }
+
+    /// **No `DeleteAt` predicate**, and that is Go's. The intersection check therefore compares a
+    /// new hook against *deleted* ones too, so a trigger word freed by deleting a hook stays
+    /// unusable. Reproduced: the alternative accepts hooks Go refuses.
+    ///
+    /// Go's `-1` offset and limit reach `squirrel` as `OFFSET -1 LIMIT -1`, which Postgres treats
+    /// as "no offset, no limit"; expressed here as the absence of both clauses.
+    #[tracing::instrument(skip(self), fields(team_id = %team_id, found))]
+    async fn get_outgoing_by_team_unpaged(
+        &self,
+        team_id: &str,
+    ) -> Result<Vec<OutgoingWebhook>, StoreError> {
+        let rows = sqlx::query_as!(
+            OutgoingWebhookRow,
+            r#"
+            SELECT id            AS "id!",
+                   token         AS "token!",
+                   createat      AS "createat!",
+                   updateat      AS "updateat!",
+                   deleteat      AS "deleteat!",
+                   creatorid     AS "creatorid!",
+                   channelid     AS "channelid!",
+                   teamid        AS "teamid!",
+                   triggerwords  AS "triggerwords?",
+                   triggerwhen   AS "triggerwhen!",
+                   callbackurls  AS "callbackurls?",
+                   displayname   AS "displayname!",
+                   description   AS "description!",
+                   contenttype   AS "contenttype!",
+                   username      AS "username!",
+                   iconurl       AS "iconurl!"
+              FROM outgoingwebhooks
+             WHERE teamid = $1
+            "#,
+            team_id,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to get OutgoingWebhooks with teamId={team_id}"),
+            source,
+        })?;
+
+        tracing::Span::current().record("found", rows.len());
+        rows.into_iter()
+            .map(OutgoingWebhookRow::into_model)
+            .collect()
+    }
+
     /// # `ORDER BY DisplayName, Id`
     ///
     /// Two keys, and the second is what makes the page stable: display names are not unique —

@@ -93,6 +93,14 @@ pub struct Config {
     /// prop is refused, and forwarded, while this is on.
     pub enable_post_icon_override: bool,
 
+    /// `ServiceSettings.EnablePostUsernameOverride` (config.go, defaulted **`false`**).
+    ///
+    /// The username half of the pair above, and the two are **not** applied the same way by the
+    /// webhook paths: on *create* a disabled override blanks `Username` to `""`, while on
+    /// *update* it restores the **old hook's** value. So an administrator who turns the setting
+    /// off does not lose the usernames already configured — they simply become unchangeable.
+    pub enable_post_username_override: bool,
+
     /// `ServiceSettings.EnableCustomEmoji` (config.go:849). Go default **`true`**.
     ///
     /// Gates `metadata.emojis` entirely — `getCustomEmojisForPost` returns an empty slice
@@ -403,6 +411,7 @@ impl Default for Config {
             image_proxy_enable: false,
             enable_post_icon_override: false,
             enable_custom_emoji: true,
+            enable_post_username_override: false,
             post_priority: true,
             // config.go:997 — `new(true)`.
             allow_persistent_notifications: true,
@@ -507,6 +516,11 @@ impl Config {
                 lookup,
                 "MM_SERVICESETTINGS_ENABLEPOSTICONOVERRIDE",
                 default.enable_post_icon_override,
+            ),
+            enable_post_username_override: lookup_bool(
+                lookup,
+                "MM_SERVICESETTINGS_ENABLEPOSTUSERNAMEOVERRIDE",
+                default.enable_post_username_override,
             ),
             enable_custom_emoji: lookup_bool(
                 lookup,
@@ -693,6 +707,9 @@ impl Config {
             enable_post_icon_override: service
                 .enable_post_icon_override
                 .unwrap_or(default.enable_post_icon_override),
+            enable_post_username_override: service
+                .enable_post_username_override
+                .unwrap_or(default.enable_post_username_override),
             enable_custom_emoji: service
                 .enable_custom_emoji
                 .unwrap_or(default.enable_custom_emoji),
@@ -942,6 +959,8 @@ struct ServiceSettingsDocument {
     scheduled_posts: Option<bool>,
     #[serde(rename = "EnablePostIconOverride")]
     enable_post_icon_override: Option<bool>,
+    #[serde(rename = "EnablePostUsernameOverride")]
+    enable_post_username_override: Option<bool>,
     #[serde(rename = "EnableCustomEmoji")]
     enable_custom_emoji: Option<bool>,
     #[serde(rename = "PostPriority")]

@@ -402,3 +402,572 @@ mod single_hook_tests {
         assert_ne!(INCOMING_GET_ERROR, OUTGOING_GET_ERROR);
     }
 }
+
+impl App {
+    /// Port of `app.App.CreateIncomingWebhookForChannel` (app/webhook.go).
+    ///
+    /// # The two override settings are applied differently here and in the update path
+    ///
+    /// With `EnablePostUsernameOverride` off, **create blanks the username to `""`** while
+    /// [`App::update_incoming_webhook`] restores the *old hook's* value. Same setting, opposite
+    /// effect on an existing configuration: turning the setting off does not erase usernames
+    /// already stored, it makes them unchangeable. Both defaults are `false`, so the blanking is
+    /// what a stock server does.
+    ///
+    /// The username is validated **after** the blanking, so an invalid username on a server with
+    /// the override off is silently dropped rather than refused.
+    ///
+    /// `UserId` and `TeamId` are overwritten from the caller and the channel — a client cannot
+    /// choose either.
+    #[tracing::instrument(skip(self, hook), fields(channel_id = %channel.id))]
+    pub async fn create_incoming_webhook_for_channel(
+        &self,
+        creator_id: &str,
+        channel: &mm_model::channel::Channel,
+        hook: &IncomingWebhook,
+    ) -> AppResult<IncomingWebhook> {
+        if !self.config().enable_incoming_webhooks {
+            return Err(incoming_disabled("CreateIncomingWebhookForChannel"));
+        }
+
+        let mut hook = hook.clone();
+        hook.user_id = creator_id.to_owned();
+        hook.team_id = channel.team_id.clone();
+
+        if !self.config().enable_post_username_override {
+            hook.username = String::new();
+        }
+        if !self.config().enable_post_icon_override {
+            hook.icon_url = String::new();
+        }
+
+        if !hook.username.is_empty() && !mm_model::user::is_valid_username(&hook.username) {
+            return Err(AppError::boxed(
+                "CreateIncomingWebhookForChannel",
+                "api.incoming_webhook.invalid_username.app_error",
+                None,
+                String::new(),
+                400,
+            ));
+        }
+
+        // `SaveIncoming` refuses a hook that already carries an id, before `PreSave` runs — so a
+        // client that echoes back an existing hook gets a 400 rather than overwriting it.
+        if !hook.id.is_empty() {
+            return Err(AppError::boxed(
+                "CreateIncomingWebhookForChannel",
+                "app.webhooks.save_incoming.existing.app_error",
+                None,
+                String::new(),
+                400,
+            ));
+        }
+
+        hook.pre_save();
+        hook.is_valid()?;
+
+        self.store()
+            .webhook()
+            .save_incoming(&hook)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "incoming webhook save failed");
+                AppError::boxed(
+                    "CreateIncomingWebhookForChannel",
+                    "app.webhooks.save_incoming.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })?;
+
+        Ok(hook)
+    }
+
+    /// Port of `app.App.UpdateIncomingWebhook` (app/webhook.go).
+    ///
+    /// Seven fields are copied off the old hook and cannot be changed: `Id`, `UserId`,
+    /// `CreateAt`, `TeamId`, `DeleteAt` and `LastUsed`, with `UpdateAt` taken fresh. The store's
+    /// `SET` list omits `UserId` and `LastUsed` as well, so both are protected twice.
+    #[tracing::instrument(skip(self, old_hook, updated_hook), fields(id = %old_hook.id))]
+    pub async fn update_incoming_webhook(
+        &self,
+        old_hook: &IncomingWebhook,
+        updated_hook: &IncomingWebhook,
+    ) -> AppResult<IncomingWebhook> {
+        if !self.config().enable_incoming_webhooks {
+            return Err(incoming_disabled("UpdateIncomingWebhook"));
+        }
+
+        let mut hook = updated_hook.clone();
+
+        // **Restores the old value rather than blanking**, unlike the create path above.
+        if !self.config().enable_post_username_override {
+            hook.username = old_hook.username.clone();
+        }
+        if !self.config().enable_post_icon_override {
+            hook.icon_url = old_hook.icon_url.clone();
+        }
+
+        if !hook.username.is_empty() && !mm_model::user::is_valid_username(&hook.username) {
+            return Err(AppError::boxed(
+                "UpdateIncomingWebhook",
+                "api.incoming_webhook.invalid_username.app_error",
+                None,
+                String::new(),
+                400,
+            ));
+        }
+
+        hook.id = old_hook.id.clone();
+        hook.user_id = old_hook.user_id.clone();
+        hook.create_at = old_hook.create_at;
+        hook.update_at = mm_model::utils::get_millis();
+        hook.team_id = old_hook.team_id.clone();
+        hook.delete_at = old_hook.delete_at;
+        hook.last_used = old_hook.last_used;
+
+        self.store()
+            .webhook()
+            .update_incoming(&hook)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "incoming webhook update failed");
+                AppError::boxed(
+                    "UpdateIncomingWebhook",
+                    "app.webhooks.update_incoming.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })?;
+
+        // `InvalidateCacheForWebhook` clears Go's own webhook cache. There is nothing to clear
+        // here, and Go's copy is unreachable from this process — see [D-190].
+        Ok(hook)
+    }
+
+    /// Port of `app.App.DeleteIncomingWebhook` (app/webhook.go).
+    #[tracing::instrument(skip(self), fields(id = %hook_id))]
+    pub async fn delete_incoming_webhook(&self, hook_id: &str) -> AppResult<()> {
+        if !self.config().enable_incoming_webhooks {
+            return Err(incoming_disabled("DeleteIncomingWebhook"));
+        }
+
+        self.store()
+            .webhook()
+            .delete_incoming(hook_id, mm_model::utils::get_millis())
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "incoming webhook delete failed");
+                AppError::boxed(
+                    "DeleteIncomingWebhook",
+                    "app.webhooks.delete_incoming.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })
+    }
+
+    /// Port of `app.App.CreateOutgoingWebhook` (app/webhook.go).
+    ///
+    /// # A channel-scoped hook must be in an open channel, and Go says so twice
+    ///
+    /// ```text
+    /// if channel.Type != Open                          -> 403 api.outgoing_webhook.disabled
+    /// if channel.Type != Open || channel.TeamId != ...  -> 403 api.webhook.create_outgoing.permissions
+    /// ```
+    ///
+    /// The second condition's first disjunct is **unreachable** — the first `if` already returned
+    /// — so the team mismatch is the only way to reach the second error. Reproduced as written,
+    /// because the two ids differ and a client branches on them.
+    ///
+    /// A hook with **no** channel must carry trigger words instead; that arm is a **400** where
+    /// the update path's identical arm is a 500.
+    #[tracing::instrument(skip(self, hook), fields(team_id = %hook.team_id))]
+    pub async fn create_outgoing_webhook(
+        &self,
+        hook: &OutgoingWebhook,
+    ) -> AppResult<OutgoingWebhook> {
+        if !self.config().enable_outgoing_webhooks {
+            return Err(outgoing_disabled("CreateOutgoingWebhook"));
+        }
+
+        let mut hook = hook.clone();
+
+        if !hook.channel_id.is_empty() {
+            let channel = self.get_channel(&hook.channel_id).await.map_err(|err| {
+                let mut params: std::collections::HashMap<String, serde_json::Value> =
+                    std::collections::HashMap::new();
+                params.insert(
+                    "channel_id".to_owned(),
+                    serde_json::Value::String(hook.channel_id.clone()),
+                );
+                let (id, status) = if err.status_code == 404 {
+                    ("app.channel.get.existing.app_error", 404)
+                } else {
+                    ("app.channel.get.find.app_error", 500)
+                };
+                AppError::boxed(
+                    "CreateOutgoingWebhook",
+                    id,
+                    Some(params),
+                    String::new(),
+                    status,
+                )
+            })?;
+
+            if channel.channel_type != mm_model::channel::CHANNEL_TYPE_OPEN {
+                return Err(outgoing_disabled_forbidden("CreateOutgoingWebhook"));
+            }
+
+            if channel.team_id != hook.team_id {
+                return Err(AppError::boxed(
+                    "CreateOutgoingWebhook",
+                    "api.webhook.create_outgoing.permissions.app_error",
+                    None,
+                    String::new(),
+                    403,
+                ));
+            }
+        } else if hook
+            .trigger_words
+            .as_ref()
+            .is_none_or(|words| words.is_empty())
+        {
+            return Err(AppError::boxed(
+                "CreateOutgoingWebhook",
+                "api.webhook.create_outgoing.triggers.app_error",
+                None,
+                String::new(),
+                400,
+            ));
+        }
+
+        self.refuse_intersecting_outgoing(&hook, None, "CreateOutgoingWebhook", 500)
+            .await?;
+
+        if !hook.id.is_empty() {
+            return Err(AppError::boxed(
+                "CreateOutgoingWebhook",
+                "app.webhooks.save_outgoing.override.app_error",
+                None,
+                String::new(),
+                400,
+            ));
+        }
+
+        hook.pre_save();
+        hook.is_valid()?;
+
+        self.store()
+            .webhook()
+            .save_outgoing(&hook)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "outgoing webhook save failed");
+                AppError::boxed(
+                    "CreateOutgoingWebhook",
+                    "app.webhooks.save_outgoing.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })?;
+
+        Ok(hook)
+    }
+
+    /// Port of `app.App.UpdateOutgoingWebhook` (app/webhook.go).
+    ///
+    /// The same four gates as the create path with **three differences**, each of which a reader
+    /// would smooth over:
+    ///
+    /// - a non-open channel is `api.webhook.create_outgoing.not_open.app_error`, a *different id*
+    ///   from create's;
+    /// - the team check compares against the **old** hook's team, not the submitted one;
+    /// - the empty-trigger-words arm is a **500**, where create's is a 400. Same message, same
+    ///   condition, different status.
+    ///
+    /// The intersection check additionally excludes the hook being updated, or every update would
+    /// collide with itself.
+    #[tracing::instrument(skip(self, old_hook, updated_hook), fields(id = %old_hook.id))]
+    pub async fn update_outgoing_webhook(
+        &self,
+        old_hook: &OutgoingWebhook,
+        updated_hook: &OutgoingWebhook,
+    ) -> AppResult<OutgoingWebhook> {
+        if !self.config().enable_outgoing_webhooks {
+            return Err(outgoing_disabled("UpdateOutgoingWebhook"));
+        }
+
+        let mut hook = updated_hook.clone();
+
+        if !hook.channel_id.is_empty() {
+            let channel = self.get_channel(&hook.channel_id).await?;
+
+            if channel.channel_type != mm_model::channel::CHANNEL_TYPE_OPEN {
+                return Err(AppError::boxed(
+                    "UpdateOutgoingWebhook",
+                    "api.webhook.create_outgoing.not_open.app_error",
+                    None,
+                    String::new(),
+                    403,
+                ));
+            }
+
+            if channel.team_id != old_hook.team_id {
+                return Err(AppError::boxed(
+                    "UpdateOutgoingWebhook",
+                    "api.webhook.create_outgoing.permissions.app_error",
+                    None,
+                    String::new(),
+                    403,
+                ));
+            }
+        } else if hook
+            .trigger_words
+            .as_ref()
+            .is_none_or(|words| words.is_empty())
+        {
+            return Err(AppError::boxed(
+                "UpdateOutgoingWebhook",
+                "api.webhook.create_outgoing.triggers.app_error",
+                None,
+                String::new(),
+                500,
+            ));
+        }
+
+        self.refuse_intersecting_outgoing(
+            &hook,
+            Some(&old_hook.team_id),
+            "UpdateOutgoingWebhook",
+            400,
+        )
+        .await?;
+
+        hook.creator_id = old_hook.creator_id.clone();
+        hook.create_at = old_hook.create_at;
+        hook.delete_at = old_hook.delete_at;
+        hook.team_id = old_hook.team_id.clone();
+        hook.update_at = mm_model::utils::get_millis();
+
+        self.store()
+            .webhook()
+            .update_outgoing(&hook)
+            .await
+            .map_err(|err| update_outgoing_error("UpdateOutgoingWebhook", err))?;
+
+        Ok(hook)
+    }
+
+    /// Port of `app.App.DeleteOutgoingWebhook` (app/webhook.go).
+    #[tracing::instrument(skip(self), fields(id = %hook_id))]
+    pub async fn delete_outgoing_webhook(&self, hook_id: &str) -> AppResult<()> {
+        if !self.config().enable_outgoing_webhooks {
+            return Err(outgoing_disabled("DeleteOutgoingWebhook"));
+        }
+
+        self.store()
+            .webhook()
+            .delete_outgoing(hook_id, mm_model::utils::get_millis())
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "outgoing webhook delete failed");
+                AppError::boxed(
+                    "DeleteOutgoingWebhook",
+                    "app.webhooks.delete_outgoing.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })
+    }
+
+    /// Port of `app.App.RegenOutgoingWebhookToken` (app/webhook.go).
+    ///
+    /// A new token and **nothing else** — no `UpdateAt`, no validation, straight through
+    /// `UpdateOutgoing`, whose `SET` list happens to cover every column so the unchanged ones are
+    /// rewritten with their own values.
+    #[tracing::instrument(skip(self, hook), fields(id = %hook.id))]
+    pub async fn regen_outgoing_webhook_token(
+        &self,
+        hook: &OutgoingWebhook,
+    ) -> AppResult<OutgoingWebhook> {
+        if !self.config().enable_outgoing_webhooks {
+            return Err(outgoing_disabled("RegenOutgoingWebhookToken"));
+        }
+
+        let mut hook = hook.clone();
+        hook.token = mm_model::utils::new_id();
+
+        self.store()
+            .webhook()
+            .update_outgoing(&hook)
+            .await
+            .map_err(|err| update_outgoing_error("RegenOutgoingWebhookToken", err))?;
+
+        Ok(hook)
+    }
+
+    /// The trigger-word/callback intersection check both outgoing write paths run
+    /// (app/webhook.go).
+    ///
+    /// A new hook collides with an existing one when they share a channel **and** at least one
+    /// callback URL **and** at least one trigger word. All three, so two hooks on the same channel
+    /// with different triggers are fine.
+    ///
+    /// `exclude_team` carries the *old* hook's team on the update path, because that is the team
+    /// Go scans — not the submitted one. `status` is 500 on create and 400 on update, for the
+    /// same condition.
+    async fn refuse_intersecting_outgoing(
+        &self,
+        hook: &OutgoingWebhook,
+        old_team_id: Option<&str>,
+        where_: &'static str,
+        status: i32,
+    ) -> AppResult<()> {
+        let team_id = old_team_id.unwrap_or(&hook.team_id);
+        let existing = self
+            .store()
+            .webhook()
+            .get_outgoing_by_team_unpaged(team_id)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "outgoing webhook scan failed");
+                AppError::boxed(
+                    where_,
+                    "app.webhooks.get_outgoing_by_team.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })?;
+
+        let id = if old_team_id.is_some() {
+            // The update path excludes the hook being updated; the create path has no id yet.
+            Some(hook.id.as_str())
+        } else {
+            None
+        };
+
+        for other in &existing {
+            if other.channel_id != hook.channel_id {
+                continue;
+            }
+            if id == Some(other.id.as_str()) {
+                continue;
+            }
+            if intersects(other.callback_urls.as_ref(), hook.callback_urls.as_ref())
+                && intersects(other.trigger_words.as_ref(), hook.trigger_words.as_ref())
+            {
+                let id = if old_team_id.is_some() {
+                    "api.webhook.update_outgoing.intersect.app_error"
+                } else {
+                    "api.webhook.create_outgoing.intersect.app_error"
+                };
+                return Err(AppError::boxed(where_, id, None, String::new(), status));
+            }
+        }
+
+        Ok(())
+    }
+}
+
+/// `utils.StringArrayIntersection` reduced to the question both call sites ask: is it non-empty.
+fn intersects(
+    a: Option<&mm_model::utils::StringArray>,
+    b: Option<&mm_model::utils::StringArray>,
+) -> bool {
+    let (Some(a), Some(b)) = (a, b) else {
+        return false;
+    };
+    a.iter().any(|item| b.contains(item))
+}
+
+fn incoming_disabled(where_: &'static str) -> Box<AppError> {
+    AppError::boxed(
+        where_,
+        "api.incoming_webhook.disabled.app_error",
+        None,
+        String::new(),
+        501,
+    )
+}
+
+/// The **same id at a different status**: `CreateOutgoingWebhook` reuses
+/// `api.outgoing_webhook.disabled.app_error` for a non-open channel, at **403** rather than the
+/// 501 the feature gate uses. One id, two meanings, in one function.
+fn outgoing_disabled_forbidden(where_: &'static str) -> Box<AppError> {
+    AppError::boxed(
+        where_,
+        "api.outgoing_webhook.disabled.app_error",
+        None,
+        String::new(),
+        403,
+    )
+}
+
+fn update_outgoing_error(where_: &'static str, err: StoreError) -> Box<AppError> {
+    tracing::error!(error = %err, "outgoing webhook update failed");
+    AppError::boxed(
+        where_,
+        "app.webhooks.update_outgoing.app_error",
+        None,
+        String::new(),
+        500,
+    )
+}
+
+impl App {
+    /// Port of `app.App.ValidateIncomingWebhookUser` (app/webhook.go:521) and the channel-access
+    /// half it delegates to.
+    ///
+    /// Two refusals, both **403** and both carrying the ids in `detailed_error`:
+    ///
+    /// - assigning a **system admin** as a hook's owner requires the requester to hold
+    ///   `manage_system` themselves, so an integration manager cannot forge posts as an admin;
+    /// - the owner must be able to read the channel — checked as *that user*, not the requester.
+    #[tracing::instrument(skip(self, session, user, channel), fields(user_id = %user.id, channel_id = %channel.id))]
+    pub async fn validate_incoming_webhook_user(
+        &self,
+        session: &mm_model::session::Session,
+        user: &mm_model::user::User,
+        channel: &mm_model::channel::Channel,
+    ) -> AppResult<()> {
+        if user.is_system_admin()
+            && !self
+                .session_has_permission_to(session, &mm_model::permission::PERMISSION_MANAGE_SYSTEM)
+                .await
+        {
+            return Err(AppError::boxed(
+                "ValidateIncomingWebhookUser",
+                "api.webhook.incoming.user_role.app_error",
+                None,
+                format!("user_id={}", user.id),
+                403,
+            ));
+        }
+
+        let (has_permission, _) = self
+            .has_permission_to_channel(
+                &user.id,
+                &channel.id,
+                &mm_model::permission::PERMISSION_READ_CHANNEL_CONTENT,
+            )
+            .await;
+        if !has_permission {
+            return Err(AppError::boxed(
+                "ValidateIncomingWebhookUserChannelAccess",
+                "api.webhook.incoming.user_membership.app_error",
+                None,
+                format!("user_id={}, channel_id={}", user.id, channel.id),
+                403,
+            ));
+        }
+
+        Ok(())
+    }
+}
