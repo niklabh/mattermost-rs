@@ -75,6 +75,7 @@ mod parity {
     pub mod posts_by_ids;
     pub mod preference_reads;
     pub mod preferences;
+    pub mod recaps;
     pub mod recommended_channels;
     pub mod roles;
     pub mod schemes;

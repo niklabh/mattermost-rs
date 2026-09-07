@@ -1817,3 +1817,75 @@ pub async fn set_team_display_name(
         response.text().await.unwrap_or_default()
     );
 }
+
+/// A second `mm-api`, started on its own port with extra environment, for the life of the guard.
+///
+/// # Why the suite needs one
+///
+/// Several routes are gated on a setting that lives **only** in the environment — Go strips
+/// `FeatureFlags` before persisting the configuration, so the flag behind the fifteen `/recaps`
+/// routes has no database representation at all. The suite can therefore reach only one side of
+/// those gates against the shared server on :8066, and a mutation that ignores the gate entirely
+/// is invisible: "always refuse" and "refuse unless enabled" are the same program when the
+/// feature is off. Measured — `recaps-gate-ignored` survived the first run of `recaps.plan`.
+///
+/// This starts the **same binary** `scripts/parity.sh` just built, with the same database and the
+/// same upstream, differing only in the variables under test. Killed on drop, including on a
+/// panic, so a failing test cannot leave a stray server bound to the port.
+pub struct SecondServer {
+    child: std::process::Child,
+    pub base: String,
+}
+
+impl SecondServer {
+    /// Start one on `port` with `env` overlaid, and wait for it to answer.
+    ///
+    /// Returns [`None`] when the binary is not where `parity.sh` leaves it — a `cargo test` run
+    /// outside the harness — so a caller can skip rather than fail for the wrong reason.
+    pub async fn start(port: u16, env: &[(&str, &str)]) -> Option<Self> {
+        let binary =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/debug/mm-api");
+        if !binary.exists() {
+            return None;
+        }
+        let database_url = std::env::var("DATABASE_URL").ok()?;
+
+        let mut command = std::process::Command::new(binary);
+        command
+            .env("DATABASE_URL", database_url)
+            .env("MM_API_LISTEN", format!("127.0.0.1:{port}"))
+            .env("MM_GO_UPSTREAM", GO)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        for (key, value) in env {
+            command.env(key, value);
+        }
+        let child = command.spawn().ok()?;
+
+        let base = format!("http://127.0.0.1:{port}");
+        let client = client();
+        for _ in 0..60 {
+            if client
+                .get(format!("{base}/api/v4/system/ping"))
+                .send()
+                .await
+                .is_ok_and(|r| r.status().is_success())
+            {
+                return Some(Self { child, base });
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+        // Never came up: kill it rather than leaving it, and let the caller skip.
+        let mut child = child;
+        let _ = child.kill();
+        let _ = child.wait();
+        None
+    }
+}
+
+impl Drop for SecondServer {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}

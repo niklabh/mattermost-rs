@@ -1,0 +1,28 @@
+# Mutation plan for the 2026-09-07 /recaps group — fifteen routes.
+#
+#   scripts/mutate-batch.sh scripts/mutations/recaps.plan
+#
+# The gate is a **configuration** one, not a licence, and that is where the risk is:
+#
+#   * `AIRecapSettings.IsEnabled()` is `s == nil || s.Enable == nil || *s.Enable`, so an **absent**
+#     setting means *enabled*. `unwrap_or(false)` would refuse recaps on a server whose operator
+#     had set the flag and left the setting alone, which is the normal way to enable them.
+#   * the two halves are an `&&` and the feature flag is the one that defaults off;
+#   * the refusal names the feature, not a licence — every neighbouring family in this router ends
+#     in `.license.error`, which is the natural wrong answer.
+#
+# The last two lines are the no-op controls and must SURVIVE.
+recaps-gate-inverted	crates/mm-api/src/recaps.rs	    if enabled {	    if !enabled {	api	recaps
+recaps-gate-ignored	crates/mm-api/src/recaps.rs	    let enabled = state.app.config().ai_recaps_enabled();	    let enabled = false;	api	recaps
+recaps-refusal-is-a-403	crates/mm-api/src/recaps.rs	        RECAPS_DISABLED_ERROR,\n        None,\n        String::new(),\n        501,	        RECAPS_DISABLED_ERROR,\n        None,\n        String::new(),\n        403,	api	recaps
+recaps-error-id-is-a-licence-one	crates/mm-api/src/recaps.rs	const RECAPS_DISABLED_ERROR: &str = "api.recap.disabled.app_error";	const RECAPS_DISABLED_ERROR: &str = "api.recap.license.error";	api	recaps
+recaps-absent-setting-means-disabled	crates/mm-app/src/config.rs	        self.feature_flag_enable_ai_recaps && self.ai_recap_settings_enable.unwrap_or(true)	        self.feature_flag_enable_ai_recaps && self.ai_recap_settings_enable.unwrap_or(false)	unit	config::
+recaps-gate-ignores-the-feature-flag	crates/mm-app/src/config.rs	        self.feature_flag_enable_ai_recaps && self.ai_recap_settings_enable.unwrap_or(true)	        self.ai_recap_settings_enable.unwrap_or(true)	unit	config::
+recaps-gate-ignores-the-setting	crates/mm-app/src/config.rs	        self.feature_flag_enable_ai_recaps && self.ai_recap_settings_enable.unwrap_or(true)	        self.feature_flag_enable_ai_recaps	unit	config::
+recaps-gate-is-an-or	crates/mm-app/src/config.rs	        self.feature_flag_enable_ai_recaps && self.ai_recap_settings_enable.unwrap_or(true)	        self.feature_flag_enable_ai_recaps || self.ai_recap_settings_enable.unwrap_or(true)	unit	config::
+recaps-feature-flag-defaults-on	crates/mm-app/src/config.rs	            feature_flag_enable_ai_recaps: false,	            feature_flag_enable_ai_recaps: true,	api	recaps
+recaps-setting-read-from-the-document-with-a-default	crates/mm-app/src/config.rs	            ai_recap_settings_enable: parsed.ai_recap_settings.unwrap_or_default().enable,	            ai_recap_settings_enable: Some(\n                parsed\n                    .ai_recap_settings\n                    .unwrap_or_default()\n                    .enable\n                    .unwrap_or(false),\n            ),	unit	config::
+recaps-limit-status-not-registered	crates/mm-api/src/lib.rs	            "/api/v4/recaps/limit_status",\n            partially_migrated(get(recaps::get_recap_limit_status)),	            "/api/v4/recaps/limit_status_unregistered",\n            partially_migrated(get(recaps::get_recap_limit_status)),	api	recaps
+recaps-scheduled-put-not-registered	crates/mm-api/src/lib.rs	                get(recaps::get_scheduled_recap)\n                    .put(recaps::update_scheduled_recap)\n                    .delete(recaps::delete_scheduled_recap),	                get(recaps::get_scheduled_recap).delete(recaps::delete_scheduled_recap),	api	recaps
+control-rename-recaps-enabled-binding	crates/mm-api/src/recaps.rs	    let enabled = state.app.config().ai_recaps_enabled();	    let recaps_on = state.app.config().ai_recaps_enabled();\n    let enabled = recaps_on;	api	recaps
+control-reorder-independent-recap-routes	crates/mm-api/src/recaps.rs	recap_route!(get_recaps, "getRecaps");\nrecap_route!(create_recap, "createRecap");	recap_route!(create_recap, "createRecap");\nrecap_route!(get_recaps, "getRecaps");	api	recaps

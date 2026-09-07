@@ -210,6 +210,27 @@ pub struct Config {
     /// treats sliding expiry and idle revocation as alternatives, never both.
     pub extend_session_length_with_activity: bool,
 
+    /// `FeatureFlags.EnableAIRecaps` (feature_flags.go:96, defaulted **`false`** at :192).
+    ///
+    /// Half of `Config.AIRecapsEnabled()` (ai_recap_settings.go:143), which gates all fifteen
+    /// `/recaps` and `/scheduled_recaps` routes. Like [`Config::feature_flag_burn_on_read`] it is
+    /// deliberately **not** read from the persisted document: Go strips `FeatureFlags` before
+    /// writing (config/store.go:306), so the environment is its only source.
+    ///
+    /// The Go comment beside it reads `FEATURE_FLAG_REMOVAL: EnableAIRecaps — Remove this when GA
+    /// is released`, so this field has a shelf life; when it goes, the gate becomes the setting
+    /// below alone.
+    pub feature_flag_enable_ai_recaps: bool,
+
+    /// `AIRecapSettings.Enable` (ai_recap_settings.go:88).
+    ///
+    /// The other half of `AIRecapsEnabled()`, and it is `Option<bool>` for a reason that changes
+    /// the answer: `AIRecapSettings.IsEnabled()` is
+    /// `s == nil || s.Enable == nil || *s.Enable` — so an **absent** setting means *enabled*, not
+    /// disabled. Collapsing this to `bool` with `unwrap_or(false)` would disable recaps on every
+    /// server that has never configured them, which is every server.
+    pub ai_recap_settings_enable: Option<bool>,
+
     /// `ClientRequirements.AndroidLatestVersion` and its three siblings (config.go:2674-2677).
     ///
     /// The four version strings `GET /api/v4/system/ping` echoes back verbatim. They have **no**
@@ -269,6 +290,19 @@ pub struct Config {
 }
 
 impl Config {
+    /// Port of `Config.AIRecapsEnabled` (model/ai_recap_settings.go:143).
+    ///
+    /// `o.FeatureFlags.EnableAIRecaps && o.AIRecapSettings.IsEnabled()`, and the second half is
+    /// `s == nil || s.Enable == nil || *s.Enable` — **absent means enabled**. So the whole gate is
+    /// off by default only because the feature flag is, and turning the flag on enables recaps on
+    /// every server that has not explicitly disabled them.
+    ///
+    /// Fifteen routes are gated on this. It is a *configuration* gate, not a licence one: an
+    /// operator can turn it on, at which point this server must stop answering and forward.
+    pub fn ai_recaps_enabled(&self) -> bool {
+        self.feature_flag_enable_ai_recaps && self.ai_recap_settings_enable.unwrap_or(true)
+    }
+
     /// Port of `utils.GetSubpathFromConfig` (channels/utils/subpath.go:242).
     ///
     /// The path a session cookie is scoped to. Go throws the error away at the one call site this
@@ -346,6 +380,10 @@ impl Default for Config {
             // document a running Go server persists takes the other branch — see
             // [`Config::from_document`].
             extend_session_length_with_activity: true,
+            // `f.EnableAIRecaps = false` (feature_flags.go:192).
+            feature_flag_enable_ai_recaps: false,
+            // Absent, and absent means **enabled** — see the field's note.
+            ai_recap_settings_enable: None,
             // `ClientRequirements` has no `SetDefaults`; the zero value is the default.
             android_latest_version: String::new(),
             android_min_version: String::new(),
@@ -456,6 +494,16 @@ impl Config {
                 .unwrap_or(default.ios_min_version),
             feature_flag_test_feature: lookup("MM_FEATUREFLAGS_TESTFEATURE")
                 .unwrap_or(default.feature_flag_test_feature),
+            feature_flag_enable_ai_recaps: lookup_bool(
+                lookup,
+                "MM_FEATUREFLAGS_ENABLEAIRECAPS",
+                default.feature_flag_enable_ai_recaps,
+            ),
+            // An overlay can only ever *set* this, never restore it to absent — which matches
+            // Go, whose environment layer writes a pointer to the parsed value.
+            ai_recap_settings_enable: lookup("MM_AIRECAPSETTINGS_ENABLE")
+                .and_then(|raw| parse_bool(&raw))
+                .or(default.ai_recap_settings_enable),
             goroutine_health_threshold: lookup_int(
                 lookup,
                 "MM_SERVICESETTINGS_GOROUTINEHEALTHTHRESHOLD",
@@ -646,6 +694,10 @@ impl Config {
             // Same rule as `feature_flag_burn_on_read` above: `FeatureFlags` is cleared before
             // the document is persisted, so reading it here would turn an absence into a value.
             feature_flag_test_feature: default.feature_flag_test_feature,
+            feature_flag_enable_ai_recaps: default.feature_flag_enable_ai_recaps,
+            // **Not** `unwrap_or(default)`: the field is `Option` on purpose and an absent
+            // `Enable` is a different input from `false`. Carried through as it arrived.
+            ai_recap_settings_enable: parsed.ai_recap_settings.unwrap_or_default().enable,
             // Not a config field on either server — `MM_LICENSE` is its own variable, read by
             // `apply_env`.
             license: default.license,
@@ -727,6 +779,16 @@ struct Document {
     sql_settings: Option<SqlSettingsDocument>,
     #[serde(rename = "ElasticsearchSettings")]
     elasticsearch_settings: Option<ElasticsearchSettingsDocument>,
+    #[serde(rename = "AIRecapSettings")]
+    ai_recap_settings: Option<AIRecapSettingsDocument>,
+}
+
+/// The one field of `AIRecapSettings` a migrated route reads. `Option<bool>` all the way through:
+/// absent means **enabled**.
+#[derive(Debug, Default, serde::Deserialize)]
+struct AIRecapSettingsDocument {
+    #[serde(rename = "Enable")]
+    enable: Option<bool>,
 }
 
 /// The four mobile version strings `getSystemPing` echoes. Every field is `Option<String>` for
@@ -1066,6 +1128,45 @@ mod tests {
 #[cfg(test)]
 mod go_parity {
     use super::*;
+
+    /// `AIRecapsEnabled`'s truth table, and the corner that inverts the intuition.
+    ///
+    /// `IsEnabled()` is `s == nil || s.Enable == nil || *s.Enable`, so an **absent** `Enable`
+    /// means *enabled*. A port reaching for `unwrap_or(false)` would refuse recaps on every
+    /// server that has never configured them — which is every server — and the fifteen routes
+    /// behind the gate would then answer for a feature the operator had switched on.
+    #[test]
+    fn an_absent_recap_setting_means_enabled_not_disabled() {
+        let gate = |flag: bool, enable: Option<bool>| {
+            Config {
+                feature_flag_enable_ai_recaps: flag,
+                ai_recap_settings_enable: enable,
+                ..Config::default()
+            }
+            .ai_recaps_enabled()
+        };
+
+        assert!(!gate(false, None), "the feature flag is off by default");
+        assert!(!gate(false, Some(true)), "and it is the outer `&&`");
+        assert!(
+            gate(true, None),
+            "an absent setting is enabled — this is the one that inverts"
+        );
+        assert!(gate(true, Some(true)));
+        assert!(
+            !gate(true, Some(false)),
+            "and an explicit false still disables"
+        );
+    }
+
+    /// The default configuration does **not** enable recaps, so all fifteen routes are ours until
+    /// an operator sets the flag.
+    #[test]
+    fn recaps_are_off_on_a_stock_server() {
+        assert!(!Config::default().ai_recaps_enabled());
+        assert!(!Config::default().feature_flag_enable_ai_recaps);
+        assert_eq!(Config::default().ai_recap_settings_enable, None);
+    }
 
     const ACTIVE: &str = include_str!("../../../fixtures/config_active.json");
 

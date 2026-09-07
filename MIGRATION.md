@@ -7622,3 +7622,56 @@ than deleted** — the property it guarded, that the two methods on that path ag
 and an unregistered method on the same path is the canary now. That is the third time this session
 a "still forwarded" test has had to move; they are worth keeping, and worth moving rather than
 removing.
+
+## Fifteen `/recaps` routes behind a **configuration** gate (2026-09-07)
+
+New: `crates/mm-api/src/recaps.rs`, `crates/mm-api/tests/parity/recaps.rs`,
+`scripts/mutations/recaps.plan`. Changed: `crates/mm-app/src/config.rs`,
+`crates/mm-api/src/lib.rs`.
+
+149 → **164 of 764**. All of `recap.go` and `scheduled_recap.go`.
+
+Every one of the fifteen handlers opens with `requireRecapsEnabled(c)`, which is
+`Config.AIRecapsEnabled()` — `FeatureFlags.EnableAIRecaps && AIRecapSettings.IsEnabled()`. On a
+stock server the feature flag is `false`, so all fifteen answer `api.recap.disabled.app_error` at
+501 before consulting anything else.
+
+### It looks like the licence families and differs in the way that matters
+
+**An operator can turn this on**, from the environment, without touching a licence. The moment
+they do, every one of these routes must stop being answered here and go back to Go — there is no
+AI recap engine on this side and never will be. So the gate is read from the live configuration on
+every request rather than decided at startup.
+
+That also makes the *enabled* half testable in a way a licence gate's is not: the routing decision
+is a pure function of `Config`, so the branch that must forward is pinned by driving the config
+directly, without restarting a process the suite did not start.
+
+### `AIRecapSettings.IsEnabled()` inverts the intuition
+
+It is `s == nil || s.Enable == nil || *s.Enable` — an **absent** setting means *enabled*. Only the
+feature flag is off by default. A port reading the setting as `unwrap_or(false)` would refuse
+recaps on a server whose operator had switched the flag on and left the setting alone, which is
+the normal way to enable them. `ai_recap_settings_enable` is therefore `Option<bool>` all the way
+through, and the document reader carries an absent key across as absent rather than resolving it
+to a default like every neighbouring field.
+
+The Go source marks the flag `FEATURE_FLAG_REMOVAL: EnableAIRecaps — Remove this when GA is
+released`, so this gate has a shelf life; when the flag goes, the setting alone decides.
+
+### The mutation run, and a new way to test an environment-only gate
+
+**14 run, 12 caught, 2 controls survived, 0 harness faults.** The survivor was the gate itself
+replaced by a constant `false` — never forward — which with recaps off is the *same program*. It
+is wrong only on a server that has enabled them, which is exactly the case the suite could not
+reach: the flag has no database representation, so nothing the parity fixtures can write turns it
+on.
+
+`common::SecondServer` closes that. It starts **the same binary** `parity.sh` just built, on its
+own port, with the same database and upstream and only the variables under test changed, and kills
+it when the guard drops — panic or not. `an_enabled_server_forwards_every_recap_route` uses it to
+assert all fifteen forward with the flag set, and then asks the ordinary server on :8066 the same
+question to show the difference is the configuration and not the build.
+
+That helper is reusable: several more families ahead are gated on settings that live only in the
+environment.

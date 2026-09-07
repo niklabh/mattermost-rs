@@ -25,6 +25,7 @@ pub mod posts;
 pub mod preferences;
 pub mod proxy;
 pub mod reactions;
+pub mod recaps;
 pub mod roles;
 pub mod schemes;
 pub mod sessions;
@@ -867,6 +868,63 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/users/{user_id}/teams/{team_id}/channels/categories/{category}",
             partially_migrated_with_ids(&state, get(sidebar::get_category_for_team_for_user)),
+        )
+        // ---- recaps (2026-09-07) ----
+        //
+        // Fifteen routes behind one **configuration** gate, not a licence — see `recaps.rs`. An
+        // operator can enable them, so every handler reads the live config and forwards when they
+        // have.
+        .route(
+            "/api/v4/recaps",
+            partially_migrated(get(recaps::get_recaps).post(recaps::create_recap)),
+        )
+        .route(
+            "/api/v4/recaps/limit_status",
+            partially_migrated(get(recaps::get_recap_limit_status)),
+        )
+        .route(
+            "/api/v4/recaps/mark_viewed",
+            partially_migrated(post(recaps::mark_recaps_as_viewed)),
+        )
+        // `limit_status` and `mark_viewed` are literal siblings of `{recap_id}`; axum prefers a
+        // literal, and gorilla registers them first, so both routers agree.
+        .route(
+            "/api/v4/recaps/{recap_id}",
+            partially_migrated_with_ids(
+                &state,
+                get(recaps::get_recap).delete(recaps::delete_recap),
+            ),
+        )
+        .route(
+            "/api/v4/recaps/{recap_id}/read",
+            partially_migrated_with_ids(&state, post(recaps::mark_recap_as_read)),
+        )
+        .route(
+            "/api/v4/recaps/{recap_id}/regenerate",
+            partially_migrated_with_ids(&state, post(recaps::regenerate_recap)),
+        )
+        .route(
+            "/api/v4/scheduled_recaps",
+            partially_migrated(
+                get(recaps::get_scheduled_recaps).post(recaps::create_scheduled_recap),
+            ),
+        )
+        .route(
+            "/api/v4/scheduled_recaps/{scheduled_recap_id}",
+            partially_migrated_with_ids(
+                &state,
+                get(recaps::get_scheduled_recap)
+                    .put(recaps::update_scheduled_recap)
+                    .delete(recaps::delete_scheduled_recap),
+            ),
+        )
+        .route(
+            "/api/v4/scheduled_recaps/{scheduled_recap_id}/pause",
+            partially_migrated_with_ids(&state, post(recaps::pause_scheduled_recap)),
+        )
+        .route(
+            "/api/v4/scheduled_recaps/{scheduled_recap_id}/resume",
+            partially_migrated_with_ids(&state, post(recaps::resume_scheduled_recap)),
         )
         // ---- licence-gated families (2026-09-07) ----
         //
