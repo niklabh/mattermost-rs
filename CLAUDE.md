@@ -44,8 +44,32 @@ So:
 3. **Legitimate exception:** a route blocked on a decision (i18n, licensing, a missing crate).
    Say which route is blocked and on what, then pick a different route rather than falling back to
    breadth.
-4. **Prefer routes a real client actually calls.** A route no client hits is worth less than its
-   test suite costs.
+4. **Order by what a real client calls; do not filter by it.** Client traffic decides what to
+   port *next*, never what to port *at all*. Every route ships eventually, including the
+   local-mode socket API and the licensed/enterprise handlers — so a route no client hits is
+   deferred, not dropped, and "no client calls this" is not a reason to close a gap unported.
+
+## The end state is a Go server that is not running
+
+**Added 2026-09-07, on the maintainer's direction.** The strangler proxy is *test apparatus*, not
+the destination. It exists so a half-migrated server stays honest and byte-comparable against Go;
+it is not a licence to leave a route in Go indefinitely, and it must never be the reason a piece
+of work is skipped.
+
+Two things follow, and they override any local reading of the rules above:
+
+- **The denominator is everything.** 762 api4 route+method pairs, plus the websocket hub, the
+  plugin host, jobs, and the cluster interfaces — none of which are in the 762. Progress reported
+  against a subset that excludes enterprise or local-mode routes is progress reported against the
+  wrong number. Do not do it.
+- **Nothing about this project's status gates development.** There are no users and no deployment,
+  so a staleness window, a licensed feature, a missing client, or an unpopular route is a fact to
+  record and route around — never a blocker. See also the standing rule that licensing does not
+  gate development.
+
+What does *not* change is rules 1-3. Porting breadth-first without a route to exercise it is how
+this project accumulated ~20,000 lines of unreachable model code, and wanting the whole thing in
+Rust is a reason to sequence that work behind routes, not a reason to repeat it.
 
 ## Reading the Go tree
 
