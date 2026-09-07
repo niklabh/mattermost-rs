@@ -7796,3 +7796,99 @@ hard-coded thread id, so under load something about the fixture's ordering moved
 was about the wrong thing. It now asserts what the route actually guarantees: `per_page=1` returns
 the **head of the unpaged list**, checked against the list itself, which the ordering test beside it
 already pins. Neither depends on a timestamp race any more.
+
+## The websocket hub: what a write route will broadcast into (2026-09-08)
+
+New: `crates/mm-app/src/hub.rs`, `crates/mm-api/src/websocket.rs`,
+`crates/mm-api/tests/parity/websocket.rs`, `scripts/mutations/websocket-hub.plan`.
+Changed: `crates/mm-app/src/lib.rs`, `crates/mm-api/src/lib.rs`, `crates/mm-api/tests/common/mod.rs`,
+`Cargo.toml`, `crates/{mm-app,mm-api}/Cargo.toml`.
+
+203 → **204 of 764**. One route, `GET /api/v4/websocket` — and it is phase 0 of the write work
+rather than a route in its own right: **every real mutation in Go publishes an event**, so a port
+that persists the right row and broadcasts nothing is wrong in a way no HTTP comparison can see.
+This is the thing the write routes will be measured against.
+
+### The model layer was already there, and this is the first time it has been reachable
+
+`mm-model`'s `websocket_message.rs` and `websocket_request.rs` (783 lines) were ported
+breadth-first and had never been called by anything. They needed no changes. That is the argument
+for CLAUDE.md's rule stated from the other end: the work was correct, it simply sat unexercised
+until a route arrived to exercise it.
+
+### Two encodings, and a client can tell them apart
+
+Go writes a queued frame one of two ways and this is wire format, not an optimisation:
+
+- `Hub.Broadcast` calls `PrecomputeJSON` (web_hub.go:718), so every **broadcast event** leaves
+  through `precomputedJSONBuf` — hand-concatenated, **a space after each colon**, no trailing
+  newline: `{"event": "posted", "data": {…}, …}`.
+- Everything else — `hello`, and every `WebSocketResponse` — goes through `json.Encoder.Encode`,
+  which is compact **and appends a newline**: `{"event":"hello",…}\n`.
+
+Both were measured against the running server. `OutgoingFrame::Event` therefore carries a
+`precomputed` flag and the write pump picks the encoder from it. A port that used one form for
+everything would be half wrong whichever form it picked.
+
+`seq` is assigned in the write pump, not in the hub, and **only to events** — a response
+interleaved between two events does not consume a number.
+
+### The extractor that answered before the handler
+
+`WebSocketUpgrade` as a handler argument is an extractor, and an extractor that rejects answers
+*before* the handler body. Go checks the session first, in `ServeHTTP`, ahead of the handler. The
+difference is visible: `GET /api/v4/websocket?access_token=…` is **401** on Go —
+`handlers.go:281` refuses a non-OAuth session in the query string on every route — and was **400**
+here until the upgrade was moved inside the handler. Caught by the parity suite on its first run.
+
+### The fan-out order is the behaviour
+
+`ShouldSendEvent`'s five addressing fields are **not a union**: `connection_id` wins over
+`user_id`, which wins over `omit_users`, which wins over `channel_id`, which wins over `team_id`,
+and the later field is never consulted. An event addressed to this connection but a different user
+*is delivered*. The decision is split into a pure `addressing_verdict` precisely so that ordering
+can be tested without a database — see `mm_app::hub`.
+
+Two further rules that read wrongly if skimmed: `omit_users` tests **key presence**, not the
+bool's value, so `{u: false}` still omits; and `notInThread` ANDs its two arms, so a connection
+that has told us about neither thread view is never "not in thread" and typing is not withheld
+from it.
+
+### A socket is not isolated the way a request is
+
+Three of the four parity tests failed on their first full-suite run — not on their answers but on
+their *counts*. Other suites were creating users and teams, and Go broadcast `new_user`, `posted`
+and `user_added` onto the admin's socket between a request and its reply: nine frames where the
+test expected two. `SocketProbe::responses` now selects the frames that answer a request
+(`seq_reply`, or `status` when the seq was zero). Worth stating because every write route's test
+will have the same shape, and because the failure was Go's hub demonstrating it works.
+
+### What is deliberately not here
+
+Reconnect replay ([D-181]), cross-process events ([D-182]), broadcast hooks ([D-183]), the MFA arm
+([D-184]), guest visibility ([D-185]), msgpack frames ([D-187]) and the six `wsapi` actions
+([D-188]). `hello`'s `server_version` and `server_hostname` cannot match Go's and never will —
+stated in `App::hello_message`, not in the backlog.
+
+`crates/mm-ws` remains a six-line stub and is now definitively dead: the hub belongs in `mm-app`
+(Go puts it in `channels/app/platform`) and the connect handler in `mm-api` (Go puts it in
+`api4`), so a separate binary has nothing to hold. It is left in the workspace rather than removed
+in the same commit as the thing that replaced it.
+
+### The mutation run
+
+**20 run, 18 caught, 2 controls survived, 0 harness faults** — after a first pass of 13 caught, 5
+survived and 2 harness faults. Every one of the three real survivors was the same species of test
+bug:
+
+- the slow-queue test filled the queue to `SEND_SLOW_WARN` **symbolically**, so mutating the
+  constant moved the threshold and the fill together and the test saw nothing. It now asserts the
+  literal 128;
+- `should_send_event_to_guest` was a method on `App`, so no unit test could reach it and replacing
+  its body with `true` survived. It is a free function now;
+- `unregister` was checked with `conn_count_for_user`, which filters on `is_active` — so a
+  connection left behind in the user index was invisible to it. The test now asserts on the index
+  a broadcast actually iterates.
+
+The two harness faults were the same mistake twice: a mutation that referenced a constant not
+imported at module scope, which fails to compile rather than failing a test.

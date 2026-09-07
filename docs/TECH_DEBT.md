@@ -5831,3 +5831,138 @@ this is a divergence in cleanup rather than in access.
 cookie in `ApiError::unauthenticated`'s response. The parity assertion is one line against
 `Set-Cookie` in `parity/session_activity.rs`, which already compares the bodies of this exact
 branch.
+
+---
+
+## D-181 · Websocket reconnect replay is not ported
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-08 (websocket hub, phase 0 of the
+write routes)
+
+Go keeps a 128-slot **dead queue** of every frame it has written to a connection
+(`web_conn.go:665`). A client that drops and reconnects presents its `connection_id` and
+`sequence_number`; `PopulateWebConnConfig` finds the old connection, and `writePump` either drains
+the frames it missed (`drainDeadQueue`) or — when the sequence is too old to be in the queue —
+mints a *new* connection id, resets the sequence to 0 and re-sends `hello`.
+
+`mm_app::hub` implements none of it. Every connection is fresh: `connection_id` and
+`sequence_number` on the query string are read by nobody, so a reconnecting client silently
+**loses every event raised while it was disconnected** rather than being told to refetch.
+
+What makes this more than an efficiency gap is the third branch. Go's `hasMsgLoss` path is how a
+client *learns* it has a hole: a second `hello` with a new connection id is the signal to reload
+state. This server never sends one, so a client cannot distinguish "you missed nothing" from "you
+missed an hour".
+
+**Owed:** the dead queue, `PopulateWebConnConfig`'s three-way branch, and the `reuseCount == 0`
+gate on `hello` that currently has only one reachable value.
+
+## D-182 · A client on mm-api does not see events raised by Go-served routes
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-08 (websocket hub)
+
+The two servers each have their own hub and no bus between them. Go mirrors events across nodes
+through `clusterIFace` (`cluster.go:189`); there is no cluster here, and the *other process* is
+not a node — it is the half of the API that has not been migrated yet.
+
+So a client connected to `:8066` sees events for the routes this server serves and **nothing** for
+the ~560 routes still forwarded to Go. Before this session it saw nothing at all — `forward_to_go`
+strips `Connection` and `Upgrade` as hop-by-hop headers, so the websocket route could never be
+proxied — which is why this is a step forward rather than a regression, but it is a real hole for
+as long as the strangler runs.
+
+Two ways to close it, and the choice is not obvious:
+
+1. **Listen to Go.** mm-api opens its own websocket to the Go server as a system client and
+   re-publishes what it receives. Cheap, and wrong in one way: Go filters per connection, so what
+   arrives is already scoped to *that* connection's user, not the whole event.
+2. **Port the routes.** The hole shrinks to zero on its own as the migration proceeds, which is
+   the project's actual direction ("the end state is a Go server that is not running").
+
+Recorded rather than solved because (2) is the plan and (1) would be scaffolding on scaffolding.
+It stops being a hole when the last publishing route is migrated.
+
+## D-183 · Broadcast hooks are stripped but not run
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-08 (websocket hub)
+
+`web_broadcast_hooks.go` rewrites an event *per connection* on the way out. The stock hook adds
+the recipient's own mention count and follow state to a `posted` event, so two users receive
+different bytes for the same post.
+
+`mm_model::WebSocketEvent::without_broadcast_hooks` is ported and `App::publish` calls it, so the
+hook fields never reach a client — that part is correct and is wire format. The hooks themselves
+are dropped on the floor. Every recipient of a `posted` event from this server therefore gets the
+*unhooked* payload, which is missing the fields the webapp uses to decide whether to badge the
+channel.
+
+**Owed with the first write route that publishes `posted`** — which is the route this becomes
+visible on. Until then no event this server raises has a hook attached.
+
+## D-184 · The MFA half of a websocket connection's authentication is not checked
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-08 (websocket hub)
+
+`WebConn.IsAuthenticated` is `IsBasicAuthenticated() && IsMFAAuthenticated()` (`web_conn.go:824`).
+Only the first is ported: `MFARequired` does not exist in `mm-app`, so a connection whose user owes
+MFA is treated as fully authenticated and receives every event they would otherwise be held back
+from.
+
+Narrow in practice — the HTTP side of MFA is not ported either, so a deployment that enforces MFA
+is not one this server can serve at all — but it is a *fail-open* difference and belongs in the
+backlog rather than a code comment for that reason. Closing it means porting `MFARequired`, which
+is HTTP work that this route will then inherit for free.
+
+## D-185 · Guests receive `user_updated` and `new_user` for users Go hides from them
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-08 (websocket hub)
+
+`ShouldSendEventToGuest` (`web_conn.go:852`) special-cases exactly two event types and asks
+`UserCanSeeOtherUser` whether this guest may see the user the event is about. That function is not
+ported, so `mm_app::hub::guest_visibility` implements the *default* arm — every other event passes
+— and the two special cases are withheld unconditionally.
+
+That is the safe direction (a guest sees less, not more), and it is deliberately not approximated:
+guessing at the visibility rule would produce a confident wrong answer where a stated gap produces
+none. It becomes wrong in the other direction only if `UserCanSeeOtherUser` would have returned
+true, which for a guest is the minority case.
+
+**Owed:** `UserCanSeeOtherUser`, which several `/users` routes will need anyway.
+
+## D-187 · Binary (msgpack) websocket frames are refused
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-08 (websocket hub)
+
+Go's `readPump` decodes a binary frame with msgpack (`web_conn.go:485`), using the same
+`msgpack:` tags `WebSocketRequest` carries beside its `json:` ones — so a client may speak either
+encoding. This port handles text frames only and closes the connection on a binary one.
+
+No stock Mattermost client sends msgpack over the socket today (the tags exist for the *cluster*
+path), so nothing reachable is affected. It is owed rather than accepted because the tags are on
+the wire type and a client is entitled to use them.
+
+## D-188 · The six `wsapi` actions are not served
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-08 (websocket hub)
+
+`channels/wsapi` registers six actions on the websocket router, and this port serves none of them:
+
+| Action | What it needs |
+|---|---|
+| `ping` | nothing — four constants and `GetMillis` |
+| `user_typing` | `PublishUserTyping`, a channel permission check, and the server-busy gate |
+| `user_update_active_status` | `SetStatusOnline` / `SetStatusAwayIfNeeded` — status **writes** |
+| `get_statuses` | `GetAllStatuses`, which reads Go's in-memory status cache, not a table |
+| `get_statuses_by_ids` | `mm_app::status::get_user_statuses_by_ids`, already ported |
+| `posted_notify_ack` | notification metrics, which do not exist here |
+
+All six currently answer `api.web_socket_router.bad_action.app_error` at 500 — Go's *unknown
+action* error — which is a wrong answer rather than a missing one, and that is why this is an
+entry and not a note.
+
+`get_statuses` is the one with a real question behind it: Go returns the contents of a cache this
+server does not have, so "every row in `Status`" is a different answer on a freshly started Go
+process. It needs measuring before it is ported, not translating.
+
+**Two of the six are nearly free** (`ping`, `get_statuses_by_ids`) and should go first, with the
+rest following the status-write routes that give them their app layer.

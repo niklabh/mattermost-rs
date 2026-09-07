@@ -11,7 +11,7 @@ mm-app.workspace = true
 mm-model.workspace = true
 mm-store.workspace = true
 
-axum.workspace = true
+axum = { workspace = true, features = ["ws"] }
 form_urlencoded.workspace = true
 tokio.workspace = true
 reqwest.workspace = true
@@ -30,3 +30,6 @@ sqlx.workspace = true
 # `json` is a test-only need: the proxy must forward bodies untouched, so the crate itself never
 # asks reqwest to serialise anything.
 reqwest = { workspace = true, features = ["json"] }
+# The parity suite connects a real websocket to both servers and compares the frames.
+tokio-tungstenite.workspace = true
+futures-util = "0.3"

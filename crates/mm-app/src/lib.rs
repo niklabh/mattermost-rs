@@ -12,6 +12,8 @@ pub mod draft;
 pub mod emoji;
 /// The read side of `app/file.go` — `FileInfo` rows, never file bytes.
 pub mod file;
+/// The websocket connection registry and event fan-out — Go's `app/platform` hub.
+pub mod hub;
 pub mod license;
 pub mod limits;
 pub mod oauth;
@@ -49,6 +51,10 @@ use crate::config::Config;
 pub struct App {
     store: SqlStore,
     config: Config,
+    /// Shared, because every clone of `App` must publish into the *same* registry of live
+    /// connections. `App` is cloned per request by axum's state extractor, and a hub per clone
+    /// would mean an event raised by one request reaching none of the sockets.
+    hub: std::sync::Arc<crate::hub::Hub>,
 }
 
 impl App {
@@ -63,7 +69,11 @@ impl App {
     }
 
     pub fn with_config(store: SqlStore, config: Config) -> Self {
-        Self { store, config }
+        Self {
+            store,
+            config,
+            hub: std::sync::Arc::new(crate::hub::Hub::new()),
+        }
     }
 
     /// Port of `app.App.Srv().Store()`.

@@ -41,6 +41,8 @@ pub mod terms_of_service;
 pub mod usage;
 pub mod users;
 pub mod webhooks;
+/// `GET /api/v4/websocket` — the upgrade, the pumps, and the action router.
+pub mod websocket;
 
 use axum::Router;
 use axum::extract::{RawPathParams, Request, State};
@@ -176,6 +178,13 @@ fn partially_migrated_with_ids(
 /// (`partially_migrated`).
 pub fn router(state: AppState) -> Router {
     Router::new()
+        // `api.BaseRoutes.APIRoot.Handle("/{websocket:websocket(?:\\/)?}")` (api4/websocket.go:52)
+        // — the gorilla pattern accepts a trailing slash, so both spellings are registered. This
+        // is the one route the proxy could never forward: `forward_to_go` strips `Connection` and
+        // `Upgrade` as hop-by-hop headers, so a client pointed at this server had no socket at
+        // all before it was served here.
+        .route("/api/v4/websocket", get(websocket::connect_websocket))
+        .route("/api/v4/websocket/", get(websocket::connect_websocket))
         .route(
             "/api/v4/users/me",
             partially_migrated(get(users::get_user_me)),

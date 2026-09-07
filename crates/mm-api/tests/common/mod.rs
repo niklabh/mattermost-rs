@@ -1889,3 +1889,129 @@ impl Drop for SecondServer {
         let _ = self.child.wait();
     }
 }
+
+// ---------------------------------------------------------------------------------------------
+// Websocket client
+//
+// A write route's answer is only half of what it does: Go also publishes an event, and a port
+// that persists the right row while broadcasting nothing is wrong in a way no HTTP comparison can
+// see. So the suite has to be a websocket client on both servers at once.
+// ---------------------------------------------------------------------------------------------
+
+use futures_util::{SinkExt, StreamExt};
+use tokio_tungstenite::tungstenite::Message;
+
+/// A live websocket connection to one of the two servers, with everything it has been sent.
+pub struct SocketProbe {
+    socket: tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >,
+    /// Frames exactly as they arrived, including the trailing newline Go's `json.Encoder` leaves
+    /// on everything that did not take the precompute path. Kept raw, because that newline and
+    /// the spacing after each colon are the two things a value comparison cannot see.
+    pub raw: Vec<String>,
+}
+
+impl SocketProbe {
+    /// Connect and read the `hello` frame, leaving the probe ready to collect what follows.
+    ///
+    /// The token goes in the `Authorization` header, never the query string: `handlers.go:281`
+    /// rejects a non-OAuth session presented as `?access_token=` with a 401, so a probe that used
+    /// the query string would be testing that rejection instead of the socket.
+    pub async fn connect(base: &str, token: &str) -> SocketProbe {
+        let url = format!("{}/api/v4/websocket", base.replace("http://", "ws://"));
+        let request =
+            tokio_tungstenite::tungstenite::client::IntoClientRequest::into_client_request(
+                url.as_str(),
+            )
+            .expect("a websocket request");
+        let mut request = request;
+        request.headers_mut().insert(
+            "Authorization",
+            format!("Bearer {token}").parse().expect("a header value"),
+        );
+        let (socket, _) = tokio_tungstenite::connect_async(request)
+            .await
+            .unwrap_or_else(|e| panic!("{base} websocket: {e}"));
+        let mut probe = SocketProbe {
+            socket,
+            raw: Vec::new(),
+        };
+        probe.collect_for(Duration::from_millis(400)).await;
+        assert_eq!(
+            probe.events_named("hello").len(),
+            1,
+            "{base} did not send exactly one hello: {:?}",
+            probe.raw
+        );
+        probe.raw.clear();
+        probe
+    }
+
+    /// Send one `WebSocketRequest`.
+    pub async fn send(&mut self, request: serde_json::Value) {
+        self.socket
+            .send(Message::Text(request.to_string().into()))
+            .await
+            .expect("the socket accepts a frame");
+    }
+
+    /// Read whatever arrives within `window`, appending to [`SocketProbe::raw`].
+    ///
+    /// A fixed window rather than "wait for N frames" on purpose: the assertion a write route
+    /// needs is usually *how many* events it published, and a reader that stops at the expected
+    /// count cannot tell one from two.
+    pub async fn collect_for(&mut self, window: Duration) {
+        let deadline = tokio::time::Instant::now() + window;
+        loop {
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            if remaining.is_zero() {
+                return;
+            }
+            match tokio::time::timeout(remaining, self.socket.next()).await {
+                Ok(Some(Ok(Message::Text(text)))) => self.raw.push(text.to_string()),
+                // Pings are answered by the library; nothing else is expected.
+                Ok(Some(Ok(_))) => continue,
+                Ok(Some(Err(err))) => panic!("websocket error: {err}"),
+                Ok(None) => return,
+                Err(_) => return,
+            }
+        }
+    }
+
+    /// The collected frames as JSON values.
+    pub fn frames(&self) -> Vec<serde_json::Value> {
+        self.raw
+            .iter()
+            .map(|raw| serde_json::from_str(raw).expect("a frame decodes"))
+            .collect()
+    }
+
+    /// Every collected frame whose `event` is `name`.
+    pub fn events_named(&self, name: &str) -> Vec<serde_json::Value> {
+        self.frames()
+            .into_iter()
+            .filter(|frame| frame.get("event").and_then(|e| e.as_str()) == Some(name))
+            .collect()
+    }
+
+    /// The frames that answer a request this probe sent, raw and parsed, in arrival order.
+    ///
+    /// **A socket is not isolated the way a request is.** Anything else running against the same
+    /// server broadcasts to this connection too — a whole-suite run put five `new_user`,
+    /// `posted` and `user_added` frames on the admin's socket between one request and its answer.
+    /// A test that counted frames was really counting the rest of the suite. Responses are
+    /// separable because only they carry `seq_reply`.
+    pub fn responses(&self) -> Vec<(&str, serde_json::Value)> {
+        self.raw
+            .iter()
+            .map(|raw| {
+                (
+                    raw.as_str(),
+                    serde_json::from_str::<serde_json::Value>(raw).expect("a frame decodes"),
+                )
+            })
+            .filter(|(_, frame)| frame.get("seq_reply").is_some() || frame.get("status").is_some())
+            .collect()
+    }
+}

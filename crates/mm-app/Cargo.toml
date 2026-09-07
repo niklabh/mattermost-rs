@@ -15,6 +15,9 @@ serde_json.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 chrono.workspace = true
+# The hub holds one bounded `mpsc` queue per live websocket connection; the queue *is* the port
+# of Go's `wc.send`, including that a full one is a disconnect rather than backpressure.
+tokio = { workspace = true }
 
 # Password hashing — see the workspace manifest for why each is here.
 pbkdf2.workspace = true

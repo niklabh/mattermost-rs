@@ -1033,6 +1033,7 @@ dependencies = [
  "anyhow",
  "axum",
  "form_urlencoded",
+ "futures-util",
  "mm-app",
  "mm-model",
  "mm-store",
@@ -1042,6 +1043,7 @@ dependencies = [
  "sqlx",
  "thiserror",
  "tokio",
+ "tokio-tungstenite",
  "tracing",
  "tracing-subscriber",
 ]

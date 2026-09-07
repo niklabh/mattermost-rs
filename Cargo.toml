@@ -49,6 +49,12 @@ http-body-util = "0.1"
 form_urlencoded = "1"
 tower = "0.5"
 
+# Test-only: the parity suite has to *be* a websocket client to check what the hub emits, and the
+# same version axum's `ws` feature already links is used so no second tungstenite enters the tree.
+tokio-tungstenite = { version = "0.29", default-features = false, features = [
+    "connect",
+] }
+
 # Database — Postgres only.
 sqlx = { version = "0.8", default-features = false, features = [
     "runtime-tokio-rustls",

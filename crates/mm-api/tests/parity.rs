@@ -119,4 +119,5 @@ mod parity {
     pub mod users_search;
     pub mod users_stats;
     pub mod users_stats_filtered;
+    pub mod websocket;
 }
