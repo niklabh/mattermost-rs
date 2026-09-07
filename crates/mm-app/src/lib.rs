@@ -20,6 +20,7 @@ pub mod post;
 pub mod preference;
 pub mod reaction;
 pub mod role;
+pub mod scheme;
 pub mod session;
 /// The read side of `app/channel_category.go`.
 pub mod sidebar;

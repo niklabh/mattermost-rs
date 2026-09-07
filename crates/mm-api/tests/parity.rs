@@ -75,6 +75,7 @@ mod parity {
     pub mod preferences;
     pub mod recommended_channels;
     pub mod roles;
+    pub mod schemes;
     pub mod server_limits;
     pub mod session_activity;
     pub mod session_team_members;

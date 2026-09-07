@@ -299,11 +299,45 @@ async fn the_unfiltered_list_matches_go() {
     let client = client();
     let f = fixture(&client, "ulall").await;
 
-    let (go, rs) =
-        fetch_both_stable(&client, &f.admin_token, &format!("{PATH}?per_page=200")).await;
+    // **Sixty windows, not the default twenty-four.** This is the one test that byte-compares the
+    // **entire** user list, so every user any other suite creates moves it — and the schemes suite
+    // builds a fixture of four users, five teams and two channels in one burst that can outlast a
+    // shorter budget. Nothing about that is a divergence; it is this test asking the hardest
+    // question in the suite while the binary is at its busiest.
+    let (go, rs) = common::fetch_both_stable_within(
+        &client,
+        &f.admin_token,
+        &format!("{PATH}?per_page=200"),
+        60,
+    )
+    .await;
     // No query string at all is the same arm with the default paging.
-    let (go_bare, rs_bare) = fetch_both_stable(&client, &f.admin_token, PATH).await;
-    let ids = ids_of(&rs, "unfiltered");
+    let (go_bare, rs_bare) =
+        common::fetch_both_stable_within(&client, &f.admin_token, PATH, 60).await;
+    // **Walk the pages.** `per_page` is clamped to 200 and this database holds more users than
+    // that — the suite creates a few dozen per run and only purges at the start of the next one —
+    // so the fixture's own users are not guaranteed to be on page 0. Asserting `ids.contains` over
+    // one page was a test of how many users happened to exist, and it started failing when four
+    // more arrived. Walking makes the assertion the one it always meant: the unfiltered arm
+    // returns users the caller shares no team with.
+    let mut ids = ids_of(&rs, "unfiltered");
+    for page in 1..12 {
+        if ids.contains(&f.outsider.id) && ids.contains(&f.members[0].id) {
+            break;
+        }
+        let (_, more) = common::fetch_both_stable_within(
+            &client,
+            &f.admin_token,
+            &format!("{PATH}?per_page=200&page={page}"),
+            60,
+        )
+        .await;
+        let page_ids = ids_of(&more, "unfiltered");
+        if page_ids.is_empty() {
+            break;
+        }
+        ids.extend(page_ids);
+    }
     teardown(&client, &f).await;
 
     assert_eq!(rs, go);

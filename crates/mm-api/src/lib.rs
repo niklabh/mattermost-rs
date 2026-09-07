@@ -24,6 +24,7 @@ pub mod preferences;
 pub mod proxy;
 pub mod reactions;
 pub mod roles;
+pub mod schemes;
 pub mod sessions;
 pub mod sidebar;
 pub mod status;
@@ -38,7 +39,7 @@ use axum::Router;
 use axum::extract::{RawPathParams, Request, State};
 use axum::middleware::Next;
 use axum::response::Response;
-use axum::routing::{MethodRouter, get, post};
+use axum::routing::{MethodRouter, get, post, put};
 use mm_app::App;
 
 /// Shared state. Cloned per request, so every field is cheap to clone — `reqwest::Client` and
@@ -857,6 +858,37 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/users/{user_id}/teams/{team_id}/channels/categories/{category}",
             partially_migrated_with_ids(&state, get(sidebar::get_category_for_team_for_user)),
+        )
+        // ---- schemes (2026-09-07) ----
+        //
+        // `/schemes` and `/schemes/{scheme_id}` are a literal and its parameterised child, as in
+        // gorilla; the two deeper paths shadow nothing. The three write methods are registered
+        // beside their reads because their whole behaviour on an unlicensed server — a 501 with
+        // the route's own error id, after the body and id checks — is ported; a licensed one is
+        // forwarded from inside the handler rather than by omitting the method here, so the
+        // 400-before-501 ordering stays ours to reproduce.
+        .route(
+            "/api/v4/schemes",
+            partially_migrated(get(schemes::get_schemes).post(schemes::create_scheme)),
+        )
+        .route(
+            "/api/v4/schemes/{scheme_id}",
+            partially_migrated_with_ids(
+                &state,
+                get(schemes::get_scheme).delete(schemes::delete_scheme),
+            ),
+        )
+        .route(
+            "/api/v4/schemes/{scheme_id}/patch",
+            partially_migrated_with_ids(&state, put(schemes::patch_scheme)),
+        )
+        .route(
+            "/api/v4/schemes/{scheme_id}/teams",
+            partially_migrated_with_ids(&state, get(schemes::get_teams_for_scheme)),
+        )
+        .route(
+            "/api/v4/schemes/{scheme_id}/channels",
+            partially_migrated_with_ids(&state, get(schemes::get_channels_for_scheme)),
         )
         // ---- system, usage and permissions (2026-09-07) ----
         //

@@ -250,6 +250,18 @@ pub trait TeamStore {
         opts: &TeamSearch,
     ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
 
+    /// Port of `SqlTeamStore.GetTeamsByScheme` (team_store.go:1346).
+    ///
+    /// `teamsQuery` plus `WHERE SchemeId = ?`, ordered by display name and paged. No `DeleteAt`
+    /// predicate — a soft-deleted team still belongs to its scheme and `getTeamsForScheme`
+    /// returns it.
+    fn get_teams_by_scheme(
+        &self,
+        scheme_id: &str,
+        offset: i64,
+        limit: i64,
+    ) -> impl std::future::Future<Output = Result<Vec<Team>, StoreError>> + Send;
+
     /// Port of `SqlTeamStore.GetAll` (team_store.go:637) — every team, deleted ones included.
     ///
     /// `teamsQuery` with nothing but `ORDER BY DisplayName`: no `DeleteAt` predicate, no paging,
@@ -367,6 +379,16 @@ impl TeamStore for SqlTeamStore {
     #[tracing::instrument(skip_all, fields(found))]
     async fn get_all(&self) -> Result<Vec<Team>, StoreError> {
         get_all(&self.pool).await
+    }
+
+    #[tracing::instrument(skip_all, fields(scheme_id = %scheme_id, offset, limit, found))]
+    async fn get_teams_by_scheme(
+        &self,
+        scheme_id: &str,
+        offset: i64,
+        limit: i64,
+    ) -> Result<Vec<Team>, StoreError> {
+        get_teams_by_scheme(&self.pool, scheme_id, offset, limit).await
     }
 
     #[tracing::instrument(skip_all, fields(asked = ids.len(), found))]
@@ -1492,6 +1514,66 @@ pub async fn analytics_team_count(pool: &PgPool, opts: &TeamSearch) -> Result<i6
         context: "failed to count Teams".to_owned(),
         source,
     })
+}
+
+/// Port of `SqlTeamStore.GetTeamsByScheme` (team_store.go:1346).
+///
+/// The same `teamsQuery` as [`get_all`] with one predicate added. `SchemeId` is nullable and Go
+/// compares it with `sq.Eq`, which renders `SchemeId = ?` — so a team with a NULL scheme never
+/// matches, whatever is passed, exactly as here.
+pub async fn get_teams_by_scheme(
+    pool: &PgPool,
+    scheme_id: &str,
+    offset: i64,
+    limit: i64,
+) -> Result<Vec<Team>, StoreError> {
+    let rows = sqlx::query_as!(
+        TeamRow,
+        r#"
+        SELECT t.id,
+               t.createat,
+               t.updateat,
+               t.deleteat,
+               t.displayname,
+               t.name,
+               t.description,
+               t.email,
+               t.type::text AS "team_type",
+               t.companyname,
+               t.alloweddomains,
+               t.inviteid,
+               t.allowopeninvite,
+               t.lastteamiconupdate,
+               t.schemeid,
+               t.groupconstrained,
+               t.cloudlimitsarchived,
+               EXISTS (
+                   SELECT 1 FROM accesscontrolpolicies acp
+                    WHERE acp.id = t.id AND acp.type = 'team'
+               ) AS "policy_enforced!",
+               COALESCE((
+                   SELECT acp.active FROM accesscontrolpolicies acp
+                    WHERE acp.id = t.id AND acp.type = 'team' AND acp.active = TRUE
+                    LIMIT 1
+               ), false) AS "policy_is_active!"
+          FROM teams t
+         WHERE t.schemeid = $1
+         ORDER BY t.displayname
+         LIMIT $2 OFFSET $3
+        "#,
+        scheme_id,
+        limit,
+        offset
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: format!("failed to find Teams with schemeId={scheme_id}"),
+        source,
+    })?;
+
+    tracing::Span::current().record("found", rows.len());
+    Ok(rows.into_iter().map(team_from_row).collect())
 }
 
 /// Port of `SqlTeamStore.GetAll` (team_store.go:637).

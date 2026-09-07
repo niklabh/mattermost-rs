@@ -803,9 +803,16 @@ async fn the_usage_counters_need_no_permission() {
         "/api/v4/usage/storage",
         "/api/v4/usage/teams",
     ] {
-        let ((go_status, go), (rs_status, rs)) = fetch_both_raw(&client, &plain.token, path).await;
+        // The status check is a single unretried pair — it is about the *permission*, and 200 is
+        // 200 however many teams exist. The **body** comparison goes through the bracketed
+        // fetch, because `active` is a live `COUNT(*)` and other suites create and delete teams
+        // throughout the run: an unretried byte comparison of it fails on churn alone, which it
+        // did once the schemes fixture started creating five teams of its own.
+        let ((go_status, _), (rs_status, _)) = fetch_both_raw(&client, &plain.token, path).await;
         assert_eq!(go_status, 200, "{path} refuses nobody");
         assert_eq!(rs_status, go_status, "{path}");
+
+        let (go, rs) = fetch_both_stable(&client, &plain.token, path).await;
         assert_eq!(
             String::from_utf8_lossy(&go),
             String::from_utf8_lossy(&rs),

@@ -23,7 +23,19 @@ pub const SCHEME_SCOPE_PLAYBOOK: &str = "playbook";
 pub const SCHEME_SCOPE_RUN: &str = "run";
 
 /// Port of `model.Scheme` (scheme.go:23).
+///
+/// # `#[serde(default)]` is not decoration
+///
+/// `createScheme` decodes a request body into this type with `json.NewDecoder(r.Body).Decode`,
+/// and Go's decoder fills every absent field with its zero value — so `{"name":"x"}` is a valid
+/// `model.Scheme`. Without `default` here, serde demands all sixteen fields and the route answers
+/// **400** to a body Go accepts. Found by the scheme parity suite: Go answered 501 (its licence
+/// refusal) and this port answered 400, on the same bytes.
+///
+/// Unknown fields stay permitted, also matching Go: `encoding/json` ignores them by default and
+/// `DisallowUnknownFields` is not set at this call site.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Scheme {
     #[serde(rename = "id")]
     pub id: String,

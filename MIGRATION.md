@@ -7371,3 +7371,94 @@ the verdicts mean nothing — this one meant it twice.
 - **`set_user_roles` does not change what a session can do.** `SessionHasPermissionTo` reads
   `session.Roles`, copied at login and never re-read, so granting a role and reusing the old token
   gets a 403 from **Go**. `common::login_plain_user` mints a fresh one.
+
+## The seven `/schemes` routes, four reads and three refusals (2026-09-07)
+
+New: `crates/mm-api/src/schemes.rs`, `crates/mm-app/src/scheme.rs`,
+`crates/mm-api/tests/parity/schemes.rs`, `scripts/mutations/schemes.plan`. Changed:
+`crates/mm-store/src/{team_store,channel_store}.rs`, `crates/mm-model/src/scheme.rs`,
+`crates/mm-api/src/lib.rs`, `crates/mm-app/src/lib.rs`, `crates/mm-api/tests/common/mod.rs`.
+
+110 → **117 of 764**.
+
+| Go file | Rust | Status | Tests | Note |
+|---|---|---|---|---|
+| api4/scheme.go (`getSchemes`) | `mm-api/src/schemes.rs` | DONE | 2 parity, 1 unit | The **empty** scope is one of three accepted values; `playbook` and `run` are refused. |
+| api4/scheme.go (`getScheme`) | `mm-api/src/schemes.rs` | DONE | 1 parity | Trailing newline, unlike `getSchemes` twenty lines above it. |
+| api4/scheme.go (`getTeamsForScheme`) | `mm-api/src/schemes.rs`, `mm-store/src/team_store.rs` | DONE | 1 parity | Wrong scope is a **400**, and the teams are sanitized on the way out. |
+| api4/scheme.go (`getChannelsForScheme`) | `mm-api/src/schemes.rs`, `mm-store/src/channel_store.rs` | DONE | 1 parity | Excludes only `'S'`, where `ChannelStore::get` excludes everything but `('O','P','D','G')`. |
+| api4/scheme.go (`createScheme`, `patchScheme`, `deleteScheme`) | `mm-api/src/schemes.rs` | DONE | 1 parity | 501 on an unlicensed server — the whole route here — after each one's own id and body checks. |
+| app/scheme.go (`IsPhase2MigrationCompleted`, four reads) | `mm-app/src/scheme.rs` | DONE | 2 unit | Every read is gated on a `Systems` row, and its refusal is a **501**. |
+
+### The three writes are complete, not stubbed
+
+Each begins with the same licence test and answers 501 before any permission check or database
+access, so on an unlicensed server that 501 **is** the route — there is no reachable path past it.
+A licensed installation is forwarded, because the test's other two clauses read
+`Features.CustomPermissionsSchemes` and `SkuShortName` out of the signed licence body.
+
+What makes them worth porting rather than proxying is the **order**, which differs in all three:
+`createScheme` decodes the body first, so `{` is a 400 and a well-formed body is a 501;
+`patchScheme` validates the id, then decodes, then tests the licence; `deleteScheme` goes straight
+from the id to the licence. Reversing any pair answers 501 to a request Go answers 400 to.
+
+### `model.Scheme` was missing `#[serde(default)]`, and the route found it
+
+Go decodes a request body into `model.Scheme` with `json.NewDecoder`, which fills every absent
+field with its zero value — so `{"name":"x"}` is a valid scheme. Without `default`, serde demanded
+all eighteen fields and `POST /api/v4/schemes` answered **400** where Go answered its 501. This is
+a model-layer defect that only a route could surface: the fixture round-trip test passes either
+way, because the fixture is fully populated by construction.
+
+### Three fixture findings, none of them about the port
+
+- **The purge deletes what the fixture just planted.** `purge_api_fixtures` is a `OnceCell` that
+  `create_team` triggers; planting schemes before the binary's first `create_team` has them
+  deleted moments later. The scheme fixture now awaits the purge explicitly first.
+- **Go caches schemes by id.** Re-planting a fixed id with a new `CreateAt` leaves Go serving the
+  previous run's row from its local cache while this port reads the new one — a parity failure on
+  a timestamp with nothing wrong on either side. Planted ids are now unique per run.
+- **`model.Scheme` is eighteen fields, not sixteen.** Counted from the running server rather than
+  from the struct, which is the only way to be sure the four playbook and run role names are on
+  the wire even on a server that never fills them.
+
+### The mutation run, and the four fixture findings it forced
+
+**30 run, 28 caught, 2 controls survived, 0 harness faults** — over three passes. The first pass
+had **two harness faults**: dropping a SQL predicate left `$1` bound and unused, which sqlx
+rejects at compile time. The mutations were rewritten to keep the parameter (`AND $1::text IS NOT
+NULL`), which is what a "drop the filter" mutation should have looked like anyway.
+
+Seven real survivors, and every one was a fixture that could not tell two answers apart:
+
+| Survivor | What the fixture could not see |
+|---|---|
+| the permission swap | **No stock role separates the three sysconsole reads** — `system_admin`, `system_manager`, `system_read_only_admin` and `system_user_manager` all hold all three. Fixed with planted single-permission roles. |
+| `SanitizeTeams` removed | An admin can manage every team, so the sanitizer was a no-op for the only session the suite had. The teams reader now holds no `manage_team`. |
+| both `page * per_page` | At page 0 the offset **is** the page. Fixed with three schemes and three teams, and `?per_page=2&page=1`. |
+| `ORDER BY DisplayName` → `Name` | `create_team` derives both from one tag, so they always agree. The fixture teams are now renamed to invert the two orderings. |
+| `Type <> 'S'` → `Type IN ('O','P','D','G')` | Without a **board** channel the two filters return the same rows. `POST /channels` will not create one, so it is planted. |
+| the migration gate | The `Systems` row is present on any server Go has started, so only the `true` arm is reachable. The decision moved into a named function with a truth table. |
+| `SchemeId = $1` → `IS NOT NULL` | Every team with *any* scheme had *this* scheme. A second scheme with its own team and channel now exists. |
+
+**One survivor was a test that discarded its own answer.** `let (page_one, _) = fetch_both(...)`
+kept Go's body and threw ours away, so the assertion was about the Go server — which is never
+mutated. Worth recording twice over: the fix was written once against a line `cargo fmt` had
+already split, so the edit silently did not apply and the mutation survived a second time.
+
+**And one unit test asserted nothing at all.** `assert_ne!` on two `Response`s compares their
+*debug* output, which renders any body as `Body(UnsyncBoxBody)` — so a test that two encodings
+differ passed whatever the bytes were. The byte-producing half is now its own function.
+
+### The suite got slower to churn, and three older tests had to catch up
+
+The schemes fixture creates four users, five teams and two channels in one burst, which is enough
+to break three tests that had nothing to do with schemes:
+
+- `fetch_both_stable`'s default budget went from 12 windows to **24**, with the backoff capped so
+  a *real* divergence still fails quickly rather than four times slower.
+- `users_list::the_unfiltered_list_matches_go` asserted its fixture users were on page 0 of the
+  user list. `per_page` is clamped to 200 and this database holds more users than that, so it was
+  really testing how many users happened to exist; it now walks the pages.
+- `system_usage::the_usage_counters_need_no_permission` byte-compared a live `COUNT(*)` of teams
+  with no retry. The status check stays unretried — 200 is 200 — and only the body is bracketed.

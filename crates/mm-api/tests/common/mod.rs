@@ -695,16 +695,24 @@ pub async fn fetch_both_stable(
     token: &str,
     path: &str,
 ) -> (Vec<u8>, Vec<u8>) {
-    fetch_both_stable_within(client, token, path, 12).await
+    fetch_both_stable_within(client, token, path, 24).await
 }
 
 /// [`fetch_both_stable`] with the retry budget spelled out.
 ///
-/// Twelve windows is enough for a list that churns when a test writes to it. It is **not** enough
-/// for `GET /api/v4/audits`, whose page-0 shifts on every login anywhere in this binary — including
-/// the logins other tests are doing concurrently — so that one asks for more. Measured: a no-op
-/// control mutation was reported CAUGHT because this call exhausted its budget, which is the
-/// harness lying about a verdict rather than a port being wrong.
+/// The default is **24**, raised from twelve when the schemes suite landed: it creates four users,
+/// five teams and two channels in one fixture, and every one of those is a row in the user list
+/// and two rows in the admin's audit page. Two long-standing tests started failing on churn alone
+/// — `users_list::the_unfiltered_list_matches_go` and `user_audits::me_resolves_to_the_caller` —
+/// neither of which had anything to do with the routes being added.
+///
+/// The backoff is capped so a *real* divergence still fails quickly: without a cap, doubling the
+/// attempts would have quadrupled the time a genuinely broken route takes to report itself.
+///
+/// It is still not enough for `GET /api/v4/audits`, whose page 0 shifts on every login anywhere in
+/// this binary; that one compares a shifted window instead. Measured: a no-op control mutation was
+/// reported CAUGHT because this call exhausted its budget, which is the harness lying about a
+/// verdict rather than a port being wrong.
 pub async fn fetch_both_stable_within(
     client: &reqwest::Client,
     token: &str,
@@ -750,7 +758,7 @@ pub async fn fetch_both_stable_within(
         }
 
         last = (before, ours, after);
-        tokio::time::sleep(std::time::Duration::from_millis(80 * attempt)).await;
+        tokio::time::sleep(std::time::Duration::from_millis((80 * attempt).min(400))).await;
     }
 
     // Matching neither bracket, repeatedly, is a divergence rather than churn — so fail with the
@@ -839,6 +847,19 @@ async fn purge_api_fixtures_once() {
         "DELETE FROM reactions WHERE postid IN (SELECT id FROM posts WHERE channelid IN (SELECT id FROM channels WHERE name LIKE 'mmrs-parity-%'))",
         "DELETE FROM postspriority WHERE postid IN (SELECT id FROM posts WHERE channelid IN (SELECT id FROM channels WHERE name LIKE 'mmrs-parity-%'))",
         "DELETE FROM postacknowledgements WHERE postid IN (SELECT id FROM posts WHERE channelid IN (SELECT id FROM channels WHERE name LIKE 'mmrs-parity-%'))",
+        // Schemes planted by `plant_scheme`. **The detach comes first**: `Teams.SchemeId` and
+        // `Channels.SchemeId` are plain columns with no foreign key, so deleting the scheme row
+        // first would leave a team pointing at a scheme that no longer exists — which Go reads as
+        // a scheme-less team on some paths and errors on others. Detach, then delete.
+        "UPDATE teams SET schemeid = NULL WHERE schemeid LIKE 'mmrsscheme%'",
+        "UPDATE channels SET schemeid = NULL WHERE schemeid LIKE 'mmrsscheme%'",
+        "DELETE FROM schemes WHERE id LIKE 'mmrsscheme%'",
+        // Roles planted by `plant_role`. **The users first**: `Users.Roles` is a space-separated
+        // string with no foreign key, so a leftover `mmrs_role_x` there outlives the role row and
+        // is silently skipped by every permission check — which reads as a permission the fixture
+        // thought it had granted.
+        "UPDATE users SET roles = 'system_user' WHERE roles LIKE '%mmrs_role_%'",
+        "DELETE FROM roles WHERE name LIKE 'mmrs_role_%'",
         // Go's DELETE on an emoji is a **soft** delete and the name stays taken, so the row has
         // to go or the next run cannot create one.
         "DELETE FROM emoji WHERE name LIKE 'mmrsparity%'",
@@ -1524,7 +1545,7 @@ pub async fn plant_custom_typed_post(
 ) -> Option<String> {
     let pool = fixture_pool().await?;
     let id: String = format!("mmrscustomtype{:012}", rand_suffix());
-    let now = i64::try_from(rand_suffix()).unwrap_or(0) + 1_788_000_000_000;
+    let now = now_millis();
     sqlx::query(
         "INSERT INTO posts (id, createat, updateat, deleteat, userid, channelid, rootid, \
          originalid, message, type, props, hashtags, filenames, fileids, hasreactions, editat, \
@@ -1605,13 +1626,194 @@ pub async fn set_system_value(name: &str, value: Option<&str>) -> bool {
     true
 }
 
-/// A monotonic-enough suffix for a planted row id, and — offset into 2026 — its `CreateAt`.
+/// A unique-enough suffix for a planted row id.
 ///
 /// Not `rand`: the suite is deterministic everywhere else, and a clock in microseconds is unique
-/// enough for a row this test deletes moments later.
+/// enough for a row the test deletes moments later. Bounded well below the id column's width.
 fn rand_suffix() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_micros() as u64 % 1_000_000_000_000)
+        .map(|d| d.as_micros() as u64 % 1_000_000_000)
         .unwrap_or(0)
+}
+
+/// Epoch **milliseconds**, the unit every timestamp column in this schema uses.
+///
+/// A planted row's `CreateAt` has to be a plausible instant: it is compared byte-for-byte against
+/// Go's rendering of the same row, and it sorts against real rows. An earlier version added a
+/// microsecond counter to a fixed base and produced timestamps in the year 2050.
+fn now_millis() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| i64::try_from(d.as_millis()).unwrap_or(0))
+        .unwrap_or(0)
+}
+
+/// Plant a `Schemes` row and return its id.
+///
+/// # No REST route can create one on this deployment
+///
+/// `POST /api/v4/schemes` is licence-gated and answers **501** on an unlicensed server — which is
+/// exactly the behaviour the scheme suite also has to test. So the four scheme *reads* have no
+/// fixture unless one is planted, and without a fixture `GET /api/v4/schemes` returns `[]` on both
+/// servers and every assertion about its contents passes vacuously.
+///
+/// # The id is **unique per run**, and that is not tidiness
+///
+/// Go caches `SchemeStore.Get` by id in its local cache layer. Planting a fixed id and rewriting
+/// the row — an `ON CONFLICT DO UPDATE` — leaves Go serving the *previous* run's `CreateAt` from
+/// cache while this port reads the new row, and the parity comparison fails on a timestamp with
+/// nothing wrong on either side. Measured. A fresh id has no cache entry, so the first read
+/// populates it correctly.
+///
+/// `scope` is `"team"` or `"channel"`. The four default role names are left empty: they are
+/// `varchar` columns Go fills with real role names when it creates a scheme, and nothing this
+/// suite reads resolves them — a scheme is only ever *listed* here, never applied to a permission
+/// check. The id carries the `mmrsscheme` prefix so [`purge_api_fixtures`] can find it.
+pub async fn plant_scheme(scope: &str, tag: &str) -> Option<String> {
+    let pool = fixture_pool().await?;
+    let short = &tag[..tag.len().min(9)];
+    let id = format!("mmrsscheme{short}{:0>7}", rand_suffix() % 10_000_000);
+    let now = now_millis();
+    sqlx::query(
+        "INSERT INTO schemes (id, name, displayname, description, createat, updateat, deleteat, \
+         scope, defaultteamadminrole, defaultteamuserrole, defaultchanneladminrole, \
+         defaultchanneluserrole, defaultteamguestrole, defaultchannelguestrole, \
+         defaultplaybookadminrole, defaultplaybookmemberrole, defaultrunadminrole, \
+         defaultrunmemberrole) \
+         VALUES ($1, $2, $3, 'planted by the parity suite', $4, $4, 0, $5, '', '', '', '', '', \
+         '', '', '', '', '')",
+    )
+    .bind(&id)
+    .bind(format!("mmrs-{short}-{}", rand_suffix() % 10_000_000))
+    .bind(format!("mmrs {tag}"))
+    .bind(now)
+    .bind(scope)
+    .execute(&pool)
+    .await
+    .expect("the scheme row is written");
+    Some(id)
+}
+
+/// Point a team at a scheme, or with [`None`] detach it.
+pub async fn set_team_scheme(team_id: &str, scheme_id: Option<&str>) -> bool {
+    let Some(pool) = fixture_pool().await else {
+        return false;
+    };
+    sqlx::query("UPDATE teams SET schemeid = $2 WHERE id = $1")
+        .bind(team_id)
+        .bind(scheme_id)
+        .execute(&pool)
+        .await
+        .expect("the team's scheme is written");
+    true
+}
+
+/// Point a channel at a scheme, or with [`None`] detach it.
+pub async fn set_channel_scheme(channel_id: &str, scheme_id: Option<&str>) -> bool {
+    let Some(pool) = fixture_pool().await else {
+        return false;
+    };
+    sqlx::query("UPDATE channels SET schemeid = $2 WHERE id = $1")
+        .bind(channel_id)
+        .bind(scheme_id)
+        .execute(&pool)
+        .await
+        .expect("the channel's scheme is written");
+    true
+}
+
+/// Plant a custom role holding exactly `permissions`, and return its name.
+///
+/// # Why a fixture needs to invent a role
+///
+/// Three of the scheme routes are gated on three *different* sysconsole read permissions —
+/// `..._permissions`, `..._teams`, `..._channels` — and **no stock role holds one without the
+/// others**: `system_admin`, `system_manager`, `system_read_only_admin` and `system_user_manager`
+/// all hold all three. So a mutation swapping one for another is invisible to any fixture built
+/// from stock roles, and three of them survived the first run of `schemes.plan`.
+///
+/// A planted role also separates a sysconsole *read* from `manage_team`, which is what lets a
+/// fixture observe `SanitizeTeams` doing anything: an admin can manage every team, so the
+/// sanitizer is a no-op for the only session the suite had.
+///
+/// `permissions` is the space-separated form the column stores. `SchemeManaged` and `BuiltIn` are
+/// false, matching a role an administrator created. The name carries the `mmrs_role_` prefix so
+/// [`purge_api_fixtures`] can find it; Go's role cache is keyed by name and a fresh one has no
+/// entry, so the first read populates it correctly — the same rule [`plant_scheme`] records.
+pub async fn plant_role(tag: &str, permissions: &str) -> Option<String> {
+    let pool = fixture_pool().await?;
+    let name = format!("mmrs_role_{tag}");
+    let id = format!("mmrsrole{tag:0>18}");
+    let now = now_millis();
+    sqlx::query(
+        "INSERT INTO roles (id, name, displayname, description, createat, updateat, deleteat, \
+         permissions, schememanaged, builtin, schemeid) \
+         VALUES ($1, $2, $2, 'planted by the parity suite', $3, $3, 0, $4, false, false, NULL) \
+         ON CONFLICT (name) DO UPDATE SET permissions = EXCLUDED.permissions",
+    )
+    .bind(&id)
+    .bind(&name)
+    .bind(now)
+    .bind(permissions)
+    .execute(&pool)
+    .await
+    .expect("the role row is written");
+    Some(name)
+}
+
+/// Plant a channel row of an arbitrary type, returning its id.
+///
+/// `POST /api/v4/channels` accepts only `O` and `P`, so a **board** (`BO`) has to be written
+/// directly. `GetChannelsByScheme` excludes only `S`, while `ChannelStore::Get` excludes
+/// everything but `('O','P','D','G')` — without a board in the fixture those two filters return
+/// the same rows and a mutation swapping them survives.
+pub async fn plant_channel_of_type(team_id: &str, channel_type: &str, tag: &str) -> Option<String> {
+    let pool = fixture_pool().await?;
+    let id = format!("mmrschan{:0>18}", rand_suffix());
+    let now = now_millis();
+    sqlx::query(
+        "INSERT INTO channels (id, createat, updateat, deleteat, teamid, type, displayname, \
+         name, header, purpose, lastpostat, totalmsgcount, extraupdateat, creatorid, schemeid, \
+         groupconstrained, shared, totalmsgcountroot, lastrootpostat, defaultcategoryname, \
+         discoverable, autotranslation) \
+         VALUES ($1, $2, $2, 0, $3, $4::channel_type, $5, $6, '', '', 0, 0, 0, '', NULL, NULL, \
+         NULL, 0, 0, '', false, false)",
+    )
+    .bind(&id)
+    .bind(now)
+    .bind(team_id)
+    .bind(channel_type)
+    .bind(format!("mmrs board {tag}"))
+    .bind(format!("mmrs-parity-{tag}"))
+    .execute(&pool)
+    .await
+    .expect("the channel row is written");
+    Some(id)
+}
+
+/// Set a team's display name through Go, so both servers see the change and its caches are
+/// updated the way any client would update them.
+///
+/// The scheme suite needs teams whose display-name order is the **reverse** of their name order,
+/// to tell `ORDER BY DisplayName` from `ORDER BY Name`. `create_team` derives both from one tag,
+/// so they always agree until something changes one of them.
+pub async fn set_team_display_name(
+    client: &reqwest::Client,
+    admin_token: &str,
+    team_id: &str,
+    display_name: &str,
+) {
+    let response = client
+        .put(format!("{GO}/api/v4/teams/{team_id}"))
+        .header("Authorization", format!("Bearer {admin_token}"))
+        .json(&serde_json::json!({ "id": team_id, "display_name": display_name }))
+        .send()
+        .await
+        .expect("Go answers");
+    assert!(
+        response.status().is_success(),
+        "renaming the fixture team failed: {}",
+        response.text().await.unwrap_or_default()
+    );
 }

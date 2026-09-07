@@ -1,0 +1,51 @@
+# Mutation plan for the 2026-09-07 /schemes group — all seven routes.
+#
+#   scripts/mutate-batch.sh scripts/mutations/schemes.plan
+#
+# The decisions a reader could plausibly get wrong:
+#
+#   * `?scope=` accepts three values and the **empty string is one of them**; `playbook` and `run`
+#     are real `SchemeScope`s the handler still refuses.
+#   * Four reads, two writers: `getSchemes` and `getTeamsForScheme` write no trailing newline,
+#     `getScheme` and `getChannelsForScheme` do. The pairs are **crossed**, so reading the Go file
+#     top to bottom suggests the wrong grouping.
+#   * Three different sysconsole read permissions across four routes.
+#   * Asking a channel-scoped scheme for its teams is a **400**, not a 404 and not `[]`.
+#   * The three writes are 501 on an unlicensed server, but the body decode and the id check come
+#     **first** — and in a different order in each of the three.
+#   * `GetChannelsByScheme` excludes only `'S'`, while `Get` excludes everything but
+#     `('O','P','D','G')`. The two constants sit thirteen lines apart in the Go source.
+#   * `model.Scheme` needs `#[serde(default)]`: Go's decoder fills absent fields, and without it
+#     this port answered 400 where Go answered 501.
+#
+# The last two lines are the no-op controls and must SURVIVE.
+schemes-scope-accepts-playbook	crates/mm-api/src/schemes.rs	    scope.is_empty() || scope == SCHEME_SCOPE_TEAM || scope == SCHEME_SCOPE_CHANNEL	    scope.is_empty() || scope == SCHEME_SCOPE_TEAM || scope == SCHEME_SCOPE_CHANNEL\n        || scope == "playbook"	api	schemes
+schemes-empty-scope-refused	crates/mm-api/src/schemes.rs	    scope.is_empty() || scope == SCHEME_SCOPE_TEAM || scope == SCHEME_SCOPE_CHANNEL	    scope == SCHEME_SCOPE_TEAM || scope == SCHEME_SCOPE_CHANNEL	api	schemes
+schemes-scope-not-passed-to-the-store	crates/mm-api/src/schemes.rs	    let schemes = state.app.get_schemes_page(&scope, page, per_page).await?;	    let schemes = state.app.get_schemes_page("", page, per_page).await?;	api	schemes
+schemes-teams-scope-check-dropped	crates/mm-api/src/schemes.rs	    if scheme.scope != SCHEME_SCOPE_TEAM {	    if false {	api	schemes
+schemes-channels-scope-check-dropped	crates/mm-api/src/schemes.rs	    if scheme.scope != SCHEME_SCOPE_CHANNEL {	    if false {	api	schemes
+schemes-teams-checks-the-channel-scope	crates/mm-api/src/schemes.rs	    if scheme.scope != SCHEME_SCOPE_TEAM {	    if scheme.scope != SCHEME_SCOPE_CHANNEL {	api	schemes
+schemes-list-gains-a-newline	crates/mm-api/src/schemes.rs	    encode("getSchemes", &schemes, Newline::No)	    encode("getSchemes", &schemes, Newline::Yes)	api	schemes
+schemes-single-loses-its-newline	crates/mm-api/src/schemes.rs	    encode("getScheme", &scheme, Newline::Yes)	    encode("getScheme", &scheme, Newline::No)	api	schemes
+schemes-teams-gains-a-newline	crates/mm-api/src/schemes.rs	    encode("getTeamsForScheme", &teams, Newline::No)	    encode("getTeamsForScheme", &teams, Newline::Yes)	api	schemes
+schemes-channels-loses-its-newline	crates/mm-api/src/schemes.rs	    encode("getChannelsForScheme", &channels, Newline::Yes)	    encode("getChannelsForScheme", &channels, Newline::No)	api	schemes
+schemes-list-uses-the-teams-permission	crates/mm-api/src/schemes.rs	            &PERMISSION_SYSCONSOLE_READ_USER_MANAGEMENT_PERMISSIONS,\n        )\n        .await\n    {\n        return Err(ApiError::from(make_permission_error(\n            &session.0,\n            &[&PERMISSION_SYSCONSOLE_READ_USER_MANAGEMENT_PERMISSIONS],\n        )));\n    }\n\n    let scope	            &PERMISSION_SYSCONSOLE_READ_USER_MANAGEMENT_TEAMS,\n        )\n        .await\n    {\n        return Err(ApiError::from(make_permission_error(\n            &session.0,\n            &[&PERMISSION_SYSCONSOLE_READ_USER_MANAGEMENT_PERMISSIONS],\n        )));\n    }\n\n    let scope	api	schemes
+schemes-list-permission-dropped	crates/mm-api/src/schemes.rs	        .await\n    {\n        return Err(ApiError::from(make_permission_error(\n            &session.0,\n            &[&PERMISSION_SYSCONSOLE_READ_USER_MANAGEMENT_PERMISSIONS],\n        )));\n    }\n\n    let scope	        .await\n        && false\n    {\n        return Err(ApiError::from(make_permission_error(\n            &session.0,\n            &[&PERMISSION_SYSCONSOLE_READ_USER_MANAGEMENT_PERMISSIONS],\n        )));\n    }\n\n    let scope	api	schemes
+schemes-create-licence-gate-inverted	crates/mm-api/src/schemes.rs	    if licensed {\n        let request = Request::from_parts(parts, axum::body::Body::from(body));	    if !licensed {\n        let request = Request::from_parts(parts, axum::body::Body::from(body));	api	schemes
+schemes-create-decodes-after-the-licence	crates/mm-api/src/schemes.rs	    if serde_json::from_slice::<mm_model::scheme::Scheme>(&bytes).is_err() {	    if false {	api	schemes
+schemes-patch-decodes-after-the-licence	crates/mm-api/src/schemes.rs	    if serde_json::from_slice::<serde_json::Value>(&bytes).is_err() {	    if false {	api	schemes
+schemes-create-error-id-is-the-patch-one	crates/mm-api/src/schemes.rs	"api.scheme.create_scheme.license.error"	"api.scheme.patch_scheme.license.error"	api	schemes
+schemes-migration-gate-always-passes	crates/mm-app/src/scheme.rs	    matches!(row, Ok(Some(_)))	    true	unit	scheme::
+schemes-migration-gate-never-passes	crates/mm-app/src/scheme.rs	    matches!(row, Ok(Some(_)))	    row.is_ok()	unit	scheme::
+schemes-missing-is-a-500-not-a-404	crates/mm-app/src/scheme.rs	                Err(scheme_get_error(404))	                Err(scheme_get_error(500))	api	schemes
+schemes-get-error-id-changed	crates/mm-app/src/scheme.rs	        "app.scheme.get.app_error",\n        None,	        "app.scheme.not_found.app_error",\n        None,	unit	scheme::
+schemes-page-offset-is-the-page	crates/mm-app/src/scheme.rs	            .get_all_page(scope, page * per_page, per_page)	            .get_all_page(scope, page, per_page)	api	schemes
+schemes-teams-page-offset-is-the-page	crates/mm-app/src/scheme.rs	            .get_teams_by_scheme(scheme_id, page * per_page, per_page)	            .get_teams_by_scheme(scheme_id, page, per_page)	api	schemes
+schemes-teams-by-scheme-drops-the-predicate	crates/mm-store/src/team_store.rs	         WHERE t.schemeid = $1\n         ORDER BY t.displayname	         WHERE t.schemeid IS NOT NULL AND $1::text IS NOT NULL\n         ORDER BY t.displayname	api	schemes
+schemes-teams-by-scheme-orders-by-name	crates/mm-store/src/team_store.rs	         WHERE t.schemeid = $1\n         ORDER BY t.displayname	         WHERE t.schemeid = $1\n         ORDER BY t.name	api	schemes
+schemes-channels-by-scheme-drops-the-predicate	crates/mm-store/src/channel_store.rs	         WHERE c.schemeid = $1\n           AND c.type <> 'S'	         WHERE c.schemeid IS NOT NULL AND $1::text IS NOT NULL\n           AND c.type <> 'S'	api	schemes
+schemes-channels-by-scheme-uses-the-message-types	crates/mm-store/src/channel_store.rs	           AND c.type <> 'S'	           AND c.type IN ('O', 'P', 'D', 'G')	api	schemes
+schemes-teams-are-not-sanitized	crates/mm-api/src/schemes.rs	    state.app.sanitize_teams(&session.0, &mut teams).await;	    let _ = &mut teams;	api	schemes
+scheme-model-requires-every-field	crates/mm-model/src/scheme.rs	#[serde(default)]\npub struct Scheme {	pub struct Scheme {	api	schemes
+control-rename-schemes-scope-binding	crates/mm-api/src/schemes.rs	    let scope = params.scope.unwrap_or_default();	    let requested_scope = params.scope.unwrap_or_default();\n    let scope = requested_scope;	api	schemes
+control-reorder-independent-scheme-team-columns	crates/mm-store/src/team_store.rs	               t.companyname,\n               t.alloweddomains,\n               t.inviteid,\n               t.allowopeninvite,\n               t.lastteamiconupdate,\n               t.schemeid,\n               t.groupconstrained,\n               t.cloudlimitsarchived,\n               EXISTS (\n                   SELECT 1 FROM accesscontrolpolicies acp\n                    WHERE acp.id = t.id AND acp.type = 'team'\n               ) AS "policy_enforced!",\n               COALESCE((\n                   SELECT acp.active FROM accesscontrolpolicies acp\n                    WHERE acp.id = t.id AND acp.type = 'team' AND acp.active = TRUE\n                    LIMIT 1\n               ), false) AS "policy_is_active!"\n          FROM teams t\n         WHERE t.schemeid = $1	               t.alloweddomains,\n               t.companyname,\n               t.inviteid,\n               t.allowopeninvite,\n               t.lastteamiconupdate,\n               t.schemeid,\n               t.groupconstrained,\n               t.cloudlimitsarchived,\n               EXISTS (\n                   SELECT 1 FROM accesscontrolpolicies acp\n                    WHERE acp.id = t.id AND acp.type = 'team'\n               ) AS "policy_enforced!",\n               COALESCE((\n                   SELECT acp.active FROM accesscontrolpolicies acp\n                    WHERE acp.id = t.id AND acp.type = 'team' AND acp.active = TRUE\n                    LIMIT 1\n               ), false) AS "policy_is_active!"\n          FROM teams t\n         WHERE t.schemeid = $1	api	schemes

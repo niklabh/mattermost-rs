@@ -145,6 +145,14 @@ pub trait ChannelStore {
         id: &str,
     ) -> impl std::future::Future<Output = Result<Channel, StoreError>> + Send;
 
+    /// Port of `SqlChannelStore.GetChannelsByScheme` (channel_store.go:4071).
+    fn get_channels_by_scheme(
+        &self,
+        scheme_id: &str,
+        offset: i64,
+        limit: i64,
+    ) -> impl std::future::Future<Output = Result<Vec<Channel>, StoreError>> + Send;
+
     /// Port of `SqlChannelStore.GetForPost` (channel_store.go:3152).
     fn get_for_post(
         &self,
@@ -427,6 +435,16 @@ impl SqlChannelStore {
 }
 
 impl ChannelStore for SqlChannelStore {
+    #[tracing::instrument(skip_all, fields(scheme_id = %scheme_id, offset, limit, found))]
+    async fn get_channels_by_scheme(
+        &self,
+        scheme_id: &str,
+        offset: i64,
+        limit: i64,
+    ) -> Result<Vec<Channel>, StoreError> {
+        get_channels_by_scheme(&self.pool, scheme_id, offset, limit).await
+    }
+
     #[tracing::instrument(skip_all, fields(channel_id = %id, found))]
     async fn get(&self, id: &str) -> Result<Channel, StoreError> {
         get(&self.pool, id).await
@@ -3771,6 +3789,81 @@ pub async fn get_pinned_posts(pool: &PgPool, channel_id: &str) -> Result<PostLis
         list.add_order(id);
     }
     Ok(list)
+}
+
+/// Port of `SqlChannelStore.GetChannelsByScheme` (channel_store.go:4071).
+///
+/// # Its type filter is **not** `Get`'s
+///
+/// `Get` uses `messageChannelTypes` — `IN ('O','P','D','G')` — and deliberately hides a board.
+/// This query uses `nonMessageBackingChannelTypes`, which holds exactly one entry, `ChannelTypeSpace`
+/// (`'S'`, channel_store.go:52), so it renders `Type NOT IN ('S')` and a **board is returned**.
+/// The two constants sit thirteen lines apart in the same file and read alike; using either for
+/// the other changes which channels a scheme reports owning.
+///
+/// `ORDER BY DisplayName` with no tiebreak, like every other scheme-scoped listing. Two channels
+/// sharing a display name have no defined order in either server; reproduced rather than
+/// stabilised, for the reason recorded on the audit query.
+pub async fn get_channels_by_scheme(
+    pool: &PgPool,
+    scheme_id: &str,
+    offset: i64,
+    limit: i64,
+) -> Result<Vec<Channel>, StoreError> {
+    let rows = sqlx::query_as!(
+        ChannelRow,
+        r#"
+        SELECT c.id,
+               c.createat,
+               c.updateat,
+               c.deleteat,
+               c.teamid,
+               c.type::text AS "channel_type!",
+               c.displayname,
+               c.name,
+               c.header,
+               c.purpose,
+               c.lastpostat,
+               c.totalmsgcount,
+               c.extraupdateat,
+               c.creatorid,
+               c.schemeid,
+               c.groupconstrained,
+               c.autotranslation,
+               c.shared,
+               c.totalmsgcountroot,
+               c.lastrootpostat,
+               c.bannerinfo,
+               c.defaultcategoryname,
+               c.discoverable,
+               EXISTS (
+                   SELECT 1 FROM accesscontrolpolicies acp
+                    WHERE acp.id = c.id AND acp.type = 'channel'
+               ) AS "policy_enforced!",
+               COALESCE((
+                   SELECT acp.active FROM accesscontrolpolicies acp
+                    WHERE acp.id = c.id AND acp.type = 'channel' AND acp.active = TRUE
+                    LIMIT 1
+               ), false) AS "policy_is_active!"
+          FROM channels c
+         WHERE c.schemeid = $1
+           AND c.type <> 'S'
+         ORDER BY c.displayname
+         LIMIT $2 OFFSET $3
+        "#,
+        scheme_id,
+        limit,
+        offset
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: format!("failed to find Channels with schemeId={scheme_id}"),
+        source,
+    })?;
+
+    tracing::Span::current().record("found", rows.len());
+    rows.into_iter().map(channel_from_row).collect()
 }
 
 #[cfg(test)]
