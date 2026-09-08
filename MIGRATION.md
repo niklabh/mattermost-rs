@@ -8824,3 +8824,8 @@ mid-test. `a_team_and_channel_the_user_is_in` returns the *first* channel the ad
 whichever channel some other suite created most recently, and a fifty-one-request test is open long
 enough for that suite's fixtures to be swept underneath it. The test now creates its own team and
 channel. Six consecutive full runs green afterwards.
+
+`users_stats_filtered` moved to `fetch_both_stable` for the same class of reason: it is a **live
+count of users**, and a plain Go-then-Rust pair compares two different instants, so a
+`create_plain_user` landing between the two reads is a difference of one. Five consecutive full
+runs green.

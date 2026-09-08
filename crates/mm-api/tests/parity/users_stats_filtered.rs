@@ -15,8 +15,8 @@ use crate::common;
 
 use common::{
     GO, RUST, assert_error_bodies_match_except_known_gaps, client, create_channel_typed,
-    create_plain_user, create_team, delete_plain_user, fetch_both_raw, go_minted_token,
-    purge_api_fixtures, stack_enabled,
+    create_plain_user, create_team, delete_plain_user, fetch_both_raw, fetch_both_stable,
+    go_minted_token, purge_api_fixtures, stack_enabled,
 };
 
 const PATH: &str = "/api/v4/users/stats/filtered";
@@ -108,15 +108,19 @@ async fn plant_remote_id(user_id: &str) -> bool {
 }
 
 /// Both servers' answer to one query, asserted byte-identical, as a number.
+///
+/// Through [`fetch_both_stable`], not `fetch_both_raw`: this is a **live count of users**, and
+/// every suite in this binary creates and deletes them. A plain Go-then-Rust pair compares two
+/// different instants and disagrees by one whenever a `create_plain_user` lands between them —
+/// which this session's new fixtures made frequent. The stable helper re-reads Go afterwards and
+/// accepts our answer if it matches either side of the window. [D-167] has the same shape.
 async fn count(client: &reqwest::Client, token: &str, query: &str) -> i64 {
     let path = if query.is_empty() {
         PATH.to_owned()
     } else {
         format!("{PATH}?{query}")
     };
-    let ((go_status, go), (rs_status, rs)) = fetch_both_raw(client, token, &path).await;
-    assert_eq!(go_status, 200, "{path}");
-    assert_eq!(rs_status, go_status, "{path}: statuses must match");
+    let (go, rs) = fetch_both_stable(client, token, &path).await;
     assert_eq!(
         String::from_utf8_lossy(&go),
         String::from_utf8_lossy(&rs),
