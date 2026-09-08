@@ -150,6 +150,12 @@ pub trait TeamStore {
     /// Port of `SqlTeamStore.Get` (team_store.go:354).
     fn get(&self, id: &str) -> impl std::future::Future<Output = Result<Team, StoreError>> + Send;
 
+    /// Port of `SqlTeamStore.GetByInviteId` (team_store.go:391).
+    fn get_by_invite_id(
+        &self,
+        invite_id: &str,
+    ) -> impl std::future::Future<Output = Result<Team, StoreError>> + Send;
+
     /// Port of `SqlTeamStore.GetByName` (team_store.go:424).
     fn get_by_name(
         &self,
@@ -377,6 +383,10 @@ impl TeamStore for SqlTeamStore {
     #[tracing::instrument(skip_all, fields(team_id = %id, found))]
     async fn get(&self, id: &str) -> Result<Team, StoreError> {
         get(&self.pool, id).await
+    }
+
+    async fn get_by_invite_id(&self, invite_id: &str) -> Result<Team, StoreError> {
+        get_by_invite_id(&self.pool, invite_id).await
     }
 
     #[tracing::instrument(skip_all, fields(name = %name, found))]
@@ -775,6 +785,84 @@ pub async fn get(pool: &PgPool, id: &str) -> Result<Team, StoreError> {
     tracing::Span::current().record("found", true);
 
     Ok(team_from_row(row))
+}
+
+/// Port of `SqlTeamStore.GetByInviteId` (team_store.go:391).
+///
+/// [`get`]'s query with `InviteId = $1`, and **two** not-found paths that are the same answer:
+///
+/// 1. no row matched — Go collapses *every* error from `sqlx.Get` into `ErrNotFound` here
+///    (team_store.go:400), so even a driver failure reads as a miss on this one method;
+/// 2. the row matched but `inviteId == ""` **or** its `InviteId` differs from the parameter
+///    (team_store.go:403). The equality half is unreachable; the empty-string half is not.
+///    `Teams.InviteId` is **not unique** — Go's `GetByEmptyInviteID` exists precisely because rows
+///    with an empty one occur — so without that guard an empty parameter would return an arbitrary
+///    team to an unauthenticated caller. It is the whole reason this is not [`get`] with a
+///    different column, and it is ported.
+///
+/// `RequireInviteId` rejects the empty string before `getInviteInfo` reaches this, so the guard is
+/// belt-and-braces through that route — but this is a *store* method and the next caller may not
+/// check.
+#[tracing::instrument(skip(pool), fields(found))]
+pub async fn get_by_invite_id(pool: &PgPool, invite_id: &str) -> Result<Team, StoreError> {
+    let missing = || StoreError::NotFound {
+        entity: "Team",
+        criteria: format!("inviteId={invite_id}"),
+    };
+
+    let row = sqlx::query_as!(
+        TeamRow,
+        r#"
+        SELECT t.id,
+               t.createat,
+               t.updateat,
+               t.deleteat,
+               t.displayname,
+               t.name,
+               t.description,
+               t.email,
+               t.type::text AS "team_type",
+               t.companyname,
+               t.alloweddomains,
+               t.inviteid,
+               t.allowopeninvite,
+               t.lastteamiconupdate,
+               t.schemeid,
+               t.groupconstrained,
+               t.cloudlimitsarchived,
+               EXISTS (
+                   SELECT 1 FROM accesscontrolpolicies acp
+                    WHERE acp.id = t.id AND acp.type = 'team'
+               ) AS "policy_enforced!",
+               COALESCE((
+                   SELECT acp.active FROM accesscontrolpolicies acp
+                    WHERE acp.id = t.id AND acp.type = 'team' AND acp.active = TRUE
+                    LIMIT 1
+               ), false) AS "policy_is_active!"
+          FROM teams t
+         WHERE t.inviteid = $1
+         LIMIT 1
+        "#,
+        invite_id
+    )
+    .fetch_optional(pool)
+    .await
+    // Go wraps *every* error from the fetch as not-found here, unlike its neighbours.
+    .map_err(|_| missing())?;
+
+    let Some(row) = row else {
+        tracing::Span::current().record("found", false);
+        return Err(missing());
+    };
+
+    let team = team_from_row(row);
+    if invite_id.is_empty() || team.invite_id != invite_id {
+        tracing::Span::current().record("found", false);
+        return Err(missing());
+    }
+
+    tracing::Span::current().record("found", true);
+    Ok(team)
 }
 
 /// Port of `SqlTeamStore.GetByName` (team_store.go:424).

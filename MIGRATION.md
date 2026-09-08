@@ -8779,3 +8779,38 @@ in the licence-boundary list rather than a gap in the code.
 
 Also recorded this session: [D-169] (the built-in slash-command registry, three routes) and
 [D-171] (five routes that read in-process state this server does not share).
+
+## `getInviteInfo` — the only unauthenticated route that returns data (2026-09-09)
+
+`GET /api/v4/teams/invite/{invite_id}`. New: `team_store::get_by_invite_id`,
+`App::get_team_by_invite_id`, `teams::get_invite_info`,
+`crates/mm-store/tests/db_team_invite_id.rs`, `crates/mm-api/tests/parity/invite_info.rs`,
+`scripts/mutations/invite-info.plan`.
+
+`APIHandler`, not `APISessionRequired` — the join-by-link page shows a team's name to someone who
+has not signed in. The two other sessionless routes this server answers are both refusals, so this
+is the one place where adding a session extractor "for consistency" would break a sign-up flow.
+
+Three things carry it:
+
+- **A closed team is a 403 and an unknown invite a 404**, so the pair distinguishes "no such
+  invite" from "that invite is for a team you may not see this way". The invite id goes into
+  `detailed_error`, which `WipeDetailed` blanks.
+- **The body is four fields in an anonymous struct**, not a `Team` — so `email`,
+  `allowed_domains` and the invite id itself never leave the server, not by sanitisation (this
+  route calls none) but because they were never in the struct.
+- **`Teams.InviteId` is not unique.** Go guards with `inviteId == "" || team.InviteId != inviteId`,
+  and the empty half is load-bearing: rows with an empty invite id exist — Go ships a
+  `GetByEmptyInviteID` for them — so without it an anonymous caller would get an arbitrary team.
+  No HTTP request can reach that guard (an empty path segment is not a route), so it is tested at
+  the store: `db_team_invite_id.rs`.
+
+Mutations: **11 run, 9 caught, 2 controls survived** — after a first run with a **harness fault**
+(a mutation that added a struct field without an initialiser and did not compile; a fault voids the
+tally) and one survivor that moved to the store suite.
+
+**Churn:** `channels_for_team_for_user` now compares a channel page with
+`assert_same_channels`, which falls back to a set when the bytes differ. Direct-message channels
+all have an empty `DisplayName`, so any two of them are tied under `ORDER BY DisplayName` and the
+two servers may order them differently — and every plain user a suite creates leaves one more DM
+behind, so this session's fixtures made a latent tie into a recurring flake.

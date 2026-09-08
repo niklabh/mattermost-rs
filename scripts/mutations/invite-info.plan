@@ -1,0 +1,31 @@
+# Mutation plan for `getInviteInfo` (GET /api/v4/teams/invite/{invite_id}).
+#
+#   scripts/mutate-batch.sh scripts/mutations/invite-info.plan
+#
+# Three things carry this route: the **team-type gate** (a closed team is a 403 and an unknown
+# invite a 404, so the pair distinguishes them), the **four-field projection** (a `Team` would
+# leak the email, the allowed domains and the invite id itself), and the store's empty-invite-id
+# guard, which exists because `Teams.InviteId` is not unique.
+#
+# **Two lines were fixed after a first run.** `api-body-carries-the-invite-id` added a struct field
+# without an initialiser and did not compile — a harness fault, which voids a run; it now leaks the
+# id through an existing field instead. And `store-empty-invite-guard-removed` survived because no
+# HTTP request can reach the guard: an empty path segment is not a route on either server, so the
+# router 404s before the store is called. It runs under `store` against `db_team_invite_id`, where
+# the store is called with `""` directly.
+#
+# The last two lines are the no-op controls and must SURVIVE.
+
+api-closed-team-is-admitted	crates/mm-api/src/teams.rs	    if team.team_type != mm_model::team::TEAM_OPEN {	    if false {	api	invite_info
+api-open-team-is-refused	crates/mm-api/src/teams.rs	    if team.team_type != mm_model::team::TEAM_OPEN {	    if team.team_type == mm_model::team::TEAM_OPEN {	api	invite_info
+api-closed-team-is-a-404	crates/mm-api/src/teams.rs	            format!("id={invite_id}"),\n            403,	            format!("id={invite_id}"),\n            404,	api	invite_info
+api-body-carries-the-invite-id	crates/mm-api/src/teams.rs	        description: &team.description,	        description: &team.invite_id,	api	invite_info
+api-body-order-is-alphabetical	crates/mm-api/src/teams.rs	        display_name: &'a str,\n        description: &'a str,\n        name: &'a str,\n        id: &'a str,	        description: &'a str,\n        display_name: &'a str,\n        id: &'a str,\n        name: &'a str,	api	invite_info
+api-no-trailing-newline	crates/mm-api/src/teams.rs	    body.push(b'\\n');\n\n    Ok((\n        axum::http::StatusCode::OK,	    Ok((\n        axum::http::StatusCode::OK,	api	invite_info
+app-miss-is-a-500	crates/mm-app/src/team.rs	                let status = if err.is_not_found() { 404 } else { 500 };\n                if status == 500 {\n                    tracing::error!(error = ?err, "team lookup by invite id failed");	                let status = if err.is_not_found() { 500 } else { 500 };\n                if status == 500 {\n                    tracing::error!(error = ?err, "team lookup by invite id failed");	api	invite_info
+store-empty-invite-guard-removed	crates/mm-store/src/team_store.rs	    if invite_id.is_empty() || team.invite_id != invite_id {	    if false {	store	team_invite_id_
+store-query-ignores-the-invite-id	crates/mm-store/src/team_store.rs	         WHERE t.inviteid = $1\n         LIMIT 1	         WHERE t.inviteid = $1 OR true\n         LIMIT 1	api	invite_info
+#
+# --- no-op controls: these must SURVIVE ---
+control-rename-binding	crates/mm-api/src/teams.rs	    let team = state.app.get_team_by_invite_id(&invite_id).await?;	    let found = state.app.get_team_by_invite_id(&invite_id).await?;\n    let team = found;	api	invite_info
+control-store-reorder-independent-columns	crates/mm-store/src/team_store.rs	               t.companyname,\n               t.alloweddomains,\n               t.inviteid,\n               t.allowopeninvite,\n               t.lastteamiconupdate,\n               t.schemeid,\n               t.groupconstrained,\n               t.cloudlimitsarchived,\n               EXISTS (\n                   SELECT 1 FROM accesscontrolpolicies acp\n                    WHERE acp.id = t.id AND acp.type = 'team'\n               ) AS "policy_enforced!",\n               COALESCE((\n                   SELECT acp.active FROM accesscontrolpolicies acp\n                    WHERE acp.id = t.id AND acp.type = 'team' AND acp.active = TRUE\n                    LIMIT 1\n               ), false) AS "policy_is_active!"\n          FROM teams t\n         WHERE t.inviteid = $1	               t.alloweddomains,\n               t.companyname,\n               t.inviteid,\n               t.allowopeninvite,\n               t.lastteamiconupdate,\n               t.schemeid,\n               t.groupconstrained,\n               t.cloudlimitsarchived,\n               EXISTS (\n                   SELECT 1 FROM accesscontrolpolicies acp\n                    WHERE acp.id = t.id AND acp.type = 'team'\n               ) AS "policy_enforced!",\n               COALESCE((\n                   SELECT acp.active FROM accesscontrolpolicies acp\n                    WHERE acp.id = t.id AND acp.type = 'team' AND acp.active = TRUE\n                    LIMIT 1\n               ), false) AS "policy_is_active!"\n          FROM teams t\n         WHERE t.inviteid = $1	api	invite_info

@@ -1849,6 +1849,91 @@ async fn sanitized_team_response(
     }
 }
 
+/// Port of `getInviteInfo` (api4/team.go:1981) — `GET /api/v4/teams/invite/{invite_id}`.
+///
+/// # No session, and that is the point of the route
+///
+/// `APIHandler`, not `APISessionRequired` (team.go:75): the join-by-invite-link page shows a team's
+/// name to someone who has not signed in yet. It is the third unauthenticated route this server
+/// serves, and the only one that returns data rather than a refusal.
+///
+/// # A non-open team is a 403, and that answer confirms the invite is real
+///
+/// `team.Type != TeamOpen` gives `api.team.get_invite_info.not_open_team` with the invite id in
+/// `detailed_error` — where an id that matches nothing gives a 404. So the pair distinguishes "no
+/// such invite" from "that invite is for a closed team", which is Go's choice and is reproduced.
+/// `WipeDetailed` removes the id from the body before a client sees it.
+///
+/// # The body is four fields, not a `Team`
+///
+/// An anonymous struct — `display_name`, `description`, `name`, `id`, **in that order** — so none
+/// of `Team`'s twenty other fields, and none of its sanitisation, is involved. `email`,
+/// `allowed_domains` and the invite id itself never leave the server through this route.
+///
+/// `json.NewEncoder(w).Encode`, so a trailing newline.
+#[tracing::instrument(skip_all, fields(invite_id = %invite_id, team_type))]
+pub async fn get_invite_info(
+    State(state): State<AppState>,
+    Path(invite_id): Path<String>,
+) -> Result<Response, ApiError> {
+    // `RequireInviteId` (web/context.go:344) tests **emptiness only** — not `IsValidId`. The mux
+    // charset already rejects an empty segment, so this cannot fire through the router; it is
+    // ported because the check is Go's and the next caller may not be a route.
+    if invite_id.is_empty() {
+        return Err(ApiError::invalid_url_param("invite_id"));
+    }
+
+    let team = state.app.get_team_by_invite_id(&invite_id).await?;
+    tracing::Span::current().record("team_type", &team.team_type);
+
+    if team.team_type != mm_model::team::TEAM_OPEN {
+        return Err(ApiError::from(mm_model::utils::AppError::new(
+            "getInviteInfo",
+            "api.team.get_invite_info.not_open_team",
+            None,
+            format!("id={invite_id}"),
+            403,
+        )));
+    }
+
+    // The anonymous struct Go declares inline. Field order is the wire order.
+    #[derive(serde::Serialize)]
+    struct InviteInfo<'a> {
+        display_name: &'a str,
+        description: &'a str,
+        name: &'a str,
+        id: &'a str,
+    }
+
+    let mut body = serde_json::to_vec(&InviteInfo {
+        display_name: &team.display_name,
+        description: &team.description,
+        name: &team.name,
+        id: &team.id,
+    })
+    .map_err(|err| {
+        tracing::error!(error = %err, "failed to serialise the invite info");
+        ApiError::from(mm_model::utils::AppError::new(
+            "getInviteInfo",
+            "api.marshal_error",
+            None,
+            String::new(),
+            500,
+        ))
+    })?;
+    body.push(b'\n');
+
+    Ok((
+        axum::http::StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
+    )
+        .into_response())
+}
+
 #[cfg(test)]
 mod tests {
     use mm_model::team_member::TeamMember;

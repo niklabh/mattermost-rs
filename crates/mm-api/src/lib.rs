@@ -1577,6 +1577,15 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/users/{user_id}/tokens",
             partially_migrated_with_ids(&state, get(tokens::get_user_access_tokens_for_user)),
         )
+        // `BaseRoutes.Teams.Handle("/invite/{invite_id:[A-Za-z0-9]+}")` (api4/team.go:75) — a
+        // literal `invite` sibling of `{team_id}`, and an `APIHandler`, so no session extractor.
+        // `invite_id` is not id-shaped, so the id-charset middleware does not apply; the mux class
+        // is the same `[A-Za-z0-9]+` and axum's `{invite_id}` is wider, which only matters for a
+        // segment Go would have 404'd — and this handler answers 404 for it too, from the store.
+        .route(
+            "/api/v4/teams/invite/{invite_id}",
+            partially_migrated(get(teams::get_invite_info)),
+        )
         .route(
             "/api/v4/commands",
             partially_migrated(get(commands::list_commands)),

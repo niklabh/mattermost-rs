@@ -16,6 +16,38 @@ use mm_store::team_store::TeamMembersGetOptions;
 use crate::App;
 
 impl App {
+    /// Port of `App.GetTeamByInviteId` (app/team.go:986).
+    ///
+    /// **Both branches carry the same id** — `app.team.get_by_invite_id.finding.app_error` — and
+    /// differ only in status: 404 for a miss, 500 for anything else. And the store above collapses
+    /// every driver failure into a miss, so the 500 arm is unreachable through it. Ported for
+    /// fidelity; a client cannot tell the two apart from the body either way.
+    #[tracing::instrument(skip(self))]
+    pub async fn get_team_by_invite_id(
+        &self,
+        invite_id: &str,
+    ) -> mm_model::utils::AppResult<mm_model::team::Team> {
+        use mm_store::TeamStore;
+
+        self.store()
+            .team()
+            .get_by_invite_id(invite_id)
+            .await
+            .map_err(|err| {
+                let status = if err.is_not_found() { 404 } else { 500 };
+                if status == 500 {
+                    tracing::error!(error = ?err, "team lookup by invite id failed");
+                }
+                mm_model::utils::AppError::boxed(
+                    "GetTeamByInviteId",
+                    "app.team.get_by_invite_id.finding.app_error",
+                    None,
+                    String::new(),
+                    status,
+                )
+            })
+    }
+
     /// Port of `app.App.GetTeamMembersForUser` (team.go:1108).
     ///
     /// A thin wrapper: Go's whole body is the store call plus one error mapping, and *any* store

@@ -918,6 +918,8 @@ async fn purge_api_fixtures_once() {
         "DELETE FROM users WHERE id LIKE 'mmrsbp%'",
         "DELETE FROM channels WHERE id LIKE 'mmrsbp%'",
         "DELETE FROM teams WHERE id LIKE 'mmrsbp%'",
+        // Teams planted by `mm-store`'s `db_team_invite_id` test — another binary, same database.
+        "DELETE FROM teams WHERE id LIKE 'mmrsinv%'",
         // Slash commands planted by `parity/commands.rs`. Soft-deleted rows keep their trigger
         // reserved, so a leftover is not merely noise in a listing.
         "DELETE FROM commands WHERE id LIKE 'mmrscmd%'",
