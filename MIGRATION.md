@@ -8557,3 +8557,44 @@ hiding:
 | `GET /users/me/sessions` embedding `team_members` from Go's **session cache** while we read the table | compare everything but `team_members`, then assert Go's set is a **subset** of ours — being ahead is [D-087] working as decided, being behind would be a real divergence |
 
 Eight consecutive full runs are green.
+
+## The two bot reads, and the 404 that is a security answer (2026-09-08)
+
+`GET /api/v4/bots` and `GET /api/v4/bots/{bot_user_id}` are served — the first route this project
+recorded as **blocked** and then unblocked. New: `crates/mm-store/src/bot_store.rs`,
+`crates/mm-app/src/bot.rs`, `crates/mm-api/src/bots.rs`,
+`crates/mm-store/tests/db_bot_store.rs`, `crates/mm-api/tests/parity/bots.rs`,
+`scripts/mutations/bots.plan`. `mm-model/src/bot.rs` was already ported.
+
+### A refused read and a missing bot are the same document
+
+`getBot` answers `store.sql_bot.get.missing.app_error` — a **404** — to a caller who may not read
+the bot, built by the same `MakeBotNotFoundError` a miss uses. Go's comment: "pretend like the bot
+doesn't exist at all, to avoid revealing that the user is a bot." A 403 here would leak exactly
+what the 404 hides. `getBots`, one function away, answers a plain 403 — there is no id in the
+request to confirm or deny. Both are asserted on the *bodies*, not the statuses.
+
+### The `ETag` is written only on the 304
+
+`HandleEtag` (web/context.go:230) sets `HeaderEtagServer` inside the `if et == etag` branch and
+nowhere else, so a 200 from either route carries no `ETag` at all. Measured, because the intuitive
+reading is the opposite.
+
+### Go builds eight statements; the port builds one
+
+`GetAll`'s three options are assembled into the `WHERE` at runtime, and `OnlyOrphaned` adds a
+second `JOIN Users`. `query_as!` checks a literal, so they are parameters here — with two rewrites
+that are exact rather than approximate: an absent clause becomes a satisfied one, and the inner
+join becomes a left join plus `o.Id IS NOT NULL`. The mutation run then proved the null check is a
+**no-op**: `o.DeleteAt <> 0` is already NULL for a plugin-owned bot, so three-valued logic excludes
+it either way. Kept for intent, recorded as a control.
+
+### Six survivors, one cause
+
+First run **22 run, 14 caught, 6 real survivors**. Five were the same gap: **no stock role holds
+`read_bots` without `read_others_bots`**, so every branch that tells them apart is unreachable over
+HTTP — including one mutation that let any caller read any bot. No REST route can create a deleted
+bot or one owned by someone else either. A planted role and two planted bot rows fix all five; the
+sixth was the SQL no-op above.
+
+Re-run: **22 run, 19 caught, 3 controls survived, 0 harness faults.**

@@ -1,0 +1,48 @@
+# Mutation plan for the two bot reads (GET /api/v4/bots, /api/v4/bots/{bot_user_id}).
+#
+#   scripts/mutate-batch.sh scripts/mutations/bots.plan
+#
+# The decisions here are the permission cascade — whose three arms give *two* different statuses
+# for the same shape of refusal — and the store rewrite that turns Go's eight statement shapes
+# into one parameterised query. The second is where a silent widening would hide: every
+# neutralised predicate is a place a mutation can turn a filter off.
+#
+# Five mutations survived the first run and every one was a fixture gap, all of the same shape:
+# **no stock role holds `read_bots` without also holding `read_others_bots`**, so the branch that
+# tells them apart is unreachable over HTTP, and no REST route can create a deleted bot or a bot
+# owned by someone else. `read_bots_alone_admits_only_the_callers_own_bots` and
+# `include_deleted_reveals_a_deleted_bot_on_both_servers` plant the role and the rows.
+#
+# A sixth survivor was **not** a fixture gap and is recorded here rather than fixed:
+# `store-list-orphan-filter-keeps-plugin-owners` removes the `o.id IS NOT NULL` guard, and SQL's
+# three-valued logic already does that work — for a bot whose owner is not a user, `o.deleteat` is
+# NULL, so `o.deleteat <> 0` is NULL and the row is excluded either way. The guard is kept because
+# it states the intent that the left join replaced an inner one, but it is a **no-op**, so the line
+# has moved down to the controls where a survivor is the correct verdict.
+#
+# The last three lines are the no-op controls and must SURVIVE.
+
+api-non-owner-refusal-is-a-403	crates/mm-api/src/bots.rs	    } else {\n        return Err(ApiError::from(make_bot_not_found_error(\n            "permissions",\n            &bot_user_id,\n        )));\n    }\n\n    let etag = bot.etag();	    } else {\n        return Err(ApiError::from(make_permission_error(\n            &session.0,\n            &[&PERMISSION_READ_BOTS],\n        )));\n    }\n\n    let etag = bot.etag();	api	bots
+api-non-owner-is-let-through	crates/mm-api/src/bots.rs	    } else if bot.owner_id == session.0.user_id {	    } else if true {	api	bots
+api-owner-check-compares-the-bot-to-itself	crates/mm-api/src/bots.rs	    } else if bot.owner_id == session.0.user_id {	    } else if bot.owner_id == bot.user_id {	api	bots
+api-list-falls-back-to-every-owner	crates/mm-api/src/bots.rs	        session.0.user_id.clone()	        String::new()	api	bots
+api-list-refuses-with-the-bot-404	crates/mm-api/src/bots.rs	        return Err(ApiError::from(make_permission_error(\n            &session.0,\n            &[&PERMISSION_READ_BOTS],\n        )));	        return Err(ApiError::from(make_bot_not_found_error("permissions", "")));	api	bots
+api-etag-header-on-the-200	crates/mm-api/src/bots.rs	            ("Content-Type", "application/json"),	            ("Content-Type", "application/json"),\n            ("ETag", "11.11.0.x.1"),	api	bots
+api-etag-is-never-checked	crates/mm-api/src/bots.rs	    !etag.is_empty()\n        && headers	    false\n        && headers	api	bots
+api-etag-matches-anything	crates/mm-api/src/bots.rs	            .is_some_and(|sent| sent == etag)	            .is_some()	api	bots
+api-no-trailing-newline	crates/mm-api/src/bots.rs	    body.push(b'\\n');\n\n    Ok((	    Ok((	api	bots
+api-include-deleted-is-always-on	crates/mm-api/src/bots.rs	    let include_deleted = query_flag_is_true(query.as_deref(), "include_deleted");\n    let only_orphaned	    let include_deleted = true;\n    let only_orphaned	api	bots
+api-only-orphaned-is-ignored	crates/mm-api/src/bots.rs	    let only_orphaned = query_flag_is_true(query.as_deref(), "only_orphaned");	    let only_orphaned = false;	api	bots
+api-bot-id-is-never-validated	crates/mm-api/src/bots.rs	    if !is_valid_id(&bot_user_id) {	    if false {	api	bots
+app-miss-is-a-500	crates/mm-app/src/bot.rs	                if err.is_not_found() {	                if false {	api	bots
+store-get-ignores-include-deleted	crates/mm-store/src/bot_store.rs	                   AND b.deleteat = 0	                   AND b.deleteat >= 0	store	bot_store_
+store-list-include-deleted-is-inverted	crates/mm-store/src/bot_store.rs	             WHERE ($1 OR b.deleteat = 0)	             WHERE (NOT $1 OR b.deleteat = 0)	store	bot_store_
+store-list-owner-filter-is-off	crates/mm-store/src/bot_store.rs	               AND ($2 = '' OR b.ownerid = $2)	               AND ($2 = $2)	store	bot_store_
+store-list-orphan-filter-is-off	crates/mm-store/src/bot_store.rs	               AND (NOT $3 OR (o.id IS NOT NULL AND o.deleteat <> 0))	               AND ($3 OR true)	store	bot_store_
+store-list-orders-newest-first	crates/mm-store/src/bot_store.rs	             ORDER BY b.createat ASC, u.username ASC	             ORDER BY b.createat DESC, u.username ASC	store	bot_store_
+store-display-name-is-the-username	crates/mm-store/src/bot_store.rs	                   COALESCE(u.firstname, '')      AS "displayname!",\n                   COALESCE(b.description, '')    AS "description!",\n                   COALESCE(b.ownerid, '')        AS "ownerid!",\n                   COALESCE(b.lasticonupdate, 0)  AS "lasticonupdate!",\n                   COALESCE(b.createat, 0)        AS "createat!",\n                   COALESCE(b.updateat, 0)        AS "updateat!",\n                   COALESCE(b.deleteat, 0)        AS "deleteat!"\n              FROM bots b\n              JOIN users u ON u.id = b.userid\n              LEFT JOIN	                   COALESCE(u.username, '')       AS "displayname!",\n                   COALESCE(b.description, '')    AS "description!",\n                   COALESCE(b.ownerid, '')        AS "ownerid!",\n                   COALESCE(b.lasticonupdate, 0)  AS "lasticonupdate!",\n                   COALESCE(b.createat, 0)        AS "createat!",\n                   COALESCE(b.updateat, 0)        AS "updateat!",\n                   COALESCE(b.deleteat, 0)        AS "deleteat!"\n              FROM bots b\n              JOIN users u ON u.id = b.userid\n              LEFT JOIN	api	bots
+#
+# --- no-op controls: these must SURVIVE ---
+control-rename-binding	crates/mm-api/src/bots.rs	    let bot = state.app.get_bot(&bot_user_id, include_deleted).await?;	    let found = state.app.get_bot(&bot_user_id, include_deleted).await?;\n    let bot = found;	api	bots
+control-store-reorder-independent-conditions	crates/mm-store/src/bot_store.rs	             WHERE ($1 OR b.deleteat = 0)\n               AND ($2 = '' OR b.ownerid = $2)	             WHERE ($2 = '' OR b.ownerid = $2)\n               AND ($1 OR b.deleteat = 0)	store	bot_store_
+control-store-orphan-null-check-is-redundant	crates/mm-store/src/bot_store.rs	               AND (NOT $3 OR (o.id IS NOT NULL AND o.deleteat <> 0))	               AND (NOT $3 OR o.deleteat <> 0)	store	bot_store_

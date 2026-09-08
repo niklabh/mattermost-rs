@@ -14,6 +14,7 @@
 //! driver. Queries here spell them the way the database does.
 
 pub mod audit_store;
+pub mod bot_store;
 pub mod channel_store;
 pub mod config_store;
 pub mod draft_store;
@@ -40,6 +41,7 @@ pub mod user_terms_of_service_store;
 pub mod webhook_store;
 
 pub use audit_store::{AUDIT_LIMIT_MAXIMUM, AuditStore, SqlAuditStore};
+pub use bot_store::{BotStore, SqlBotStore};
 pub use channel_store::{ChannelStore, SqlChannelStore};
 pub use config_store::{ConfigStore, SqlConfigStore};
 pub use draft_store::{DraftStore, SqlDraftStore};
@@ -76,6 +78,7 @@ use sqlx::postgres::PgPoolOptions;
 #[derive(Debug, Clone)]
 pub struct SqlStore {
     audit: SqlAuditStore,
+    bot: SqlBotStore,
     channel: SqlChannelStore,
     config: SqlConfigStore,
     emoji: SqlEmojiStore,
@@ -128,6 +131,7 @@ impl SqlStore {
     pub fn from_pool(pool: PgPool) -> Self {
         Self {
             audit: SqlAuditStore::new(pool.clone()),
+            bot: SqlBotStore::new(pool.clone()),
             channel: SqlChannelStore::new(pool.clone()),
             config: SqlConfigStore::new(pool.clone()),
             emoji: SqlEmojiStore::new(pool.clone()),
@@ -235,6 +239,11 @@ impl SqlStore {
     /// Port of `store.Store.Job()`.
     pub fn job(&self) -> &SqlJobStore {
         &self.job
+    }
+
+    /// Port of `store.Store.Bot()`.
+    pub fn bot(&self) -> &SqlBotStore {
+        &self.bot
     }
 
     /// Port of `store.Store.Post()` — and, folded in, `PostPriority()` and

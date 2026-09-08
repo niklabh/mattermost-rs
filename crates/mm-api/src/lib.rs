@@ -7,6 +7,8 @@
 
 pub mod audits;
 pub mod auth;
+/// The two bot reads. `getBot` and `getBots`.
+pub mod bots;
 pub mod channels;
 pub mod cloud;
 pub mod common_teams;
@@ -1448,6 +1450,11 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/audits",
             partially_migrated(get(audits::get_audits)),
+        )
+        .route("/api/v4/bots", partially_migrated(get(bots::get_bots)))
+        .route(
+            "/api/v4/bots/{bot_user_id}",
+            partially_migrated_with_ids(&state, get(bots::get_bot)),
         )
         .route("/api/v4/jobs", partially_migrated(get(jobs::get_jobs)))
         // `BaseRoutes.Jobs.Handle("/type/{job_type:[A-Za-z0-9_-]+}")` (api4/job.go:28). Two

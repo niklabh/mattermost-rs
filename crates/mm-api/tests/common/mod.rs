@@ -907,6 +907,12 @@ async fn purge_api_fixtures_once() {
         // thought it had granted.
         "UPDATE users SET roles = 'system_user' WHERE roles LIKE '%mmrs_role_%'",
         "DELETE FROM roles WHERE name LIKE 'mmrs_role_%'",
+        // Bots and their owners planted by `mm-store`'s `db_bot_store` test. They live in a
+        // different binary, but they land in the *same* database and `Users` is shared: a run
+        // that panicked past that file's own cleanup leaves rows that `users_stats` counts and
+        // `bots` compares. Cheap to sweep, and the alternative is an unexplained off-by-two.
+        "DELETE FROM bots WHERE userid LIKE 'mmrsbot%'",
+        "DELETE FROM users WHERE id LIKE 'mmrsbot%'",
         // Go's DELETE on an emoji is a **soft** delete and the name stays taken, so the row has
         // to go or the next run cannot create one.
         "DELETE FROM emoji WHERE name LIKE 'mmrsparity%'",
@@ -1609,7 +1615,7 @@ pub async fn invalidate_go_caches(client: &reqwest::Client, admin_token: &str) {
 ///
 /// Five helpers below plant rows no REST call can create. They each opened their own pool; this
 /// is that, once.
-async fn fixture_pool() -> Option<sqlx::PgPool> {
+pub(crate) async fn fixture_pool() -> Option<sqlx::PgPool> {
     let url = std::env::var("DATABASE_URL").ok()?;
     sqlx::postgres::PgPoolOptions::new()
         .max_connections(1)
