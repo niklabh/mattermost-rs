@@ -1690,6 +1690,24 @@ pub async fn system_value(name: &str) -> Option<Option<Option<String>>> {
 /// Two of the fields that decide `SetStatusOnline`'s branches never reach the wire — `manual` is
 /// on it but `prev_status` carries `json:"-"` — so the row is the only place a test can see them.
 /// Returns `(status, manual, prev_status, dnd_end_time, last_activity_at)`.
+/// The `Users.Props` map as the row holds it.
+///
+/// A custom status lives here as a JSON **string** under `customStatus`, and neither server's
+/// REST surface exposes the prop directly — `SanitizeProfile` does not strip it, but a cleared
+/// status is the empty string and a never-set one is an absent key, and only the row can tell
+/// those apart.
+pub async fn user_props(user_id: &str) -> Option<serde_json::Map<String, serde_json::Value>> {
+    let pool = fixture_pool().await?;
+    let row: Option<(Option<serde_json::Value>,)> =
+        sqlx::query_as("SELECT props FROM users WHERE id = $1")
+            .bind(user_id)
+            .fetch_optional(&pool)
+            .await
+            .expect("the users table is readable");
+    row.and_then(|row| row.0)
+        .and_then(|value| value.as_object().cloned())
+}
+
 pub type StatusRow = (String, bool, String, i64, i64);
 
 /// The nullable shape the columns actually have, before the defaults are folded in.

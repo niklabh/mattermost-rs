@@ -8422,3 +8422,65 @@ Rust read. `post_both_raw` had no quiescence bracket at all — `fetch_both_stab
 since the schemes suite, and every POST comparison in the tree was still doing a single unbracketed
 pair. `post_both_raw_stable` is that bracket for POSTs, now used at all ten call sites. Any suite
 whose answer embeds a `User` needs it; the route was never in question.
+
+## `UpdateUser`, and the four custom-status routes it was blocking (2026-09-08)
+
+New: `crates/mm-api/tests/parity/custom_status_writes.rs`,
+`scripts/mutations/custom-status-writes.plan`.
+Changed: `crates/mm-model/src/user.rs` (`UserUpdate`), `crates/mm-store/src/{error,user_store}.rs`,
+`crates/mm-app/src/{user,status,preference,config}.rs`, `crates/mm-api/src/{status,lib}.rs`,
+`crates/mm-api/tests/common/mod.rs` (`user_props`).
+
+**231/764, and `api4/status.go` is complete at 7/7.** A custom status is not a `Status` row — it
+lives in `Users.Props["customStatus"]` as a JSON string — so all four routes were blocked on
+`UpdateUser` rather than on the status cache, and porting it is what this group is really about.
+
+**`UserStore::update` is the security boundary of every update route in the server.** Thirteen
+fields are copied from the stored row onto the submitted user, and two more (`Roles`, `DeleteAt`)
+when the caller is untrusted, which every api4 caller is. Without them a client could set its own
+password hash, mark its own email verified, clear its own failed-login count, turn off its own MFA,
+grant itself a role, or un-deactivate its own account by naming the field in a request body. Those
+copies are the first eleven mutations in the plan.
+
+`sendUpdatedUserEvent` publishes **three** `user_updated` events, not one: an admin copy flagged
+`ContainsSensitiveData`, a member copy flagged `ContainsSanitizedData`, and — because both omit the
+subject — the subject's own copy, sanitised with `Sanitize(nil)` rather than `SanitizeProfile`, so
+it keeps the profile fields the other two strip. The hub already addressed both flags.
+
+**[D-089] is closed.** `UpdatePreferences` was the last route still carrying the original "a write
+served here publishes no WebSocket event" gap; its `sidebar_category_updated` and
+`preferences_changed` now go out, with `preferences` as a JSON **string** as Go sends it. Its
+sibling `DeletePreferences` had published its pair since it was written, and that asymmetry inside
+one route was the thing worth fixing.
+
+Not ported, and named rather than guessed at: the three background mails, `UpdateDefaultProfileImage`
+on a username change (needs the image pipeline — the consequence is a stale initials avatar), and
+three in-process caches this server does not have.
+
+### Sixteen survivors, one cause — and the store is where a boundary gets pinned
+
+The first run of `custom-status-writes.plan` was **19 caught, 16 survived, 2 harness faults**. The
+survivors were not sixteen findings; they were one. `UserStore::update`'s field copies are the
+security boundary of every update route, and **no ported route lets a client submit a `User`** —
+the custom-status routes write `Props` and nothing else, so deleting the password copy, the roles
+copy or the MFA copy is invisible over HTTP. A parity suite cannot reach them and no fixture in it
+ever will.
+
+They now run against a new `crates/mm-store/tests/db_user_update.rs`, which hands the store a
+deliberately poisoned `User` — the layer that *can* be given one. Writing it found three places
+where the expectation was wrong and the code was right:
+
+| expected | actual |
+|---|---|
+| a fixture user may carry both `auth_data` and a password | `IsValid` runs **before** the copies and refuses that pair (`auth_data_pwd`); `authdata` is uniquely indexed too |
+| `UpdateMentionKeysFromUsername` adds the new username | it only **removes** the old one, and leaves a leading comma — `",keepme"` |
+| a gitlab user's email change clears verification | gitlab is an **OAuth** service, so the email is pinned before the clear is reached; SAML is the SSO-but-not-OAuth case |
+
+Two of the sixteen were faults in the plan rather than gaps in the tests, and both are worth
+naming. The gate-ordering mutation moved the decode *expression* above the gate but not the
+refusal it guards — a genuine no-op that looked like a missing test for twenty minutes. And two
+mutations deleted a sqlx bind parameter, which breaks compile-time type inference rather than the
+code: **a mutation must keep every parameter it uses**, so swap two same-typed columns instead.
+The same trap the team-writes plan hit.
+
+Re-run: **34 run, 32 caught, 2 controls survived, 0 harness faults.**

@@ -51,6 +51,7 @@ mod parity {
     pub mod cloud_and_workspaces;
     pub mod common_teams;
     pub mod config_source;
+    pub mod custom_status_writes;
     pub mod data_retention;
     pub mod draft_and_preference_writes;
     pub mod drafts;

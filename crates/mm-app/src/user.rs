@@ -613,6 +613,314 @@ impl App {
 /// The store-error-to-`AppError` mapping for `GetUser`, split out so it is reachable from a test
 /// without a database. A miss and a broken query are different HTTP statuses, and collapsing them
 /// would report a server fault to the client as a missing account.
+impl App {
+    /// Port of `App.SanitizeProfile` (app/user.go:1375) over
+    /// `UserService.GetSanitizeOptions` (app/users/utils.go:48).
+    ///
+    /// The base options are `PrivacySettings.ShowFullName` and `ShowEmailAddress`; `as_admin`
+    /// forces those two on and adds `authservice` and `authdata`. Note the asymmetry with
+    /// `clear_non_profile_fields`, which `as_admin` makes *less* destructive — an admin copy keeps
+    /// `notify_props`, `auth_data` and `failed_attempts` that a member copy does not.
+    pub fn sanitize_profile(&self, user: &mut mm_model::user::User, as_admin: bool) {
+        let config = self.config();
+        let mut options = std::collections::HashMap::new();
+        options.insert("fullname".to_owned(), config.show_full_name);
+        options.insert("email".to_owned(), config.show_email_address);
+        if as_admin {
+            options.insert("fullname".to_owned(), true);
+            options.insert("email".to_owned(), true);
+            options.insert("authservice".to_owned(), true);
+            options.insert("authdata".to_owned(), true);
+        }
+        user.sanitize_profile(&options, as_admin);
+    }
+
+    /// Port of `App.sendUpdatedUserEvent` (app/user.go:1508).
+    ///
+    /// **Three events, all `user_updated`, all carrying a differently sanitised copy of the same
+    /// user**, and the hub decides which connection gets which:
+    ///
+    /// 1. the admin copy, `ContainsSensitiveData` — delivered *only* to connections with
+    ///    `manage_system`;
+    /// 2. the member copy, `ContainsSanitizedData` — delivered to everyone *without* it;
+    /// 3. the subject's own copy, addressed to their user id, with `Sanitize(nil)` rather than
+    ///    `SanitizeProfile` — so it keeps the profile fields the other two strip.
+    ///
+    /// All three omit the subject from the broadcast, which is why the third exists at all: the
+    /// user who made the change would otherwise learn nothing.
+    async fn send_updated_user_event(&self, user: &mm_model::user::User) {
+        let omit: std::collections::BTreeMap<String, bool> =
+            std::iter::once((user.id.clone(), true)).collect();
+
+        let mut admin_copy = user.clone();
+        self.sanitize_profile(&mut admin_copy, true);
+        let mut admin_message = mm_model::websocket_message::WebSocketEvent::new(
+            mm_model::websocket_message::WEBSOCKET_EVENT_USER_UPDATED,
+            "",
+            "",
+            "",
+            Some(omit.clone()),
+            "",
+        );
+        admin_message.add(
+            "user",
+            serde_json::to_value(&admin_copy).unwrap_or(serde_json::Value::Null),
+        );
+        let admin_message = {
+            let mut broadcast = admin_message.get_broadcast().cloned().unwrap_or_default();
+            broadcast.contains_sensitive_data = true;
+            admin_message.set_broadcast(broadcast)
+        };
+        self.publish(admin_message).await;
+
+        let mut member_copy = user.clone();
+        self.sanitize_profile(&mut member_copy, false);
+        let mut message = mm_model::websocket_message::WebSocketEvent::new(
+            mm_model::websocket_message::WEBSOCKET_EVENT_USER_UPDATED,
+            "",
+            "",
+            "",
+            Some(omit),
+            "",
+        );
+        message.add(
+            "user",
+            serde_json::to_value(&member_copy).unwrap_or(serde_json::Value::Null),
+        );
+        let message = {
+            let mut broadcast = message.get_broadcast().cloned().unwrap_or_default();
+            broadcast.contains_sanitized_data = true;
+            message.set_broadcast(broadcast)
+        };
+        self.publish(message).await;
+
+        // `Sanitize(nil)` — the *credential* scrub, not the profile one. A nil options map means
+        // every `options[...]` lookup is false, so the email and full name survive; only the
+        // password, MFA secret and auth data go.
+        let mut own_copy = user.clone();
+        own_copy.sanitize(&std::collections::HashMap::new());
+        let mut own_message = mm_model::websocket_message::WebSocketEvent::new(
+            mm_model::websocket_message::WEBSOCKET_EVENT_USER_UPDATED,
+            "",
+            "",
+            &own_copy.id,
+            None,
+            "",
+        );
+        own_message.add(
+            "user",
+            serde_json::to_value(&own_copy).unwrap_or(serde_json::Value::Null),
+        );
+        self.publish(own_message).await;
+    }
+
+    /// Port of `App.isUniqueToGroupNames` (app/user.go:1539).
+    ///
+    /// A username may not collide with a **group** name. The empty string is exempt, and the
+    /// query has no `DeleteAt` predicate — a soft-deleted group keeps its name reserved.
+    async fn is_unique_to_group_names(&self, value: &str) -> AppResult<()> {
+        if value.is_empty() {
+            return Ok(());
+        }
+        let exists = self
+            .store()
+            .user()
+            .group_name_exists(value)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "group name lookup failed");
+                AppError::boxed(
+                    "isUniqueToGroupNames",
+                    "app.user.save.groupname.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })?;
+        if exists {
+            // Go's id is the *username* one, not a group one — a client that picks a taken group
+            // name is told the username exists, which is the message it can act on.
+            return Err(AppError::boxed(
+                "isUniqueToGroupNames",
+                "app.user.save.username_exists.app_error",
+                None,
+                format!("group name {value} exists"),
+                400,
+            ));
+        }
+        Ok(())
+    }
+
+    /// Port of `App.UpdateUser` (app/user.go:1555).
+    ///
+    /// # `CreateAt` is restored twice
+    ///
+    /// Once here and once in the store. Go does both; keeping the redundancy means a future
+    /// caller that bypasses one still cannot move a user's creation time.
+    ///
+    /// # The email branch is three checks and a swap
+    ///
+    /// A changed email must pass the member domain list *unless* the stored user is a guest, an
+    /// LDAP user or a SAML user; and the guest domain list if the stored user **is** a guest and
+    /// not LDAP/SAML. The two lists are different config fields and the two errors are different
+    /// ids. Then, with `RequireEmailVerification` on, the submitted address is stashed and the
+    /// **stored** one is written back — unless the account is a bot, whose `prev.Email` is a
+    /// generated fake that a CLI conversion must be able to replace.
+    ///
+    /// # Not reproduced
+    ///
+    /// The three background sends (`SendEmailVerification`, `SendEmailChangeEmail`,
+    /// `SendChangeUsernameEmail`) — no mail service is ported, and every one of them is
+    /// `a.Srv().Go(...)`, so none can affect the response. `UpdateDefaultProfileImage` on a
+    /// username change with no custom picture — needs the image pipeline; the consequence is a
+    /// stale initials avatar, recorded rather than guessed at. `InvalidateCacheForUser`,
+    /// `onUserProfileChange` and the auto-translation locale cache are all in-process caches this
+    /// server does not have.
+    #[tracing::instrument(skip_all, fields(user_id = %user.id, notify = send_notifications))]
+    pub async fn update_user(
+        &self,
+        user: &mm_model::user::User,
+        send_notifications: bool,
+    ) -> AppResult<mm_model::user::User> {
+        let mut user = user.clone();
+        let prev = self.get_user(&user.id).await?;
+
+        if prev.create_at != user.create_at {
+            user.create_at = prev.create_at;
+        }
+
+        if user.username != prev.username {
+            self.is_unique_to_group_names(&user.username).await?;
+        }
+
+        let mut new_email = String::new();
+        if user.email != prev.email {
+            if !check_email_domain(&user.email, &self.config().restrict_creation_to_domains)
+                && !prev.is_guest()
+                && !prev.is_ldap_user()
+                && !prev.is_saml_user()
+            {
+                return Err(AppError::boxed(
+                    "UpdateUser",
+                    "api.user.update_user.accepted_domain.app_error",
+                    None,
+                    String::new(),
+                    400,
+                ));
+            }
+
+            if !check_email_domain(
+                &user.email,
+                &self.config().guest_restrict_creation_to_domains,
+            ) && prev.is_guest()
+                && !prev.is_ldap_user()
+                && !prev.is_saml_user()
+            {
+                return Err(AppError::boxed(
+                    "UpdateUser",
+                    "api.user.update_user.accepted_guest_domain.app_error",
+                    None,
+                    String::new(),
+                    400,
+                ));
+            }
+
+            if self.config().require_email_verification {
+                new_email = user.email.clone();
+                // "Don't set new eMail on user account if email verification is required, this
+                // will be done as a post-verification action to avoid users being able to set
+                // non-controlled eMails as their account email"
+                if self.get_user_by_email(&new_email).await.is_ok() {
+                    return Err(AppError::boxed(
+                        "UpdateUser",
+                        "app.user.save.email_exists.app_error",
+                        None,
+                        format!("user_id={}", user.id),
+                        400,
+                    ));
+                }
+                if !user.is_bot {
+                    user.email = prev.email.clone();
+                }
+            }
+        }
+
+        let update = self
+            .store()
+            .user()
+            .update(&user, false)
+            .await
+            .map_err(|err| update_user_error(err, &user.id))?;
+
+        let new_user = update.new;
+
+        if send_notifications {
+            // The three mails are not ported; the event is. `newEmail != ""` is Go's own signal
+            // that the address changed even though the row did not.
+            let _ = (&new_email, &update.old.email);
+            self.send_updated_user_event(&new_user).await;
+        }
+
+        // `newUser.Sanitize(map[string]bool{})` — an empty map, not nil: every option lookup is
+        // false, so this is the credential scrub only. The store already did it; Go does it
+        // again and so does this.
+        let mut new_user = new_user;
+        new_user.sanitize(&std::collections::HashMap::new());
+        Ok(new_user)
+    }
+}
+
+/// Port of `users.CheckEmailDomain` (app/users/utils.go:18).
+///
+/// An **empty** domain list admits everything, which is the default and so the live path on a
+/// stock server. The match is a suffix test against `"@" + domain`, so `example.com` admits
+/// `a@example.com` and also `a@evil-example.com` — Go's own looseness, reproduced.
+fn check_email_domain(email: &str, domains: &str) -> bool {
+    if domains.is_empty() {
+        return true;
+    }
+    let email = mm_model::utils::go_to_lower(email);
+    crate::team::normalize_domains(domains)
+        .iter()
+        .any(|domain| email.ends_with(&format!("@{domain}")))
+}
+
+/// The five error shapes `App.UpdateUser` gives the store's failures (app/user.go:1610).
+fn update_user_error(err: StoreError, user_id: &str) -> Box<AppError> {
+    match err {
+        // Go's `errors.As(err, &appErr)` — a validation failure keeps its own id and status.
+        StoreError::Invalid { app_error, .. } => app_error,
+        StoreError::InvalidInput { .. } => AppError::boxed(
+            "UpdateUser",
+            "app.user.update.find.app_error",
+            None,
+            String::new(),
+            400,
+        ),
+        StoreError::Conflict { resource, .. } => AppError::boxed(
+            "UpdateUser",
+            if resource == "Username" {
+                "app.user.save.username_exists.app_error"
+            } else {
+                "app.user.save.email_exists.app_error"
+            },
+            None,
+            String::new(),
+            400,
+        ),
+        other => {
+            tracing::error!(error = %other, user_id, "user update failed");
+            AppError::boxed(
+                "UpdateUser",
+                "app.user.update.finding.app_error",
+                None,
+                String::new(),
+                500,
+            )
+        }
+    }
+}
+
 fn get_user_error(err: StoreError) -> Box<AppError> {
     match err {
         StoreError::NotFound { .. } => AppError::boxed(

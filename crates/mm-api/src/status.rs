@@ -286,6 +286,188 @@ pub async fn update_user_status(
     }
 }
 
+/// Port of `updateUserCustomStatus` (api4/status.go:136), `PUT /users/{user_id}/status/custom`.
+///
+/// # Three refusals share one line
+///
+/// `jsonErr != nil || (Emoji == "" && Text == "") || !AreDurationAndExpirationTimeValid()` is a
+/// single `if`, so a malformed body, an empty status and an expired one are indistinguishable on
+/// the wire: all three are **400 `custom_status`**. Splitting them would be an improvement and a
+/// divergence.
+///
+/// # The gate is `TeamSettings`, and it answers 501
+///
+/// `EnableCustomUserStatuses` is a *different* setting from `ServiceSettings.EnableUserStatuses`,
+/// and off means **501 with a body**, where the plain status writes off means a silent 200.
+///
+/// # Order
+///
+/// The decode runs **before** the permission check, so a caller who may not touch this user still
+/// gets 400 for a bad body rather than 403.
+#[tracing::instrument(skip_all, fields(user_id = %user_id, forwarded))]
+pub async fn update_user_custom_status(
+    State(state): State<AppState>,
+    session: AuthenticatedSession,
+    Path(user_id): Path<String>,
+    body: axum::body::Bytes,
+) -> Response {
+    let user_id = resolve_me(&session, user_id);
+    if let Err(err) = require_id(&user_id, "user_id") {
+        return err.into_response();
+    }
+    if !state.app.config().enable_custom_user_statuses {
+        return custom_status_disabled("updateUserCustomStatus").into_response();
+    }
+
+    let decoded: Option<mm_model::custom_status::CustomStatus> = serde_json::from_slice(&body).ok();
+    let Some(mut custom_status) = decoded.filter(|cs| {
+        !(cs.emoji.is_empty() && cs.text.is_empty()) && cs.are_duration_and_expiration_time_valid()
+    }) else {
+        return ApiError::invalid_param("custom_status").into_response();
+    };
+
+    if !state
+        .app
+        .session_has_permission_to_user(&session.0, &user_id)
+        .await
+    {
+        return ApiError::from(*make_permission_error(
+            &session.0,
+            &[&PERMISSION_EDIT_OTHER_USERS],
+        ))
+        .into_response();
+    }
+
+    custom_status.pre_save();
+    match state.app.set_custom_status(&user_id, &custom_status).await {
+        Ok(()) => status_ok(),
+        Err(err) => ApiError::from(*err).into_response(),
+    }
+}
+
+/// Port of `removeUserCustomStatus` (api4/status.go:169),
+/// `DELETE /users/{user_id}/status/custom`.
+///
+/// No body at all, so the gate and the permission check are the whole handler.
+#[tracing::instrument(skip_all, fields(user_id = %user_id))]
+pub async fn remove_user_custom_status(
+    State(state): State<AppState>,
+    session: AuthenticatedSession,
+    Path(user_id): Path<String>,
+) -> Response {
+    let user_id = resolve_me(&session, user_id);
+    if let Err(err) = require_id(&user_id, "user_id") {
+        return err.into_response();
+    }
+    if !state.app.config().enable_custom_user_statuses {
+        return custom_status_disabled("removeUserCustomStatus").into_response();
+    }
+    if !state
+        .app
+        .session_has_permission_to_user(&session.0, &user_id)
+        .await
+    {
+        return ApiError::from(*make_permission_error(
+            &session.0,
+            &[&PERMISSION_EDIT_OTHER_USERS],
+        ))
+        .into_response();
+    }
+
+    match state.app.remove_custom_status(&user_id).await {
+        Ok(()) => status_ok(),
+        Err(err) => ApiError::from(*err).into_response(),
+    }
+}
+
+/// Port of `removeUserRecentCustomStatus` (api4/status.go:193), reached as **both**
+/// `DELETE /users/{user_id}/status/custom/recent` and
+/// `POST /users/{user_id}/status/custom/recent/delete`.
+///
+/// The two paths are the same function registered twice — the POST form exists for clients that
+/// cannot send a body with DELETE, and both read one.
+///
+/// Unlike its sibling, the decode failure is its **own** condition, so an undecodable body is
+/// `recent_custom_status` and an empty-but-valid one is not refused here at all — it reaches
+/// `RemoveRecentCustomStatus`, whose `Contains` answers false for a status with no emoji and no
+/// text, and comes back as the recents-delete error instead.
+#[tracing::instrument(skip_all, fields(user_id = %user_id))]
+pub async fn remove_user_recent_custom_status(
+    State(state): State<AppState>,
+    session: AuthenticatedSession,
+    Path(user_id): Path<String>,
+    body: axum::body::Bytes,
+) -> Response {
+    let user_id = resolve_me(&session, user_id);
+    if let Err(err) = require_id(&user_id, "user_id") {
+        return err.into_response();
+    }
+    if !state.app.config().enable_custom_user_statuses {
+        return custom_status_disabled("removeUserRecentCustomStatus").into_response();
+    }
+
+    let Ok(status) = serde_json::from_slice::<mm_model::custom_status::CustomStatus>(&body) else {
+        return ApiError::invalid_param("recent_custom_status").into_response();
+    };
+
+    if !state
+        .app
+        .session_has_permission_to_user(&session.0, &user_id)
+        .await
+    {
+        return ApiError::from(*make_permission_error(
+            &session.0,
+            &[&PERMISSION_EDIT_OTHER_USERS],
+        ))
+        .into_response();
+    }
+
+    match state
+        .app
+        .remove_recent_custom_status(&user_id, &status)
+        .await
+    {
+        Ok(()) => status_ok(),
+        Err(err) => ApiError::from(*err).into_response(),
+    }
+}
+
+/// `c.Params.UserId` with `me` already resolved — the router's own substitution, applied by
+/// `RequireUserId` on every route in this file.
+fn resolve_me(session: &AuthenticatedSession, user_id: String) -> String {
+    if user_id == ME {
+        session.0.user_id.clone()
+    } else {
+        user_id
+    }
+}
+
+/// The **501** all four custom-status routes answer when `EnableCustomUserStatuses` is off.
+///
+/// `Where` differs per handler and is on the wire, so it is a parameter rather than a constant.
+fn custom_status_disabled(where_: &'static str) -> ApiError {
+    ApiError::from(*AppError::boxed(
+        where_,
+        "api.custom_status.disabled",
+        None,
+        String::new(),
+        501,
+    ))
+}
+
+/// `web.ReturnStatusOK` (web/web.go:127) — `w.Write(MapToJSON(...))`, so **no trailing newline**.
+fn status_ok() -> Response {
+    (
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        r#"{"status":"OK"}"#,
+    )
+        .into_response()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

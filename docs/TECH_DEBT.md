@@ -3177,7 +3177,22 @@ revoked by Go.
 
 ## D-089 · A write served here publishes no WebSocket event
 
-**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-08-17 (phase 2, first write route)
+**Status** CLOSED 2026-09-08 · **Severity** divergence · **Raised** 2026-08-17 (phase 2, first
+write route)
+
+**Closed by option (a).** `mm-ws` is a real hub (`crates/mm-app/src/hub.rs`), every write route
+ported since publishes its events, and the parity suites compare the two servers' event streams
+frame by frame. What remains is not this entry: a client connected to *Go* still does not see a
+Rust write, and vice versa, because the two hubs are separate processes with no cluster bus
+between them. That is [D-182]/[D-190], it is a property of running two servers, and it ends when
+Go does.
+
+The last route still carrying the original gap was `UpdatePreferences`, whose two publishes landed
+with the custom-status group — its sibling `DeletePreferences` had had them since it was written,
+and the asymmetry inside one route was the thing worth fixing.
+
+The entry as originally written, for the record:
+
 **Affects** every write route from here on.
 
 Go's write paths end with `a.Publish(message)` — `UpdatePreferences` publishes
@@ -3203,7 +3218,7 @@ not been watched happening.
 - **(b) Have Rust writes go through Go's API** rather than the database, so Go publishes. Costs
   the latency of a second hop and makes the migrated route a proxy with extra steps.
 - **(c) Accept it.** For a project with no users, a missed live update is invisible; a developer
-  reloads the page. This is the current position, consistent with [D-087]'s calibration.
+  reloads the page. ~~This is the current position~~ — superseded; (a) was built.
 
 ---
 

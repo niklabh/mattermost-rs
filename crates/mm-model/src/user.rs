@@ -237,6 +237,22 @@ fn slice_is_empty(v: &Option<StringArray>) -> bool {
 // User
 // ---------------------------------------------------------------------------
 
+/// Port of `model.UserUpdate` (user.go:187).
+///
+/// What `SqlUserStore.Update` hands back: the row as it was and as it now is. `App.UpdateUser`
+/// decides three things by comparing them — whether to send an email-change mail, a
+/// username-change mail, and whether to mint a new default profile picture — so a store that
+/// returned only the new user would leave all three unanswerable.
+///
+/// Go's fields are pointers and can be nil; the store never returns a `UserUpdate` with either
+/// half missing (it errors instead, twice, with `app.user.update.find.app_error`), so they are
+/// values here and the two nil checks in `UpdateUser` are unreachable rather than ported.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UserUpdate {
+    pub old: User,
+    pub new: User,
+}
+
 /// Port of `model.User` (user.go:87).
 ///
 /// Three field shapes here are easy to get wrong and all three are load-bearing:

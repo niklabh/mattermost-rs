@@ -1,7 +1,7 @@
 //! Port of `SqlUserStore` (channels/store/sqlstore/user_store.go), `Get`, `GetByUsername` and
 //! `GetProfileByIds`.
 
-use mm_model::user::User;
+use mm_model::user::{User, UserUpdate};
 use mm_model::utils::{CURRENT_VERSION, StringArray, StringMap};
 use sqlx::PgPool;
 
@@ -44,6 +44,39 @@ pub trait UserStore {
         &self,
         usernames: &[String],
     ) -> impl std::future::Future<Output = Result<Vec<User>, StoreError>> + Send;
+
+    /// Port of `SqlUserStore.Update` (user_store.go:255).
+    ///
+    /// `trusted_update_data` is Go's second parameter. **Every caller reachable from api4 passes
+    /// `false`** — `App.UpdateUser` calls `userService.UpdateUser(rctx, user, false)` regardless
+    /// of its own `sendNotifications` flag — so the `!trusted` block is the live path and the
+    /// `true` path is reached only by the CLI and by tests.
+    ///
+    /// Returns Go's `UserUpdate{Old, New}`: the caller needs both, because whether to send an
+    /// email-change email, a username-change email, and a new default profile picture are all
+    /// decided by comparing them.
+    fn update(
+        &self,
+        user: &User,
+        trusted_update_data: bool,
+    ) -> impl std::future::Future<Output = Result<UserUpdate, StoreError>> + Send;
+
+    /// Port of `SqlPostStore.GetMaxPostSize` (post_store.go:2747), which `SqlUserStore.Update`
+    /// consults to bound `auto_responder_message`.
+    ///
+    /// Lives on this trait rather than the post store because this is its only caller here, and
+    /// because Go reaches it through `us.Post()` — a store-to-store call the layering forbids.
+    fn max_post_size(&self) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
+
+    /// Port of `SqlGroupStore.GetByName` (group_store.go:290), reduced to the question its one
+    /// caller asks.
+    ///
+    /// `App.isUniqueToGroupNames` wants a yes or no, and Go's query carries **no `DeleteAt`
+    /// predicate** — a soft-deleted group still reserves its name against a username.
+    fn group_name_exists(
+        &self,
+        name: &str,
+    ) -> impl std::future::Future<Output = Result<bool, StoreError>> + Send;
 
     /// Port of `SqlUserStore.GetByEmail` (user_store.go:1282).
     fn get_by_email(
@@ -1768,6 +1801,307 @@ impl UserStore for SqlUserStore {
 
         rows.into_iter().map(user_from_row).collect()
     }
+
+    /// # The thirteen fields the caller does not get to change
+    ///
+    /// Go reads the stored row and copies `CreateAt`, `AuthData`, `AuthService`, `Password`,
+    /// `LastPasswordUpdate`, `LastPictureUpdate`, `EmailVerified`, `FailedAttempts`, `MfaSecret`,
+    /// `MfaActive`, `MfaUsedTimestamps`, `LastLogin` and `RemoteId` **onto the submitted user**
+    /// before writing. That is the security boundary of every update route: without it a client
+    /// could set its own password hash, mark its own email verified, clear its own failed-login
+    /// count, or turn off its own MFA by putting the field in the request body.
+    ///
+    /// With `trusted_update_data` false — which is every api4 caller — `Roles` and `DeleteAt`
+    /// join that list, so no update route can grant itself a role or un-deactivate an account.
+    ///
+    /// # Three things the untrusted path does that the trusted one does not
+    ///
+    /// An OAuth user's email is pinned to the stored one. An LDAP user changing username or email
+    /// is **refused**, not ignored — two different `ErrInvalidInput`s. And any other email change
+    /// clears `EmailVerified`, which is what makes the verification mail meaningful.
+    ///
+    /// # And one both paths do
+    ///
+    /// `IsSSOUser` forces `EmailVerified` true — Go calls it "a lazy migration to fix broken
+    /// records", and it runs *after* the untrusted path may have cleared it.
+    #[tracing::instrument(skip_all, fields(user_id = %user.id, trusted = trusted_update_data))]
+    async fn update(
+        &self,
+        user: &User,
+        trusted_update_data: bool,
+    ) -> Result<UserUpdate, StoreError> {
+        let mut user = user.clone();
+        user.pre_update();
+
+        if let Err(app_error) = user.is_valid() {
+            return Err(StoreError::Invalid {
+                entity: "User",
+                app_error,
+            });
+        }
+
+        if let Some(notify_props) = user.notify_props.as_ref() {
+            let max = self.max_post_size().await?;
+            let message = notify_props
+                .get(mm_model::user::AUTO_RESPONDER_MESSAGE_NOTIFY_PROP)
+                .map(String::as_str)
+                .unwrap_or_default();
+            if message.chars().count() as i64 > max {
+                return Err(StoreError::InvalidInput {
+                    entity: "User",
+                    field: "auto_responder_message",
+                    value: "Auto responder message size can't be more than the allowed Post size"
+                        .to_owned(),
+                });
+            }
+        }
+
+        // Go's `oldUser.Id == ""` check: `GetBuilder` into a zero struct leaves the id empty when
+        // nothing matched. `get` raises `NotFound` for the same case, so the two are folded.
+        let old_user = match self.get(&user.id).await {
+            Ok(old_user) => old_user,
+            Err(err) if err.is_not_found() => {
+                return Err(StoreError::InvalidInput {
+                    entity: "User",
+                    field: "id",
+                    value: user.id.clone(),
+                });
+            }
+            Err(err) => return Err(err),
+        };
+
+        user.create_at = old_user.create_at;
+        user.auth_data = old_user.auth_data.clone();
+        user.auth_service = old_user.auth_service.clone();
+        user.password = old_user.password.clone();
+        user.last_password_update = old_user.last_password_update;
+        user.last_picture_update = old_user.last_picture_update;
+        user.email_verified = old_user.email_verified;
+        user.failed_attempts = old_user.failed_attempts;
+        user.mfa_secret = old_user.mfa_secret.clone();
+        user.mfa_active = old_user.mfa_active;
+        user.mfa_used_timestamps = old_user.mfa_used_timestamps.clone();
+        user.last_login = old_user.last_login;
+        user.remote_id = old_user.remote_id.clone();
+
+        if !trusted_update_data {
+            user.roles = old_user.roles.clone();
+            user.delete_at = old_user.delete_at;
+
+            if user.is_oauth_user() {
+                user.email = old_user.email.clone();
+            }
+
+            if user.is_ldap_user() {
+                if user.username != old_user.username {
+                    return Err(StoreError::InvalidInput {
+                        entity: "User",
+                        field: "id",
+                        value: user.id.clone(),
+                    });
+                }
+                if user.email != old_user.email {
+                    return Err(StoreError::InvalidInput {
+                        entity: "User",
+                        field: "email",
+                        value: user.id.clone(),
+                    });
+                }
+            }
+
+            if user.email != old_user.email {
+                user.email_verified = false;
+            }
+        }
+
+        // "In the past, changing the email of a SSO user would mark the email as unverified.
+        // This is a lazy migration to fix broken records." — and it runs after the clear above.
+        if user.is_sso_user() {
+            user.email_verified = true;
+        }
+
+        if user.username != old_user.username {
+            user.update_mention_keys_from_username(&old_user.username);
+        }
+
+        let props = json_or_null(user.props.as_ref(), "props")?;
+        let notify_props = json_or_null(user.notify_props.as_ref(), "notifyprops")?;
+        let timezone = json_or_null(user.timezone.as_ref(), "timezone")?;
+        let mfa_used_timestamps = match user.mfa_used_timestamps.as_ref() {
+            None => None,
+            Some(value) => {
+                Some(
+                    serde_json::to_value(value).map_err(|source| StoreError::Decode {
+                        entity: "User",
+                        column: "mfausedtimestamps",
+                        source,
+                    })?,
+                )
+            }
+        };
+
+        // The column list is Go's, verbatim and in its order. `Id` is the only column of the
+        // table that is **not** here: it is the key.
+        let affected = sqlx::query!(
+            r#"
+            UPDATE users
+               SET createat = $2, updateat = $3, deleteat = $4, username = $5, password = $6,
+                   authdata = $7, authservice = $8, email = $9, emailverified = $10,
+                   nickname = $11, firstname = $12, lastname = $13, position = $14, roles = $15,
+                   allowmarketing = $16, props = $17, notifyprops = $18,
+                   lastpasswordupdate = $19, lastpictureupdate = $20,
+                   failedattempts = $21, locale = $22, timezone = $23, mfaactive = $24,
+                   mfasecret = $25, remoteid = $26, lastlogin = $27, mfausedtimestamps = $28
+             WHERE id = $1
+            "#,
+            user.id,
+            user.create_at,
+            user.update_at,
+            user.delete_at,
+            user.username,
+            user.password,
+            user.auth_data,
+            user.auth_service,
+            user.email,
+            user.email_verified,
+            user.nickname,
+            user.first_name,
+            user.last_name,
+            user.position,
+            user.roles,
+            user.allow_marketing,
+            props,
+            notify_props,
+            user.last_password_update,
+            user.last_picture_update,
+            user.failed_attempts as i32,
+            user.locale,
+            timezone,
+            user.mfa_active,
+            user.mfa_secret,
+            user.remote_id,
+            user.last_login,
+            mfa_used_timestamps,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| match unique_constraint(&source) {
+            // Go tests the constraint names in this order, so a violation matching neither is an
+            // ordinary wrapped error rather than a conflict.
+            Some(resource) => StoreError::Conflict { resource, source },
+            None => StoreError::Db {
+                context: format!("failed to update User with userId={}", user.id),
+                source,
+            },
+        })?
+        .rows_affected();
+
+        if affected > 1 {
+            return Err(StoreError::Db {
+                context: format!(
+                    "multiple users were update: userId={}, count={affected}",
+                    user.id
+                ),
+                source: sqlx::Error::RowNotFound,
+            });
+        }
+
+        // Both halves are sanitized, and `Old` is what the caller compares against — so a caller
+        // that logged the pair cannot leak a password hash through either.
+        let mut new_user = user;
+        let mut old_user = old_user;
+        new_user.sanitize(&std::collections::HashMap::new());
+        old_user.sanitize(&std::collections::HashMap::new());
+
+        Ok(UserUpdate {
+            old: old_user,
+            new: new_user,
+        })
+    }
+
+    #[tracing::instrument(skip_all, fields(max))]
+    async fn max_post_size(&self) -> Result<i64, StoreError> {
+        let bytes: i64 = sqlx::query_scalar!(
+            r#"
+            SELECT COALESCE(character_maximum_length, 0)::bigint AS "length!"
+              FROM information_schema.columns
+             WHERE table_name = 'posts' AND column_name = 'message'
+            "#,
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "Unable to determine the maximum supported post size".to_owned(),
+            source,
+        })?
+        .unwrap_or(0);
+
+        // "Assume a worst-case representation of four bytes per rune" — and the floor is
+        // `PostMessageMaxRunesV2`, so a failed query does not make every message invalid the way
+        // `max_draft_size` does. That asymmetry is Go's.
+        let max = (bytes / 4).max(mm_model::post::POST_MESSAGE_MAX_RUNES_V2 as i64);
+        tracing::Span::current().record("max", max);
+        Ok(max)
+    }
+
+    #[tracing::instrument(skip_all, fields(name = %name, exists))]
+    async fn group_name_exists(&self, name: &str) -> Result<bool, StoreError> {
+        let exists: bool = sqlx::query_scalar!(
+            r#"SELECT EXISTS(SELECT 1 FROM usergroups WHERE name = $1) AS "exists!""#,
+            name,
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to get Group with name={name}"),
+            source,
+        })?;
+
+        tracing::Span::current().record("exists", exists);
+        Ok(exists)
+    }
+}
+
+/// A `StringMap`/`StringArray`/`Timezone` column, or SQL NULL when the model holds `None`.
+///
+/// Go writes `nil` maps as SQL NULL through `NamedExec`, and `user_from_row` already treats NULL
+/// and JSON `null` alike on the way back — so round-tripping a user with no props does not
+/// invent an empty object.
+fn json_or_null<T: serde::Serialize>(
+    value: Option<&T>,
+    column: &'static str,
+) -> Result<Option<serde_json::Value>, StoreError> {
+    match value {
+        None => Ok(None),
+        Some(value) => Ok(Some(serde_json::to_value(value).map_err(|source| {
+            StoreError::Decode {
+                entity: "User",
+                column,
+                source,
+            }
+        })?)),
+    }
+}
+
+/// Port of `IsUniqueConstraintError(err, []string{...})` for the two constraints
+/// `SqlUserStore.Update` names.
+///
+/// Go matches on the **constraint name** and checks Email before Username, which matters only if
+/// a statement could violate both — it cannot, since Postgres reports the first. Reproduced in
+/// Go's order anyway.
+fn unique_constraint(err: &sqlx::Error) -> Option<&'static str> {
+    let constraint = err.as_database_error()?.constraint()?;
+    for (name, resource) in [
+        ("users_email_key", "Email"),
+        ("idx_users_email_unique", "Email"),
+        ("users_username_key", "Username"),
+        ("idx_users_username_unique", "Username"),
+    ] {
+        if constraint == name {
+            return Some(resource);
+        }
+    }
+    None
 }
 
 #[cfg(test)]

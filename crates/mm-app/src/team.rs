@@ -1283,7 +1283,7 @@ impl App {
 /// `@` and `,` become spaces, the whole string is lower-cased, and the result is split on
 /// whitespace — so `"@corp.example.com, example.com  example.org"` is three domains. Go uses
 /// `strings.ToLower`, which is the **simple** case mapping; `go_to_lower` is the port of it.
-fn normalize_domains(domains: &str) -> Vec<String> {
+pub(crate) fn normalize_domains(domains: &str) -> Vec<String> {
     mm_model::utils::go_to_lower(&domains.replace(['@', ','], " "))
         .split_whitespace()
         .map(str::to_owned)

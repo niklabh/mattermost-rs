@@ -1,0 +1,88 @@
+# Mutation plan for the four custom-status routes and the `UpdateUser` beneath them.
+#
+#   scripts/mutate-batch.sh scripts/mutations/custom-status-writes.plan
+#
+# `UserStore::update` is the security boundary of every update route in the server: thirteen
+# fields are copied from the stored row onto the submitted user, and two more when the caller is
+# untrusted. Without them a client could set its own password hash, mark its own email verified,
+# clear its own failed-login count, turn off its own MFA, grant itself a role, or un-deactivate
+# its own account by putting the field in a request body. Those copies are mutated first.
+#
+# **Equivalent mutants, deliberately not here.** Measured, each survives for a reason about the
+# route rather than a gap in the tests:
+#
+#   * the `trusted_update_data` branch taken as `true`. Every api4 caller passes `false`, so
+#     flipping the constant at the call site is the only reachable form and it *is* mutated
+#     (`update-user-store-trusts-the-request`). Mutating inside the `if` would test the CLI path.
+#   * `user.create_at = prev.create_at` in `App::update_user`. The store restores it again from
+#     its own read, so the app-layer assignment cannot change what is written. Go carries the
+#     same redundancy.
+#   * `new_user.sanitize(...)` at the end of `App::update_user`. The store already sanitized both
+#     halves; Go does it twice too.
+#   * the `is_bot` exemption in the `RequireEmailVerification` branch. That flag is off on the
+#     shared stack, and a `SecondServer` with it on cannot reach the branch either — no bot has a
+#     password to authenticate with. Recorded rather than tested.
+#   * `update-user-skips-the-group-name-check`. `isUniqueToGroupNames` runs only when the username
+#     changes, and **no ported route changes a username** — the custom-status routes write `Props`
+#     and nothing else. It becomes reachable with `PUT /users/{id}`, and belongs in that plan.
+#   * swapping `invalid_param("recent_custom_status")` for `invalid_param("custom_status")`.
+#     `AppError.Params` is `json:"-"`, so neither name reaches the client and the id and status
+#     are identical. The same equivalence the team plan records for `id` vs `team_id`.
+#   * `update-user-store-trusts-the-request` — flipping `update(&user, false)` to `true` at the
+#     call site. The `store` lines below mutate both paths directly against
+#     `db_user_update.rs`, which asserts the trusted and untrusted branches side by side; the
+#     call-site flip only re-tests what `the_trusted_path_differs_in_exactly_two_fields` pins.
+#
+# **The store lines run against `db_user_update.rs`, not the parity suite, and that is the whole
+# finding of this plan's first run.** Sixteen mutations survived because no ported route lets a
+# client submit a `User`: the custom-status routes change `Props`, so deleting the password copy
+# or the roles copy is invisible over HTTP. The store is the layer that can be handed a poisoned
+# user, so that is where the boundary is pinned until `PUT /users/{id}` lands. Run them with:
+#
+#   MUTATE_STORE_TARGETS='--test db_user_update' scripts/mutate-batch.sh scripts/mutations/custom-status-writes.plan
+#
+# The last two lines are the no-op controls and must SURVIVE.
+
+# --- the store's field copies: the security boundary ------------------------------------------
+update-user-store-keeps-the-submitted-password	crates/mm-store/src/user_store.rs	        user.password = old_user.password.clone();	        // the submitted password is kept	store
+update-user-store-keeps-the-submitted-email-verified	crates/mm-store/src/user_store.rs	        user.email_verified = old_user.email_verified;	        // the submitted flag is kept	store
+update-user-store-keeps-the-submitted-mfa	crates/mm-store/src/user_store.rs	        user.mfa_active = old_user.mfa_active;	        // the submitted flag is kept	store
+update-user-store-keeps-the-submitted-roles	crates/mm-store/src/user_store.rs	            user.roles = old_user.roles.clone();	            // the submitted roles are kept	store
+update-user-store-keeps-the-submitted-delete-at	crates/mm-store/src/user_store.rs	            user.delete_at = old_user.delete_at;	            // the submitted delete_at is kept	store
+update-user-store-does-not-clear-email-verified	crates/mm-store/src/user_store.rs	            if user.email != old_user.email {\n                user.email_verified = false;\n            }	            if false {\n                user.email_verified = false;\n            }	store
+update-user-store-swaps-username-and-nickname	crates/mm-store/src/user_store.rs	                   nickname = $11, firstname = $12, lastname = $13,	                   nickname = $12, firstname = $11, lastname = $13,	store
+update-user-store-swaps-props-and-notifyprops	crates/mm-store/src/user_store.rs	                   allowmarketing = $16, props = $17, notifyprops = $18,	                   allowmarketing = $16, props = $18, notifyprops = $17,	store
+update-user-store-does-not-update-mention-keys	crates/mm-store/src/user_store.rs	        if user.username != old_user.username {\n            user.update_mention_keys_from_username(&old_user.username);\n        }	        if false {\n            user.update_mention_keys_from_username(&old_user.username);\n        }	store
+update-user-store-returns-the-new-user-as-old	crates/mm-store/src/user_store.rs	        Ok(UserUpdate {\n            old: old_user,\n            new: new_user,\n        })	        Ok(UserUpdate {\n            old: new_user.clone(),\n            new: new_user,\n        })	store
+
+# --- the app layer -----------------------------------------------------------------------------
+update-user-event-is-not-published	crates/mm-app/src/user.rs	            self.send_updated_user_event(&new_user).await;	            // no event	api	custom_status_writes
+update-user-event-does-not-omit-the-subject	crates/mm-app/src/user.rs	        let omit: std::collections::BTreeMap<String, bool> =\n            std::iter::once((user.id.clone(), true)).collect();	        let omit: std::collections::BTreeMap<String, bool> = std::collections::BTreeMap::new();	api	custom_status_writes
+update-user-own-event-is-not-addressed	crates/mm-app/src/user.rs	            &own_copy.id,\n            None,	            "",\n            None,	api	custom_status_writes
+update-user-own-copy-uses-the-profile-scrub	crates/mm-app/src/user.rs	        own_copy.sanitize(&std::collections::HashMap::new());	        self.sanitize_profile(&mut own_copy, false);	api	custom_status_writes
+update-user-admin-copy-is-not-sensitive	crates/mm-app/src/user.rs	            broadcast.contains_sensitive_data = true;	            broadcast.contains_sanitized_data = true;	api	custom_status_writes
+
+# --- the custom-status app functions -----------------------------------------------------------
+custom-status-emoji-not-checked	crates/mm-app/src/status.rs	        if !cs.emoji.is_empty() && self.confirm_emoji_exists(&cs.emoji).await.is_err() {	        if false {	api	custom_status_writes
+custom-status-emoji-error-is-not-wrapped	crates/mm-app/src/status.rs	        if !cs.emoji.is_empty() && self.confirm_emoji_exists(&cs.emoji).await.is_err() {\n            return Err(AppError::boxed(\n                "SetCustomStatus",\n                "api.custom_status.set_custom_statuses.emoji_not_found",\n                None,\n                String::new(),\n                400,\n            ));\n        }	        if !cs.emoji.is_empty() {\n            self.confirm_emoji_exists(&cs.emoji).await?;\n        }	api	custom_status_writes
+custom-status-system-emoji-not-short-circuited	crates/mm-app/src/status.rs	        if mm_model::emoji::is_system_emoji_name(emoji_name) {\n            return Ok(());\n        }	        if false {\n            return Ok(());\n        }	api	custom_status_writes
+custom-status-recents-not-updated	crates/mm-app/src/status.rs	        if let Err(err) = self.add_recent_custom_status(user_id, cs).await {	        if let Err(err) = Ok::<(), Box<AppError>>(()) {	api	custom_status_writes
+custom-status-recents-replace-rather-than-extend	crates/mm-app/src/status.rs	                decoded.add(status)	                mm_model::custom_status::RecentCustomStatuses(vec![status.clone()])	api	custom_status_writes
+custom-status-remove-clears-nothing	crates/mm-app/src/status.rs	        user.clear_custom_status();	        // the prop is left as it was	api	custom_status_writes
+custom-status-recent-delete-skips-the-membership-test	crates/mm-app/src/status.rs	        match existing.contains(status) {\n            Ok(true) => {}\n            Ok(false) | Err(_) => return Err(recent_delete_error()),\n        }	        match existing.contains(status) {\n            _ => {}\n        }	api	custom_status_writes
+custom-status-recent-delete-removes-nothing	crates/mm-app/src/status.rs	        let new_rcs = existing.remove(status).map_err(|_| recent_delete_error())?;	        let new_rcs = existing.clone();	api	custom_status_writes
+prefs-update-publishes-no-events	crates/mm-app/src/preference.rs	        self.publish(mm_model::websocket_message::WebSocketEvent::new(\n            mm_model::websocket_message::WEBSOCKET_EVENT_SIDEBAR_CATEGORY_UPDATED,\n            "",\n            "",\n            user_id,\n            None,\n            "",\n        ))\n        .await;\n\n        let mut message = mm_model::websocket_message::WebSocketEvent::new(\n            mm_model::websocket_message::WEBSOCKET_EVENT_PREFERENCES_CHANGED,	        let mut message = mm_model::websocket_message::WebSocketEvent::new(\n            mm_model::websocket_message::WEBSOCKET_EVENT_PREFERENCES_CHANGED,	api	custom_status_writes
+prefs-update-sends-the-batch-as-an-array	crates/mm-app/src/preference.rs	        message.add("preferences", serde_json::Value::String(encoded));	        message.add("preferences", serde_json::to_value(preferences).unwrap_or_default());	api	custom_status_writes
+
+# --- the handlers --------------------------------------------------------------------------------
+custom-status-gate-not-checked	crates/mm-api/src/status.rs	    if !state.app.config().enable_custom_user_statuses {\n        return custom_status_disabled("updateUserCustomStatus").into_response();\n    }	    if false {\n        return custom_status_disabled("updateUserCustomStatus").into_response();\n    }	api	custom_status_writes
+custom-status-gate-runs-after-the-refusal	crates/mm-api/src/status.rs	    if !state.app.config().enable_custom_user_statuses {\n        return custom_status_disabled("updateUserCustomStatus").into_response();\n    }\n\n    let decoded: Option<mm_model::custom_status::CustomStatus> = serde_json::from_slice(&body).ok();\n    let Some(mut custom_status) = decoded.filter(|cs| {\n        !(cs.emoji.is_empty() && cs.text.is_empty()) && cs.are_duration_and_expiration_time_valid()\n    }) else {\n        return ApiError::invalid_param("custom_status").into_response();\n    };	    let decoded: Option<mm_model::custom_status::CustomStatus> = serde_json::from_slice(&body).ok();\n    let Some(mut custom_status) = decoded.filter(|cs| {\n        !(cs.emoji.is_empty() && cs.text.is_empty()) && cs.are_duration_and_expiration_time_valid()\n    }) else {\n        return ApiError::invalid_param("custom_status").into_response();\n    };\n    if !state.app.config().enable_custom_user_statuses {\n        return custom_status_disabled("updateUserCustomStatus").into_response();\n    }	api	custom_status_writes
+custom-status-empty-body-accepted	crates/mm-api/src/status.rs	        !(cs.emoji.is_empty() && cs.text.is_empty()) && cs.are_duration_and_expiration_time_valid()	        cs.are_duration_and_expiration_time_valid()	api	custom_status_writes
+custom-status-expiry-not-validated	crates/mm-api/src/status.rs	        !(cs.emoji.is_empty() && cs.text.is_empty()) && cs.are_duration_and_expiration_time_valid()	        !(cs.emoji.is_empty() && cs.text.is_empty())	api	custom_status_writes
+custom-status-pre-save-skipped	crates/mm-api/src/status.rs	    custom_status.pre_save();	    // pre_save is skipped	api	custom_status_writes
+custom-status-remove-skips-the-permission-check	crates/mm-api/src/status.rs	    if !state\n        .app\n        .session_has_permission_to_user(&session.0, &user_id)\n        .await\n    {\n        return ApiError::from(*make_permission_error(\n            &session.0,\n            &[&PERMISSION_EDIT_OTHER_USERS],\n        ))\n        .into_response();\n    }\n\n    match state.app.remove_custom_status(&user_id).await {	    match state.app.remove_custom_status(&user_id).await {	api	custom_status_writes
+custom-status-answers-with-a-newline	crates/mm-api/src/status.rs	        r#"{"status":"OK"}"#,\n    )\n        .into_response()\n}	        "{\\"status\\":\\"OK\\"}\\n",\n    )\n        .into_response()\n}	api	custom_status_writes
+
+# --- no-op controls: both must SURVIVE ------------------------------------------------------------
+control-rename-custom-status-binding	crates/mm-app/src/status.rs	    async fn add_recent_custom_status(\n        &self,\n        user_id: &str,\n        status: &mm_model::custom_status::CustomStatus,\n    ) -> AppResult<()> {	    async fn add_recent_custom_status(\n        &self,\n        user_id: &str,\n        cs: &mm_model::custom_status::CustomStatus,\n    ) -> AppResult<()> {\n        let status = cs;	api	custom_status_writes
+control-reorder-independent-user-update-columns	crates/mm-store/src/user_store.rs	                   mfasecret = $25, remoteid = $26, lastlogin = $27, mfausedtimestamps = $28	                   remoteid = $26, mfasecret = $25, lastlogin = $27, mfausedtimestamps = $28	store

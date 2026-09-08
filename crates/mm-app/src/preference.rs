@@ -125,9 +125,16 @@ impl App {
     ///   `direct_channel_show` / `group_channel_show` preferences (preference.go:62). Needs the
     ///   channel store. See [D-091]; a client that changes DM visibility through us gets a
     ///   sidebar that does not follow.
-    /// * The two WebSocket events, `sidebar_category_updated` and `preferences_changed`
-    ///   (preference.go:66-70). We cannot reach the Go server's hub at all — see [D-089], which
-    ///   is the finding this route surfaced.
+    /// # The two events
+    ///
+    /// `sidebar_category_updated` carries an **empty data map** — Go's own comment says "TODO this
+    /// needs to be updated to include information on which categories changed" — and
+    /// `preferences_changed` carries the batch as a **JSON string**, not as a nested array. Both
+    /// are addressed to the user and to nothing else.
+    ///
+    /// They were unported until the hub existed ([D-089] recorded the gap); `delete_preferences`
+    /// has published its pair since it landed, and this asymmetry between the two halves of one
+    /// route was the thing worth fixing.
     #[tracing::instrument(skip_all, fields(user_id = %user_id, count = preferences.len()))]
     pub async fn update_preferences(
         &self,
@@ -148,6 +155,17 @@ impl App {
             }
         }
 
+        self.save_preferences_then_publish(user_id, preferences)
+            .await
+    }
+
+    /// The store call and the two events, split out so the ownership loop above reads as one
+    /// decision.
+    async fn save_preferences_then_publish(
+        &self,
+        user_id: &str,
+        preferences: &Preferences,
+    ) -> AppResult<()> {
         self.store()
             .preference()
             .save(preferences)
@@ -167,7 +185,43 @@ impl App {
                         400,
                     )
                 }
-            })
+            })?;
+
+        self.publish(mm_model::websocket_message::WebSocketEvent::new(
+            mm_model::websocket_message::WEBSOCKET_EVENT_SIDEBAR_CATEGORY_UPDATED,
+            "",
+            "",
+            user_id,
+            None,
+            "",
+        ))
+        .await;
+
+        let mut message = mm_model::websocket_message::WebSocketEvent::new(
+            mm_model::websocket_message::WEBSOCKET_EVENT_PREFERENCES_CHANGED,
+            "",
+            "",
+            user_id,
+            None,
+            "",
+        );
+        // `json.Marshal(preferences)` then `message.Add("preferences", string(...))` — the value
+        // is a **string** holding JSON, not an array. A port that added the array directly would
+        // give every client a type error on a field it parses.
+        let encoded = serde_json::to_string(preferences).map_err(|err| {
+            tracing::error!(error = %err, "preferences did not encode");
+            AppError::boxed(
+                "UpdatePreferences",
+                "api.marshal_error",
+                None,
+                String::new(),
+                500,
+            )
+        })?;
+        message.add("preferences", serde_json::Value::String(encoded));
+        self.publish(message).await;
+
+        Ok(())
     }
 }
 

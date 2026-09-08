@@ -65,6 +65,32 @@ pub enum StoreError {
     #[error("limit exceeds the store's maximum: {limit}")]
     OutOfBounds { limit: i64 },
 
+    /// Port of `store.NewErrConflict(resource, err, details)` (store/errors.go).
+    ///
+    /// A unique-constraint violation the app layer must tell apart by **which** constraint:
+    /// `App.UpdateUser` answers `app.user.save.username_exists.app_error` when `Resource` is
+    /// `"Username"` and `app.user.save.email_exists.app_error` for anything else. Folding the two
+    /// together would tell a client their email was taken when their username was.
+    #[error("{resource} already exists")]
+    Conflict {
+        resource: &'static str,
+        #[source]
+        source: sqlx::Error,
+    },
+
+    /// Port of `store.NewErrInvalidInput(entity, field, value)` (store/errors.go).
+    ///
+    /// Distinct from [`StoreError::Argument`] because the app layer answers **400** to this one
+    /// and 500 to that one: `App.UpdateUser` maps it to `app.user.update.find.app_error`. Go
+    /// raises it for a row that vanished between the caller's read and the store's, and for an
+    /// LDAP user whose username or email the caller tried to change.
+    #[error("invalid {entity}.{field}: {value}")]
+    InvalidInput {
+        entity: &'static str,
+        field: &'static str,
+        value: String,
+    },
+
     /// A `jsonb` column held something the model type cannot represent.
     ///
     /// Go decodes these columns into `model.StringMap` with `encoding/json` and surfaces a
@@ -85,6 +111,19 @@ impl StoreError {
     /// on a message would be exactly the stringly-typed error handling `CLAUDE.md` forbids.
     pub fn is_not_found(&self) -> bool {
         matches!(self, StoreError::NotFound { .. })
+    }
+
+    /// True when a unique constraint rejected the write. The `resource` says which.
+    pub fn conflict_resource(&self) -> Option<&'static str> {
+        match self {
+            StoreError::Conflict { resource, .. } => Some(resource),
+            _ => None,
+        }
+    }
+
+    /// True when a store function refused its input, which the app layer answers 400 to.
+    pub fn is_invalid_input(&self) -> bool {
+        matches!(self, StoreError::InvalidInput { .. })
     }
 
     /// True when a store function refused its page size, which the app layer answers 400 to.

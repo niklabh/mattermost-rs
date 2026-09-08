@@ -293,6 +293,26 @@ pub fn router(state: AppState) -> Router {
                 get(status::get_user_status).put(status::update_user_status),
             ),
         )
+        .route(
+            "/api/v4/users/{user_id}/status/custom",
+            partially_migrated_with_ids(
+                &state,
+                put(status::update_user_custom_status).delete(status::remove_user_custom_status),
+            ),
+        )
+        .route(
+            "/api/v4/users/{user_id}/status/custom/recent",
+            partially_migrated_with_ids(
+                &state,
+                axum::routing::delete(status::remove_user_recent_custom_status),
+            ),
+        )
+        // Gorilla registers `removeUserRecentCustomStatus` twice; the POST form exists for
+        // clients that cannot put a body on a DELETE, and reads one just the same.
+        .route(
+            "/api/v4/users/{user_id}/status/custom/recent/delete",
+            partially_migrated_with_ids(&state, post(status::remove_user_recent_custom_status)),
+        )
         // A literal under `/users/` whose *second* segment is `status` — it cannot collide with
         // `/users/{user_id}/status` above (third segment `ids` vs `status`), and axum prefers
         // the literal anyway. Registered as POST only: a GET here is forwarded and Go answers

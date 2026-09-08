@@ -169,6 +169,29 @@ pub struct Config {
     /// honoured at all: a user who has been active more recently than the timeout stays online.
     pub user_status_away_timeout: i64,
 
+    /// `TeamSettings.EnableCustomUserStatuses` (config.go:2549, defaulted **`true`** at :2596).
+    ///
+    /// Gates all four custom-status routes, which answer **501** `api.custom_status.disabled`
+    /// when it is off — a status code, not a silent success like [`Config::enable_user_statuses`]
+    /// gives the plain status writes. Two adjacent features, two different shapes of "off".
+    pub enable_custom_user_statuses: bool,
+
+    /// `EmailSettings.RequireEmailVerification` (config.go:2145, defaulted **`false`** at :2193).
+    ///
+    /// Read by `App.UpdateUser`, where it inverts what an email change *means*: with it on, the
+    /// submitted email is stashed as `newEmail` and the stored one is **kept**, so the row does
+    /// not change until the user follows a verification link. A port that ignored the flag would
+    /// let a client take an address it has not proved it owns.
+    pub require_email_verification: bool,
+
+    /// `GuestAccountsSettings.RestrictCreationToDomains` (config.go:3948, defaulted **`""`**).
+    ///
+    /// The guest-account twin of [`Config::restrict_creation_to_domains`]. `App.UpdateUser`
+    /// checks **both**, and which one refuses depends on whether the *stored* user is a guest —
+    /// so the two are not interchangeable and a port that read one for both would let a guest
+    /// take a member-only domain.
+    pub guest_restrict_creation_to_domains: String,
+
     /// `ServiceSettings.AllowSyncedDrafts` (config.go:488). Go default **`true`**.
     ///
     /// Gates the whole drafts feature. Every one of `getDrafts`, `upsertDraft` and `deleteDraft`
@@ -464,6 +487,9 @@ impl Default for Config {
             restrict_creation_to_domains: String::new(),
             enable_user_statuses: true,
             user_status_away_timeout: 300,
+            enable_custom_user_statuses: true,
+            require_email_verification: false,
+            guest_restrict_creation_to_domains: String::new(),
             allow_synced_drafts: true,
             enable_burn_on_read: true,
             feature_flag_burn_on_read: true,
@@ -601,6 +627,20 @@ impl Config {
                 "MM_TEAMSETTINGS_USERSTATUSAWAYTIMEOUT",
                 default.user_status_away_timeout,
             ),
+            enable_custom_user_statuses: lookup_bool(
+                lookup,
+                "MM_TEAMSETTINGS_ENABLECUSTOMUSERSTATUSES",
+                default.enable_custom_user_statuses,
+            ),
+            require_email_verification: lookup_bool(
+                lookup,
+                "MM_EMAILSETTINGS_REQUIREEMAILVERIFICATION",
+                default.require_email_verification,
+            ),
+            guest_restrict_creation_to_domains: lookup(
+                "MM_GUESTACCOUNTSSETTINGS_RESTRICTCREATIONTODOMAINS",
+            )
+            .unwrap_or(default.guest_restrict_creation_to_domains),
             post_priority: lookup_bool(
                 lookup,
                 "MM_SERVICESETTINGS_POSTPRIORITY",
@@ -748,6 +788,8 @@ impl Config {
         let is_update = service.site_url.is_some();
         let client_requirements = parsed.client_requirements.unwrap_or_default();
         let team_settings = parsed.team_settings.unwrap_or_default();
+        let email_settings = parsed.email_settings.unwrap_or_default();
+        let guest_accounts = parsed.guest_accounts_settings.unwrap_or_default();
         Ok(Self {
             // Moved, not cloned: `is_update` above already took the only other thing anything
             // wants from this field, and the remaining `service` reads are all `Option<bool>`.
@@ -804,6 +846,15 @@ impl Config {
             user_status_away_timeout: team_settings
                 .user_status_away_timeout
                 .unwrap_or(default.user_status_away_timeout),
+            enable_custom_user_statuses: team_settings
+                .enable_custom_user_statuses
+                .unwrap_or(default.enable_custom_user_statuses),
+            require_email_verification: email_settings
+                .require_email_verification
+                .unwrap_or(default.require_email_verification),
+            guest_restrict_creation_to_domains: guest_accounts
+                .restrict_creation_to_domains
+                .unwrap_or(default.guest_restrict_creation_to_domains),
             allow_synced_drafts: service
                 .allow_synced_drafts
                 .unwrap_or(default.allow_synced_drafts),
@@ -967,6 +1018,10 @@ struct Document {
     ai_recap_settings: Option<AIRecapSettingsDocument>,
     #[serde(rename = "TeamSettings")]
     team_settings: Option<TeamSettingsDocument>,
+    #[serde(rename = "EmailSettings")]
+    email_settings: Option<EmailSettingsDocument>,
+    #[serde(rename = "GuestAccountsSettings")]
+    guest_accounts_settings: Option<GuestAccountsSettingsDocument>,
 }
 
 /// The one field of `TeamSettings` a migrated route reads.
@@ -978,6 +1033,23 @@ struct TeamSettingsDocument {
     restrict_creation_to_domains: Option<String>,
     #[serde(rename = "UserStatusAwayTimeout")]
     user_status_away_timeout: Option<i64>,
+    #[serde(rename = "EnableCustomUserStatuses")]
+    enable_custom_user_statuses: Option<bool>,
+}
+
+/// The one field of `EmailSettings` a migrated route reads.
+#[derive(Debug, Default, serde::Deserialize)]
+struct EmailSettingsDocument {
+    #[serde(rename = "RequireEmailVerification")]
+    require_email_verification: Option<bool>,
+}
+
+/// The one field of `GuestAccountsSettings` a migrated route reads. Its name collides with
+/// `TeamSettings.RestrictCreationToDomains`, which is exactly why it needs its own section.
+#[derive(Debug, Default, serde::Deserialize)]
+struct GuestAccountsSettingsDocument {
+    #[serde(rename = "RestrictCreationToDomains")]
+    restrict_creation_to_domains: Option<String>,
 }
 
 /// The one field of `AIRecapSettings` a migrated route reads. `Option<bool>` all the way through:

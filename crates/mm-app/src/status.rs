@@ -453,6 +453,233 @@ fn online_row_needs_writing(
         || new.last_activity_at - old_time > mm_model::status::STATUS_MIN_UPDATE_TIME
 }
 
+impl App {
+    // ---------------------------------------------------------------------------------------
+    // Custom statuses
+    //
+    // A custom status is **not** a `Status` row. It lives in `Users.Props["customStatus"]` as a
+    // JSON string, so every write here is a full `UpdateUser` — which is why these four routes
+    // were blocked on that function rather than on the status cache.
+    // ---------------------------------------------------------------------------------------
+
+    /// Port of `App.confirmEmojiExists` (app/emoji.go:381).
+    ///
+    /// A system emoji short-circuits; anything else must pass `IsValidEmojiName` **and** exist in
+    /// the `Emoji` table. The two failures have different ids, and both are the emoji route's own
+    /// rather than a custom-status one.
+    async fn confirm_emoji_exists(&self, emoji_name: &str) -> AppResult<()> {
+        if mm_model::emoji::is_system_emoji_name(emoji_name) {
+            return Ok(());
+        }
+        mm_model::emoji::is_valid_emoji_name(emoji_name)?;
+        self.get_emoji_by_name(emoji_name).await?;
+        Ok(())
+    }
+
+    /// Port of `App.SetCustomStatus` (app/status.go:84).
+    ///
+    /// # The emoji is checked before anything is written
+    ///
+    /// "Ensure the emoji exists before saving the custom status even if it's deleted afterwards"
+    /// — and the wrapper error is `api.custom_status.set_custom_statuses.emoji_not_found` at 400,
+    /// which **replaces** the emoji route's own 404. A port that let `confirmEmojiExists`'s error
+    /// through would answer 404 where Go answers 400.
+    ///
+    /// # Two failures that are logged, not returned
+    ///
+    /// `user.SetCustomStatus` failing (a marshalling error, unreachable for this type) and
+    /// `addRecentCustomStatus` failing are both logged and swallowed. So a client can get a 200
+    /// for a status that was stored but whose recents were not updated.
+    #[tracing::instrument(skip_all, fields(user_id = %user_id))]
+    pub async fn set_custom_status(
+        &self,
+        user_id: &str,
+        cs: &mm_model::custom_status::CustomStatus,
+    ) -> AppResult<()> {
+        if cs.emoji.is_empty() && cs.text.is_empty() {
+            return Err(AppError::boxed(
+                "SetCustomStatus",
+                "api.custom_status.set_custom_statuses.update.app_error",
+                None,
+                String::new(),
+                400,
+            ));
+        }
+
+        if !cs.emoji.is_empty() && self.confirm_emoji_exists(&cs.emoji).await.is_err() {
+            return Err(AppError::boxed(
+                "SetCustomStatus",
+                "api.custom_status.set_custom_statuses.emoji_not_found",
+                None,
+                String::new(),
+                400,
+            ));
+        }
+
+        let mut user = self.get_user(user_id).await?;
+        if let Err(err) = user.set_custom_status(cs) {
+            tracing::error!(error = %err, user_id, "Failed to set custom status");
+        }
+        self.update_user(&user, true).await?;
+
+        if let Err(err) = self.add_recent_custom_status(user_id, cs).await {
+            tracing::error!(error = %err, user_id, "Can't add recent custom status for");
+        }
+
+        Ok(())
+    }
+
+    /// Port of `App.RemoveCustomStatus` (app/status.go:116).
+    ///
+    /// `ClearCustomStatus` writes the **empty string** into the prop rather than removing the
+    /// key, so a cleared status and a never-set one are different rows. It does not touch the
+    /// recents.
+    #[tracing::instrument(skip_all, fields(user_id = %user_id))]
+    pub async fn remove_custom_status(&self, user_id: &str) -> AppResult<()> {
+        let mut user = self.get_user(user_id).await?;
+        user.clear_custom_status();
+        self.update_user(&user, true).await?;
+        Ok(())
+    }
+
+    /// Port of `App.addRecentCustomStatus` (app/status.go:140).
+    ///
+    /// **An error from the preference read is treated the same as an empty value**: the recents
+    /// become a one-element list. So a user with no preference row and a user whose store is
+    /// failing both end up with their history replaced rather than extended.
+    async fn add_recent_custom_status(
+        &self,
+        user_id: &str,
+        status: &mm_model::custom_status::CustomStatus,
+    ) -> AppResult<()> {
+        let existing = self
+            .get_preference_by_category_and_name_for_user(
+                user_id,
+                mm_model::preference::PREFERENCE_CATEGORY_CUSTOM_STATUS,
+                mm_model::preference::PREFERENCE_NAME_RECENT_CUSTOM_STATUSES,
+            )
+            .await
+            .ok()
+            .filter(|preference| !preference.value.is_empty());
+
+        let new_rcs = match existing {
+            None => mm_model::custom_status::RecentCustomStatuses(vec![status.clone()]),
+            Some(preference) => {
+                let decoded: mm_model::custom_status::RecentCustomStatuses =
+                    serde_json::from_str(&preference.value).map_err(|err| {
+                        tracing::debug!(error = %err, "recent custom statuses did not decode");
+                        AppError::boxed(
+                            "addRecentCustomStatus",
+                            "api.unmarshal_error",
+                            None,
+                            String::new(),
+                            400,
+                        )
+                    })?;
+                decoded.add(status)
+            }
+        };
+
+        let encoded = serde_json::to_string(&new_rcs).map_err(|err| {
+            tracing::error!(error = %err, "recent custom statuses did not encode");
+            AppError::boxed(
+                "addRecentCustomStatus",
+                "api.marshal_error",
+                None,
+                String::new(),
+                400,
+            )
+        })?;
+
+        self.update_preferences(
+            user_id,
+            &mm_model::preference::Preferences(vec![mm_model::preference::Preference {
+                user_id: user_id.to_owned(),
+                category: mm_model::preference::PREFERENCE_CATEGORY_CUSTOM_STATUS.to_owned(),
+                name: mm_model::preference::PREFERENCE_NAME_RECENT_CUSTOM_STATUSES.to_owned(),
+                value: encoded,
+            }]),
+        )
+        .await
+    }
+
+    /// Port of `App.RemoveRecentCustomStatus` (app/status.go:171).
+    ///
+    /// **Four different ways to answer the same 400.** A failed read is the preference route's own
+    /// error; an empty value, a status the list does not contain, and a marshalling failure are
+    /// all `api.custom_status.recent_custom_statuses.delete.app_error`. The membership test is a
+    /// **byte comparison of the marshalled status**, not a field match — so a request whose
+    /// `expires_at` differs by a second removes nothing and is a 400.
+    #[tracing::instrument(skip_all, fields(user_id = %user_id))]
+    pub async fn remove_recent_custom_status(
+        &self,
+        user_id: &str,
+        status: &mm_model::custom_status::CustomStatus,
+    ) -> AppResult<()> {
+        let preference = self
+            .get_preference_by_category_and_name_for_user(
+                user_id,
+                mm_model::preference::PREFERENCE_CATEGORY_CUSTOM_STATUS,
+                mm_model::preference::PREFERENCE_NAME_RECENT_CUSTOM_STATUSES,
+            )
+            .await?;
+
+        if preference.value.is_empty() {
+            return Err(recent_delete_error());
+        }
+
+        let existing: mm_model::custom_status::RecentCustomStatuses =
+            serde_json::from_str(&preference.value).map_err(|err| {
+                tracing::debug!(error = %err, "recent custom statuses did not decode");
+                AppError::boxed(
+                    "RemoveRecentCustomStatus",
+                    "api.unmarshal_error",
+                    None,
+                    String::new(),
+                    400,
+                )
+            })?;
+
+        match existing.contains(status) {
+            Ok(true) => {}
+            Ok(false) | Err(_) => return Err(recent_delete_error()),
+        }
+
+        let new_rcs = existing.remove(status).map_err(|_| recent_delete_error())?;
+        let encoded = serde_json::to_string(&new_rcs).map_err(|err| {
+            tracing::error!(error = %err, "recent custom statuses did not encode");
+            AppError::boxed(
+                "RemoveRecentCustomStatus",
+                "api.marshal_error",
+                None,
+                String::new(),
+                400,
+            )
+        })?;
+
+        // Go mutates the preference it read and writes *that* back, so the row keeps whatever
+        // `UserId`/`Category`/`Name` the store returned rather than the arguments.
+        let mut preference = preference;
+        preference.value = encoded;
+        self.update_preferences(
+            user_id,
+            &mm_model::preference::Preferences(vec![preference]),
+        )
+        .await
+    }
+}
+
+/// The one error id `RemoveRecentCustomStatus` gives three different failures.
+fn recent_delete_error() -> Box<AppError> {
+    AppError::boxed(
+        "RemoveRecentCustomStatus",
+        "api.custom_status.recent_custom_statuses.delete.app_error",
+        None,
+        String::new(),
+        400,
+    )
+}
+
 /// Port of `truncateDNDEndTime` (platform/status.go).
 ///
 /// `time.Unix(endtime, 0).Truncate(DNDExpiryInterval).Unix()` — a **seconds** value rounded down
