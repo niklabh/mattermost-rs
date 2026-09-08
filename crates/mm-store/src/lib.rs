@@ -20,6 +20,7 @@ pub mod draft_store;
 pub mod emoji_store;
 pub mod error;
 pub mod file_info_store;
+pub mod job_store;
 pub mod oauth_store;
 pub mod post_store;
 pub mod preference_store;
@@ -45,6 +46,7 @@ pub use draft_store::{DraftStore, SqlDraftStore};
 pub use emoji_store::{EmojiStore, SqlEmojiStore};
 pub use error::StoreError;
 pub use file_info_store::{FileInfoStore, SqlFileInfoStore};
+pub use job_store::{JobStore, SqlJobStore};
 pub use oauth_store::{OAuthStore, SqlOAuthStore};
 pub use post_store::{PostStore, SqlPostStore};
 pub use preference_store::{PreferenceStore, SqlPreferenceStore};
@@ -79,6 +81,7 @@ pub struct SqlStore {
     emoji: SqlEmojiStore,
     draft: SqlDraftStore,
     file_info: SqlFileInfoStore,
+    job: SqlJobStore,
     oauth: SqlOAuthStore,
     post: SqlPostStore,
     reaction: SqlReactionStore,
@@ -130,6 +133,7 @@ impl SqlStore {
             emoji: SqlEmojiStore::new(pool.clone()),
             draft: SqlDraftStore::new(pool.clone()),
             file_info: SqlFileInfoStore::new(pool.clone()),
+            job: SqlJobStore::new(pool.clone()),
             oauth: SqlOAuthStore::new(pool.clone()),
             post: SqlPostStore::new(pool.clone()),
             reaction: SqlReactionStore::new(pool.clone()),
@@ -226,6 +230,11 @@ impl SqlStore {
 
     pub fn file_info(&self) -> &SqlFileInfoStore {
         &self.file_info
+    }
+
+    /// Port of `store.Store.Job()`.
+    pub fn job(&self) -> &SqlJobStore {
+        &self.job
     }
 
     /// Port of `store.Store.Post()` — and, folded in, `PostPriority()` and

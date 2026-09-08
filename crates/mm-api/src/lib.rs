@@ -20,6 +20,8 @@ pub mod feature_gates;
 /// `getFileInfo` — the one `/files/` route that returns JSON rather than bytes.
 pub mod files;
 pub mod groups;
+/// The three job reads. `getJobs`, `getJob` and `getJobsByType`.
+pub mod jobs;
 pub mod license;
 pub mod licensed_features;
 pub mod limits;
@@ -1446,6 +1448,19 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/audits",
             partially_migrated(get(audits::get_audits)),
+        )
+        .route("/api/v4/jobs", partially_migrated(get(jobs::get_jobs)))
+        // `BaseRoutes.Jobs.Handle("/type/{job_type:[A-Za-z0-9_-]+}")` (api4/job.go:28). Two
+        // segments deeper than `{job_id}` below, so there is no precedence question; the handler
+        // carries its own mux charset, because `job_type` is not id-shaped and the id middleware
+        // therefore does not see it.
+        .route(
+            "/api/v4/jobs/type/{job_type}",
+            partially_migrated(get(jobs::get_jobs_by_type)),
+        )
+        .route(
+            "/api/v4/jobs/{job_id}",
+            partially_migrated_with_ids(&state, get(jobs::get_job)),
         )
         .route(
             "/api/v4/usage/posts",

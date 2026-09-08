@@ -1,0 +1,49 @@
+# Mutation plan for the three job reads (GET /api/v4/jobs, /jobs/{job_id}, /jobs/type/{job_type}).
+#
+#   scripts/mutate-batch.sh scripts/mutations/jobs.plan
+#
+# The decisions worth mutating here are almost all about *which* empty answer a route gives and
+# *which* status a refusal carries — neither of which any type can protect. The nil-versus-empty
+# flag is a bare `bool` at three call sites, so flipping each one is a separate mutation.
+#
+# Four mutations were re-pointed after a first run reported them SURVIVED, and each survivor was a
+# finding about the fixtures rather than about the code:
+#
+#   * the two `page_in_memory` lines run under `unit`. Their branch is reached only by the
+#     `team_id`/`policy_id` filters, which need an access-control job — and creating one needs a
+#     licence, so no HTTP request on Team Edition reaches the sort at all. The unit tests do.
+#   * `store-data-filter-*` run under `store`, against `job_data_filter`, for the same reason
+#     seen from the other end: with zero matching rows in `Jobs`, a broken predicate and a correct
+#     one both return `[]`. That test plants the rows.
+#   * `app-data-retention-uses-read-jobs` stayed on `api` and the *suite* was fixed instead: every
+#     stock role granting `read_jobs` also grants `read_data_retention_job`, so a planted role
+#     holding only the first is what separates them.
+#
+# The last two lines are the no-op controls and must SURVIVE.
+
+api-getjobs-empty-is-a-list	crates/mm-api/src/jobs.rs	    if jobs.is_empty() && nil_when_empty {	    if false {	api	jobs
+api-bytype-empty-is-null	crates/mm-api/src/jobs.rs	    Ok(json_ok(encode_jobs(&jobs, false)?))	    Ok(json_ok(encode_jobs(&jobs, true)?))	api	jobs
+api-status-branch-picks-the-wrong-encoder	crates/mm-api/src/jobs.rs	                .await?,\n            false,	                .await?,\n            true,	api	jobs
+api-undefined-type-is-a-403	crates/mm-api/src/jobs.rs	        400,\n    ))\n}\n\n/// Port of `getJobs`	        403,\n    ))\n}\n\n/// Port of `getJobs`	api	jobs
+api-getjob-skips-the-newline	crates/mm-api/src/jobs.rs	    body.push(b'\\n');\n\n    Ok(json_ok(body))	    Ok(json_ok(body))	api	jobs
+api-getjob-checks-before-fetching	crates/mm-api/src/jobs.rs	    if !is_valid_id(&job_id) {	    if !is_valid_id(&job_id) || true {	api	jobs
+api-job-type-charset-allows-a-dot	crates/mm-api/src/jobs.rs	            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')	            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-' || b == b'.')	api	jobs
+api-empty-valid-types-is-not-a-403	crates/mm-api/src/jobs.rs	    if valid_job_types.is_empty() {	    if false {	api	jobs
+api-status-is-never-invalid	crates/mm-api/src/jobs.rs	    if !status.is_empty() && !job::is_valid_job_status(&status) {	    if false {	api	jobs
+api-status-check-runs-first	crates/mm-api/src/jobs.rs	        if !job::is_valid_job_type(&requested_type) {	        if false {	api	jobs
+api-team-id-is-never-validated	crates/mm-api/src/jobs.rs	        if !is_valid_id(&team_id) {	        if false {	api	jobs
+api-pagination-sorts-oldest-first	crates/mm-api/src/jobs.rs	    jobs.sort_by_key(|job| std::cmp::Reverse(job.create_at));	    jobs.sort_by_key(|job| job.create_at);	unit	in_memory_pagination
+api-pagination-clamps-instead-of-emptying	crates/mm-api/src/jobs.rs	    if start >= jobs.len() as i64 {\n        return Vec::new();\n    }	    if false {\n        return Vec::new();\n    }\n    let start = start.min(jobs.len() as i64 - 1).max(0);	unit	in_memory_pagination
+app-undefined-type-falls-back-to-read-jobs	crates/mm-app/src/job.rs	            _ => ReadJobPermission::NoPermissionDefined,	            _ => single(&PERMISSION_READ_JOBS).await,	api	jobs
+app-getjob-miss-is-a-500	crates/mm-app/src/job.rs	            let status = if err.is_not_found() {\n                404	            let status = if err.is_not_found() {\n                500	api	jobs
+app-data-retention-uses-read-jobs	crates/mm-app/src/job.rs	            job::JOB_TYPE_DATA_RETENTION => single(&PERMISSION_READ_DATA_RETENTION_JOB).await,	            job::JOB_TYPE_DATA_RETENTION => single(&PERMISSION_READ_JOBS).await,	api	jobs
+store-bytypes-orders-ascending	crates/mm-store/src/job_store.rs	             WHERE type = ANY($1)\n             ORDER BY createat DESC	             WHERE type = ANY($1)\n             ORDER BY createat ASC	api	jobs
+store-data-filter-ignores-the-key	crates/mm-store/src/job_store.rs	             WHERE type = $1 AND data->$2 = $3	             WHERE type = $1 AND data->'team_id' = $3 AND $2 = $2	store	job_data_filter
+store-bytype-ignores-the-type	crates/mm-store/src/job_store.rs	             WHERE type = $1\n             ORDER BY createat DESC	             WHERE type = $1 OR true\n             ORDER BY createat DESC	api	jobs
+store-data-filter-drops-the-quotes	crates/mm-store/src/job_store.rs	        let json_value = serde_json::Value::String(data_value.to_owned());	        let json_value = serde_json::Value::String(String::new());	store	job_data_filter
+#
+# --- no-op controls: these must SURVIVE ---
+control-rename-binding	crates/mm-api/src/jobs.rs	    let requested_type = query_first(query.as_deref(), "job_type").unwrap_or_default();	    let asked_for = query_first(query.as_deref(), "job_type").unwrap_or_default();\n    let requested_type = asked_for;	api	jobs
+control-reorder-independent-columns	crates/mm-store/src/job_store.rs	                   COALESCE(startat, 0)        AS "startat!",\n                   COALESCE(lastactivityat, 0) AS "lastactivityat!",\n                   COALESCE(status, '')        AS "status!",\n                   COALESCE(progress, 0)       AS "progress!",\n                   data                        AS "data?"\n              FROM jobs\n             WHERE id = $1	                   COALESCE(lastactivityat, 0) AS "lastactivityat!",\n                   COALESCE(startat, 0)        AS "startat!",\n                   COALESCE(progress, 0)       AS "progress!",\n                   COALESCE(status, '')        AS "status!",\n                   data                        AS "data?"\n              FROM jobs\n             WHERE id = $1	api	jobs
+control-store-rename-binding	crates/mm-store/src/job_store.rs	        let json_value = serde_json::Value::String(data_value.to_owned());	        let quoted = serde_json::Value::String(data_value.to_owned());\n        let json_value = quoted;	store	job_data_filter
+control-unit-rename-binding	crates/mm-api/src/jobs.rs	    let start = start as usize;	    let offset = start as usize;\n    let start = offset;	unit	in_memory_pagination

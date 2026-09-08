@@ -65,6 +65,7 @@ mod parity {
     pub mod gated_families;
     pub mod groups;
     pub mod incoming_hooks;
+    pub mod jobs;
     pub mod licence_gated_channels;
     pub mod license_client;
     pub mod licensed_features;

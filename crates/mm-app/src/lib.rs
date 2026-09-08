@@ -14,6 +14,7 @@ pub mod emoji;
 pub mod file;
 /// The websocket connection registry and event fan-out — Go's `app/platform` hub.
 pub mod hub;
+pub mod job;
 pub mod license;
 pub mod limits;
 pub mod oauth;

@@ -8484,3 +8484,44 @@ code: **a mutation must keep every parameter it uses**, so swap two same-typed c
 The same trap the team-writes plan hit.
 
 Re-run: **34 run, 32 caught, 2 controls survived, 0 harness faults.**
+
+## The three job reads, and an empty list that is `null` on one route and `[]` on the next (2026-09-08)
+
+`GET /api/v4/jobs`, `GET /api/v4/jobs/{job_id}` and `GET /api/v4/jobs/type/{job_type}` are served.
+New: `crates/mm-store/src/job_store.rs`, `crates/mm-app/src/job.rs`, `crates/mm-api/src/jobs.rs`,
+`crates/mm-store/tests/db_job_data_filter.rs`, `crates/mm-api/tests/parity/jobs.rs`,
+`scripts/mutations/jobs.plan`. `mm-model/src/job.rs` was already ported and needed no change.
+
+### The empty answer depends on a slice initialiser three layers down
+
+Four Go store methods build the same query and differ only in how they declare the destination:
+`var jobs []*model.Job` marshals as `null`, `jobs := []*model.Job{}` marshals as `[]`. Measured on
+the running server, not inferred — `?job_type=data_retention` gives `null` and
+`/type/data_retention` gives `[]`, same database, same zero rows. Adding `?status=success` moves
+`getJobs` to the *third* method and it answers `[]`. A `Vec` cannot carry that, so the decision is
+an explicit `nil_when_empty` flag at the API edge (`mm_api::jobs::encode_jobs`); the store trait
+documents which side each method is on.
+
+### `SessionHasPermissionToReadJob` returns a nil permission, and that is a 400
+
+An unknown job type produces `(false, nil)`, and every caller branches on the **nil**, answering
+`api.job.retrieve.nopermissions` with **400** — not a 403. Modelled as
+`mm_app::job::ReadJobPermission`, an enum, so the case cannot be destructured away into a bool.
+`scheduled_recap` is the interesting instance: it is in `AllJobTypes`, so it passes
+`IsValidJobType` and still lands on the 400.
+
+### Four survivors, four different fixture gaps
+
+First run **21 run, 15 caught, 4 real survivors**. None were shrugs:
+
+| survivor | why it survived | fix |
+|---|---|---|
+| the two `page_in_memory` mutations | that branch needs an access-control job, which needs a licence — no HTTP request on Team Edition reaches the sort | re-pointed to the `unit` suite, where the tests already existed |
+| `data_retention` → `read_jobs` | every stock role granting one grants the other, so both answers coincide | a planted role holding `read_jobs` alone (`parity::jobs::read_jobs_does_not_open_the_types_with_their_own_permission`) |
+| the JSONB data predicate | `Jobs` holds no row with a `team_id` in its `Data`, so a broken filter and a correct one both return `[]` | `db_job_data_filter.rs`, which plants the rows |
+
+And a fifth that was the harness, not the code: `MUTATE_FILTER=db_job_data_filter` is a **file**
+name, so cargo ran zero tests and reported SURVIVED — the trap `mutate.sh`'s own header warns
+about. The tests are named `job_data_filter_*` now so the filter can select them.
+
+Re-run: **24 run, 20 caught, 4 controls survived, 0 harness faults.**
