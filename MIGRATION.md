@@ -8623,3 +8623,46 @@ Two second gates are named and not ported: `getGroupStats` and
 route forward.
 
 Mutations: **9 run, 7 caught, 2 controls survived.**
+
+## Ten reads that refuse before they read anything (2026-09-08)
+
+`hosted_customer.go`, `license.go`, `saml.go`, `ldap.go`, `system.go`,
+`custom_profile_attributes.go`, `user.go`, `outgoing_oauth_connection.go` (×2) and `job.go` — ten
+`GET`s across eight files, all served. New: `crates/mm-api/src/gated_reads.rs`,
+`crates/mm-api/tests/parity/gated_reads.rs`, `scripts/mutations/gated-reads.plan`; three fields
+added to `mm_app::config::Config`.
+
+`licensed_features.rs` holds the routes whose licence test is the handler's first statement. These
+are the next shape along: the gate always fires, but it is not always first, not always the
+licence, and **not always the same status** — three of the ten answer 403 where the family's
+convention is 501, and `api.ldap_groups.license_error` appears at 501 here and at 403 in
+`group.go`. Neither the id nor the status can be inferred from a neighbour, which is the reason
+they are one module with one table.
+
+Two of them take **no session at all** — `getSamlMetadata` and `getSessionAttributesManifest` are
+`APIHandler`, not `APISessionRequired` — so an anonymous request gets the refusal where the other
+eight get a 401. Adding an extractor "for consistency" would turn a 501 into a 401.
+
+### The config fixture had drifted, and the test that should have caught it agreed with the drift
+
+`scripts/dump-config-fixture.sh` projected **six** sections and seventeen keys while `Document` had
+grown to fourteen sections and thirty-eight, so eight sections of Go's own output were never
+compared against anything —
+`the_fixture_covers_every_document_sourced_setting` asserted a hardcoded `17` rather than the
+struct's own shape. The list is now the struct's keys and the count is 40. Regenerating found one
+real difference and it is benign: `AIRecapSettings.SetDefaults` writes `Enable = true`, so a
+persisted document carries `Some(true)` where `Config::default()` carries `None` — and
+`IsEnabled()` treats absent as enabled, which is why the field is an `Option`.
+
+### A hand-planted fixture row was making **Go** answer 500
+
+`mm-app`'s `db_authorization_by_post` seeds a team without `LastTeamIconUpdate`, so the column was
+NULL — and `SqlTeamStore.GetAllPage` scans it into an `int64`. For as long as that row existed,
+`GET /api/v4/teams` was a 500 **on the Go server**, and twelve parity tests in two unrelated suites
+failed on "should return 200". It surfaced only because the two binaries ran in a different order
+than usual. The column is written now, and `purge_api_fixtures` sweeps the prefix.
+
+Mutations: **20 run, 17 caught, 2 controls survived** after re-pointing three that were measuring
+the wrong suite — two config defaults that only the config oracle can see, and the
+restricted-admin check, whose branch needs `ExperimentalSettings.RestrictSystemAdmin` and is
+therefore mutated at the app layer where a test can plant it.

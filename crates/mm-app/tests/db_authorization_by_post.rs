@@ -106,6 +106,16 @@ async fn purge(pool: &PgPool) {
     }
 }
 
+/// **Every nullable column Go scans into a non-pointer field must be written.**
+///
+/// `LastTeamIconUpdate` was omitted here, so the row carried NULL — and `SqlTeamStore.GetAllPage`
+/// scans it into an `int64`, which makes **Go's own `GET /api/v4/teams` a 500** for as long as this
+/// fixture exists. It is a cross-binary failure with no obvious cause: this file leaves the row
+/// behind (its purge runs at seed time, not teardown), and whichever `mm-api` parity suite runs
+/// next finds the forward target broken. Measured, twice: nine `teams_all` tests and three
+/// `system_usage` tests failed on `should return 200` with a 500 from Go.
+///
+/// `SchemeId` stays NULL on purpose — Go scans it into a `*string`.
 async fn seed(pool: &PgPool) {
     purge(pool).await;
 
@@ -113,9 +123,9 @@ async fn seed(pool: &PgPool) {
         r#"
         INSERT INTO teams (id, createat, updateat, deleteat, displayname, name, description,
                            email, type, companyname, alloweddomains, inviteid, allowopeninvite,
-                           schemeid, groupconstrained, cloudlimitsarchived)
+                           schemeid, lastteamiconupdate, groupconstrained, cloudlimitsarchived)
         VALUES ($1, $2, $2, 0, 'mmrs bp team', 'mmrs-bp-team', '', '', 'O', '', '', $1, false,
-                NULL, false, false)
+                NULL, 0, false, false)
         "#,
     )
     .bind(TEAM)

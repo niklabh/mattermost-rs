@@ -1,6 +1,21 @@
 {
+  "AIRecapSettings": {
+    "Enable": true
+  },
+  "ClientRequirements": {
+    "AndroidLatestVersion": "",
+    "AndroidMinVersion": "",
+    "IosLatestVersion": "",
+    "IosMinVersion": ""
+  },
   "ComplianceSettings": {
     "Enable": false
+  },
+  "ElasticsearchSettings": {
+    "EnableSearching": false
+  },
+  "EmailSettings": {
+    "RequireEmailVerification": false
   },
   "ExperimentalSettings": {
     "RestrictSystemAdmin": false
@@ -8,24 +23,48 @@
   "FileSettings": {
     "DriverName": "local"
   },
+  "GuestAccountsSettings": {
+    "RestrictCreationToDomains": ""
+  },
   "ImageProxySettings": {
     "Enable": false
+  },
+  "MessageExportSettings": {
+    "DownloadExportResults": false
   },
   "PrivacySettings": {
     "ShowEmailAddress": true,
     "ShowFullName": true
   },
   "ServiceSettings": {
+    "AllowPersistentNotifications": true,
     "AllowSyncedDrafts": true,
     "EnableBurnOnRead": true,
     "EnableCustomEmoji": true,
+    "EnableDynamicClientRegistration": false,
     "EnableIncomingWebhooks": true,
     "EnableOAuthServiceProvider": true,
+    "EnableOutgoingOAuthConnections": false,
     "EnableOutgoingWebhooks": true,
     "EnablePostIconOverride": false,
+    "EnablePostUsernameOverride": false,
+    "EnableTesting": false,
+    "EnableUserStatuses": true,
     "ExtendSessionLengthWithActivity": false,
+    "GoroutineHealthThreshold": -1,
     "PostPriority": true,
+    "ScheduledPosts": true,
     "SessionIdleTimeoutInMinutes": 43200,
-    "SiteURL": ""
+    "SiteURL": "",
+    "UniqueEmojiReactionLimitPerPost": 50
+  },
+  "SqlSettings": {
+    "DisableDatabaseSearch": false
+  },
+  "TeamSettings": {
+    "EnableCustomUserStatuses": true,
+    "RestrictCreationToDomains": "",
+    "RestrictDirectMessage": "any",
+    "UserStatusAwayTimeout": 300
   }
 }

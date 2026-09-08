@@ -64,6 +64,7 @@ mod parity {
     pub mod file_info;
     pub mod flagged_posts;
     pub mod gated_families;
+    pub mod gated_reads;
     pub mod groups;
     pub mod incoming_hooks;
     pub mod jobs;

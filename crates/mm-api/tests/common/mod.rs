@@ -907,6 +907,17 @@ async fn purge_api_fixtures_once() {
         // thought it had granted.
         "UPDATE users SET roles = 'system_user' WHERE roles LIKE '%mmrs_role_%'",
         "DELETE FROM roles WHERE name LIKE 'mmrs_role_%'",
+        // `mm-app`'s `db_authorization_by_post` fixture, which lives in another binary and leaves
+        // its rows behind. Swept here because one of them once made **Go** answer 500 to
+        // `GET /api/v4/teams` — a NULL `LastTeamIconUpdate` that Go scans into an `int64`. That
+        // column is written now, so this is belt-and-braces; the sweep costs nothing and the
+        // failure it prevents looks like a broken forward target rather than a stale fixture.
+        "DELETE FROM posts WHERE id LIKE 'mmrsbp%' OR channelid LIKE 'mmrsbp%'",
+        "DELETE FROM channelmembers WHERE userid LIKE 'mmrsbp%' OR channelid LIKE 'mmrsbp%'",
+        "DELETE FROM teammembers WHERE userid LIKE 'mmrsbp%' OR teamid LIKE 'mmrsbp%'",
+        "DELETE FROM users WHERE id LIKE 'mmrsbp%'",
+        "DELETE FROM channels WHERE id LIKE 'mmrsbp%'",
+        "DELETE FROM teams WHERE id LIKE 'mmrsbp%'",
         // Bots and their owners planted by `mm-store`'s `db_bot_store` test. They live in a
         // different binary, but they land in the *same* database and `Users` is shared: a run
         // that panicked past that file's own cleanup leaves rows that `users_stats` counts and

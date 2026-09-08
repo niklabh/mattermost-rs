@@ -19,6 +19,13 @@
 # KEEP THE KEY LIST IN SYNC. Adding a field to `mm_app::config::Config` means adding its key here
 # and re-running this, or the fixture silently stops covering the new field while still passing.
 #
+# **It had drifted, and the test that was supposed to catch that did not.** The list held six
+# sections and seventeen keys while the Rust `Document` had grown to fourteen sections and
+# thirty-eight; the count assertion in `the_fixture_covers_every_document_sourced_setting` was
+# comparing the fixture against a hardcoded 17 rather than against the struct, so it agreed with
+# the stale list. The list below is now the struct's own keys, extracted from it rather than
+# maintained beside it, and the count in that test is the number this script writes.
+#
 #   ./scripts/dump-config-fixture.sh
 #
 set -euo pipefail
@@ -52,7 +59,10 @@ MODELLED = {
         "EnablePostIconOverride", "EnableCustomEmoji", "PostPriority", "AllowSyncedDrafts",
         "EnableBurnOnRead", "EnableIncomingWebhooks", "EnableOutgoingWebhooks",
         "EnableOAuthServiceProvider", "SessionIdleTimeoutInMinutes",
-        "ExtendSessionLengthWithActivity",
+        "ExtendSessionLengthWithActivity", "GoroutineHealthThreshold", "EnableTesting",
+        "ScheduledPosts", "EnableUserStatuses", "EnableDynamicClientRegistration",
+        "EnableOutgoingOAuthConnections", "EnablePostUsernameOverride",
+        "AllowPersistentNotifications", "UniqueEmojiReactionLimitPerPost",
         # Not a setting Config carries — the `isUpdate` discriminator. `Config.isUpdate` is
         # `ServiceSettings.SiteURL != nil` (config.go:4289) and two defaults are `!isUpdate`, so
         # the fixture has to record that a real document *has* the key. The value is "" here and
@@ -64,6 +74,19 @@ MODELLED = {
     "ImageProxySettings": ["Enable"],
     "FileSettings": ["DriverName"],
     "PrivacySettings": ["ShowFullName", "ShowEmailAddress"],
+    "ClientRequirements": [
+        "AndroidLatestVersion", "AndroidMinVersion", "IosLatestVersion", "IosMinVersion",
+    ],
+    "SqlSettings": ["DisableDatabaseSearch"],
+    "ElasticsearchSettings": ["EnableSearching"],
+    "AIRecapSettings": ["Enable"],
+    "TeamSettings": [
+        "RestrictDirectMessage", "RestrictCreationToDomains", "UserStatusAwayTimeout",
+        "EnableCustomUserStatuses",
+    ],
+    "EmailSettings": ["RequireEmailVerification"],
+    "GuestAccountsSettings": ["RestrictCreationToDomains"],
+    "MessageExportSettings": ["DownloadExportResults"],
 }
 
 full = json.load(sys.stdin)

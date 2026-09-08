@@ -251,6 +251,39 @@ pub struct Config {
     /// same status. Read by [`crate::App::get_oauth_apps`] and its two neighbours.
     pub enable_oauth_service_provider: bool,
 
+    /// `ServiceSettings.EnableOutgoingOAuthConnections` (config.go:390, defaulted **`false`** at
+    /// :615).
+    ///
+    /// The **first** of the two gates in `ensureOutgoingOAuthConnectionInterface`
+    /// (api4/outgoing_oauth_connection.go:60), and on a stock server the one that fires: closed,
+    /// it answers `api.context.outgoing_oauth_connection.not_available.configuration_disabled` at
+    /// 501. *Open*, the next line asks for an Enterprise licence and answers
+    /// `api.license.upgrade_needed.app_error` — same status, different id — so the setting selects
+    /// which refusal a Team Edition server gives, never whether it refuses. Read by
+    /// `mm_api::outgoing_oauth`.
+    pub enable_outgoing_oauth_connections: bool,
+
+    /// `MessageExportSettings.DownloadExportResults` (config.go:3880, defaulted **`false`** at
+    /// :3893).
+    ///
+    /// The whole content of `downloadJob` (api4/job.go:59) on a stock server: closed, the route is
+    /// `app.job.download_export_results_not_enabled` at **501**, checked after `RequireJobId` and
+    /// before the job is fetched — so a nonexistent id is the 501 and not a 404. Read by
+    /// `mm_api::jobs::download_job`.
+    pub message_export_download_export_results: bool,
+
+    /// `FeatureFlags.SessionAttributes` (feature_flags.go:116, defaulted **`false`** at :204).
+    ///
+    /// Gates `GET /api/v4/users/sessions/attributes/manifest` through
+    /// `App.sessionAttributesEnabled` (app/session_attributes.go:24), which is this flag **and**
+    /// an Enterprise Advanced licence. Closed, the route is
+    /// `api.user.session_attributes.disabled.app_error` at 501.
+    ///
+    /// Like [`Config::feature_flag_burn_on_read`], it can only come from the environment or the
+    /// compiled-in default — `FeatureFlags` is cleared before the document is persisted, so there
+    /// is no database source to read and giving it one would be inventing a value.
+    pub feature_flag_session_attributes: bool,
+
     /// `ServiceSettings.EnableDynamicClientRegistration` (config.go:386, defaulted **`false`** at
     /// :599).
     ///
@@ -497,6 +530,9 @@ impl Default for Config {
             enable_incoming_webhooks: true,
             enable_outgoing_webhooks: true,
             enable_oauth_service_provider: true,
+            enable_outgoing_oauth_connections: false,
+            message_export_download_export_results: false,
+            feature_flag_session_attributes: false,
             show_full_name: true,
             show_email_address: true,
             // Absent, not empty: `SetDefaults` never fills `SiteURL`, and this constructor
@@ -725,6 +761,21 @@ impl Config {
                 "MM_SERVICESETTINGS_ENABLEOAUTHSERVICEPROVIDER",
                 default.enable_oauth_service_provider,
             ),
+            enable_outgoing_oauth_connections: lookup_bool(
+                lookup,
+                "MM_SERVICESETTINGS_ENABLEOUTGOINGOAUTHCONNECTIONS",
+                default.enable_outgoing_oauth_connections,
+            ),
+            message_export_download_export_results: lookup_bool(
+                lookup,
+                "MM_MESSAGEEXPORTSETTINGS_DOWNLOADEXPORTRESULTS",
+                default.message_export_download_export_results,
+            ),
+            feature_flag_session_attributes: lookup_bool(
+                lookup,
+                "MM_FEATUREFLAGS_SESSIONATTRIBUTES",
+                default.feature_flag_session_attributes,
+            ),
             show_full_name: lookup_bool(
                 lookup,
                 "MM_PRIVACYSETTINGS_SHOWFULLNAME",
@@ -815,6 +866,17 @@ impl Config {
             enable_dynamic_client_registration: service
                 .enable_dynamic_client_registration
                 .unwrap_or(default.enable_dynamic_client_registration),
+            enable_outgoing_oauth_connections: service
+                .enable_outgoing_oauth_connections
+                .unwrap_or(default.enable_outgoing_oauth_connections),
+            message_export_download_export_results: parsed
+                .message_export_settings
+                .unwrap_or_default()
+                .download_export_results
+                .unwrap_or(default.message_export_download_export_results),
+            // The same rule as `feature_flag_burn_on_read` above: `FeatureFlags` never reaches the
+            // persisted document, so there is nothing here to read.
+            feature_flag_session_attributes: default.feature_flag_session_attributes,
             enable_post_username_override: service
                 .enable_post_username_override
                 .unwrap_or(default.enable_post_username_override),
@@ -1022,6 +1084,15 @@ struct Document {
     email_settings: Option<EmailSettingsDocument>,
     #[serde(rename = "GuestAccountsSettings")]
     guest_accounts_settings: Option<GuestAccountsSettingsDocument>,
+    #[serde(rename = "MessageExportSettings")]
+    message_export_settings: Option<MessageExportSettingsDocument>,
+}
+
+/// The one field of `MessageExportSettings` a migrated route reads.
+#[derive(Debug, Default, serde::Deserialize)]
+struct MessageExportSettingsDocument {
+    #[serde(rename = "DownloadExportResults")]
+    download_export_results: Option<bool>,
 }
 
 /// The one field of `TeamSettings` a migrated route reads.
@@ -1112,6 +1183,8 @@ struct ServiceSettingsDocument {
     enable_user_statuses: Option<bool>,
     #[serde(rename = "EnableDynamicClientRegistration")]
     enable_dynamic_client_registration: Option<bool>,
+    #[serde(rename = "EnableOutgoingOAuthConnections")]
+    enable_outgoing_oauth_connections: Option<bool>,
     #[serde(rename = "EnablePostUsernameOverride")]
     enable_post_username_override: Option<bool>,
     #[serde(rename = "EnableCustomEmoji")]
@@ -1479,21 +1552,31 @@ mod go_parity {
     /// all — `defaults_match_gos_set_defaults` asserts the same values against line numbers a
     /// human read, which catches a typo in the test and nothing in the world.
     ///
-    /// # Two fields are expected to differ, and they are the same fact twice
+    /// # Three fields are expected to differ, and none of them is a drift
     ///
     /// `Store.Load` plants a `SiteURL` of `""` before calling `SetDefaults` (config/store.go:280),
     /// so a persisted document always **has** one where [`Config::default`] — which models a
     /// config that has never been through `Load` — does not. That is the first difference, and it
     /// causes the second: `ExtendSessionLengthWithActivity` defaults to `!isUpdate` and `isUpdate`
-    /// is `SiteURL != nil`, so the fresh config gets `true` and every real document `false`. Both
-    /// are correct for their input, which is why this compares against the adjusted default rather
-    /// than widening the assertion to let a genuine drift through.
+    /// is `SiteURL != nil`, so the fresh config gets `true` and every real document `false`.
+    ///
+    /// The third appeared the moment the fixture stopped being a six-section projection:
+    /// `AIRecapSettings.SetDefaults` writes `Enable = true` when it is nil
+    /// (ai_recap_settings.go:105), so a persisted document carries `Some(true)` where the fresh
+    /// config carries `None`. **They mean the same thing** — `IsEnabled()` is
+    /// `s == nil || s.Enable == nil || *s.Enable`, so absent *is* enabled — which is why the field
+    /// is an `Option` at all. Adjusted here rather than changed in [`Config::default`], because
+    /// the default is modelling the pre-`Load` config correctly.
+    ///
+    /// All three are correct for their input, which is why this compares against the adjusted
+    /// default rather than widening the assertion to let a genuine drift through.
     #[test]
     fn every_default_matches_what_go_actually_wrote() {
         let from_go = Config::from_document(ACTIVE).expect("the fixture is a config document");
         let transcribed = Config {
             site_url: Some(String::new()),
             extend_session_length_with_activity: false,
+            ai_recap_settings_enable: Some(true),
             ..Config::default()
         };
 
@@ -1655,8 +1738,13 @@ mod go_parity {
     /// *default* against its default and passes, having proved nothing about the new field. The
     /// count is the cheapest thing that fails instead.
     ///
-    /// Seventeen: the nineteen fields [`Config`] carries, minus `feature_flag_burn_on_read` and
-    /// `license`, which come from nowhere near the document.
+    /// **The count was 17 and the script's key list had drifted to match it.** `Document` had
+    /// grown to fourteen sections and thirty-eight keys while the projection still carried six
+    /// sections and seventeen, so eight sections of Go's own output were never compared against
+    /// anything and this assertion agreed with the omission. The list in the script is now the
+    /// struct's keys, and the number below is what the script writes: **40** — the thirty-eight
+    /// modelled keys plus `ServiceSettings.SiteURL`, projected for its presence rather than its
+    /// value, and counted here like any other.
     #[test]
     fn the_fixture_covers_every_document_sourced_setting() {
         let fixture: serde_json::Value = serde_json::from_str(ACTIVE).expect("the fixture is JSON");
@@ -1668,8 +1756,8 @@ mod go_parity {
             .sum();
 
         assert_eq!(
-            keys, 17,
-            "the fixture covers {keys} settings and Config reads 17 from the document. \
+            keys, 40,
+            "the fixture covers {keys} settings and Config reads 40 from the document. \
              Add the new key to scripts/dump-config-fixture.sh and re-run it — a modelled \
              setting the fixture does not carry is a setting Go's own output never checked"
         );

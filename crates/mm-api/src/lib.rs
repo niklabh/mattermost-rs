@@ -20,6 +20,9 @@ pub mod emoji;
 pub mod error;
 pub mod feature_gates;
 /// `getFileInfo` — the one `/files/` route that returns JSON rather than bytes.
+/// Ten reads that refuse before they read anything. One module, eight `api4` files.
+pub mod gated_reads;
+
 pub mod files;
 pub mod groups;
 /// The three job reads. `getJobs`, `getJob` and `getJobsByType`.
@@ -1490,6 +1493,50 @@ pub fn router(state: AppState) -> Router {
                 &state,
                 get(groups::get_groups_associated_to_channels_by_team),
             ),
+        )
+        // --- `gated_reads`: ten refusals across eight api4 files. See that module for the table.
+        .route(
+            "/api/v4/hosted_customer/signup_available",
+            partially_migrated(get(gated_reads::handle_signup_available)),
+        )
+        .route(
+            "/api/v4/trial-license/prev",
+            partially_migrated(get(gated_reads::get_prev_trial_license)),
+        )
+        // `APIHandler`, not `APISessionRequired` — no session extractor, deliberately.
+        .route(
+            "/api/v4/saml/metadata",
+            partially_migrated(get(gated_reads::get_saml_metadata)),
+        )
+        .route(
+            "/api/v4/ldap/groups",
+            partially_migrated(get(gated_reads::get_ldap_groups)),
+        )
+        .route(
+            "/api/v4/system/support_packet",
+            partially_migrated(get(gated_reads::generate_support_packet)),
+        )
+        .route(
+            "/api/v4/custom_profile_attributes/group",
+            partially_migrated(get(gated_reads::get_cpa_group)),
+        )
+        // Four segments under `/users`, so it shadows none of the `{user_id}` routes; `APIHandler`
+        // again, so no session extractor.
+        .route(
+            "/api/v4/users/sessions/attributes/manifest",
+            partially_migrated(get(gated_reads::get_session_attributes_manifest)),
+        )
+        .route(
+            "/api/v4/oauth/outgoing_connections",
+            partially_migrated(get(gated_reads::list_outgoing_oauth_connections)),
+        )
+        .route(
+            "/api/v4/oauth/outgoing_connections/{outgoing_oauth_connection_id}",
+            partially_migrated_with_ids(&state, get(gated_reads::get_outgoing_oauth_connection)),
+        )
+        .route(
+            "/api/v4/jobs/{job_id}/download",
+            partially_migrated_with_ids(&state, get(gated_reads::download_job)),
         )
         .route("/api/v4/bots", partially_migrated(get(bots::get_bots)))
         .route(

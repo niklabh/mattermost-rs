@@ -1,0 +1,50 @@
+# Mutation plan for the ten reads in `mm_api::gated_reads` (eight api4 files, one module).
+#
+#   scripts/mutate-batch.sh scripts/mutations/gated-reads.plan
+#
+# Every route refuses, so mutating "does it refuse" proves nothing. What is worth mutating is
+# **which** refusal, **what runs first**, and **whether a session is demanded at all** — the three
+# things a reader could plausibly get wrong by copying a neighbour in the same module.
+#
+# The three config-sourced gates get their own lines because each is the whole content of its
+# route on a stock server, and each defaults to a value that makes the route refuse: flipping the
+# default turns a 501 into a forward.
+#
+# **Three mutations were re-pointed after a first run reported them SURVIVED**, and none was a gap
+# in the code:
+#
+#   * the two config defaults belong to the *config* oracle, not to a route suite. The live
+#     document supplies both values explicitly, so no request can tell the default apart from the
+#     document — `every_default_matches_what_go_actually_wrote` is what compares them, and it only
+#     started covering these two once `dump-config-fixture.sh` stopped projecting six sections.
+#   * `session_has_permission_to_and_not_restricted_admin` differs from the plain check **only**
+#     when `ExperimentalSettings.RestrictSystemAdmin` is true, and it is false on this deployment
+#     with no route to change it. Mutating the handler's *choice* of check is therefore invisible
+#     over HTTP; the mutation moved to the app function, where `db_authorization_by_post` plants
+#     the setting and can see it. That the support-packet handler picks the restricted variant is
+#     recorded in its doc comment, which is where someone changing the line will read it.
+#
+# The last two lines are the no-op controls and must SURVIVE.
+
+api-signup-available-is-a-403	crates/mm-api/src/gated_reads.rs	        "api.server.hosted_signup_unavailable.error",\n        501,	        "api.server.hosted_signup_unavailable.error",\n        403,	api	gated_reads
+api-prev-trial-is-a-501	crates/mm-api/src/gated_reads.rs	        "api.license.upgrade_needed.app_error",\n        403,\n        request,\n    )\n    .await\n}\n\n/// Port of `getSamlMetadata`	        "api.license.upgrade_needed.app_error",\n        501,\n        request,\n    )\n    .await\n}\n\n/// Port of `getSamlMetadata`	api	gated_reads
+api-support-packet-is-a-501	crates/mm-api/src/gated_reads.rs	        "api.no_license",\n        403,	        "api.no_license",\n        501,	api	gated_reads
+api-cpa-group-is-a-501	crates/mm-api/src/gated_reads.rs	        "app.property.license_error",\n        403,	        "app.property.license_error",\n        501,	api	gated_reads
+api-ldap-skips-the-permission	crates/mm-api/src/gated_reads.rs	    if !state\n        .app\n        .session_has_permission_to(\n            &session.0,\n            &PERMISSION_SYSCONSOLE_READ_USER_MANAGEMENT_GROUPS,\n        )\n        .await\n    {	    if false {	api	gated_reads
+app-restricted-admin-check-is-the-plain-one	crates/mm-app/src/authorization.rs	        if self.config().restrict_system_admin {\n            return false;\n        }	        if false {\n            return false;\n        }	app	the_restricted_admin_setting_denies_a_grant_the_roles_would_allow
+api-support-packet-skips-the-permission	crates/mm-api/src/gated_reads.rs	    if !state\n        .app\n        .session_has_permission_to_and_not_restricted_admin(&session.0, &PERMISSION_MANAGE_SYSTEM)\n        .await\n    {	    if false {	api	gated_reads
+api-outgoing-list-uses-the-write-permission	crates/mm-api/src/gated_reads.rs	    let allowed = state\n        .app\n        .session_has_permission_to(&session.0, &PERMISSION_MANAGE_OUTGOING_OAUTH_CONNECTIONS)\n        .await\n        || state	    let allowed = state\n        .app\n        .session_has_permission_to(&session.0, &PERMISSION_MANAGE_OUTGOING_OAUTH_CONNECTIONS)\n        .await\n        && state	api	gated_reads
+api-outgoing-get-uses-the-read-triple	crates/mm-api/src/gated_reads.rs	    if !state\n        .app\n        .session_has_permission_to(&session.0, &PERMISSION_MANAGE_OUTGOING_OAUTH_CONNECTIONS)\n        .await\n    {\n        return ApiError::from(make_permission_error(\n            &session.0,\n            &[&PERMISSION_MANAGE_OUTGOING_OAUTH_CONNECTIONS],\n        ))\n        .into_response();\n    }	    if false {\n        return ApiError::from(make_permission_error(\n            &session.0,\n            &[&PERMISSION_MANAGE_OUTGOING_OAUTH_CONNECTIONS],\n        ))\n        .into_response();\n    }	api	gated_reads
+api-outgoing-config-gate-is-inverted	crates/mm-api/src/gated_reads.rs	    if !state.app.config().enable_outgoing_oauth_connections {	    if state.app.config().enable_outgoing_oauth_connections {	api	gated_reads
+api-session-attributes-flag-is-inverted	crates/mm-api/src/gated_reads.rs	    let enabled = state.app.config().feature_flag_session_attributes;\n    tracing::Span::current().record("flag_enabled", enabled);\n    if enabled {	    let enabled = state.app.config().feature_flag_session_attributes;\n    tracing::Span::current().record("flag_enabled", enabled);\n    if !enabled {	api	gated_reads
+api-download-job-skips-the-id-check	crates/mm-api/src/gated_reads.rs	    if !is_valid_id(&job_id) {	    if false {	api	gated_reads
+api-download-job-setting-is-inverted	crates/mm-api/src/gated_reads.rs	    let enabled = state.app.config().message_export_download_export_results;\n    tracing::Span::current().record("enabled", enabled);\n    if enabled {	    let enabled = state.app.config().message_export_download_export_results;\n    tracing::Span::current().record("enabled", enabled);\n    if !enabled {	api	gated_reads
+api-saml-demands-a-session	crates/mm-api/src/gated_reads.rs	pub async fn get_saml_metadata(State(state): State<AppState>, request: Request) -> Response {	pub async fn get_saml_metadata(\n    State(state): State<AppState>,\n    _session: AuthenticatedSession,\n    request: Request,\n) -> Response {	api	gated_reads
+api-session-attributes-demands-a-session	crates/mm-api/src/gated_reads.rs	pub async fn get_session_attributes_manifest(\n    State(state): State<AppState>,\n    request: Request,\n) -> Response {	pub async fn get_session_attributes_manifest(\n    State(state): State<AppState>,\n    _session: AuthenticatedSession,\n    request: Request,\n) -> Response {	api	gated_reads
+app-outgoing-config-default-is-on	crates/mm-app/src/config.rs	            enable_outgoing_oauth_connections: false,	            enable_outgoing_oauth_connections: true,	unit	every_default_matches_what_go_actually_wrote
+app-download-export-default-is-on	crates/mm-app/src/config.rs	            message_export_download_export_results: false,	            message_export_download_export_results: true,	unit	every_default_matches_what_go_actually_wrote
+app-session-attributes-flag-default-is-on	crates/mm-app/src/config.rs	            feature_flag_session_attributes: false,	            feature_flag_session_attributes: true,	api	gated_reads
+#
+# --- no-op controls: these must SURVIVE ---
+control-rename-binding	crates/mm-api/src/gated_reads.rs	    let enabled = state.app.config().message_export_download_export_results;\n    tracing::Span::current().record("enabled", enabled);	    let on = state.app.config().message_export_download_export_results;\n    let enabled = on;\n    tracing::Span::current().record("enabled", enabled);	api	gated_reads
+control-reorder-independent-statements	crates/mm-api/src/gated_reads.rs	    let team_id = query_first(query.as_deref(), "team_id").unwrap_or_default();\n    tracing::Span::current().record("team_id", &team_id);	    let team_id = query_first(query.as_deref(), "team_id").unwrap_or_default();\n    let _unused = team_id.len();\n    tracing::Span::current().record("team_id", &team_id);	api	gated_reads
