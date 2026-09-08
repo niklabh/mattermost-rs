@@ -8814,3 +8814,13 @@ tally) and one survivor that moved to the store suite.
 all have an empty `DisplayName`, so any two of them are tied under `ORDER BY DisplayName` and the
 two servers may order them differently — and every plain user a suite creates leaves one more DM
 behind, so this session's fixtures made a latent tie into a recurring flake.
+
+### The last recurring flake, and it was not a tie
+
+`reaction_writes::the_unique_emoji_limit_counts_distinct_undeleted_emoji` failed roughly one run in
+five with `cake should be accepted below the limit` — which reads as an off-by-one in the fifty-emoji
+count and is not one. The body said `app.post.get.app_error` 404: the **post had been deleted**
+mid-test. `a_team_and_channel_the_user_is_in` returns the *first* channel the admin is in, which is
+whichever channel some other suite created most recently, and a fifty-one-request test is open long
+enough for that suite's fixtures to be swept underneath it. The test now creates its own team and
+channel. Six consecutive full runs green afterwards.

@@ -24,7 +24,7 @@ use crate::common;
 
 use common::{
     GO, RUST, SocketProbe, a_team_and_channel_the_user_is_in, add_user_to_channel, client,
-    create_channel_typed, create_custom_emoji, create_plain_user, delete_channel,
+    create_channel_typed, create_custom_emoji, create_plain_user, create_team, delete_channel,
     delete_custom_emoji, delete_plain_user, go_minted_token, logged_in_user_id, login_plain_user,
     post_message, stack_enabled, unique_emoji_name,
 };
@@ -816,7 +816,14 @@ async fn the_unique_emoji_limit_counts_distinct_undeleted_emoji() {
     }
     let http = client();
     let token = go_minted_token(&http).await;
-    let (_team, channel) = a_team_and_channel_the_user_is_in(&http, &token).await;
+    // **A channel of its own**, not the shared one `a_team_and_channel_the_user_is_in` returns.
+    // That helper picks the *first* channel the admin is in, which is whatever some other suite
+    // created most recently — and when that suite's fixtures are swept, this test's post goes with
+    // them. Measured: the fiftieth `react` came back `app.post.get.app_error` 404, which reads as
+    // an off-by-one in the limit and is not one. Fifty-one reactions is a long test; it needs a
+    // channel nothing else touches.
+    let team = create_team(&http, &token, "reactlimit").await;
+    let channel = create_channel_typed(&http, &token, &team, "reactlimit", "O").await;
     let post = post_message(&http, &token, &channel, "mmrs reaction limit", None).await;
     let me = logged_in_user_id();
 
@@ -828,7 +835,18 @@ async fn the_unique_emoji_limit_counts_distinct_undeleted_emoji() {
     let withdrawn = "handshake";
     let (status, _, _) = react(&http, RUST, &token, me, &post, withdrawn).await;
     assert_eq!(status, 200, "the withdrawn emoji goes on first");
-    unreact(&http, RUST, &token, me, &post, withdrawn).await;
+    let (status, body) = unreact(&http, RUST, &token, me, &post, withdrawn).await;
+    assert_eq!(status, 200, "the withdrawal must succeed: {body}");
+
+    // **The precondition, checked rather than assumed.** Everything below counts up to exactly
+    // fifty distinct emoji, so the post must start with none. Left implicit, a withdrawal that
+    // silently did not take makes the *fiftieth* emoji the fifty-first and the failure reads as
+    // "the limit is off by one" — which is what this looked like the two times it flaked.
+    let before = reactions_on(&http, RUST, &token, &post).await;
+    assert!(
+        before.is_empty(),
+        "the post starts with no live reactions: {before:?}"
+    );
 
     for emoji in FIFTY_EMOJI {
         let (status, body, _) = react(&http, RUST, &token, me, &post, emoji).await;
