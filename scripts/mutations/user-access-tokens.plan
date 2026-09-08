@@ -1,0 +1,55 @@
+# Mutation plan for the four personal-access-token reads (api4/user.go:3080, :3103, :3155, :3188).
+#
+#   scripts/mutate-batch.sh scripts/mutations/user-access-tokens.plan
+#
+# Two things carry this family: the **secret** — cleared in the app layer on three of the four
+# routes, and `omitempty` so a cleared one is an absent key — and the **permission cascade**,
+# which is a different rule on every route and is the only thing between a
+# `read_user_access_token` holder and someone else's credentials.
+#
+# The store's two list queries have no ORDER BY and are not mutated for order: Go has none
+# either, and adding one would be the divergence rather than the fix.
+#
+# **Two mutations survived the first run and both were the same fixture gap in different clothes:**
+# no stock role separates the permissions this family distinguishes.
+#
+#   * `manage_system` and `read_user_access_token` are held together by every role that holds
+#     either, so swapping them on `GET /users/tokens` was invisible. A planted role with only the
+#     second now asserts the installation-wide routes refuse it.
+#   * `SessionHasPermissionToUserOrBot` falls through to the user check on **one** error — the bot
+#     store's not-found, from `SqlBotStore.Get` — and must not on any other. Telling those apart
+#     needs a caller with `read_others_bots` but not `manage_others_bots` (so the bot path refuses
+#     with a *permission* error) **and** `edit_other_users` (so the user path would grant). That is
+#     `a_refusal_on_a_bot_does_not_fall_through_to_the_user_check`, and without it a caller could
+#     read every bot's access tokens. **That HTTP test was not enough**: over HTTP both answers are
+#     the same 403, because the route refuses either way when the caller cannot reach the bot. The
+#     two mutations therefore run under `app`, against `db_user_or_bot`, where the function returns
+#     a `bool` and the difference is visible. The parity test stays — it is what proves the routes
+#     consult the function at all.
+#
+# The last two lines are the no-op controls and must SURVIVE.
+
+app-list-keeps-the-secret	crates/mm-app/src/user_access_token.rs	        sanitize_all(&mut tokens);\n        tracing::Span::current().record("found", tokens.len());\n        Ok(tokens)\n    }\n\n    /// Port of `App.GetUserAccessTokensForUser`	        tracing::Span::current().record("found", tokens.len());\n        Ok(tokens)\n    }\n\n    /// Port of `App.GetUserAccessTokensForUser`	api	user_access_tokens
+app-per-user-list-keeps-the-secret	crates/mm-app/src/user_access_token.rs	        sanitize_all(&mut tokens);\n        tracing::Span::current().record("found", tokens.len());\n        Ok(tokens)\n    }\n\n    /// Port of `App.GetUserAccessToken`	        tracing::Span::current().record("found", tokens.len());\n        Ok(tokens)\n    }\n\n    /// Port of `App.GetUserAccessToken`	api	user_access_tokens
+app-sanitize-clears-nothing	crates/mm-app/src/user_access_token.rs	        token.token.clear();\n    }\n}	    }\n}	api	user_access_tokens
+api-single-token-is-not-sanitized	crates/mm-api/src/tokens.rs	    let token: UserAccessToken = state.app.get_user_access_token(&token_id, true).await?;	    let token: UserAccessToken = state.app.get_user_access_token(&token_id, false).await?;	api	user_access_tokens
+api-single-token-skips-the-owner-check	crates/mm-api/src/tokens.rs	    if !state\n        .app\n        .session_has_permission_to_user_or_bot(&session.0, &token.user_id)\n        .await\n    {	    if false {	api	user_access_tokens
+api-per-user-list-skips-the-owner-check	crates/mm-api/src/tokens.rs	    if !state\n        .app\n        .session_has_permission_to_user_or_bot(&session.0, &user_id)\n        .await\n    {	    if false {	api	user_access_tokens
+api-per-user-list-checks-the-caller-not-the-target	crates/mm-api/src/tokens.rs	        .session_has_permission_to_user_or_bot(&session.0, &user_id)	        .session_has_permission_to_user_or_bot(&session.0, &session.0.user_id)	api	user_access_tokens
+api-single-token-checks-the-caller-not-the-owner	crates/mm-api/src/tokens.rs	        .session_has_permission_to_user_or_bot(&session.0, &token.user_id)	        .session_has_permission_to_user_or_bot(&session.0, &session.0.user_id)	api	user_access_tokens
+api-all-tokens-needs-only-read-permission	crates/mm-api/src/tokens.rs	        .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)\n        .await\n    {\n        return Err(ApiError::from(make_permission_error(\n            &session.0,\n            &[&PERMISSION_MANAGE_SYSTEM],\n        )));\n    }\n\n    let page = parse_page	        .session_has_permission_to(&session.0, &PERMISSION_READ_USER_ACCESS_TOKEN)\n        .await\n    {\n        return Err(ApiError::from(make_permission_error(\n            &session.0,\n            &[&PERMISSION_MANAGE_SYSTEM],\n        )));\n    }\n\n    let page = parse_page	api	user_access_tokens
+api-per-user-list-skips-the-read-permission	crates/mm-api/src/tokens.rs	        .session_has_permission_to(&session.0, &PERMISSION_READ_USER_ACCESS_TOKEN)\n        .await\n    {\n        return Err(ApiError::from(make_permission_error(\n            &session.0,\n            &[&PERMISSION_READ_USER_ACCESS_TOKEN],\n        )));\n    }\n\n    if !state\n        .app\n        .session_has_permission_to_user_or_bot(&session.0, &user_id)	        .session_has_permission_to(&session.0, &PERMISSION_READ_USER_ACCESS_TOKEN)\n        .await\n        && false\n    {\n        return Err(ApiError::from(make_permission_error(\n            &session.0,\n            &[&PERMISSION_READ_USER_ACCESS_TOKEN],\n        )));\n    }\n\n    if !state\n        .app\n        .session_has_permission_to_user_or_bot(&session.0, &user_id)	api	user_access_tokens
+api-single-token-skips-the-id-check	crates/mm-api/src/tokens.rs	    // `RequireTokenId` (web/context.go) — the URL-param error.\n    if !is_valid_id(&token_id) {	    // `RequireTokenId` (web/context.go) — the URL-param error.\n    if false {	api	user_access_tokens
+api-per-user-list-does-not-resolve-me	crates/mm-api/src/tokens.rs	    let user_id = crate::channels::resolve_me(&user_id, &session).to_owned();	    let user_id = user_id.clone();	api	user_access_tokens
+api-single-token-has-no-newline	crates/mm-api/src/tokens.rs	    let mut body = encode(&token, "getUserAccessToken")?;\n    body.push(b'\\n');	    let body = encode(&token, "getUserAccessToken")?;	api	user_access_tokens
+api-list-has-a-newline	crates/mm-api/src/tokens.rs	    Ok(json_ok(encode(&tokens, "searchUserAccessTokens")?))\n}\n\n/// Port of `countNonCompliantUserAccessTokens`	    let mut body = encode(&tokens, "searchUserAccessTokens")?;\n    body.push(b'\\n');\n    Ok(json_ok(body))\n}\n\n/// Port of `countNonCompliantUserAccessTokens`	api	user_access_tokens
+app-count-ignores-the-disabled-policy	crates/mm-app/src/user_access_token.rs	        let Some(max_expires_at) = self.max_user_access_token_expiry() else {	        let Some(max_expires_at) = Some(self.max_user_access_token_expiry().unwrap_or(0)) else {	api	user_access_tokens
+app-missing-token-is-a-500	crates/mm-app/src/user_access_token.rs	                let status = if err.is_not_found() { 404 } else { 500 };	                let status = if err.is_not_found() { 500 } else { 500 };	api	user_access_tokens
+store-per-user-query-ignores-the-user	crates/mm-store/src/user_access_token_store.rs	              FROM useraccesstokens\n             WHERE userid = $1\n             LIMIT $2 OFFSET $3	              FROM useraccesstokens\n             WHERE userid = $1 OR true\n             LIMIT $2 OFFSET $3	api	user_access_tokens
+store-get-matches-any-row	crates/mm-store/src/user_access_token_store.rs	              FROM useraccesstokens\n             WHERE id = $1\n            "#	              FROM useraccesstokens\n             WHERE id = $1 OR true\n            "#	api	user_access_tokens
+app-user-or-bot-falls-through-on-any-error	crates/mm-app/src/authorization.rs	            Err(err)\n                if err.id == "store.sql_bot.get.missing.app_error"\n                    && err.where_ == "SqlBotStore.Get" =>	            Err(err) if err.id == "store.sql_bot.get.missing.app_error" || true =>	app	user_or_bot_
+app-user-or-bot-never-falls-through	crates/mm-app/src/authorization.rs	            Err(err)\n                if err.id == "store.sql_bot.get.missing.app_error"\n                    && err.where_ == "SqlBotStore.Get" =>	            Err(err) if err.id == "store.sql_bot.get.missing.app_error" && false =>	app	user_or_bot_
+#
+# --- no-op controls: these must SURVIVE ---
+control-rename-binding	crates/mm-api/src/tokens.rs	    let tokens = state.app.get_user_access_tokens(page, per_page).await?;	    let found = state.app.get_user_access_tokens(page, per_page).await?;\n    let tokens = found;	api	user_access_tokens
+control-reorder-independent-columns	crates/mm-store/src/user_access_token_store.rs	                   COALESCE(userid, '')        AS "userid!",\n                   COALESCE(description, '')   AS "description!",\n                   COALESCE(isactive, false)   AS "isactive!",\n                   expiresat                   AS "expiresat!",\n                   lastnotifiedat              AS "lastnotifiedat?"\n              FROM useraccesstokens\n             WHERE userid = $1	                   COALESCE(description, '')   AS "description!",\n                   COALESCE(userid, '')        AS "userid!",\n                   COALESCE(isactive, false)   AS "isactive!",\n                   expiresat                   AS "expiresat!",\n                   lastnotifiedat              AS "lastnotifiedat?"\n              FROM useraccesstokens\n             WHERE userid = $1	api	user_access_tokens

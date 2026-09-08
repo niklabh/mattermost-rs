@@ -918,6 +918,10 @@ async fn purge_api_fixtures_once() {
         "DELETE FROM users WHERE id LIKE 'mmrsbp%'",
         "DELETE FROM channels WHERE id LIKE 'mmrsbp%'",
         "DELETE FROM teams WHERE id LIKE 'mmrsbp%'",
+        // Personal access tokens planted by `parity/user_access_tokens.rs`. `UserAccessTokens`
+        // is empty on a stock server — the route that creates them is closed — so a leftover row
+        // is visible in `GET /users/tokens` to every later run.
+        "DELETE FROM useraccesstokens WHERE id LIKE 'mmrstok%'",
         // Bots and their owners planted by `mm-store`'s `db_bot_store` test. They live in a
         // different binary, but they land in the *same* database and `Users` is shared: a run
         // that panicked past that file's own cleanup leaves rows that `users_stats` counts and
@@ -1924,6 +1928,72 @@ pub async fn set_channel_scheme(channel_id: &str, scheme_id: Option<&str>) -> bo
 /// false, matching a role an administrator created. The name carries the `mmrs_role_` prefix so
 /// [`purge_api_fixtures`] can find it; Go's role cache is keyed by name and a fresh one has no
 /// entry, so the first read populates it correctly — the same rule [`plant_scheme`] records.
+/// A bot row planted directly, with its `Users` row.
+///
+/// `POST /api/v4/bots` needs `create_bot` *and* `ServiceSettings.EnableBotAccountCreation`, and it
+/// cannot create a bot owned by someone else or one that is already deleted — which is exactly
+/// what the two unreachable branches of `getBot` and `getBots` need. Planted, therefore, the same
+/// way `plant_role` and `plant_channel_of_type` are.
+///
+/// Returns the bot's user id, or `None` when there is no `DATABASE_URL` to plant into.
+pub async fn plant_bot(tag: &str, owner_id: &str, delete_at: i64) -> Option<String> {
+    let pool = fixture_pool().await?;
+    let id = format!("mmrsbot{tag:0>19}");
+    let username = format!("mmrsbotparity{tag}");
+    sqlx::query(
+        "INSERT INTO users
+            (id, createat, updateat, deleteat, username, password, authdata, authservice, email,
+             emailverified, nickname, firstname, lastname, position, roles, allowmarketing, props,
+             notifyprops, lastpasswordupdate, lastpictureupdate, failedattempts, locale, timezone,
+             mfaactive, mfasecret, remoteid, lastlogin, mfausedtimestamps)
+         VALUES ($1, 1788600000000, 1788600000000, $3, $2, '', NULL, '', $2 || '@mmrs.invalid',
+                 false, '', $4, '', '', 'system_user', false, '{}'::jsonb, '{}'::jsonb,
+                 1788600000000, 0, 0, 'en', '{}'::jsonb, false, '', NULL, 0, '{}')
+         ON CONFLICT (id) DO NOTHING",
+    )
+    .bind(&id)
+    .bind(&username)
+    .bind(delete_at)
+    .bind(format!("Parity {tag}"))
+    .execute(&pool)
+    .await
+    .expect("the bot's user row is written");
+
+    sqlx::query(
+        "INSERT INTO bots (userid, description, ownerid, createat, updateat, deleteat,
+                           lasticonupdate)
+         VALUES ($1, $2, $3, 1788600000000, 1788600000000, $4, 0)
+         ON CONFLICT (userid) DO UPDATE SET ownerid = EXCLUDED.ownerid,
+                                            deleteat = EXCLUDED.deleteat",
+    )
+    .bind(&id)
+    .bind(format!("planted by the parity suite ({tag})"))
+    .bind(owner_id)
+    .bind(delete_at)
+    .execute(&pool)
+    .await
+    .expect("the bot row is written");
+
+    Some(id)
+}
+
+/// [`purge_api_fixtures`] sweeps `mmrsbot%`, so this is belt-and-braces for a run that continues
+/// after these tests rather than for one that crashes in them.
+pub async fn unplant_bots() {
+    let Some(pool) = fixture_pool().await else {
+        return;
+    };
+    for statement in [
+        "DELETE FROM bots WHERE userid LIKE 'mmrsbot%'",
+        "DELETE FROM users WHERE id LIKE 'mmrsbot%'",
+    ] {
+        sqlx::query(statement)
+            .execute(&pool)
+            .await
+            .expect("the planted bots are removed");
+    }
+}
+
 pub async fn plant_role(tag: &str, permissions: &str) -> Option<String> {
     let pool = fixture_pool().await?;
     let name = format!("mmrs_role_{tag}");

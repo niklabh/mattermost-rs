@@ -376,72 +376,6 @@ async fn the_id_checks_agree() {
     );
 }
 
-/// A bot row planted directly, with its `Users` row.
-///
-/// `POST /api/v4/bots` needs `create_bot` *and* `ServiceSettings.EnableBotAccountCreation`, and it
-/// cannot create a bot owned by someone else or one that is already deleted — which is exactly
-/// what the two unreachable branches of `getBot` and `getBots` need. Planted, therefore, the same
-/// way `plant_role` and `plant_channel_of_type` are.
-///
-/// Returns the bot's user id, or `None` when there is no `DATABASE_URL` to plant into.
-async fn plant_bot(tag: &str, owner_id: &str, delete_at: i64) -> Option<String> {
-    let pool = common::fixture_pool().await?;
-    let id = format!("mmrsbot{tag:0>19}");
-    let username = format!("mmrsbotparity{tag}");
-    sqlx::query(
-        "INSERT INTO users
-            (id, createat, updateat, deleteat, username, password, authdata, authservice, email,
-             emailverified, nickname, firstname, lastname, position, roles, allowmarketing, props,
-             notifyprops, lastpasswordupdate, lastpictureupdate, failedattempts, locale, timezone,
-             mfaactive, mfasecret, remoteid, lastlogin, mfausedtimestamps)
-         VALUES ($1, 1788600000000, 1788600000000, $3, $2, '', NULL, '', $2 || '@mmrs.invalid',
-                 false, '', $4, '', '', 'system_user', false, '{}'::jsonb, '{}'::jsonb,
-                 1788600000000, 0, 0, 'en', '{}'::jsonb, false, '', NULL, 0, '{}')
-         ON CONFLICT (id) DO NOTHING",
-    )
-    .bind(&id)
-    .bind(&username)
-    .bind(delete_at)
-    .bind(format!("Parity {tag}"))
-    .execute(&pool)
-    .await
-    .expect("the bot's user row is written");
-
-    sqlx::query(
-        "INSERT INTO bots (userid, description, ownerid, createat, updateat, deleteat,
-                           lasticonupdate)
-         VALUES ($1, $2, $3, 1788600000000, 1788600000000, $4, 0)
-         ON CONFLICT (userid) DO UPDATE SET ownerid = EXCLUDED.ownerid,
-                                            deleteat = EXCLUDED.deleteat",
-    )
-    .bind(&id)
-    .bind(format!("planted by the parity suite ({tag})"))
-    .bind(owner_id)
-    .bind(delete_at)
-    .execute(&pool)
-    .await
-    .expect("the bot row is written");
-
-    Some(id)
-}
-
-/// `purge_api_fixtures` sweeps `mmrsbot%`, so this is belt-and-braces for a run that continues
-/// after these tests rather than for one that crashes in them.
-async fn unplant_bots() {
-    let Some(pool) = common::fixture_pool().await else {
-        return;
-    };
-    for statement in [
-        "DELETE FROM bots WHERE userid LIKE 'mmrsbot%'",
-        "DELETE FROM users WHERE id LIKE 'mmrsbot%'",
-    ] {
-        sqlx::query(statement)
-            .execute(&pool)
-            .await
-            .expect("the planted bots are removed");
-    }
-}
-
 /// **`read_bots` without `read_others_bots` is the caller no stock role can be.**
 ///
 /// Every branch that distinguishes the two permissions is unreachable otherwise: the system admin
@@ -466,10 +400,10 @@ async fn read_bots_alone_admits_only_the_callers_own_bots() {
     common::set_user_roles(&user.id, &format!("system_user {role}")).await;
     let token = common::login_plain_user(&client, "botsown").await;
 
-    let Some(mine) = plant_bot("own", &user.id, 0).await else {
+    let Some(mine) = common::plant_bot("own", &user.id, 0).await else {
         return;
     };
-    let Some(theirs) = plant_bot("other", common::logged_in_user_id(), 0).await else {
+    let Some(theirs) = common::plant_bot("other", common::logged_in_user_id(), 0).await else {
         return;
     };
 
@@ -529,7 +463,7 @@ async fn read_bots_alone_admits_only_the_callers_own_bots() {
         .collect();
     assert!(admin_ids.contains(&mine.as_str()) && admin_ids.contains(&theirs.as_str()));
 
-    unplant_bots().await;
+    common::unplant_bots().await;
     common::delete_plain_user(&client, &admin, &user.id).await;
 }
 
@@ -544,7 +478,7 @@ async fn include_deleted_reveals_a_deleted_bot_on_both_servers() {
     let token = go_minted_token(&client).await;
     let me = common::logged_in_user_id();
 
-    let Some(gone) = plant_bot("gone", me, 1788600001000).await else {
+    let Some(gone) = common::plant_bot("gone", me, 1788600001000).await else {
         return; // no DATABASE_URL
     };
 
@@ -593,5 +527,5 @@ async fn include_deleted_reveals_a_deleted_bot_on_both_servers() {
         "{path}"
     );
 
-    unplant_bots().await;
+    common::unplant_bots().await;
 }

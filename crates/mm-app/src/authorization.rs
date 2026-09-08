@@ -552,6 +552,90 @@ impl App {
         !user.is_system_admin()
     }
 
+    /// Port of `App.SessionHasPermissionToManageBot` (authorization.go:409).
+    ///
+    /// Returns Go's `*model.AppError` shape: `Ok(())` grants, and the error is the one the caller
+    /// hands straight to the client. **Two of its three refusals are the bot 404**, not a 403 —
+    /// Go's comments say "pretend as if the bot doesn't exist at all", the same existence-hiding
+    /// rule `mm_api::bots` reproduces. Which of the two applies depends on whether the caller owns
+    /// the bot, so the same request can be a 404, a 403 or a grant depending on `OwnerId`.
+    ///
+    /// **`GetBot` is called with `include_deleted: true`**, so a soft-deleted bot is still
+    /// manageable — and, importantly for [`App::session_has_permission_to_user_or_bot`], a
+    /// *user* id produces the bot store's not-found error rather than a grant.
+    ///
+    /// The unrestricted check comes **after** the fetch (authorization.go:414), so even a local
+    /// session gets the fetch's error for an id that is not a bot. That ordering is what makes the
+    /// fall-through below work at all.
+    #[tracing::instrument(skip(self, session), fields(actor = %session.user_id, bot_user_id = %bot_user_id))]
+    pub async fn session_has_permission_to_manage_bot(
+        &self,
+        session: &Session,
+        bot_user_id: &str,
+    ) -> Result<(), Box<mm_model::utils::AppError>> {
+        use mm_model::bot::make_bot_not_found_error;
+        use mm_model::permission::{
+            PERMISSION_MANAGE_BOTS, PERMISSION_MANAGE_OTHERS_BOTS, PERMISSION_READ_BOTS,
+            PERMISSION_READ_OTHERS_BOTS, make_permission_error,
+        };
+
+        let existing = self.get_bot(bot_user_id, true).await?;
+        if session.is_unrestricted() {
+            return Ok(());
+        }
+
+        let (manage, read) = if existing.owner_id == session.user_id {
+            (&PERMISSION_MANAGE_BOTS, &PERMISSION_READ_BOTS)
+        } else {
+            (&PERMISSION_MANAGE_OTHERS_BOTS, &PERMISSION_READ_OTHERS_BOTS)
+        };
+
+        if self.session_has_permission_to(session, manage).await {
+            return Ok(());
+        }
+        if !self.session_has_permission_to(session, read).await {
+            // No read permission: hide the bot's existence entirely.
+            return Err(make_bot_not_found_error("permissions", bot_user_id));
+        }
+        Err(make_permission_error(session, &[manage]))
+    }
+
+    /// Port of `App.SessionHasPermissionToUserOrBot` (authorization.go:278).
+    ///
+    /// "Or bot" is resolved by *trying* the bot path and reading its failure: an id that names no
+    /// bot comes back as `store.sql_bot.get.missing.app_error` from `SqlBotStore.Get`, and **only
+    /// that exact pair** falls through to the ordinary user check. A refusal that hides an
+    /// existing bot carries the same id with `where` = `permissions`, and it does **not** fall
+    /// through — so a caller refused on a bot is not given a second chance as a user.
+    ///
+    /// Matching on the id *and* the `where` is Go's own test (authorization.go:287) and it is the
+    /// whole content of this function; matching on the id alone would let that second chance
+    /// through.
+    #[tracing::instrument(skip(self, session), fields(actor = %session.user_id))]
+    pub async fn session_has_permission_to_user_or_bot(
+        &self,
+        session: &Session,
+        user_id: &str,
+    ) -> bool {
+        if session.is_unrestricted() {
+            return true;
+        }
+
+        match self
+            .session_has_permission_to_manage_bot(session, user_id)
+            .await
+        {
+            Ok(()) => true,
+            Err(err)
+                if err.id == "store.sql_bot.get.missing.app_error"
+                    && err.where_ == "SqlBotStore.Get" =>
+            {
+                self.session_has_permission_to_user(session, user_id).await
+            }
+            Err(_) => false,
+        }
+    }
+
     // ---------------------------------------------------------------------------------------
     // The `askingUserId` family (authorization.go:295-381, :466-512).
     //

@@ -8666,3 +8666,54 @@ Mutations: **20 run, 17 caught, 2 controls survived** after re-pointing three th
 the wrong suite — two config defaults that only the config oracle can see, and the
 restricted-admin check, whose branch needs `ExperimentalSettings.RestrictSystemAdmin` and is
 therefore mutated at the app layer where a test can plant it.
+
+## The four personal-access-token reads (2026-09-08)
+
+`GET /api/v4/users/tokens`, `/users/tokens/non_compliant/count`, `/users/tokens/{token_id}` and
+`/users/{user_id}/tokens`. New: `crates/mm-store/src/user_access_token_store.rs`,
+`crates/mm-app/src/user_access_token.rs`, `crates/mm-api/src/tokens.rs`,
+`crates/mm-app/tests/db_user_or_bot.rs`, `crates/mm-api/tests/parity/user_access_tokens.rs`,
+`scripts/mutations/user-access-tokens.plan`; `SessionHasPermissionToManageBot` and
+`SessionHasPermissionToUserOrBot` ported into `mm-app`, and one config field.
+
+### Four routes, four different permission rules
+
+Nothing is shared. The two installation-wide reads want `manage_system`; the two token-scoped ones
+want `read_user_access_token` **and then** `SessionHasPermissionToUserOrBot` — and on
+`getUserAccessToken` that second check runs **after** the fetch, on the token's owner, so a caller
+with the first permission and not the second gets 404 for an id that does not exist and 403 for one
+that does.
+
+### "Or bot" is resolved by reading a failure, and only one failure counts
+
+`SessionHasPermissionToUserOrBot` tries the bot path and falls through to the user check **only**
+on `store.sql_bot.get.missing.app_error` from `SqlBotStore.Get`. A refusal that *hides* an existing
+bot carries the same id with `where` = `permissions` and must not fall through — otherwise a
+caller holding `edit_other_users` reads every bot's access tokens. Matching on the id alone would
+let that through.
+
+**The parity suite could not see that, and the mutation run proved it.** Over HTTP both answers are
+the same 403, because the route refuses either way when the caller cannot reach the bot. The test
+moved to `crates/mm-app/tests/db_user_or_bot.rs`, where the function returns a `bool`; the parity
+test stays, because it is what proves the routes consult the function at all.
+
+### The count route reads nothing
+
+`MaximumPersonalAccessTokenLifetimeDays` defaults to 0, `maxUserAccessTokenExpiry` returns
+`(0, false)` for anything `<= 0`, and the caller returns 0 **before** the query — so
+`{"count":0}` is the answer even with a never-expiring token planted, which is what the fixture
+plants to prove it.
+
+### The rows had to be planted
+
+`POST /users/{user_id}/tokens` needs `ServiceSettings.EnableUserAccessTokens`, which is off, so
+`UserAccessTokens` is empty on this deployment and every route answers `[]` or `{"count":0}`.
+Planted rows carry a **distinct secret per fixture** — the column is uniquely indexed — and the
+suite asserts that literal appears in no response body.
+
+Mutations: **22 run, 20 caught, 2 controls survived** after re-pointing the two user-or-bot lines
+to the app suite and adding a fixture that separates `manage_system` from `read_user_access_token`
+(no stock role does).
+
+**Churn:** `parity/user_get.rs`'s "literal siblings are forwarded" list lost `tokens`, which is now
+ours. That list has been shrinking with each migration and is down to one entry.

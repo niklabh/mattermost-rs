@@ -263,6 +263,19 @@ pub struct Config {
     /// `mm_api::outgoing_oauth`.
     pub enable_outgoing_oauth_connections: bool,
 
+    /// `ServiceSettings.MaximumPersonalAccessTokenLifetimeDays` (config.go:409, defaulted **`0`**
+    /// at :583).
+    ///
+    /// **Zero disables the whole policy**, and that is not the same as "no maximum in days":
+    /// `App.maxUserAccessTokenExpiry` returns `(0, false)` for anything `<= 0`, and its caller
+    /// returns `0` *without querying the database at all* — so on a stock server
+    /// `GET /api/v4/users/tokens/non_compliant/count` answers `{"count":0}` having read nothing.
+    /// Read by [`crate::App::max_user_access_token_expiry`].
+    ///
+    /// `i64` rather than Go's `int` because the value is multiplied into milliseconds
+    /// (`maxDays*24*60*60*1000`) before it is used, and that product is an `int64` in Go too.
+    pub maximum_personal_access_token_lifetime_days: i64,
+
     /// `MessageExportSettings.DownloadExportResults` (config.go:3880, defaulted **`false`** at
     /// :3893).
     ///
@@ -531,6 +544,7 @@ impl Default for Config {
             enable_outgoing_webhooks: true,
             enable_oauth_service_provider: true,
             enable_outgoing_oauth_connections: false,
+            maximum_personal_access_token_lifetime_days: 0,
             message_export_download_export_results: false,
             feature_flag_session_attributes: false,
             show_full_name: true,
@@ -766,6 +780,11 @@ impl Config {
                 "MM_SERVICESETTINGS_ENABLEOUTGOINGOAUTHCONNECTIONS",
                 default.enable_outgoing_oauth_connections,
             ),
+            maximum_personal_access_token_lifetime_days: lookup_int(
+                lookup,
+                "MM_SERVICESETTINGS_MAXIMUMPERSONALACCESSTOKENLIFETIMEDAYS",
+                default.maximum_personal_access_token_lifetime_days,
+            ),
             message_export_download_export_results: lookup_bool(
                 lookup,
                 "MM_MESSAGEEXPORTSETTINGS_DOWNLOADEXPORTRESULTS",
@@ -869,6 +888,9 @@ impl Config {
             enable_outgoing_oauth_connections: service
                 .enable_outgoing_oauth_connections
                 .unwrap_or(default.enable_outgoing_oauth_connections),
+            maximum_personal_access_token_lifetime_days: service
+                .maximum_personal_access_token_lifetime_days
+                .unwrap_or(default.maximum_personal_access_token_lifetime_days),
             message_export_download_export_results: parsed
                 .message_export_settings
                 .unwrap_or_default()
@@ -1185,6 +1207,8 @@ struct ServiceSettingsDocument {
     enable_dynamic_client_registration: Option<bool>,
     #[serde(rename = "EnableOutgoingOAuthConnections")]
     enable_outgoing_oauth_connections: Option<bool>,
+    #[serde(rename = "MaximumPersonalAccessTokenLifetimeDays")]
+    maximum_personal_access_token_lifetime_days: Option<i64>,
     #[serde(rename = "EnablePostUsernameOverride")]
     enable_post_username_override: Option<bool>,
     #[serde(rename = "EnableCustomEmoji")]
@@ -1756,8 +1780,8 @@ mod go_parity {
             .sum();
 
         assert_eq!(
-            keys, 40,
-            "the fixture covers {keys} settings and Config reads 40 from the document. \
+            keys, 41,
+            "the fixture covers {keys} settings and Config reads 41 from the document. \
              Add the new key to scripts/dump-config-fixture.sh and re-run it — a modelled \
              setting the fixture does not carry is a setting Go's own output never checked"
         );

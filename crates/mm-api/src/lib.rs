@@ -45,6 +45,8 @@ pub mod status;
 pub mod system;
 pub mod teams;
 pub mod terms_of_service;
+/// The four personal-access-token reads.
+pub mod tokens;
 pub mod usage;
 pub mod users;
 pub mod webhooks;
@@ -1537,6 +1539,25 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/jobs/{job_id}/download",
             partially_migrated_with_ids(&state, get(gated_reads::download_job)),
+        )
+        // The four personal-access-token reads. `/users/tokens` and its children are literals
+        // under `/users`, so they never reach the `{user_id}` route; `/users/{user_id}/tokens` is
+        // the parameterised one and resolves `me` in the handler.
+        .route(
+            "/api/v4/users/tokens",
+            partially_migrated(get(tokens::get_user_access_tokens)),
+        )
+        .route(
+            "/api/v4/users/tokens/non_compliant/count",
+            partially_migrated(get(tokens::count_non_compliant_user_access_tokens)),
+        )
+        .route(
+            "/api/v4/users/tokens/{token_id}",
+            partially_migrated_with_ids(&state, get(tokens::get_user_access_token)),
+        )
+        .route(
+            "/api/v4/users/{user_id}/tokens",
+            partially_migrated_with_ids(&state, get(tokens::get_user_access_tokens_for_user)),
         )
         .route("/api/v4/bots", partially_migrated(get(bots::get_bots)))
         .route(

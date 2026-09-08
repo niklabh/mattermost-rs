@@ -52,6 +52,7 @@
     "EnableUserStatuses": true,
     "ExtendSessionLengthWithActivity": false,
     "GoroutineHealthThreshold": -1,
+    "MaximumPersonalAccessTokenLifetimeDays": 0,
     "PostPriority": true,
     "ScheduledPosts": true,
     "SessionIdleTimeoutInMinutes": 43200,

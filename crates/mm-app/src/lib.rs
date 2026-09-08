@@ -35,6 +35,7 @@ pub mod terms_of_service;
 pub mod thread;
 pub mod usage;
 pub mod user;
+pub mod user_access_token;
 pub mod user_terms_of_service;
 pub mod utils;
 pub mod webhook;

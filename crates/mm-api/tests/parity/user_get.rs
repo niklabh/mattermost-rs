@@ -300,10 +300,12 @@ async fn literal_siblings_and_non_id_segments_are_forwarded_to_gos_own_answers()
     // `tokens` is a real Go handler; `abc` is Go's own invalid-id 400. Both are alphanumeric, so
     // the charset middleware passes them; the serve-only-exact-ids rule is what forwards them.
     //
-    // `stats` was in this list until it was migrated on 2026-09-04 — `parity/users_stats.rs`
-    // owns it now, and `known` beside it. The list keeps two entries so it still asserts that a
-    // literal sibling reaches Go rather than `getUser`.
-    for segment in ["tokens", "abc"] {
+    // The list has been shrinking as its members were migrated: `stats` left on 2026-09-04
+    // (`parity/users_stats.rs`), `known` beside it, and `tokens` on 2026-09-08
+    // (`parity/user_access_tokens.rs`). What is asserted is unchanged — a literal sibling of
+    // `{user_id}` must reach Go rather than `getUser` — and `abc` is the case that cannot be
+    // migrated away, being a segment Go has no route for at all.
+    for segment in ["abc"] {
         let path = format!("/api/v4/users/{segment}");
         let ours = client
             .get(format!("{RUST}{path}"))

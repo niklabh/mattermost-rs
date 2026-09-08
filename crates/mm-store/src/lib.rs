@@ -36,6 +36,7 @@ pub mod system_store;
 pub mod team_store;
 pub mod terms_of_service_store;
 pub mod thread_store;
+pub mod user_access_token_store;
 pub mod user_store;
 pub mod user_terms_of_service_store;
 pub mod webhook_store;
@@ -62,6 +63,7 @@ pub use system_store::{SYSTEM_ACTIVE_LICENSE_ID, SqlSystemStore, SystemStore};
 pub use team_store::{SqlTeamStore, TeamStore};
 pub use terms_of_service_store::{SqlTermsOfServiceStore, TermsOfServiceStore};
 pub use thread_store::{SqlThreadStore, ThreadStore};
+pub use user_access_token_store::{SqlUserAccessTokenStore, UserAccessTokenStore};
 pub use user_store::{SqlUserStore, UserStore};
 pub use user_terms_of_service_store::{SqlUserTermsOfServiceStore, UserTermsOfServiceStore};
 pub use webhook_store::{SqlWebhookStore, WebhookStore};
@@ -99,6 +101,7 @@ pub struct SqlStore {
     system: SqlSystemStore,
     team: SqlTeamStore,
     user: SqlUserStore,
+    user_access_token: SqlUserAccessTokenStore,
     user_terms_of_service: SqlUserTermsOfServiceStore,
     webhook: SqlWebhookStore,
     /// Go's `SqlStore` owns the connections and hands them to each sub-store; a handful of its
@@ -154,6 +157,7 @@ impl SqlStore {
             user_terms_of_service: SqlUserTermsOfServiceStore::new(pool.clone()),
             webhook: SqlWebhookStore::new(pool.clone()),
             user: SqlUserStore::new(pool.clone()),
+            user_access_token: SqlUserAccessTokenStore::new(pool.clone()),
             pool,
         }
     }
@@ -244,6 +248,11 @@ impl SqlStore {
     /// Port of `store.Store.Bot()`.
     pub fn bot(&self) -> &SqlBotStore {
         &self.bot
+    }
+
+    /// Port of `store.Store.UserAccessToken()`.
+    pub fn user_access_token(&self) -> &SqlUserAccessTokenStore {
+        &self.user_access_token
     }
 
     /// Port of `store.Store.Post()` — and, folded in, `PostPriority()` and

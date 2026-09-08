@@ -62,6 +62,7 @@ MODELLED = {
         "ExtendSessionLengthWithActivity", "GoroutineHealthThreshold", "EnableTesting",
         "ScheduledPosts", "EnableUserStatuses", "EnableDynamicClientRegistration",
         "EnableOutgoingOAuthConnections", "EnablePostUsernameOverride",
+        "MaximumPersonalAccessTokenLifetimeDays",
         "AllowPersistentNotifications", "UniqueEmojiReactionLimitPerPost",
         # Not a setting Config carries — the `isUpdate` discriminator. `Config.isUpdate` is
         # `ServiceSettings.SiteURL != nil` (config.go:4289) and two defaults are `!isUpdate`, so
