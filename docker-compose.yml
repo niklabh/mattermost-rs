@@ -5,13 +5,26 @@
 # token minted by Go is authenticated by Rust without a second login.
 #
 #   postgres    :5432   the shared database — schema created and migrated by the Go server
-#   mattermost  :8065   the Go server; the proxy's forward target for unmigrated routes
+#
+# **The Go server is no longer a container.** It is built from the pinned reference SHA and run on
+# the host by `scripts/go-server.sh`; the service below is kept, behind a profile, only as the
+# fallback described in [D-167]. The published `11.11.0-rc1` image and `reference/mattermost/` are
+# both "11.11.0" and are *not* the same code — rc1 answers `GET /api/v4/bots` with a `system_owned`
+# field the pinned source has never heard of, and 404s routes the pinned source registers — so a
+# route can disagree with the reference without either side being wrong. Building the reference is
+# what makes "read the Go source" and "ask the forward target" the same question again.
 #
 # The Rust server (`mm-api`) runs on the host, not here, so it can be rebuilt without a
 # container cycle. It listens on :8066 and forwards anything it does not serve to :8065.
 #
-#   docker compose up -d
+#   docker compose up -d          # postgres only
+#   scripts/go-server.sh start    # the pinned Go server on :8065
 #   cargo run -p mm-api
+#
+# To fall back to the published image — which will not read a database the pinned build has
+# migrated, so the volume has to be recreated first:
+#
+#   scripts/go-server.sh stop && docker compose --profile published-image up -d mattermost
 #
 # The Go server owns the schema. Never point a migration tool at this database from the Rust
 # side — the two servers would race, and the Go server's migrations are the reference.
@@ -53,7 +66,11 @@ services:
   # the pinned source with `ForceEnableRedis()` can — which is the no-licence route to Redis cache
   # mode if stale-on-write ever starts to bite. See D-087.
 
+  # Behind a profile, so `docker compose up -d` starts postgres alone. See the header: the forward
+  # target is now `scripts/go-server.sh`, which builds the pinned reference SHA natively — no qemu,
+  # and no wire-format disagreement with the source this project is porting.
   mattermost:
+    profiles: ["published-image"]
     # No arm64 manifest is published, so the platform is forced and the container runs under
     # emulation on Apple silicon. It is slow to boot and fine for a forward target.
     #

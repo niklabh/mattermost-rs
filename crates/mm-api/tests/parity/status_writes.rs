@@ -352,6 +352,10 @@ async fn a_status_change_is_broadcast_to_the_user() {
     if !stack_enabled() {
         return;
     }
+    // Serialised against every other broadcast-counting test: this one asserts a *count* of
+    // frames on the shared admin's stream, which is only true while nothing else writes to
+    // that user. See `common::BROADCAST_STREAM`.
+    let _broadcast = common::BROADCAST_STREAM.lock().await;
     let http = client();
     let admin = go_minted_token(&http).await;
     let me = common::logged_in_user_id();

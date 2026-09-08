@@ -236,6 +236,23 @@ pub async fn a_team_and_channel_the_user_is_in(
 /// `x-mmrs-served-by: go` where it asserted `rust`.
 pub static ACTIVE_LICENCE_ROW: tokio::sync::RwLock<()> = tokio::sync::RwLock::const_new(());
 
+/// **The shared admin's broadcast stream is one resource, and counting frames on it is exclusive.**
+///
+/// A websocket sees everything the server publishes to that connection, so a test asserting
+/// "exactly one `user_updated`" or "exactly one `preferences_changed`" is really asserting that
+/// *nothing else in the binary* touched the shared admin while its socket was open. Scoping by
+/// subject is not enough when the other writer is a sibling test changing the same admin, and
+/// scoping by payload is not enough when both write the same category.
+///
+/// This lock is what makes those counts true. Every test that opens a `SocketProbe` and asserts a
+/// **count** holds it for the whole exchange — connect, write, collect, assert.
+///
+/// It was not needed while the Go server ran under qemu: the tests were slow enough to miss each
+/// other. Replacing that image with a native build of the pinned source made the suite roughly six
+/// times faster and turned four of these into failures on unchanged code. The races were always
+/// there; the emulator was hiding them.
+pub static BROADCAST_STREAM: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 /// Write `Systems.ActiveLicenseId`, or clear it when `id` is `None`.
 ///
 /// A 26-character value passes `IsValidId`, which is all `LoadLicense` checks before it looks the
@@ -2124,6 +2141,47 @@ impl SocketProbe {
                 Ok(Some(Err(err))) => panic!("websocket error: {err}"),
                 Ok(None) => return,
                 Err(_) => return,
+            }
+        }
+    }
+
+    /// Collect until `found` says the frames the caller is waiting for have arrived, or `window`
+    /// expires. Returns whether they arrived.
+    ///
+    /// **Prefer this to [`SocketProbe::collect_for`] for anything that asserts a count.** A fixed
+    /// window encodes an assumption about how fast the server is, and that assumption changed:
+    /// the Go server used to run under qemu and now runs native, roughly six times quicker, which
+    /// turned three passing socket assertions into intermittent failures on the same code. Waiting
+    /// for the event rather than for the clock is the only version of the test that means the same
+    /// thing on both. `collect_for` remains correct for the opposite assertion — that nothing
+    /// *else* arrives — where the whole point is to wait out a window.
+    ///
+    /// The predicate sees every frame collected so far, parsed, including any that arrived before
+    /// this call.
+    pub async fn collect_until<F>(&mut self, window: Duration, found: F) -> bool
+    where
+        F: Fn(&[serde_json::Value]) -> bool,
+    {
+        if found(&self.frames()) {
+            return true;
+        }
+        let deadline = tokio::time::Instant::now() + window;
+        loop {
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            if remaining.is_zero() {
+                return false;
+            }
+            match tokio::time::timeout(remaining, self.socket.next()).await {
+                Ok(Some(Ok(Message::Text(text)))) => {
+                    self.raw.push(text.to_string());
+                    if found(&self.frames()) {
+                        return true;
+                    }
+                }
+                Ok(Some(Ok(_))) => continue,
+                Ok(Some(Err(err))) => panic!("websocket error: {err}"),
+                Ok(None) => return false,
+                Err(_) => return false,
             }
         }
     }

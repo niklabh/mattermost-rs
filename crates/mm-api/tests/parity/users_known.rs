@@ -22,7 +22,7 @@ use crate::common;
 
 use common::{
     add_user_to_channel, client, create_channel_typed, create_plain_user, fetch_both,
-    go_minted_token, logged_in_user_id, purge_api_fixtures, stack_enabled,
+    fetch_both_stable, go_minted_token, logged_in_user_id, purge_api_fixtures, stack_enabled,
 };
 
 struct Fixture {
@@ -159,7 +159,12 @@ async fn no_id_appears_twice_however_many_channels_are_shared() {
     let token = go_minted_token(&client).await;
     let _ = fixture(&client, &token).await;
 
-    let (go, rs) = fetch_both(&client, &token, "/api/v4/users/known").await;
+    // **The shared admin's known set is the one thing on this route that other suites move.**
+    // Every `create_plain_user` puts someone new in a channel this caller is in, so a plain
+    // `fetch_both` compares a Go read taken before that write with a Rust read taken after it.
+    // `fetch_both_stable` re-reads Go on the far side and accepts our answer if it matches either,
+    // which is the same Go–Rust–Go window the churning list routes already use.
+    let (go, rs) = fetch_both_stable(&client, &token, "/api/v4/users/known").await;
     let ids = ids_of(&go);
     assert_eq!(ids, ids_of(&rs), "the same set on both servers");
 

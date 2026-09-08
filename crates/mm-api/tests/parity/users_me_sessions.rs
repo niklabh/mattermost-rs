@@ -42,14 +42,38 @@ async fn sessions_list_is_byte_identical_across_both_servers() {
     // with each other the same way, so the order is not a parity property; the *content* is.
     // Measured twice: a live run during the `getTeam` session, then a no-op mutation control
     // failing on this test during the `getTeamStats` session.
+    //
+    // **Membership is exempt as well, and that exemption is [D-087] showing on the wire.** Go
+    // hydrates `TeamMembers` when it *fetches the session* and caches it; joining a team does not
+    // invalidate that cache, so Go keeps serving the memberships the session had when it was last
+    // read while we query the table on every request. The Go–Rust–Go window cannot see it — Go is
+    // stale in **both** its reads — and the suite creates teams for the shared admin throughout a
+    // run, so the two lists legitimately differ by whatever landed since Go's cache was filled.
+    // The assertion is therefore: everything but `team_members` is identical, and Go's
+    // memberships are a **subset** of ours. Being a strict superset is the correct direction and
+    // the only one allowed — we are never staler than Go.
     if rs_body != go_body {
         let go: serde_json::Value = serde_json::from_slice(&go_body).expect("go decodes");
         let rs: serde_json::Value = serde_json::from_slice(&rs_body).expect("rust decodes");
         assert_eq!(
-            with_sorted_team_members(go),
-            with_sorted_team_members(rs),
-            "the two servers differ beyond team_members order"
+            without_team_members(go.clone()),
+            without_team_members(rs.clone()),
+            "the two servers differ beyond team_members"
         );
+        for (go_session, rs_session) in go
+            .as_array()
+            .expect("go is a list")
+            .iter()
+            .zip(rs.as_array().expect("rust is a list"))
+        {
+            let go_teams = team_ids(go_session);
+            let rs_teams = team_ids(rs_session);
+            assert!(
+                go_teams.is_subset(&rs_teams),
+                "Go's session cache named a membership we did not serve, which is the one \
+                 direction that is a real divergence: go {go_teams:?} rust {rs_teams:?}"
+            );
+        }
     }
 
     // Guard against a vacuous pass: two empty arrays are also byte-identical.
@@ -61,20 +85,31 @@ async fn sessions_list_is_byte_identical_across_both_servers() {
     );
 }
 
-/// Each session's `team_members`, sorted by `team_id` — the only normalisation applied before
-/// the structural fallback comparison above. Everything else stays exactly as served.
-fn with_sorted_team_members(mut sessions: serde_json::Value) -> serde_json::Value {
+/// Every session with `team_members` removed — the only normalisation applied before the
+/// structural fallback comparison above. Everything else stays exactly as served, so a difference
+/// in any other field still fails.
+fn without_team_members(mut sessions: serde_json::Value) -> serde_json::Value {
     if let Some(list) = sessions.as_array_mut() {
         for session in list {
-            if let Some(members) = session
-                .get_mut("team_members")
-                .and_then(serde_json::Value::as_array_mut)
-            {
-                members.sort_by_key(|m| m["team_id"].as_str().unwrap_or_default().to_owned());
+            if let Some(object) = session.as_object_mut() {
+                object.remove("team_members");
             }
         }
     }
     sessions
+}
+
+/// The `team_id`s a session's `team_members` names, as a set.
+fn team_ids(session: &serde_json::Value) -> std::collections::BTreeSet<String> {
+    session["team_members"]
+        .as_array()
+        .map(|members| {
+            members
+                .iter()
+                .filter_map(|m| m["team_id"].as_str().map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// The security property. Asserted against the **live** response rather than a constructed one,

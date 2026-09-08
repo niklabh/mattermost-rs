@@ -306,6 +306,10 @@ async fn restoring_and_regenerating_agree_and_publish_update_team() {
     if !stack_enabled() {
         return;
     }
+    // Serialised against every other broadcast-counting test: this one asserts a *count* of
+    // frames on the shared admin's stream, which is only true while nothing else writes to
+    // that user. See `common::BROADCAST_STREAM`.
+    let _broadcast = common::BROADCAST_STREAM.lock().await;
     let http = client();
     let token = go_minted_token(&http).await;
     let go_team = create_team(&http, &token, "twresg").await;

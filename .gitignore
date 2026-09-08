@@ -28,3 +28,7 @@
 # Compiled fixture generator (go build ./... in reference/dump drops it here).
 /reference/dump/dump
 __pycache__/
+
+# The Go server built from the pinned SHA, plus its runtime root. Rebuilt by
+# scripts/go-server.sh; never committed.
+/reference/.build/

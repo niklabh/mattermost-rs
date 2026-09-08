@@ -8525,3 +8525,35 @@ name, so cargo ran zero tests and reported SURVIVED — the trap `mutate.sh`'s o
 about. The tests are named `job_data_filter_*` now so the filter can select them.
 
 Re-run: **24 run, 20 caught, 4 controls survived, 0 harness faults.**
+
+## The forward target is now built from the pinned SHA (2026-09-08)
+
+`docker compose up -d` starts Postgres alone; `scripts/go-server.sh start` builds
+`reference/mattermost/server` and runs it on :8065. The published `11.11.0-rc1` image stays in
+`docker-compose.yml` behind a `published-image` profile as the documented fallback. This closes
+[D-167] — see that entry for what it cost and what it did **not** fix.
+
+Three things a later session should not have to rediscover:
+
+1. **`go build` fails in the reference tree for a reason that looks like a broken checkout.**
+   `server/go.mod` requires the *published* `server/public v0.4.0`, so every `model.` symbol added
+   since that release is undefined. `scripts/go-server.sh` writes a `go.work` outside the tree.
+2. **`GET /api/v4/bots` no longer carries `system_owned`**, and `api4/properties.go`'s routes are
+   registered. Those were the two measured disagreements between the source and the image.
+3. **`api4/view.go` and `api4/channel_join_request.go` are behind feature flags**, not behind the
+   version skew — `IntegratedBoards` and `DiscoverableChannels`, both off at the pinned SHA. That
+   is fourteen routes `scripts/routes.py` counts and the server does not serve.
+
+### The suite is six times faster, and that broke six tests
+
+`--test parity` went from 244s to 38s once the target stopped running under qemu. Six tests then
+failed intermittently on unchanged code, and every one was a latent race the emulator had been
+hiding:
+
+| shape | fix |
+|---|---|
+| counting `user_updated`/`preferences_changed` frames on the **shared admin**, while a sibling test writes to the same user | `common::BROADCAST_STREAM`, a mutex every broadcast-counting test holds |
+| waiting a fixed 600–1200ms for an event that now arrives on a different schedule | `SocketProbe::collect_until`, which waits for the frame and then briefly for a second one |
+| `GET /users/me/sessions` embedding `team_members` from Go's **session cache** while we read the table | compare everything but `team_members`, then assert Go's set is a **subset** of ours — being ahead is [D-087] working as decided, being behind would be a real divergence |
+
+Eight consecutive full runs are green.

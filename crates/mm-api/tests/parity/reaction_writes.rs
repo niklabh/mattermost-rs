@@ -160,6 +160,31 @@ fn normalise_timestamps(reaction: &serde_json::Value) -> serde_json::Value {
     out
 }
 
+/// Wait for one `event_type` frame naming `post_id`, then keep collecting briefly so a second
+/// would also be seen.
+///
+/// A fixed window used to stand here. It encoded how fast the Go server was, and that changed:
+/// the published image ran under qemu and the pinned build runs native, so `both_servers_broadcast_the_same_reaction_event`
+/// started reporting *zero* `reaction_added` frames inside 900ms on a server that was strictly
+/// faster. Waiting for the event rather than for the clock is what makes the assertion mean the
+/// same thing at either speed; the trailing collect keeps "and not a second one" testable.
+async fn wait_for_reaction_event(probe: &mut SocketProbe, event_type: &str, post_id: &str) {
+    let event_type = event_type.to_owned();
+    let post_id = post_id.to_owned();
+    probe
+        .collect_until(Duration::from_secs(5), move |frames| {
+            frames.iter().any(|frame| {
+                frame["event"] == event_type.as_str()
+                    && frame["data"]["reaction"]
+                        .as_str()
+                        .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
+                        .is_some_and(|reaction| reaction["post_id"] == post_id.as_str())
+            })
+        })
+        .await;
+    probe.collect_for(Duration::from_millis(300)).await;
+}
+
 #[tokio::test]
 async fn saving_a_reaction_answers_and_persists_the_same_row_on_both_servers() {
     if !stack_enabled() {
@@ -271,6 +296,10 @@ async fn both_servers_broadcast_the_same_reaction_event() {
     if !stack_enabled() {
         return;
     }
+    // Serialised against every other broadcast-counting test: this one asserts a *count* of
+    // frames on the shared admin's stream, which is only true while nothing else writes to
+    // that user. See `common::BROADCAST_STREAM`.
+    let _broadcast = common::BROADCAST_STREAM.lock().await;
     let http = client();
     let token = go_minted_token(&http).await;
     let (_team, channel) = a_team_and_channel_the_user_is_in(&http, &token).await;
@@ -286,8 +315,8 @@ async fn both_servers_broadcast_the_same_reaction_event() {
     react(&http, GO, &token, logged_in_user_id(), &go_post, EMOJI).await;
     react(&http, RUST, &token, logged_in_user_id(), &rust_post, EMOJI).await;
 
-    go_socket.collect_for(Duration::from_millis(900)).await;
-    rust_socket.collect_for(Duration::from_millis(900)).await;
+    wait_for_reaction_event(&mut go_socket, "reaction_added", &go_post).await;
+    wait_for_reaction_event(&mut rust_socket, "reaction_added", &rust_post).await;
 
     // **Scoped to this test's own post.** `events_named` filters by event type alone, and the
     // suite has other tests reacting in the *same* channel — the fifty-emoji limit fixture alone
@@ -358,8 +387,8 @@ async fn both_servers_broadcast_the_same_reaction_event() {
     unreact(&http, GO, &token, logged_in_user_id(), &go_post, EMOJI).await;
     unreact(&http, RUST, &token, logged_in_user_id(), &rust_post, EMOJI).await;
 
-    go_socket.collect_for(Duration::from_millis(900)).await;
-    rust_socket.collect_for(Duration::from_millis(900)).await;
+    wait_for_reaction_event(&mut go_socket, "reaction_removed", &go_post).await;
+    wait_for_reaction_event(&mut rust_socket, "reaction_removed", &rust_post).await;
     assert_eq!(
         reaction_events(&go_socket, "reaction_removed", &go_post).len(),
         1,

@@ -381,6 +381,10 @@ async fn the_draft_events_omit_the_originating_connection() {
     if !stack_enabled() {
         return;
     }
+    // Serialised against every other broadcast-counting test: this one asserts a *count* of
+    // frames on the shared admin's stream, which is only true while nothing else writes to
+    // that user. See `common::BROADCAST_STREAM`.
+    let _broadcast = common::BROADCAST_STREAM.lock().await;
     let http = client();
     let token = go_minted_token(&http).await;
     let (team, _channel) = a_team_and_channel_the_user_is_in(&http, &token).await;
@@ -602,6 +606,10 @@ async fn deleting_preferences_publishes_both_events() {
     if !stack_enabled() {
         return;
     }
+    // Serialised against every other broadcast-counting test: this one asserts a *count* of
+    // frames on the shared admin's stream, which is only true while nothing else writes to
+    // that user. See `common::BROADCAST_STREAM`.
+    let _broadcast = common::BROADCAST_STREAM.lock().await;
     let http = client();
     let token = go_minted_token(&http).await;
     let me = logged_in_user_id();

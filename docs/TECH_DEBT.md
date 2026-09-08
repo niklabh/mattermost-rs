@@ -4746,6 +4746,40 @@ route whose live shape does not match the source is **skipped and recorded**, no
 
 ---
 
+**CLOSED 2026-09-08 — the forward target is now built from the pinned SHA.** Not an image: a
+native binary, run on the host by `scripts/go-server.sh`, against the same Postgres. The published
+image is still defined in `docker-compose.yml` behind a `published-image` profile and is no longer
+started by `docker compose up -d`.
+
+The one thing that made this look harder than it was: `server/go.mod` requires the **published**
+`github.com/mattermost/mattermost/server/public v0.4.0`, not the copy sitting in the same
+checkout, so a plain `go build` fails with a screen of undefined `model.` symbols that reads like a
+broken clone. Upstream's `make setup-go-work` writes a `go.work`; the script writes an equivalent
+one *outside* the reference tree, with absolute paths, so the reference stays untouched.
+
+**Both measured differences are gone:** `GET /api/v4/bots` no longer carries `system_owned`, and
+`api4/properties.go`'s routes answer their handler's own error instead of a mux 404.
+
+**Two families are still unregistered, and it is not version skew.** `api4/view.go`'s seven routes
+are inside `if api.srv.Config().FeatureFlags.IntegratedBoards`, and
+`api4/channel_join_request.go`'s seven are inside `if !...FeatureFlags.DiscoverableChannels
+{ return }`. Both are off by default at the pinned SHA, so `scripts/routes.py` counts fourteen
+routes the running server does not serve. Turning either flag on is a deliberate act with its own
+parity run — `DiscoverableChannels` also changes `getChannel`, which [D-153] pins as off — and it
+is what those routes need before they can be ported, not a version problem.
+
+**Two consequences worth knowing before the next session:**
+
+1. **The migrations are one-way.** The pinned SHA is later than rc1, so its first boot migrated the
+   shared database forward and rc1 can no longer read it. Falling back means recreating the volume.
+2. **The suite got roughly six times faster** — 244s to 38s for `--test parity` — because the
+   forward target is no longer emulated. That speed exposed six latent races in the parity suite
+   itself, all of the same shape: a socket assertion counting frames on the *shared admin*, or
+   waiting a fixed number of milliseconds for one. They are fixed rather than papered over; see
+   `common::BROADCAST_STREAM` and `SocketProbe::collect_until`.
+
+---
+
 ## D-168 · 41 of 700 mutation-plan anchors no longer match the tree
 
 **Status** OPEN · **Severity** unverified · **Raised** 2026-09-06 (phase 2, mutation harness)

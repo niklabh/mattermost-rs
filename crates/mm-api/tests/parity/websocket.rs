@@ -22,6 +22,27 @@ use common::{GO, RUST, SocketProbe, client, go_minted_token, logged_in_user_id, 
 /// only that the key is present. `server_hostname` is the host, which differs the same way.
 const HELLO_SHARED_KEYS: &[&str] = &["connection_id", "server_version", "server_hostname"];
 
+/// Wait for `count` responses on this probe, then collect briefly so an unexpected extra would
+/// also be seen.
+///
+/// A fixed 600ms window used to stand here and it encoded how fast the servers were. That
+/// changed — the Go server moved from an emulated image to a native build of the pinned source —
+/// and both of these tests started intermittently reading zero responses inside the window. A
+/// response is isolated per connection (only responses carry `seq_reply` or `status`, see
+/// [`SocketProbe::responses`]), so waiting for the count is exact rather than merely generous.
+async fn wait_for_responses(probe: &mut SocketProbe, count: usize) {
+    probe
+        .collect_until(Duration::from_secs(5), move |frames| {
+            frames
+                .iter()
+                .filter(|frame| frame.get("seq_reply").is_some() || frame.get("status").is_some())
+                .count()
+                >= count
+        })
+        .await;
+    probe.collect_for(Duration::from_millis(250)).await;
+}
+
 #[tokio::test]
 async fn hello_has_the_same_shape_on_both_servers() {
     if !stack_enabled() {
@@ -158,7 +179,7 @@ async fn presence_and_an_unknown_action_answer_identically() {
         probe
             .send(serde_json::json!({"seq": 2, "action": "no_such_action", "data": {}}))
             .await;
-        probe.collect_for(Duration::from_millis(600)).await;
+        wait_for_responses(probe, 2).await;
     }
 
     // Responses only — see `SocketProbe::responses`. A socket is not isolated the way a request
@@ -238,7 +259,7 @@ async fn a_request_with_no_seq_is_refused_the_same_way() {
         probe
             .send(serde_json::json!({"seq": 0, "action": "presence", "data": {}}))
             .await;
-        probe.collect_for(Duration::from_millis(600)).await;
+        wait_for_responses(probe, 1).await;
     }
 
     // A `bad_seq` refusal carries no `seq_reply` — the field is `omitempty` and the seq was 0 —

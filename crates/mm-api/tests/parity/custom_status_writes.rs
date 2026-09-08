@@ -77,6 +77,49 @@ async fn recents(http: &reqwest::Client, base: &str, token: &str, user_id: &str)
     preference["value"].as_str().unwrap_or_default().to_owned()
 }
 
+/// `user_updated` frames whose subject is `user_id` **and** whose custom status carries `text`.
+///
+/// Filtering by the subject alone is not enough, and that is not hypothetical: every test in this
+/// file changes the *same* shared admin's status, so a sibling running concurrently publishes a
+/// `user_updated` for exactly this user. Under qemu the tests were spread far enough apart to miss
+/// each other; against the native server two of them started failing on every run. The status text
+/// is unique per call site, so it is what identifies "my" event.
+fn updates_for(
+    events: Vec<serde_json::Value>,
+    user_id: &str,
+    text: &str,
+) -> Vec<serde_json::Value> {
+    events
+        .into_iter()
+        .filter(|event| {
+            event["data"]["user"]["id"] == user_id
+                && event["data"]["user"]["props"]["customStatus"]
+                    .as_str()
+                    .is_some_and(|status| status.contains(text))
+        })
+        .collect()
+}
+
+/// Wait — rather than sleep — for one such frame, then keep collecting briefly so that a *second*
+/// one would also be seen. Both halves matter: the tests here assert a count of exactly one, so
+/// arriving late and arriving twice are both failures worth catching.
+async fn wait_for_update(socket: &mut SocketProbe, user_id: &str, text: &str) {
+    let user_id = user_id.to_owned();
+    let text = text.to_owned();
+    socket
+        .collect_until(Duration::from_secs(5), move |frames| {
+            frames.iter().any(|frame| {
+                frame["event"] == "user_updated"
+                    && frame["data"]["user"]["id"] == user_id
+                    && frame["data"]["user"]["props"]["customStatus"]
+                        .as_str()
+                        .is_some_and(|status| status.contains(&text))
+            })
+        })
+        .await;
+    socket.collect_for(Duration::from_millis(400)).await;
+}
+
 #[tokio::test]
 async fn a_custom_status_round_trips_and_lands_in_the_user_row() {
     if !stack_enabled() {
@@ -565,6 +608,10 @@ async fn a_custom_status_publishes_the_same_events_on_both_servers() {
     if !stack_enabled() {
         return;
     }
+    // Serialised against every other broadcast-counting test: this one asserts a *count* of
+    // frames on the shared admin's stream, which is only true while nothing else writes to
+    // that user. See `common::BROADCAST_STREAM`.
+    let _broadcast = common::BROADCAST_STREAM.lock().await;
     let http = client();
     let admin = go_minted_token(&http).await;
     let me = common::logged_in_user_id();
@@ -581,7 +628,7 @@ async fn a_custom_status_publishes_the_same_events_on_both_servers() {
         Some(&serde_json::json!({"emoji": "wave", "text": "go event"})),
     )
     .await;
-    go_socket.collect_for(Duration::from_millis(1200)).await;
+    wait_for_update(&mut go_socket, me, "go event").await;
 
     send(
         &http,
@@ -592,13 +639,15 @@ async fn a_custom_status_publishes_the_same_events_on_both_servers() {
         Some(&serde_json::json!({"emoji": "wave", "text": "rust event"})),
     )
     .await;
-    rust_socket.collect_for(Duration::from_millis(1200)).await;
+    wait_for_update(&mut rust_socket, me, "rust event").await;
 
     // **The subject is omitted from two of the three**, so the admin's own socket sees exactly
     // one `user_updated` — the third, addressed to them by id. A port that dropped the third
     // would leave the user who made the change unaware of it.
-    let go_updated = go_socket.events_named("user_updated");
-    let rust_updated = rust_socket.events_named("user_updated");
+    //
+    // Scoped by the status text, not just by the subject: see [`updates_for`].
+    let go_updated = updates_for(go_socket.events_named("user_updated"), me, "go event");
+    let rust_updated = updates_for(rust_socket.events_named("user_updated"), me, "rust event");
     assert_eq!(
         go_updated.len(),
         rust_updated.len(),
@@ -696,6 +745,10 @@ async fn a_non_admin_socket_receives_exactly_one_of_the_two_broadcast_copies() {
     if !stack_enabled() {
         return;
     }
+    // Serialised against every other broadcast-counting test: this one asserts a *count* of
+    // frames on the shared admin's stream, which is only true while nothing else writes to
+    // that user. See `common::BROADCAST_STREAM`.
+    let _broadcast = common::BROADCAST_STREAM.lock().await;
     let http = client();
     let admin = go_minted_token(&http).await;
     common::purge_api_fixtures().await;
@@ -717,7 +770,7 @@ async fn a_non_admin_socket_receives_exactly_one_of_the_two_broadcast_copies() {
         Some(&serde_json::json!({"emoji": "wave", "text": "go broadcast"})),
     )
     .await;
-    go_socket.collect_for(Duration::from_millis(1200)).await;
+    wait_for_update(&mut go_socket, me, "go broadcast").await;
 
     send(
         &http,
@@ -728,20 +781,19 @@ async fn a_non_admin_socket_receives_exactly_one_of_the_two_broadcast_copies() {
         Some(&serde_json::json!({"emoji": "wave", "text": "rust broadcast"})),
     )
     .await;
-    rust_socket.collect_for(Duration::from_millis(1200)).await;
+    wait_for_update(&mut rust_socket, me, "rust broadcast").await;
 
-    // **Filtered by subject, not counted outright.** This socket is open for the whole test and
-    // other suites create and delete users on the same server, each of which publishes its own
-    // `user_updated` — measured: an unfiltered count saw two, and the second belonged to another
-    // test's fixture. The rule that broke four suites cross-server applies to event streams too.
-    let mine = |events: Vec<serde_json::Value>| -> Vec<serde_json::Value> {
-        events
-            .into_iter()
-            .filter(|event| event["data"]["user"]["id"] == me)
-            .collect()
-    };
-    let go_updated = mine(go_socket.events_named("user_updated"));
-    let rust_updated = mine(rust_socket.events_named("user_updated"));
+    // **Filtered by subject *and* by status text, not counted outright.** This socket is open for
+    // the whole test and other suites create and delete users on the same server, each of which
+    // publishes its own `user_updated` — measured: an unfiltered count saw two, and the second
+    // belonged to another test's fixture. Filtering by subject alone was still not enough once
+    // the server got fast enough for this file's own siblings to overlap; see [`updates_for`].
+    let go_updated = updates_for(go_socket.events_named("user_updated"), me, "go broadcast");
+    let rust_updated = updates_for(
+        rust_socket.events_named("user_updated"),
+        me,
+        "rust broadcast",
+    );
     assert_eq!(
         go_updated.len(),
         1,
