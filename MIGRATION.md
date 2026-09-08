@@ -8829,3 +8829,44 @@ channel. Six consecutive full runs green afterwards.
 count of users**, and a plain Go-then-Rust pair compares two different instants, so a
 `create_plain_user` landing between the two reads is a difference of one. Five consecutive full
 runs green.
+
+## Where the read routes stand (2026-09-09)
+
+**33 of the 106 unserved `GET`/`HEAD` pairs on the HTTP router were migrated this session**, taking
+the inventory from 231/764 to 264/764. `scripts/routes.py --todo | grep -E '^(GET|HEAD)'` is the
+live number; it reads **73**.
+
+The 73 are not one queue. They fall into four groups, and the next session should pick from the
+first:
+
+**Ordinary work (~30).** `report.go` (2), `post.go` (2), `channel.go` (4), `team.go` (4),
+`user.go`'s `auth_data`/`invalid_emails`/`uploads` (3), `properties.go` (3) and
+`custom_profile_attributes.go` (2) behind one property service, `access_control.go` (4),
+`shared_channel.go` (1), `saml/certificate/status` (1), `config.go` (3), `api.go`'s `/manualtest`
+(1). Nothing here is blocked; it is the same shape as the nine units above.
+
+**Blocked on a subsystem, and the subsystem is buildable (~20).** `file.go` (5 GET + 3 HEAD),
+`emoji.go`, `brand.go`, `team.go`'s icon and `user.go`'s two image routes, `export.go` (2),
+`import.go` (1), `upload.go` (1), `image.go` (1) all need a **local file backend**. The groundwork
+is done: `FileSettings.DriverName` is `local` in the shared config document, `scripts/go-server.sh`
+points both processes at one directory, and `FileInfo` and its store are already ported. The two
+profile-image routes additionally need initials-avatar rendering, which is a font and a drawing
+library.
+
+**Blocked on a decision or a large port (~16).** `plugin.go` (5) and `agents.go` (3) need the
+plugin environment; `view.go` (3) and `channel_join_request.go` (4) are behind the
+`IntegratedBoards` and `DiscoverableChannels` feature flags, and turning either on changes routes
+already served ([D-153]); `command.go`'s two autocomplete routes need the built-in slash-command
+registry ([D-169]).
+
+**Recorded as not-portable (~7).** [D-171]'s five — `server_busy`, `logs`, `logs/download`,
+`latest_version` and the agents trio's shared cause — plus `/files/{id}/public` ([D-170]), whose
+errors are signed HTML rather than JSON.
+
+### What the session cost the test suite, and paid back
+
+The forward target moving from an emulated image to a native build made `--test parity` six times
+faster, and that exposed **nine** latent races — four socket assertions counting frames on the
+shared admin, two fixed-window waits, a live user count compared across two instants, a tied
+sort key on direct-message channels, and a fifty-one-request test whose post another suite deleted
+underneath it. All nine are fixed rather than retried, and the suite is 906 tests over ~40s.
