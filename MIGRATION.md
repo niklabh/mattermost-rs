@@ -8598,3 +8598,28 @@ bot or one owned by someone else either. A planted role and two planted bot rows
 sixth was the SQL no-op above.
 
 Re-run: **22 run, 19 caught, 3 controls survived, 0 harness faults.**
+
+## The eight remaining `group.go` reads: ten routes, one answer (2026-09-08)
+
+Every `GET` in `api4/group.go` is now served. Modified: `crates/mm-api/src/groups.rs`,
+`crates/mm-api/src/lib.rs`, `crates/mm-api/tests/parity/groups.rs`,
+`scripts/mutations/groups.plan`. No store or app work — `requireLicense(c)` is the **first
+statement** of all ten handlers, checked one by one, so on an unlicensed server the whole family
+collapses to the generic `api.license_error` at 501.
+
+The only thing a port can get wrong here is which requests reach the gate, so that is what the
+suite pins:
+
+- **`{syncable_type:teams|channels}` is an alternation of literals, not a character class.**
+  `/groups/{id}/teams` is a 501 and `/groups/{id}/team` is gorilla's mux 404 — two answers to what
+  looks like one route. The handler carries the charset and forwards the miss; `routes.py` keeps
+  counting it as one parameterised route because the pattern holds a `|`.
+- **`members` and `stats` are literal siblings** of `{syncable_type}` and must not be read as
+  syncable types. axum prefers the literal, which is the order gorilla registers them in.
+
+Two second gates are named and not ported: `getGroupStats` and
+`getGroupsAssociatedToChannelsByTeam` consult `License().Features.LDAPGroups` and answer
+`api.ldap_groups.license_error` at **403** — reachable only with the licence that makes the whole
+route forward.
+
+Mutations: **9 run, 7 caught, 2 controls survived.**

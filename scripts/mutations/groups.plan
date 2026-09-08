@@ -1,4 +1,4 @@
-# Mutation plan for GET /api/v4/groups and /api/v4/users/{user_id}/groups.
+# Mutation plan for every GET in api4/group.go — ten routes, twelve paths, one answer.
 #
 #   scripts/mutate-batch.sh scripts/mutations/groups.plan
 #
@@ -13,11 +13,19 @@
 # other error in the tree names its caller is recorded in the module doc instead, which is where a
 # reader changing the line will look.
 #
+# **The eight routes added later are all the same `answer`**, so the three mutations above already
+# cover their bodies. What is *not* shared is the routing, and that is where the new lines go: the
+# `teams|channels` alternation, and the literal siblings that must not be read as syncable types.
+#
 # The last two lines are the no-op controls and must SURVIVE.
 
 api-groups-status	crates/mm-api/src/groups.rs	            "api.license_error",\n            None,\n            String::new(),\n            501,	            "api.license_error",\n            None,\n            String::new(),\n            403,	api	parity::groups
 api-groups-id	crates/mm-api/src/groups.rs	            "api.license_error",	            "api.ldap_groups.license_error",	api	parity::groups
 api-groups-licensed-answers-anyway	crates/mm-api/src/groups.rs	        LicenceGate::Forward(response) => response,	        LicenceGate::Forward(_) => crate::error::ApiError::from(mm_model::utils::AppError::new(\n            "",\n            "api.license_error",\n            None,\n            String::new(),\n            501,\n        ))\n        .into_response(),	api	parity::groups
+api-syncable-type-accepts-anything	crates/mm-api/src/groups.rs	fn syncable_type_matches_go_mux(value: &str) -> bool {\n    value == "teams" || value == "channels"	fn syncable_type_matches_go_mux(value: &str) -> bool {\n    !value.is_empty() || value == "channels"	api	parity::groups
+api-syncable-type-accepts-nothing	crates/mm-api/src/groups.rs	fn syncable_type_matches_go_mux(value: &str) -> bool {\n    value == "teams" || value == "channels"	fn syncable_type_matches_go_mux(value: &str) -> bool {\n    value == "teams" && value == "channels"	api	parity::groups
+api-syncable-type-drops-teams	crates/mm-api/src/groups.rs	    value == "teams" || value == "channels"	    value == "channels"	api	parity::groups
+api-syncables-skips-the-charset-check	crates/mm-api/src/groups.rs	    if !syncable_type_matches_go_mux(&syncable_type) {\n        tracing::Span::current().record("forwarded", true);\n        return crate::proxy::forward_to_go(State(state), request).await;\n    }\n    tracing::Span::current().record("forwarded", false);\n    answer(&state, request).await\n}\n\n/// Port of `getGroupSyncable`	    tracing::Span::current().record("forwarded", false);\n    answer(&state, request).await\n}\n\n/// Port of `getGroupSyncable`	api	parity::groups
 #
 # --- no-op controls: these must SURVIVE ---
 control-rename-binding	crates/mm-api/src/groups.rs	async fn answer(state: &AppState, request: Request) -> Response {\n    match licence_gate(state, request).await {	async fn answer(state: &AppState, request: Request) -> Response {\n    let gate = licence_gate(state, request).await;\n    match gate {	api	parity::groups

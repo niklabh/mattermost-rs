@@ -1451,6 +1451,46 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/audits",
             partially_migrated(get(audits::get_audits)),
         )
+        // `api4/group.go`'s eight remaining reads, every one of which opens with
+        // `requireLicense`. `{syncable_type}` is gorilla's `teams|channels` alternation and is not
+        // id-shaped, so the handler carries that charset itself; `members` and `stats` are
+        // literals beside it and axum prefers a literal, which is the order gorilla registers
+        // them in too.
+        .route(
+            "/api/v4/groups/{group_id}",
+            partially_migrated_with_ids(&state, get(groups::get_group)),
+        )
+        .route(
+            "/api/v4/groups/{group_id}/members",
+            partially_migrated_with_ids(&state, get(groups::get_group_members)),
+        )
+        .route(
+            "/api/v4/groups/{group_id}/stats",
+            partially_migrated_with_ids(&state, get(groups::get_group_stats)),
+        )
+        .route(
+            "/api/v4/groups/{group_id}/{syncable_type}",
+            partially_migrated_with_ids(&state, get(groups::get_group_syncables)),
+        )
+        .route(
+            "/api/v4/groups/{group_id}/{syncable_type}/{syncable_id}",
+            partially_migrated_with_ids(&state, get(groups::get_group_syncable)),
+        )
+        .route(
+            "/api/v4/channels/{channel_id}/groups",
+            partially_migrated_with_ids(&state, get(groups::get_groups_by_channel)),
+        )
+        .route(
+            "/api/v4/teams/{team_id}/groups",
+            partially_migrated_with_ids(&state, get(groups::get_groups_by_team)),
+        )
+        .route(
+            "/api/v4/teams/{team_id}/groups_by_channels",
+            partially_migrated_with_ids(
+                &state,
+                get(groups::get_groups_associated_to_channels_by_team),
+            ),
+        )
         .route("/api/v4/bots", partially_migrated(get(bots::get_bots)))
         .route(
             "/api/v4/bots/{bot_user_id}",
