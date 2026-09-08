@@ -1,4 +1,4 @@
-//! Ten reads that refuse before they read anything, across eight `api4` files.
+//! Thirteen reads that refuse before they read anything, across eleven `api4` files.
 //!
 //! # Why one module rather than eight
 //!
@@ -21,6 +21,9 @@
 //! | `/oauth/outgoing_connections` | a three-way permission | 501 `…configuration_disabled` |
 //! | `/oauth/outgoing_connections/{id}` | a **different** permission | 501 `…configuration_disabled` |
 //! | `/jobs/{job_id}/download` | `RequireJobId` | 501 `app.job.download_export_results_not_enabled` |
+//! | `/files/{file_id}/link` | `RequireFileId` | 403 `api.file.get_public_link.disabled.app_error` |
+//! | `/cloud/preview/modal_data` | nothing | 404 `app.cloud.preview_modal_bucket_url_not_configured` |
+//! | `/license/load_metric` | nothing | **200** `{"load":0}` — the one member that is not a refusal |
 //!
 //! # Three gates that are not the licence, and one that is not even a licence question
 //!
@@ -37,6 +40,14 @@
 //!   be persisted (Go strips `FeatureFlags` before writing the document), so the licence half of
 //!   `sessionAttributesEnabled` is never reached and this route needs no licence question at all.
 //!
+//! # One of them is a 200
+//!
+//! `getLicenseLoadMetric` is in this module because it is the same *shape* — an answer fixed by
+//! the absence of a licence — and not because it refuses. Unlicensed, `license.Features.Users` is
+//! nil, `licenseUsers` stays 0, the `if licenseUsers > 0` guard is not taken and the metric stays
+//! 0, so the body is `{"load":0}` **without a database read**. Putting it anywhere else would hide
+//! that its zero is the licence's doing rather than a real measurement.
+//!
 //! # Two routes take no session
 //!
 //! `getSamlMetadata` and `getSessionAttributesManifest` are registered with `APIHandler`, not
@@ -46,6 +57,7 @@
 //! would turn a 501 into a 401 for exactly the callers these routes exist for.
 
 use axum::extract::{Path, Request, State};
+use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use mm_model::permission::{
     PERMISSION_MANAGE_OUTGOING_OAUTH_CONNECTIONS, PERMISSION_MANAGE_OWN_OUTGOING_WEBHOOKS,
@@ -407,15 +419,104 @@ pub async fn download_job(
     )
 }
 
+/// Port of `getFileLink` (api4/file.go:709) — `GET /api/v4/files/{file_id}/link`.
+///
+/// `FileSettings.EnablePublicLink` is checked **after** `RequireFileId` and before everything
+/// else — before the file is fetched, before the channel is read, before any permission. So a
+/// malformed id is a 400 and every well-formed one is the same 403, whether or not the file
+/// exists.
+#[tracing::instrument(skip_all, fields(file_id = %file_id, enabled))]
+pub async fn get_file_link(
+    State(state): State<AppState>,
+    Path(file_id): Path<String>,
+    _session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    if !is_valid_id(&file_id) {
+        return ApiError::invalid_url_param("file_id").into_response();
+    }
+    public_link_gate(state, "getPublicLink", request).await
+}
+
+/// The `EnablePublicLink` gate. Open, the route needs the file backend and a signed-hash
+/// comparison, neither of which is ported — so it forwards.
+///
+/// Shared with `getPublicFile` in Go and **not** here: that route's path is outside `/api/`, so
+/// `web.Handler` renders a signed HTML page rather than the JSON `AppError`, and it is not served.
+/// See [D-170].
+async fn public_link_gate(state: AppState, where_: &'static str, request: Request) -> Response {
+    let enabled = state.app.config().enable_public_link;
+    tracing::Span::current().record("enabled", enabled);
+    if enabled {
+        return crate::proxy::forward_to_go(State(state), request).await;
+    }
+    refusal(where_, "api.file.get_public_link.disabled.app_error", 403)
+}
+
+/// Port of `getPreviewModalData` (api4/cloud.go:618) via `App.GetPreviewModalData`
+/// (app/cloud.go:43).
+///
+/// `CloudSettings.PreviewModalBucketURL` is empty on a stock server, and Go's test is
+/// `bucketURL == nil || *bucketURL == ""` — the two are one answer. Set, the route fetches JSON
+/// over HTTP from that bucket, which this server does not do, so it forwards.
+#[tracing::instrument(skip_all, fields(configured))]
+pub async fn get_preview_modal_data(
+    State(state): State<AppState>,
+    _session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    let configured = !state.app.config().cloud_preview_modal_bucket_url.is_empty();
+    tracing::Span::current().record("configured", configured);
+    if configured {
+        return crate::proxy::forward_to_go(State(state), request).await;
+    }
+    refusal(
+        "GetPreviewModalData",
+        "app.cloud.preview_modal_bucket_url_not_configured",
+        404,
+    )
+}
+
+/// Port of `getLicenseLoadMetric` (api4/license.go:300) — `GET /api/v4/license/load_metric`.
+///
+/// **A 200, and the only one in this module.** Unlicensed, `license.Features.Users` is nil so
+/// `licenseUsers` stays 0, the `if licenseUsers > 0` guard is not taken, and `loadMetric` keeps its
+/// zero value — so the monthly-active-user count is **never queried** and the body is `{"load":0}`.
+/// A port that computed the ratio anyway would divide by zero to reach the same number, which is
+/// the kind of accident that stops being the same number the moment a licence appears.
+///
+/// `map[string]int` with one key, `json.NewEncoder(w).Encode` — so a trailing newline — and an
+/// explicit `Content-Type` that Go sets by hand a line earlier.
+#[tracing::instrument(skip_all, fields(licensed))]
+pub async fn get_license_load_metric(
+    State(state): State<AppState>,
+    _session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    match licence_gate(&state, request).await {
+        LicenceGate::Forward(response) => response,
+        LicenceGate::Unlicensed => (
+            StatusCode::OK,
+            [
+                ("Content-Type", "application/json"),
+                ("x-mmrs-served-by", "rust"),
+            ],
+            b"{\"load\":0}\n".to_vec(),
+        )
+            .into_response(),
+        LicenceGate::Failed(err) => err.into_response(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// The statuses are **not** uniform, and three of the ten are 403s. A port that reached for
+    /// The statuses are **not** uniform: four of the twelve refusals are 403s and one is a 404. A port that reached for
     /// 501 everywhere — the status most licence refusals use — would be wrong on
     /// `trial-license/prev`, `system/support_packet` and `custom_profile_attributes/group`.
     #[test]
-    fn the_family_carries_two_statuses_and_nine_ids() {
+    fn the_family_carries_three_statuses_and_eleven_ids() {
         let cases: &[(&str, i32)] = &[
             ("api.server.hosted_signup_unavailable.error", 501),
             ("api.license.upgrade_needed.app_error", 403),
@@ -427,6 +528,8 @@ mod tests {
             (OUTGOING_OAUTH_DISABLED, 501),
             (OUTGOING_OAUTH_UNLICENSED, 501),
             ("app.job.download_export_results_not_enabled", 501),
+            ("api.file.get_public_link.disabled.app_error", 403),
+            ("app.cloud.preview_modal_bucket_url_not_configured", 404),
         ];
 
         // Ten refusals and **nine** ids: the two outgoing-OAuth routes share
@@ -434,14 +537,14 @@ mod tests {
         // Everything else in the family has an id of its own, which is why the ids are listed
         // here rather than derived from a shared constant.
         let ids: std::collections::BTreeSet<&str> = cases.iter().map(|(id, _)| *id).collect();
-        assert_eq!(ids.len(), 9, "ten refusals, nine distinct ids");
+        assert_eq!(ids.len(), 11, "twelve refusals, eleven distinct ids");
 
         let statuses: std::collections::BTreeSet<i32> =
             cases.iter().map(|(_, status)| *status).collect();
         assert_eq!(
             statuses,
-            [403, 501].into_iter().collect(),
-            "two statuses, and 403 is not the rare one"
+            [403, 404, 501].into_iter().collect(),
+            "three statuses — and the 404 is a *configuration* answer, not a missing resource"
         );
     }
 

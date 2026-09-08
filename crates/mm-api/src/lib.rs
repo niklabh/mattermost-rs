@@ -1541,6 +1541,23 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/jobs/{job_id}/download",
             partially_migrated_with_ids(&state, get(gated_reads::download_job)),
         )
+        .route(
+            "/api/v4/files/{file_id}/link",
+            partially_migrated_with_ids(&state, get(gated_reads::get_file_link)),
+        )
+        // `/files/{file_id}/public` is **not** registered, and the reason is worth stating: it is
+        // the only route in this family whose errors are not JSON. Because its path is outside
+        // `/api/`, `web.Handler` renders a signed HTML redirect page — `utils.RenderWebAppError`
+        // with the server's `AsymmetricSigningKey` — so reproducing even its 403 means porting
+        // ECDSA signing and the web-app error template. See [D-170].
+        .route(
+            "/api/v4/cloud/preview/modal_data",
+            partially_migrated(get(gated_reads::get_preview_modal_data)),
+        )
+        .route(
+            "/api/v4/license/load_metric",
+            partially_migrated(get(gated_reads::get_license_load_metric)),
+        )
         // The four personal-access-token reads. `/users/tokens` and its children are literals
         // under `/users`, so they never reach the `{user_id}` route; `/users/{user_id}/tokens` is
         // the parameterised one and resolves `me` in the handler.

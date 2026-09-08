@@ -1,4 +1,4 @@
-//! Cross-server parity for the ten reads in `mm_api::gated_reads`.
+//! Cross-server parity for the thirteen reads in `mm_api::gated_reads`.
 //!
 //! ```sh
 //! scripts/parity.sh -p mm-api --test parity gated_reads
@@ -24,7 +24,8 @@ use common::{
 
 const NOWHERE: &str = "zzzzzzzzzzzzzzzzzzzzzzzzzz";
 
-/// `(path, status, id)` for all ten, as an admin sees them.
+/// `(path, status, id)` for the twelve **refusals**, as an admin sees them. The two that are not
+/// refusals — `license/load_metric`, a 200, and nothing else — have their own tests.
 fn every_gated_read() -> Vec<(String, u16, &'static str)> {
     vec![
         (
@@ -77,6 +78,16 @@ fn every_gated_read() -> Vec<(String, u16, &'static str)> {
             501,
             "app.job.download_export_results_not_enabled",
         ),
+        (
+            format!("/api/v4/files/{NOWHERE}/link"),
+            403,
+            "api.file.get_public_link.disabled.app_error",
+        ),
+        (
+            "/api/v4/cloud/preview/modal_data".into(),
+            404,
+            "app.cloud.preview_modal_bucket_url_not_configured",
+        ),
     ]
 }
 
@@ -104,7 +115,7 @@ async fn every_gated_read_gives_its_own_refusal() {
     let token = go_minted_token(&client).await;
 
     let all = every_gated_read();
-    assert_eq!(all.len(), 10);
+    assert_eq!(all.len(), 12);
 
     for (path, want_status, want_id) in &all {
         let ((go_status, go), (rs_status, rs)) =
@@ -126,18 +137,19 @@ async fn every_gated_read_gives_its_own_refusal() {
         );
     }
 
-    // Nine distinct ids across ten routes, and exactly two statuses — the guard against a loop
-    // that asserts one constant ten times. **Nine, not ten**: the two outgoing-OAuth routes share
-    // `configuration_disabled` because they share `ensureOutgoingOAuthConnectionInterface`, and
-    // every other route in the family has an id of its own.
+    // Eleven distinct ids across twelve routes, and three statuses — the guard against a loop
+    // that asserts one constant twelve times. **Eleven, not twelve**: the two outgoing-OAuth
+    // routes share `configuration_disabled` because they share
+    // `ensureOutgoingOAuthConnectionInterface`, and every other route in the family has an id of
+    // its own. The 404 is a *configuration* answer, not a missing resource.
     let ids: std::collections::BTreeSet<_> = all.iter().map(|r| r.2).collect();
     assert_eq!(
         ids.len(),
-        9,
-        "ten routes and nine ids — only the outgoing-OAuth pair shares one"
+        11,
+        "twelve routes and eleven ids — only the outgoing-OAuth pair shares one"
     );
     let statuses: std::collections::BTreeSet<_> = all.iter().map(|r| r.1).collect();
-    assert_eq!(statuses, [403, 501].into_iter().collect());
+    assert_eq!(statuses, [403, 404, 501].into_iter().collect());
 }
 
 /// **`api.ldap_groups.license_error` at 501 here and at 403 in `group.go`.** One id, two statuses,
@@ -355,6 +367,12 @@ async fn a_license_row_moves_only_the_licence_gated_ones() {
         "/api/v4/ldap/groups",
         "/api/v4/system/support_packet",
         "/api/v4/custom_profile_attributes/group",
+        // **A 200 that must still move.** `load_metric` answers `{"load":0}` unlicensed and is
+        // the only member of the family that is not a refusal — which makes it the one a port is
+        // most likely to serve unconditionally, since the answer *looks* like a constant. It is
+        // not: with a licence the metric is a real ratio, and this is what fails if the route
+        // stops forwarding.
+        "/api/v4/license/load_metric",
     ];
     // Neither of these consults the licence at all: the flag short-circuits before it, and the
     // setting is checked before it.
@@ -424,4 +442,75 @@ async fn other_methods_on_the_same_paths_are_forwarded() {
         );
         assert_ne!(ours.status().as_u16(), 405, "{method} {path}");
     }
+}
+
+/// **The one member that answers 200.** Unlicensed, `licenseUsers` is 0, the guard is not taken
+/// and the metric keeps its zero — so the body is `{"load":0}` and the monthly-active-user count
+/// is never queried. A licence sends the route to Go, where the real ratio is computed.
+#[tokio::test]
+async fn the_load_metric_is_zero_without_a_licence() {
+    if !stack_enabled() {
+        return;
+    }
+    let _unlicensed = ACTIVE_LICENCE_ROW.read().await;
+    let client = client();
+    let token = go_minted_token(&client).await;
+
+    let path = "/api/v4/license/load_metric";
+    let ((go_status, go), (rs_status, rs)) = fetch_both_raw(&client, &token, path).await;
+    assert_eq!(go_status, 200, "{path}: {}", String::from_utf8_lossy(&go));
+    assert_eq!(rs_status, go_status);
+    assert_eq!(
+        String::from_utf8_lossy(&go),
+        String::from_utf8_lossy(&rs),
+        "{path}"
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&rs),
+        "{\"load\":0}\n",
+        "one key, and the encoder's newline"
+    );
+    assert_eq!(
+        served_by(&client, &token, path).await.as_deref(),
+        Some("rust")
+    );
+
+    // **This deployment has active users**, so a zero that came from the count rather than from
+    // the licence would be wrong for a reason no other assertion here would catch.
+    let stats: serde_json::Value = client
+        .get(format!("{RUST}/api/v4/users/stats"))
+        .header("Authorization", format!("Bearer {token}"))
+        .send()
+        .await
+        .expect("reachable")
+        .json()
+        .await
+        .expect("json");
+    assert!(
+        stats["total_users_count"].as_i64().unwrap_or(0) > 0,
+        "the installation has users: {stats}"
+    );
+}
+
+/// `RequireFileId` runs **before** the public-link gate, so a malformed id is a 400 and not the
+/// 403.
+///
+/// Only `/api/v4/files/{id}/link` is checked: its sibling `/files/{id}/public` is not served,
+/// because a path outside `/api/` gets a signed HTML page from `web.Handler` instead of the JSON
+/// `AppError` every assertion here compares. See [D-170].
+#[tokio::test]
+async fn the_public_link_routes_check_the_id_first() {
+    if !stack_enabled() {
+        return;
+    }
+    let _unlicensed = ACTIVE_LICENCE_ROW.read().await;
+    let client = client();
+    let token = go_minted_token(&client).await;
+
+    let path = "/api/v4/files/short/link";
+    let ((go_status, go), (rs_status, rs)) = fetch_both_raw(&client, &token, path).await;
+    assert_eq!(go_status, 400, "{path}");
+    assert_eq!(rs_status, go_status);
+    let body = assert_error_bodies_match_except_known_gaps(&go, &rs, path);
+    assert_eq!(body["id"], "api.context.invalid_url_param.app_error");
 }

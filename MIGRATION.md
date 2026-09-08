@@ -8756,3 +8756,26 @@ team. Re-run: **21 run, 19 caught, 2 controls survived.**
 `recent_custom_statuses` category. Three other suites write preferences for the shared admin, and
 with the native forward target they now overlap; the sibling `sidebar_category_updated` cannot be
 scoped at all — its data map is empty by Go's own TODO — so it is asserted as "at least one".
+
+## Four more gated reads, and one of them is a 200 (2026-09-08)
+
+`GET /api/v4/files/{file_id}/link`, `/api/v4/cloud/preview/modal_data` and
+`/api/v4/license/load_metric` join `mm_api::gated_reads`; two config fields added.
+
+`load_metric` is the odd one and the reason it is worth a note: unlicensed, `licenseUsers` is 0,
+the `if licenseUsers > 0` guard is never taken and the metric keeps its zero — so the body is
+`{"load":0}` **without a database read**. It is the member of the family most likely to be served
+unconditionally by mistake, because the answer looks like a constant; a mutation that did exactly
+that survived until the licence-boundary test learned to include it.
+
+### `/files/{file_id}/public` is not served, and its sibling is
+
+Same gate, same error id, and a completely different response: the public route's path is outside
+`/api/`, so `web.Handler` renders a signed HTML redirect page rather than a JSON `AppError`. Its
+403 carries an ECDSA signature made with the server's `AsymmetricSigningKey`. See [D-170].
+
+Mutations: **28 run, 25 caught, 2 controls survived**, after one survivor that was a missing entry
+in the licence-boundary list rather than a gap in the code.
+
+Also recorded this session: [D-169] (the built-in slash-command registry, three routes) and
+[D-171] (five routes that read in-process state this server does not share).

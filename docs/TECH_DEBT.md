@@ -6181,3 +6181,68 @@ plausible-looking 400 rather than a compile error. Two options, and the first is
 
 A `#[derive(Deserialize)]` on a wire type without `#[serde(default)]` should be treated as a
 review error in this project, the same way a missing `rename` is.
+
+## D-169 · `listCommands`'s built-in half needs the slash-command registry
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-08 (phase 2, command reads)
+
+`GET /api/v4/commands` is served for `custom_only=true` and **forwarded otherwise**. The other
+branch calls `ListAutocompleteCommands` / `ListAllCommandsByUser`, which merge the ~30 **built-in**
+slash commands — registered by `app/slashcommands/`, with i18n-translated display names and
+descriptions — with plugin-registered ones. Neither is in the database, so no store read can
+produce them.
+
+The same registry blocks two more routes outright: `GET /api/v4/teams/{team_id}/commands/autocomplete`
+(`listAutocompleteCommands`) and `.../autocomplete_suggestions`
+(`listCommandAutocompleteSuggestions`), which additionally runs each provider's autocomplete
+matcher.
+
+**What is owed:** port `app/slashcommands`' provider registry, or accept that these three stay
+Go's. The i18n half is the harder one — the display strings come from `i18n/en.json` through
+`c.AppContext.T`, which is [D-092]'s gap.
+
+---
+
+## D-170 · `/files/{file_id}/public` answers HTML, not JSON
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-08 (phase 2, gated reads)
+
+Its sibling `/api/v4/files/{file_id}/link` is served — same gate, same error id, a JSON
+`AppError`. This one is **not**, and the reason is the path rather than the handler: it sits
+outside `/api/`, so `web.Handler` renders `utils.RenderWebAppError` instead — a `text/html`
+redirect page whose target carries the message **and an ECDSA signature** made with the server's
+`AsymmetricSigningKey` (a `Systems` row).
+
+Measured: `GET /files/zzzz…/public` on the pinned server is a 403 with
+`Content-Type: text/html` and a 695-byte body containing
+`window.location = '/error?message=Public+links+have+been+disabled.&s=MEQCIF…'`.
+
+So even the *refusal* is out of reach: matching it needs the signing key, Go's exact `s=`
+construction, and the error-page template. Both `GET` and `HEAD` stay forwarded.
+
+**What is owed:** port `AsymmetricSigningKey` loading and `RenderWebAppError`. It is a prerequisite
+for anything else outside `/api/` — there are three such routes in the inventory.
+
+---
+
+## D-171 · Five read routes are blocked on in-process state this server does not share
+
+**Status** OPEN · **Severity** unverifiable · **Raised** 2026-09-08 (phase 2, system reads)
+
+Each of these reads something that lives **inside the Go process** and is not in the database, so
+serving them would mean answering about *our* state while a client is asking about Go's:
+
+| route | what it reads |
+|---|---|
+| `GET /api/v4/server_busy` | `platform.Busy`, an in-memory flag set by `POST /server_busy` — which we forward, so Go holds it and we would always answer "not busy" |
+| `GET /api/v4/logs` | the server's own log buffer |
+| `GET /api/v4/logs/download` | the same, as a file |
+| `GET /api/v4/latest_version` | a cached fetch of `api.github.com/repos/mattermost/mattermost-server/releases/latest`; two servers with independent caches disagree |
+| `GET /api/v4/agents`, `/agents/status`, `/llmservices` | the **plugin environment** — `IsActive("mattermost-ai")` and the bridge client. Three routes, one cause |
+
+This is not the [D-087] staleness case: those answers converge, these are simply about a different
+process. `server_busy` is the one that could be closed cheaply *if* the write half moved here too,
+since then this server would own the flag.
+
+**What is owed:** nothing yet — recorded so the next session does not re-derive it. The agents trio
+closes with the plugin host; the busy flag closes when `POST`/`DELETE /server_busy` migrate.

@@ -1,4 +1,4 @@
-# Mutation plan for the ten reads in `mm_api::gated_reads` (eight api4 files, one module).
+# Mutation plan for the thirteen reads in `mm_api::gated_reads` (eleven api4 files, one module).
 #
 #   scripts/mutate-batch.sh scripts/mutations/gated-reads.plan
 #
@@ -44,6 +44,14 @@ api-session-attributes-demands-a-session	crates/mm-api/src/gated_reads.rs	pub as
 app-outgoing-config-default-is-on	crates/mm-app/src/config.rs	            enable_outgoing_oauth_connections: false,	            enable_outgoing_oauth_connections: true,	unit	every_default_matches_what_go_actually_wrote
 app-download-export-default-is-on	crates/mm-app/src/config.rs	            message_export_download_export_results: false,	            message_export_download_export_results: true,	unit	every_default_matches_what_go_actually_wrote
 app-session-attributes-flag-default-is-on	crates/mm-app/src/config.rs	            feature_flag_session_attributes: false,	            feature_flag_session_attributes: true,	api	gated_reads
+api-public-link-gate-is-inverted	crates/mm-api/src/gated_reads.rs	    let enabled = state.app.config().enable_public_link;\n    tracing::Span::current().record("enabled", enabled);\n    if enabled {	    let enabled = state.app.config().enable_public_link;\n    tracing::Span::current().record("enabled", enabled);\n    if !enabled {	api	gated_reads
+api-file-link-skips-the-id-check	crates/mm-api/src/gated_reads.rs	    if !is_valid_id(&file_id) {	    if false {	api	gated_reads
+api-preview-modal-gate-is-inverted	crates/mm-api/src/gated_reads.rs	    let configured = !state.app.config().cloud_preview_modal_bucket_url.is_empty();\n    tracing::Span::current().record("configured", configured);\n    if configured {	    let configured = !state.app.config().cloud_preview_modal_bucket_url.is_empty();\n    tracing::Span::current().record("configured", configured);\n    if !configured {	api	gated_reads
+api-preview-modal-is-a-501	crates/mm-api/src/gated_reads.rs	        "app.cloud.preview_modal_bucket_url_not_configured",\n        404,	        "app.cloud.preview_modal_bucket_url_not_configured",\n        501,	api	gated_reads
+api-load-metric-is-not-zero	crates/mm-api/src/gated_reads.rs	b"{\\"load\\":0}\\n".to_vec(),	b"{\\"load\\":1}\\n".to_vec(),	api	gated_reads
+api-load-metric-has-no-newline	crates/mm-api/src/gated_reads.rs	b"{\\"load\\":0}\\n".to_vec(),	b"{\\"load\\":0}".to_vec(),	api	gated_reads
+api-load-metric-answers-while-licensed	crates/mm-api/src/gated_reads.rs	    match licence_gate(&state, request).await {\n        LicenceGate::Forward(response) => response,\n        LicenceGate::Unlicensed => (\n            StatusCode::OK,	    match licence_gate(&state, request).await {\n        LicenceGate::Forward(_) => (\n            StatusCode::OK,\n            [\n                ("Content-Type", "application/json"),\n                ("x-mmrs-served-by", "rust"),\n            ],\n            b"{\\"load\\":0}\\n".to_vec(),\n        )\n            .into_response(),\n        LicenceGate::Unlicensed => (\n            StatusCode::OK,	api	gated_reads
+app-public-link-default-is-on	crates/mm-app/src/config.rs	            enable_public_link: false,	            enable_public_link: true,	unit	every_default_matches_what_go_actually_wrote
 #
 # --- no-op controls: these must SURVIVE ---
 control-rename-binding	crates/mm-api/src/gated_reads.rs	    let enabled = state.app.config().message_export_download_export_results;\n    tracing::Span::current().record("enabled", enabled);	    let on = state.app.config().message_export_download_export_results;\n    let enabled = on;\n    tracing::Span::current().record("enabled", enabled);	api	gated_reads

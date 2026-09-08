@@ -73,7 +73,7 @@ MODELLED = {
     "ComplianceSettings": ["Enable"],
     "ExperimentalSettings": ["RestrictSystemAdmin"],
     "ImageProxySettings": ["Enable"],
-    "FileSettings": ["DriverName"],
+    "FileSettings": ["DriverName", "EnablePublicLink"],
     "PrivacySettings": ["ShowFullName", "ShowEmailAddress"],
     "ClientRequirements": [
         "AndroidLatestVersion", "AndroidMinVersion", "IosLatestVersion", "IosMinVersion",
@@ -88,6 +88,7 @@ MODELLED = {
     "EmailSettings": ["RequireEmailVerification"],
     "GuestAccountsSettings": ["RestrictCreationToDomains"],
     "MessageExportSettings": ["DownloadExportResults"],
+    "CloudSettings": ["PreviewModalBucketURL"],
 }
 
 full = json.load(sys.stdin)

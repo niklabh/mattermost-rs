@@ -467,11 +467,10 @@ async fn the_unmigrated_neighbours_are_forwarded() {
     };
 
     for (method, path, why) in [
-        (
-            m("GET"),
-            "/api/v4/cloud/preview/modal_data",
-            "no cloud gate at all",
-        ),
+        // `/api/v4/cloud/preview/modal_data` was in this list until it was migrated on
+        // 2026-09-08. It is now `mm_api::gated_reads` — its answer is a *configuration* 404
+        // (`CloudSettings.PreviewModalBucketURL` is empty), which is why it never had the cloud
+        // gate the routes around it do.
         (
             m("POST"),
             "/api/v4/cloud/webhook",

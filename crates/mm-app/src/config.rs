@@ -273,6 +273,22 @@ pub struct Config {
     /// `mm_api::commands`.
     pub enable_commands: bool,
 
+    /// `FileSettings.EnablePublicLink` (config.go, defaulted **`false`**).
+    ///
+    /// The whole of `getFileLink` and `getPublicFile` on a stock server: closed, both answer
+    /// `api.file.get_public_link.disabled.app_error` at **403** — and `getPublicFile` does so to an
+    /// **unauthenticated** caller, since it is an `APIHandler`. Checked *after* `RequireFileId`, so
+    /// a malformed id is still a 400. Read by `mm_api::file_links`.
+    pub enable_public_link: bool,
+
+    /// `CloudSettings.PreviewModalBucketURL` (config.go:3562, defaulted **`""`** at :3593).
+    ///
+    /// `App.GetPreviewModalData` answers `app.cloud.preview_modal_bucket_url_not_configured` at
+    /// **404** when it is empty, and otherwise fetches JSON over HTTP from that bucket. Empty is
+    /// the stock value, so the 404 is the whole route here. Modelled as a `String` rather than an
+    /// `Option` because Go's own test is `nil || ""` — the two are the same answer.
+    pub cloud_preview_modal_bucket_url: String,
+
     /// `ServiceSettings.MaximumPersonalAccessTokenLifetimeDays` (config.go:409, defaulted **`0`**
     /// at :583).
     ///
@@ -555,6 +571,8 @@ impl Default for Config {
             enable_oauth_service_provider: true,
             enable_outgoing_oauth_connections: false,
             enable_commands: true,
+            enable_public_link: false,
+            cloud_preview_modal_bucket_url: String::new(),
             maximum_personal_access_token_lifetime_days: 0,
             message_export_download_export_results: false,
             feature_flag_session_attributes: false,
@@ -796,6 +814,13 @@ impl Config {
                 "MM_SERVICESETTINGS_ENABLECOMMANDS",
                 default.enable_commands,
             ),
+            enable_public_link: lookup_bool(
+                lookup,
+                "MM_FILESETTINGS_ENABLEPUBLICLINK",
+                default.enable_public_link,
+            ),
+            cloud_preview_modal_bucket_url: lookup("MM_CLOUDSETTINGS_PREVIEWMODALBUCKETURL")
+                .unwrap_or(default.cloud_preview_modal_bucket_url),
             maximum_personal_access_token_lifetime_days: lookup_int(
                 lookup,
                 "MM_SERVICESETTINGS_MAXIMUMPERSONALACCESSTOKENLIFETIMEDAYS",
@@ -908,6 +933,17 @@ impl Config {
                 .maximum_personal_access_token_lifetime_days
                 .unwrap_or(default.maximum_personal_access_token_lifetime_days),
             enable_commands: service.enable_commands.unwrap_or(default.enable_commands),
+            enable_public_link: parsed
+                .file_settings
+                .as_ref()
+                .and_then(|f| f.enable_public_link)
+                .unwrap_or(default.enable_public_link),
+            cloud_preview_modal_bucket_url: parsed
+                .cloud_settings
+                .clone()
+                .unwrap_or_default()
+                .preview_modal_bucket_url
+                .unwrap_or(default.cloud_preview_modal_bucket_url),
             message_export_download_export_results: parsed
                 .message_export_settings
                 .unwrap_or_default()
@@ -1125,6 +1161,15 @@ struct Document {
     guest_accounts_settings: Option<GuestAccountsSettingsDocument>,
     #[serde(rename = "MessageExportSettings")]
     message_export_settings: Option<MessageExportSettingsDocument>,
+    #[serde(rename = "CloudSettings")]
+    cloud_settings: Option<CloudSettingsDocument>,
+}
+
+/// The one field of `CloudSettings` a migrated route reads.
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+struct CloudSettingsDocument {
+    #[serde(rename = "PreviewModalBucketURL")]
+    preview_modal_bucket_url: Option<String>,
 }
 
 /// The one field of `MessageExportSettings` a migrated route reads.
@@ -1268,6 +1313,8 @@ struct ExperimentalSettingsDocument {
 struct FileSettingsDocument {
     #[serde(rename = "DriverName")]
     driver_name: Option<String>,
+    #[serde(rename = "EnablePublicLink")]
+    enable_public_link: Option<bool>,
 }
 
 #[derive(Debug, Default, serde::Deserialize)]
@@ -1799,8 +1846,8 @@ mod go_parity {
             .sum();
 
         assert_eq!(
-            keys, 42,
-            "the fixture covers {keys} settings and Config reads 42 from the document. \
+            keys, 44,
+            "the fixture covers {keys} settings and Config reads 44 from the document. \
              Add the new key to scripts/dump-config-fixture.sh and re-run it — a modelled \
              setting the fixture does not carry is a setting Go's own output never checked"
         );

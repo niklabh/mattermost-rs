@@ -8,6 +8,9 @@
     "IosLatestVersion": "",
     "IosMinVersion": ""
   },
+  "CloudSettings": {
+    "PreviewModalBucketURL": ""
+  },
   "ComplianceSettings": {
     "Enable": false
   },
@@ -21,7 +24,8 @@
     "RestrictSystemAdmin": false
   },
   "FileSettings": {
-    "DriverName": "local"
+    "DriverName": "local",
+    "EnablePublicLink": false
   },
   "GuestAccountsSettings": {
     "RestrictCreationToDomains": ""
