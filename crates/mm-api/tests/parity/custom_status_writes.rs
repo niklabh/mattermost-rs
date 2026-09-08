@@ -683,24 +683,48 @@ async fn a_custom_status_publishes_the_same_events_on_both_servers() {
     );
 
     // And `addRecentCustomStatus` goes through `UpdatePreferences`, which publishes its own pair.
-    for (label, socket) in [("go", &go_socket), ("rust", &rust_socket)] {
+    //
+    // **Scoped to the `custom_status` category, not counted outright.** This socket is open for
+    // the whole exchange and every other suite that writes a preference for the shared admin —
+    // `drafts`, `preferences`, `draft_and_preference_writes` — publishes its own
+    // `preferences_changed` onto it. Measured: an unfiltered count saw three. The category is in
+    // the payload, which is a **string** holding JSON, so it is matched as a substring rather than
+    // decoded twice.
+    let recent_status_changes = |socket: &SocketProbe| -> Vec<serde_json::Value> {
+        socket
+            .events_named("preferences_changed")
+            .into_iter()
+            .filter(|event| {
+                event["data"]["preferences"]
+                    .as_str()
+                    .is_some_and(|raw| raw.contains("recent_custom_statuses"))
+            })
+            .collect()
+    };
+
+    let go_prefs = recent_status_changes(&go_socket);
+    let rust_prefs = recent_status_changes(&rust_socket);
+    for (label, prefs, socket) in [
+        ("go", &go_prefs, &go_socket),
+        ("rust", &rust_prefs, &rust_socket),
+    ] {
         assert_eq!(
-            socket.events_named("preferences_changed").len(),
+            prefs.len(),
             1,
-            "{label} published one preferences_changed: {:?}",
+            "{label} published one preferences_changed for the recent statuses: {:?}",
             socket.raw
         );
-        assert_eq!(
-            socket.events_named("sidebar_category_updated").len(),
-            1,
-            "{label} published one sidebar_category_updated: {:?}",
+        // `sidebar_category_updated` carries an **empty** data map — Go's own TODO says so — and
+        // therefore cannot be scoped the same way. Asserted as "at least one", which is the part
+        // of the property that survives a shared socket: a port that published none would fail.
+        assert!(
+            !socket.events_named("sidebar_category_updated").is_empty(),
+            "{label} published a sidebar_category_updated: {:?}",
             socket.raw
         );
     }
 
     // `preferences` is a **string** holding JSON, not an array.
-    let go_prefs = go_socket.events_named("preferences_changed");
-    let rust_prefs = rust_socket.events_named("preferences_changed");
     assert!(
         go_prefs[0]["data"]["preferences"].is_string(),
         "Go sends a string: {:?}",

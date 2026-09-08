@@ -263,6 +263,16 @@ pub struct Config {
     /// `mm_api::outgoing_oauth`.
     pub enable_outgoing_oauth_connections: bool,
 
+    /// `ServiceSettings.EnableCommands` (config.go:391, defaulted **`true`** at :803).
+    ///
+    /// The first statement of `App.GetCommand` and `App.ListTeamCommandsByUser`, and closed it is
+    /// `api.command.disabled.app_error` at **501** — which `getCommand` then *discards*:
+    /// its handler answers `SetCommandNotFoundError` for **any** error from `GetCommand`
+    /// (api4/command.go:329), so a disabled installation 404s rather than 501s on that route while
+    /// `listCommands` shows the 501. One setting, two visible answers. Read by
+    /// `mm_api::commands`.
+    pub enable_commands: bool,
+
     /// `ServiceSettings.MaximumPersonalAccessTokenLifetimeDays` (config.go:409, defaulted **`0`**
     /// at :583).
     ///
@@ -544,6 +554,7 @@ impl Default for Config {
             enable_outgoing_webhooks: true,
             enable_oauth_service_provider: true,
             enable_outgoing_oauth_connections: false,
+            enable_commands: true,
             maximum_personal_access_token_lifetime_days: 0,
             message_export_download_export_results: false,
             feature_flag_session_attributes: false,
@@ -780,6 +791,11 @@ impl Config {
                 "MM_SERVICESETTINGS_ENABLEOUTGOINGOAUTHCONNECTIONS",
                 default.enable_outgoing_oauth_connections,
             ),
+            enable_commands: lookup_bool(
+                lookup,
+                "MM_SERVICESETTINGS_ENABLECOMMANDS",
+                default.enable_commands,
+            ),
             maximum_personal_access_token_lifetime_days: lookup_int(
                 lookup,
                 "MM_SERVICESETTINGS_MAXIMUMPERSONALACCESSTOKENLIFETIMEDAYS",
@@ -891,6 +907,7 @@ impl Config {
             maximum_personal_access_token_lifetime_days: service
                 .maximum_personal_access_token_lifetime_days
                 .unwrap_or(default.maximum_personal_access_token_lifetime_days),
+            enable_commands: service.enable_commands.unwrap_or(default.enable_commands),
             message_export_download_export_results: parsed
                 .message_export_settings
                 .unwrap_or_default()
@@ -1209,6 +1226,8 @@ struct ServiceSettingsDocument {
     enable_outgoing_oauth_connections: Option<bool>,
     #[serde(rename = "MaximumPersonalAccessTokenLifetimeDays")]
     maximum_personal_access_token_lifetime_days: Option<i64>,
+    #[serde(rename = "EnableCommands")]
+    enable_commands: Option<bool>,
     #[serde(rename = "EnablePostUsernameOverride")]
     enable_post_username_override: Option<bool>,
     #[serde(rename = "EnableCustomEmoji")]
@@ -1780,8 +1799,8 @@ mod go_parity {
             .sum();
 
         assert_eq!(
-            keys, 41,
-            "the fixture covers {keys} settings and Config reads 41 from the document. \
+            keys, 42,
+            "the fixture covers {keys} settings and Config reads 42 from the document. \
              Add the new key to scripts/dump-config-fixture.sh and re-run it — a modelled \
              setting the fixture does not carry is a setting Go's own output never checked"
         );

@@ -11,6 +11,7 @@ pub mod auth;
 pub mod bots;
 pub mod channels;
 pub mod cloud;
+pub mod commands;
 pub mod common_teams;
 pub mod compliance;
 pub mod connected_workspaces;
@@ -1558,6 +1559,14 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/users/{user_id}/tokens",
             partially_migrated_with_ids(&state, get(tokens::get_user_access_tokens_for_user)),
+        )
+        .route(
+            "/api/v4/commands",
+            partially_migrated(get(commands::list_commands)),
+        )
+        .route(
+            "/api/v4/commands/{command_id}",
+            partially_migrated_with_ids(&state, get(commands::get_command)),
         )
         .route("/api/v4/bots", partially_migrated(get(bots::get_bots)))
         .route(

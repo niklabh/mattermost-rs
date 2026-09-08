@@ -8717,3 +8717,42 @@ to the app suite and adding a fixture that separates `manage_system` from `read_
 
 **Churn:** `parity/user_get.rs`'s "literal siblings are forwarded" list lost `tokens`, which is now
 ours. That list has been shrinking with each migration and is down to one entry.
+
+## `getCommand`, and half of `listCommands` (2026-09-08)
+
+`GET /api/v4/commands/{command_id}` is served in full; `GET /api/v4/commands` is served for
+`custom_only=true` and forwarded otherwise. New: `crates/mm-store/src/command_store.rs`,
+`crates/mm-app/src/command.rs`, `crates/mm-api/src/commands.rs`,
+`crates/mm-api/tests/parity/commands.rs`, `scripts/mutations/commands.plan`; one config field.
+
+### Every one of `getCommand`'s four failures is the same 404
+
+No such command, no `view_team`, no `manage_own_slash_commands`, or neither the creator nor a
+holder of `manage_others_slash_commands` — all four are `SetCommandNotFoundError`, and Go's comment
+says why: a 403 would tell a caller that a command id is real and which team it belongs to. The id
+is `store.sql_command.save.get.app_error` — a store **save** id on a read, built by the handler,
+and it does not match the id `App.GetCommand` produces, which is unreachable through this route.
+
+### The forwarded half, and why
+
+Without `custom_only` the handler merges the **built-in** slash commands — a registry in
+`app/slashcommands/` with translated display names — with plugin-registered ones. Neither is
+derivable from the database. Everything before that branch is served: the missing `team_id` (a
+**body**-param error for a query parameter), the `view_team` gate, and the
+`manage_own_slash_commands` gate `custom_only` adds. The forwarded branch is compared as a **set**:
+`ListAllCommandsByUser` ranges over a Go map, so two consecutive reads of the same server disagree
+byte for byte.
+
+### Eight survivors, one mistake
+
+First run **21 run, 11 caught, 8 real survivors**, and all eight were the same fixture error: the
+refusal test used a caller who failed *every* gate, so removing any one left another to refuse, and
+the list test's team held nothing the store's predicates were meant to exclude.
+`each_gate_refuses_on_its_own` now uses three callers that each fail exactly one gate — with a
+positive control for each — and the list fixture carries a soft-deleted command and one in another
+team. Re-run: **21 run, 19 caught, 2 controls survived.**
+
+**Churn:** `custom_status_writes`'s `preferences_changed` count is now scoped to the
+`recent_custom_statuses` category. Three other suites write preferences for the shared admin, and
+with the native forward target they now overlap; the sibling `sidebar_category_updated` cannot be
+scoped at all — its data map is empty by Go's own TODO — so it is asserted as "at least one".

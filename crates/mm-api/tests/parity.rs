@@ -50,6 +50,7 @@ mod parity {
     pub mod channels_for_user;
     pub mod channels_member_count;
     pub mod cloud_and_workspaces;
+    pub mod commands;
     pub mod common_teams;
     pub mod config_source;
     pub mod custom_status_writes;

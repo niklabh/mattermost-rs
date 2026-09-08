@@ -918,6 +918,9 @@ async fn purge_api_fixtures_once() {
         "DELETE FROM users WHERE id LIKE 'mmrsbp%'",
         "DELETE FROM channels WHERE id LIKE 'mmrsbp%'",
         "DELETE FROM teams WHERE id LIKE 'mmrsbp%'",
+        // Slash commands planted by `parity/commands.rs`. Soft-deleted rows keep their trigger
+        // reserved, so a leftover is not merely noise in a listing.
+        "DELETE FROM commands WHERE id LIKE 'mmrscmd%'",
         // Personal access tokens planted by `parity/user_access_tokens.rs`. `UserAccessTokens`
         // is empty on a stock server — the route that creates them is closed — so a leftover row
         // is visible in `GET /users/tokens` to every later run.

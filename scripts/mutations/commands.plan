@@ -1,0 +1,41 @@
+# Mutation plan for `getCommand` and the `custom_only` half of `listCommands`.
+#
+#   scripts/mutate-batch.sh scripts/mutations/commands.plan
+#
+# `getCommand` answers **404 to all four of its refusals** so that a command id cannot be probed,
+# and `listCommands` chooses a creator filter whose polarity decides whether a caller sees one
+# command or the whole team's. Those are the two things worth mutating; the rest of both handlers
+# is gates whose ordering is visible as a different status.
+#
+# **Eight mutations survived the first run, and every one was the same fixture mistake**: the
+# refusal fixtures used a caller who failed *every* gate at once, so removing any one gate left
+# another to refuse, and the list fixture had nothing in it that the store's predicates were
+# supposed to exclude. `each_gate_refuses_on_its_own` now uses three callers who each fail exactly
+# one gate — plus a positive control for each — and the list fixture carries a soft-deleted command
+# and one in another team, which is what makes `DeleteAt = 0` and `TeamId = $1` observable.
+#
+# The last two lines are the no-op controls and must SURVIVE.
+
+api-refusal-is-a-403	crates/mm-api/src/commands.rs	        "store.sql_command.save.get.app_error",\n        None,\n        String::new(),\n        404,	        "api.context.permissions.app_error",\n        None,\n        String::new(),\n        403,	api	parity::commands
+api-not-found-uses-the-store-id	crates/mm-api/src/commands.rs	        "store.sql_command.save.get.app_error",	        "store.sql_command.get.missing.app_error",	api	parity::commands
+api-view-team-gate-is-skipped	crates/mm-api/src/commands.rs	        .session_has_permission_to_team(&session.0, &command.team_id, &PERMISSION_VIEW_TEAM)\n        .await\n    {\n        return Err(command_not_found());\n    }	        .session_has_permission_to_team(&session.0, &command.team_id, &PERMISSION_VIEW_TEAM)\n        .await\n        && false\n    {\n        return Err(command_not_found());\n    }	api	parity::commands
+api-manage-own-gate-is-skipped	crates/mm-api/src/commands.rs	            &PERMISSION_MANAGE_OWN_SLASH_COMMANDS,\n        )\n        .await\n    {\n        return Err(command_not_found());\n    }\n    if session.0.user_id != command.creator_id	            &PERMISSION_MANAGE_OWN_SLASH_COMMANDS,\n        )\n        .await\n        && false\n    {\n        return Err(command_not_found());\n    }\n    if session.0.user_id != command.creator_id	api	parity::commands
+api-creator-check-is-inverted	crates/mm-api/src/commands.rs	    if session.0.user_id != command.creator_id	    if session.0.user_id == command.creator_id	api	parity::commands
+api-creator-check-is-skipped	crates/mm-api/src/commands.rs	    if session.0.user_id != command.creator_id\n        && !state	    if false\n        && !state	api	parity::commands
+api-command-id-is-never-validated	crates/mm-api/src/commands.rs	    if !is_valid_id(&command_id) {	    if false {	api	parity::commands
+api-missing-team-id-is-a-url-param	crates/mm-api/src/commands.rs	        return Err(ApiError::invalid_param("team_id"));	        return Err(ApiError::invalid_url_param("team_id"));	api	parity::commands
+api-team-id-is-never-required	crates/mm-api/src/commands.rs	    if team_id.is_empty() {\n        return Err(ApiError::invalid_param("team_id"));\n    }	    if false {\n        return Err(ApiError::invalid_param("team_id"));\n    }	api	parity::commands
+api-view-team-gate-on-the-list-is-skipped	crates/mm-api/src/commands.rs	        .session_has_permission_to_team(&session.0, &team_id, &PERMISSION_VIEW_TEAM)\n        .await\n    {	        .session_has_permission_to_team(&session.0, &team_id, &PERMISSION_VIEW_TEAM)\n        .await\n        && false\n    {	api	parity::commands
+api-custom-only-branch-is-inverted	crates/mm-api/src/commands.rs	    if !custom_only {\n        // `ListAutocompleteCommands` / `ListAllCommandsByUser` — the built-in registry.\n        return Ok(None);\n    }	    if custom_only {\n        // `ListAutocompleteCommands` / `ListAllCommandsByUser` — the built-in registry.\n        return Ok(None);\n    }	api	parity::commands
+api-manage-own-gate-on-the-list-is-skipped	crates/mm-api/src/commands.rs	        .session_has_permission_to_team(&session.0, &team_id, &PERMISSION_MANAGE_OWN_SLASH_COMMANDS)\n        .await\n    {	        .session_has_permission_to_team(&session.0, &team_id, &PERMISSION_MANAGE_OWN_SLASH_COMMANDS)\n        .await\n        && false\n    {	api	parity::commands
+api-creator-filter-is-inverted	crates/mm-api/src/commands.rs	    let creator_filter = if state\n        .app\n        .session_has_permission_to_team(\n            &session.0,\n            &team_id,\n            &PERMISSION_MANAGE_OTHERS_SLASH_COMMANDS,\n        )\n        .await\n    {\n        String::new()\n    } else {\n        session.0.user_id.clone()\n    };	    let creator_filter = if state\n        .app\n        .session_has_permission_to_team(\n            &session.0,\n            &team_id,\n            &PERMISSION_MANAGE_OTHERS_SLASH_COMMANDS,\n        )\n        .await\n    {\n        session.0.user_id.clone()\n    } else {\n        String::new()\n    };	api	parity::commands
+api-list-has-no-newline	crates/mm-api/src/commands.rs	    body.push(b'\\n');\n\n    Ok((	    Ok((	api	parity::commands
+app-creator-filter-is-never-applied	crates/mm-app/src/command.rs	        let commands = if user_id.is_empty() {	        let commands = if true {	api	parity::commands
+app-creator-filter-matches-the-wrong-field	crates/mm-app/src/command.rs	                .filter(|command| command.creator_id == user_id)	                .filter(|command| command.team_id == user_id)	api	parity::commands
+store-get-ignores-the-delete-predicate	crates/mm-store/src/command_store.rs	             WHERE id = $1 AND deleteat = 0	             WHERE id = $1 AND deleteat >= 0	api	parity::commands
+store-by-team-ignores-the-delete-predicate	crates/mm-store/src/command_store.rs	             WHERE teamid = $1 AND deleteat = 0	             WHERE teamid = $1 AND deleteat >= 0	api	parity::commands
+store-by-team-ignores-the-team	crates/mm-store/src/command_store.rs	             WHERE teamid = $1 AND deleteat = 0	             WHERE (teamid = $1 OR true) AND deleteat = 0	api	parity::commands
+#
+# --- no-op controls: these must SURVIVE ---
+control-rename-binding	crates/mm-api/src/commands.rs	    let custom_only = query_flag_is_true(query, "custom_only");	    let only_custom = query_flag_is_true(query, "custom_only");\n    let custom_only = only_custom;	api	parity::commands
+control-reorder-independent-columns	crates/mm-store/src/command_store.rs	                   COALESCE(username, '')          AS "username!",\n                   COALESCE(iconurl, '')           AS "iconurl!",\n                   COALESCE(autocomplete, false)   AS "autocomplete!",\n                   COALESCE(autocompletedesc, '')  AS "autocompletedesc!",\n                   COALESCE(autocompletehint, '')  AS "autocompletehint!",\n                   COALESCE(displayname, '')       AS "displayname!",\n                   COALESCE(description, '')       AS "description!",\n                   COALESCE(url, '')               AS "url!",\n                   COALESCE(pluginid, '')          AS "pluginid!"\n              FROM commands\n             WHERE id = $1	                   COALESCE(iconurl, '')           AS "iconurl!",\n                   COALESCE(username, '')          AS "username!",\n                   COALESCE(autocomplete, false)   AS "autocomplete!",\n                   COALESCE(autocompletehint, '')  AS "autocompletehint!",\n                   COALESCE(autocompletedesc, '')  AS "autocompletedesc!",\n                   COALESCE(displayname, '')       AS "displayname!",\n                   COALESCE(description, '')       AS "description!",\n                   COALESCE(url, '')               AS "url!",\n                   COALESCE(pluginid, '')          AS "pluginid!"\n              FROM commands\n             WHERE id = $1	api	parity::commands
