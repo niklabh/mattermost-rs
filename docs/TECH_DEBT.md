@@ -6047,7 +6047,13 @@ phantom bug.
 
 ## D-191 · The five status writes need a status cache before they can be ported
 
-**Status** OPEN · **Severity** blocking · **Raised** 2026-09-08 (write-route loop)
+**Status** CLOSED 2026-09-08 · **Severity** blocking · **Raised** 2026-09-08 (write-route loop)
+
+**Closed by the status-writes group.** `App::status_cache` exists, `PUT /users/{id}/status` is
+served, and the three cache-dependent decisions are `away_is_needed`, `online_row_needs_writing`
+and `is_user_away` in `crates/mm-app/src/status.rs` — extracted precisely because no HTTP request
+can reach them, and mutated against unit tests instead. The four `custom` siblings are not blocked
+on the cache at all; they are blocked on `UpdateUser`, which is the next group.
 
 `PUT /users/{id}/status` and its four `custom` siblings are the first write family where **the
 cache is the model rather than an optimisation**, and porting them mechanically would be wrong in

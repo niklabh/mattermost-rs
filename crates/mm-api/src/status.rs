@@ -4,6 +4,8 @@
 use axum::extract::{Path, Request, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
+use mm_model::permission::{PERMISSION_EDIT_OTHER_USERS, make_permission_error};
+use mm_model::status::{STATUS_OUT_OF_OFFICE, Status};
 use mm_model::utils::{AppError, sorted_array_from_json};
 
 use crate::AppState;
@@ -174,6 +176,114 @@ fn parse_user_ids(body: &[u8]) -> Result<Vec<String>, ApiError> {
     }
 
     Ok(user_ids)
+}
+
+/// Port of `updateUserStatus` (api4/status.go) — `PUT /api/v4/users/{user_id}/status`.
+///
+/// # The body's `user_id` must match the path's, and that check is a **400 naming `user_id`**
+///
+/// It runs before the permission check, so a mismatched body is a 400 even for a caller who could
+/// not have updated that user anyway.
+///
+/// # Four statuses, and `ooo` is not one of them
+///
+/// The switch accepts `online`, `offline`, `away` and `dnd`; anything else — including the
+/// `ooo` that `Status.Status` can hold — is `SetInvalidParam("status")`. So this route can never
+/// *set* out-of-office, only move a user out of it.
+///
+/// # Leaving `ooo` disables the auto-responder, and that part is forwarded
+///
+/// When the stored status is `ooo` and the new one is not, Go calls `DisableAutoResponder`, which
+/// patches the user's notify props. `PatchUser` is unported, and skipping it would leave the
+/// auto-responder armed for a user who is no longer away — a persisted inconsistency a reload does
+/// not fix. Reachable only from a status row already saying `ooo`, which no route here writes.
+///
+/// # The answer is `getUserStatus`'s own body
+///
+/// Go tail-calls the read handler, so the response is a fresh read rather than the struct just
+/// written — and it carries the `Status` shape, not `{"status":"OK"}`.
+#[tracing::instrument(skip_all, fields(user_id = %user_id, forwarded))]
+pub async fn update_user_status(
+    State(state): State<AppState>,
+    session: AuthenticatedSession,
+    Path(user_id): Path<String>,
+    request: Request,
+) -> Response {
+    let user_id = if user_id == ME {
+        session.0.user_id.clone()
+    } else {
+        user_id
+    };
+    if let Err(err) = require_id(&user_id, "user_id") {
+        return err.into_response();
+    }
+
+    let (parts, body) = request.into_parts();
+    let bytes = match axum::body::to_bytes(body, usize::MAX).await {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            tracing::warn!(error = %err, "could not read the request body");
+            return ApiError::invalid_param("status").into_response();
+        }
+    };
+    let submitted: Status = match serde_json::from_slice(&bytes) {
+        Ok(status) => status,
+        Err(err) => {
+            tracing::debug!(error = %err, "status body did not decode");
+            return ApiError::invalid_param("status").into_response();
+        }
+    };
+
+    // "The user being updated in the payload must be the same one as indicated in the URL."
+    if submitted.user_id != user_id {
+        return ApiError::invalid_param("user_id").into_response();
+    }
+
+    if !state
+        .app
+        .session_has_permission_to_user(&session.0, &user_id)
+        .await
+    {
+        return ApiError::from(*make_permission_error(
+            &session.0,
+            &[&PERMISSION_EDIT_OTHER_USERS],
+        ))
+        .into_response();
+    }
+
+    // Go logs and carries on when the current status cannot be read, so a missing row does not
+    // stop the update — it only skips the out-of-office branch.
+    if let Ok(current) = state.app.get_status(&user_id).await
+        && current.status == STATUS_OUT_OF_OFFICE
+        && submitted.status != STATUS_OUT_OF_OFFICE
+    {
+        tracing::Span::current().record("forwarded", true);
+        tracing::debug!("leaving out-of-office needs DisableAutoResponder; handing to Go");
+        let request = Request::from_parts(parts, axum::body::Body::from(bytes));
+        return crate::proxy::forward_to_go(State(state), request).await;
+    }
+    tracing::Span::current().record("forwarded", false);
+
+    match submitted.status.as_str() {
+        "online" => state.app.set_status_online(&user_id, true).await,
+        "offline" => state.app.set_status_offline(&user_id, true, false).await,
+        "away" => state.app.set_status_away_if_needed(&user_id, true).await,
+        "dnd" => {
+            state
+                .app
+                .set_status_do_not_disturb_timed(&user_id, submitted.dnd_end_time)
+                .await
+        }
+        // **Including `ooo`**, which the model can hold and this route cannot set.
+        _ => return ApiError::invalid_param("status").into_response(),
+    }
+
+    // Go tail-calls `getUserStatus`, so the answer is a fresh read — the `Status` shape with a
+    // trailing newline, not `{"status":"OK"}`.
+    match get_user_status(State(state), Path(user_id), session).await {
+        Ok(response) => response,
+        Err(err) => err.into_response(),
+    }
 }
 
 #[cfg(test)]

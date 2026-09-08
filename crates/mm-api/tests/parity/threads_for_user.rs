@@ -65,6 +65,18 @@ struct Fixture {
 
 static FIXTURE: tokio::sync::OnceCell<Fixture> = tokio::sync::OnceCell::const_new();
 
+/// Serialises the tests that assert an **exact** thread count for `plain_id` against the one test
+/// that temporarily changes what that count is.
+///
+/// `a_thread_in_a_channel_the_caller_left_is_excluded` re-inserts the channel membership, checks
+/// that the thread reappears, and deletes it again. Inside that window the fixture user follows
+/// **three** threads, not two — so a concurrent `total == 2` sees three and fails on a number that
+/// is correct for the instant it was read. It is the intra-suite form of the rule the four
+/// cross-suite fixes established: an assertion over a whole list cannot survive a test that
+/// writes to it. This is the narrowest fix — a lock rather than a third fixture user — because
+/// the window is three statements wide.
+static PLAIN_THREAD_COUNT: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 async fn fixture(client: &reqwest::Client, token: &str) -> &'static Fixture {
     FIXTURE
         .get_or_init(|| async {
@@ -444,6 +456,7 @@ async fn the_thread_list_is_byte_identical() {
     if !stack_enabled() {
         return;
     }
+    let _count_guard = PLAIN_THREAD_COUNT.lock().await;
     let client = client();
     let token = go_minted_token(&client).await;
     let f = fixture(&client, &token).await;
@@ -569,6 +582,7 @@ async fn a_thread_in_a_channel_the_caller_left_is_excluded() {
     if !stack_enabled() {
         return;
     }
+    let _count_guard = PLAIN_THREAD_COUNT.lock().await;
     let client = client();
     let token = go_minted_token(&client).await;
     let f = fixture(&client, &token).await;
@@ -651,6 +665,7 @@ async fn per_page_limits_the_list_and_not_the_totals() {
     if !stack_enabled() {
         return;
     }
+    let _count_guard = PLAIN_THREAD_COUNT.lock().await;
     let client = client();
     let token = go_minted_token(&client).await;
     let f = fixture(&client, &token).await;

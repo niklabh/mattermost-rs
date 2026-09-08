@@ -1,0 +1,65 @@
+# Mutation plan for `PUT /api/v4/users/{user_id}/status` and the four setters behind it.
+#
+#   scripts/mutate-batch.sh scripts/mutations/status-writes.plan
+#
+# **This is the first route whose model is a cache rather than a table**, and that splits the plan
+# in two. The decisions that a request can reach are mutated against the parity suite (`api`); the
+# decisions that branch on the *previous* status are unreachable over HTTP, because the only
+# caller passes `manual: true` and `force: false` every time — those are mutated against the unit
+# tests (`unit`), which is why they were extracted into `away_is_needed`,
+# `online_row_needs_writing` and `is_user_away` in the first place.
+#
+# **Equivalent mutants, deliberately not here.** Each was measured and each survives for a reason
+# that is a fact about the route, not a gap in the tests:
+#
+#   * `status.manual && !manual` in `set_status_online`, and `!force && status.manual && !manual`
+#     in `set_status_offline`. No caller passes a non-manual or forced flag, so neither guard can
+#     fire. The equivalent decision in the away path *is* mutated, through `away_is_needed`.
+#   * the `else` arm of the write test in `set_status_online`. Go calls `UpdateLastActivityAt`
+#     there and this port calls `SaveOrUpdate` in both arms; collapsing the branch changes no
+#     statement that runs.
+#   * `active_channel = String::new()` in any setter. The column does not exist, `to_json` blanks
+#     the field on the way out, and `Status::default()` already leaves it empty.
+#   * swapping `invalid_param("status")` for `invalid_param("user_id")`. `AppError.Params` is
+#     `json:"-"`, so neither name reaches the client and the id and status are identical.
+#
+# The last two lines are the no-op controls and must SURVIVE.
+
+# --- reachable over HTTP: the handler ---------------------------------------------------------
+status-handler-body-user-id-not-compared	crates/mm-api/src/status.rs	    if submitted.user_id != user_id {	    if false {	api	status_writes
+status-handler-permission-not-checked	crates/mm-api/src/status.rs	    if !state\n        .app\n        .session_has_permission_to_user(&session.0, &user_id)\n        .await\n    {	    if false\n    {	api	status_writes
+status-handler-unknown-status-is-accepted	crates/mm-api/src/status.rs	        _ => return ApiError::invalid_param("status").into_response(),	        _ => state.app.set_status_online(&user_id, true).await,	api	status_writes
+status-handler-away-sets-online	crates/mm-api/src/status.rs	        "away" => state.app.set_status_away_if_needed(&user_id, true).await,	        "away" => state.app.set_status_online(&user_id, true).await,	api	status_writes
+status-handler-dnd-ignores-the-end-time	crates/mm-api/src/status.rs	                .set_status_do_not_disturb_timed(&user_id, submitted.dnd_end_time)	                .set_status_do_not_disturb_timed(&user_id, 0)	api	status_writes
+status-handler-sets-status-non-manually	crates/mm-api/src/status.rs	        "offline" => state.app.set_status_offline(&user_id, true, false).await,	        "offline" => state.app.set_status_offline(&user_id, false, false).await,	api	status_writes
+status-handler-answers-ok-not-the-status	crates/mm-api/src/status.rs	    match get_user_status(State(state), Path(user_id), session).await {\n        Ok(response) => response,\n        Err(err) => err.into_response(),\n    }	    axum::Json(serde_json::json!({"status": "OK"})).into_response()	api	status_writes
+
+# --- reachable over HTTP: the setters ---------------------------------------------------------
+status-online-does-not-clear-manual	crates/mm-app/src/status.rs	                status.manual = false;	                status.manual = true;	api	status_writes
+status-dnd-does-not-force-manual	crates/mm-app/src/status.rs	        status.manual = true;\n        status.dnd_end_time = truncate_dnd_end_time(end_time);	        status.dnd_end_time = truncate_dnd_end_time(end_time);	api	status_writes
+status-dnd-end-time-not-truncated	crates/mm-app/src/status.rs	        status.dnd_end_time = truncate_dnd_end_time(end_time);	        status.dnd_end_time = end_time;	api	status_writes
+status-dnd-does-not-record-the-previous	crates/mm-app/src/status.rs	        status.prev_status = status.status.clone();\n        status.status = mm_model::status::STATUS_DND.to_owned();	        status.status = mm_model::status::STATUS_DND.to_owned();	api	status_writes
+status-away-does-not-take-the-manual-flag	crates/mm-app/src/status.rs	        status.manual = manual;\n        status.active_channel = String::new();	        status.active_channel = String::new();	api	status_writes
+status-offline-patches-rather-than-rebuilds	crates/mm-app/src/status.rs	        let status = Status {\n            user_id: user_id.to_owned(),\n            status: STATUS_OFFLINE.to_owned(),\n            manual,	        let status = Status {\n            user_id: user_id.to_owned(),\n            status: STATUS_OFFLINE.to_owned(),\n            manual: false,	api	status_writes
+status-event-is-addressed-to-the-channel	crates/mm-app/src/status.rs	            "",\n            "",\n            &status.user_id,	            "",\n            &status.user_id,\n            "",	api	status_writes
+status-event-omits-the-user-id	crates/mm-app/src/status.rs	        event.add("user_id", serde_json::Value::String(status.user_id.clone()));	        // the user id is not in the data	api	status_writes
+status-event-carries-the-whole-object	crates/mm-app/src/status.rs	        event.add("status", serde_json::Value::String(status.status.clone()));	        event.add("status", serde_json::to_value(status).unwrap_or_default());	api	status_writes
+status-store-conflict-keeps-the-old-dnd-end-time	crates/mm-store/src/status_store.rs	                              dndendtime     = EXCLUDED.dndendtime,\n                              prevstatus     = EXCLUDED.prevstatus	                              prevstatus     = EXCLUDED.prevstatus	api	status_writes
+status-store-conflict-writes-the-previous-status	crates/mm-store/src/status_store.rs	                DO UPDATE SET status         = EXCLUDED.status,	                DO UPDATE SET status         = EXCLUDED.prevstatus,	api	status_writes
+status-store-swaps-status-and-prevstatus	crates/mm-store/src/status_store.rs	            status.status,\n            status.manual,	            status.prev_status,\n            status.manual,	api	status_writes
+
+# --- unreachable over HTTP: the cache-dependent decisions, against the unit tests ---------------
+status-away-manual-is-not-a-short-circuit	crates/mm-app/src/status.rs	    if manual {\n        return true;\n    }	    if false {\n        return true;\n    }	unit	status::
+status-away-ignores-a-manual-status	crates/mm-app/src/status.rs	    if status.manual {\n        return false;\n    }	    if false {\n        return false;\n    }	unit	status::
+status-away-repeats-over-away	crates/mm-app/src/status.rs	    if status.status == mm_model::status::STATUS_AWAY {\n        return false;\n    }	    if false {\n        return false;\n    }	unit	status::
+status-away-window-is-exclusive	crates/mm-app/src/status.rs	    now - last_activity_at >= away_timeout_secs * 1000	    now - last_activity_at > away_timeout_secs * 1000	unit	status::
+status-away-timeout-is-milliseconds	crates/mm-app/src/status.rs	    now - last_activity_at >= away_timeout_secs * 1000	    now - last_activity_at >= away_timeout_secs	unit	status::
+status-online-write-ignores-the-status-change	crates/mm-app/src/status.rs	    new.status != old_status\n        || new.manual != old_manual	    new.manual != old_manual	unit	status::
+status-online-write-ignores-the-manual-change	crates/mm-app/src/status.rs	        || new.manual != old_manual\n        || new.last_activity_at - old_time > mm_model::status::STATUS_MIN_UPDATE_TIME	        || new.last_activity_at - old_time > mm_model::status::STATUS_MIN_UPDATE_TIME	unit	status::
+status-online-write-window-is-inclusive	crates/mm-app/src/status.rs	        || new.last_activity_at - old_time > mm_model::status::STATUS_MIN_UPDATE_TIME	        || new.last_activity_at - old_time >= mm_model::status::STATUS_MIN_UPDATE_TIME	unit	status::
+status-truncate-uses-the-remainder-operator	crates/mm-app/src/status.rs	    end_time - end_time.rem_euclid(interval)	    end_time - end_time % interval	unit	status::
+status-truncate-rounds-up	crates/mm-app/src/status.rs	    end_time - end_time.rem_euclid(interval)	    end_time + end_time.rem_euclid(interval)	unit	status::
+
+# --- no-op controls: both must SURVIVE ---------------------------------------------------------
+control-rename-status-away-binding	crates/mm-app/src/status.rs	fn is_user_away(now: i64, last_activity_at: i64, away_timeout_secs: i64) -> bool {\n    now - last_activity_at >= away_timeout_secs * 1000	fn is_user_away(now: i64, idle_since: i64, away_timeout_secs: i64) -> bool {\n    now - idle_since >= away_timeout_secs * 1000	unit	status::
+control-reorder-independent-status-select-columns	crates/mm-store/src/status_store.rs	            SELECT userid                          AS "userid!",\n                   COALESCE(status, '')            AS "status!",\n                   COALESCE(manual, false)         AS "manual!",	            SELECT userid                          AS "userid!",\n                   COALESCE(manual, false)         AS "manual!",\n                   COALESCE(status, '')            AS "status!",	api	status_writes

@@ -16,6 +16,25 @@ pub trait StatusStore {
         &self,
         user_ids: &[String],
     ) -> impl std::future::Future<Output = Result<Vec<Status>, StoreError>> + Send;
+
+    /// Port of `SqlStatusStore.Get` (status_store.go).
+    ///
+    /// `Ok(None)` is Go's `ErrNotFound`, which `GetStatus` renders as
+    /// `app.status.get.missing.app_error` at **404** — a shape no other status path produces.
+    fn get(
+        &self,
+        user_id: &str,
+    ) -> impl std::future::Future<Output = Result<Option<Status>, StoreError>> + Send;
+
+    /// Port of `SqlStatusStore.SaveOrUpdate` (status_store.go).
+    ///
+    /// **`ActiveChannel` is not a column.** `statusSliceColumns` is `UserId, Status, Manual,
+    /// LastActivityAt, DNDEndTime, PrevStatus` — the model's `active_channel` carries `db:"-"` and
+    /// lives only in the cache, which is why a status read back from the table never has one.
+    fn save_or_update(
+        &self,
+        status: &Status,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 }
 
 /// One row of Go's `statusSelectQuery` (status_store.go:37-46).
@@ -62,6 +81,63 @@ impl SqlStatusStore {
 }
 
 impl StatusStore for SqlStatusStore {
+    #[tracing::instrument(skip(self), fields(user_id = %user_id, found))]
+    async fn get(&self, user_id: &str) -> Result<Option<Status>, StoreError> {
+        let row = sqlx::query_as!(
+            StatusRow,
+            r#"
+            SELECT userid                          AS "userid!",
+                   COALESCE(status, '')            AS "status!",
+                   COALESCE(manual, false)         AS "manual!",
+                   COALESCE(lastactivityat, 0)     AS "lastactivityat!",
+                   COALESCE(dndendtime, 0)         AS "dndendtime!",
+                   COALESCE(prevstatus, '')        AS "prevstatus!"
+              FROM status
+             WHERE userid = $1
+            "#,
+            user_id,
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to get Status with userId={user_id}"),
+            source,
+        })?;
+
+        tracing::Span::current().record("found", row.is_some());
+        Ok(row.map(Status::from))
+    }
+
+    /// The conflict clause updates **five** columns and not `UserId`, which is the key.
+    #[tracing::instrument(skip(self, status), fields(user_id = %status.user_id, status = %status.status))]
+    async fn save_or_update(&self, status: &Status) -> Result<(), StoreError> {
+        sqlx::query!(
+            r#"
+            INSERT INTO status (userid, status, manual, lastactivityat, dndendtime, prevstatus)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            ON CONFLICT (userid)
+                DO UPDATE SET status         = EXCLUDED.status,
+                              manual         = EXCLUDED.manual,
+                              lastactivityat = EXCLUDED.lastactivityat,
+                              dndendtime     = EXCLUDED.dndendtime,
+                              prevstatus     = EXCLUDED.prevstatus
+            "#,
+            status.user_id,
+            status.status,
+            status.manual,
+            status.last_activity_at,
+            status.dnd_end_time,
+            status.prev_status,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to upsert Status".to_owned(),
+            source,
+        })?;
+        Ok(())
+    }
+
     /// `sq.Eq{"UserId": userIds}` renders as `UserId IN (...)`; `= ANY($1)` is the same predicate
     /// with one bind. There is **no `ORDER BY`** in Go and none here: the app layer owns the
     /// order it puts on the wire (see `mm_app::status`).

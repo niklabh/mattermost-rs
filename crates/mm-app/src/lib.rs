@@ -55,6 +55,16 @@ pub struct App {
     /// connections. `App` is cloned per request by axum's state extractor, and a hub per clone
     /// would mean an event raised by one request reaching none of the sockets.
     hub: std::sync::Arc<crate::hub::Hub>,
+    /// Go's `platform.statusCache`, and — like the hub — shared across every clone of `App` so
+    /// that a status set by one request is the previous status the next request sees.
+    ///
+    /// **The cache is the model here, not an optimisation.** Three decisions in the status
+    /// setters read the *previous* status and would take a different branch against the table:
+    /// the manual-override early return, whether to broadcast at all, and whether the row is
+    /// written. See `crate::status` and [D-191].
+    status_cache: std::sync::Arc<
+        std::sync::RwLock<std::collections::HashMap<String, mm_model::status::Status>>,
+    >,
 }
 
 impl App {
@@ -73,6 +83,9 @@ impl App {
             store,
             config,
             hub: std::sync::Arc::new(crate::hub::Hub::new()),
+            status_cache: std::sync::Arc::new(std::sync::RwLock::new(
+                std::collections::HashMap::new(),
+            )),
         }
     }
 

@@ -997,6 +997,63 @@ pub async fn post_both_raw(
     (post(GO).await, post(RUST).await)
 }
 
+/// [`post_both_raw`] with the same quiescence bracket [`fetch_both_stable_within`] uses.
+///
+/// A single Go-then-Rust pair compares two reads taken at different instants, so any row the
+/// answer embeds and another suite writes shows up as a byte difference that is not a divergence.
+/// `POST /users/group_channels` embeds whole `User` objects, and the admin's `Users.UpdateAt` is
+/// touched by half the suites in this binary — so the pair fails on churn alone, intermittently,
+/// with a 4KB byte-array diff that says nothing about the route.
+///
+/// The bracket is Go, us, Go: if our body matches either Go read, that is the answer; if Go was
+/// quiescent across the window and we still differ, it is ours to explain and the caller's
+/// assertion decides. Same three-way rule, same reason.
+pub async fn post_both_raw_stable(
+    client: &reqwest::Client,
+    token: &str,
+    path: &str,
+    body: &[u8],
+) -> ((u16, Vec<u8>), (u16, Vec<u8>)) {
+    let post = async |base: &str| {
+        let response = client
+            .post(format!("{base}{path}"))
+            .header("Authorization", format!("Bearer {token}"))
+            .header("Content-Type", "application/json")
+            .body(body.to_vec())
+            .send()
+            .await
+            .unwrap_or_else(|e| panic!("{base}{path} is unreachable: {e}"));
+        let status = response.status().as_u16();
+        if base == RUST {
+            assert_served_by_rust(response.headers(), path);
+        }
+        (status, response.bytes().await.expect("body reads").to_vec())
+    };
+
+    let mut last = None;
+    for attempt in 1..=12u64 {
+        let before = post(GO).await;
+        let ours = post(RUST).await;
+        let after = post(GO).await;
+
+        if ours == before {
+            return (before, ours);
+        }
+        if ours == after {
+            return (after, ours);
+        }
+        if before == after {
+            return (before, ours);
+        }
+
+        last = Some((before, ours));
+        tokio::time::sleep(std::time::Duration::from_millis((80 * attempt).min(400))).await;
+    }
+
+    // Matching neither bracket, repeatedly, is a divergence rather than churn.
+    last.expect("the loop runs at least once")
+}
+
 /// Set a user's status through Go's `PUT /users/{id}/status`, returning Go's response body.
 ///
 /// This is the one REST write that lands in **both** Go's status cache and the `Status` table
@@ -1625,6 +1682,45 @@ pub async fn system_value(name: &str) -> Option<Option<Option<String>>> {
             .await
             .expect("the systems table is readable");
     Some(row.map(|row| row.0))
+}
+
+/// The `Status` **row**, which is not the same thing as the cached status either server answers
+/// with.
+///
+/// Two of the fields that decide `SetStatusOnline`'s branches never reach the wire — `manual` is
+/// on it but `prev_status` carries `json:"-"` — so the row is the only place a test can see them.
+/// Returns `(status, manual, prev_status, dnd_end_time, last_activity_at)`.
+pub type StatusRow = (String, bool, String, i64, i64);
+
+/// The nullable shape the columns actually have, before the defaults are folded in.
+type NullableStatusRow = (
+    Option<String>,
+    Option<bool>,
+    Option<String>,
+    Option<i64>,
+    Option<i64>,
+);
+
+pub async fn status_row(user_id: &str) -> Option<StatusRow> {
+    let pool = fixture_pool().await?;
+    // Every column but the primary key is nullable in the Go schema.
+    let row: Option<NullableStatusRow> = sqlx::query_as(
+        "SELECT status, manual, prevstatus, dndendtime, lastactivityat \
+             FROM status WHERE userid = $1",
+    )
+    .bind(user_id)
+    .fetch_optional(&pool)
+    .await
+    .expect("the status table is readable");
+    row.map(|(status, manual, prev, dnd, last)| {
+        (
+            status.unwrap_or_default(),
+            manual.unwrap_or(false),
+            prev.unwrap_or_default(),
+            dnd.unwrap_or(0),
+            last.unwrap_or(0),
+        )
+    })
 }
 
 /// Set — or, with [`None`], delete — a `Systems` row.

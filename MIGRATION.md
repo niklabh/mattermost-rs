@@ -8376,3 +8376,49 @@ The pattern is one rule: **an assertion over a whole shared table cannot survive
 writes**. Count it, and you are counting the rest of the run. [D-167] predicted exactly this and
 asked for the deliberate pass; four of them are now done, driven by failures rather than by the
 sweep it asked for.
+
+## `PUT /users/{id}/status` — the first route whose model is a cache (2026-09-08)
+
+New: `crates/mm-api/tests/parity/status_writes.rs`, `scripts/mutations/status-writes.plan`.
+Changed: `crates/mm-store/src/status_store.rs` (`get`, `save_or_update`),
+`crates/mm-app/src/{status,config,lib}.rs`, `crates/mm-api/src/{status,lib}.rs`,
+`crates/mm-api/tests/common/mod.rs` (`status_row`).
+
+**227/764.** One route, four setters, and a design decision that had been open since the read side:
+[D-191] is now closed in favour of giving `mm-app` its own `statusCache`. Three decisions inside
+`SetStatusOnline` branch on the *previous* status, and the previous status is not the `Status` row
+— it is whatever the process last cached. A port that read the table would take a different branch
+from Go on exactly the requests that matter, and would write rows Go throttles away. While both
+servers run the two caches are independent, so the parity suite drives and reads **each server
+through itself**; the divergence ends when Go stops.
+
+Two surfaces the wire cannot show, so the suite reads the row directly: `manual` is on the wire but
+`prev_status` carries `json:"-"`, and `dnd_end_time` is **seconds** — the only timestamp in the
+package that is — floored to a whole minute by `truncateDNDEndTime`.
+
+**The guards the route cannot reach.** Every caller passes `manual: true` and `force: false`, so
+the manual-override guard in `SetStatusOnline`/`SetStatusOffline`, all three "IfNeeded" conditions,
+and the `StatusMinUpdateTime` throttle are unreachable over HTTP. They were extracted into
+`away_is_needed`, `online_row_needs_writing` and `is_user_away` and are mutated against unit tests
+instead — the alternative was shipping a third of the ported logic unexamined.
+
+Leaving out-of-office is **forwarded**: it needs `DisableAutoResponder`, which is not ported. The
+answer is `getUserStatus`'s own body, not `{"status":"OK"}`.
+
+### Two more shared-fixture failures, and the first one inside a single suite
+
+Both surfaced in the full run for this group and neither is about statuses.
+
+`threads_for_user::per_page_limits_the_list_and_not_the_totals` asserts `total == 2` while
+`a_thread_in_a_channel_the_caller_left_is_excluded` re-inserts a channel membership, checks the
+thread reappears, and deletes it again. Inside that three-statement window the fixture user follows
+**three** threads, so the count is correct for the instant it was read and wrong for the assertion.
+This is [D-167]'s rule turned inward: it is the first instance *within* one suite rather than
+between two. Fixed with a module `Mutex` over the three tests that assert an exact count — narrower
+than a second fixture user, because the window is three statements wide.
+
+`users_group_channels` failed on the admin's `Users.UpdateAt` moving between the Go read and the
+Rust read. `post_both_raw` had no quiescence bracket at all — `fetch_both_stable_within` has had one
+since the schemes suite, and every POST comparison in the tree was still doing a single unbracketed
+pair. `post_both_raw_stable` is that bracket for POSTs, now used at all ten call sites. Any suite
+whose answer embeds a `User` needs it; the route was never in question.

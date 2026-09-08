@@ -150,6 +150,25 @@ pub struct Config {
     /// the check is a no-op, and a server that sets it refuses updates Go would refuse too.
     pub restrict_creation_to_domains: String,
 
+    /// `ServiceSettings.EnableUserStatuses` (config.go:445, defaulted **`true`** at :711).
+    ///
+    /// **`ServiceSettings`, not `TeamSettings`** — its sibling `UserStatusAwayTimeout` *is* in
+    /// `TeamSettings`, and reading either from the wrong section would silently fall back to the
+    /// default on every real server's document.
+    ///
+    /// **Every status read and write returns early when this is off** — and the writes return
+    /// *silently*, with no error, so a client gets a 200 for a status that was never stored. The
+    /// read `GetStatus` answers an empty `Status{}` rather than a 404, which is a different shape
+    /// again.
+    pub enable_user_statuses: bool,
+
+    /// `TeamSettings.UserStatusAwayTimeout` (config.go, defaulted **`300`** — seconds).
+    ///
+    /// `isUserAway` is `GetMillis() - lastActivityAt >= timeout * 1000`, so the field is seconds
+    /// and the comparison is milliseconds. It decides whether a *non-manual* away request is
+    /// honoured at all: a user who has been active more recently than the timeout stays online.
+    pub user_status_away_timeout: i64,
+
     /// `ServiceSettings.AllowSyncedDrafts` (config.go:488). Go default **`true`**.
     ///
     /// Gates the whole drafts feature. Every one of `getDrafts`, `upsertDraft` and `deleteDraft`
@@ -443,6 +462,8 @@ impl Default for Config {
             restrict_direct_message: DIRECT_MESSAGE_ANY.to_owned(),
             // config.go:2592 — `new("")`.
             restrict_creation_to_domains: String::new(),
+            enable_user_statuses: true,
+            user_status_away_timeout: 300,
             allow_synced_drafts: true,
             enable_burn_on_read: true,
             feature_flag_burn_on_read: true,
@@ -570,6 +591,16 @@ impl Config {
                 .unwrap_or(default.restrict_direct_message),
             restrict_creation_to_domains: lookup("MM_TEAMSETTINGS_RESTRICTCREATIONTODOMAINS")
                 .unwrap_or(default.restrict_creation_to_domains),
+            enable_user_statuses: lookup_bool(
+                lookup,
+                "MM_SERVICESETTINGS_ENABLEUSERSTATUSES",
+                default.enable_user_statuses,
+            ),
+            user_status_away_timeout: lookup_int(
+                lookup,
+                "MM_TEAMSETTINGS_USERSTATUSAWAYTIMEOUT",
+                default.user_status_away_timeout,
+            ),
             post_priority: lookup_bool(
                 lookup,
                 "MM_SERVICESETTINGS_POSTPRIORITY",
@@ -767,6 +798,12 @@ impl Config {
             restrict_creation_to_domains: team_settings
                 .restrict_creation_to_domains
                 .unwrap_or(default.restrict_creation_to_domains),
+            enable_user_statuses: service
+                .enable_user_statuses
+                .unwrap_or(default.enable_user_statuses),
+            user_status_away_timeout: team_settings
+                .user_status_away_timeout
+                .unwrap_or(default.user_status_away_timeout),
             allow_synced_drafts: service
                 .allow_synced_drafts
                 .unwrap_or(default.allow_synced_drafts),
@@ -939,6 +976,8 @@ struct TeamSettingsDocument {
     restrict_direct_message: Option<String>,
     #[serde(rename = "RestrictCreationToDomains")]
     restrict_creation_to_domains: Option<String>,
+    #[serde(rename = "UserStatusAwayTimeout")]
+    user_status_away_timeout: Option<i64>,
 }
 
 /// The one field of `AIRecapSettings` a migrated route reads. `Option<bool>` all the way through:
@@ -997,6 +1036,8 @@ struct ServiceSettingsDocument {
     scheduled_posts: Option<bool>,
     #[serde(rename = "EnablePostIconOverride")]
     enable_post_icon_override: Option<bool>,
+    #[serde(rename = "EnableUserStatuses")]
+    enable_user_statuses: Option<bool>,
     #[serde(rename = "EnableDynamicClientRegistration")]
     enable_dynamic_client_registration: Option<bool>,
     #[serde(rename = "EnablePostUsernameOverride")]

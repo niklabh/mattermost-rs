@@ -92,6 +92,7 @@ mod parity {
     pub mod sidebar_router;
     pub mod single_hooks;
     pub mod status;
+    pub mod status_writes;
     pub mod system_usage;
     pub mod team_channel_lists;
     pub mod team_exists;

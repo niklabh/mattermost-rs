@@ -288,7 +288,10 @@ pub fn router(state: AppState) -> Router {
         )
         .route(
             "/api/v4/users/{user_id}/status",
-            partially_migrated_with_ids(&state, get(status::get_user_status)),
+            partially_migrated_with_ids(
+                &state,
+                get(status::get_user_status).put(status::update_user_status),
+            ),
         )
         // A literal under `/users/` whose *second* segment is `status` — it cannot collide with
         // `/users/{user_id}/status` above (third segment `ids` vs `status`), and axum prefers

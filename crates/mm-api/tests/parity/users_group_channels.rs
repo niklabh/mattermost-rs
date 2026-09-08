@@ -21,7 +21,7 @@ use crate::common;
 
 use common::{
     GO, RUST, assert_error_bodies_match_except_known_gaps, client, create_channel_typed,
-    create_plain_user, create_team, go_minted_token, logged_in_user_id, post_both_raw,
+    create_plain_user, create_team, go_minted_token, logged_in_user_id, post_both_raw_stable,
     purge_api_fixtures, stack_enabled,
 };
 
@@ -151,7 +151,7 @@ async fn a_group_channels_members_are_byte_identical() {
 
     let ids = [f.shared_gm.as_str()];
     let ((go_status, go_body), (rs_status, rs_body)) =
-        post_both_raw(&client, &token, PATH, &body(&ids)).await;
+        post_both_raw_stable(&client, &token, PATH, &body(&ids)).await;
 
     assert_eq!(go_status, 200, "{}", String::from_utf8_lossy(&go_body));
     assert_eq!(rs_status, go_status, "{PATH}: statuses must match");
@@ -197,7 +197,7 @@ async fn a_group_channel_the_caller_is_not_in_is_absent() {
 
     let ids = [f.shared_gm.as_str(), f.foreign_gm.as_str()];
     let ((go_status, go_body), (rs_status, rs_body)) =
-        post_both_raw(&client, &token, PATH, &body(&ids)).await;
+        post_both_raw_stable(&client, &token, PATH, &body(&ids)).await;
 
     assert_eq!(
         go_status, 200,
@@ -219,7 +219,7 @@ async fn a_group_channel_the_caller_is_not_in_is_absent() {
     // A member of that same channel does see it, so the absence above is the subquery and not a
     // channel that does not exist.
     let ((go_status, go_body), (_rs, rs_body)) =
-        post_both_raw(&client, &f.plain_token, PATH, &body(&ids)).await;
+        post_both_raw_stable(&client, &f.plain_token, PATH, &body(&ids)).await;
     assert_eq!(go_status, 200);
     assert_eq!(go_body, rs_body, "{PATH} must be byte-identical");
     let parsed: serde_json::Value = serde_json::from_slice(&go_body).expect("JSON");
@@ -241,7 +241,7 @@ async fn an_empty_list_is_a_parse_error_not_an_invalid_param() {
 
     for raw in [&b"[]"[..], &b"null"[..], &b"{}"[..], &b"not json"[..]] {
         let ((go_status, go_body), (rs_status, rs_body)) =
-            post_both_raw(&client, &token, PATH, raw).await;
+            post_both_raw_stable(&client, &token, PATH, raw).await;
         assert_eq!(
             go_status,
             400,
@@ -279,7 +279,7 @@ async fn the_fifty_channel_cap_truncates_the_sorted_list_silently() {
     ids.push(f.shared_gm.as_str());
 
     let ((go_status, go_body), (rs_status, rs_body)) =
-        post_both_raw(&client, &token, PATH, &body(&ids)).await;
+        post_both_raw_stable(&client, &token, PATH, &body(&ids)).await;
     assert_eq!(go_status, 200, "the cap is not a refusal");
     assert_eq!(rs_status, go_status);
     assert_eq!(go_body, rs_body, "{PATH} must be byte-identical");
@@ -297,7 +297,7 @@ async fn the_fifty_channel_cap_truncates_the_sorted_list_silently() {
         .chain(std::iter::once(f.shared_gm.as_str()))
         .collect();
     let ((go_status, go_body), (_rs, rs_body)) =
-        post_both_raw(&client, &token, PATH, &body(&ids)).await;
+        post_both_raw_stable(&client, &token, PATH, &body(&ids)).await;
     assert_eq!(go_status, 200);
     assert_eq!(go_body, rs_body, "{PATH} must be byte-identical");
     assert!(
@@ -325,7 +325,7 @@ async fn the_admin_bit_changes_which_fields_survive_sanitisation() {
     let ids = [f.shared_gm.as_str()];
 
     let ((go_admin_status, go_admin), (_rs, rs_admin)) =
-        post_both_raw(&client, &token, PATH, &body(&ids)).await;
+        post_both_raw_stable(&client, &token, PATH, &body(&ids)).await;
     assert_eq!(go_admin_status, 200);
     assert_eq!(
         go_admin, rs_admin,
@@ -333,7 +333,7 @@ async fn the_admin_bit_changes_which_fields_survive_sanitisation() {
     );
 
     let ((go_plain_status, go_plain), (_rs, rs_plain)) =
-        post_both_raw(&client, &f.plain_token, PATH, &body(&ids)).await;
+        post_both_raw_stable(&client, &f.plain_token, PATH, &body(&ids)).await;
     assert_eq!(go_plain_status, 200);
     assert_eq!(
         go_plain, rs_plain,
@@ -402,7 +402,7 @@ async fn an_unknown_channel_id_is_absent() {
 
     let ids = ["aaaaaaaaaaaaaaaaaaaaaaaaaa"];
     let ((go_status, go_body), (rs_status, rs_body)) =
-        post_both_raw(&client, &token, PATH, &body(&ids)).await;
+        post_both_raw_stable(&client, &token, PATH, &body(&ids)).await;
     assert_eq!(go_status, 200);
     assert_eq!(rs_status, go_status);
     assert_eq!(
@@ -486,7 +486,7 @@ async fn only_group_channels_are_answered_for() {
         f.direct_channel.as_str(),
     ];
     let ((go_status, go_body), (rs_status, rs_body)) =
-        post_both_raw(&client, &token, PATH, &body(&ids)).await;
+        post_both_raw_stable(&client, &token, PATH, &body(&ids)).await;
 
     assert_eq!(go_status, 200);
     assert_eq!(rs_status, go_status);
