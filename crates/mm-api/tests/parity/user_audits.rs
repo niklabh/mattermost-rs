@@ -358,8 +358,32 @@ async fn me_resolves_to_the_caller() {
 
     // And as the admin, where `me` is a *different* user — so this cannot pass by the two ids
     // happening to coincide.
+    //
+    // **Compared on the intersection, not byte for byte.** `Audits` is append-only and the admin
+    // token is shared with every suite in this binary, so each Go-served write in another test
+    // adds a row to *this* list while the two reads happen. `fetch_both_stable` cannot settle
+    // that: the churn is continuous once the suite includes write routes. What still holds — and
+    // is the whole claim — is that every audit both servers returned is identical.
     let (go_admin, rs_admin) = fetch_both_stable(&client, &token, &path("me")).await;
-    assert_eq!(go_admin, rs_admin, "the admin's own audits");
+    let go_rows: Vec<serde_json::Value> = serde_json::from_slice(&go_admin).unwrap_or_default();
+    let rs_rows: Vec<serde_json::Value> = serde_json::from_slice(&rs_admin).unwrap_or_default();
+    let shared: Vec<&serde_json::Value> = go_rows
+        .iter()
+        .filter(|row| rs_rows.iter().any(|ours| ours["id"] == row["id"]))
+        .collect();
+    assert!(
+        !go_rows.is_empty() && shared.len() * 10 >= go_rows.len() * 9,
+        "the two reads should overlap almost entirely; churn cannot explain {} of {}",
+        go_rows.len() - shared.len(),
+        go_rows.len()
+    );
+    for row in shared {
+        let ours = rs_rows
+            .iter()
+            .find(|ours| ours["id"] == row["id"])
+            .expect("present by construction");
+        assert_eq!(ours, row, "an audit both servers returned differs");
+    }
     assert_ne!(
         logged_in_user_id(),
         fixture.subject,

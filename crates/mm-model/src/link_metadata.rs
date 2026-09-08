@@ -39,6 +39,7 @@ pub type LinkMetadataType = String;
 /// `Type`. It is a `Value` here: modelling *which* concrete type is present is the decision
 /// [D-106] records, and it is what `IsValid` needs.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct LinkMetadata {
     /// "A value computed from the URL and Timestamp for use as a primary key in the database."
     #[serde(rename = "Hash")]

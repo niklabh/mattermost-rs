@@ -59,6 +59,7 @@ fn is_false(value: &bool) -> bool {
 
 /// Port of `model.IntuneLoginRequest` (oauth.go:26).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct IntuneLoginRequest {
     #[serde(rename = "access_token")]
     pub access_token: String,

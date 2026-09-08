@@ -222,6 +222,7 @@ pub const INVALID_CLIENT_TYPE_ERROR: &str = "Invalid client type supplied";
 /// **Every** field is `omitempty`, so a zero-valued `Conditions` serialises as `{}` — which
 /// [`ProductNotice`] still transmits, because its own `conditions` key is not omitempty.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Conditions {
     #[serde(rename = "audience", default, skip_serializing_if = "Option::is_none")]
     pub audience: Option<NoticeAudience>,
@@ -311,6 +312,7 @@ pub struct Conditions {
 
 /// Port of `model.ProductNotice` (product_notices.go:26).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ProductNotice {
     #[serde(rename = "conditions")]
     pub conditions: Conditions,
@@ -334,6 +336,7 @@ pub struct ProductNotice {
 
 /// Port of `model.NoticeMessageInternal` (product_notices.go:58).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct NoticeMessageInternal {
     #[serde(rename = "action", default, skip_serializing_if = "Option::is_none")]
     pub action: Option<NoticeAction>,
@@ -377,6 +380,7 @@ pub struct NoticeMessageInternal {
 /// `ScheduledPost` has, solved the same way. `Deserialize` still derives with `flatten`, since
 /// input order does not matter.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(default)]
 pub struct NoticeMessage {
     #[serde(flatten)]
     pub internal: NoticeMessageInternal,
@@ -430,6 +434,7 @@ impl Serialize for NoticeMessage {
 /// **No `json:` tags at all**, so every wire key is the Go field name in PascalCase — the
 /// `wrangler.go` shape. `Viewed` is `int32`, not `int64`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ProductNoticeViewState {
     #[serde(rename = "UserId")]
     pub user_id: String,
@@ -443,6 +448,7 @@ pub struct ProductNoticeViewState {
 
 /// Port of `model.ExternalDependency` (product_notices.go:216).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ExternalDependency {
     #[serde(rename = "name")]
     pub name: String,

@@ -97,6 +97,7 @@ fn voip_device_platforms() -> [&'static str; 2] {
 /// No field carries `omitempty`, so every key is always present. `props` and `team_members`
 /// are nil-able Go reference types and therefore serialise as `null`, not `{}` / `[]`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Session {
     #[serde(rename = "id")]
     pub id: String,
@@ -147,6 +148,7 @@ pub struct Session {
 /// Port of `model.MobileSessionMetadata` (session.go:45). No json tags in Go, so the wire
 /// keys are the Go field names verbatim.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct MobileSessionMetadata {
     #[serde(rename = "Version")]
     pub version: String,

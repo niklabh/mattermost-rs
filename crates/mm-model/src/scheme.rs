@@ -94,6 +94,7 @@ pub struct Scheme {
 
 /// Port of `model.SchemePatch` (scheme.go:178).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct SchemePatch {
     #[serde(rename = "name")]
     pub name: Option<String>,
@@ -107,6 +108,7 @@ pub struct SchemePatch {
 
 /// Port of `model.SchemeIDPatch` (scheme.go:192).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct SchemeIDPatch {
     #[serde(rename = "scheme_id")]
     pub scheme_id: Option<String>,
@@ -119,6 +121,7 @@ pub struct SchemeIDPatch {
 /// `DefaultTeamAdminRole`, and only the `json:` tags line the two up. The tags are what matter, so
 /// they are what the port matches.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct SchemeConveyor {
     #[serde(rename = "name")]
     pub name: String,
@@ -170,6 +173,7 @@ pub struct SchemeConveyor {
 /// Port of `model.SchemeRoles` (scheme.go:239) — which of the three scheme roles a membership
 /// carries.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct SchemeRoles {
     #[serde(rename = "scheme_admin")]
     pub scheme_admin: bool,

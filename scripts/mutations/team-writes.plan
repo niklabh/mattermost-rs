@@ -1,0 +1,48 @@
+# Mutation plan for the four team writes.
+#
+#   scripts/mutate-batch.sh scripts/mutations/team-writes.plan
+#
+# The decisions here are unusually easy to "tidy" into something wrong:
+#
+#   * `UpdateOptions{Sanitized: true}` copies **seven** fields onto the stored team and discards
+#     the rest of the body — a port that wrote the submitted struct would let a client change a
+#     team's type or un-archive it through an ordinary update;
+#   * the name is taken only when non-empty, changed, **and not `-`**;
+#   * turning `AllowOpenInvite` off mints a new invite id, which nothing in the request names;
+#   * the two routes decide the conditional `invite_user` permission differently — by *change* on
+#     update, by *presence* on patch;
+#   * the websocket event is sanitised and the HTTP answer is not.
+#
+# **Three mutations are deliberately not here, because they are equivalent mutants.** Measured —
+# each survives, and none is a gap in the tests:
+#
+#   * `team.create_at = old.create_at` in the store. Every caller passes a team it has just
+#     *fetched*, so the value is already the stored one and the assignment cannot change anything.
+#     Go carries the same redundancy.
+#   * `team.update_at = get_millis()` in the store, for the same reason: `write_team` has already
+#     called `pre_update`, which sets it. Go calls `PreUpdate` and then assigns again too.
+#   * swapping `invalid_param("id")` for `invalid_param("team_id")`. `AppError.Params` is
+#     `json:"-"`, so the parameter name never reaches the client on either server — the id and the
+#     status are identical either way.
+#
+# The last two lines are the no-op controls and must SURVIVE.
+team-update-writes-the-submitted-type	crates/mm-app/src/team.rs	        old_team.display_name = team.display_name.clone();	        old_team.team_type = team.team_type.clone();\n        old_team.display_name = team.display_name.clone();	api	team_writes
+team-update-writes-the-submitted-delete-at	crates/mm-app/src/team.rs	        old_team.description = team.description.clone();	        old_team.delete_at = team.delete_at;\n        old_team.description = team.description.clone();	api	team_writes
+team-update-writes-the-submitted-invite-id	crates/mm-app/src/team.rs	        old_team.company_name = team.company_name.clone();	        old_team.invite_id = team.invite_id.clone();\n        old_team.company_name = team.company_name.clone();	api	team_writes
+team-update-drops-the-display-name	crates/mm-app/src/team.rs	        old_team.display_name = team.display_name.clone();	        // the display name is not copied	api	team_writes
+team-update-name-sentinel-ignored	crates/mm-app/src/team.rs	        if !team.name.is_empty() && team.name != old_team.name && team.name != "-" {	        if !team.name.is_empty() && team.name != old_team.name {	api	team_writes
+team-patch-closing-invitations-keeps-the-invite-id	crates/mm-app/src/team.rs	        if patch.allow_open_invite == Some(false) {\n            team.invite_id = mm_model::utils::new_id();\n        }	        if false {\n            team.invite_id = mm_model::utils::new_id();\n        }	api	team_writes
+team-patch-opening-invitations-also-regenerates	crates/mm-app/src/team.rs	        if patch.allow_open_invite == Some(false) {	        if patch.allow_open_invite.is_some() {	api	team_writes
+team-regenerate-keeps-the-old-invite-id	crates/mm-app/src/team.rs	        team.invite_id = mm_model::utils::new_id();\n        let updated = self.write_team("RegenerateTeamInviteId", team).await?;	        let updated = self.write_team("RegenerateTeamInviteId", team).await?;	api	team_writes
+team-restore-does-not-clear-delete-at	crates/mm-app/src/team.rs	        team.delete_at = 0;	        // delete_at is left as it was	api	team_writes
+team-restore-publishes-update-team	crates/mm-app/src/team.rs	            mm_model::websocket_message::WEBSOCKET_EVENT_RESTORE_TEAM,	            mm_model::websocket_message::WEBSOCKET_EVENT_UPDATE_TEAM,	api	team_writes
+team-event-is-not-sanitised	crates/mm-app/src/team.rs	        let mut sanitized = team.clone();\n        sanitized.sanitize();	        let sanitized = team.clone();	api	team_writes
+team-event-addressed-to-nothing	crates/mm-app/src/team.rs	            &sanitized.id,\n            "",\n            "",	            "",\n            "",\n            "",	api	team_writes
+team-store-update-swaps-display-name-and-name	crates/mm-store/src/team_store.rs	               SET createat = $2, updateat = $3, deleteat = $4, displayname = $5, name = $6,	               SET createat = $2, updateat = $3, deleteat = $4, displayname = $6, name = $5,	api	team_writes
+team-update-body-id-not-compared-to-the-path	crates/mm-api/src/teams.rs	    if team.id != team_id {\n        return ApiError::invalid_param("id").into_response();\n    }	    if false {\n        return ApiError::invalid_param("id").into_response();\n    }	api	team_writes
+team-update-invite-permission-not-checked	crates/mm-api/src/teams.rs	    if (team.allow_open_invite != old_team.allow_open_invite\n        || team.allowed_domains != old_team.allowed_domains)	    if false	api	team_writes
+team-patch-invite-permission-checked-by-change	crates/mm-api/src/teams.rs	    if (patch.allow_open_invite.is_some() || patch.allowed_domains.is_some())	    if false	api	team_writes
+team-regenerate-skips-the-invite-permission	crates/mm-api/src/teams.rs	    if !state\n        .app\n        .session_has_permission_to_team(&session.0, &team_id, &PERMISSION_INVITE_USER)\n        .await\n    {\n        return ApiError::from(*make_permission_error(\n            &session.0,\n            &[&PERMISSION_INVITE_USER],\n        ))\n        .into_response();\n    }\n\n    match state.app.regenerate_team_invite_id(&team_id).await {	    match state.app.regenerate_team_invite_id(&team_id).await {	api	team_writes
+team-response-not-encoder-framed	crates/mm-api/src/teams.rs	            json + "\\n",\n        )\n            .into_response(),\n        Err(err) => {\n            tracing::warn!(error = %err, "Error while writing response");\n            StatusCode::INTERNAL_SERVER_ERROR.into_response()\n        }\n    }\n}	            json,\n        )\n            .into_response(),\n        Err(err) => {\n            tracing::warn!(error = %err, "Error while writing response");\n            StatusCode::INTERNAL_SERVER_ERROR.into_response()\n        }\n    }\n}	api	team_writes
+control-rename-team-old-binding	crates/mm-app/src/team.rs	        let mut old_team = self.get_team_for_update(&team.id).await?;	        let stored = self.get_team_for_update(&team.id).await?;\n        let mut old_team = stored;	api	team_writes
+control-reorder-independent-team-set-columns	crates/mm-store/src/team_store.rs	               SET createat = $2, updateat = $3, deleteat = $4, displayname = $5, name = $6,	               SET updateat = $3, createat = $2, deleteat = $4, displayname = $5, name = $6,	api	team_writes

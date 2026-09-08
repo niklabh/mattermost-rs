@@ -55,6 +55,7 @@ impl From<&str> for AutocompleteArgType {
 
 /// Port of `model.AutocompleteTextArg` (command_autocomplete.go:60).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct AutocompleteTextArg {
     #[serde(rename = "Hint")]
     pub hint: String,
@@ -67,6 +68,7 @@ pub struct AutocompleteTextArg {
 
 /// Port of `model.AutocompleteListItem` (command_autocomplete.go:68).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct AutocompleteListItem {
     #[serde(rename = "Item")]
     pub item: String,
@@ -80,6 +82,7 @@ pub struct AutocompleteListItem {
 
 /// Port of `model.AutocompleteStaticListArg` (command_autocomplete.go:76).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct AutocompleteStaticListArg {
     /// `[]AutocompleteListItem` in Go, so a nil list is `null` on the wire and an empty one is
     /// `[]`. Modelled `Option` for that reason — a plain `Vec` cannot decode the `null` a real
@@ -90,6 +93,7 @@ pub struct AutocompleteStaticListArg {
 
 /// Port of `model.AutocompleteDynamicListArg` (command_autocomplete.go:81).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct AutocompleteDynamicListArg {
     #[serde(rename = "FetchURL")]
     pub fetch_url: String,

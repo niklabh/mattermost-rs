@@ -45,6 +45,7 @@ fn is_zero(value: &i64) -> bool {
 /// Three fields carry `omitempty` — `display_name`, `description`, `last_icon_update` — so a
 /// zero-valued bot serialises six keys rather than nine.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Bot {
     #[serde(rename = "user_id")]
     pub user_id: String,
@@ -87,6 +88,7 @@ pub struct Bot {
 /// **No field carries `omitempty`**, so an all-nil patch is three explicit `null`s rather than
 /// `{}` — the difference between "leave this alone" and "not mentioned", and it is on the wire.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct BotPatch {
     #[serde(rename = "username")]
     pub username: Option<String>,

@@ -85,6 +85,7 @@ const ROLE_NAME_CUTSET: &str = "abcdefghijklmnopqrstuvwxyz0123456789_";
 /// preserves nil, `UnknownPermissions` returns nil for a nil list, and `MergeChannelHigherScoped`
 /// always produces `[]`. Same modelling as `channel.rs:707`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Role {
     #[serde(rename = "id")]
     pub id: String,
@@ -126,6 +127,7 @@ pub struct Role {
 /// slice, which `Patch` would write through as a nil `Permissions`. It is unreachable from the
 /// wire — JSON `null` unmarshals to a nil *pointer* — so the gap is Go-side only. [D-126].
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct RolePatch {
     #[serde(rename = "permissions")]
     pub permissions: Option<Vec<String>>,

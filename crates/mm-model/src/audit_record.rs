@@ -95,6 +95,7 @@ impl Auditable for crate::bot::BotPatch {
 /// Nothing on this struct carries `omitempty`, so every key is present even when its map is nil —
 /// and a nil map is `null`, not `{}`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct AuditRecord {
     #[serde(rename = "event_name")]
     pub event_name: String,
@@ -122,6 +123,7 @@ pub struct AuditRecord {
 ///
 /// Note `ResultState`'s tag is `resulting_state`, not `result_state`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct AuditEventData {
     /// "Payload and parameters being processed as part of the request".
     #[serde(rename = "parameters")]
@@ -143,6 +145,7 @@ pub struct AuditEventData {
 
 /// Port of `model.AuditEventActor` (audit_record.go:44) — "the subject triggering the event".
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct AuditEventActor {
     #[serde(rename = "user_id")]
     pub user_id: String,
@@ -164,6 +167,7 @@ pub struct AuditEventActor {
 /// `AuditRecord::meta`: that would narrow what an arbitrary `add_meta` call can store, which is
 /// the opposite of the field's purpose.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct EventMeta {
     #[serde(rename = "api_path")]
     pub api_path: String,
@@ -176,6 +180,7 @@ pub struct EventMeta {
 /// The only nested type with `omitempty`, and it is on **both** fields — so a zero-valued error
 /// serialises as `{}`, and a 0 status code disappears while a description survives.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct AuditEventError {
     #[serde(
         rename = "description",

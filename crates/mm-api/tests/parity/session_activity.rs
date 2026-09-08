@@ -283,14 +283,46 @@ async fn a_304_is_not_activity_on_either_server() {
             .await
             .expect("ages the session");
 
-        let second = client()
-            .get(format!("{base}/api/v4/users/me"))
-            .header("Authorization", format!("Bearer {token}"))
-            .header("If-None-Match", &etag)
-            .send()
-            .await
-            .expect("the server is reachable");
-        assert_eq!(second.status().as_u16(), 304, "{base} did not answer 304");
+        // **Retry on a moved etag.** `/users/me`'s etag folds in `Users.UpdateAt`, and the admin
+        // row is shared with every other suite in this binary — one of them touching it between
+        // the two requests turns the conditional read into a 200 and the assertion below fails
+        // about the wrong thing. The session's activity is *not* shared (it is planted here), so
+        // re-reading the etag and repeating is sound: what is under test is the 304's effect, not
+        // which etag produced it.
+        let mut etag = etag;
+        let mut second_status = 0;
+        for attempt in 1..=6 {
+            // Re-plant the aged activity each time: a 200 on a previous attempt moved it.
+            sqlx::query("UPDATE sessions SET lastactivityat = $1 WHERE token = $2")
+                .bind(stale)
+                .bind(&token)
+                .execute(&pool)
+                .await
+                .expect("ages the session");
+
+            let second = client()
+                .get(format!("{base}/api/v4/users/me"))
+                .header("Authorization", format!("Bearer {token}"))
+                .header("If-None-Match", &etag)
+                .send()
+                .await
+                .expect("the server is reachable");
+            second_status = second.status().as_u16();
+            if second_status == 304 {
+                break;
+            }
+            // The row moved: take the etag this answer carries and try once more.
+            if let Some(fresh) = second
+                .headers()
+                .get("etag")
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_owned)
+            {
+                etag = fresh;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50 * attempt)).await;
+        }
+        assert_eq!(second_status, 304, "{base} did not answer 304");
 
         assert_eq!(
             activity_of(&pool, &token).await,

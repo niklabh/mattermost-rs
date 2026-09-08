@@ -40,14 +40,21 @@ async fn session_team_members_match_the_go_servers_computed_roles() {
 
     let token = go_minted_token(&client).await;
 
-    // Read Go's list, our store's, then Go's again, and accept a store answer that matches
-    // either bracket. **Creating a team makes the creator a member**, and every suite in this
-    // binary that needs a team creates one with this same admin token — so the admin's membership
-    // count moves under this test, and an unbracketed comparison fails on churn. Measured at 50
-    // against 49 once the data-retention fixture landed.
+    // **A comparison over the intersection, which no amount of churn can break.**
+    //
+    // The original bracketed the store read between two Go reads and accepted a *count* matching
+    // either end. That holds while at most one team is created during the read, and stopped
+    // holding once a suite created eight in a run — creating a team makes the creator a member,
+    // and every suite in this binary uses this same admin token.
+    //
+    // A settle loop does not fix it either: the churn is continuous, so there may be no quiet
+    // moment. Nor is the direction monotonic — suites remove members as well as add them, so the
+    // later read can be *smaller*. What survives all of it is the **intersection**: a team both
+    // reads saw must agree in every computed field, which is the whole claim. A team only one of
+    // them saw is churn, and the overlap is required to be near-total so churn cannot hollow the
+    // test out.
     let go_members = go_team_members(&client, &token).await;
 
-    // Now the same question through our store, using the same token.
     let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
     let store = SqlStore::connect(&database_url, 2)
         .await
@@ -62,17 +69,21 @@ async fn session_team_members_match_the_go_servers_computed_roles() {
         .team_members
         .expect("D-077: team_members must be hydrated, not left null");
 
-    let go_after = go_team_members(&client, &token).await;
-    let go_members = if ours.len() == go_members.len() {
-        go_members
-    } else {
-        go_after
-    };
-    assert_eq!(
-        ours.len(),
-        go_members.len(),
-        "both servers should see the same number of memberships, at one of the two instants Go \
-         was asked"
+    // Neither direction is monotonic — suites create teams *and* remove members while this runs —
+    // so the comparison is over the **intersection**. Every team both reads saw must agree in
+    // every computed field, which is the whole claim; a team only one of them saw is churn.
+    let shared: Vec<&serde_json::Value> = go_members
+        .iter()
+        .filter(|m| {
+            let team_id = m["team_id"].as_str().unwrap_or_default();
+            ours.iter().any(|mine| mine.team_id == team_id)
+        })
+        .collect();
+    assert!(
+        !shared.is_empty() && shared.len() * 10 >= go_members.len() * 9,
+        "the two reads should overlap almost entirely; churn cannot explain {} of {}",
+        go_members.len() - shared.len(),
+        go_members.len()
     );
 
     // Compare per team id rather than by position — neither query has an ORDER BY, so the row
@@ -80,10 +91,10 @@ async fn session_team_members_match_the_go_servers_computed_roles() {
     // strict.
     for go_member in &go_members {
         let team_id = go_member["team_id"].as_str().expect("team_id is a string");
-        let mine = ours
-            .iter()
-            .find(|m| m.team_id == team_id)
-            .unwrap_or_else(|| panic!("we are missing team {team_id}"));
+        let Some(mine) = ours.iter().find(|m| m.team_id == team_id) else {
+            // Created or removed between the two reads — see the note above.
+            continue;
+        };
 
         // `roles` is the computed field and the reason this test exists.
         assert_eq!(

@@ -83,6 +83,7 @@ pub const MANAGED_CATEGORY_PROPERTY_FIELD_NAME: &str = "category_name";
 /// `string`/`int64`/`bool`, so a NULL fails the whole query rather than defaulting. The store
 /// port reproduces that; see `mm_store::sidebar_category_store`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct SidebarCategory {
     #[serde(rename = "id")]
     pub id: String,
@@ -123,6 +124,7 @@ pub struct SidebarCategory {
 /// The Go field is named `Channels` but its tag is `channel_ids`; the name here follows the
 /// wire, because that is the half a client sees.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct SidebarCategoryWithChannels {
     #[serde(flatten)]
     pub category: SidebarCategory,
@@ -147,6 +149,7 @@ impl SidebarCategoryWithChannels {
 /// Port of `model.OrderedSidebarCategories` (channel_sidebar.go:69) — the body of
 /// `GET .../channels/categories`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct OrderedSidebarCategories {
     /// Go's `SidebarCategoriesWithChannels`, a named `[]*SidebarCategoryWithChannels` with no
     /// methods of its own.
@@ -164,6 +167,7 @@ pub struct OrderedSidebarCategories {
 /// `SortOrder` is tagged `json:"-"`, so it is **absent** from the wire rather than emitted as
 /// zero; `#[serde(skip)]` matches, and `fixtures/sidebar_channel.json` has only three keys.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct SidebarChannel {
     #[serde(rename = "channel_id")]
     pub channel_id: String,

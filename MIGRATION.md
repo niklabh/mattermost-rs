@@ -8290,3 +8290,89 @@ behaviour here is the decode and the two gates, and that is what is served. The 
 **first**, so a malformed body answers `invalid_client_metadata` even though the feature is off.
 A deployment that enables DCR is forwarded, along with Go's 2/sec rate limit, which this server
 has no equivalent of.
+
+## Four team writes, and the write load finally broke the shared fixtures (2026-09-08)
+
+New: `crates/mm-api/tests/parity/team_writes.rs`, `scripts/mutations/team-writes.plan`.
+Changed: `crates/mm-model/` (23 files — see below), `crates/mm-store/src/team_store.rs`,
+`crates/mm-app/src/{team,config}.rs`, `crates/mm-api/src/{teams,lib}.rs`, and four existing parity
+suites.
+
+222 → **226 of 764**: `updateTeam`, `patchTeam`, `restoreTeam`, `regenerateTeamInviteId`.
+
+### `Sanitized: true` means the submitted team is not what gets written
+
+`teamService.UpdateTeam` fetches the stored team and copies **seven** fields onto it —
+`DisplayName`, `Description`, `AllowOpenInvite`, `CompanyName`, `AllowedDomains`,
+`LastTeamIconUpdate`, `GroupConstrained` — plus `Name`, conditionally. Everything else a client
+sends is discarded, **including `Email`, `Type`, `InviteId`, `DeleteAt` and `SchemeId`**. A port
+that wrote the submitted struct would let a client change a team's type or un-archive it through
+an ordinary update; the parity suite plants all four and asserts each is ignored.
+
+The name is taken only when it is non-empty, changed, **and not `-`** — a sentinel meaning "leave
+it alone" — and an occupied name answers with the *old* team at 400.
+
+### Turning open invitations off mints a new invite id
+
+`patch.AllowOpenInvite != nil && !*patch.AllowOpenInvite` regenerates `InviteId`, invalidating
+every invite link already handed out. Nothing in the request names it. Turning them *on* does not,
+so the branch is on the value rather than on the change — asserted both ways.
+
+### The socket carries less than the response
+
+`sendTeamEvent` runs `Team.Sanitize`, which clears `Email` and `InviteId`; the HTTP answer runs the
+**session-aware** `SanitizeTeam`, which leaves them for a caller with `manage_system`. So
+`regenerate_invite_id` publishes an event whose team has **no invite id** — the one thing the route
+exists to produce. Both halves asserted.
+
+### The conditional permission is decided differently by the two routes
+
+`invite_user` is required by `updateTeam` when `AllowOpenInvite` or `AllowedDomains` **differ from
+the stored team**, and by `patchTeam` when they are merely **present in the patch**. So
+`{"allow_open_invite": <the value it already has>}` needs the permission on one route and not the
+other.
+
+### `#[serde(default)]`, swept
+
+[D-192] bit a third group running: `Team` and `TeamPatch` lacked the attribute, so
+`PUT /teams/{id}` with a partial body was a 400 here and a 200 on Go. Rather than wait for a
+fourth, the attribute is now on **every** `Deserialize` struct in `mm-model` — 90 of them across
+23 files. The one exemption is `Permission`, a static descriptor with no `Default` that no handler
+decodes.
+
+The sweep cannot break a serialisation test: the attribute affects decoding only, and every
+fixture round-trip decodes a fully populated document where defaults never apply. All 1,437 model
+tests pass unchanged.
+
+### Every stock team role grants `invite_user`
+
+Which is why three separate mutations of the conditional permission survived the first run: an
+ordinary member of the team already holds it, however narrow the *system* role is. Separating
+`manage_team` from `invite_user` needs a **roleless team membership**, planted directly —
+`POST /teams/{id}/members` always writes `team_user`.
+
+With that fixture the sharpest difference between the two routes becomes visible: naming
+`allow_open_invite` with the value it already has is a **403 on `patchTeam`** and a **200 on
+`updateTeam`**, because one decides by presence and the other by change.
+
+Three further mutations are recorded in the plan as **equivalent** rather than as gaps: the
+store's `create_at`/`update_at` assignments are redundant given what the app layer has already
+done (Go carries the same redundancy), and `invalid_param("id")` versus `"team_id"` is invisible
+because `AppError.Params` is `json:"-"` and never reaches a client.
+
+### Four existing suites had to be made churn-proof, and that is this group's real cost
+
+Adding write routes to a suite that shares one database with a running Go server changes what the
+*read* suites can assume. Four broke, each differently, and none of them was a port divergence:
+
+| suite | why it broke | fix |
+|---|---|---|
+| `teams_all` | its fixture refuses to build when two teams share a display name — and this suite renamed both of its teams to `"mmrs renamed"`. The panic left its `OnceCell` half-built, so the next test retried the build and collided on the team *name*, taking out ten tests | distinct display names per server |
+| `session_team_members` | compared a membership **count** across two instants; creating a team makes the creator a member, and this suite creates eight | compare the **intersection** — every team both reads saw must agree in every field, with near-total overlap required |
+| `session_activity` | `/users/me`'s etag folds in `Users.UpdateAt`, shared with every suite, so the conditional read became a 200 | re-read the etag and retry, re-planting the aged activity each time |
+| `user_audits` | `Audits` is append-only and every Go-served write in another test adds a row to the admin's list | compare the intersection, as above |
+
+The pattern is one rule: **an assertion over a whole shared table cannot survive a suite that
+writes**. Count it, and you are counting the rest of the run. [D-167] predicted exactly this and
+asked for the deliberate pass; four of them are now done, driven by failures rather than by the
+sweep it asked for.

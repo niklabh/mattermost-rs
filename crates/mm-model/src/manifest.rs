@@ -815,6 +815,7 @@ impl std::fmt::Display for StrictVersion {
 /// `encoding/json` **inlines**. `#[serde(flatten)]` is the equivalent; a nested `manifest` key
 /// would be a wire break.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct PluginInfo {
     #[serde(flatten)]
     pub manifest: Manifest,

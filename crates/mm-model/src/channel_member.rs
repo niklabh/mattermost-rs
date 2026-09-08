@@ -51,6 +51,7 @@ pub const CHANNEL_MEMBER_NOTIFY_PROPS_MAX_RUNES: usize = 800_000;
 /// `notify_props` carries `json:"-"`: it is populated by the store and consumed by the
 /// notification logic, never sent to a client.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ChannelUnread {
     #[serde(rename = "team_id")]
     pub team_id: String,
@@ -79,6 +80,7 @@ pub struct ChannelUnread {
 
 /// Port of `model.ChannelUnreadAt` (channel_member.go:41).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ChannelUnreadAt {
     #[serde(rename = "team_id")]
     pub team_id: String,
@@ -121,6 +123,7 @@ pub struct ChannelUnreadAt {
 /// Nil is also reachable at runtime: [`ChannelMember::set_channel_muted`] writes into the map
 /// and **panics in Go** when it is nil (see D-018).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ChannelMember {
     #[serde(rename = "channel_id")]
     pub channel_id: String,
@@ -454,6 +457,7 @@ pub fn get_default_channel_notify_props() -> StringMap {
 
 /// Port of `model.ChannelMemberWithTeamData` (channel_member.go:104).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ChannelMemberWithTeamData {
     #[serde(flatten)]
     pub channel_member: ChannelMember,
@@ -479,6 +483,7 @@ pub type ChannelMembersWithTeamData = Vec<ChannelMemberWithTeamData>;
 /// `ChannelName` and `Username` have no json tag, so Go marshals them under the Go field names
 /// verbatim — same trap as `ChannelForExport` and `TeamForExport`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ChannelMemberForExport {
     #[serde(flatten)]
     pub channel_member: ChannelMember,
@@ -492,6 +497,7 @@ pub struct ChannelMemberForExport {
 
 /// Port of `model.ChannelMemberIdentifier` (channel_member.go:253).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ChannelMemberIdentifier {
     #[serde(rename = "channel_id")]
     pub channel_id: String,
@@ -503,6 +509,7 @@ pub struct ChannelMemberIdentifier {
 /// Port of `model.SetChannelMembersRequest` (channel_member.go:259) — the bulk
 /// set-channel-members request body.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct SetChannelMembersRequest {
     /// The complete desired membership. Users here and in `channel_admins` are the final set.
     #[serde(rename = "members")]
@@ -521,6 +528,7 @@ pub struct SetChannelMembersRequest {
 /// `added` and `removed` have no `omitempty`, so a nil slice is `null` and the key stays;
 /// the other three are dropped when nil or empty.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct SetChannelMembersResponse {
     #[serde(rename = "added")]
     pub added: Option<Vec<String>>,
@@ -540,6 +548,7 @@ pub struct SetChannelMembersResponse {
 
 /// Port of `model.SetChannelMembersError` (channel_member.go:292).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct SetChannelMembersError {
     #[serde(rename = "user_id")]
     pub user_id: String,

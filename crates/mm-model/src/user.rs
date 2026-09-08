@@ -250,6 +250,7 @@ fn slice_is_empty(v: &Option<StringArray>) -> bool {
 ///   is omitted. `Sanitize` relies on this — it sets a pointer to the empty string, which
 ///   must still appear on the wire.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct User {
     #[serde(rename = "id")]
     pub id: String,
@@ -397,6 +398,7 @@ pub struct User {
 /// matching Go: only `password` and the two maps carry `omitempty`, so a patch that clears a
 /// field sends an explicit `null` and one that omits it sends nothing.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct UserPatch {
     #[serde(rename = "username")]
     pub username: Option<String>,
@@ -437,6 +439,7 @@ pub struct UserPatch {
 
 /// Port of `model.UserAuth` (user.go:225).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct UserAuth {
     #[serde(rename = "auth_data", default, skip_serializing_if = "Option::is_none")]
     pub auth_data: Option<String>,
@@ -466,6 +469,7 @@ impl UserAuth {
 
 /// Port of `model.UserForIndexing` (user.go:249).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct UserForIndexing {
     #[serde(rename = "id")]
     pub id: String,

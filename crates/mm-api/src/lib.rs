@@ -359,7 +359,21 @@ pub fn router(state: AppState) -> Router {
         // route below applies unchanged.
         .route(
             "/api/v4/teams/{team_id}",
-            partially_migrated_with_ids(&state, get(teams::get_team)),
+            partially_migrated_with_ids(&state, get(teams::get_team).put(teams::update_team)),
+        )
+        // `BaseRoutes.Team.Handle("/patch")` (api4/team.go) — a segment deeper than `{team_id}`,
+        // so no precedence question with the route above.
+        .route(
+            "/api/v4/teams/{team_id}/patch",
+            partially_migrated_with_ids(&state, axum::routing::put(teams::patch_team)),
+        )
+        .route(
+            "/api/v4/teams/{team_id}/restore",
+            partially_migrated_with_ids(&state, post(teams::restore_team)),
+        )
+        .route(
+            "/api/v4/teams/{team_id}/regenerate_invite_id",
+            partially_migrated_with_ids(&state, post(teams::regenerate_team_invite_id)),
         )
         .route(
             "/api/v4/teams/{team_id}/stats",

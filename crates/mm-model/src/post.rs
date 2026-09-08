@@ -1050,6 +1050,7 @@ pub fn find_at_channel_mention(message: &str) -> Option<String> {
 /// Port of `model.PostPatch` (post.go:211). No field carries `omitempty`, so every key is
 /// always present and `null` when unset.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct PostPatch {
     #[serde(rename = "is_pinned")]
     pub is_pinned: Option<bool>,
@@ -1105,6 +1106,7 @@ impl PostPatch {
 
 /// Port of `model.PostEphemeral` (post.go:206).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct PostEphemeral {
     #[serde(rename = "user_id")]
     pub user_id: String,
@@ -1119,6 +1121,7 @@ pub struct PostEphemeral {
 /// the field name and two capitalised keys sit beside the snake_case one. Same trap as
 /// `PostPriority` and `TeamForExport.SchemeName`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct PostReminder {
     #[serde(rename = "target_time")]
     pub target_time: i64,
@@ -1132,6 +1135,7 @@ pub struct PostReminder {
 
 /// Port of `model.MoveThreadParams` (post.go:253).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct MoveThreadParams {
     #[serde(rename = "channel_id")]
     pub channel_id: String,
@@ -1139,6 +1143,7 @@ pub struct MoveThreadParams {
 
 /// Port of `model.SearchParameter` (post.go:257).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct SearchParameter {
     #[serde(rename = "terms")]
     pub terms: Option<String>,
@@ -1161,6 +1166,7 @@ pub struct SearchParameter {
 
 /// Port of `model.PostForIndexing` (post.go:326). Embeds `Post`, whose fields are inlined.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct PostForIndexing {
     #[serde(flatten)]
     pub post: Post,
@@ -1177,6 +1183,7 @@ pub struct PostForIndexing {
 
 /// Port of `model.FileForIndexing` (post.go:333).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct FileForIndexing {
     #[serde(flatten)]
     pub file_info: crate::file_info::FileInfo,

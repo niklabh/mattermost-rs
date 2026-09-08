@@ -1309,6 +1309,7 @@ fn is_zero_i32(n: &i32) -> bool {
 /// — which has to substitute one field's value — can emit Go's field order instead of the
 /// alphabetical order a `serde_json::Value` would impose. One definition of the order, two callers.
 #[derive(Debug, Default, Deserialize)]
+#[serde(default)]
 pub struct AppError {
     #[serde(rename = "id")]
     pub id: String,

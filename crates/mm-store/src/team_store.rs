@@ -268,6 +268,27 @@ pub trait TeamStore {
     /// no filter. `App.GetAllTeams` is a straight pass-through, and `GetTeamsUsage` is the caller
     /// that needs it.
     fn get_all(&self) -> impl std::future::Future<Output = Result<Vec<Team>, StoreError>> + Send;
+
+    /// Port of `SqlTeamStore.Update` (team_store.go).
+    ///
+    /// **Sixteen columns, and `Id` is the only one it does not write.** `CreateAt` is re-read from
+    /// the stored row and written back unchanged — so a body cannot move it — while `UpdateAt`
+    /// takes a fresh `GetMillis`. Everything else on the struct lands as given, which is why the
+    /// *callers* are the ones that decide which fields a client may change.
+    ///
+    /// # `PreUpdate` and `IsValid` are the caller's here, and Go's are inside this function
+    ///
+    /// Go's `Update` calls both before touching the database and lets the resulting `AppError`
+    /// travel up through `errors.As(err, &appErr)`. A store in this tree does not produce
+    /// `AppError`s — that is the layering the crate split exists for — so `mm_app::team` runs
+    /// them immediately before calling this, and the same error reaches the same caller.
+    ///
+    /// The ordering is unobservable: every caller passes a team it has just **fetched and
+    /// modified**, so `CreateAt` is already the stored one by the time `IsValid` sees it.
+    fn update(
+        &self,
+        team: &Team,
+    ) -> impl std::future::Future<Output = Result<Team, StoreError>> + Send;
 }
 
 /// Postgres-backed implementation.
@@ -283,6 +304,61 @@ impl SqlTeamStore {
 }
 
 impl TeamStore for SqlTeamStore {
+    #[tracing::instrument(skip_all, fields(team_id = %team.id))]
+    async fn update(&self, team: &Team) -> Result<Team, StoreError> {
+        let mut team = team.clone();
+
+        // Go re-reads the row through `GetMaster` and refuses when the id is unknown —
+        // `ErrInvalidInput`, which every caller renders as `app.team.update.find.app_error` at
+        // **400**, not a 404. The read is on the *master* rather than a replica, so an update
+        // immediately after a create cannot miss its own row.
+        let old = get(&self.pool, &team.id).await?;
+
+        team.create_at = old.create_at;
+        team.update_at = mm_model::utils::get_millis();
+
+        sqlx::query!(
+            r#"
+            UPDATE teams
+               SET createat = $2, updateat = $3, deleteat = $4, displayname = $5, name = $6,
+                   description = $7, email = $8, type = ($9::text)::team_type,
+                   companyname = $10,
+                   alloweddomains = $11, inviteid = $12, allowopeninvite = $13,
+                   lastteamiconupdate = $14, schemeid = $15, groupconstrained = $16,
+                   cloudlimitsarchived = $17
+             WHERE id = $1
+            "#,
+            team.id,
+            team.create_at,
+            team.update_at,
+            team.delete_at,
+            team.display_name,
+            team.name,
+            team.description,
+            team.email,
+            team.team_type,
+            team.company_name,
+            team.allowed_domains,
+            team.invite_id,
+            team.allow_open_invite,
+            team.last_team_icon_update,
+            team.scheme_id,
+            team.group_constrained,
+            team.cloud_limits_archived,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to update Team with id={}", team.id),
+            source,
+        })?;
+
+        // Go returns the struct it wrote, **not** a re-read — so the two computed
+        // `AccessControlPolicies` flags on the returned value are whatever the caller had, which
+        // for every caller here is the value from the fetch that preceded the update.
+        Ok(team)
+    }
+
     #[tracing::instrument(skip_all, fields(user_id = %user_id, found))]
     async fn get_teams_for_user(
         &self,

@@ -86,6 +86,7 @@ static CODE_VERIFIER_REGEX: LazyLock<Regex> = LazyLock::new(|| {
 
 /// Port of `model.AuthData` (authorize.go:31) — a stored authorization code.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct AuthData {
     #[serde(rename = "client_id")]
     pub client_id: String,
@@ -138,6 +139,7 @@ pub struct AuthData {
 /// Note `redirect_uri`'s Go field is spelled `RedirectURI` here and `RedirectUri` on [`AuthData`];
 /// the JSON tag is the same on both, so only the Go call sites see the difference.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct AuthorizeRequest {
     #[serde(rename = "response_type")]
     pub response_type: String,

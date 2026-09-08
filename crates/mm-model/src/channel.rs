@@ -98,6 +98,7 @@ fn bool_map_is_empty(m: &Option<HashMap<String, bool>>) -> bool {
 /// None of the three fields carries `omitempty`, so all three keys are always present and a
 /// nil pointer serialises as `null`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ChannelBannerInfo {
     #[serde(rename = "enabled")]
     pub enabled: Option<bool>,
@@ -124,6 +125,7 @@ pub struct ChannelBannerInfo {
 /// `omitempty` so a nil map is `null` with the key present, while `policy_actions` has
 /// `omitempty` so a nil **or empty** map drops the key entirely.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Channel {
     #[serde(rename = "id")]
     pub id: String,
@@ -688,6 +690,7 @@ pub fn get_group_name_from_user_ids(user_ids: &[String]) -> String {
 
 /// Port of `model.ChannelWithTeamData` (channel.go:170).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ChannelWithTeamData {
     #[serde(flatten)]
     pub channel: Channel,
@@ -707,6 +710,7 @@ pub struct ChannelWithTeamData {
 /// `channels` has no `omitempty`, so a nil list serialises as `null` rather than `[]`. Landed
 /// with `channel_list.go`, which supplies the list type — this closes D-014.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ChannelsWithCount {
     #[serde(rename = "channels")]
     pub channels: Option<ChannelListWithTeamData>,
@@ -720,6 +724,7 @@ pub struct ChannelsWithCount {
 /// Every field is a pointer with no `omitempty`, so all ten keys are always present on the
 /// wire and `null` means "leave alone".
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ChannelPatch {
     #[serde(rename = "display_name")]
     pub display_name: Option<String>,
@@ -759,6 +764,7 @@ pub struct ChannelPatch {
 /// names verbatim — capitals included, sitting alongside the inlined snake_case `Channel`
 /// fields. Same trap as `TeamForExport`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ChannelForExport {
     #[serde(flatten)]
     pub channel: Channel,
@@ -776,6 +782,7 @@ pub struct ChannelForExport {
 /// `omitempty`, so a nil slice serialises as `null`. Landed with `channel_member.go`, which
 /// supplies the element type — the other half of D-014.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct DirectChannelForExport {
     #[serde(flatten)]
     pub channel: Channel,
@@ -786,6 +793,7 @@ pub struct DirectChannelForExport {
 
 /// Port of `model.ChannelModeration` (channel.go:220).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ChannelModeration {
     #[serde(rename = "name")]
     pub name: String,
@@ -796,6 +804,7 @@ pub struct ChannelModeration {
 
 /// Port of `model.ChannelModeratedRoles` (channel.go:225).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ChannelModeratedRoles {
     #[serde(rename = "guests")]
     pub guests: Option<ChannelModeratedRole>,
@@ -806,6 +815,7 @@ pub struct ChannelModeratedRoles {
 
 /// Port of `model.ChannelModeratedRole` (channel.go:230).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ChannelModeratedRole {
     #[serde(rename = "value")]
     pub value: bool,
@@ -816,6 +826,7 @@ pub struct ChannelModeratedRole {
 
 /// Port of `model.ChannelModerationPatch` (channel.go:235).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ChannelModerationPatch {
     #[serde(rename = "name")]
     pub name: Option<String>,
@@ -826,6 +837,7 @@ pub struct ChannelModerationPatch {
 
 /// Port of `model.ChannelModeratedRolesPatch` (channel.go:247).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ChannelModeratedRolesPatch {
     #[serde(rename = "guests")]
     pub guests: Option<bool>,
@@ -836,6 +848,7 @@ pub struct ChannelModeratedRolesPatch {
 
 /// Port of `model.ChannelMemberCountByGroup` (channel.go:286).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ChannelMemberCountByGroup {
     #[serde(rename = "group_id")]
     pub group_id: String,
@@ -849,6 +862,7 @@ pub struct ChannelMemberCountByGroup {
 
 /// Port of `model.GroupMessageConversionRequestBody` (channel.go:617).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct GroupMessageConversionRequestBody {
     #[serde(rename = "channel_id")]
     pub channel_id: String,

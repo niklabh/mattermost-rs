@@ -139,6 +139,17 @@ pub struct Config {
     /// with no team in common is refused only on a server that has been configured for it.
     pub restrict_direct_message: String,
 
+    /// `TeamSettings.RestrictCreationToDomains` (config.go:2548, defaulted **`""`** at :2592).
+    ///
+    /// A free-form list of email domains, normalised by `normalizeDomains`: `@` and `,` become
+    /// spaces, the whole string is lower-cased, and the result is split on whitespace. So
+    /// `"@corp.example.com, example.com example.org"` is three domains.
+    ///
+    /// `checkValidDomains` refuses a team whose `AllowedDomains` names anything outside this list
+    /// — and **only when the list is non-empty**, which the default makes it. So on a stock server
+    /// the check is a no-op, and a server that sets it refuses updates Go would refuse too.
+    pub restrict_creation_to_domains: String,
+
     /// `ServiceSettings.AllowSyncedDrafts` (config.go:488). Go default **`true`**.
     ///
     /// Gates the whole drafts feature. Every one of `getDrafts`, `upsertDraft` and `deleteDraft`
@@ -430,6 +441,8 @@ impl Default for Config {
             unique_emoji_reaction_limit_per_post: 50,
             // config.go:2620 — `new(DirectMessageAny)`.
             restrict_direct_message: DIRECT_MESSAGE_ANY.to_owned(),
+            // config.go:2592 — `new("")`.
+            restrict_creation_to_domains: String::new(),
             allow_synced_drafts: true,
             enable_burn_on_read: true,
             feature_flag_burn_on_read: true,
@@ -555,6 +568,8 @@ impl Config {
             )),
             restrict_direct_message: lookup("MM_TEAMSETTINGS_RESTRICTDIRECTMESSAGE")
                 .unwrap_or(default.restrict_direct_message),
+            restrict_creation_to_domains: lookup("MM_TEAMSETTINGS_RESTRICTCREATIONTODOMAINS")
+                .unwrap_or(default.restrict_creation_to_domains),
             post_priority: lookup_bool(
                 lookup,
                 "MM_SERVICESETTINGS_POSTPRIORITY",
@@ -701,6 +716,7 @@ impl Config {
         // key both land here as `false`, matching Go's nil pointer.
         let is_update = service.site_url.is_some();
         let client_requirements = parsed.client_requirements.unwrap_or_default();
+        let team_settings = parsed.team_settings.unwrap_or_default();
         Ok(Self {
             // Moved, not cloned: `is_update` above already took the only other thing anything
             // wants from this field, and the remaining `service` reads are all `Option<bool>`.
@@ -745,11 +761,12 @@ impl Config {
                     .unique_emoji_reaction_limit_per_post
                     .unwrap_or(default.unique_emoji_reaction_limit_per_post),
             ),
-            restrict_direct_message: parsed
-                .team_settings
-                .unwrap_or_default()
+            restrict_direct_message: team_settings
                 .restrict_direct_message
                 .unwrap_or(default.restrict_direct_message),
+            restrict_creation_to_domains: team_settings
+                .restrict_creation_to_domains
+                .unwrap_or(default.restrict_creation_to_domains),
             allow_synced_drafts: service
                 .allow_synced_drafts
                 .unwrap_or(default.allow_synced_drafts),
@@ -920,6 +937,8 @@ struct Document {
 struct TeamSettingsDocument {
     #[serde(rename = "RestrictDirectMessage")]
     restrict_direct_message: Option<String>,
+    #[serde(rename = "RestrictCreationToDomains")]
+    restrict_creation_to_domains: Option<String>,
 }
 
 /// The one field of `AIRecapSettings` a migrated route reads. `Option<bool>` all the way through:

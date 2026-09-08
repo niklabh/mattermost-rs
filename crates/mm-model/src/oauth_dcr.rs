@@ -82,6 +82,7 @@ pub struct ClientRegistrationRequest {
 
 /// Port of `model.ClientRegistrationResponse` (oauth_dcr.go:19).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ClientRegistrationResponse {
     #[serde(rename = "client_id")]
     pub client_id: String,
@@ -127,6 +128,7 @@ pub struct ClientRegistrationResponse {
 
 /// Port of `model.DCRError` (oauth_dcr.go:36).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct DcrError {
     #[serde(rename = "error")]
     pub error: String,

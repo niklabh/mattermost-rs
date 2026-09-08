@@ -12,14 +12,18 @@
 //! - `getAllTeams` — `GET /api/v4/teams`
 //! - `getTeamMembersByIds` — `POST /api/v4/teams/{team_id}/members/ids`
 
-use axum::extract::{Path, State};
+use axum::body::Body;
+use axum::extract::{Path, Request, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
+use mm_app::team::TeamWrite;
 use mm_model::permission::{
     PERMISSION_EDIT_OTHER_USERS, PERMISSION_LIST_PRIVATE_TEAMS, PERMISSION_LIST_PUBLIC_TEAMS,
     PERMISSION_MANAGE_SYSTEM, PERMISSION_SYSCONSOLE_READ_COMPLIANCE_DATA_RETENTION_POLICY,
     PERMISSION_SYSCONSOLE_READ_USER_MANAGEMENT_USERS, PERMISSION_VIEW_TEAM, make_permission_error,
 };
+use mm_model::permission::{PERMISSION_INVITE_USER, PERMISSION_MANAGE_TEAM};
+use mm_model::team::{Team, TeamPatch};
 
 use crate::AppState;
 use crate::auth::AuthenticatedSession;
@@ -1569,6 +1573,280 @@ async fn serve_team_members_by_ids(
         body,
     )
         .into_response())
+}
+
+/// Port of `updateTeam` (api4/team.go) — `PUT /api/v4/teams/{team_id}`.
+///
+/// # Two permissions, and the second depends on what changed
+///
+/// `manage_team` always. Then **`invite_user`, but only if `AllowOpenInvite` or `AllowedDomains`
+/// differ from the stored team** — so the same request is allowed or refused depending on a value
+/// the caller may not have meant to change. A client that round-trips a fetched team and edits
+/// only its display name never trips it; one that omits `allow_open_invite` from the body sends
+/// `false` and may.
+///
+/// # The email is lower-cased before the id comparison
+///
+/// `team.Email = strings.ToLower(team.Email)` is the handler's first statement after the decode,
+/// and it happens even though `Email` is one of the fields the app layer then **discards**.
+#[tracing::instrument(skip_all, fields(team_id = %team_id))]
+pub async fn update_team(
+    State(state): State<AppState>,
+    session: AuthenticatedSession,
+    Path(team_id): Path<String>,
+    request: Request,
+) -> Response {
+    if let Err(err) = require_id(&team_id, "team_id") {
+        return err.into_response();
+    }
+
+    let bytes = match axum::body::to_bytes(request.into_body(), usize::MAX).await {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            tracing::warn!(error = %err, "could not read the request body");
+            return ApiError::invalid_param("team").into_response();
+        }
+    };
+    let mut team: Team = match serde_json::from_slice(&bytes) {
+        Ok(team) => team,
+        Err(err) => {
+            tracing::debug!(error = %err, "team body did not decode");
+            return ApiError::invalid_param("team").into_response();
+        }
+    };
+
+    // `strings.ToLower`, which is the *simple* case mapping — see `go_to_lower`.
+    team.email = mm_model::utils::go_to_lower(&team.email);
+
+    // **`SetInvalidParam("id")`, not `"team_id"`.** The parameter Go names here is the body's
+    // field, not the path's segment, and a client branching on `params.Name` sees the difference.
+    if team.id != team_id {
+        return ApiError::invalid_param("id").into_response();
+    }
+
+    if !state
+        .app
+        .session_has_permission_to_team(&session.0, &team_id, &PERMISSION_MANAGE_TEAM)
+        .await
+    {
+        return ApiError::from(*make_permission_error(
+            &session.0,
+            &[&PERMISSION_MANAGE_TEAM],
+        ))
+        .into_response();
+    }
+
+    let old_team = match state.app.get_team(&team_id).await {
+        Ok(team) => team,
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+
+    if (team.allow_open_invite != old_team.allow_open_invite
+        || team.allowed_domains != old_team.allowed_domains)
+        && !state
+            .app
+            .session_has_permission_to_team(&session.0, &team_id, &PERMISSION_INVITE_USER)
+            .await
+    {
+        return ApiError::from(*make_permission_error(
+            &session.0,
+            &[&PERMISSION_INVITE_USER],
+        ))
+        .into_response();
+    }
+
+    match state.app.update_team(&team).await {
+        Ok(updated) => sanitized_team_response(&state, &session, updated).await,
+        Err(err) => ApiError::from(err).into_response(),
+    }
+}
+
+/// Port of `patchTeam` (api4/team.go) — `PUT /api/v4/teams/{team_id}/patch`.
+///
+/// The same two permissions, but the second is decided by **presence** rather than by change:
+/// `patch.AllowOpenInvite != nil || patch.AllowedDomains != nil`. So sending
+/// `{"allow_open_invite": <the value it already has>}` needs `invite_user` where the update route
+/// would not.
+///
+/// Both permission checks run **before** the team is fetched, which is the opposite order from
+/// `updateTeam` — so a patch naming a nonexistent team answers 403 rather than 404 for a caller
+/// without the permission.
+#[tracing::instrument(skip_all, fields(team_id = %team_id, forwarded))]
+pub async fn patch_team(
+    State(state): State<AppState>,
+    session: AuthenticatedSession,
+    Path(team_id): Path<String>,
+    request: Request,
+) -> Response {
+    if let Err(err) = require_id(&team_id, "team_id") {
+        return err.into_response();
+    }
+
+    let (parts, body) = request.into_parts();
+    let bytes = match axum::body::to_bytes(body, usize::MAX).await {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            tracing::warn!(error = %err, "could not read the request body");
+            return ApiError::invalid_param("team").into_response();
+        }
+    };
+    let patch: TeamPatch = match serde_json::from_slice(&bytes) {
+        Ok(patch) => patch,
+        Err(err) => {
+            tracing::debug!(error = %err, "team patch body did not decode");
+            return ApiError::invalid_param("team").into_response();
+        }
+    };
+
+    if !state
+        .app
+        .session_has_permission_to_team(&session.0, &team_id, &PERMISSION_MANAGE_TEAM)
+        .await
+    {
+        return ApiError::from(*make_permission_error(
+            &session.0,
+            &[&PERMISSION_MANAGE_TEAM],
+        ))
+        .into_response();
+    }
+
+    if (patch.allow_open_invite.is_some() || patch.allowed_domains.is_some())
+        && !state
+            .app
+            .session_has_permission_to_team(&session.0, &team_id, &PERMISSION_INVITE_USER)
+            .await
+    {
+        return ApiError::from(*make_permission_error(
+            &session.0,
+            &[&PERMISSION_INVITE_USER],
+        ))
+        .into_response();
+    }
+
+    match state.app.patch_team(&team_id, &patch).await {
+        Ok(TeamWrite::Done(patched)) => {
+            tracing::Span::current().record("forwarded", false);
+            sanitized_team_response(&state, &session, *patched).await
+        }
+        Ok(TeamWrite::Forward(why)) => {
+            tracing::Span::current().record("forwarded", true);
+            tracing::debug!(?why, "handing the team patch to Go");
+            let request = Request::from_parts(parts, Body::from(bytes));
+            crate::proxy::forward_to_go(State(state), request).await
+        }
+        Err(err) => ApiError::from(err).into_response(),
+    }
+}
+
+/// Port of `restoreTeam` (api4/team.go) — `POST /api/v4/teams/{team_id}/restore`.
+///
+/// The body is a **second fetch**, not the struct that was written — Go re-reads the team "to be
+/// consistent with RestoreChannel". So a concurrent update between the two is visible in the
+/// answer.
+#[tracing::instrument(skip_all, fields(team_id = %team_id))]
+pub async fn restore_team(
+    State(state): State<AppState>,
+    session: AuthenticatedSession,
+    Path(team_id): Path<String>,
+) -> Response {
+    if let Err(err) = require_id(&team_id, "team_id") {
+        return err.into_response();
+    }
+
+    if !state
+        .app
+        .session_has_permission_to_team(&session.0, &team_id, &PERMISSION_MANAGE_TEAM)
+        .await
+    {
+        return ApiError::from(*make_permission_error(
+            &session.0,
+            &[&PERMISSION_MANAGE_TEAM],
+        ))
+        .into_response();
+    }
+
+    if let Err(err) = state.app.restore_team(&team_id).await {
+        return ApiError::from(err).into_response();
+    }
+
+    match state.app.get_team(&team_id).await {
+        Ok(team) => sanitized_team_response(&state, &session, team).await,
+        Err(err) => ApiError::from(err).into_response(),
+    }
+}
+
+/// Port of `regenerateTeamInviteId` (api4/team.go) —
+/// `POST /api/v4/teams/{team_id}/regenerate_invite_id`.
+///
+/// **Both** `manage_team` and `invite_user`, unconditionally — the only team write that requires
+/// the second without looking at what changed.
+#[tracing::instrument(skip_all, fields(team_id = %team_id))]
+pub async fn regenerate_team_invite_id(
+    State(state): State<AppState>,
+    session: AuthenticatedSession,
+    Path(team_id): Path<String>,
+) -> Response {
+    if let Err(err) = require_id(&team_id, "team_id") {
+        return err.into_response();
+    }
+
+    if !state
+        .app
+        .session_has_permission_to_team(&session.0, &team_id, &PERMISSION_MANAGE_TEAM)
+        .await
+    {
+        return ApiError::from(*make_permission_error(
+            &session.0,
+            &[&PERMISSION_MANAGE_TEAM],
+        ))
+        .into_response();
+    }
+    if !state
+        .app
+        .session_has_permission_to_team(&session.0, &team_id, &PERMISSION_INVITE_USER)
+        .await
+    {
+        return ApiError::from(*make_permission_error(
+            &session.0,
+            &[&PERMISSION_INVITE_USER],
+        ))
+        .into_response();
+    }
+
+    match state.app.regenerate_team_invite_id(&team_id).await {
+        Ok(team) => sanitized_team_response(&state, &session, team).await,
+        Err(err) => ApiError::from(err).into_response(),
+    }
+}
+
+/// `SanitizeTeam` then `json.NewEncoder(w).Encode` — the trailing newline every team write shares.
+///
+/// The sanitiser is the **session-aware** one, not `Team::sanitize`: it clears `Email` and
+/// `InviteId` only for a caller without `manage_system` on the team, which is why an admin's
+/// answer carries them and a member's does not. The websocket event uses the *unconditional*
+/// sanitiser instead, so the two disagree by design.
+async fn sanitized_team_response(
+    state: &AppState,
+    session: &AuthenticatedSession,
+    team: Team,
+) -> Response {
+    let mut team = team;
+    state.app.sanitize_team(&session.0, &mut team).await;
+    match mm_model::utils::go_json_marshal(&team) {
+        Ok(json) => (
+            StatusCode::OK,
+            [
+                ("Content-Type", "application/json"),
+                ("x-mmrs-served-by", "rust"),
+            ],
+            json + "\n",
+        )
+            .into_response(),
+        Err(err) => {
+            tracing::warn!(error = %err, "Error while writing response");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
 }
 
 #[cfg(test)]

@@ -57,7 +57,12 @@ fn bool_map_is_empty(m: &Option<HashMap<String, bool>>) -> bool {
 /// Note the pointer fields — `scheme_id`, `group_constrained`, `policy_id` — carry **no**
 /// `omitempty`, so a nil pointer serialises as `null` and the key is always present. Only
 /// `last_team_icon_update`, `policy_actions` and `recommended` are omitted when empty.
+/// **`serde(default)`**: Go's `json.Decode` leaves an absent field at its zero value, and a serde
+/// derive without it makes an absent field a decode *error*. `updateTeam` and `patchTeam` decode
+/// this type from a client body, so without the attribute an ordinary partial body is a 400 here
+/// and a 200 on Go. See [D-192].
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Team {
     #[serde(rename = "id")]
     pub id: String,
@@ -142,7 +147,12 @@ pub struct Team {
 
 /// Port of `model.TeamPatch` (team.go:90). No field carries `omitempty`, so every key is
 /// present on the wire and `null` means "not patching this".
+/// **`serde(default)`**: Go's `json.Decode` leaves an absent field at its zero value, and a serde
+/// derive without it makes an absent field a decode *error*. `updateTeam` and `patchTeam` decode
+/// this type from a client body, so without the attribute an ordinary partial body is a 400 here
+/// and a 200 on Go. See [D-192].
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct TeamPatch {
     #[serde(rename = "display_name")]
     pub display_name: Option<String>,
@@ -162,6 +172,7 @@ pub struct TeamPatch {
 
 /// Port of `model.Invites` (team.go:113).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Invites {
     #[serde(rename = "invites")]
     pub invites: Vec<HashMap<String, String>>,
@@ -182,6 +193,7 @@ impl Invites {
 
 /// Port of `model.TeamsWithCount` (team.go:117).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct TeamsWithCount {
     #[serde(rename = "teams")]
     pub teams: Vec<Team>,
@@ -194,6 +206,7 @@ pub struct TeamsWithCount {
 /// The embedded `Team` inlines its fields; `SchemeName` has **no** json tag, so Go falls back
 /// to the Go field name verbatim — capital S included.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct TeamForExport {
     #[serde(flatten)]
     pub team: Team,

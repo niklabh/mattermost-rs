@@ -92,6 +92,7 @@ pub const MESSAGE_ATTACHMENT_FIELD_FIELDS: crate::go_json::GoFields = crate::go_
 /// **Only `actions` carries `omitempty`.** Every other key is always present, so a zero
 /// attachment serialises with `"fields":null` and `"ts":null` and no `actions` key at all.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct MessageAttachment {
     #[serde(rename = "id", default)]
     pub id: i64,
@@ -294,6 +295,7 @@ impl MessageAttachment {
 /// Port of `model.MessageAttachmentField` (message_attachment.go:196). No field carries
 /// `omitempty`, so all three keys are always present.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct MessageAttachmentField {
     #[serde(rename = "title", default)]
     pub title: String,

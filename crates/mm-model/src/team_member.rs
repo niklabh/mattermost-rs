@@ -22,6 +22,7 @@ pub const USERNAME: &str = "Username";
 ///
 /// Note `create_at` carries `json:"-"`: it exists in the database but never on the wire.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct TeamMember {
     #[serde(rename = "team_id")]
     pub team_id: String,
@@ -54,6 +55,7 @@ pub struct TeamMember {
 
 /// Port of `model.TeamUnread` (team_member.go:47).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct TeamUnread {
     #[serde(rename = "team_id")]
     pub team_id: String,
@@ -77,6 +79,7 @@ pub struct TeamUnread {
 ///
 /// `TeamName` has no json tag, so Go emits the field name verbatim.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct TeamMemberForExport {
     #[serde(flatten)]
     pub team_member: TeamMember,

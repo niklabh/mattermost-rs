@@ -6067,13 +6067,26 @@ So the previous value is not the `Status` row; it is whatever the process last p
 A port that read the row would take a different branch from Go on exactly the requests that
 matter, and would write rows Go throttles away.
 
-**What is owed is a decision, not code.** Two shapes:
+**Decided 2026-09-08, on the maintainer's direction that Go is temporary: option 1.**
 
-1. **Give `mm-app` its own status cache**, mirroring `platform.statusCache`. Correct in isolation
-   and *incoherent while Go runs*: two processes would each hold an authoritative previous value
-   and disagree about whether to broadcast. This is [D-182] again, sharper — statuses are the
-   highest-frequency write in the product.
-2. **Serve the status writes only once Go is gone**, and forward them until then.
+`mm-app` gets its own status cache, mirroring `platform.statusCache`. The objection to it — that
+two processes each hold an authoritative previous value and disagree about whether to broadcast —
+is real, and it is a property of *running two servers*, not of the design. It is [D-182] and
+[D-190] again, and like them it ends when the Go server does. Waiting instead would leave five
+routes unported for a reason that expires, which is the shape of decision the "end state is a Go
+server that is not running" rule exists to refuse.
+
+The rejected alternative, for the record:
+
+2. ~~Serve the status writes only once Go is gone, and forward them until then.~~ Rejected: it
+   makes the strangler a reason to skip work, which is exactly what MIGRATION.md's 2026-09-07 note
+   forbids.
+
+**What the cache has to reproduce**, and each is a branch a table-reading port would get wrong:
+the manual-override early return, the "did it change" test that decides whether to broadcast at
+all, and the `StatusMinUpdateTime` throttle that decides whether the row is written. It is a
+`RwLock<HashMap<String, Status>>` on `App` beside the hub, populated on read-through and written
+on every set — the same shape `mm_app::hub` already has.
 
 Related: `getUserStatus` is already served here and reads the **table**, which is why
 `common::set_user_status` in the parity harness exists and says so. The read is safe because Go

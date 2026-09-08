@@ -993,3 +993,309 @@ mod tests {
         );
     }
 }
+
+/// What a team write could not decide here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TeamWriteBlocked {
+    /// The patch turns on group-constraint, which Go follows with
+    /// `DeleteGroupConstrainedTeamMemberships` in a goroutine — group sync is unported.
+    GroupConstrained,
+}
+
+/// The outcome of a team write.
+#[derive(Debug)]
+pub enum TeamWrite {
+    Done(Box<Team>),
+    Forward(TeamWriteBlocked),
+}
+
+impl App {
+    /// Port of `app.App.UpdateTeam` (app/team.go) and the `teamService.UpdateTeam` it delegates
+    /// to, with `UpdateOptions{Sanitized: true}`.
+    ///
+    /// # Only seven fields of the body are used
+    ///
+    /// The `Sanitized` option means the submitted team is **not** what gets written: the stored
+    /// team is fetched and seven fields are copied onto it — `DisplayName`, `Description`,
+    /// `AllowOpenInvite`, `CompanyName`, `AllowedDomains`, `LastTeamIconUpdate`,
+    /// `GroupConstrained` — plus `Name`, conditionally. Everything else a client sends,
+    /// **including `Email`, `Type`, `InviteId`, `DeleteAt` and `SchemeId`**, is discarded. A port
+    /// that wrote the submitted struct would let a client change a team's type or un-archive it
+    /// through an ordinary update.
+    ///
+    /// # The name is only taken when it is non-empty, changed, and not `-`
+    ///
+    /// `team.Name != "" && team.Name != oldTeam.Name && team.Name != "-"`. The `-` is a sentinel
+    /// meaning "leave it alone". When the name *is* taken, a `GetByName` decides whether it is
+    /// occupied — and the occupied case returns `app.team.rename_team.name_occupied` at 400 with
+    /// the old team, not the new one.
+    #[tracing::instrument(skip(self, team), fields(team_id = %team.id))]
+    pub async fn update_team(&self, team: &Team) -> AppResult<Team> {
+        let mut old_team = self.get_team_for_update(&team.id).await?;
+
+        self.check_valid_domains(&team.allowed_domains, "UpdateTeam")?;
+
+        if !team.name.is_empty() && team.name != old_team.name && team.name != "-" {
+            match self.store().team().get_by_name(&team.name).await {
+                Ok(_) => {
+                    return Err(AppError::boxed(
+                        "UpdateTeam",
+                        "app.team.rename_team.name_occupied",
+                        None,
+                        format!("team with name {} already exists", team.name),
+                        400,
+                    ));
+                }
+                Err(err) if err.is_not_found() => {}
+                Err(err) => {
+                    tracing::error!(error = %err, "team name lookup failed");
+                    return Err(team_update_error("UpdateTeam"));
+                }
+            }
+            old_team.name = team.name.clone();
+        }
+
+        old_team.display_name = team.display_name.clone();
+        old_team.description = team.description.clone();
+        old_team.allow_open_invite = team.allow_open_invite;
+        old_team.company_name = team.company_name.clone();
+        old_team.allowed_domains = team.allowed_domains.clone();
+        old_team.last_team_icon_update = team.last_team_icon_update;
+        old_team.group_constrained = team.group_constrained;
+
+        let updated = self.write_team("UpdateTeam", old_team).await?;
+        self.send_team_event(
+            &updated,
+            mm_model::websocket_message::WEBSOCKET_EVENT_UPDATE_TEAM,
+        )
+        .await?;
+        Ok(updated)
+    }
+
+    /// Port of `app.App.PatchTeam` (app/team.go) and `teamService.PatchTeam`.
+    ///
+    /// # Turning `AllowOpenInvite` **off** regenerates the invite id
+    ///
+    /// `if patch.AllowOpenInvite != nil && !*patch.AllowOpenInvite { team.InviteId = NewId() }`.
+    /// Closing a team to open invitations therefore invalidates every invite link already handed
+    /// out — a side effect nothing in the request names, and one a port drops silently.
+    ///
+    /// # Group-constraining is forwarded
+    ///
+    /// A patch that turns `GroupConstrained` on is followed by
+    /// `DeleteGroupConstrainedTeamMemberships` in a goroutine, which removes every member not in
+    /// one of the team's groups. Group sync is unported, so the whole request goes to Go rather
+    /// than leaving the flag set and the memberships stale.
+    ///
+    /// The ABAC pre-check above it — refusing a group-constraint on a team with a membership
+    /// policy — is reached first and is portable: `PolicyEnforced` is a column.
+    #[tracing::instrument(skip(self, patch), fields(team_id = %team_id))]
+    pub async fn patch_team(
+        &self,
+        team_id: &str,
+        patch: &mm_model::team::TeamPatch,
+    ) -> AppResult<TeamWrite> {
+        let turning_on_group_constraint = patch.group_constrained == Some(true);
+
+        if turning_on_group_constraint {
+            // Go fetches the team for this check specifically, and its 400 comes *before* the
+            // patch is applied.
+            let existing = self.get_team(team_id).await?;
+            if existing.policy_enforced {
+                return Err(AppError::boxed(
+                    "PatchTeam",
+                    "api.team.update.group_constrained.policy_exists",
+                    None,
+                    String::new(),
+                    400,
+                ));
+            }
+            return Ok(TeamWrite::Forward(TeamWriteBlocked::GroupConstrained));
+        }
+
+        let mut team = self.get_team_for_update(team_id).await?;
+        team.patch(patch);
+
+        if patch.allow_open_invite == Some(false) {
+            team.invite_id = mm_model::utils::new_id();
+        }
+
+        self.check_valid_domains(&team.allowed_domains, "PatchTeam")?;
+
+        let updated = self.write_team("PatchTeam", team).await?;
+        self.send_team_event(
+            &updated,
+            mm_model::websocket_message::WEBSOCKET_EVENT_UPDATE_TEAM,
+        )
+        .await?;
+        Ok(TeamWrite::Done(Box::new(updated)))
+    }
+
+    /// Port of `app.App.RestoreTeam` (app/team.go).
+    ///
+    /// `DeleteAt = 0` and nothing else, then `restore_team` on the socket. The handler re-reads
+    /// the team afterwards "to be consistent with RestoreChannel" — so the body a client gets is
+    /// a *second* fetch, not the struct that was written.
+    #[tracing::instrument(skip(self), fields(team_id = %team_id))]
+    pub async fn restore_team(&self, team_id: &str) -> AppResult<()> {
+        let mut team = self.get_team(team_id).await?;
+        team.delete_at = 0;
+        let restored = self.write_team("RestoreTeam", team).await?;
+        self.send_team_event(
+            &restored,
+            mm_model::websocket_message::WEBSOCKET_EVENT_RESTORE_TEAM,
+        )
+        .await
+    }
+
+    /// Port of `app.App.RegenerateTeamInviteId` (app/team.go).
+    ///
+    /// A new invite id and nothing else, published as **`update_team`** — the same event an
+    /// ordinary update sends, so a client cannot tell the two apart from the socket alone.
+    #[tracing::instrument(skip(self), fields(team_id = %team_id))]
+    pub async fn regenerate_team_invite_id(&self, team_id: &str) -> AppResult<Team> {
+        let mut team = self.get_team(team_id).await?;
+        team.invite_id = mm_model::utils::new_id();
+        let updated = self.write_team("RegenerateTeamInviteId", team).await?;
+        self.send_team_event(
+            &updated,
+            mm_model::websocket_message::WEBSOCKET_EVENT_UPDATE_TEAM,
+        )
+        .await?;
+        Ok(updated)
+    }
+
+    /// The fetch every write does first, with the **update** path's error ids rather than
+    /// `GetTeam`'s: a missing team is `app.team.get.find.app_error` at 404 here.
+    async fn get_team_for_update(&self, team_id: &str) -> AppResult<Team> {
+        self.store().team().get(team_id).await.map_err(|err| {
+            if err.is_not_found() {
+                AppError::boxed(
+                    "UpdateTeam",
+                    "app.team.get.find.app_error",
+                    None,
+                    String::new(),
+                    404,
+                )
+            } else {
+                tracing::error!(error = %err, "team lookup failed");
+                team_update_error("UpdateTeam")
+            }
+        })
+    }
+
+    /// `PreUpdate` + `IsValid` + the store write, with the two error arms every caller shares.
+    ///
+    /// Go runs the first two **inside** `SqlTeamStore.Update`; they are here because a store in
+    /// this tree does not produce `AppError`s. See `TeamStore::update`.
+    async fn write_team(&self, where_: &'static str, team: Team) -> AppResult<Team> {
+        let mut team = team;
+        team.pre_update();
+        team.is_valid()?;
+
+        self.store().team().update(&team).await.map_err(|err| {
+            if err.is_not_found() {
+                // Go's `ErrInvalidInput` arm: a **400**, not a 404, for a team that vanished
+                // between the fetch and the write.
+                AppError::boxed(
+                    where_,
+                    "app.team.update.find.app_error",
+                    None,
+                    String::new(),
+                    400,
+                )
+            } else {
+                tracing::error!(error = %err, "team update failed");
+                team_update_error(where_)
+            }
+        })
+    }
+
+    /// Port of `teamService.checkValidDomains` (app/teams/utils.go:77).
+    ///
+    /// **Only fires when `RestrictCreationToDomains` is non-empty**, which the default makes it
+    /// not — so this is a no-op on a stock server. When it is set, every domain in the team's
+    /// `AllowedDomains` must appear in it, and the first that does not names itself in the error's
+    /// `Domain` param.
+    fn check_valid_domains(&self, allowed_domains: &str, where_: &'static str) -> AppResult<()> {
+        let valid = normalize_domains(&self.config().restrict_creation_to_domains);
+        if valid.is_empty() {
+            return Ok(());
+        }
+        for domain in normalize_domains(allowed_domains) {
+            if !valid.contains(&domain) {
+                let mut params: std::collections::HashMap<String, serde_json::Value> =
+                    std::collections::HashMap::new();
+                params.insert("Domain".to_owned(), serde_json::Value::String(domain));
+                return Err(AppError::boxed(
+                    where_,
+                    "api.team.update_restricted_domains.mismatch.app_error",
+                    Some(params),
+                    String::new(),
+                    400,
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    /// Port of `app.App.sendTeamEvent` (app/team.go).
+    ///
+    /// **The team is sanitised before it goes on the wire** — `Team.Sanitize` clears `Email` and
+    /// `InviteId` — so the event carries less than the HTTP response does, and a client that
+    /// trusted the socket for an invite id would get an empty one.
+    ///
+    /// Addressed to the **team** and nothing else, so the hub delivers it to every member of the
+    /// team via `Session.TeamMembers`.
+    async fn send_team_event(&self, team: &Team, event: &str) -> AppResult<()> {
+        let mut sanitized = team.clone();
+        sanitized.sanitize();
+
+        let mut message = mm_model::websocket_message::WebSocketEvent::new(
+            event,
+            &sanitized.id,
+            "",
+            "",
+            None,
+            "",
+        );
+        match serde_json::to_string(&sanitized) {
+            Ok(json) => message.add("team", serde_json::Value::String(json)),
+            Err(err) => {
+                // Go returns `api.marshal_error` at 500 — **after** the write — so the row is
+                // changed and the request reports failure.
+                return Err(AppError::boxed(
+                    "sendTeamEvent",
+                    "api.marshal_error",
+                    None,
+                    err.to_string(),
+                    500,
+                ));
+            }
+        }
+        self.publish(message).await;
+        Ok(())
+    }
+}
+
+/// Port of `normalizeDomains` (app/teams/utils.go).
+///
+/// `@` and `,` become spaces, the whole string is lower-cased, and the result is split on
+/// whitespace — so `"@corp.example.com, example.com  example.org"` is three domains. Go uses
+/// `strings.ToLower`, which is the **simple** case mapping; `go_to_lower` is the port of it.
+fn normalize_domains(domains: &str) -> Vec<String> {
+    mm_model::utils::go_to_lower(&domains.replace(['@', ','], " "))
+        .split_whitespace()
+        .map(str::to_owned)
+        .collect()
+}
+
+fn team_update_error(where_: &'static str) -> Box<AppError> {
+    AppError::boxed(
+        where_,
+        "app.team.update.updating.app_error",
+        None,
+        String::new(),
+        500,
+    )
+}

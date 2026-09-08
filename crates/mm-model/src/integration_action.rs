@@ -119,6 +119,7 @@ pub const POST_ACTION_INTEGRATION_FIELDS: crate::go_json::GoFields = crate::go_j
 ///
 /// Every field carries `omitempty`, so a zero `PostAction` serialises as `{}`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct PostAction {
     /// A unique action id. Generated automatically when unset.
     #[serde(rename = "id", default, skip_serializing_if = "String::is_empty")]
@@ -312,6 +313,7 @@ impl PostAction {
 /// Port of `model.PostActionOptions` (integration_action.go:390). Neither field carries
 /// `omitempty`, so both keys are always present.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct PostActionOptions {
     #[serde(rename = "text")]
     pub text: String,
@@ -337,6 +339,7 @@ impl PostActionOptions {
 
 /// Port of `model.PostActionIntegration` (integration_action.go:408).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct PostActionIntegration {
     /// The endpoint the action is sent to. May be a plugin-relative path.
     #[serde(rename = "url", default, skip_serializing_if = "String::is_empty")]
@@ -354,6 +357,7 @@ pub struct PostActionIntegration {
 
 /// Port of `model.DoPostActionRequest` (integration_action.go:116).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct DoPostActionRequest {
     #[serde(
         rename = "selected_option",
@@ -398,6 +402,7 @@ pub fn normalize_post_action_integration_format(s: &str) -> &'static str {
 /// Port of `model.PostActionCookie` (integration_action.go:362). Serialised and encrypted into
 /// [`PostAction::cookie`] so the server can recover action metadata for ephemeral posts.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct PostActionCookie {
     #[serde(rename = "type", default, skip_serializing_if = "String::is_empty")]
     pub cookie_type: String,
@@ -450,6 +455,7 @@ pub struct PostActionCookie {
 
 /// Port of `model.MmBlocksActionCookie` (integration_action.go:380).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct MmBlocksActionCookie {
     #[serde(rename = "kind", default, skip_serializing_if = "String::is_empty")]
     pub kind: String,
@@ -496,6 +502,7 @@ pub struct MmBlocksActionCookie {
 
 /// Port of `model.PostActionIntegrationRequest` (integration_action.go:415).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct PostActionIntegrationRequest {
     #[serde(rename = "user_id")]
     pub user_id: String,
@@ -538,6 +545,7 @@ pub struct PostActionIntegrationRequest {
 
 /// Port of `model.PostActionIntegrationResponse` (integration_action.go:429).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct PostActionIntegrationResponse {
     /// No `omitempty`, so a nil post is `null` and the key is always present.
     #[serde(rename = "update")]
@@ -560,6 +568,7 @@ pub struct PostActionIntegrationResponse {
 
 /// Port of `model.PostActionAPIResponse` (integration_action.go:436).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct PostActionAPIResponse {
     /// Kept for backwards compatibility, per Go's comment.
     #[serde(rename = "status")]
@@ -578,6 +587,7 @@ pub struct PostActionAPIResponse {
 
 /// Port of `model.ExecuteDialogActionResponse` (integration_action.go:442).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ExecuteDialogActionResponse {
     #[serde(rename = "trigger_id")]
     pub trigger_id: String,
