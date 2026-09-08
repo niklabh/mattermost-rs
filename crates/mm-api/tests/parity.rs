@@ -68,6 +68,7 @@ mod parity {
     pub mod license_client;
     pub mod licensed_features;
     pub mod me_alias;
+    pub mod oauth_app_writes;
     pub mod oauth_apps;
     pub mod outgoing_hooks;
     pub mod post_bulk_reactions;

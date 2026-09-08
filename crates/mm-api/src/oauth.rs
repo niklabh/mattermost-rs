@@ -17,9 +17,13 @@
 //! Two of the four sanitise, two do not, and the two that do sanitise in **different layers**.
 //! Each is ported where Go put it, because "where" is what a reader checks.
 
-use axum::extract::{Path, RawQuery, State};
+use axum::extract::{Path, RawQuery, Request, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
+use mm_model::oauth::{OAuthApp, OAuthAppRequest};
+use mm_model::oauth_dcr::{
+    ClientRegistrationRequest, DCR_ERROR_INVALID_CLIENT_METADATA, DCR_ERROR_UNSUPPORTED_OPERATION,
+};
 use mm_model::permission::{
     PERMISSION_MANAGE_OAUTH, PERMISSION_MANAGE_SYSTEM_WIDE_OAUTH, make_permission_error,
 };
@@ -242,6 +246,406 @@ fn json_ok(mut body: Vec<u8>, newline: bool) -> Response {
             ("x-mmrs-served-by", "rust"),
         ],
         body,
+    )
+        .into_response()
+}
+
+/// Port of `createOAuthApp` (api4/oauth.go:29) — `POST /api/v4/oauth/apps`.
+///
+/// # The body is an `OAuthAppRequest`, not an `OAuthApp`
+///
+/// Six fields are lifted across and **everything else the client sent is discarded** — including
+/// `id`, `creator_id`, `create_at` and `client_secret`. So this route cannot be used to plant an
+/// app with a chosen id or secret, which is why the app layer's "already has an id" refusal is
+/// unreachable through it.
+///
+/// # `is_public` is not stored anywhere
+///
+/// It only decides whether a secret is generated. A public client keeps an **empty** secret, and
+/// that emptiness is what `IsPublicClient` later reads to refuse a regeneration — so the flag
+/// survives as the absence of a value rather than as a column.
+///
+/// # `is_trusted` needs `manage_system`, and is silently cleared without it
+///
+/// Not a refusal: a caller holding `manage_oauth` but not `manage_system` gets a `201` for an app
+/// that is not trusted, whatever they asked for.
+#[tracing::instrument(skip_all, fields(user_id = %session.0.user_id))]
+pub async fn create_oauth_app(
+    State(state): State<AppState>,
+    session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    let bytes = match axum::body::to_bytes(request.into_body(), usize::MAX).await {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            tracing::warn!(error = %err, "could not read the request body");
+            return ApiError::invalid_param("oauth_app").into_response();
+        }
+    };
+    let app_request: OAuthAppRequest = match serde_json::from_slice(&bytes) {
+        Ok(request) => request,
+        Err(err) => {
+            tracing::debug!(error = %err, "oauth_app body did not decode");
+            return ApiError::invalid_param("oauth_app").into_response();
+        }
+    };
+
+    if !state
+        .app
+        .session_has_permission_to(&session.0, &PERMISSION_MANAGE_OAUTH)
+        .await
+    {
+        return ApiError::from(*make_permission_error(
+            &session.0,
+            &[&PERMISSION_MANAGE_OAUTH],
+        ))
+        .into_response();
+    }
+
+    let mut app = OAuthApp {
+        name: app_request.name,
+        description: app_request.description,
+        icon_url: app_request.icon_url,
+        callback_urls: app_request.callback_urls,
+        homepage: app_request.homepage,
+        is_trusted: app_request.is_trusted,
+        ..OAuthApp::default()
+    };
+
+    if !state
+        .app
+        .session_has_permission_to(&session.0, &mm_model::permission::PERMISSION_MANAGE_SYSTEM)
+        .await
+    {
+        app.is_trusted = false;
+    }
+
+    app.creator_id = session.0.user_id.clone();
+    app.is_dynamically_registered = false;
+
+    match state
+        .app
+        .create_oauth_app_internal(&app, !app_request.is_public)
+        .await
+    {
+        Ok(saved) => encoded_json(StatusCode::CREATED, &saved),
+        Err(err) => ApiError::from(err).into_response(),
+    }
+}
+
+/// Port of `updateOAuthApp` (api4/oauth.go:83) — `PUT /api/v4/oauth/apps/{app_id}`.
+///
+/// The permission ladder runs **before the body is read**, which is the opposite of the incoming
+/// webhook update: a caller without `manage_oauth` gets a 403 for a body that would not have
+/// decoded.
+///
+/// `200`, not the `201` its create sibling answers.
+#[tracing::instrument(skip_all, fields(app_id = %app_id))]
+pub async fn update_oauth_app(
+    State(state): State<AppState>,
+    session: AuthenticatedSession,
+    Path(app_id): Path<String>,
+    request: Request,
+) -> Response {
+    if let Err(err) = require_app_id(&app_id) {
+        return err.into_response();
+    }
+
+    if !state
+        .app
+        .session_has_permission_to(&session.0, &PERMISSION_MANAGE_OAUTH)
+        .await
+    {
+        return ApiError::from(*make_permission_error(
+            &session.0,
+            &[&PERMISSION_MANAGE_OAUTH],
+        ))
+        .into_response();
+    }
+
+    let bytes = match axum::body::to_bytes(request.into_body(), usize::MAX).await {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            tracing::warn!(error = %err, "could not read the request body");
+            return ApiError::invalid_param("oauth_app").into_response();
+        }
+    };
+    let mut updated: OAuthApp = match serde_json::from_slice(&bytes) {
+        Ok(app) => app,
+        Err(err) => {
+            tracing::debug!(error = %err, "oauth_app body did not decode");
+            return ApiError::invalid_param("oauth_app").into_response();
+        }
+    };
+
+    if updated.id != app_id {
+        return ApiError::invalid_param("app_id").into_response();
+    }
+
+    let old_app = match state.app.get_oauth_app(&app_id).await {
+        Ok(app) => app,
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+
+    if let Some(response) = refuse_unless_owner_or_system_wide(&state, &session, &old_app).await {
+        return response;
+    }
+
+    // Silently preserved, not refused — the same shape as the create path's clearing.
+    if !state
+        .app
+        .session_has_permission_to(&session.0, &mm_model::permission::PERMISSION_MANAGE_SYSTEM)
+        .await
+    {
+        updated.is_trusted = old_app.is_trusted;
+    }
+
+    match state.app.update_oauth_app(&old_app, &updated).await {
+        Ok(saved) => encoded_json(StatusCode::OK, &saved),
+        Err(err) => ApiError::from(err).into_response(),
+    }
+}
+
+/// Port of `deleteOAuthApp` (api4/oauth.go:142) — `DELETE /api/v4/oauth/apps/{app_id}`.
+#[tracing::instrument(skip_all, fields(app_id = %app_id))]
+pub async fn delete_oauth_app(
+    State(state): State<AppState>,
+    session: AuthenticatedSession,
+    Path(app_id): Path<String>,
+) -> Response {
+    if let Err(err) = require_app_id(&app_id) {
+        return err.into_response();
+    }
+
+    if !state
+        .app
+        .session_has_permission_to(&session.0, &PERMISSION_MANAGE_OAUTH)
+        .await
+    {
+        return ApiError::from(*make_permission_error(
+            &session.0,
+            &[&PERMISSION_MANAGE_OAUTH],
+        ))
+        .into_response();
+    }
+
+    let app = match state.app.get_oauth_app(&app_id).await {
+        Ok(app) => app,
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+
+    if let Some(response) = refuse_unless_owner_or_system_wide(&state, &session, &app).await {
+        return response;
+    }
+
+    match state.app.delete_oauth_app(&app.id).await {
+        Ok(()) => status_ok(),
+        Err(err) => ApiError::from(err).into_response(),
+    }
+}
+
+/// Port of `regenerateOAuthAppSecret` (api4/oauth.go:186) —
+/// `POST /api/v4/oauth/apps/{app_id}/regen_secret`.
+///
+/// The one extra gate: a **public client** — an app whose stored secret is empty — is refused
+/// with `api.oauth.regenerate_secret.public_client.app_error` at 400, *after* both permission
+/// checks. Giving it a secret would silently convert it to a confidential client.
+#[tracing::instrument(skip_all, fields(app_id = %app_id))]
+pub async fn regenerate_oauth_app_secret(
+    State(state): State<AppState>,
+    session: AuthenticatedSession,
+    Path(app_id): Path<String>,
+) -> Response {
+    if let Err(err) = require_app_id(&app_id) {
+        return err.into_response();
+    }
+
+    if !state
+        .app
+        .session_has_permission_to(&session.0, &PERMISSION_MANAGE_OAUTH)
+        .await
+    {
+        return ApiError::from(*make_permission_error(
+            &session.0,
+            &[&PERMISSION_MANAGE_OAUTH],
+        ))
+        .into_response();
+    }
+
+    let app = match state.app.get_oauth_app(&app_id).await {
+        Ok(app) => app,
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+
+    if let Some(response) = refuse_unless_owner_or_system_wide(&state, &session, &app).await {
+        return response;
+    }
+
+    if app.is_public_client() {
+        return ApiError::from(AppError::new(
+            "regenerateOAuthAppSecret",
+            "api.oauth.regenerate_secret.public_client.app_error",
+            None,
+            format!("app_id={}", app.id),
+            400,
+        ))
+        .into_response();
+    }
+
+    match state.app.regenerate_oauth_app_secret(&app).await {
+        Ok(saved) => encoded_json(StatusCode::OK, &saved),
+        Err(err) => ApiError::from(err).into_response(),
+    }
+}
+
+/// Port of `registerOAuthClient` (api4/oauth.go:342) — `POST /api/v4/oauth/apps/register`.
+///
+/// # Not an `AppError` route
+///
+/// Dynamic Client Registration is an RFC 7591 endpoint, so every failure is a **DCR error
+/// envelope** — `{"error": …, "error_description": …}` at `400` — written with
+/// `w.WriteHeader` + an encoder, never through `c.Err`. A port that reached for `ApiError` would
+/// answer the right status with a body no DCR client can parse.
+///
+/// # No session, and two gates
+///
+/// Go's comment says it plainly: "Session and permission checks removed for DCR endpoint to allow
+/// external client registration". Then `EnableOAuthServiceProvider` and
+/// `EnableDynamicClientRegistration`, both answering `unsupported_operation`.
+///
+/// **The second defaults to `false`**, so on a stock server this route's whole reachable
+/// behaviour is the two gates and the decode — which is what is served here. A deployment that
+/// turns DCR on is handed to Go, because the registration itself has a validation surface this
+/// port has not been through.
+///
+/// Go also rate-limits it to 2/sec with a burst of 1. There is no rate limiter here; the forward
+/// is what carries that for an enabled deployment, and for a disabled one there is nothing to
+/// limit. See [D-192].
+#[tracing::instrument(skip_all, fields(forwarded))]
+pub async fn register_oauth_client(State(state): State<AppState>, request: Request) -> Response {
+    let (parts, body) = request.into_parts();
+    let bytes = match axum::body::to_bytes(body, usize::MAX).await {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            tracing::warn!(error = %err, "could not read the request body");
+            return dcr_error(
+                DCR_ERROR_INVALID_CLIENT_METADATA,
+                "Invalid JSON in request body",
+            );
+        }
+    };
+
+    // **The decode comes first**, before either gate — so a malformed body on a server with the
+    // feature off answers `invalid_client_metadata`, not `unsupported_operation`.
+    if serde_json::from_slice::<ClientRegistrationRequest>(&bytes).is_err() {
+        return dcr_error(
+            DCR_ERROR_INVALID_CLIENT_METADATA,
+            "Invalid JSON in request body",
+        );
+    }
+
+    if !state.app.config().enable_oauth_service_provider {
+        return dcr_error(
+            DCR_ERROR_UNSUPPORTED_OPERATION,
+            "OAuth service provider is disabled",
+        );
+    }
+
+    if !state.app.config().enable_dynamic_client_registration {
+        return dcr_error(
+            DCR_ERROR_UNSUPPORTED_OPERATION,
+            "Dynamic client registration is disabled",
+        );
+    }
+
+    // Both gates open: the registration itself, its validation and its rate limit belong to Go
+    // until they are ported.
+    tracing::Span::current().record("forwarded", true);
+    let request = Request::from_parts(parts, axum::body::Body::from(bytes));
+    crate::proxy::forward_to_go(State(state), request).await
+}
+
+/// The ownership ladder the update, delete and regenerate paths share: not the creator **and**
+/// without `manage_system_wide_oauth` is a 403 naming the latter.
+async fn refuse_unless_owner_or_system_wide(
+    state: &AppState,
+    session: &AuthenticatedSession,
+    app: &OAuthApp,
+) -> Option<Response> {
+    if session.0.user_id == app.creator_id {
+        return None;
+    }
+    if state
+        .app
+        .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM_WIDE_OAUTH)
+        .await
+    {
+        return None;
+    }
+    Some(
+        ApiError::from(*make_permission_error(
+            &session.0,
+            &[&PERMISSION_MANAGE_SYSTEM_WIDE_OAUTH],
+        ))
+        .into_response(),
+    )
+}
+
+/// `RequireAppId` (web/context.go) — `IsValidId`.
+fn require_app_id(app_id: &str) -> Result<(), ApiError> {
+    if !is_valid_id(app_id) {
+        return Err(ApiError::invalid_url_param("app_id"));
+    }
+    Ok(())
+}
+
+/// The DCR failure shape: `w.WriteHeader(400)` then an encoder, so a trailing newline.
+fn dcr_error(error_type: &str, description: &str) -> Response {
+    let body = mm_model::oauth_dcr::new_dcr_error(error_type, description);
+    match mm_model::utils::go_json_marshal(&body) {
+        Ok(json) => (
+            StatusCode::BAD_REQUEST,
+            [
+                ("Content-Type", "application/json"),
+                ("x-mmrs-served-by", "rust"),
+            ],
+            json + "\n",
+        )
+            .into_response(),
+        Err(err) => {
+            tracing::warn!(error = %err, "Error while writing response");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+
+/// `json.NewEncoder(w).Encode` — a trailing newline.
+fn encoded_json<T: serde::Serialize>(status: StatusCode, value: &T) -> Response {
+    match mm_model::utils::go_json_marshal(value) {
+        Ok(json) => (
+            status,
+            [
+                ("Content-Type", "application/json"),
+                ("x-mmrs-served-by", "rust"),
+            ],
+            json + "\n",
+        )
+            .into_response(),
+        Err(err) => {
+            tracing::warn!(error = %err, "Error while writing response");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
+    }
+}
+
+fn status_ok() -> Response {
+    (
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        r#"{"status":"OK"}"#,
     )
         .into_response()
 }

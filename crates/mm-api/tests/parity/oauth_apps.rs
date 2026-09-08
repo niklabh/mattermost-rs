@@ -169,10 +169,19 @@ async fn the_list_is_byte_identical_and_carries_the_secret() {
         "a system-wide admin sees every app, including one it did not create: {listed:?}"
     );
 
+    // **The fixture's own apps, not every app.** The claim is that the list is not sanitised —
+    // that a secret which exists is returned — and a *public* OAuth client legitimately has an
+    // empty one. `oauth_app_writes` creates such clients, and with the suites running in parallel
+    // one can be listed here mid-flight, which is agreement about the wrong thing.
     let apps: Vec<serde_json::Value> = serde_json::from_slice(&go).expect("decodes");
+    let ours: Vec<&serde_json::Value> = apps
+        .iter()
+        .filter(|app| app["id"] == fixture.mine.as_str() || app["id"] == fixture.theirs.as_str())
+        .collect();
+    assert_eq!(ours.len(), 2, "both fixture apps are listed: {apps:?}");
     assert!(
-        apps.iter().all(|app| app["client_secret"] != ""),
-        "the list is **not** sanitised: {apps:?}"
+        ours.iter().all(|app| app["client_secret"] != ""),
+        "the list is **not** sanitised: {ours:?}"
     );
 }
 
@@ -404,8 +413,11 @@ async fn other_methods_are_forwarded() {
     let token = go_minted_token(&client).await;
     let fixture = fixture(&client, &token).await;
 
+    // **Repointed when `POST` was migrated.** The point is the method fallback, not this method:
+    // a verb this server does not register must reach Go rather than meet axum's 405. `PATCH` is
+    // registered by neither server on this path.
     let ours = client
-        .post(format!("{RUST}{LIST}"))
+        .patch(format!("{RUST}{LIST}"))
         .header("Authorization", format!("Bearer {token}"))
         .json(&serde_json::json!({}))
         .send()
@@ -416,14 +428,15 @@ async fn other_methods_are_forwarded() {
             .get("x-mmrs-served-by")
             .and_then(|v| v.to_str().ok()),
         Some("go"),
-        "POST {LIST} must be forwarded"
+        "PATCH {LIST} must be forwarded"
     );
 
-    // Deliberately against the **absent** id: a forwarded `DELETE` is a real delete, and pointing
-    // one at a fixture row cost this session a whole suite once already.
+    // `DELETE` on the single path is migrated too, so the probe here is `PATCH` as well. Still
+    // against the **absent** id: a forwarded write is a real write, and pointing one at a fixture
+    // row cost this suite once already.
     let p = single(&fixture.absent);
     let ours = client
-        .delete(format!("{RUST}{p}"))
+        .patch(format!("{RUST}{p}"))
         .header("Authorization", format!("Bearer {token}"))
         .send()
         .await
@@ -433,6 +446,6 @@ async fn other_methods_are_forwarded() {
             .get("x-mmrs-served-by")
             .and_then(|v| v.to_str().ok()),
         Some("go"),
-        "DELETE {p} must be forwarded"
+        "PATCH {p} must be forwarded"
     );
 }

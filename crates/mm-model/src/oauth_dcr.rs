@@ -48,7 +48,12 @@ const CLIENT_URI_MAX_BYTES: usize = 256;
 /// Three of the four fields are `omitempty` **pointers**, so a pointer to `""` is not the same
 /// document as a nil one — and, more importantly, not the same input: the validity checks below
 /// are skipped for nil and applied for empty.
+/// **`serde(default)` is not decoration.** Go's `json.Decode` into a struct leaves an absent field
+/// at its zero value; a serde derive without `default` makes it a decode *error*. Without it this
+/// type rejects bodies Go accepts — measured: `POST /oauth/apps` with `icon_url` and `is_trusted`
+/// omitted is a 201 on Go and was a 400 here.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct ClientRegistrationRequest {
     #[serde(rename = "redirect_uris")]
     pub redirect_uris: Option<StringArray>,

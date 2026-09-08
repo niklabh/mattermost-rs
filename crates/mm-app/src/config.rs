@@ -198,6 +198,15 @@ pub struct Config {
     /// same status. Read by [`crate::App::get_oauth_apps`] and its two neighbours.
     pub enable_oauth_service_provider: bool,
 
+    /// `ServiceSettings.EnableDynamicClientRegistration` (config.go:386, defaulted **`false`** at
+    /// :599).
+    ///
+    /// The second of the two gates in front of `registerOAuthClient`, and the one that is closed
+    /// on a stock server — so the whole Dynamic Client Registration route is a `400` carrying a
+    /// **DCR error envelope**, not an `AppError`. Go's own check is
+    /// `cfg == nil || !*cfg`, so an absent setting is `false` here as everywhere.
+    pub enable_dynamic_client_registration: bool,
+
     /// `PrivacySettings.ShowFullName` (config.go, defaulted `true`).
     ///
     /// Read by `getUser` and every route that sanitizes another user, and folded into
@@ -411,6 +420,8 @@ impl Default for Config {
             image_proxy_enable: false,
             enable_post_icon_override: false,
             enable_custom_emoji: true,
+            // config.go:599 — `new(false)`.
+            enable_dynamic_client_registration: false,
             enable_post_username_override: false,
             post_priority: true,
             // config.go:997 — `new(true)`.
@@ -516,6 +527,11 @@ impl Config {
                 lookup,
                 "MM_SERVICESETTINGS_ENABLEPOSTICONOVERRIDE",
                 default.enable_post_icon_override,
+            ),
+            enable_dynamic_client_registration: lookup_bool(
+                lookup,
+                "MM_SERVICESETTINGS_ENABLEDYNAMICCLIENTREGISTRATION",
+                default.enable_dynamic_client_registration,
             ),
             enable_post_username_override: lookup_bool(
                 lookup,
@@ -707,6 +723,9 @@ impl Config {
             enable_post_icon_override: service
                 .enable_post_icon_override
                 .unwrap_or(default.enable_post_icon_override),
+            enable_dynamic_client_registration: service
+                .enable_dynamic_client_registration
+                .unwrap_or(default.enable_dynamic_client_registration),
             enable_post_username_override: service
                 .enable_post_username_override
                 .unwrap_or(default.enable_post_username_override),
@@ -959,6 +978,8 @@ struct ServiceSettingsDocument {
     scheduled_posts: Option<bool>,
     #[serde(rename = "EnablePostIconOverride")]
     enable_post_icon_override: Option<bool>,
+    #[serde(rename = "EnableDynamicClientRegistration")]
+    enable_dynamic_client_registration: Option<bool>,
     #[serde(rename = "EnablePostUsernameOverride")]
     enable_post_username_override: Option<bool>,
     #[serde(rename = "EnableCustomEmoji")]

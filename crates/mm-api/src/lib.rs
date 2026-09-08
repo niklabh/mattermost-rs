@@ -729,11 +729,28 @@ pub fn router(state: AppState) -> Router {
         )
         .route(
             "/api/v4/oauth/apps",
-            partially_migrated(get(oauth::get_oauth_apps)),
+            partially_migrated(get(oauth::get_oauth_apps).post(oauth::create_oauth_app)),
+        )
+        // `BaseRoutes.OAuthApps.Handle("/register")` (api4/oauth.go:24) — a **literal** sibling of
+        // `{app_id}` below, so axum's literal-first precedence puts it here. Go registers it as a
+        // distinct route too, and with `APIHandler` rather than `APISessionRequired`: it is the
+        // one route in this file that takes no session.
+        .route(
+            "/api/v4/oauth/apps/register",
+            partially_migrated(post(oauth::register_oauth_client)),
         )
         .route(
             "/api/v4/oauth/apps/{app_id}",
-            partially_migrated_with_ids(&state, get(oauth::get_oauth_app)),
+            partially_migrated_with_ids(
+                &state,
+                get(oauth::get_oauth_app)
+                    .put(oauth::update_oauth_app)
+                    .delete(oauth::delete_oauth_app),
+            ),
+        )
+        .route(
+            "/api/v4/oauth/apps/{app_id}/regen_secret",
+            partially_migrated_with_ids(&state, post(oauth::regenerate_oauth_app_secret)),
         )
         .route(
             "/api/v4/oauth/apps/{app_id}/info",

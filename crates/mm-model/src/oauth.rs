@@ -77,7 +77,12 @@ pub struct IntuneLoginRequest {
 ///
 /// Only `is_dynamically_registered` carries `omitempty`, so a zero-valued app emits twelve keys —
 /// including `"callback_urls": null`, because a nil `StringArray` is not dropped.
+/// **`serde(default)` is not decoration.** Go's `json.Decode` into a struct leaves an absent field
+/// at its zero value; a serde derive without `default` makes it a decode *error*. Without it this
+/// type rejects bodies Go accepts — measured: `POST /oauth/apps` with `icon_url` and `is_trusted`
+/// omitted is a 201 on Go and was a 400 here.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct OAuthApp {
     #[serde(rename = "id")]
     pub id: String,
@@ -113,7 +118,12 @@ pub struct OAuthApp {
 }
 
 /// Port of `model.OAuthAppRequest` (oauth.go:50) — "the request body for creating an OAuth app".
+/// **`serde(default)` is not decoration.** Go's `json.Decode` into a struct leaves an absent field
+/// at its zero value; a serde derive without `default` makes it a decode *error*. Without it this
+/// type rejects bodies Go accepts — measured: `POST /oauth/apps` with `icon_url` and `is_trusted`
+/// omitted is a 201 on Go and was a 400 here.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct OAuthAppRequest {
     #[serde(rename = "name")]
     pub name: String,

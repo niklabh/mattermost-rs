@@ -6082,3 +6082,34 @@ writes the row on the paths a test uses; the write is not.
 The four `custom` routes are lighter — they write `Users.Props["customStatus"]` rather than the
 `Status` row — but they publish through the same `BroadcastStatus`, so they inherit the same
 question about who decides that a status changed.
+
+## D-192 · A `Deserialize` derive without `#[serde(default)]` rejects bodies Go accepts
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-08 (OAuth app writes)
+
+Go's `json.Decode` into a struct leaves an **absent field at its zero value**. A serde derive
+without `#[serde(default)]` makes an absent field a *decode error*. So any type a handler decodes
+from a request body is stricter here than in Go unless it carries the attribute, and the
+divergence is a 400 where Go answers 200.
+
+Measured: `POST /api/v4/oauth/apps` with `icon_url` and `is_trusted` omitted — a perfectly ordinary
+body — is a **201** on Go and was a **400** here, because `OAuthAppRequest` lacked the attribute.
+
+**The three types this server decodes that were missing it are fixed** (`OAuthAppRequest`,
+`OAuthApp`, `ClientRegistrationRequest`). The other five it decodes — `Reaction`, `Draft`,
+`Preference`, `IncomingWebhook`, `OutgoingWebhook` — already had it.
+
+**What is owed is the sweep.** 126 of `mm-model`'s deserializable structs have no
+`#[serde(default)]`. Most are response types that no handler decodes, so most are harmless *today*
+— but every one is a landmine for the write route that first decodes it, and the failure mode is a
+plausible-looking 400 rather than a compile error. Two options, and the first is probably right:
+
+1. Add `#[serde(default)]` to every `Deserialize` type in `mm-model` and let the parity fixtures
+   prove nothing changed. It cannot break a *serialisation* test, because the attribute only
+   affects decoding, and every fixture round-trip decodes a **fully populated** document where
+   defaults never apply.
+2. Add it per type as each becomes reachable, which is what has happened so far and is how this
+   one was found — by a test failing after the code was written.
+
+A `#[derive(Deserialize)]` on a wire type without `#[serde(default)]` should be treated as a
+review error in this project, the same way a missing `rename` is.

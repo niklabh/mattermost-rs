@@ -152,6 +152,178 @@ fn failure(where_: &str, id: &'static str, err: StoreError) -> Box<AppError> {
     AppError::boxed(where_, id, None, String::new(), 500)
 }
 
+impl App {
+    /// Port of `app.App.CreateOAuthAppInternal` (app/oauth.go).
+    ///
+    /// `generate_secret` is `!request.IsPublic`: a **public** client keeps an empty secret, and
+    /// that emptiness is what `IsPublicClient` later reads to refuse a regeneration. So the flag
+    /// on the request is not stored anywhere — it survives only as the presence or absence of a
+    /// secret.
+    ///
+    /// The feature gate's id is `api.oauth.register_oauth_app.turn_off.app_error`, which the
+    /// other three write paths do **not** share: they use `api.oauth.allow_oauth.turn_off`.
+    #[tracing::instrument(skip(self, app), fields(name = %app.name))]
+    pub async fn create_oauth_app_internal(
+        &self,
+        app: &OAuthApp,
+        generate_secret: bool,
+    ) -> AppResult<OAuthApp> {
+        if !self.config().enable_oauth_service_provider {
+            return Err(AppError::boxed(
+                "CreateOAuthApp",
+                "api.oauth.register_oauth_app.turn_off.app_error",
+                None,
+                String::new(),
+                501,
+            ));
+        }
+
+        let mut app = app.clone();
+        if generate_secret {
+            app.client_secret = mm_model::utils::new_id();
+        }
+
+        // `SaveApp` refuses an app that already carries an id, before `PreSave` runs.
+        if !app.id.is_empty() {
+            return Err(AppError::boxed(
+                "CreateOAuthApp",
+                "app.oauth.save_app.existing.app_error",
+                None,
+                String::new(),
+                400,
+            ));
+        }
+
+        app.pre_save();
+        app.is_valid()?;
+
+        self.store().oauth().save_app(&app).await.map_err(|err| {
+            tracing::error!(error = %err, name = %app.name, "Error saving OAuth app");
+            AppError::boxed(
+                "CreateOAuthApp",
+                "app.oauth.save_app.save.app_error",
+                None,
+                String::new(),
+                500,
+            )
+        })?;
+
+        Ok(app)
+    }
+
+    /// Port of `app.App.UpdateOAuthApp` (app/oauth.go).
+    ///
+    /// Five fields are copied off the old app and cannot be changed by a body: `Id`, `CreatorId`,
+    /// `CreateAt`, **`ClientSecret`** and `IsDynamicallyRegistered`. The secret one matters — it
+    /// is why an update cannot rotate a credential and `regen_secret` exists as its own route,
+    /// which is the opposite of the outgoing-webhook update's behaviour.
+    #[tracing::instrument(skip(self, old_app, updated_app), fields(id = %old_app.id))]
+    pub async fn update_oauth_app(
+        &self,
+        old_app: &OAuthApp,
+        updated_app: &OAuthApp,
+    ) -> AppResult<OAuthApp> {
+        if !self.config().enable_oauth_service_provider {
+            return Err(oauth_disabled("UpdateOAuthApp"));
+        }
+
+        let mut app = updated_app.clone();
+        app.id = old_app.id.clone();
+        app.creator_id = old_app.creator_id.clone();
+        app.create_at = old_app.create_at;
+        app.client_secret = old_app.client_secret.clone();
+        app.is_dynamically_registered = old_app.is_dynamically_registered;
+
+        app.pre_update();
+        app.is_valid()?;
+
+        self.store()
+            .oauth()
+            .update_app(&app)
+            .await
+            .map_err(|err| update_app_error("UpdateOAuthApp", err))?;
+
+        Ok(app)
+    }
+
+    /// Port of `app.App.DeleteOAuthApp` (app/oauth.go).
+    ///
+    /// Go follows the delete with `InvalidateAllCaches()`, which on a single node clears its own
+    /// session cache — the app's sessions have just been deleted from under it. This server has
+    /// no such cache and cannot reach Go's, so a session issued through a deleted app stays live
+    /// in Go's memory until it expires. See [D-190]; it is the sharpest instance of that entry so
+    /// far, because the row really is gone.
+    #[tracing::instrument(skip(self), fields(id = %app_id))]
+    pub async fn delete_oauth_app(&self, app_id: &str) -> AppResult<()> {
+        if !self.config().enable_oauth_service_provider {
+            return Err(oauth_disabled("DeleteOAuthApp"));
+        }
+
+        self.store()
+            .oauth()
+            .delete_app(app_id)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "oauth app delete failed");
+                AppError::boxed(
+                    "DeleteOAuthApp",
+                    "app.oauth.delete_app.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })
+    }
+
+    /// Port of `app.App.RegenerateOAuthAppSecret` (app/oauth.go).
+    ///
+    /// A new secret and nothing else, through the same `UpdateApp` — whose `SET` list covers
+    /// `ClientSecret`, which is exactly what `UpdateOAuthApp` above relies on *not* changing.
+    #[tracing::instrument(skip(self, app), fields(id = %app.id))]
+    pub async fn regenerate_oauth_app_secret(&self, app: &OAuthApp) -> AppResult<OAuthApp> {
+        if !self.config().enable_oauth_service_provider {
+            return Err(oauth_disabled("RegenerateOAuthAppSecret"));
+        }
+
+        let mut app = app.clone();
+        app.client_secret = mm_model::utils::new_id();
+
+        app.pre_update();
+        app.is_valid()?;
+
+        self.store()
+            .oauth()
+            .update_app(&app)
+            .await
+            .map_err(|err| update_app_error("RegenerateOAuthAppSecret", err))?;
+
+        Ok(app)
+    }
+}
+
+/// The id the three non-create write paths share, at 501 — **different from the create path's**,
+/// which is `api.oauth.register_oauth_app.turn_off.app_error`.
+fn oauth_disabled(where_: &'static str) -> Box<AppError> {
+    AppError::boxed(
+        where_,
+        "api.oauth.allow_oauth.turn_off.app_error",
+        None,
+        String::new(),
+        501,
+    )
+}
+
+fn update_app_error(where_: &'static str, err: StoreError) -> Box<AppError> {
+    tracing::error!(error = %err, "oauth app update failed");
+    AppError::boxed(
+        where_,
+        "app.oauth.update_app.updating.app_error",
+        None,
+        String::new(),
+        500,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

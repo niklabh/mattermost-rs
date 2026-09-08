@@ -866,6 +866,11 @@ async fn purge_api_fixtures_once() {
         // intersection check `CreateOutgoingWebhook` runs carries **no `DeleteAt` predicate**
         // (webhook.go) — so a deleted hook keeps its trigger words and callback URLs reserved
         // for ever. The second run of `webhook_writes` failed against the first run's rows.
+        // OAuth apps the suite creates. `OAuthApps` has no `DeleteAt`, so an aborted run leaves
+        // rows that later show up in every list read.
+        "DELETE FROM oauthaccessdata WHERE clientid IN (SELECT id FROM oauthapps WHERE name LIKE 'mmrs%')",
+        "DELETE FROM preferences WHERE category = 'oauth_app' AND name IN (SELECT id FROM oauthapps WHERE name LIKE 'mmrs%')",
+        "DELETE FROM oauthapps WHERE name LIKE 'mmrs%'",
         "DELETE FROM incomingwebhooks WHERE displayname LIKE 'mmrs%'",
         "DELETE FROM outgoingwebhooks WHERE displayname LIKE 'mmrs%'",
         "DELETE FROM reactions WHERE emojiname LIKE 'mmrsparity%'",

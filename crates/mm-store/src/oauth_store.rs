@@ -35,6 +35,34 @@ pub trait OAuthStore {
 
     /// Port of `SqlOAuthStore.GetAuthorizedApps` (oauth_store.go:147) — the apps a user has
     /// granted, found by joining `Preferences`.
+    /// Port of `SqlOAuthStore.SaveApp` (oauth_store.go).
+    ///
+    /// Go refuses an app that already carries an id, before `PreSave` runs.
+    fn save_app(
+        &self,
+        app: &OAuthApp,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlOAuthStore.UpdateApp` (oauth_store.go).
+    ///
+    /// **Nine columns, and `CreatorId`/`CreateAt` are not among them** — Go re-reads the old row
+    /// and copies both onto the struct first, so neither can be changed by an update.
+    fn update_app(
+        &self,
+        app: &OAuthApp,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlOAuthStore.DeleteApp` (oauth_store.go) — a **hard** delete, and a cascade.
+    ///
+    /// Four statements in one transaction, in this order: the app, every `Sessions` row whose
+    /// token appears in `OAuthAccessData` for it, the `OAuthAccessData` rows themselves, and the
+    /// `Preferences` rows in the `oauth_app` category naming it. Deleting an OAuth app therefore
+    /// **logs out everybody who authorised it**, which is why it is a transaction.
+    fn delete_app(
+        &self,
+        app_id: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
     fn get_authorized_apps(
         &self,
         user_id: &str,
@@ -107,6 +135,20 @@ impl OAuthAppRow {
     }
 }
 
+/// The write half of the row's `CallbackUrls` decode: `None` becomes SQL `NULL`, keeping the
+/// third state the model distinguishes from `[]`.
+fn callback_urls_text(value: Option<&StringArray>) -> Result<Option<String>, StoreError> {
+    value
+        .map(|value| {
+            serde_json::to_string(value).map_err(|source| StoreError::Decode {
+                entity: "OAuthApp",
+                column: "CallbackUrls",
+                source,
+            })
+        })
+        .transpose()
+}
+
 // The three queries below repeat the column list. Go builds all of them from one
 // `SelectBuilder` (oauth_store.go:29), and a `macro_rules!` would say that here — but
 // `sqlx::query_as!` needs a string **literal** to check against the database at compile time, so a
@@ -114,6 +156,132 @@ impl OAuthAppRow {
 // it cannot see.
 
 impl OAuthStore for SqlOAuthStore {
+    #[tracing::instrument(skip_all, fields(id = %app.id))]
+    async fn save_app(&self, app: &OAuthApp) -> Result<(), StoreError> {
+        let callback_urls = callback_urls_text(app.callback_urls.as_ref())?;
+        sqlx::query!(
+            r#"
+            INSERT INTO oauthapps
+                (id, creatorid, createat, updateat, clientsecret, name, description, iconurl,
+                 callbackurls, homepage, istrusted, mattermostappid, isdynamicallyregistered)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+            "#,
+            app.id,
+            app.creator_id,
+            app.create_at,
+            app.update_at,
+            app.client_secret,
+            app.name,
+            app.description,
+            app.icon_url,
+            callback_urls,
+            app.homepage,
+            app.is_trusted,
+            app.mattermost_app_id,
+            app.is_dynamically_registered,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to save OAuthApp".to_owned(),
+            source,
+        })?;
+        Ok(())
+    }
+
+    #[tracing::instrument(skip_all, fields(id = %app.id))]
+    async fn update_app(&self, app: &OAuthApp) -> Result<(), StoreError> {
+        let callback_urls = callback_urls_text(app.callback_urls.as_ref())?;
+        sqlx::query!(
+            r#"
+            UPDATE oauthapps
+               SET updateat = $2, clientsecret = $3, name = $4, description = $5, iconurl = $6,
+                   callbackurls = $7, homepage = $8, istrusted = $9, mattermostappid = $10,
+                   isdynamicallyregistered = $11
+             WHERE id = $1
+            "#,
+            app.id,
+            app.update_at,
+            app.client_secret,
+            app.name,
+            app.description,
+            app.icon_url,
+            callback_urls,
+            app.homepage,
+            app.is_trusted,
+            app.mattermost_app_id,
+            app.is_dynamically_registered,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to update OAuthApp with id={}", app.id),
+            source,
+        })?;
+        Ok(())
+    }
+
+    #[tracing::instrument(skip(self), fields(id = %app_id))]
+    async fn delete_app(&self, app_id: &str) -> Result<(), StoreError> {
+        let mut tx = self.pool.begin().await.map_err(|source| StoreError::Db {
+            context: "begin_transaction".to_owned(),
+            source,
+        })?;
+
+        sqlx::query!("DELETE FROM oauthapps WHERE id = $1", app_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|source| StoreError::Db {
+                context: format!("failed to delete OAuthApp with id={app_id}"),
+                source,
+            })?;
+
+        // **The sessions go before the tokens they are joined against.** Reversing these two
+        // would leave every session issued through the app alive, because the `USING` join has
+        // nothing left to match. Go's ordering, and the reason it is a transaction.
+        sqlx::query!(
+            r#"
+            DELETE FROM sessions s
+             USING oauthaccessdata o
+             WHERE o.token = s.token AND o.clientid = $1
+            "#,
+            app_id,
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to delete Session with OAuthAccessData.Id={app_id}"),
+            source,
+        })?;
+
+        sqlx::query!("DELETE FROM oauthaccessdata WHERE clientid = $1", app_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|source| StoreError::Db {
+                context: format!("failed to delete OAuthAccessData with id={app_id}"),
+                source,
+            })?;
+
+        // The `oauth_app` preference rows are what `getAuthorizedOAuthApps` reads, so an app that
+        // survived here would keep appearing in every user's authorised list.
+        sqlx::query!(
+            "DELETE FROM preferences WHERE category = $1 AND name = $2",
+            mm_model::preference::PREFERENCE_CATEGORY_AUTHORIZED_OAUTH_APP,
+            app_id,
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to delete Preferences with name={app_id}"),
+            source,
+        })?;
+
+        tx.commit().await.map_err(|source| StoreError::Db {
+            context: "commit_transaction".to_owned(),
+            source,
+        })
+    }
+
     /// # No `ORDER BY`, and no `DeleteAt` either
     ///
     /// `OAuthApps` has no `DeleteAt` column at all — deleting an app removes the row — so unlike

@@ -8212,3 +8212,81 @@ The first channel of the fixture user's first team is a DM: type `D`, `team_id` 
 webhook permission here is team-scoped, so both servers answer 403 — agreement about the wrong
 thing. The test that used it now creates its own open channel. Worth recording because that helper
 is used by a dozen suites and the DM only matters where the team id does.
+
+## The five OAuth app writes, and a decode that was stricter than Go's (2026-09-08)
+
+New: `crates/mm-api/tests/parity/oauth_app_writes.rs`, `scripts/mutations/oauth-app-writes.plan`.
+Changed: `crates/mm-model/src/{oauth,oauth_dcr}.rs`, `crates/mm-store/src/oauth_store.rs`,
+`crates/mm-app/src/{oauth,config}.rs`, `crates/mm-api/src/{oauth,lib}.rs`.
+
+217 → **222 of 764**: create, update, delete, `regen_secret`, and the Dynamic Client Registration
+endpoint.
+
+### `#[serde(default)]` is not decoration, and its absence is a 400 where Go answers 201
+
+Go's `json.Decode` into a struct leaves an absent field at its **zero value**. A serde derive
+without `#[serde(default)]` makes an absent field a decode **error**. `OAuthAppRequest` lacked the
+attribute, so `POST /oauth/apps` with `icon_url` and `is_trusted` omitted — an ordinary body — was
+a 400 here and a 201 on Go.
+
+Three of the eight types this server decodes from a request body were missing it, all three in the
+OAuth files; the other five already had it. Fixed, and the *class* is recorded as [D-192]: 126 of
+`mm-model`'s deserializable structs have no `#[serde(default)]`, most harmless today because no
+handler decodes them, each a landmine for the write route that first does. The failure mode is a
+plausible 400, not a compile error.
+
+### `is_public` is stored nowhere
+
+It decides only whether a secret is generated, and the **emptiness of that secret** is what
+`IsPublicClient` reads afterwards to refuse a regeneration. So the flag survives as the absence of
+a value rather than as a column, and `regen_secret` on a public client is a 400 — giving it a
+secret would silently convert it to a confidential client.
+
+### The update copies the secret off the old app; the outgoing-webhook update does not
+
+`UpdateOAuthApp` copies `Id`, `CreatorId`, `CreateAt`, **`ClientSecret`** and
+`IsDynamicallyRegistered`, so a body cannot rotate a credential and `regen_secret` exists as its
+own route. The webhook group two commits ago found the opposite: an outgoing-hook update that
+omits `token` **destroys** it. Two adjacent CRUD families, opposite answers to the same question.
+
+### `is_trusted` is cleared and preserved, never refused
+
+Without `manage_system`, create clears it to `false` and update restores the old value — a `201`
+or `200` for an app that is not what was asked for. The same "not a refusal" shape as the incoming
+webhook's channel lock.
+
+### The delete is a cascade, and its statement order matters
+
+Four statements in one transaction: the app, then every `Sessions` row whose token appears in
+`OAuthAccessData` for it, then the `OAuthAccessData` rows, then the `oauth_app` preference rows.
+**The sessions go before the tokens they join against** — reversing them leaves every session
+issued through the app alive, because the `USING` join has nothing left to match.
+
+Go follows the delete with `InvalidateAllCaches()`. This server has no such cache and cannot reach
+Go's, so a session issued through a deleted app stays live in Go's memory until it expires — the
+sharpest instance of [D-190] so far, because the row really is gone.
+
+### The create path's gate needed a second server to be visible at all
+
+`EnableOAuthServiceProvider` is **`true`** on the shared stack, so none of the four feature gates
+fires against `:8066` and a mutation swapping the create path's id for the other three's was
+invisible — it survived the first run of this plan. The create answers
+`api.oauth.register_oauth_app.turn_off.app_error`; update, delete and regenerate all answer
+`api.oauth.allow_oauth.turn_off.app_error`. Same 501, one line apart in the Go source, two ids.
+
+A `SecondServer` with the setting off reaches it, the same device `/recaps` and the gated families
+use. Worth stating as a rule: **a configuration gate is untested until a server exists with the
+setting on the other side**, which for this project nearly always means a second process.
+
+### DCR is not an `AppError` route
+
+`registerOAuthClient` takes **no session** ("Session and permission checks removed for DCR endpoint
+to allow external client registration") and answers a **DCR error envelope** —
+`{"error", "error_description"}` at 400 — never `c.Err`. A port reaching for `ApiError` would
+answer the right status with a body no RFC 7591 client can parse.
+
+`EnableDynamicClientRegistration` defaults to **false**, so a stock server's entire reachable
+behaviour here is the decode and the two gates, and that is what is served. The decode runs
+**first**, so a malformed body answers `invalid_client_metadata` even though the feature is off.
+A deployment that enables DCR is forwarded, along with Go's 2/sec rate limit, which this server
+has no equivalent of.

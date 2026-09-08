@@ -1,0 +1,36 @@
+# Mutation plan for the five OAuth app writes.
+#
+#   scripts/mutate-batch.sh scripts/mutations/oauth-app-writes.plan
+#
+# What is worth mutating:
+#
+#   * the five fields copied off the old app, of which **ClientSecret** is the one that makes
+#     `regen_secret` a separate route;
+#   * `is_public`, which is stored nowhere and survives only as an empty secret;
+#   * the two "silently clear/preserve rather than refuse" branches on `is_trusted`;
+#   * the DCR endpoint, whose failures are a **different envelope** from every other route here;
+#   * the delete cascade, whose statement order decides whether sessions survive.
+#
+# The last two lines are the no-op controls and must SURVIVE.
+oauth-create-answers-200	crates/mm-api/src/oauth.rs	        Ok(saved) => encoded_json(StatusCode::CREATED, &saved),	        Ok(saved) => encoded_json(StatusCode::OK, &saved),	api	oauth_app_writes
+oauth-create-body-not-encoder-framed	crates/mm-api/src/oauth.rs	            json + "\\n",\n        )\n            .into_response(),\n        Err(err) => {\n            tracing::warn!(error = %err, "Error while writing response");\n            StatusCode::INTERNAL_SERVER_ERROR.into_response()\n        }\n    }\n}\n\nfn status_ok()	            json,\n        )\n            .into_response(),\n        Err(err) => {\n            tracing::warn!(error = %err, "Error while writing response");\n            StatusCode::INTERNAL_SERVER_ERROR.into_response()\n        }\n    }\n}\n\nfn status_ok()	api	oauth_app_writes
+oauth-public-client-still-gets-a-secret	crates/mm-api/src/oauth.rs	        .create_oauth_app_internal(&app, !app_request.is_public)	        .create_oauth_app_internal(&app, true)	api	oauth_app_writes
+oauth-confidential-client-gets-no-secret	crates/mm-api/src/oauth.rs	        .create_oauth_app_internal(&app, !app_request.is_public)	        .create_oauth_app_internal(&app, false)	api	oauth_app_writes
+oauth-creator-taken-from-the-body	crates/mm-api/src/oauth.rs	    app.creator_id = session.0.user_id.clone();	    // creator_id left as the body sent it	api	oauth_app_writes
+oauth-regen-allowed-for-a-public-client	crates/mm-api/src/oauth.rs	    if app.is_public_client() {	    if false {	api	oauth_app_writes
+oauth-regen-public-refusal-is-a-403	crates/mm-api/src/oauth.rs	            "api.oauth.regenerate_secret.public_client.app_error",\n            None,\n            format!("app_id={}", app.id),\n            400,	            "api.oauth.regenerate_secret.public_client.app_error",\n            None,\n            format!("app_id={}", app.id),\n            403,	api	oauth_app_writes
+oauth-body-id-not-compared-to-the-path	crates/mm-api/src/oauth.rs	    if updated.id != app_id {\n        return ApiError::invalid_param("app_id").into_response();\n    }	    if false {\n        return ApiError::invalid_param("app_id").into_response();\n    }	api	oauth_app_writes
+oauth-app-id-not-validated	crates/mm-api/src/oauth.rs	fn require_app_id(app_id: &str) -> Result<(), ApiError> {\n    if !is_valid_id(app_id) {	fn require_app_id(app_id: &str) -> Result<(), ApiError> {\n    if false {	api	oauth_app_writes
+oauth-update-does-not-copy-the-secret	crates/mm-app/src/oauth.rs	        app.client_secret = old_app.client_secret.clone();	        // the secret is taken from the body	api	oauth_app_writes
+oauth-update-does-not-copy-the-creator	crates/mm-app/src/oauth.rs	        app.creator_id = old_app.creator_id.clone();	        // the creator is taken from the body	api	oauth_app_writes
+oauth-update-does-not-copy-create-at	crates/mm-app/src/oauth.rs	        app.create_at = old_app.create_at;	        // create_at is taken from the body	api	oauth_app_writes
+oauth-regen-keeps-the-old-secret	crates/mm-app/src/oauth.rs	        let mut app = app.clone();\n        app.client_secret = mm_model::utils::new_id();	        let mut app = app.clone();\n        // the secret is left alone	api	oauth_app_writes
+oauth-create-gate-uses-the-other-id	crates/mm-app/src/oauth.rs	                "api.oauth.register_oauth_app.turn_off.app_error",	                "api.oauth.allow_oauth.turn_off.app_error",	api	oauth_app_writes
+oauth-store-update-writes-create-at	crates/mm-store/src/oauth_store.rs	               SET updateat = $2, clientsecret = $3, name = $4, description = $5, iconurl = $6,	               SET updateat = $2, clientsecret = $3, name = $5, description = $4, iconurl = $6,	api	oauth_app_writes
+oauth-store-delete-leaves-the-app	crates/mm-store/src/oauth_store.rs	        sqlx::query!("DELETE FROM oauthapps WHERE id = $1", app_id)	        sqlx::query!("DELETE FROM oauthapps WHERE id = $1 AND $1 <> $1", app_id)	api	oauth_app_writes
+dcr-disabled-answers-an-app-error	crates/mm-api/src/oauth.rs	        return dcr_error(\n            DCR_ERROR_UNSUPPORTED_OPERATION,\n            "Dynamic client registration is disabled",\n        );	        return ApiError::from(AppError::new(\n            "registerOAuthClient",\n            "api.oauth.allow_oauth.turn_off.app_error",\n            None,\n            String::new(),\n            501,\n        ))\n        .into_response();	api	oauth_app_writes
+dcr-decode-runs-after-the-gates	crates/mm-api/src/oauth.rs	    if serde_json::from_slice::<ClientRegistrationRequest>(&bytes).is_err() {\n        return dcr_error(\n            DCR_ERROR_INVALID_CLIENT_METADATA,\n            "Invalid JSON in request body",\n        );\n    }\n\n    if !state.app.config().enable_oauth_service_provider {	    if !state.app.config().enable_oauth_service_provider {	api	oauth_app_writes
+dcr-error-type-swapped	crates/mm-api/src/oauth.rs	    if serde_json::from_slice::<ClientRegistrationRequest>(&bytes).is_err() {\n        return dcr_error(\n            DCR_ERROR_INVALID_CLIENT_METADATA,	    if serde_json::from_slice::<ClientRegistrationRequest>(&bytes).is_err() {\n        return dcr_error(\n            DCR_ERROR_UNSUPPORTED_OPERATION,	api	oauth_app_writes
+dcr-gate-inverted	crates/mm-api/src/oauth.rs	    if !state.app.config().enable_dynamic_client_registration {	    if state.app.config().enable_dynamic_client_registration {	api	oauth_app_writes
+control-rename-oauth-app-binding	crates/mm-app/src/oauth.rs	        let mut app = updated_app.clone();\n        app.id = old_app.id.clone();	        let mut app = updated_app.clone();\n        let previous = old_app;\n        app.id = previous.id.clone();	api	oauth_app_writes
+control-reorder-independent-oauth-insert-columns	crates/mm-store/src/oauth_store.rs	                (id, creatorid, createat, updateat, clientsecret, name, description, iconurl,\n                 callbackurls, homepage, istrusted, mattermostappid, isdynamicallyregistered)\n            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)	                (id, creatorid, updateat, createat, clientsecret, name, description, iconurl,\n                 callbackurls, homepage, istrusted, mattermostappid, isdynamicallyregistered)\n            VALUES ($1, $2, $4, $3, $5, $6, $7, $8, $9, $10, $11, $12, $13)	api	oauth_app_writes
