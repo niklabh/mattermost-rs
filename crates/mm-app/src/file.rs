@@ -1,11 +1,17 @@
-//! Port of the read side of `server/channels/app/file.go` — `GetFileInfo` and the mini-preview
-//! guard every file read shares.
+//! Port of the read side of `server/channels/app/file.go` — `GetFileInfo`, the mini-preview guard
+//! every file read shares, and the thin wrappers that put an `AppError` on a
+//! [`crate::filestore`] failure.
 //!
-//! # Nothing here touches a file
+//! # Two layers, and the lower one is where the surprises live
 //!
-//! The routes served from this module return the `FileInfo` **row**, never bytes.
-//! `GET /files/{file_id}`, `/thumbnail`, `/preview` and `/link` all read the file backend and
-//! are unregistered, so they stay Go's.
+//! Everything below [`App::read_file`] is a one-line delegation whose only job is to name an
+//! error id. What they wrap — path joining, the ENOENT-vs-ENOTDIR split, the listing prefix —
+//! is in [`crate::filestore`], which is where the behavioural oracle points.
+//!
+//! One thing to know before reading them: Go raises these errors from **free functions shared by
+//! both backends**, so the `where` never says whether the file or the export backend failed, and
+//! `listDirectory`'s says `ListExportDirectory` even when it was the file one. See
+//! [`backend_errors`].
 
 use mm_model::file_info::FileInfo;
 use mm_model::utils::AppError;
@@ -123,4 +129,152 @@ pub fn abac_denied(where_: &'static str) -> Box<AppError> {
         String::new(),
         403,
     )
+}
+
+/// The `where` on every `AppError` the file-backend wrappers raise, alongside its message id.
+///
+/// Split out because Go raises them from *free functions* shared between the two backends, so the
+/// `where` names the file-backend function and never says which backend failed — a log line from
+/// `ListExportDirectory` and one from `ListDirectory` are identical. Reproduced rather than
+/// improved: the string is on the wire in `AppError.request_id`-adjacent logging and in tests.
+mod backend_errors {
+    /// `fileReader` (app/file.go:139) — used by **both** `FileReader` and `ExportFileReader`.
+    pub const FILE_READER: (&str, &str) = ("FileReader", "api.file.file_reader.app_error");
+    /// `Server.ReadFile` (app/server.go:1929).
+    pub const READ_FILE: (&str, &str) = ("ReadFile", "api.file.read_file.app_error");
+    /// `fileExists` (app/file.go:211) — shared by `FileExists` and `ExportFileExists`.
+    pub const FILE_EXISTS: (&str, &str) = ("FileExists", "api.file.file_exists.app_error");
+    /// `removeFile` (app/file.go:325) — shared by `RemoveFile` and `RemoveExportFile`.
+    pub const REMOVE_FILE: (&str, &str) = ("RemoveFile", "api.file.remove_file.app_error");
+    /// `listDirectory` (app/file.go:355). **The `where` is `ListExportDirectory` for both**
+    /// backends — Go's own copy-paste, kept because changing it would change a log line the Go
+    /// server beside us still writes the other way.
+    pub const LIST_DIRECTORY: (&str, &str) =
+        ("ListExportDirectory", "api.file.list_directory.app_error");
+}
+
+impl App {
+    /// Turn a backend failure into the answer the route should give.
+    ///
+    /// Two outcomes, and the split is the whole reason this exists:
+    ///
+    /// - An **unsupported driver** (S3, Azure) is [`PrepareError::Unreproducible`], so the handler
+    ///   forwards to Go and that deployment keeps the answers it has. It is not a 500: nothing is
+    ///   wrong, we simply are not the right server for it.
+    /// - Anything else is Go's own `AppError`, which for every wrapper in `app/file.go` is a
+    ///   **500 with an empty `detailed_error`** — the wrapped cause is discarded there too, so a
+    ///   missing file and an unreadable one are the same answer.
+    fn backend_error(
+        (where_, id): (&'static str, &'static str),
+        err: crate::filestore::FileStoreError,
+    ) -> PrepareError {
+        if err.is_unsupported_driver() {
+            return PrepareError::Unreproducible(
+                "the configured file backend driver is not implemented here",
+            );
+        }
+        tracing::debug!(error = %err, where_, "file backend operation failed");
+        PrepareError::App(AppError::boxed(where_, id, None, String::new(), 500))
+    }
+
+    /// Port of `app.App.ReadFile` → `Server.ReadFile` (app/server.go:1929).
+    pub async fn read_file(&self, path: &str) -> Result<Vec<u8>, PrepareError> {
+        self.file_backend()
+            .read_file(path)
+            .await
+            .map_err(|err| Self::backend_error(backend_errors::READ_FILE, err))
+    }
+
+    /// Port of `app.App.FileReader` (app/file.go:174), plus the size `http.ServeContent` learns by
+    /// seeking to the end.
+    pub async fn file_reader(&self, path: &str) -> Result<(tokio::fs::File, u64), PrepareError> {
+        self.file_backend()
+            .reader(path)
+            .await
+            .map_err(|err| Self::backend_error(backend_errors::FILE_READER, err))
+    }
+
+    /// Port of `app.App.ExportFileReader` (app/file.go:188).
+    pub async fn export_file_reader(
+        &self,
+        path: &str,
+    ) -> Result<(tokio::fs::File, u64), PrepareError> {
+        self.export_file_backend()
+            .reader(path)
+            .await
+            .map_err(|err| Self::backend_error(backend_errors::FILE_READER, err))
+    }
+
+    /// Port of `app.App.FileExists` (app/file.go:199).
+    pub async fn file_exists(&self, path: &str) -> Result<bool, PrepareError> {
+        self.file_backend()
+            .file_exists(path)
+            .await
+            .map_err(|err| Self::backend_error(backend_errors::FILE_EXISTS, err))
+    }
+
+    /// Port of `app.App.ExportFileExists` (app/file.go:203).
+    pub async fn export_file_exists(&self, path: &str) -> Result<bool, PrepareError> {
+        self.export_file_backend()
+            .file_exists(path)
+            .await
+            .map_err(|err| Self::backend_error(backend_errors::FILE_EXISTS, err))
+    }
+
+    /// Port of `app.App.RemoveFile` (app/file.go:315).
+    pub async fn remove_file(&self, path: &str) -> Result<(), PrepareError> {
+        self.file_backend()
+            .remove_file(path)
+            .await
+            .map_err(|err| Self::backend_error(backend_errors::REMOVE_FILE, err))
+    }
+
+    /// Port of `app.App.RemoveExportFile` (app/file.go:319).
+    pub async fn remove_export_file(&self, path: &str) -> Result<(), PrepareError> {
+        self.export_file_backend()
+            .remove_file(path)
+            .await
+            .map_err(|err| Self::backend_error(backend_errors::REMOVE_FILE, err))
+    }
+
+    /// Port of `app.App.ListDirectory` (app/file.go:339) — non-recursive.
+    pub async fn list_directory(&self, path: &str) -> Result<Vec<String>, PrepareError> {
+        self.file_backend()
+            .list_directory(path)
+            .await
+            .map_err(|err| Self::backend_error(backend_errors::LIST_DIRECTORY, err))
+    }
+
+    /// Port of `app.App.ListExportDirectory` (app/file.go:343).
+    pub async fn list_export_directory(&self, path: &str) -> Result<Vec<String>, PrepareError> {
+        self.export_file_backend()
+            .list_directory(path)
+            .await
+            .map_err(|err| Self::backend_error(backend_errors::LIST_DIRECTORY, err))
+    }
+
+    /// Port of `app.App.TestFileStoreConnection` (app/file.go:126).
+    ///
+    /// The three `FileBackendAuthError` / `FileBackendNoBucketError` arms of
+    /// `connectionTestErrorToAppError` (app/file.go:88) are **S3 and Azure only** — the local
+    /// backend never constructs either — so a local deployment can reach exactly two answers:
+    /// success, or `api.file.test_connection.app_error` at 500 when the directory is not
+    /// writable.
+    pub async fn test_file_store_connection(&self) -> Result<(), PrepareError> {
+        self.file_backend().test_connection().await.map_err(|err| {
+            if err.is_unsupported_driver() {
+                return PrepareError::Unreproducible(
+                    "the configured file backend driver is not implemented here",
+                );
+            }
+            tracing::debug!(error = %err, "file backend connection test failed");
+            PrepareError::App(AppError::boxed(
+                "TestConnection",
+                "api.file.test_connection.app_error",
+                None,
+                err.to_string(),
+                500,
+            ))
+        })
+    }
 }

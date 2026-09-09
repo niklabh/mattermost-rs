@@ -943,6 +943,60 @@ fn get_user_error(err: StoreError) -> Box<AppError> {
     }
 }
 
+/// Port of `app.getProfileImagePath` (app/user.go:3302) — `filepath.Join("users", id, "profile.png")`.
+fn profile_image_path(user_id: &str) -> String {
+    mm_model::go_path::join(&["users", user_id, "profile.png"])
+}
+
+impl App {
+    /// Port of `Server.GetProfileImage` (app/server.go:1885), **narrowed to its one reproducible
+    /// branch**.
+    ///
+    /// Go's function has three outcomes and only the middle one is ours:
+    ///
+    /// | condition | Go's answer | here |
+    /// |---|---|---|
+    /// | `FileSettings.DriverName == ""` | a generated default avatar | forwarded |
+    /// | the stored `users/<id>/profile.png` reads | those bytes, `readFailed = false` | **served** |
+    /// | the read fails | a generated default avatar, `readFailed = true`, and a *write* when `LastPictureUpdate == 0` | forwarded |
+    ///
+    /// # Why the default avatar is not ported
+    ///
+    /// `users.GetDefaultProfileImage` rasterises the user's initials with a TTF font through
+    /// `golang/freetype`, and the answer is a PNG whose every pixel depends on that rasteriser's
+    /// hinting and anti-aliasing. There is no way to match it byte for byte short of embedding
+    /// the same font *and* the same rasteriser, and a near-match is worse than a forward: the
+    /// image is cached by the client for a day under an etag we would have minted.
+    ///
+    /// This is also why `GET /users/{user_id}/image/default`, which is *only* that path, is not
+    /// migrated at all. See [D-204].
+    ///
+    /// In practice the served branch is the common one: every user gets a `profile.png` written
+    /// at account creation by `SetDefaultProfileImage`, so the fallback fires for accounts
+    /// created before that behaviour or whose file has been removed from under the server.
+    pub async fn get_profile_image(
+        &self,
+        user_id: &str,
+    ) -> Result<Vec<u8>, crate::post::PrepareError> {
+        use crate::post::PrepareError;
+
+        if self.config().file_driver_name.is_empty() {
+            return Err(PrepareError::Unreproducible(
+                "a driverless configuration serves a generated default avatar",
+            ));
+        }
+
+        self.read_file(&profile_image_path(user_id))
+            .await
+            .map_err(|err| match err {
+                PrepareError::App(_) => PrepareError::Unreproducible(
+                    "no stored profile image, so Go generates a default avatar and may write it",
+                ),
+                unreproducible => unreproducible,
+            })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

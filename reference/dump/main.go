@@ -1197,6 +1197,13 @@ func main() {
 		fmt.Fprintf(os.Stderr, "FAIL: go stdlib behaviour fixture: %v\n", err)
 		os.Exit(1)
 	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_go_stdlib.json"))
+
+	if err := writeFilestoreBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: filestore behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_filestore.json"))
 
 	if err := writeSweepModelsBehaviourFixture(*out); err != nil {
 		fmt.Fprintf(os.Stderr, "FAIL: sweep models behaviour fixture: %v\n", err)

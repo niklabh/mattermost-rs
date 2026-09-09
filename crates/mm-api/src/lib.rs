@@ -40,6 +40,8 @@ pub mod reactions;
 pub mod recaps;
 pub mod roles;
 pub mod schemes;
+/// Port of `web.WriteFileResponse` and the `http.ServeContent` behind it.
+pub mod serve_content;
 pub mod sessions;
 pub mod sidebar;
 pub mod status;

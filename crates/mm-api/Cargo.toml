@@ -14,16 +14,24 @@ mm-store.workspace = true
 axum = { workspace = true, features = ["ws"] }
 form_urlencoded.workspace = true
 tokio.workspace = true
+# `ReaderStream`, so a file response streams out of the backend rather than being buffered.
+# `MaxFileSize` defaults to 100MB and a range request can ask for all of it.
+tokio-util = { version = "0.7", default-features = false, features = ["io"] }
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+# `Last-Modified` and the three date formats `http.ParseTime` accepts.
+chrono.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 # main.rs only — CLAUDE.md permits anyhow there and nowhere else.
 anyhow.workspace = true
 
 [dev-dependencies]
+# The `write_file_response` corpus records bodies base64-encoded, since a range response is not
+# necessarily valid UTF-8.
+base64.workspace = true
 # The parity test reads the users row directly, to prove our value is the row's and not merely
 # different from Go's cached one.
 sqlx.workspace = true
@@ -32,7 +40,4 @@ sqlx.workspace = true
 reqwest = { workspace = true, features = ["json"] }
 # The parity suite connects a real websocket to both servers and compares the frames.
 tokio-tungstenite.workspace = true
-# `plant_persistent_notification` needs an epoch-millisecond timestamp for a column no REST route
-# writes.
-chrono.workspace = true
 futures-util = "0.3"

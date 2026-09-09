@@ -1331,3 +1331,42 @@ fn team_update_error(where_: &'static str) -> Box<AppError> {
         500,
     )
 }
+
+impl App {
+    /// Port of `app.App.GetTeamIcon` (app/team.go:1094).
+    ///
+    /// One hard-coded path per team, `teams/<id>/teamIcon.png`, and **no check that the team
+    /// actually has an icon**: `Team.LastTeamIconUpdate` is read by the *handler* for the etag
+    /// and never here, so a team that has never uploaded one takes the read failure and gets a
+    /// 404 — `api.team.get_team_icon.read_file.app_error`, which is the 500 from `ReadFile`
+    /// discarded and re-raised, exactly as in [`crate::App::get_emoji_image`].
+    ///
+    /// The empty-driver guard above it answers **501**, and is the same unreachable branch as
+    /// [`crate::App::get_brand_image`]'s.
+    pub async fn get_team_icon(&self, team_id: &str) -> Result<Vec<u8>, crate::post::PrepareError> {
+        use crate::post::PrepareError;
+
+        if self.config().file_driver_name.is_empty() {
+            return Err(PrepareError::App(AppError::boxed(
+                "GetTeamIcon",
+                "api.team.get_team_icon.filesettings_no_driver.app_error",
+                None,
+                String::new(),
+                501,
+            )));
+        }
+
+        self.read_file(&format!("teams/{team_id}/teamIcon.png"))
+            .await
+            .map_err(|err| match err {
+                PrepareError::App(_) => PrepareError::App(AppError::boxed(
+                    "GetTeamIcon",
+                    "api.team.get_team_icon.read_file.app_error",
+                    None,
+                    String::new(),
+                    404,
+                )),
+                unreproducible => unreproducible,
+            })
+    }
+}

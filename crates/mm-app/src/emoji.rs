@@ -5,6 +5,7 @@ use mm_model::utils::{AppError, AppResult};
 use mm_store::emoji_store::EmojiStore;
 
 use crate::App;
+use crate::post::PrepareError;
 
 impl App {
     /// Port of `app.App.GetMultipleEmojiByName` (app/emoji.go:242).
@@ -267,6 +268,90 @@ impl App {
         }
 
         Ok(())
+    }
+}
+
+/// Port of `app.getEmojiImagePath` (app/emoji.go:348).
+fn emoji_image_path(id: &str) -> String {
+    format!("emoji/{id}/image")
+}
+
+impl App {
+    /// Port of `app.App.GetEmojiImage` (app/emoji.go:278).
+    ///
+    /// Returns the bytes and the **format name** `image.DecodeConfig` reports, which the handler
+    /// turns straight into `Content-Type: image/<name>` — so a GIF emoji is served as `image/gif`
+    /// even though every emoji is stored under a path ending in `image` with no extension.
+    ///
+    /// # The store read is not the emoji you already have
+    ///
+    /// It exists to 404 a deleted or absent emoji before touching the backend, and its two error
+    /// ids — `app.emoji.get.no_result` and `app.emoji.get.app_error` — are `GetEmoji`'s, not this
+    /// function's. Note also that `GetEmojiImage` does **not** call `emoji_storage_available`:
+    /// unlike [`App::get_emoji`] it never checks `FileSettings.DriverName`, so a driverless
+    /// configuration reaches the backend read and fails there instead of refusing with a 403.
+    ///
+    /// # The two failures below the store read are both `getEmojiImage`, lowercase
+    ///
+    /// Go spells the `where` with a lowercase `g` for these two and an uppercase one for the
+    /// store read above them — three errors from one function under two different names.
+    pub async fn get_emoji_image(
+        &self,
+        emoji_id: &str,
+    ) -> Result<(Vec<u8>, &'static str), PrepareError> {
+        self.store()
+            .emoji()
+            .get(emoji_id)
+            .await
+            .map_err(|err| {
+                if err.is_not_found() {
+                    AppError::boxed(
+                        "GetEmojiImage",
+                        "app.emoji.get.no_result",
+                        None,
+                        String::new(),
+                        404,
+                    )
+                } else {
+                    tracing::error!(error = %err, "emoji lookup failed");
+                    AppError::boxed(
+                        "GetEmojiImage",
+                        "app.emoji.get.app_error",
+                        None,
+                        String::new(),
+                        500,
+                    )
+                }
+            })
+            .map_err(PrepareError::App)?;
+
+        let image = self
+            .read_file(&emoji_image_path(emoji_id))
+            .await
+            .map_err(|err| match err {
+                // `ReadFile`'s own 500 is discarded and re-raised as a **404** — the only place
+                // in the file family where a backend failure becomes "not found".
+                PrepareError::App(_) => PrepareError::App(AppError::boxed(
+                    "getEmojiImage",
+                    "api.emoji.get_image.read.app_error",
+                    None,
+                    String::new(),
+                    404,
+                )),
+                unreproducible => unreproducible,
+            })?;
+
+        let Some(format) = crate::imaging::detect_format(&image) else {
+            return Err(PrepareError::App(AppError::boxed(
+                "getEmojiImage",
+                "api.emoji.get_image.decode.app_error",
+                None,
+                String::new(),
+                500,
+            )));
+        };
+
+        Ok((image, format))
     }
 }
 

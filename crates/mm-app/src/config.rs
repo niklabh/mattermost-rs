@@ -224,6 +224,66 @@ pub struct Config {
     /// unreachable and is ported for fidelity rather than for coverage.
     pub file_driver_name: String,
 
+    /// `FileSettings.Directory` (config.go:1815). Go default **`"./data/"`**
+    /// (`FileSettingsDefaultDirectory`, config.go:155), and `SetDefaults` replaces an **empty**
+    /// value with it too — so a document holding `""` still reads `./data/`.
+    ///
+    /// The root of every path [`crate::filestore::LocalFileBackend`] resolves. Relative, and
+    /// relative to the **process working directory** — which is the Go server's, not
+    /// necessarily ours. A deployment where the two processes start in different directories has
+    /// two different file backends and no error to say so; see [D-201].
+    pub file_directory: String,
+
+    /// `FileSettings.PublicLinkSalt` (config.go:1832). Go's default is
+    /// **`NewRandomString(32)`** — generated, not constant.
+    ///
+    /// So there is no default worth writing: the empty string here means "the document did not
+    /// say", and `getPublicFile` forwards rather than validating a hash against a salt it had to
+    /// invent. Every server that has ever persisted a configuration has a real value here.
+    pub public_link_salt: String,
+
+    /// `FileSettings.DedicatedExportStore` (config.go:1845, defaulted **`false`** at :2028).
+    ///
+    /// False — the stock value — means the export backend **is** the file backend, the same
+    /// object, not a second one configured the same way (platform/service.go:397). True switches
+    /// exports to [`Config::file_export_driver_name`] and
+    /// [`Config::file_export_directory`], and is also the second gate in
+    /// `GeneratePresignURLForExport`.
+    pub dedicated_export_store: bool,
+
+    /// `FileSettings.ExportDriverName` (config.go:1846, defaulted **`"local"`** at :2032).
+    /// Read only when [`Config::dedicated_export_store`] is set.
+    pub file_export_driver_name: String,
+
+    /// `FileSettings.ExportDirectory` (config.go:1847, defaulted **`"./data/"`** at :2036 — the
+    /// *file* settings default, not the export one). Read only when
+    /// [`Config::dedicated_export_store`] is set.
+    pub file_export_directory: String,
+
+    /// `ExportSettings.Directory` (config.go:4047, defaulted **`"./export"`** at :4067).
+    ///
+    /// **Not** [`Config::file_export_directory`], and the two are easy to confuse: this is the
+    /// path *within* the export backend that `listExports`, `downloadExport` and `deleteExport`
+    /// operate on, while that one is the backend's own root. On a stock server the export
+    /// backend's root is `./data/` and this is `./export`, so an export lives at
+    /// `./data/export/<name>`.
+    pub export_directory: String,
+
+    /// `ImportSettings.Directory` (config.go:4030, defaulted **`"./import"`** at :4036).
+    ///
+    /// The counterpart of [`Config::export_directory`] for `listImports` and `deleteImport`,
+    /// against the **file** backend rather than the export one — imports have no dedicated store.
+    pub import_directory: String,
+
+    /// `ServiceSettings.WebserverMode` (config.go:432, defaulted **`"gzip"`** at :843).
+    ///
+    /// Read by `web.WriteFileResponse` and by nothing else: in `gzip` mode the pre-computed
+    /// content length is written as `X-Uncompressed-Content-Length` instead of `Content-Length`.
+    /// **`"regular"` is rewritten to `"gzip"` on load** (config.go:845) — a mutation of the
+    /// caller's config rather than a read-time fold — so a document saying `regular` behaves as
+    /// `gzip` and this field never holds that value.
+    pub webserver_mode: String,
+
     /// `ServiceSettings.EnableIncomingWebhooks` (config.go:388, defaulted at :607). Go default
     /// **`true`**.
     ///
@@ -566,6 +626,16 @@ impl Default for Config {
             enable_burn_on_read: true,
             feature_flag_burn_on_read: true,
             file_driver_name: "local".to_owned(),
+            // config.go:1904 — `FileSettingsDefaultDirectory`.
+            file_directory: "./data/".to_owned(),
+            // No constant default exists; see the field's documentation.
+            public_link_salt: String::new(),
+            dedicated_export_store: false,
+            file_export_driver_name: "local".to_owned(),
+            file_export_directory: "./data/".to_owned(),
+            export_directory: "./export".to_owned(),
+            import_directory: "./import".to_owned(),
+            webserver_mode: "gzip".to_owned(),
             enable_incoming_webhooks: true,
             enable_outgoing_webhooks: true,
             enable_oauth_service_provider: true,
@@ -744,6 +814,27 @@ impl Config {
             // override of `""` is a deliberate empty driver and must survive as one.
             file_driver_name: lookup("MM_FILESETTINGS_DRIVERNAME")
                 .unwrap_or(default.file_driver_name),
+            file_directory: lookup("MM_FILESETTINGS_DIRECTORY").unwrap_or(default.file_directory),
+            public_link_salt: lookup("MM_FILESETTINGS_PUBLICLINKSALT")
+                .unwrap_or(default.public_link_salt),
+            dedicated_export_store: lookup_bool(
+                lookup,
+                "MM_FILESETTINGS_DEDICATEDEXPORTSTORE",
+                default.dedicated_export_store,
+            ),
+            file_export_driver_name: lookup("MM_FILESETTINGS_EXPORTDRIVERNAME")
+                .unwrap_or(default.file_export_driver_name),
+            file_export_directory: lookup("MM_FILESETTINGS_EXPORTDIRECTORY")
+                .unwrap_or(default.file_export_directory),
+            export_directory: lookup("MM_EXPORTSETTINGS_DIRECTORY")
+                .unwrap_or(default.export_directory),
+            import_directory: lookup("MM_IMPORTSETTINGS_DIRECTORY")
+                .unwrap_or(default.import_directory),
+            // `SetDefaults` folds `regular` into `gzip` whatever the source, so the overlay is
+            // normalised on the way in exactly as the document is.
+            webserver_mode: normalise_webserver_mode(
+                lookup("MM_SERVICESETTINGS_WEBSERVERMODE").unwrap_or(default.webserver_mode),
+            ),
             android_latest_version: lookup("MM_CLIENTREQUIREMENTS_ANDROIDLATESTVERSION")
                 .unwrap_or(default.android_latest_version),
             android_min_version: lookup("MM_CLIENTREQUIREMENTS_ANDROIDMINVERSION")
@@ -901,6 +992,7 @@ impl Config {
         let team_settings = parsed.team_settings.unwrap_or_default();
         let email_settings = parsed.email_settings.unwrap_or_default();
         let guest_accounts = parsed.guest_accounts_settings.unwrap_or_default();
+        let file_settings = parsed.file_settings.unwrap_or_default();
         Ok(Self {
             // Moved, not cloned: `is_update` above already took the only other thing anything
             // wants from this field, and the remaining `service` reads are all `Option<bool>`.
@@ -933,10 +1025,8 @@ impl Config {
                 .maximum_personal_access_token_lifetime_days
                 .unwrap_or(default.maximum_personal_access_token_lifetime_days),
             enable_commands: service.enable_commands.unwrap_or(default.enable_commands),
-            enable_public_link: parsed
-                .file_settings
-                .as_ref()
-                .and_then(|f| f.enable_public_link)
+            enable_public_link: file_settings
+                .enable_public_link
                 .unwrap_or(default.enable_public_link),
             cloud_preview_modal_bucket_url: parsed
                 .cloud_settings
@@ -1002,11 +1092,37 @@ impl Config {
             // (store.go:306-310), so the section is absent from every row it writes. Sourcing it
             // here would read an absence as a deliberate `false` on the next `readOnlyFF` change.
             feature_flag_burn_on_read: default.feature_flag_burn_on_read,
-            file_driver_name: parsed
-                .file_settings
-                .unwrap_or_default()
+            file_driver_name: file_settings
                 .driver_name
                 .unwrap_or(default.file_driver_name),
+            // `SetDefaults` replaces an empty directory with the default as well as a nil one
+            // (config.go:1903), which `unwrap_or` alone would not: a document holding `""` must
+            // read `./data/`, not `""`.
+            file_directory: non_empty_or(file_settings.directory, default.file_directory),
+            public_link_salt: file_settings
+                .public_link_salt
+                .unwrap_or(default.public_link_salt),
+            dedicated_export_store: file_settings
+                .dedicated_export_store
+                .unwrap_or(default.dedicated_export_store),
+            file_export_driver_name: file_settings
+                .export_driver_name
+                .unwrap_or(default.file_export_driver_name),
+            file_export_directory: non_empty_or(
+                file_settings.export_directory,
+                default.file_export_directory,
+            ),
+            export_directory: non_empty_or(
+                parsed.export_settings.unwrap_or_default().directory,
+                default.export_directory,
+            ),
+            import_directory: non_empty_or(
+                parsed.import_settings.unwrap_or_default().directory,
+                default.import_directory,
+            ),
+            webserver_mode: normalise_webserver_mode(
+                service.webserver_mode.unwrap_or(default.webserver_mode),
+            ),
             enable_incoming_webhooks: service
                 .enable_incoming_webhooks
                 .unwrap_or(default.enable_incoming_webhooks),
@@ -1143,6 +1259,10 @@ struct Document {
     image_proxy_settings: Option<EnableOnlyDocument>,
     #[serde(rename = "FileSettings")]
     file_settings: Option<FileSettingsDocument>,
+    #[serde(rename = "ExportSettings")]
+    export_settings: Option<ExportSettingsDocument>,
+    #[serde(rename = "ImportSettings")]
+    import_settings: Option<ImportSettingsDocument>,
     #[serde(rename = "PrivacySettings")]
     privacy_settings: Option<PrivacySettingsDocument>,
     #[serde(rename = "ClientRequirements")]
@@ -1251,6 +1371,8 @@ struct ServiceSettingsDocument {
     /// consulted, never its value, which is just as well: the live document holds `""`.
     #[serde(rename = "SiteURL")]
     site_url: Option<String>,
+    #[serde(rename = "WebserverMode")]
+    webserver_mode: Option<String>,
     #[serde(rename = "SessionIdleTimeoutInMinutes")]
     session_idle_timeout_in_minutes: Option<i64>,
     #[serde(rename = "ExtendSessionLengthWithActivity")]
@@ -1313,8 +1435,32 @@ struct ExperimentalSettingsDocument {
 struct FileSettingsDocument {
     #[serde(rename = "DriverName")]
     driver_name: Option<String>,
+    #[serde(rename = "Directory")]
+    directory: Option<String>,
     #[serde(rename = "EnablePublicLink")]
     enable_public_link: Option<bool>,
+    #[serde(rename = "PublicLinkSalt")]
+    public_link_salt: Option<String>,
+    #[serde(rename = "DedicatedExportStore")]
+    dedicated_export_store: Option<bool>,
+    #[serde(rename = "ExportDriverName")]
+    export_driver_name: Option<String>,
+    #[serde(rename = "ExportDirectory")]
+    export_directory: Option<String>,
+}
+
+/// `ExportSettings` — one key, and it is not the same directory as `FileSettings.ExportDirectory`.
+#[derive(Debug, Default, serde::Deserialize)]
+struct ExportSettingsDocument {
+    #[serde(rename = "Directory")]
+    directory: Option<String>,
+}
+
+/// `ImportSettings`.
+#[derive(Debug, Default, serde::Deserialize)]
+struct ImportSettingsDocument {
+    #[serde(rename = "Directory")]
+    directory: Option<String>,
 }
 
 #[derive(Debug, Default, serde::Deserialize)]
@@ -1323,6 +1469,34 @@ struct PrivacySettingsDocument {
     show_full_name: Option<bool>,
     #[serde(rename = "ShowEmailAddress")]
     show_email_address: Option<bool>,
+}
+
+/// `SetDefaults`' `if s.X == nil || *s.X == ""` shape — an absent key **and** an empty string both
+/// take the default.
+///
+/// Four of the directory settings use it and the rest of the config does not, which is why it is
+/// a helper rather than an `unwrap_or`: writing `unwrap_or` here would leave a document holding
+/// `""` pointing the backend at the process working directory.
+fn non_empty_or(value: Option<String>, default: String) -> String {
+    match value {
+        Some(value) if !value.is_empty() => value,
+        _ => default,
+    }
+}
+
+/// `ServiceSettings.SetDefaults`' rewrite of `regular` to `gzip` (config.go:845).
+///
+/// Go *mutates the config* rather than folding at read time, so `regular` is not a value a
+/// running server ever holds. Applied to both the document and the environment overlay, since
+/// `applyEnvironmentMap` runs before nothing — `SetDefaults` has already been called, so an
+/// overlay of `regular` would in Go survive as `regular`. This is the one place the port
+/// deliberately normalises more than Go: see [D-202].
+fn normalise_webserver_mode(mode: String) -> String {
+    if mode == "regular" {
+        "gzip".to_owned()
+    } else {
+        mode
+    }
 }
 
 /// `strconv.ParseBool` (Go strconv/atob.go:10) — the exact set of accepted spellings, and
@@ -2190,5 +2364,119 @@ mod go_parity {
             overlaid.compliance_enable,
             "and the document's value survives"
         );
+    }
+
+    /// The eight file-storage settings, read from a document that sets all of them.
+    #[test]
+    fn the_file_storage_settings_are_read_from_the_document() {
+        let config = Config::from_document(
+            r#"{
+                "ServiceSettings": {"WebserverMode": "disabled"},
+                "FileSettings": {
+                    "DriverName": "local",
+                    "Directory": "/srv/mm/data/",
+                    "PublicLinkSalt": "saltysaltysaltysaltysaltysaltysa",
+                    "DedicatedExportStore": true,
+                    "ExportDriverName": "amazons3",
+                    "ExportDirectory": "/srv/mm/exportroot/"
+                },
+                "ExportSettings": {"Directory": "exports"},
+                "ImportSettings": {"Directory": "imports"}
+            }"#,
+        )
+        .expect("valid document");
+
+        assert_eq!(config.file_directory, "/srv/mm/data/");
+        assert_eq!(config.public_link_salt, "saltysaltysaltysaltysaltysaltysa");
+        assert!(config.dedicated_export_store);
+        assert_eq!(config.file_export_driver_name, "amazons3");
+        assert_eq!(config.file_export_directory, "/srv/mm/exportroot/");
+        assert_eq!(config.export_directory, "exports");
+        assert_eq!(config.import_directory, "imports");
+        assert_eq!(config.webserver_mode, "disabled");
+    }
+
+    /// A document that omits them takes Go's defaults — and the three directories are three
+    /// *different* defaults, which is the thing a reader is most likely to get wrong.
+    #[test]
+    fn the_file_storage_defaults_are_three_different_directories() {
+        let config = Config::from_document("{}").expect("valid document");
+        assert_eq!(config.file_directory, "./data/");
+        assert_eq!(config.file_export_directory, "./data/");
+        assert_eq!(config.export_directory, "./export");
+        assert_eq!(config.import_directory, "./import");
+        assert_eq!(config.webserver_mode, "gzip");
+        assert!(config.public_link_salt.is_empty());
+        assert!(!config.dedicated_export_store);
+        assert_eq!(config.file_export_driver_name, "local");
+    }
+
+    /// `SetDefaults` replaces an **empty** directory with the default, not only a missing one —
+    /// so `""` must not reach the backend as "the process working directory".
+    #[test]
+    fn an_empty_directory_takes_the_default_rather_than_the_working_directory() {
+        let config = Config::from_document(
+            r#"{
+                "FileSettings": {"Directory": "", "ExportDirectory": ""},
+                "ExportSettings": {"Directory": ""},
+                "ImportSettings": {"Directory": ""}
+            }"#,
+        )
+        .expect("valid document");
+        assert_eq!(config.file_directory, "./data/");
+        assert_eq!(config.file_export_directory, "./data/");
+        assert_eq!(config.export_directory, "./export");
+        assert_eq!(config.import_directory, "./import");
+    }
+
+    /// `regular` is rewritten to `gzip` on load, so it is not a value a running server holds.
+    /// Every other spelling — including one Go has never heard of — survives untouched.
+    #[test]
+    fn webserver_mode_regular_is_rewritten_to_gzip() {
+        for (document, want) in [
+            (r#"{"ServiceSettings":{"WebserverMode":"regular"}}"#, "gzip"),
+            (r#"{"ServiceSettings":{"WebserverMode":"gzip"}}"#, "gzip"),
+            (
+                r#"{"ServiceSettings":{"WebserverMode":"disabled"}}"#,
+                "disabled",
+            ),
+            (
+                r#"{"ServiceSettings":{"WebserverMode":"regularly"}}"#,
+                "regularly",
+            ),
+        ] {
+            assert_eq!(
+                Config::from_document(document)
+                    .expect("valid document")
+                    .webserver_mode,
+                want,
+                "{document}"
+            );
+        }
+    }
+
+    /// The environment overlay reaches all eight, and normalises `regular` on the way through.
+    #[test]
+    fn the_file_storage_settings_are_overridable_by_environment() {
+        let env = std::collections::HashMap::from([
+            ("MM_FILESETTINGS_DIRECTORY", "/env/data"),
+            ("MM_FILESETTINGS_PUBLICLINKSALT", "envsalt"),
+            ("MM_FILESETTINGS_DEDICATEDEXPORTSTORE", "true"),
+            ("MM_FILESETTINGS_EXPORTDRIVERNAME", "azureblob"),
+            ("MM_FILESETTINGS_EXPORTDIRECTORY", "/env/exportroot"),
+            ("MM_EXPORTSETTINGS_DIRECTORY", "/env/export"),
+            ("MM_IMPORTSETTINGS_DIRECTORY", "/env/import"),
+            ("MM_SERVICESETTINGS_WEBSERVERMODE", "regular"),
+        ]);
+        let config = Config::default().apply_env_from(&|key| env.get(key).map(|v| (*v).to_owned()));
+
+        assert_eq!(config.file_directory, "/env/data");
+        assert_eq!(config.public_link_salt, "envsalt");
+        assert!(config.dedicated_export_store);
+        assert_eq!(config.file_export_driver_name, "azureblob");
+        assert_eq!(config.file_export_directory, "/env/exportroot");
+        assert_eq!(config.export_directory, "/env/export");
+        assert_eq!(config.import_directory, "/env/import");
+        assert_eq!(config.webserver_mode, "gzip");
     }
 }

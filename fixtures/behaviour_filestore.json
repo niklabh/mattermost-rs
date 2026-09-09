@@ -1,0 +1,1561 @@
+{
+    "filepath_base": [
+        {
+            "in": "",
+            "out": "."
+        },
+        {
+            "in": ".",
+            "out": "."
+        },
+        {
+            "in": "..",
+            "out": ".."
+        },
+        {
+            "in": "/",
+            "out": "/"
+        },
+        {
+            "in": "//",
+            "out": "/"
+        },
+        {
+            "in": "///",
+            "out": "/"
+        },
+        {
+            "in": "a",
+            "out": "a"
+        },
+        {
+            "in": "a/",
+            "out": "a"
+        },
+        {
+            "in": "/a",
+            "out": "a"
+        },
+        {
+            "in": "/a/",
+            "out": "a"
+        },
+        {
+            "in": "a/b",
+            "out": "b"
+        },
+        {
+            "in": "a/b/",
+            "out": "b"
+        },
+        {
+            "in": "/a/b/c",
+            "out": "c"
+        },
+        {
+            "in": "a//b",
+            "out": "b"
+        },
+        {
+            "in": "a/./b",
+            "out": "b"
+        },
+        {
+            "in": "a/../b",
+            "out": "b"
+        },
+        {
+            "in": "./export.zip",
+            "out": "export.zip"
+        },
+        {
+            "in": "data/export.zip",
+            "out": "export.zip"
+        },
+        {
+            "in": "/mattermost/data/export.zip",
+            "out": "export.zip"
+        },
+        {
+            "in": "import/bulk.zip.tmp",
+            "out": "bulk.zip.tmp"
+        },
+        {
+            "in": "export.zip/",
+            "out": "export.zip"
+        },
+        {
+            "in": "/export.zip//",
+            "out": "export.zip"
+        }
+    ],
+    "filepath_dir": [
+        {
+            "in": "",
+            "out": "."
+        },
+        {
+            "in": ".",
+            "out": "."
+        },
+        {
+            "in": "..",
+            "out": "."
+        },
+        {
+            "in": "/",
+            "out": "/"
+        },
+        {
+            "in": "//",
+            "out": "/"
+        },
+        {
+            "in": "///",
+            "out": "/"
+        },
+        {
+            "in": "a",
+            "out": "."
+        },
+        {
+            "in": "a/",
+            "out": "a"
+        },
+        {
+            "in": "/a",
+            "out": "/"
+        },
+        {
+            "in": "/a/",
+            "out": "/a"
+        },
+        {
+            "in": "a/b",
+            "out": "a"
+        },
+        {
+            "in": "a/b/",
+            "out": "a/b"
+        },
+        {
+            "in": "/a/b/c",
+            "out": "/a/b"
+        },
+        {
+            "in": "a//b",
+            "out": "a"
+        },
+        {
+            "in": "a/./b",
+            "out": "a"
+        },
+        {
+            "in": "a/../b",
+            "out": "."
+        },
+        {
+            "in": "./export.zip",
+            "out": "."
+        },
+        {
+            "in": "data/export.zip",
+            "out": "data"
+        },
+        {
+            "in": "/mattermost/data/export.zip",
+            "out": "/mattermost/data"
+        },
+        {
+            "in": "import/bulk.zip.tmp",
+            "out": "import"
+        },
+        {
+            "in": "export.zip/",
+            "out": "export.zip"
+        },
+        {
+            "in": "/export.zip//",
+            "out": "/export.zip"
+        }
+    ],
+    "filepath_join2": [
+        {
+            "a": "",
+            "b": "",
+            "out": ""
+        },
+        {
+            "a": "",
+            "b": "a",
+            "out": "a"
+        },
+        {
+            "a": "./data",
+            "b": "",
+            "out": "data"
+        },
+        {
+            "a": "./data",
+            "b": "a",
+            "out": "data/a"
+        },
+        {
+            "a": "./data",
+            "b": "users/abc/profile.png",
+            "out": "data/users/abc/profile.png"
+        },
+        {
+            "a": "./data",
+            "b": "/users/abc/profile.png",
+            "out": "data/users/abc/profile.png"
+        },
+        {
+            "a": "./data/",
+            "b": "users//abc///profile.png",
+            "out": "data/users/abc/profile.png"
+        },
+        {
+            "a": "/mattermost/data",
+            "b": "emoji/xyz/image",
+            "out": "/mattermost/data/emoji/xyz/image"
+        },
+        {
+            "a": "./data",
+            "b": "../escape",
+            "out": "escape"
+        },
+        {
+            "a": "./data",
+            "b": "../../escape",
+            "out": "../escape"
+        },
+        {
+            "a": "./data",
+            "b": "a/../b",
+            "out": "data/b"
+        },
+        {
+            "a": "./data",
+            "b": "./a",
+            "out": "data/a"
+        },
+        {
+            "a": "/",
+            "b": "a",
+            "out": "/a"
+        },
+        {
+            "a": "/",
+            "b": "../a",
+            "out": "/a"
+        },
+        {
+            "a": "./data",
+            "b": "brand/image",
+            "out": "data/brand/image"
+        },
+        {
+            "a": "./data",
+            "b": "teams/tid/teamIcon.png",
+            "out": "data/teams/tid/teamIcon.png"
+        }
+    ],
+    "filepath_join3": [
+        {
+            "a": "./data",
+            "b": "export",
+            "c": "job.zip",
+            "out": "data/export/job.zip"
+        },
+        {
+            "a": "./data",
+            "b": "export",
+            "c": "../../etc/passwd",
+            "out": "etc/passwd"
+        },
+        {
+            "a": "./data",
+            "b": "",
+            "c": "job.zip",
+            "out": "data/job.zip"
+        },
+        {
+            "a": "",
+            "b": "export",
+            "c": "job.zip",
+            "out": "export/job.zip"
+        },
+        {
+            "a": "./data",
+            "b": "export/",
+            "c": "/job.zip",
+            "out": "data/export/job.zip"
+        }
+    ],
+    "image_decode_config": [
+        {
+            "bytes_base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAAEElEQVR4nGJiZGIGBAAA//8AFgAJ1oG2VgAAAABJRU5ErkJggg==",
+            "err_is_format": false,
+            "format": "png",
+            "name": "png_1x1",
+            "ok": true
+        },
+        {
+            "bytes_base64": "/9j/2wCEAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDIBCQkJDAsMGA0NGDIhHCEyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMv/AABEIAAEAAQMBIgACEQEDEQH/xAGiAAABBQEBAQEBAQAAAAAAAAAAAQIDBAUGBwgJCgsQAAIBAwMCBAMFBQQEAAABfQECAwAEEQUSITFBBhNRYQcicRQygZGhCCNCscEVUtHwJDNicoIJChYXGBkaJSYnKCkqNDU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6g4SFhoeIiYqSk5SVlpeYmZqio6Slpqeoqaqys7S1tre4ubrCw8TFxsfIycrS09TV1tfY2drh4uPk5ebn6Onq8fLz9PX29/j5+gEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoLEQACAQIEBAMEBwUEBAABAncAAQIDEQQFITEGEkFRB2FxEyIygQgUQpGhscEJIzNS8BVictEKFiQ04SXxFxgZGiYnKCkqNTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqCg4SFhoeIiYqSk5SVlpeYmZqio6Slpqeoqaqys7S1tre4ubrCw8TFxsfIycrS09TV1tfY2dri4+Tl5ufo6ery8/T19vf4+fr/2gAMAwEAAhEDEQA/APAaKKKYj//Z",
+            "err_is_format": false,
+            "format": "jpeg",
+            "name": "jpeg_1x1",
+            "ok": true
+        },
+        {
+            "bytes_base64": "R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAkQBADs=",
+            "err_is_format": false,
+            "format": "gif",
+            "name": "gif_1x1",
+            "ok": true
+        },
+        {
+            "bytes_base64": "iVBORw0KGgo=",
+            "err_is_format": false,
+            "format": "",
+            "name": "png_magic_only",
+            "ok": false
+        },
+        {
+            "bytes_base64": "/9g=",
+            "err_is_format": false,
+            "format": "",
+            "name": "jpeg_magic_only",
+            "ok": false
+        },
+        {
+            "bytes_base64": "R0lGODdh",
+            "err_is_format": false,
+            "format": "",
+            "name": "gif87_magic_only",
+            "ok": false
+        },
+        {
+            "bytes_base64": "R0lGODlh",
+            "err_is_format": false,
+            "format": "",
+            "name": "gif89_magic_only",
+            "ok": false
+        },
+        {
+            "bytes_base64": "Qk0AAAAA",
+            "err_is_format": true,
+            "format": "",
+            "name": "bmp_magic_only",
+            "ok": false
+        },
+        {
+            "bytes_base64": "SUkqAA==",
+            "err_is_format": false,
+            "format": "",
+            "name": "tiff_le_magic_only",
+            "ok": false
+        },
+        {
+            "bytes_base64": "TU0AKg==",
+            "err_is_format": false,
+            "format": "",
+            "name": "tiff_be_magic_only",
+            "ok": false
+        },
+        {
+            "bytes_base64": "UklGRgAAAABXRUJQVlA4IA==",
+            "err_is_format": false,
+            "format": "",
+            "name": "webp_magic_only",
+            "ok": false
+        },
+        {
+            "bytes_base64": "",
+            "err_is_format": true,
+            "format": "",
+            "name": "empty",
+            "ok": false
+        },
+        {
+            "bytes_base64": "bm90IGFuIGltYWdlIGF0IGFsbA==",
+            "err_is_format": true,
+            "format": "",
+            "name": "garbage",
+            "ok": false
+        },
+        {
+            "bytes_base64": "PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPjwvc3ZnPg==",
+            "err_is_format": true,
+            "format": "",
+            "name": "svg",
+            "ok": false
+        },
+        {
+            "bytes_base64": "UEsDBA==",
+            "err_is_format": true,
+            "format": "",
+            "name": "zip",
+            "ok": false
+        },
+        {
+            "bytes_base64": "JVBERi0xLjcK",
+            "err_is_format": true,
+            "format": "",
+            "name": "pdf",
+            "ok": false
+        },
+        {
+            "bytes_base64": "iVBORw0KGg==",
+            "err_is_format": true,
+            "format": "",
+            "name": "png_truncated_magic",
+            "ok": false
+        }
+    ],
+    "local_backend": {
+        "driver_name": "local",
+        "lists": [
+            {
+                "list": [
+                    "brand",
+                    "emoji",
+                    "export",
+                    "users"
+                ],
+                "list_ok": true,
+                "list_recursive": [
+                    "brand/image",
+                    "emoji/abc/image",
+                    "export/job.zip",
+                    "export/nested/deep.zip",
+                    "users/uid/profile.png"
+                ],
+                "list_recursive_ok": true,
+                "path": ""
+            },
+            {
+                "list": [
+                    "brand",
+                    "emoji",
+                    "export",
+                    "users"
+                ],
+                "list_ok": true,
+                "list_recursive": [
+                    "brand/image",
+                    "emoji/abc/image",
+                    "export/job.zip",
+                    "export/nested/deep.zip",
+                    "users/uid/profile.png"
+                ],
+                "list_recursive_ok": true,
+                "path": "."
+            },
+            {
+                "list": [
+                    "export/job.zip",
+                    "export/nested"
+                ],
+                "list_ok": true,
+                "list_recursive": [
+                    "export/job.zip",
+                    "export/nested/deep.zip"
+                ],
+                "list_recursive_ok": true,
+                "path": "export"
+            },
+            {
+                "list": [
+                    "export/job.zip",
+                    "export/nested"
+                ],
+                "list_ok": true,
+                "list_recursive": [
+                    "export/job.zip",
+                    "export/nested/deep.zip"
+                ],
+                "list_recursive_ok": true,
+                "path": "export/"
+            },
+            {
+                "list": [
+                    "emoji/abc"
+                ],
+                "list_ok": true,
+                "list_recursive": [
+                    "emoji/abc/image"
+                ],
+                "list_recursive_ok": true,
+                "path": "emoji"
+            },
+            {
+                "list": [
+                    "users/uid"
+                ],
+                "list_ok": true,
+                "list_recursive": [
+                    "users/uid/profile.png"
+                ],
+                "list_recursive_ok": true,
+                "path": "users"
+            },
+            {
+                "list": [],
+                "list_ok": true,
+                "list_recursive": [],
+                "list_recursive_ok": true,
+                "path": "missing"
+            },
+            {
+                "list": [
+                    "/export/job.zip",
+                    "/export/nested"
+                ],
+                "list_ok": true,
+                "list_recursive": [
+                    "/export/job.zip",
+                    "/export/nested/deep.zip"
+                ],
+                "list_recursive_ok": true,
+                "path": "/export"
+            },
+            {
+                "list": [],
+                "list_ok": false,
+                "list_recursive": [],
+                "list_recursive_ok": false,
+                "path": "brand/image"
+            }
+        ],
+        "reads": [
+            {
+                "exists": true,
+                "exists_ok": true,
+                "path": "brand/image",
+                "read_bytes": "brandi",
+                "read_ok": true,
+                "size": 6,
+                "size_ok": true
+            },
+            {
+                "exists": true,
+                "exists_ok": true,
+                "path": "emoji/abc/image",
+                "read_bytes": "gif",
+                "read_ok": true,
+                "size": 3,
+                "size_ok": true
+            },
+            {
+                "exists": true,
+                "exists_ok": true,
+                "path": "users/uid/profile.png",
+                "read_bytes": "pngpn",
+                "read_ok": true,
+                "size": 5,
+                "size_ok": true
+            },
+            {
+                "exists": false,
+                "exists_ok": true,
+                "path": "missing/file",
+                "read_error_contains": "no such file or directory",
+                "read_ok": false,
+                "size_ok": false
+            },
+            {
+                "exists": true,
+                "exists_ok": true,
+                "path": "export",
+                "read_error_contains": "is a directory",
+                "read_ok": false,
+                "size": 4096,
+                "size_ok": true
+            },
+            {
+                "exists": true,
+                "exists_ok": true,
+                "path": "",
+                "read_error_contains": "is a directory",
+                "read_ok": false,
+                "size": 4096,
+                "size_ok": true
+            },
+            {
+                "exists": true,
+                "exists_ok": true,
+                "path": "/brand/image",
+                "read_bytes": "brandi",
+                "read_ok": true,
+                "size": 6,
+                "size_ok": true
+            },
+            {
+                "exists": true,
+                "exists_ok": true,
+                "path": "./brand/image",
+                "read_bytes": "brandi",
+                "read_ok": true,
+                "size": 6,
+                "size_ok": true
+            },
+            {
+                "exists": true,
+                "exists_ok": true,
+                "path": "emoji/abc/../abc/image",
+                "read_bytes": "gif",
+                "read_ok": true,
+                "size": 3,
+                "size_ok": true
+            },
+            {
+                "exists": false,
+                "exists_ok": true,
+                "path": "../etc/passwd",
+                "read_error_contains": "no such file or directory",
+                "read_ok": false,
+                "size_ok": false
+            },
+            {
+                "exists_error_contains": "not a directory",
+                "exists_ok": false,
+                "path": "brand/image/deeper",
+                "read_error_contains": "not a directory",
+                "read_ok": false,
+                "size_ok": false
+            }
+        ],
+        "test_connection": {
+            "ok": true,
+            "testfile_leftover": false
+        },
+        "tree": {
+            "brand/image": "brandi",
+            "emoji/abc/image": "gif",
+            "export/job.zip": "zipz",
+            "export/nested/deep.zip": "dz",
+            "users/uid/profile.png": "pngpn"
+        }
+    },
+    "media_content_types": [
+        "image/jpeg",
+        "image/png",
+        "image/bmp",
+        "image/gif",
+        "image/tiff",
+        "image/webp",
+        "video/avi",
+        "video/mpeg",
+        "video/mp4",
+        "audio/mpeg",
+        "audio/wav"
+    ],
+    "unsafe_content_types": [
+        "application/javascript",
+        "application/ecmascript",
+        "text/javascript",
+        "text/ecmascript",
+        "application/x-javascript",
+        "text/html"
+    ],
+    "write_file_response": [
+        {
+            "body_base64": "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXo=",
+            "content_size": 26,
+            "content_type_in": "text/plain",
+            "filename": "notes.txt",
+            "force_download": false,
+            "headers": {
+                "Accept-Ranges": "bytes",
+                "Cache-Control": "private, max-age=86400",
+                "Content-Disposition": "attachment;filename=\"notes.txt\"; filename*=UTF-8''notes.txt",
+                "Content-Length": "26",
+                "Content-Security-Policy": "Frame-ancestors 'none'",
+                "Content-Type": "text/plain",
+                "Last-Modified": "Thu, 04 Mar 2021 05:06:07 GMT",
+                "X-Content-Type-Options": "nosniff",
+                "X-Frame-Options": "DENY"
+            },
+            "method": "GET",
+            "modtime_unix_ms": 1614834367000,
+            "name": "plain_text_attachment",
+            "req_headers": [],
+            "status": 200,
+            "webserver_mode": ""
+        },
+        {
+            "body_base64": "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXo=",
+            "content_size": 26,
+            "content_type_in": "",
+            "filename": "blob.bin",
+            "force_download": false,
+            "headers": {
+                "Accept-Ranges": "bytes",
+                "Cache-Control": "private, max-age=86400",
+                "Content-Disposition": "attachment;filename=\"blob.bin\"; filename*=UTF-8''blob.bin",
+                "Content-Length": "26",
+                "Content-Security-Policy": "Frame-ancestors 'none'",
+                "Content-Type": "application/octet-stream",
+                "Last-Modified": "Thu, 04 Mar 2021 05:06:07 GMT",
+                "X-Content-Type-Options": "nosniff",
+                "X-Frame-Options": "DENY"
+            },
+            "method": "GET",
+            "modtime_unix_ms": 1614834367000,
+            "name": "empty_content_type",
+            "req_headers": [],
+            "status": 200,
+            "webserver_mode": ""
+        },
+        {
+            "body_base64": "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXo=",
+            "content_size": 26,
+            "content_type_in": "image/png",
+            "filename": "pic.png",
+            "force_download": false,
+            "headers": {
+                "Accept-Ranges": "bytes",
+                "Cache-Control": "private, max-age=86400",
+                "Content-Disposition": "inline;filename=\"pic.png\"; filename*=UTF-8''pic.png",
+                "Content-Length": "26",
+                "Content-Security-Policy": "Frame-ancestors 'none'",
+                "Content-Type": "image/png",
+                "Last-Modified": "Thu, 04 Mar 2021 05:06:07 GMT",
+                "X-Content-Type-Options": "nosniff",
+                "X-Frame-Options": "DENY"
+            },
+            "method": "GET",
+            "modtime_unix_ms": 1614834367000,
+            "name": "image_inline",
+            "req_headers": [],
+            "status": 200,
+            "webserver_mode": ""
+        },
+        {
+            "body_base64": "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXo=",
+            "content_size": 26,
+            "content_type_in": "image/png",
+            "filename": "pic.png",
+            "force_download": true,
+            "headers": {
+                "Accept-Ranges": "bytes",
+                "Cache-Control": "private, max-age=86400",
+                "Content-Disposition": "attachment;filename=\"pic.png\"; filename*=UTF-8''pic.png",
+                "Content-Length": "26",
+                "Content-Security-Policy": "Frame-ancestors 'none'",
+                "Content-Type": "image/png",
+                "Last-Modified": "Thu, 04 Mar 2021 05:06:07 GMT",
+                "X-Content-Type-Options": "nosniff",
+                "X-Frame-Options": "DENY"
+            },
+            "method": "GET",
+            "modtime_unix_ms": 1614834367000,
+            "name": "image_forced_download",
+            "req_headers": [],
+            "status": 200,
+            "webserver_mode": ""
+        },
+        {
+            "body_base64": "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXo=",
+            "content_size": 26,
+            "content_type_in": "text/html",
+            "filename": "page.html",
+            "force_download": false,
+            "headers": {
+                "Accept-Ranges": "bytes",
+                "Cache-Control": "private, max-age=86400",
+                "Content-Disposition": "attachment;filename=\"page.html\"; filename*=UTF-8''page.html",
+                "Content-Length": "26",
+                "Content-Security-Policy": "Frame-ancestors 'none'",
+                "Content-Type": "text/plain",
+                "Last-Modified": "Thu, 04 Mar 2021 05:06:07 GMT",
+                "X-Content-Type-Options": "nosniff",
+                "X-Frame-Options": "DENY"
+            },
+            "method": "GET",
+            "modtime_unix_ms": 1614834367000,
+            "name": "unsafe_html",
+            "req_headers": [],
+            "status": 200,
+            "webserver_mode": ""
+        },
+        {
+            "body_base64": "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXo=",
+            "content_size": 26,
+            "content_type_in": "text/html; charset=utf-8",
+            "filename": "page.html",
+            "force_download": false,
+            "headers": {
+                "Accept-Ranges": "bytes",
+                "Cache-Control": "private, max-age=86400",
+                "Content-Disposition": "attachment;filename=\"page.html\"; filename*=UTF-8''page.html",
+                "Content-Length": "26",
+                "Content-Security-Policy": "Frame-ancestors 'none'",
+                "Content-Type": "text/plain",
+                "Last-Modified": "Thu, 04 Mar 2021 05:06:07 GMT",
+                "X-Content-Type-Options": "nosniff",
+                "X-Frame-Options": "DENY"
+            },
+            "method": "GET",
+            "modtime_unix_ms": 1614834367000,
+            "name": "unsafe_html_charset",
+            "req_headers": [],
+            "status": 200,
+            "webserver_mode": ""
+        },
+        {
+            "body_base64": "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXo=",
+            "content_size": 26,
+            "content_type_in": "application/javascript",
+            "filename": "app.js",
+            "force_download": false,
+            "headers": {
+                "Accept-Ranges": "bytes",
+                "Cache-Control": "private, max-age=86400",
+                "Content-Disposition": "attachment;filename=\"app.js\"; filename*=UTF-8''app.js",
+                "Content-Length": "26",
+                "Content-Security-Policy": "Frame-ancestors 'none'",
+                "Content-Type": "text/plain",
+                "Last-Modified": "Thu, 04 Mar 2021 05:06:07 GMT",
+                "X-Content-Type-Options": "nosniff",
+                "X-Frame-Options": "DENY"
+            },
+            "method": "GET",
+            "modtime_unix_ms": 1614834367000,
+            "name": "unsafe_javascript",
+            "req_headers": [],
+            "status": 200,
+            "webserver_mode": ""
+        },
+        {
+            "body_base64": "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXo=",
+            "content_size": 26,
+            "content_type_in": "video/mp4; codecs=avc1",
+            "filename": "clip.mp4",
+            "force_download": false,
+            "headers": {
+                "Accept-Ranges": "bytes",
+                "Cache-Control": "private, max-age=86400",
+                "Content-Disposition": "inline;filename=\"clip.mp4\"; filename*=UTF-8''clip.mp4",
+                "Content-Length": "26",
+                "Content-Security-Policy": "Frame-ancestors 'none'",
+                "Content-Type": "video/mp4; codecs=avc1",
+                "Last-Modified": "Thu, 04 Mar 2021 05:06:07 GMT",
+                "X-Content-Type-Options": "nosniff",
+                "X-Frame-Options": "DENY"
+            },
+            "method": "GET",
+            "modtime_unix_ms": 1614834367000,
+            "name": "media_prefix_match",
+            "req_headers": [],
+            "status": 200,
+            "webserver_mode": ""
+        },
+        {
+            "body_base64": "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXo=",
+            "content_size": 26,
+            "content_type_in": "application/pdf",
+            "filename": "my report.pdf",
+            "force_download": false,
+            "headers": {
+                "Accept-Ranges": "bytes",
+                "Cache-Control": "private, max-age=86400",
+                "Content-Disposition": "attachment;filename=\"my%20report.pdf\"; filename*=UTF-8''my%20report.pdf",
+                "Content-Length": "26",
+                "Content-Security-Policy": "Frame-ancestors 'none'",
+                "Content-Type": "application/pdf",
+                "Last-Modified": "Thu, 04 Mar 2021 05:06:07 GMT",
+                "X-Content-Type-Options": "nosniff",
+                "X-Frame-Options": "DENY"
+            },
+            "method": "GET",
+            "modtime_unix_ms": 1614834367000,
+            "name": "filename_with_space",
+            "req_headers": [],
+            "status": 200,
+            "webserver_mode": ""
+        },
+        {
+            "body_base64": "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXo=",
+            "content_size": 26,
+            "content_type_in": "text/plain",
+            "filename": "he said \"hi\".txt",
+            "force_download": false,
+            "headers": {
+                "Accept-Ranges": "bytes",
+                "Cache-Control": "private, max-age=86400",
+                "Content-Disposition": "attachment;filename=\"he%20said%20%22hi%22.txt\"; filename*=UTF-8''he%20said%20%22hi%22.txt",
+                "Content-Length": "26",
+                "Content-Security-Policy": "Frame-ancestors 'none'",
+                "Content-Type": "text/plain",
+                "Last-Modified": "Thu, 04 Mar 2021 05:06:07 GMT",
+                "X-Content-Type-Options": "nosniff",
+                "X-Frame-Options": "DENY"
+            },
+            "method": "GET",
+            "modtime_unix_ms": 1614834367000,
+            "name": "filename_with_quote",
+            "req_headers": [],
+            "status": 200,
+            "webserver_mode": ""
+        },
+        {
+            "body_base64": "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXo=",
+            "content_size": 26,
+            "content_type_in": "text/plain",
+            "filename": "réunion-日本.txt",
+            "force_download": false,
+            "headers": {
+                "Accept-Ranges": "bytes",
+                "Cache-Control": "private, max-age=86400",
+                "Content-Disposition": "attachment;filename=\"r%C3%A9union-%E6%97%A5%E6%9C%AC.txt\"; filename*=UTF-8''r%C3%A9union-%E6%97%A5%E6%9C%AC.txt",
+                "Content-Length": "26",
+                "Content-Security-Policy": "Frame-ancestors 'none'",
+                "Content-Type": "text/plain",
+                "Last-Modified": "Thu, 04 Mar 2021 05:06:07 GMT",
+                "X-Content-Type-Options": "nosniff",
+                "X-Frame-Options": "DENY"
+            },
+            "method": "GET",
+            "modtime_unix_ms": 1614834367000,
+            "name": "filename_unicode",
+            "req_headers": [],
+            "status": 200,
+            "webserver_mode": ""
+        },
+        {
+            "body_base64": "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXo=",
+            "content_size": 26,
+            "content_type_in": "text/plain",
+            "filename": "a/b.txt",
+            "force_download": false,
+            "headers": {
+                "Accept-Ranges": "bytes",
+                "Cache-Control": "private, max-age=86400",
+                "Content-Disposition": "attachment;filename=\"a%2Fb.txt\"; filename*=UTF-8''a%2Fb.txt",
+                "Content-Length": "26",
+                "Content-Security-Policy": "Frame-ancestors 'none'",
+                "Content-Type": "text/plain",
+                "Last-Modified": "Thu, 04 Mar 2021 05:06:07 GMT",
+                "X-Content-Type-Options": "nosniff",
+                "X-Frame-Options": "DENY"
+            },
+            "method": "GET",
+            "modtime_unix_ms": 1614834367000,
+            "name": "filename_with_slash",
+            "req_headers": [],
+            "status": 200,
+            "webserver_mode": ""
+        },
+        {
+            "body_base64": "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXo=",
+            "content_size": 26,
+            "content_type_in": "text/plain",
+            "filename": "",
+            "force_download": false,
+            "headers": {
+                "Accept-Ranges": "bytes",
+                "Cache-Control": "private, max-age=86400",
+                "Content-Disposition": "attachment;filename=\"\"; filename*=UTF-8''",
+                "Content-Length": "26",
+                "Content-Security-Policy": "Frame-ancestors 'none'",
+                "Content-Type": "text/plain",
+                "Last-Modified": "Thu, 04 Mar 2021 05:06:07 GMT",
+                "X-Content-Type-Options": "nosniff",
+                "X-Frame-Options": "DENY"
+            },
+            "method": "GET",
+            "modtime_unix_ms": 1614834367000,
+            "name": "filename_empty",
+            "req_headers": [],
+            "status": 200,
+            "webserver_mode": ""
+        },
+        {
+            "body_base64": "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXo=",
+            "content_size": 0,
+            "content_type_in": "image/png",
+            "filename": "thumb.png",
+            "force_download": false,
+            "headers": {
+                "Accept-Ranges": "bytes",
+                "Cache-Control": "private, max-age=86400",
+                "Content-Disposition": "inline;filename=\"thumb.png\"; filename*=UTF-8''thumb.png",
+                "Content-Length": "26",
+                "Content-Security-Policy": "Frame-ancestors 'none'",
+                "Content-Type": "image/png",
+                "Last-Modified": "Thu, 04 Mar 2021 05:06:07 GMT",
+                "X-Content-Type-Options": "nosniff",
+                "X-Frame-Options": "DENY"
+            },
+            "method": "GET",
+            "modtime_unix_ms": 1614834367000,
+            "name": "size_zero",
+            "req_headers": [],
+            "status": 200,
+            "webserver_mode": ""
+        },
+        {
+            "body_base64": "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXo=",
+            "content_size": 26,
+            "content_type_in": "text/plain",
+            "filename": "notes.txt",
+            "force_download": false,
+            "headers": {
+                "Accept-Ranges": "bytes",
+                "Cache-Control": "private, max-age=86400",
+                "Content-Disposition": "attachment;filename=\"notes.txt\"; filename*=UTF-8''notes.txt",
+                "Content-Length": "26",
+                "Content-Security-Policy": "Frame-ancestors 'none'",
+                "Content-Type": "text/plain",
+                "Last-Modified": "Thu, 04 Mar 2021 05:06:07 GMT",
+                "X-Content-Type-Options": "nosniff",
+                "X-Frame-Options": "DENY",
+                "X-Uncompressed-Content-Length": "26"
+            },
+            "method": "GET",
+            "modtime_unix_ms": 1614834367000,
+            "name": "gzip_mode",
+            "req_headers": [],
+            "status": 200,
+            "webserver_mode": "gzip"
+        },
+        {
+            "body_base64": "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXo=",
+            "content_size": 26,
+            "content_type_in": "text/plain",
+            "filename": "notes.txt",
+            "force_download": false,
+            "headers": {
+                "Accept-Ranges": "bytes",
+                "Cache-Control": "private, max-age=86400",
+                "Content-Disposition": "attachment;filename=\"notes.txt\"; filename*=UTF-8''notes.txt",
+                "Content-Length": "26",
+                "Content-Security-Policy": "Frame-ancestors 'none'",
+                "Content-Type": "text/plain",
+                "X-Content-Type-Options": "nosniff",
+                "X-Frame-Options": "DENY"
+            },
+            "method": "GET",
+            "modtime_unix_ms": null,
+            "name": "modtime_zero",
+            "req_headers": [],
+            "status": 200,
+            "webserver_mode": ""
+        },
+        {
+            "body_base64": "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXo=",
+            "content_size": 26,
+            "content_type_in": "text/plain",
+            "filename": "notes.txt",
+            "force_download": false,
+            "headers": {
+                "Accept-Ranges": "bytes",
+                "Cache-Control": "private, max-age=86400",
+                "Content-Disposition": "attachment;filename=\"notes.txt\"; filename*=UTF-8''notes.txt",
+                "Content-Length": "26",
+                "Content-Security-Policy": "Frame-ancestors 'none'",
+                "Content-Type": "text/plain",
+                "X-Content-Type-Options": "nosniff",
+                "X-Frame-Options": "DENY"
+            },
+            "method": "GET",
+            "modtime_unix_ms": 0,
+            "name": "modtime_unix_epoch",
+            "req_headers": [],
+            "status": 200,
+            "webserver_mode": ""
+        },
+        {
+            "body_base64": "",
+            "content_size": 26,
+            "content_type_in": "text/plain",
+            "filename": "notes.txt",
+            "force_download": false,
+            "headers": {
+                "Accept-Ranges": "bytes",
+                "Cache-Control": "private, max-age=86400",
+                "Content-Disposition": "attachment;filename=\"notes.txt\"; filename*=UTF-8''notes.txt",
+                "Content-Length": "26",
+                "Content-Security-Policy": "Frame-ancestors 'none'",
+                "Content-Type": "text/plain",
+                "Last-Modified": "Thu, 04 Mar 2021 05:06:07 GMT",
+                "X-Content-Type-Options": "nosniff",
+                "X-Frame-Options": "DENY"
+            },
+            "method": "HEAD",
+            "modtime_unix_ms": 1614834367000,
+            "name": "head_request",
+            "req_headers": [],
+            "status": 200,
+            "webserver_mode": ""
+        },
+        {
+            "body_base64": "YWJjZGU=",
+            "content_size": 26,
+            "content_type_in": "text/plain",
+            "filename": "notes.txt",
+            "force_download": false,
+            "headers": {
+                "Accept-Ranges": "bytes",
+                "Cache-Control": "private, max-age=86400",
+                "Content-Disposition": "attachment;filename=\"notes.txt\"; filename*=UTF-8''notes.txt",
+                "Content-Length": "5",
+                "Content-Range": "bytes 0-4/26",
+                "Content-Security-Policy": "Frame-ancestors 'none'",
+                "Content-Type": "text/plain",
+                "Last-Modified": "Thu, 04 Mar 2021 05:06:07 GMT",
+                "X-Content-Type-Options": "nosniff",
+                "X-Frame-Options": "DENY"
+            },
+            "method": "GET",
+            "modtime_unix_ms": 1614834367000,
+            "name": "range_prefix",
+            "req_headers": [
+                {
+                    "name": "Range",
+                    "value": "bytes=0-4"
+                }
+            ],
+            "status": 206,
+            "webserver_mode": ""
+        },
+        {
+            "body_base64": "a2xtbm9wcXJzdA==",
+            "content_size": 26,
+            "content_type_in": "text/plain",
+            "filename": "notes.txt",
+            "force_download": false,
+            "headers": {
+                "Accept-Ranges": "bytes",
+                "Cache-Control": "private, max-age=86400",
+                "Content-Disposition": "attachment;filename=\"notes.txt\"; filename*=UTF-8''notes.txt",
+                "Content-Length": "10",
+                "Content-Range": "bytes 10-19/26",
+                "Content-Security-Policy": "Frame-ancestors 'none'",
+                "Content-Type": "text/plain",
+                "Last-Modified": "Thu, 04 Mar 2021 05:06:07 GMT",
+                "X-Content-Type-Options": "nosniff",
+                "X-Frame-Options": "DENY"
+            },
+            "method": "GET",
+            "modtime_unix_ms": 1614834367000,
+            "name": "range_middle",
+            "req_headers": [
+                {
+                    "name": "Range",
+                    "value": "bytes=10-19"
+                }
+            ],
+            "status": 206,
+            "webserver_mode": ""
+        },
+        {
+            "body_base64": "dXZ3eHl6",
+            "content_size": 26,
+            "content_type_in": "text/plain",
+            "filename": "notes.txt",
+            "force_download": false,
+            "headers": {
+                "Accept-Ranges": "bytes",
+                "Cache-Control": "private, max-age=86400",
+                "Content-Disposition": "attachment;filename=\"notes.txt\"; filename*=UTF-8''notes.txt",
+                "Content-Length": "6",
+                "Content-Range": "bytes 20-25/26",
+                "Content-Security-Policy": "Frame-ancestors 'none'",
+                "Content-Type": "text/plain",
+                "Last-Modified": "Thu, 04 Mar 2021 05:06:07 GMT",
+                "X-Content-Type-Options": "nosniff",
+                "X-Frame-Options": "DENY"
+            },
+            "method": "GET",
+            "modtime_unix_ms": 1614834367000,
+            "name": "range_open_ended",
+            "req_headers": [
+                {
+                    "name": "Range",
+                    "value": "bytes=20-"
+                }
+            ],
+            "status": 206,
+            "webserver_mode": ""
+        },
+        {
+            "body_base64": "dnd4eXo=",
+            "content_size": 26,
+            "content_type_in": "text/plain",
+            "filename": "notes.txt",
+            "force_download": false,
+            "headers": {
+                "Accept-Ranges": "bytes",
+                "Cache-Control": "private, max-age=86400",
+                "Content-Disposition": "attachment;filename=\"notes.txt\"; filename*=UTF-8''notes.txt",
+                "Content-Length": "5",
+                "Content-Range": "bytes 21-25/26",
+                "Content-Security-Policy": "Frame-ancestors 'none'",
+                "Content-Type": "text/plain",
+                "Last-Modified": "Thu, 04 Mar 2021 05:06:07 GMT",
+                "X-Content-Type-Options": "nosniff",
+                "X-Frame-Options": "DENY"
+            },
+            "method": "GET",
+            "modtime_unix_ms": 1614834367000,
+            "name": "range_suffix",
+            "req_headers": [
+                {
+                    "name": "Range",
+                    "value": "bytes=-5"
+                }
+            ],
+            "status": 206,
+            "webserver_mode": ""
+        },
+        {
+            "body_base64": "dXZ3eHl6",
+            "content_size": 26,
+            "content_type_in": "text/plain",
+            "filename": "notes.txt",
+            "force_download": false,
+            "headers": {
+                "Accept-Ranges": "bytes",
+                "Cache-Control": "private, max-age=86400",
+                "Content-Disposition": "attachment;filename=\"notes.txt\"; filename*=UTF-8''notes.txt",
+                "Content-Length": "6",
+                "Content-Range": "bytes 20-25/26",
+                "Content-Security-Policy": "Frame-ancestors 'none'",
+                "Content-Type": "text/plain",
+                "Last-Modified": "Thu, 04 Mar 2021 05:06:07 GMT",
+                "X-Content-Type-Options": "nosniff",
+                "X-Frame-Options": "DENY"
+            },
+            "method": "GET",
+            "modtime_unix_ms": 1614834367000,
+            "name": "range_past_end",
+            "req_headers": [
+                {
+                    "name": "Range",
+                    "value": "bytes=20-99"
+                }
+            ],
+            "status": 206,
+            "webserver_mode": ""
+        },
+        {
+            "body_base64": "aW52YWxpZCByYW5nZTogZmFpbGVkIHRvIG92ZXJsYXAK",
+            "content_size": 26,
+            "content_type_in": "text/plain",
+            "filename": "notes.txt",
+            "force_download": false,
+            "headers": {
+                "Content-Disposition": "attachment;filename=\"notes.txt\"; filename*=UTF-8''notes.txt",
+                "Content-Range": "bytes */26",
+                "Content-Security-Policy": "Frame-ancestors 'none'",
+                "Content-Type": "text/plain; charset=utf-8",
+                "X-Content-Type-Options": "nosniff",
+                "X-Frame-Options": "DENY"
+            },
+            "method": "GET",
+            "modtime_unix_ms": 1614834367000,
+            "name": "range_unsatisfiable",
+            "req_headers": [
+                {
+                    "name": "Range",
+                    "value": "bytes=100-200"
+                }
+            ],
+            "status": 416,
+            "webserver_mode": ""
+        },
+        {
+            "body_base64": "aW52YWxpZCByYW5nZQo=",
+            "content_size": 26,
+            "content_type_in": "text/plain",
+            "filename": "notes.txt",
+            "force_download": false,
+            "headers": {
+                "Content-Disposition": "attachment;filename=\"notes.txt\"; filename*=UTF-8''notes.txt",
+                "Content-Security-Policy": "Frame-ancestors 'none'",
+                "Content-Type": "text/plain; charset=utf-8",
+                "X-Content-Type-Options": "nosniff",
+                "X-Frame-Options": "DENY"
+            },
+            "method": "GET",
+            "modtime_unix_ms": 1614834367000,
+            "name": "range_malformed",
+            "req_headers": [
+                {
+                    "name": "Range",
+                    "value": "chunks=1-2"
+                }
+            ],
+            "status": 416,
+            "webserver_mode": ""
+        },
+        {
+            "body_base64": "LS05OTU4ZmQ5YjYzYjk3YzY5NWNhNDcwY2U5M2VhMmQ0ZWNmYTk3YmNiZWVmODQwOTAxMDAzNDM2YmVkOGUNCkNvbnRlbnQtUmFuZ2U6IGJ5dGVzIDAtNC8yNg0KQ29udGVudC1UeXBlOiB0ZXh0L3BsYWluDQoNCmFiY2RlDQotLTk5NThmZDliNjNiOTdjNjk1Y2E0NzBjZTkzZWEyZDRlY2ZhOTdiY2JlZWY4NDA5MDEwMDM0MzZiZWQ4ZQ0KQ29udGVudC1SYW5nZTogYnl0ZXMgMTAtMTQvMjYNCkNvbnRlbnQtVHlwZTogdGV4dC9wbGFpbg0KDQprbG1ubw0KLS05OTU4ZmQ5YjYzYjk3YzY5NWNhNDcwY2U5M2VhMmQ0ZWNmYTk3YmNiZWVmODQwOTAxMDAzNDM2YmVkOGUtLQ0K",
+            "content_size": 26,
+            "content_type_in": "text/plain",
+            "filename": "notes.txt",
+            "force_download": false,
+            "headers": {
+                "Accept-Ranges": "bytes",
+                "Cache-Control": "private, max-age=86400",
+                "Content-Disposition": "attachment;filename=\"notes.txt\"; filename*=UTF-8''notes.txt",
+                "Content-Length": "324",
+                "Content-Security-Policy": "Frame-ancestors 'none'",
+                "Content-Type": "multipart/byteranges; boundary=9958fd9b63b97c695ca470ce93ea2d4ecfa97bcbeef840901003436bed8e",
+                "Last-Modified": "Thu, 04 Mar 2021 05:06:07 GMT",
+                "X-Content-Type-Options": "nosniff",
+                "X-Frame-Options": "DENY"
+            },
+            "method": "GET",
+            "modtime_unix_ms": 1614834367000,
+            "name": "range_multiple",
+            "req_headers": [
+                {
+                    "name": "Range",
+                    "value": "bytes=0-4,10-14"
+                }
+            ],
+            "status": 206,
+            "webserver_mode": ""
+        },
+        {
+            "body_base64": "",
+            "content_size": 26,
+            "content_type_in": "text/plain",
+            "filename": "notes.txt",
+            "force_download": false,
+            "headers": {
+                "Accept-Ranges": "bytes",
+                "Cache-Control": "private, max-age=86400",
+                "Content-Disposition": "attachment;filename=\"notes.txt\"; filename*=UTF-8''notes.txt",
+                "Content-Length": "5",
+                "Content-Range": "bytes 0-4/26",
+                "Content-Security-Policy": "Frame-ancestors 'none'",
+                "Content-Type": "text/plain",
+                "Last-Modified": "Thu, 04 Mar 2021 05:06:07 GMT",
+                "X-Content-Type-Options": "nosniff",
+                "X-Frame-Options": "DENY"
+            },
+            "method": "HEAD",
+            "modtime_unix_ms": 1614834367000,
+            "name": "range_head",
+            "req_headers": [
+                {
+                    "name": "Range",
+                    "value": "bytes=0-4"
+                }
+            ],
+            "status": 206,
+            "webserver_mode": ""
+        },
+        {
+            "body_base64": "",
+            "content_size": 26,
+            "content_type_in": "text/plain",
+            "filename": "notes.txt",
+            "force_download": false,
+            "headers": {
+                "Cache-Control": "private, max-age=86400",
+                "Content-Disposition": "attachment;filename=\"notes.txt\"; filename*=UTF-8''notes.txt",
+                "Content-Security-Policy": "Frame-ancestors 'none'",
+                "Last-Modified": "Thu, 04 Mar 2021 05:06:07 GMT",
+                "X-Content-Type-Options": "nosniff",
+                "X-Frame-Options": "DENY"
+            },
+            "method": "GET",
+            "modtime_unix_ms": 1614834367000,
+            "name": "if_modified_since_equal",
+            "req_headers": [
+                {
+                    "name": "If-Modified-Since",
+                    "value": "Thu, 04 Mar 2021 05:06:07 GMT"
+                }
+            ],
+            "status": 304,
+            "webserver_mode": ""
+        },
+        {
+            "body_base64": "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXo=",
+            "content_size": 26,
+            "content_type_in": "text/plain",
+            "filename": "notes.txt",
+            "force_download": false,
+            "headers": {
+                "Accept-Ranges": "bytes",
+                "Cache-Control": "private, max-age=86400",
+                "Content-Disposition": "attachment;filename=\"notes.txt\"; filename*=UTF-8''notes.txt",
+                "Content-Length": "26",
+                "Content-Security-Policy": "Frame-ancestors 'none'",
+                "Content-Type": "text/plain",
+                "Last-Modified": "Thu, 04 Mar 2021 05:06:07 GMT",
+                "X-Content-Type-Options": "nosniff",
+                "X-Frame-Options": "DENY"
+            },
+            "method": "GET",
+            "modtime_unix_ms": 1614834367000,
+            "name": "if_modified_since_older",
+            "req_headers": [
+                {
+                    "name": "If-Modified-Since",
+                    "value": "Thu, 04 Mar 2021 04:06:07 GMT"
+                }
+            ],
+            "status": 200,
+            "webserver_mode": ""
+        },
+        {
+            "body_base64": "",
+            "content_size": 26,
+            "content_type_in": "text/plain",
+            "filename": "notes.txt",
+            "force_download": false,
+            "headers": {
+                "Cache-Control": "private, max-age=86400",
+                "Content-Disposition": "attachment;filename=\"notes.txt\"; filename*=UTF-8''notes.txt",
+                "Content-Length": "26",
+                "Content-Security-Policy": "Frame-ancestors 'none'",
+                "Content-Type": "text/plain",
+                "Last-Modified": "Thu, 04 Mar 2021 05:06:07 GMT",
+                "X-Content-Type-Options": "nosniff",
+                "X-Frame-Options": "DENY"
+            },
+            "method": "GET",
+            "modtime_unix_ms": 1614834367000,
+            "name": "if_unmodified_since_older",
+            "req_headers": [
+                {
+                    "name": "If-Unmodified-Since",
+                    "value": "Thu, 04 Mar 2021 04:06:07 GMT"
+                }
+            ],
+            "status": 412,
+            "webserver_mode": ""
+        },
+        {
+            "body_base64": "",
+            "content_size": 26,
+            "content_type_in": "text/plain",
+            "filename": "notes.txt",
+            "force_download": false,
+            "headers": {
+                "Cache-Control": "private, max-age=86400",
+                "Content-Disposition": "attachment;filename=\"notes.txt\"; filename*=UTF-8''notes.txt",
+                "Content-Security-Policy": "Frame-ancestors 'none'",
+                "Last-Modified": "Thu, 04 Mar 2021 05:06:07 GMT",
+                "X-Content-Type-Options": "nosniff",
+                "X-Frame-Options": "DENY"
+            },
+            "method": "GET",
+            "modtime_unix_ms": 1614834367000,
+            "name": "if_none_match_star",
+            "req_headers": [
+                {
+                    "name": "If-None-Match",
+                    "value": "*"
+                }
+            ],
+            "status": 304,
+            "webserver_mode": ""
+        },
+        {
+            "body_base64": "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXo=",
+            "content_size": 26,
+            "content_type_in": "text/plain",
+            "filename": "notes.txt",
+            "force_download": false,
+            "headers": {
+                "Accept-Ranges": "bytes",
+                "Cache-Control": "private, max-age=86400",
+                "Content-Disposition": "attachment;filename=\"notes.txt\"; filename*=UTF-8''notes.txt",
+                "Content-Length": "26",
+                "Content-Security-Policy": "Frame-ancestors 'none'",
+                "Content-Type": "text/plain",
+                "Last-Modified": "Thu, 04 Mar 2021 05:06:07 GMT",
+                "X-Content-Type-Options": "nosniff",
+                "X-Frame-Options": "DENY"
+            },
+            "method": "GET",
+            "modtime_unix_ms": 1614834367000,
+            "name": "if_match_star",
+            "req_headers": [
+                {
+                    "name": "If-Match",
+                    "value": "*"
+                }
+            ],
+            "status": 200,
+            "webserver_mode": ""
+        },
+        {
+            "body_base64": "YWJjZGU=",
+            "content_size": 26,
+            "content_type_in": "text/plain",
+            "filename": "notes.txt",
+            "force_download": false,
+            "headers": {
+                "Accept-Ranges": "bytes",
+                "Cache-Control": "private, max-age=86400",
+                "Content-Disposition": "attachment;filename=\"notes.txt\"; filename*=UTF-8''notes.txt",
+                "Content-Length": "5",
+                "Content-Range": "bytes 0-4/26",
+                "Content-Security-Policy": "Frame-ancestors 'none'",
+                "Content-Type": "text/plain",
+                "Last-Modified": "Thu, 04 Mar 2021 05:06:07 GMT",
+                "X-Content-Type-Options": "nosniff",
+                "X-Frame-Options": "DENY"
+            },
+            "method": "GET",
+            "modtime_unix_ms": 1614834367000,
+            "name": "if_range_matching_date",
+            "req_headers": [
+                {
+                    "name": "If-Range",
+                    "value": "Thu, 04 Mar 2021 05:06:07 GMT"
+                },
+                {
+                    "name": "Range",
+                    "value": "bytes=0-4"
+                }
+            ],
+            "status": 206,
+            "webserver_mode": ""
+        },
+        {
+            "body_base64": "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXo=",
+            "content_size": 26,
+            "content_type_in": "text/plain",
+            "filename": "notes.txt",
+            "force_download": false,
+            "headers": {
+                "Accept-Ranges": "bytes",
+                "Cache-Control": "private, max-age=86400",
+                "Content-Disposition": "attachment;filename=\"notes.txt\"; filename*=UTF-8''notes.txt",
+                "Content-Length": "26",
+                "Content-Security-Policy": "Frame-ancestors 'none'",
+                "Content-Type": "text/plain",
+                "Last-Modified": "Thu, 04 Mar 2021 05:06:07 GMT",
+                "X-Content-Type-Options": "nosniff",
+                "X-Frame-Options": "DENY"
+            },
+            "method": "GET",
+            "modtime_unix_ms": 1614834367000,
+            "name": "if_range_stale_date",
+            "req_headers": [
+                {
+                    "name": "If-Range",
+                    "value": "Thu, 04 Mar 2021 04:06:07 GMT"
+                },
+                {
+                    "name": "Range",
+                    "value": "bytes=0-4"
+                }
+            ],
+            "status": 200,
+            "webserver_mode": ""
+        }
+    ]
+}
