@@ -14,7 +14,7 @@
 //! [`backend_errors`].
 
 use mm_model::file_info::FileInfo;
-use mm_model::utils::AppError;
+use mm_model::utils::{AppError, AppResult};
 use mm_store::file_info_store::FileInfoStore;
 
 use crate::App;
@@ -76,6 +76,51 @@ impl App {
         }
 
         Ok(info)
+    }
+
+    /// The row read `getFile` makes, which is **not** [`App::get_file_info`].
+    ///
+    /// `getFile` reaches past the app layer into `Store().FileInfo().GetByIds([]{id}, true, true,
+    /// false)` (api4/file.go:531), and the three consequences are worth naming because they are
+    /// the reason this exists as a second function:
+    ///
+    /// 1. `includeDeleted` is **true**, so a soft-deleted row comes back. The handler decides
+    ///    what to do with it.
+    /// 2. The mini-preview repair — a write — is skipped, so this read never has to be forwarded.
+    /// 3. The error id is `api.file.get_file_info.app_error`, not `app.file_info.get.app_error`;
+    ///    two ids for the same miss on two routes one segment apart.
+    ///
+    /// `GetByIds` also drops `FileInfo.Archived` on the floor (see `mm_store::file_info_store`),
+    /// which is invisible here: `getFile` serves bytes and never marshals the row.
+    #[tracing::instrument(skip(self), fields(file_id = %file_id))]
+    pub async fn get_file_info_including_deleted(&self, file_id: &str) -> AppResult<FileInfo> {
+        let rows = self
+            .store()
+            .file_info()
+            .get_by_ids(std::slice::from_ref(&file_id.to_owned()), true)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "file info lookup failed");
+                AppError::boxed(
+                    "getFile",
+                    "api.file.get_file_info.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })?;
+
+        // `len(fileInfos) == 0` is a **404** with the same id as the 500 above it, so a client
+        // branching on the id cannot tell a missing file from a broken query.
+        rows.into_iter().next().ok_or_else(|| {
+            AppError::boxed(
+                "getFile",
+                "api.file.get_file_info.app_error",
+                None,
+                String::new(),
+                404,
+            )
+        })
     }
 
     /// The guard on `generateMiniPreview` (app/file.go:1253), lifted out so both file reads use
@@ -276,5 +321,72 @@ impl App {
                 500,
             ))
         })
+    }
+}
+
+/// Port of `app.GeneratePublicLinkHash` (app/file.go:606).
+///
+/// SHA-256 over the **salt first, then the file id**, base64 with `RawURLEncoding` — URL-safe
+/// alphabet, no padding. All three are easy to get backwards and none of them would show up in a
+/// smoke test, because a wrong hash simply makes every public link fail its comparison.
+///
+/// Pinned by `fixtures/behaviour_filestore.json` (`public_link_hash`), which calls Go's own
+/// function.
+pub fn generate_public_link_hash(file_id: &str, salt: &str) -> String {
+    use base64::Engine;
+    use sha2::{Digest, Sha256};
+
+    let mut hash = Sha256::new();
+    hash.update(salt.as_bytes());
+    hash.update(file_id.as_bytes());
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(hash.finalize())
+}
+
+/// Port of `getPublicFile`'s hash check (api4/file.go:918) — `subtle.ConstantTimeCompare`
+/// against [`generate_public_link_hash`].
+///
+/// Constant time is not decoration here. The presented hash is attacker-controlled and the
+/// expected one is derived from a server secret; a short-circuiting `==` leaks the length of the
+/// matching prefix through timing, which is enough to recover a link hash byte by byte. Go uses
+/// `crypto/subtle` for exactly this reason and so does the port.
+///
+/// `ConstantTimeCompare` returns `0` for inputs of different lengths **without comparing them**,
+/// so the length is not protected — in Go either. Reproduced rather than improved.
+pub fn public_link_hash_matches(file_id: &str, salt: &str, presented: &str) -> bool {
+    use subtle::ConstantTimeEq;
+
+    let expected = generate_public_link_hash(file_id, salt);
+    if presented.len() != expected.len() {
+        return false;
+    }
+    presented.as_bytes().ct_eq(expected.as_bytes()).into()
+}
+
+#[cfg(test)]
+mod public_link_go_parity {
+    use super::generate_public_link_hash;
+
+    /// Asserted against `app.GeneratePublicLinkHash` itself.
+    ///
+    /// The corpus includes a row with the id and salt **swapped**, so a port that hashed them the
+    /// other way round produces a hash the fixture does not hold — which is the only way to catch
+    /// an operand-order mistake, since both orders are the same length and the same alphabet.
+    #[test]
+    fn public_link_hash_matches_go() {
+        let oracle: serde_json::Value =
+            serde_json::from_str(include_str!("../../../fixtures/behaviour_filestore.json"))
+                .expect("behaviour_filestore.json is generated by reference/dump");
+
+        let cases = oracle["public_link_hash"].as_array().unwrap();
+        assert!(cases.len() >= 6);
+        for case in cases {
+            let file_id = case["file_id"].as_str().unwrap();
+            let salt = case["salt"].as_str().unwrap();
+            assert_eq!(
+                generate_public_link_hash(file_id, salt),
+                case["hash"].as_str().unwrap(),
+                "GeneratePublicLinkHash({file_id:?}, {salt:?})"
+            );
+        }
     }
 }

@@ -203,6 +203,13 @@ def served():
         for verb in re.findall(r'\b(get|post|put|delete|patch)\s*\(\s*[a-z_]+::', body):
             here = normalise(path)
             out.add((verb.upper(), ALIASES.get(here, here)))
+            # axum's `get` answers HEAD as well, dispatching it to the GET handler with the body
+            # removed (`MethodRouter::call_with_state` tries `head` and then falls through to
+            # `get`; axum 0.8's own `get_accepts_head` test pins it). Go registers HEAD
+            # explicitly on the file routes, so without this the inventory would under-count what
+            # this server actually answers.
+            if verb == "get":
+                out.add(("HEAD", ALIASES.get(here, here)))
     return out
 
 

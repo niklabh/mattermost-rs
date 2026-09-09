@@ -37,6 +37,8 @@ pub mod system_store;
 pub mod team_store;
 pub mod terms_of_service_store;
 pub mod thread_store;
+/// Port of `SqlUploadSessionStore` — the two reads.
+pub mod upload_session_store;
 pub mod user_access_token_store;
 pub mod user_store;
 pub mod user_terms_of_service_store;
@@ -65,6 +67,7 @@ pub use system_store::{SYSTEM_ACTIVE_LICENSE_ID, SqlSystemStore, SystemStore};
 pub use team_store::{SqlTeamStore, TeamStore};
 pub use terms_of_service_store::{SqlTermsOfServiceStore, TermsOfServiceStore};
 pub use thread_store::{SqlThreadStore, ThreadStore};
+pub use upload_session_store::{SqlUploadSessionStore, UploadSessionStore};
 pub use user_access_token_store::{SqlUserAccessTokenStore, UserAccessTokenStore};
 pub use user_store::{SqlUserStore, UserStore};
 pub use user_terms_of_service_store::{SqlUserTermsOfServiceStore, UserTermsOfServiceStore};
@@ -89,6 +92,7 @@ pub struct SqlStore {
     emoji: SqlEmojiStore,
     draft: SqlDraftStore,
     file_info: SqlFileInfoStore,
+    upload_session: SqlUploadSessionStore,
     job: SqlJobStore,
     oauth: SqlOAuthStore,
     post: SqlPostStore,
@@ -144,6 +148,7 @@ impl SqlStore {
             emoji: SqlEmojiStore::new(pool.clone()),
             draft: SqlDraftStore::new(pool.clone()),
             file_info: SqlFileInfoStore::new(pool.clone()),
+            upload_session: SqlUploadSessionStore::new(pool.clone()),
             job: SqlJobStore::new(pool.clone()),
             oauth: SqlOAuthStore::new(pool.clone()),
             post: SqlPostStore::new(pool.clone()),
@@ -242,6 +247,11 @@ impl SqlStore {
 
     pub fn file_info(&self) -> &SqlFileInfoStore {
         &self.file_info
+    }
+
+    /// Port of `store.Store.UploadSession()`.
+    pub fn upload_session(&self) -> &SqlUploadSessionStore {
+        &self.upload_session
     }
 
     /// Port of `store.Store.Job()`.

@@ -847,6 +847,44 @@ pub async fn purge_api_fixtures() {
     PURGED.get_or_init(purge_api_fixtures_once).await;
 }
 
+/// Go's profile reads **500** on any `Users` row with a NULL `Nickname`, `FirstName`, `LastName`,
+/// `Position`, `LastPictureUpdate` or `MfaUsedTimestamps`.
+///
+/// Its `sqlx` scan cannot take a NULL into a `string` or an `int64`:
+/// `converting NULL to int64 is unsupported`, surfaced as `app.user.get_profiles.app_error`. This
+/// port reads the same row happily (`unwrap_or_default`), so the two servers disagree — but only
+/// for a row no Mattermost server would ever write, because Go's own `INSERT` fills every column.
+///
+/// The development database acquires such rows anyway: `mm-app`'s `db_authorization` suite plants
+/// one that omits the name columns, and `--workspace` runs that binary before this one. **Which
+/// tests then fail is a matter of execution order**, and it moved the day a new suite was added:
+/// `common_teams` lost eight tests to a 500 from `POST /channels/group` that had nothing to do
+/// with the route it covers, while a standalone re-run of the same file passed.
+///
+/// So the repair runs here, inside the purge, for the same reason the purge itself does — it is
+/// the earliest write of the run, before any fixture exists. It **normalises rather than
+/// deletes**: nothing another suite planted goes away, the columns it did not set become what a
+/// real row would carry, and `UpdateAt` is untouched so no etag moves.
+async fn make_every_user_scannable_by_go(pool: &sqlx::PgPool) {
+    let _ = sqlx::query(
+        "UPDATE users
+            SET nickname = COALESCE(nickname, ''),
+                firstname = COALESCE(firstname, ''),
+                lastname = COALESCE(lastname, ''),
+                position = COALESCE(position, ''),
+                lastpictureupdate = COALESCE(lastpictureupdate, 0),
+                mfausedtimestamps = COALESCE(mfausedtimestamps, 'null'::jsonb)
+          WHERE nickname IS NULL
+             OR firstname IS NULL
+             OR lastname IS NULL
+             OR position IS NULL
+             OR lastpictureupdate IS NULL
+             OR mfausedtimestamps IS NULL",
+    )
+    .execute(pool)
+    .await;
+}
+
 async fn purge_api_fixtures_once() {
     let Ok(url) = std::env::var("DATABASE_URL") else {
         return;
@@ -858,6 +896,10 @@ async fn purge_api_fixtures_once() {
     else {
         return;
     };
+
+    // Before the deletions: a row another binary planted with NULL columns breaks Go's profile
+    // reads for the whole run, and the deletions below do not remove it.
+    make_every_user_scannable_by_go(&pool).await;
 
     for statement in [
         "DELETE FROM channelmembers WHERE channelid IN (SELECT id FROM channels WHERE name LIKE 'mmrs-parity-%')",

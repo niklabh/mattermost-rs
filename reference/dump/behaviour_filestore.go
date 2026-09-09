@@ -45,6 +45,7 @@ import (
 	_ "golang.org/x/image/tiff"
 	_ "golang.org/x/image/webp"
 
+	"github.com/mattermost/mattermost/server/v8/channels/app"
 	"github.com/mattermost/mattermost/server/v8/platform/shared/filestore"
 	"github.com/mattermost/mattermost/server/v8/platform/shared/web"
 )
@@ -64,6 +65,7 @@ func writeFilestoreBehaviourFixture(outDir string) error {
 		"write_file_response": writeFileResponseAll(),
 		"local_backend":       backend,
 		"image_decode_config": imageDecodeConfigAll(),
+		"public_link_hash":    publicLinkHashAll(),
 		"unsafe_content_types": []string(func() []string {
 			s := make([]string, 0, len(web.UnsafeContentTypes))
 			s = append(s, web.UnsafeContentTypes[:]...)
@@ -536,6 +538,39 @@ func imageDecodeConfigAll() []map[string]any {
 			row["err_is_format"] = false
 		}
 		rows = append(rows, row)
+	}
+	return rows
+}
+
+
+// --- app.GeneratePublicLinkHash -----------------------------------------------------------------
+
+// publicLinkHashAll records `app.GeneratePublicLinkHash` (app/file.go:606) — SHA-256 over the
+// salt **then** the file id, base64'd with `RawURLEncoding`.
+//
+// Three details a reimplementation can get wrong and none of them would show up in a smoke test,
+// because a wrong hash simply means every public link 400s: the operand order (salt first), the
+// alphabet (URL-safe, `-` and `_`), and the padding (**raw**, no `=`). `getPublicFile` compares
+// the result with `subtle.ConstantTimeCompare`, so this is a security boundary as well as a wire
+// format.
+func publicLinkHashAll() []map[string]any {
+	corpus := [][2]string{
+		{"", ""},
+		{"fileid", ""},
+		{"", "salt"},
+		{"c5r6bi1z4jbcbjbwyj7uzcgtqy", "mmrsparityxxxxxxxxxxxxxxxxxxxxxx"},
+		{"c5r6bi1z4jbcbjbwyj7uzcgtqy", "a-different-salt"},
+		// Swapped, to record that the order matters — the two rows must differ.
+		{"mmrsparityxxxxxxxxxxxxxxxxxxxxxx", "c5r6bi1z4jbcbjbwyj7uzcgtqy"},
+		{"日本", "🧂"},
+	}
+	rows := make([]map[string]any, 0, len(corpus))
+	for _, pair := range corpus {
+		rows = append(rows, map[string]any{
+			"file_id": pair[0],
+			"salt":    pair[1],
+			"hash":    app.GeneratePublicLinkHash(pair[0], pair[1]),
+		})
 	}
 	return rows
 }

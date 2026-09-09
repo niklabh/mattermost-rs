@@ -238,9 +238,11 @@ async fn the_autocomplete_literal_does_not_land_on_get_emoji() {
     );
 }
 
-/// One segment deeper and unregistered, so it falls to the router's fallback whole.
+/// One segment deeper, and now served here — `mm_api::images::get_emoji_image` reads the bytes
+/// out of the local file backend. Kept in this suite because it is the routing question the rest
+/// of the module is about: `/emoji/{id}/image` must reach its own handler and not `getEmoji`.
 #[tokio::test]
-async fn the_image_subroute_is_forwarded() {
+async fn the_image_subroute_is_served_here() {
     if !stack_enabled() {
         return;
     }
@@ -265,11 +267,9 @@ async fn the_image_subroute_is_forwarded() {
         rs.headers()
             .get("x-mmrs-served-by")
             .and_then(|v| v.to_str().ok()),
-        Some("go"),
-        "{path} must be forwarded"
+        Some("rust"),
+        "{path} is served here now — the file backend landed with it"
     );
-    // Whatever Go answers — the development stack's file backend does not always hold the image
-    // this route reads, and a 404 from it is still a 404 that came from Go.
     assert_eq!(go.status(), rs.status(), "{path}: statuses must match");
 }
 

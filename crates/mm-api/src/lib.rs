@@ -19,6 +19,8 @@ pub mod data_retention;
 pub mod drafts;
 pub mod emoji;
 pub mod error;
+/// The four export routes and the two import ones.
+pub mod exports;
 pub mod feature_gates;
 /// `getFileInfo` — the one `/files/` route that returns JSON rather than bytes.
 /// Ten reads that refuse before they read anything. One module, eight `api4` files.
@@ -26,6 +28,8 @@ pub mod gated_reads;
 
 pub mod files;
 pub mod groups;
+/// The four routes that answer with a stored image: profile, team icon, emoji, brand.
+pub mod images;
 /// The three job reads. `getJobs`, `getJob` and `getJobsByType`.
 pub mod jobs;
 pub mod license;
@@ -50,6 +54,8 @@ pub mod teams;
 pub mod terms_of_service;
 /// The four personal-access-token reads.
 pub mod tokens;
+/// The two upload-session reads.
+pub mod uploads;
 pub mod usage;
 pub mod users;
 pub mod webhooks;
@@ -181,6 +187,81 @@ fn partially_migrated_with_ids(
         state.clone(),
         mux_segments_or_forward,
     ))
+}
+
+/// Port of the security headers `web.Handler.ServeHTTP` sets on **every** API response
+/// (web/handlers.go:242) and of the `Vary` that `gzhttp.GzipHandler` adds around it.
+///
+/// # This was missing from every migrated route, and no test could see it
+///
+/// Go sets these before the handler runs, so they are on the wire for all 285 route+method pairs
+/// this server answers — and until the file-bytes suite, **no parity test compared response
+/// headers at all**. `fetch_both` asserts bodies. So 264 pairs shipped without
+/// `Referrer-Policy`, `Permissions-Policy` or `Expires`, byte-identical in the body and
+/// materially different on the wire. See [D-207].
+///
+/// # Only our own responses
+///
+/// Guarded on `x-mmrs-served-by`, which every locally-served response carries and no proxied one
+/// does. A forwarded response already has Go's own headers, including the two per-request ones
+/// this cannot mint (`X-Request-Id`, `X-Version-Id`).
+///
+/// # Three details
+///
+/// - **`Permissions-Policy` is the empty string**, deliberately (Go's comment calls these
+///   "hardcoded sensible default values"). An empty header value is legal and is what Go sends.
+/// - **`Expires: 0` is `GET` only.** Go's guard is `if r.Method == "GET"`, so a `HEAD` on the
+///   same route has no `Expires` — which axum's GET/HEAD dispatch makes easy to get wrong, since
+///   the *handler* cannot tell the difference by then.
+/// - **`Vary: Accept-Encoding` comes from the gzip wrapper**, not from the handler, so it is
+///   present exactly when `WebserverMode` is `gzip` — the default. What this port does *not*
+///   reproduce is the compression itself: a client sending `Accept-Encoding: gzip` gets a
+///   compressed body from Go and an uncompressed one from us. See [D-208].
+///
+/// `Strict-Transport-Security` is not reproduced: it is gated on `TLSStrictTransport`, which
+/// defaults to `false` and is not modelled in [`mm_app::config::Config`].
+async fn go_global_headers(
+    State(state): State<AppState>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let is_get = request.method() == axum::http::Method::GET;
+    let gzip_mode = state.app.config().webserver_mode == "gzip";
+
+    let mut response = next.run(request).await;
+
+    // A forwarded response already carries Go's own headers.
+    if !response.headers().contains_key("x-mmrs-served-by") {
+        return response;
+    }
+
+    let headers = response.headers_mut();
+    headers.insert(
+        axum::http::HeaderName::from_static("permissions-policy"),
+        axum::http::HeaderValue::from_static(""),
+    );
+    headers.insert(
+        axum::http::header::X_CONTENT_TYPE_OPTIONS,
+        axum::http::HeaderValue::from_static("nosniff"),
+    );
+    headers.insert(
+        axum::http::HeaderName::from_static("referrer-policy"),
+        axum::http::HeaderValue::from_static("no-referrer"),
+    );
+    if is_get {
+        headers.insert(
+            axum::http::header::EXPIRES,
+            axum::http::HeaderValue::from_static("0"),
+        );
+    }
+    if gzip_mode {
+        headers.insert(
+            axum::http::header::VARY,
+            axum::http::HeaderValue::from_static("Accept-Encoding"),
+        );
+    }
+
+    response
 }
 
 /// Build the router.
@@ -913,13 +994,30 @@ pub fn router(state: AppState) -> Router {
         )
         // `BaseRoutes.File.Handle("/info")` (api4/file.go:39). `{file_id}` is id-shaped —
         // gorilla's class is `[A-Za-z0-9]+` (api.go:245) — so the id-charset middleware applies.
-        //
-        // Its five siblings under `/files/{file_id}` (`""`, `/thumbnail`, `/preview`, `/link`)
-        // and the `POST /files` collection are unregistered and fall to `Router::fallback`; all
-        // of them read the file backend, which this port does not have.
         .route(
             "/api/v4/files/{file_id}/info",
             partially_migrated_with_ids(&state, get(files::get_file_info)),
+        )
+        // `BaseRoutes.File.Handle("")` (api4/file.go:36) and its two derived-image siblings
+        // (:37, :38). Go registers each with `Methods(GET, HEAD)`, and **axum's `get` answers
+        // HEAD too**, dispatching it to the same handler with the body removed — so these three
+        // registrations cover six route+method pairs. `serve_content` still branches on the
+        // method itself, because Go's `ServeContent` sets `Content-Length` on a HEAD and only
+        // skips the copy.
+        //
+        // `POST /files` (uploadFileStream) is on the same path as the first of them and falls to
+        // `partially_migrated`'s method fallback.
+        .route(
+            "/api/v4/files/{file_id}",
+            partially_migrated_with_ids(&state, get(files::get_file)),
+        )
+        .route(
+            "/api/v4/files/{file_id}/thumbnail",
+            partially_migrated_with_ids(&state, get(files::get_file_thumbnail)),
+        )
+        .route(
+            "/api/v4/files/{file_id}/preview",
+            partially_migrated_with_ids(&state, get(files::get_file_preview)),
         )
         // `BaseRoutes.Channel.Handle("/pinned")` (api4/channel.go:60) — one segment deeper than
         // `/channels/{channel_id}` and a sibling of `/stats`, `/members` and `/posts`, all of
@@ -944,8 +1042,8 @@ pub fn router(state: AppState) -> Router {
         // router does not register it. The handler forwards the literals that ordering owns;
         // see `emoji::EMOJI_SHADOWED_LITERALS` for why the list has exactly one entry.
         //
-        // `/emoji/{emoji_id}/image` is one segment deeper and unregistered, so it falls to
-        // `Router::fallback` whole.
+        // `/emoji/{emoji_id}/image` is one segment deeper, so it shadows nothing; registered
+        // below with the other three stored-image routes.
         // `BaseRoutes.Emojis.Handle("")` (api4/emoji.go:15) — the bare `/emoji` collection, one
         // segment shorter than `{emoji_id}` below, so axum sees a distinct path and there is no
         // precedence question of the kind that route's comment describes. `GET` only; `POST`
@@ -984,6 +1082,67 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/emoji/autocomplete",
             partially_migrated(get(emoji::autocomplete_emojis)),
+        )
+        // The four stored-image routes. Each is one segment deeper than a route already here, so
+        // none of them shadows anything, and each carries its own permission rule — see
+        // `images` for the table.
+        .route(
+            "/api/v4/emoji/{emoji_id}/image",
+            partially_migrated_with_ids(&state, get(images::get_emoji_image)),
+        )
+        .route(
+            "/api/v4/users/{user_id}/image",
+            partially_migrated_with_ids(&state, get(images::get_profile_image)),
+        )
+        .route(
+            "/api/v4/teams/{team_id}/image",
+            partially_migrated_with_ids(&state, get(images::get_team_icon)),
+        )
+        // `BaseRoutes.Brand.Handle("/image")` (api4/brand.go:14). The GET is
+        // `APIHandlerTrustRequester` — **unauthenticated** — and the DELETE is session-required
+        // with `edit_brand`; the POST between them uploads a multipart image and stays
+        // forwarded through `partially_migrated`'s method fallback.
+        .route(
+            "/api/v4/brand/image",
+            partially_migrated(get(images::get_brand_image).delete(images::delete_brand_image)),
+        )
+        // `BaseRoutes.Exports` / `BaseRoutes.Export` (api.go:302, :304) and the two import
+        // routes. `{export_name}` and `{import_name}` are **not** id-shaped — gorilla's pattern
+        // is `.+\.zip`, which allows dots, dashes and slashes — so the id-charset middleware
+        // must not apply; the handlers carry their own suffix check instead and forward a name
+        // gorilla would not have routed. A multi-segment name does not match axum's single
+        // segment at all and falls to `Router::fallback`, which is the same answer.
+        .route(
+            "/api/v4/exports",
+            partially_migrated(get(exports::list_exports)),
+        )
+        .route(
+            "/api/v4/exports/{export_name}",
+            partially_migrated(get(exports::download_export).delete(exports::delete_export)),
+        )
+        .route(
+            "/api/v4/exports/{export_name}/presign-url",
+            partially_migrated(post(exports::generate_presign_url_export)),
+        )
+        .route(
+            "/api/v4/imports",
+            partially_migrated(get(exports::list_imports)),
+        )
+        .route(
+            "/api/v4/imports/{import_name}",
+            partially_migrated(axum::routing::delete(exports::delete_import)),
+        )
+        // `BaseRoutes.Upload` (api.go:249) and `BaseRoutes.User.Handle("/uploads")`
+        // (api4/user.go:118). Both are reads of `UploadSessions` rows and neither touches the
+        // file backend. The `POST` on each path — `uploadData` and nothing, respectively — falls
+        // to `partially_migrated`'s method fallback.
+        .route(
+            "/api/v4/uploads/{upload_id}",
+            partially_migrated_with_ids(&state, get(uploads::get_upload)),
+        )
+        .route(
+            "/api/v4/users/{user_id}/uploads",
+            partially_migrated_with_ids(&state, get(uploads::get_uploads_for_user)),
         )
         // `BaseRoutes.ChannelCategories` (api.go:231), the three GETs. The five writes on
         // these same paths fall to `partially_migrated`'s method fallback and stay forwarded —
@@ -1547,11 +1706,16 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/files/{file_id}/link",
             partially_migrated_with_ids(&state, get(gated_reads::get_file_link)),
         )
-        // `/files/{file_id}/public` is **not** registered, and the reason is worth stating: it is
-        // the only route in this family whose errors are not JSON. Because its path is outside
-        // `/api/`, `web.Handler` renders a signed HTML redirect page — `utils.RenderWebAppError`
-        // with the server's `AsymmetricSigningKey` — so reproducing even its 403 means porting
-        // ECDSA signing and the web-app error template. See [D-170].
+        // `/files/{file_id}/public` (api4/file.go:41) — outside `/api/`, unauthenticated, and
+        // the only route in this family whose **errors are not JSON**: `web.Handler` renders a
+        // signed HTML page through `utils.RenderWebAppError`, which needs the server's
+        // `AsymmetricSigningKey` ([D-170]). So the handler serves the success path and forwards
+        // every failure, including the 403 a stock server gives because `EnablePublicLink` is
+        // off. GET and HEAD, both through axum's `get`.
+        .route(
+            "/files/{file_id}/public",
+            partially_migrated_with_ids(&state, get(files::get_public_file)),
+        )
         .route(
             "/api/v4/cloud/preview/modal_data",
             partially_migrated(get(gated_reads::get_preview_modal_data)),
@@ -1631,6 +1795,12 @@ pub fn router(state: AppState) -> Router {
             partially_migrated(post(permissions::append_ancillary_permissions_post)),
         )
         .fallback(proxy::forward_to_go)
+        // Outermost, so it sees every response this server produces — including the proxy's,
+        // which it then leaves alone. See [`go_global_headers`].
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            go_global_headers,
+        ))
         .with_state(state)
 }
 

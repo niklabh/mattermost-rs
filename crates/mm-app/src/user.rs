@@ -943,6 +943,42 @@ fn get_user_error(err: StoreError) -> Box<AppError> {
     }
 }
 
+impl App {
+    /// Port of `app.App.UserCanSeeOtherUser` (app/user.go:2710).
+    ///
+    /// Three of its four branches are here and the fourth is forwarded:
+    ///
+    /// - **The caller asking about themselves is true**, checked first and without touching a
+    ///   store — so a user with no permissions at all can always read their own profile image.
+    /// - **No view restrictions is true**, which is every account on a stock server; see
+    ///   [`App::get_view_users_restrictions`] for why.
+    /// - **Restricted** would go on to ask whether the *other* user shares a team or a channel
+    ///   with the caller, through two store methods this port does not have
+    ///   (`Team().UserBelongsToTeams`, `Channel().UserBelongsToChannels`). Refused as
+    ///   [`crate::post::PrepareError::Unreproducible`] so the handler forwards.
+    ///
+    /// The restricted branch is reachable only for a guest account or a deployment that has
+    /// edited `system_user`'s permissions, which is why forwarding it costs nothing in practice.
+    pub async fn user_can_see_other_user(
+        &self,
+        user_id: &str,
+        other_user_id: &str,
+    ) -> Result<bool, crate::post::PrepareError> {
+        if user_id == other_user_id {
+            return Ok(true);
+        }
+
+        match self.get_view_users_restrictions(user_id).await {
+            crate::user::ViewUsersRestriction::None => Ok(true),
+            crate::user::ViewUsersRestriction::Restricted => {
+                Err(crate::post::PrepareError::Unreproducible(
+                    "view-user restrictions need the team and channel membership lookups",
+                ))
+            }
+        }
+    }
+}
+
 /// Port of `app.getProfileImagePath` (app/user.go:3302) — `filepath.Join("users", id, "profile.png")`.
 fn profile_image_path(user_id: &str) -> String {
     mm_model::go_path::join(&["users", user_id, "profile.png"])

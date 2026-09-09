@@ -652,6 +652,43 @@
         "audio/mpeg",
         "audio/wav"
     ],
+    "public_link_hash": [
+        {
+            "file_id": "",
+            "hash": "47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU",
+            "salt": ""
+        },
+        {
+            "file_id": "fileid",
+            "hash": "hyTmhoo3SlrdQ7Y9xUj8iljVWaTR3yPXjhOTGqU2Gr4",
+            "salt": ""
+        },
+        {
+            "file_id": "",
+            "hash": "Y0ea1poJCyWCd-yPum-ZQZov-ySJgVEGV8lEzNEUjpc",
+            "salt": "salt"
+        },
+        {
+            "file_id": "c5r6bi1z4jbcbjbwyj7uzcgtqy",
+            "hash": "tvMQkY1I-HiqeRIeNeDRsrBnMvN4vWifXJNptto6hQg",
+            "salt": "mmrsparityxxxxxxxxxxxxxxxxxxxxxx"
+        },
+        {
+            "file_id": "c5r6bi1z4jbcbjbwyj7uzcgtqy",
+            "hash": "5ibbs5F-6PmasMx3bmOeXu53gwi2aYY31raV30XtECk",
+            "salt": "a-different-salt"
+        },
+        {
+            "file_id": "mmrsparityxxxxxxxxxxxxxxxxxxxxxx",
+            "hash": "PaZtybY8pj-kJvZJKaQxrSULKRHIzGyHynnSMyFRSkU",
+            "salt": "c5r6bi1z4jbcbjbwyj7uzcgtqy"
+        },
+        {
+            "file_id": "日本",
+            "hash": "1Z7556w7LC62D7_qy4gQ8xF3_-7uLawYoMrNwknzwek",
+            "salt": "🧂"
+        }
+    ],
     "unsafe_content_types": [
         "application/javascript",
         "application/ecmascript",
@@ -1294,7 +1331,7 @@
             "webserver_mode": ""
         },
         {
-            "body_base64": "LS05OTU4ZmQ5YjYzYjk3YzY5NWNhNDcwY2U5M2VhMmQ0ZWNmYTk3YmNiZWVmODQwOTAxMDAzNDM2YmVkOGUNCkNvbnRlbnQtUmFuZ2U6IGJ5dGVzIDAtNC8yNg0KQ29udGVudC1UeXBlOiB0ZXh0L3BsYWluDQoNCmFiY2RlDQotLTk5NThmZDliNjNiOTdjNjk1Y2E0NzBjZTkzZWEyZDRlY2ZhOTdiY2JlZWY4NDA5MDEwMDM0MzZiZWQ4ZQ0KQ29udGVudC1SYW5nZTogYnl0ZXMgMTAtMTQvMjYNCkNvbnRlbnQtVHlwZTogdGV4dC9wbGFpbg0KDQprbG1ubw0KLS05OTU4ZmQ5YjYzYjk3YzY5NWNhNDcwY2U5M2VhMmQ0ZWNmYTk3YmNiZWVmODQwOTAxMDAzNDM2YmVkOGUtLQ0K",
+            "body_base64": "LS1lNzgyMjg2NmI1N2ZjOTYxMjc5MTM5YjMxZGQwYzc3NzY5NWFjNTUxODE0OWVjZGUyZWQ5ZjZjMTQxYjQNCkNvbnRlbnQtUmFuZ2U6IGJ5dGVzIDAtNC8yNg0KQ29udGVudC1UeXBlOiB0ZXh0L3BsYWluDQoNCmFiY2RlDQotLWU3ODIyODY2YjU3ZmM5NjEyNzkxMzliMzFkZDBjNzc3Njk1YWM1NTE4MTQ5ZWNkZTJlZDlmNmMxNDFiNA0KQ29udGVudC1SYW5nZTogYnl0ZXMgMTAtMTQvMjYNCkNvbnRlbnQtVHlwZTogdGV4dC9wbGFpbg0KDQprbG1ubw0KLS1lNzgyMjg2NmI1N2ZjOTYxMjc5MTM5YjMxZGQwYzc3NzY5NWFjNTUxODE0OWVjZGUyZWQ5ZjZjMTQxYjQtLQ0K",
             "content_size": 26,
             "content_type_in": "text/plain",
             "filename": "notes.txt",
@@ -1305,7 +1342,7 @@
                 "Content-Disposition": "attachment;filename=\"notes.txt\"; filename*=UTF-8''notes.txt",
                 "Content-Length": "324",
                 "Content-Security-Policy": "Frame-ancestors 'none'",
-                "Content-Type": "multipart/byteranges; boundary=9958fd9b63b97c695ca470ce93ea2d4ecfa97bcbeef840901003436bed8e",
+                "Content-Type": "multipart/byteranges; boundary=e7822866b57fc961279139b31dd0c777695ac5518149ecde2ed9f6c141b4",
                 "Last-Modified": "Thu, 04 Mar 2021 05:06:07 GMT",
                 "X-Content-Type-Options": "nosniff",
                 "X-Frame-Options": "DENY"

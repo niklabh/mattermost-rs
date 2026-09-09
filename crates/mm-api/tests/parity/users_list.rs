@@ -85,57 +85,8 @@ async fn remove_from_team(client: &reqwest::Client, admin_token: &str, team: &st
     );
 }
 
-/// Go's unfiltered listing **500s** on any `Users` row with a NULL `Nickname`.
-///
-/// `GetAllProfiles` scans into `model.User` with `sqlx`, whose `string` destination cannot take
-/// a NULL: `sql: Scan error on column index 10, name "nickname": converting NULL to string is
-/// unsupported`, surfaced as `app.user.get_profiles.app_error`. This port reads the same row
-/// happily (`unwrap_or_default`), so the two servers disagree — but only for a row no Mattermost
-/// server would ever write, because Go's own `INSERT` fills every column.
-///
-/// The development database nevertheless acquires such rows: `mm-app`'s `db_authorization` suite
-/// plants one that omits the three name columns and purges only at the *start*, so it survives
-/// between runs. Under `cargo test --workspace` the `parity_*` binaries happen to run first and
-/// never see it; a standalone re-run of this file after that suite hits Go's 500 and fails four
-/// tests that are about something else entirely.
-///
-/// So this normalises rather than deletes: nothing another suite planted goes away, the columns
-/// it did not set become what a real row would carry, and `UpdateAt` is untouched so no etag
-/// moves. Skipped silently when `DATABASE_URL` is unset — the assertions below then fail on
-/// their own terms.
-async fn make_every_user_scannable_by_go() {
-    let Ok(url) = std::env::var("DATABASE_URL") else {
-        return;
-    };
-    let Ok(pool) = sqlx::postgres::PgPoolOptions::new()
-        .max_connections(1)
-        .connect(&url)
-        .await
-    else {
-        return;
-    };
-    let _ = sqlx::query(
-        "UPDATE users
-            SET nickname = COALESCE(nickname, ''),
-                firstname = COALESCE(firstname, ''),
-                lastname = COALESCE(lastname, ''),
-                position = COALESCE(position, ''),
-                lastpictureupdate = COALESCE(lastpictureupdate, 0),
-                mfausedtimestamps = COALESCE(mfausedtimestamps, 'null'::jsonb)
-          WHERE nickname IS NULL
-             OR firstname IS NULL
-             OR lastname IS NULL
-             OR position IS NULL
-             OR lastpictureupdate IS NULL
-             OR mfausedtimestamps IS NULL",
-    )
-    .execute(&pool)
-    .await;
-}
-
 async fn fixture(client: &reqwest::Client, tag: &str) -> Fixture {
     purge_api_fixtures().await;
-    make_every_user_scannable_by_go().await;
     let admin_token = go_minted_token(client).await;
     let team = create_team(client, &admin_token, tag).await;
 

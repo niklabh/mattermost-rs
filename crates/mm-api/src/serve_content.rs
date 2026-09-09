@@ -212,6 +212,34 @@ fn should_escape_in_path_segment(byte: u8) -> bool {
     }
 }
 
+/// Port of `http.ServeContent` **without** `web.setHeaders` — what `downloadExport`
+/// (api4/export.go:64) calls directly.
+///
+/// It sets one header of its own (`Content-Type: application/zip`) and passes the zero
+/// `time.Time`, so the response has no `Cache-Control`, no `Content-Disposition`, no
+/// `X-Frame-Options` and no `Last-Modified`: an export download and a file download share almost
+/// nothing but the `Range` handling.
+pub async fn serve_content_with_headers(
+    headers: HeaderMap,
+    name: &str,
+    modtime_millis: Option<i64>,
+    method: &Method,
+    request_headers: &HeaderMap,
+    file: tokio::fs::File,
+    size: u64,
+) -> FileResponse {
+    serve_content(
+        headers,
+        name,
+        modtime_millis,
+        method,
+        request_headers,
+        file,
+        size,
+    )
+    .await
+}
+
 /// Port of `http.serveContent` (net/http/fs.go), for a seekable file of known size.
 #[allow(clippy::too_many_arguments)]
 async fn serve_content(

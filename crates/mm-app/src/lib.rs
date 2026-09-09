@@ -44,6 +44,8 @@ pub mod system;
 pub mod team;
 pub mod terms_of_service;
 pub mod thread;
+/// Port of the two read functions in `app/upload.go`.
+pub mod upload;
 pub mod usage;
 pub mod user;
 pub mod user_access_token;
