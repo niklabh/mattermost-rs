@@ -6246,3 +6246,174 @@ since then this server would own the flag.
 
 **What is owed:** nothing yet — recorded so the next session does not re-derive it. The agents trio
 closes with the plugin host; the busy flag closes when `POST`/`DELETE /server_busy` migrate.
+
+---
+
+## D-201 · The two servers agree on a file directory only by convention
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-09 (phase 2, file backend)
+
+`FileSettings.Directory` defaults to `./data/` — **relative to the process working directory**.
+The Go server is started from `reference/.build/mmroot` by `scripts/go-server.sh`, which overrides
+it with `MM_FILESETTINGS_DIRECTORY`; that is an *environment* override, so it never reaches the
+configuration document `mm-api` reads. Two processes, one config row, two different directories,
+and no error to say so — every file route answers 404 while looking perfectly healthy.
+
+`scripts/parity.sh` now passes the same variable to the server it launches, which closes it for
+the development stack. It is recorded because nothing *enforces* it: a `cargo run -p mm-api` from
+the repository root still points at the wrong place, and the symptom is indistinguishable from a
+missing file.
+
+**What is owed:** a startup check that the configured directory exists and is writable, logged
+loudly. Not a hard failure — an S3 deployment has no directory at all.
+
+---
+
+## D-202 · The environment overlay normalises `WebserverMode` where Go does not
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-09-09 (phase 2, file backend)
+
+`ServiceSettings.SetDefaults` rewrites `regular` to `gzip` (config.go:845) as a **mutation of the
+config struct**, and `applyEnvironmentMap` runs *after* it — so on Go an environment override of
+`MM_SERVICESETTINGS_WEBSERVERMODE=regular` survives as the literal `regular`, and every
+`*WebserverMode == "gzip"` test then fails.
+
+This port normalises both the document and the overlay. That is deliberately *more* than Go does,
+and it is the safer direction: `regular` and `gzip` are the same mode everywhere the value is
+read, so folding them can only make the two servers agree. Reproducing the asymmetry would mean
+modelling the order of two functions to preserve a value that means the same thing.
+
+Accepted rather than fixed. It is reachable only by setting that one variable to that one value.
+
+---
+
+## D-203 · `image.DecodeConfig` is reproduced as far as the magic prefix and no further
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-09-09 (phase 2, emoji image)
+
+`GetEmojiImage` calls `image.DecodeConfig` for the **format name** alone, which becomes
+`Content-Type: image/<name>`. `mm_app::imaging::detect_format` reproduces the registry's magic
+prefixes exactly — png, jpeg, gif, bmp, tiff, webp, wildcards included — and stops there.
+
+So the two servers differ on exactly one input: a stored emoji whose first bytes are a valid
+signature and whose body does not parse. We answer `image/png` and 200; Go answers
+`api.emoji.get_image.decode.app_error` and 500.
+
+Accepted. `CreateEmoji` decodes every image it accepts (app/emoji.go:110), so a row that reaches
+this route has already been parsed once by Go; closing it means carrying six header parsers to
+compute a string that is then thrown away. The corpus in `fixtures/behaviour_filestore.json`
+(`image_decode_config`) records which of Go's two failure modes each case takes, so the gap is
+pinned rather than assumed.
+
+---
+
+## D-204 · The generated initials avatar is not reproducible, so two routes forward
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-09 (phase 2, profile image)
+
+`users.GetDefaultProfileImage` rasterises a user's initials with `golang/freetype` over
+`fonts/nunito-bold.ttf`. Every pixel of the result depends on that rasteriser's hinting and
+anti-aliasing, so a near-match is worse than no match at all: the image is cached by the client
+for a day under an etag we would have minted.
+
+Two consequences:
+
+- `GET /api/v4/users/{user_id}/image/default` is **entirely** that path and is not migrated.
+- `GET /api/v4/users/{user_id}/image` is migrated but forwards when the stored `profile.png`
+  does not read — which is also the branch that *writes* the generated image back when
+  `LastPictureUpdate == 0`, so forwarding is doubly right.
+
+In practice the served branch is the common one: every account gets a `profile.png` at creation.
+
+**What is owed:** nothing until someone wants those bytes. If it is ever attempted, it needs the
+same font file and a rasteriser that agrees with freetype pixel for pixel — measure before
+committing to it.
+
+---
+
+## D-205 · A multi-range request is forwarded
+
+**Status** ACCEPTED · **Severity** incomplete · **Raised** 2026-09-09 (phase 2, file bytes)
+
+`http.ServeContent` answers two or more ranges with `multipart/byteranges`, whose boundary is
+thirty bytes from `crypto/rand`. The response is therefore not byte-comparable against Go's even
+when the parts are identical, so there is nothing a parity test could assert beyond the status.
+
+`mm_api::serve_content` forwards instead. No Mattermost client asks for more than one range, and
+forwarding costs one request and keeps the answer Go's own.
+
+---
+
+## D-206 · `getFile`'s content-reviewer branch is forwarded
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-09 (phase 2, file bytes)
+
+`GET /api/v4/files/{file_id}?as_content_reviewer=true` runs four checks this port does not have —
+`requireContentFlaggingEnabled`, `checkChannelFlaggable`, `requireTeamContentReviewer` and
+`requireFlaggedPost` — and only then serves a *deleted* file's bytes. The licence gate in front of
+them is Enterprise Advanced, so on this deployment every one of them refuses; which refusal is
+Go's own business, and the request is forwarded whole.
+
+The same treatment `getTeam` and `getChannelStats` already give the parameter.
+
+---
+
+## D-207 · Go's global security headers were missing from every migrated route — CLOSED 2026-09-09
+
+**Status** CLOSED · **Severity** divergence · **Raised and closed** 2026-09-09 (phase 2, file backend)
+
+`web.Handler.ServeHTTP` sets `Permissions-Policy`, `X-Content-Type-Options`, `Referrer-Policy` and
+— for `GET` only — `Expires: 0` on **every** API response, before the handler runs; the gzip
+wrapper adds `Vary: Accept-Encoding`. This port set none of them, on all 264 route+method pairs
+migrated before this session.
+
+It survived that long because **no parity test compared a response header**: `common::fetch_both`
+asserts bodies, and every suite used it. The file-bytes suite compares every header in both
+directions and found it on its first run.
+
+Closed by `mm_api::go_global_headers`, an outermost layer guarded on `x-mmrs-served-by` so a
+forwarded response — which already carries Go's own, including the two per-request headers this
+cannot mint — is untouched. `X-Request-Id` and `X-Version-Id` are still ours to leave alone;
+`Strict-Transport-Security` is gated on `TLSStrictTransport`, which defaults to `false` and is not
+modelled.
+
+**The lesson generalises:** a body-only comparison cannot see a header, and three of
+`ServeContent`'s five answers are defined by the headers they *delete*. New suites should compare
+headers.
+
+---
+
+## D-208 · A client that asks for gzip gets a compressed body from Go and an uncompressed one from us
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-09 (phase 2, file backend)
+
+`WebserverMode` defaults to `gzip`, and Go wraps every API handler in `gzhttp.GzipHandler`. This
+port reproduces the `Vary: Accept-Encoding` that wrapper adds ([D-207]) but **not the compression
+itself**, so a request carrying `Accept-Encoding: gzip` gets `Content-Encoding: gzip` and a
+compressed body from Go, and neither from us.
+
+Invisible to the parity suite because `reqwest` is built here without its gzip feature and
+therefore sends no `Accept-Encoding` — which is also why this is recorded rather than measured: a
+browser would see it.
+
+**What is owed:** a `tower-http` `CompressionLayer` on the locally-served routes, matched to
+gzhttp's content-type and minimum-size rules. The rules are the work, not the compression.
+
+---
+
+## D-209 · `POST /api/v4/file/test` needs the whole `FileSettings` model
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-09 (phase 2, file backend)
+
+`testFileStore` decodes a complete `model.Config` from the request body, rejects it unless
+**every pointer field of `FileSettings`** is non-nil (`checkHasNilFields`, api4/system.go:1121),
+desanitizes it against the running configuration to restore `FakeSetting` placeholders, and then
+builds a backend from the *supplied* settings rather than the server's.
+
+That is roughly forty-five modelled fields plus `config.Desanitize`, for one route whose local
+branch has no mandatory fields at all. Deferred rather than approximated: a partial `FileSettings`
+would make the nil check answer differently from Go's, which is the one thing this route is
+mostly made of.
+
+Both spellings — `/file/test` and the backwards-compatible `/file/s3_test` — stay forwarded.
+

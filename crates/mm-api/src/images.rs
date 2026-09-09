@@ -28,7 +28,7 @@ use mm_model::permission::{
 
 use crate::AppState;
 use crate::auth::AuthenticatedSession;
-use crate::channels::require_id;
+use crate::channels::{require_id, resolve_me};
 use crate::error::ApiError;
 use crate::proxy;
 
@@ -138,6 +138,9 @@ async fn serve_profile_image(
     session: &AuthenticatedSession,
     headers: &HeaderMap,
 ) -> Result<Option<Response>, ApiError> {
+    // `RequireUserId` substitutes the session's id for `me` **before** validating, so
+    // `/users/me/image` is the caller's own picture and not a 400. See [`resolve_me`].
+    let user_id = resolve_me(user_id, session);
     require_id(user_id, "user_id")?;
 
     // `UserCanSeeOtherUser` runs **before** the user is fetched, so a caller who may not see the

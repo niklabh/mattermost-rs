@@ -371,6 +371,11 @@ async fn range_requests_match_including_both_416s() {
         "bytes=40-",
         "bytes=-5",
         "bytes=40-9999",
+        // Exactly at the end (the file is 45 bytes): `start >= size` does not overlap, so this
+        // is a 416 and not an empty 206. One byte earlier is a one-byte 206.
+        "bytes=45-",
+        "bytes=45-50",
+        "bytes=44-",
         // Every range past the end: `errNoOverlap`, which carries a `Content-Range`.
         "bytes=1000-2000",
         // Not `bytes=`: `invalid range`, which does not.

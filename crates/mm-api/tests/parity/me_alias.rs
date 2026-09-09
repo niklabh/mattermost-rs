@@ -84,6 +84,11 @@ fn paths(f: &Fixture) -> Vec<String> {
         format!("/api/v4/users/me/teams/{team}/drafts"),
         format!("/api/v4/users/me/teams/{team}/threads?per_page=2"),
         format!("/api/v4/users/me/teams/{team}/threads/{thread}"),
+        // The two routes the file-backend session added. `/users/me/image` is the one that
+        // matters most here: it is the route the webapp uses for the logged-in user's own avatar
+        // on every page load.
+        "/api/v4/users/me/image".to_owned(),
+        "/api/v4/users/me/uploads".to_owned(),
     ]
     .to_vec()
 }

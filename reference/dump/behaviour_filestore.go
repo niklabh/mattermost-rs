@@ -216,6 +216,11 @@ var writeFileResponseCorpus = []writeFileResponseCase{
 	{Name: "filename_with_quote", Filename: `he said "hi".txt`, ContentType: "text/plain", ContentSize: 26, ModTime: modTimeFixed, Method: http.MethodGet},
 	{Name: "filename_unicode", Filename: "réunion-日本.txt", ContentType: "text/plain", ContentSize: 26, ModTime: modTimeFixed, Method: http.MethodGet},
 	{Name: "filename_with_slash", Filename: "a/b.txt", ContentType: "text/plain", ContentSize: 26, ModTime: modTimeFixed, Method: http.MethodGet},
+	// The four reserved characters `encodePathSegment` escapes and the six it does not, in one
+	// filename. Added because a mutation that stopped escaping `;` survived the whole corpus:
+	// no other case contains one, so `PathEscape` was only ever exercised on space, quote,
+	// slash and non-ASCII.
+	{Name: "filename_with_sub_delims", Filename: "a;b,c?d/e$f&g+h:i=j@k.txt", ContentType: "text/plain", ContentSize: 26, ModTime: modTimeFixed, Method: http.MethodGet},
 	{Name: "filename_empty", Filename: "", ContentType: "text/plain", ContentSize: 26, ModTime: modTimeFixed, Method: http.MethodGet},
 	{Name: "size_zero", Filename: "thumb.png", ContentType: "image/png", ContentSize: 0, ModTime: modTimeFixed, Method: http.MethodGet},
 	{Name: "gzip_mode", Filename: "notes.txt", ContentType: "text/plain", ContentSize: 26, ModTime: modTimeFixed, WebserverMode: "gzip", Method: http.MethodGet},
@@ -227,6 +232,14 @@ var writeFileResponseCorpus = []writeFileResponseCase{
 	{Name: "range_open_ended", Filename: "notes.txt", ContentType: "text/plain", ContentSize: 26, ModTime: modTimeFixed, Method: http.MethodGet, ReqHeaders: map[string]string{"Range": "bytes=20-"}},
 	{Name: "range_suffix", Filename: "notes.txt", ContentType: "text/plain", ContentSize: 26, ModTime: modTimeFixed, Method: http.MethodGet, ReqHeaders: map[string]string{"Range": "bytes=-5"}},
 	{Name: "range_past_end", Filename: "notes.txt", ContentType: "text/plain", ContentSize: 26, ModTime: modTimeFixed, Method: http.MethodGet, ReqHeaders: map[string]string{"Range": "bytes=20-99"}},
+	// **Exactly at the end.** `parseRange`'s guard is `start >= size`, so a range beginning at
+	// byte `size` does not overlap and the answer is a 416 — not an empty 206. Added because a
+	// mutation loosening that to `start > size` survived: every other unsatisfiable case in the
+	// corpus begins well past the end, where both readings agree.
+	{Name: "range_starts_exactly_at_the_end", Filename: "notes.txt", ContentType: "text/plain", ContentSize: 26, ModTime: modTimeFixed, Method: http.MethodGet, ReqHeaders: map[string]string{"Range": "bytes=26-"}},
+	{Name: "range_starts_exactly_at_the_end_closed", Filename: "notes.txt", ContentType: "text/plain", ContentSize: 26, ModTime: modTimeFixed, Method: http.MethodGet, ReqHeaders: map[string]string{"Range": "bytes=26-30"}},
+	// One byte earlier, which *is* satisfiable and returns a single byte.
+	{Name: "range_last_byte", Filename: "notes.txt", ContentType: "text/plain", ContentSize: 26, ModTime: modTimeFixed, Method: http.MethodGet, ReqHeaders: map[string]string{"Range": "bytes=25-"}},
 	{Name: "range_unsatisfiable", Filename: "notes.txt", ContentType: "text/plain", ContentSize: 26, ModTime: modTimeFixed, Method: http.MethodGet, ReqHeaders: map[string]string{"Range": "bytes=100-200"}},
 	{Name: "range_malformed", Filename: "notes.txt", ContentType: "text/plain", ContentSize: 26, ModTime: modTimeFixed, Method: http.MethodGet, ReqHeaders: map[string]string{"Range": "chunks=1-2"}},
 	{Name: "range_multiple", Filename: "notes.txt", ContentType: "text/plain", ContentSize: 26, ModTime: modTimeFixed, Method: http.MethodGet, ReqHeaders: map[string]string{"Range": "bytes=0-4,10-14"}},

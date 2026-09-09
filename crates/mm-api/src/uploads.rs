@@ -14,9 +14,13 @@
 //! | error id | `api.upload.get_upload.forbidden.app_error` | `api.user.get_uploads_for_user.forbidden.app_error` |
 //! | body | `Encode` — **trailing newline** | `Marshal` + `Write` — **none** |
 //!
-//! So a system administrator can read any single upload session but cannot list another user's,
-//! and `me` is not accepted on either — `getUploadsForUser` compares the raw path segment with
-//! the session's user id, so `/users/me/uploads` is a 403 to everyone. Both facts are Go's.
+//! So a system administrator can read any single upload session but cannot list another user's.
+//!
+//! `me` **is** accepted, and that is not obvious from `getUploadsForUser`: the substitution
+//! happens inside `RequireUserId` (web/context.go:301), two lines before the `IsValidId` it looks
+//! like it is only there for, so the comparison below is against the *resolved* id. A port that
+//! validated the raw segment answers 400 where Go answers 200 — measured, on this very route,
+//! by `tests/parity/exports_and_uploads.rs`.
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -26,7 +30,7 @@ use mm_model::utils::AppError;
 
 use crate::AppState;
 use crate::auth::AuthenticatedSession;
-use crate::channels::require_id;
+use crate::channels::{require_id, resolve_me};
 use crate::error::ApiError;
 
 /// Port of `getUpload` (api4/upload.go:100), reached as `GET /api/v4/uploads/{upload_id}`.
@@ -84,13 +88,12 @@ async fn serve_upload(
 /// Port of `getUploadsForUser` (api4/user.go:3710), reached as
 /// `GET /api/v4/users/{user_id}/uploads`.
 ///
-/// # `me` does not work here
+/// # `me` resolves first, so `/users/me/uploads` is the caller's own list
 ///
-/// The check is `c.Params.UserId != c.AppContext.Session().UserId` on the **raw path segment**,
-/// before any alias resolution — and `getUploadsForUser` is not one of the handlers that calls
-/// `RequireUserId`'s `me` expansion. So `/users/me/uploads` compares the literal string `me`
-/// against a 26-character id and always refuses. Reproduced, because a client that "fixed" it
-/// would get a 403 from Go and a list from us.
+/// `RequireUserId` substitutes the session's user id for the literal `me` **before** it validates
+/// (web/context.go:301), so by the time `c.Params.UserId != session.UserId` runs the two are
+/// equal. Nothing in this handler says so, which is exactly why the first version of this port
+/// answered 400 to a request Go answers 200.
 #[tracing::instrument(skip_all, fields(user_id = %user_id))]
 pub async fn get_uploads_for_user(
     State(state): State<AppState>,
@@ -108,6 +111,7 @@ async fn serve_uploads_for_user(
     user_id: &str,
     session: &AuthenticatedSession,
 ) -> Result<Response, ApiError> {
+    let user_id = resolve_me(user_id, session);
     require_id(user_id, "user_id")?;
 
     if user_id != session.0.user_id {

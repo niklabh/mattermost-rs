@@ -990,6 +990,30 @@
             "body_base64": "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXo=",
             "content_size": 26,
             "content_type_in": "text/plain",
+            "filename": "a;b,c?d/e$f\u0026g+h:i=j@k.txt",
+            "force_download": false,
+            "headers": {
+                "Accept-Ranges": "bytes",
+                "Cache-Control": "private, max-age=86400",
+                "Content-Disposition": "attachment;filename=\"a%3Bb%2Cc%3Fd%2Fe$f\u0026g+h:i=j@k.txt\"; filename*=UTF-8''a%3Bb%2Cc%3Fd%2Fe$f\u0026g+h:i=j@k.txt",
+                "Content-Length": "26",
+                "Content-Security-Policy": "Frame-ancestors 'none'",
+                "Content-Type": "text/plain",
+                "Last-Modified": "Thu, 04 Mar 2021 05:06:07 GMT",
+                "X-Content-Type-Options": "nosniff",
+                "X-Frame-Options": "DENY"
+            },
+            "method": "GET",
+            "modtime_unix_ms": 1614834367000,
+            "name": "filename_with_sub_delims",
+            "req_headers": [],
+            "status": 200,
+            "webserver_mode": ""
+        },
+        {
+            "body_base64": "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXo=",
+            "content_size": 26,
+            "content_type_in": "text/plain",
             "filename": "",
             "force_download": false,
             "headers": {
@@ -1295,6 +1319,88 @@
             },
             "method": "GET",
             "modtime_unix_ms": 1614834367000,
+            "name": "range_starts_exactly_at_the_end",
+            "req_headers": [
+                {
+                    "name": "Range",
+                    "value": "bytes=26-"
+                }
+            ],
+            "status": 416,
+            "webserver_mode": ""
+        },
+        {
+            "body_base64": "aW52YWxpZCByYW5nZTogZmFpbGVkIHRvIG92ZXJsYXAK",
+            "content_size": 26,
+            "content_type_in": "text/plain",
+            "filename": "notes.txt",
+            "force_download": false,
+            "headers": {
+                "Content-Disposition": "attachment;filename=\"notes.txt\"; filename*=UTF-8''notes.txt",
+                "Content-Range": "bytes */26",
+                "Content-Security-Policy": "Frame-ancestors 'none'",
+                "Content-Type": "text/plain; charset=utf-8",
+                "X-Content-Type-Options": "nosniff",
+                "X-Frame-Options": "DENY"
+            },
+            "method": "GET",
+            "modtime_unix_ms": 1614834367000,
+            "name": "range_starts_exactly_at_the_end_closed",
+            "req_headers": [
+                {
+                    "name": "Range",
+                    "value": "bytes=26-30"
+                }
+            ],
+            "status": 416,
+            "webserver_mode": ""
+        },
+        {
+            "body_base64": "eg==",
+            "content_size": 26,
+            "content_type_in": "text/plain",
+            "filename": "notes.txt",
+            "force_download": false,
+            "headers": {
+                "Accept-Ranges": "bytes",
+                "Cache-Control": "private, max-age=86400",
+                "Content-Disposition": "attachment;filename=\"notes.txt\"; filename*=UTF-8''notes.txt",
+                "Content-Length": "1",
+                "Content-Range": "bytes 25-25/26",
+                "Content-Security-Policy": "Frame-ancestors 'none'",
+                "Content-Type": "text/plain",
+                "Last-Modified": "Thu, 04 Mar 2021 05:06:07 GMT",
+                "X-Content-Type-Options": "nosniff",
+                "X-Frame-Options": "DENY"
+            },
+            "method": "GET",
+            "modtime_unix_ms": 1614834367000,
+            "name": "range_last_byte",
+            "req_headers": [
+                {
+                    "name": "Range",
+                    "value": "bytes=25-"
+                }
+            ],
+            "status": 206,
+            "webserver_mode": ""
+        },
+        {
+            "body_base64": "aW52YWxpZCByYW5nZTogZmFpbGVkIHRvIG92ZXJsYXAK",
+            "content_size": 26,
+            "content_type_in": "text/plain",
+            "filename": "notes.txt",
+            "force_download": false,
+            "headers": {
+                "Content-Disposition": "attachment;filename=\"notes.txt\"; filename*=UTF-8''notes.txt",
+                "Content-Range": "bytes */26",
+                "Content-Security-Policy": "Frame-ancestors 'none'",
+                "Content-Type": "text/plain; charset=utf-8",
+                "X-Content-Type-Options": "nosniff",
+                "X-Frame-Options": "DENY"
+            },
+            "method": "GET",
+            "modtime_unix_ms": 1614834367000,
             "name": "range_unsatisfiable",
             "req_headers": [
                 {
@@ -1331,7 +1437,7 @@
             "webserver_mode": ""
         },
         {
-            "body_base64": "LS1lNzgyMjg2NmI1N2ZjOTYxMjc5MTM5YjMxZGQwYzc3NzY5NWFjNTUxODE0OWVjZGUyZWQ5ZjZjMTQxYjQNCkNvbnRlbnQtUmFuZ2U6IGJ5dGVzIDAtNC8yNg0KQ29udGVudC1UeXBlOiB0ZXh0L3BsYWluDQoNCmFiY2RlDQotLWU3ODIyODY2YjU3ZmM5NjEyNzkxMzliMzFkZDBjNzc3Njk1YWM1NTE4MTQ5ZWNkZTJlZDlmNmMxNDFiNA0KQ29udGVudC1SYW5nZTogYnl0ZXMgMTAtMTQvMjYNCkNvbnRlbnQtVHlwZTogdGV4dC9wbGFpbg0KDQprbG1ubw0KLS1lNzgyMjg2NmI1N2ZjOTYxMjc5MTM5YjMxZGQwYzc3NzY5NWFjNTUxODE0OWVjZGUyZWQ5ZjZjMTQxYjQtLQ0K",
+            "body_base64": "LS04MjZmMjdlMzAwNTFmNWUzNjA3ZDEzNzJmYjE3NmU2ZmE3OWVhZGMwMzBkNTkzMTkxZmFjNTYxMTFhMzANCkNvbnRlbnQtUmFuZ2U6IGJ5dGVzIDAtNC8yNg0KQ29udGVudC1UeXBlOiB0ZXh0L3BsYWluDQoNCmFiY2RlDQotLTgyNmYyN2UzMDA1MWY1ZTM2MDdkMTM3MmZiMTc2ZTZmYTc5ZWFkYzAzMGQ1OTMxOTFmYWM1NjExMWEzMA0KQ29udGVudC1SYW5nZTogYnl0ZXMgMTAtMTQvMjYNCkNvbnRlbnQtVHlwZTogdGV4dC9wbGFpbg0KDQprbG1ubw0KLS04MjZmMjdlMzAwNTFmNWUzNjA3ZDEzNzJmYjE3NmU2ZmE3OWVhZGMwMzBkNTkzMTkxZmFjNTYxMTFhMzAtLQ0K",
             "content_size": 26,
             "content_type_in": "text/plain",
             "filename": "notes.txt",
@@ -1342,7 +1448,7 @@
                 "Content-Disposition": "attachment;filename=\"notes.txt\"; filename*=UTF-8''notes.txt",
                 "Content-Length": "324",
                 "Content-Security-Policy": "Frame-ancestors 'none'",
-                "Content-Type": "multipart/byteranges; boundary=e7822866b57fc961279139b31dd0c777695ac5518149ecde2ed9f6c141b4",
+                "Content-Type": "multipart/byteranges; boundary=826f27e30051f5e3607d1372fb176e6fa79eadc030d593191fac56111a30",
                 "Last-Modified": "Thu, 04 Mar 2021 05:06:07 GMT",
                 "X-Content-Type-Options": "nosniff",
                 "X-Frame-Options": "DENY"

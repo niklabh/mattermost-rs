@@ -1,0 +1,81 @@
+# Mutation plan for the local file backend and the 21 routes on it.
+#
+#   scripts/mutate-batch.sh scripts/mutations/file-backend.plan
+#
+# Three layers, and they fail differently.
+#
+# `serve_content.rs` is a port of `http.ServeContent`, whose decisions are almost all *deletions*
+# — a 304 without a Content-Type, a 416 without a Cache-Control, an `Accept-Ranges` that must not
+# appear on the 416 because the line that sets it is below the range check. A mutation that adds a
+# header back is the shape a reader would actually write, so most of the first block does exactly
+# that.
+#
+# `filestore.rs` is a port of `os` semantics, where the two mutations that matter are the ENOENT/
+# ENOTDIR split (the intuitive reading is the wrong one, and the oracle caught it) and the listing
+# prefix.
+#
+# The `api` block mutates the four places the three byte routes disagree with each other, plus the
+# two JSON encoders whose only difference is a trailing newline, plus the `me` alias — which is a
+# real divergence this session shipped and then fixed, so the mutation reproduces a bug that
+# actually existed.
+#
+# The first run was 38 mutations, 33 caught, and two real survivors — both fixture gaps of the
+# same shape, a corpus that never reached a boundary:
+#
+#   * `serve-no-overlap-starts-one-late` loosens `parseRange`'s `start >= size` to `start > size`.
+#     Every unsatisfiable range in the corpus began *well* past the end, where the two readings
+#     agree; the case that separates them is a range beginning at byte `size` exactly, which is a
+#     416 and not an empty 206. Added as `range_starts_exactly_at_the_end`, with `range_last_byte`
+#     one byte earlier so the boundary is pinned from both sides.
+# A third survivor was a **bad mutation rather than a fixture gap**, and is recorded because the
+# distinction is the whole value of the exercise: `serve-path-escape-leaves-the-semicolon`
+# originally deleted `b';'` from the escaped arm of `should_escape_in_path_segment`, which is a
+# no-op — `;` then falls through to the catch-all `_ => true` and is escaped anyway. The mutation
+# now moves it to the *unescaped* arm, which is the change a reader would actually make.
+#
+# It did nonetheless expose a real gap on the way: no filename in the corpus contained a `;`, so
+# `url.PathEscape` was only ever exercised on space, quote, slash and non-ASCII — four of the ten
+# characters whose treatment differs. `filename_with_sub_delims` carries all ten.
+#
+# Both controls survived, which is the verdict they must give.
+#
+# The last two lines are the no-op controls and must SURVIVE.
+
+serve-epoch-is-not-zero-time	crates/mm-api/src/serve_content.rs	    matches!(modtime_millis, None | Some(0))	    modtime_millis.is_none()	unit	serve_content
+serve-if-modified-since-drops-the-equal-case	crates/mm-api/src/serve_content.rs	    if truncate_to_seconds(modtime_millis) <= theirs {\n        Cond::False\n    } else {\n        Cond::True\n    }	    if truncate_to_seconds(modtime_millis) < theirs {\n        Cond::False\n    } else {\n        Cond::True\n    }	unit	serve_content
+serve-if-unmodified-since-inverted	crates/mm-api/src/serve_content.rs	    if truncate_to_seconds(modtime_millis) <= theirs {\n        Cond::True\n    } else {\n        Cond::False\n    }	    if truncate_to_seconds(modtime_millis) > theirs {\n        Cond::True\n    } else {\n        Cond::False\n    }	unit	serve_content
+serve-if-none-match-star-is-true	crates/mm-api/src/serve_content.rs	        if rest.starts_with('*') {\n            return Cond::False;\n        }	        if rest.starts_with('*') {\n            return Cond::True;\n        }	unit	serve_content
+serve-suffix-range-counts-from-the-start	crates/mm-api/src/serve_content.rs	            ranges.push(HttpRange {\n                start: size - suffix,\n                length: suffix,\n            });	            ranges.push(HttpRange {\n                start: 0,\n                length: suffix,\n            });	unit	serve_content
+serve-range-end-is-exclusive	crates/mm-api/src/serve_content.rs	                last - begin + 1	                last - begin	unit	serve_content
+serve-no-overlap-starts-one-late	crates/mm-api/src/serve_content.rs	            if begin >= size {	            if begin > size {	unit	serve_content
+serve-416-keeps-cache-control	crates/mm-api/src/serve_content.rs	    headers.remove("cache-control");\n    headers.remove("content-encoding");	    headers.remove("content-encoding");	unit	serve_content
+serve-304-keeps-the-content-type	crates/mm-api/src/serve_content.rs	    headers.remove("content-type");\n    headers.remove("content-length");	    headers.remove("content-length");	unit	serve_content
+serve-accept-ranges-is-set-before-the-range-check	crates/mm-api/src/serve_content.rs	    set_last_modified(&mut headers, modtime_millis);	    set_last_modified(&mut headers, modtime_millis);\n    set_header(&mut headers, "accept-ranges", "bytes");	unit	serve_content
+serve-path-escape-leaves-the-semicolon	crates/mm-api/src/serve_content.rs	        b'/' | b';' | b',' | b'?' => true,	        b'/' | b',' | b'?' => true,\n        b';' => false,	unit	serve_content
+serve-unsafe-types-are-matched-exactly	crates/mm-api/src/serve_content.rs	        .any(|unsafe_type| content_type.starts_with(unsafe_type))	        .any(|unsafe_type| content_type == *unsafe_type)	unit	serve_content
+filestore-enotdir-counts-as-not-found	crates/mm-app/src/filestore.rs	            Self::Io { source, .. } => source.kind() == std::io::ErrorKind::NotFound,	            Self::Io { source, .. } => matches!(\n                source.kind(),\n                std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory\n            ),	unit	filestore
+filestore-listing-drops-the-argument-prefix	crates/mm-app/src/filestore.rs	            results.push(go_path::join(&[path, &name]));	            results.push(name);	unit	filestore
+filestore-a-missing-directory-is-an-error	crates/mm-app/src/filestore.rs	            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),	            Err(err) if false => return Ok(Vec::new()),	unit	filestore
+imaging-gif-version-is-literal	crates/mm-app/src/imaging.rs	        magic: b"GIF8?a",	        magic: b"GIF89a",	unit	imaging
+imaging-wildcard-is-a-literal-question-mark	crates/mm-app/src/imaging.rs	        .all(|(pattern, byte)| *pattern == b'?' || pattern == byte)	        .all(|(pattern, byte)| pattern == byte)	unit	imaging
+model-filepath-base-of-empty-is-empty	crates/mm-model/src/go_path.rs	    if path.is_empty() {\n        return ".".to_string();\n    }\n    let bytes = path.as_bytes();\n    // Strip trailing separators.	    if path.is_empty() {\n        return String::new();\n    }\n    let bytes = path.as_bytes();\n    // Strip trailing separators.	unit	go_path
+app-public-link-hash-salts-second	crates/mm-app/src/file.rs	    hash.update(salt.as_bytes());\n    hash.update(file_id.as_bytes());	    hash.update(file_id.as_bytes());\n    hash.update(salt.as_bytes());	unit	public_link
+app-public-link-hash-is-padded	crates/mm-app/src/file.rs	    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(hash.finalize())	    base64::engine::general_purpose::URL_SAFE.encode(hash.finalize())	unit	public_link
+api-thumbnail-declares-the-originals-size	crates/mm-api/src/files.rs	            Self::Thumbnail | Self::Preview => 0,	            Self::Thumbnail | Self::Preview => info.size,	api	file_bytes
+api-thumbnail-claims-the-originals-type	crates/mm-api/src/files.rs	            Self::Thumbnail => THUMBNAIL_IMAGE_TYPE,	            Self::Thumbnail => &info.mime_type,	api	file_bytes
+api-a-deleted-file-is-served	crates/mm-api/src/files.rs	    if route == ByteRoute::Original && info.delete_at != 0 {	    if false {	api	file_bytes
+api-download-flag-is-a-string-compare	crates/mm-api/src/files.rs	    let force_download = crate::channels::query_flag_is_true(query, DOWNLOAD_PARAM);	    let force_download = crate::channels::query_first(query, DOWNLOAD_PARAM).is_some();	api	file_bytes
+api-missing-derived-image-is-a-404	crates/mm-api/src/files.rs	            format!("file_id={file_id}"),\n            400,	            format!("file_id={file_id}"),\n            404,	api	file_bytes
+api-file-reader-failure-keeps-its-500	crates/mm-api/src/files.rs	            let mut err = *err;\n            err.status_code = 404;	            let err = *err;	api	file_bytes
+api-emoji-cache-control-is-a-day	crates/mm-api/src/images.rs	const EMOJI_CACHE_CONTROL: &str = "max-age=2592000, private";	const EMOJI_CACHE_CONTROL: &str = "max-age=86400, private";	api	file_bytes
+api-brand-404-carries-an-error-document	crates/mm-api/src/images.rs	                ("Content-Type", "application/json"),\n                ("x-mmrs-served-by", "rust"),\n            ],\n            Vec::<u8>::new(),	                ("Content-Type", "application/json"),\n                ("x-mmrs-served-by", "rust"),\n            ],\n            b"{}".to_vec(),	api	file_bytes
+api-team-icon-permission-is-an-and	crates/mm-api/src/images.rs	    if !has_permission && !team_is_publicly_readable {	    if !has_permission {	api	file_bytes
+api-list-exports-gains-a-newline	crates/mm-api/src/exports.rs	    let body = serde_json::to_vec(values).map_err(|err| marshal_error(&err, where_))?;\n    Ok((	    let mut body = serde_json::to_vec(values).map_err(|err| marshal_error(&err, where_))?;\n    body.push(b'\\n');\n    Ok((	api	exports_and_uploads
+api-list-imports-loses-its-newline	crates/mm-api/src/exports.rs	    let mut body =\n        serde_json::to_vec(&imports).map_err(|err| marshal_error(&err, "listImports"))?;\n    body.push(b'\\n');	    let body =\n        serde_json::to_vec(&imports).map_err(|err| marshal_error(&err, "listImports"))?;	api	exports_and_uploads
+api-a-bare-zip-name-is-routable	crates/mm-api/src/exports.rs	    name.len() > ARCHIVE_SUFFIX.len() && name.ends_with(ARCHIVE_SUFFIX)	    name.ends_with(ARCHIVE_SUFFIX)	api	exports_and_uploads
+api-uploads-listing-forgets-the-me-alias	crates/mm-api/src/uploads.rs	    let user_id = resolve_me(user_id, session);\n    require_id(user_id, "user_id")?;\n\n    if user_id != session.0.user_id {	    require_id(user_id, "user_id")?;\n\n    if user_id != session.0.user_id {	api	exports_and_uploads
+api-export-delete-skips-the-permission-check	crates/mm-api/src/exports.rs	    require_system_admin(state, session).await?;\n\n    let result = match which {	    let _ = session;\n\n    let result = match which {	api	exports_and_uploads
+api-global-headers-set-expires-on-head-too	crates/mm-api/src/lib.rs	    let is_get = request.method() == axum::http::Method::GET;	    let is_get = true;	api	file_bytes
+api-global-headers-are-not-applied	crates/mm-api/src/lib.rs	    if !response.headers().contains_key("x-mmrs-served-by") {\n        return response;\n    }	    if true {\n        return response;\n    }	api	file_bytes
+control-rename-a-binding	crates/mm-api/src/serve_content.rs	    let escaped = path_escape(filename);	    let percent_encoded = path_escape(filename);\n    let escaped = percent_encoded;	unit	serve_content
+control-reorder-two-independent-header-sets	crates/mm-api/src/serve_content.rs	    set_header(&mut headers, "x-frame-options", "DENY");\n    set_header(\n        &mut headers,\n        "content-security-policy",\n        "Frame-ancestors 'none'",\n    );	    set_header(\n        &mut headers,\n        "content-security-policy",\n        "Frame-ancestors 'none'",\n    );\n    set_header(&mut headers, "x-frame-options", "DENY");	unit	serve_content\n
