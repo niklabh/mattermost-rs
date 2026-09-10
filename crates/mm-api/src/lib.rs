@@ -9,6 +9,7 @@ pub mod audits;
 pub mod auth;
 /// The two bot reads. `getBot` and `getBots`.
 pub mod bots;
+pub mod channel_writes;
 pub mod channels;
 pub mod cloud;
 pub mod commands;
@@ -603,9 +604,35 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/channels/members/{user_id}/direct/read",
             partially_migrated_with_ids(&state, put(channels::read_all_messages)),
         )
+        // Three methods on one path, because **axum panics on a duplicate route path** and Go
+        // registers three separate `BaseRoutes.Channel.Handle("")` calls (api4/channel.go:85, :86,
+        // :91) that gorilla's method matcher then splits. `MethodRouter::get(...).put(...)
+        // .delete(...)` is the same split: a fourth method still falls to
+        // `partially_migrated`'s method fallback and is forwarded, exactly as gorilla's 405 path
+        // would be.
         .route(
             "/api/v4/channels/{channel_id}",
-            partially_migrated_with_ids(&state, get(channels::get_channel)),
+            partially_migrated_with_ids(
+                &state,
+                get(channels::get_channel)
+                    .put(channel_writes::update_channel)
+                    .delete(channel_writes::delete_channel),
+            ),
+        )
+        // `BaseRoutes.Channel.Handle("/patch")` and `/privacy` are both **PUT**, and `/restore` is
+        // a **POST** — not the DELETE/PUT symmetry the names suggest. Registered method-exactly so
+        // that a wrong verb reaches Go and gets its 405 rather than ours.
+        .route(
+            "/api/v4/channels/{channel_id}/patch",
+            partially_migrated_with_ids(&state, put(channel_writes::patch_channel)),
+        )
+        .route(
+            "/api/v4/channels/{channel_id}/privacy",
+            partially_migrated_with_ids(&state, put(channel_writes::update_channel_privacy)),
+        )
+        .route(
+            "/api/v4/channels/{channel_id}/restore",
+            partially_migrated_with_ids(&state, post(channel_writes::restore_channel)),
         )
         // Go's sibling `POST /channels/stats/member_count` (api.go:60) never lands here: its
         // last segment is `member_count`, not `stats`, so it falls to `Router::fallback` and is
