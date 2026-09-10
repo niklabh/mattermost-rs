@@ -755,16 +755,31 @@ pub async fn fetch_both_stable(
     token: &str,
     path: &str,
 ) -> (Vec<u8>, Vec<u8>) {
-    fetch_both_stable_within(client, token, path, 24).await
+    fetch_both_stable_within(client, token, path, 44).await
 }
 
 /// [`fetch_both_stable`] with the retry budget spelled out.
 ///
-/// The default is **24**, raised from twelve when the schemes suite landed: it creates four users,
-/// five teams and two channels in one fixture, and every one of those is a row in the user list
-/// and two rows in the admin's audit page. Two long-standing tests started failing on churn alone
-/// — `users_list::the_unfiltered_list_matches_go` and `user_audits::me_resolves_to_the_caller` —
-/// neither of which had anything to do with the routes being added.
+/// The default is **44**, and it has been raised twice for the same reason. Twelve → 24 when the
+/// schemes suite landed: it creates four users, five teams and two channels in one fixture, and
+/// every one of those is a row in the user list and two rows in the admin's audit page. Two
+/// long-standing tests started failing on churn alone — `users_list::the_unfiltered_list_matches_go`
+/// and `user_audits::me_resolves_to_the_caller` — neither of which had anything to do with the
+/// routes being added.
+///
+/// 24 → 44 when the four write suites of 2026-09-10 landed (membership, channel lifecycle, post
+/// writes, sidebar categories). Those create and *delete* users and channels continuously rather
+/// than once per fixture, so the quiescent window this function waits for stopped occurring
+/// within 24 attempts. Three separate whole-database aggregates flaked in one session
+/// — `users_stats::the_stats_body_is_byte_identical`,
+/// `users_stats::the_count_matches_the_database_including_bots` and `system_usage`'s rounded post
+/// count — each passing alone and failing in the concurrent run.
+///
+/// **This raises the budget; it does not remove the race.** The backoff caps at 400ms, so the
+/// cost is bounded at roughly 20s for a global-count route that genuinely diverges, against 10s
+/// before, and nothing at all for a route that agrees on the first attempt. A test that still
+/// exhausts 44 attempts is reporting churn, not a port bug — check it in isolation before
+/// believing it.
 ///
 /// The backoff is capped so a *real* divergence still fails quickly: without a cap, doubling the
 /// attempts would have quadrupled the time a genuinely broken route takes to report itself.
