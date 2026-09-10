@@ -72,7 +72,12 @@ fn string_interface_from_json(bytes: &[u8]) -> serde_json::Map<String, serde_jso
     serde_json::from_slice::<serde_json::Map<String, serde_json::Value>>(bytes).unwrap_or_default()
 }
 
-/// `ReturnStatusOK` (api4/apitestlib-free; web/handlers) — `{"status":"OK"}`, encoder-framed.
+/// Port of `web.ReturnStatusOK` (web/web.go:127).
+///
+/// **No trailing newline.** It is `w.Write([]byte(MapToJSON(m)))`, not
+/// `json.NewEncoder(w).Encode` — so it is the one success body on these six routes that is *not*
+/// encoder-framed, unlike `addChannelMember`'s and every NDJSON line. Measured: the first version
+/// of this function added the newline and four tests caught it.
 fn status_ok() -> Response {
     (
         StatusCode::OK,
@@ -80,7 +85,7 @@ fn status_ok() -> Response {
             ("Content-Type", "application/json"),
             ("x-mmrs-served-by", "rust"),
         ],
-        "{\"status\":\"OK\"}\n",
+        r#"{"status":"OK"}"#,
     )
         .into_response()
 }
@@ -712,6 +717,12 @@ pub async fn add_channel_member(
 
     let encoded = if single {
         mm_model::utils::go_json_marshal(&new_members[0])
+    } else if new_members.is_empty() {
+        // Go's `var newChannelMembers []model.ChannelMember` is **nil**, and `Encode` writes a nil
+        // slice as `null`. Reachable with `{"user_ids": []}`, which takes the array branch, adds
+        // nobody, and is a `201 null` rather than a `201 []`. A `Vec::new()` would serialise to
+        // `[]` and diverge on exactly that input.
+        Ok("null".to_owned())
     } else {
         mm_model::utils::go_json_marshal(&new_members)
     };

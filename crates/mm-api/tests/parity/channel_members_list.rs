@@ -303,8 +303,10 @@ async fn non_members_and_missing_channels_are_403() {
     assert_error_bodies_match_except_known_gaps(&go_body, &rs_body, "missing channel");
 }
 
-/// Only GET is ours: POST on this path is Go's `addChannelMember`, reached through the forward —
-/// and answered by Go's own body-validation 400 when given no body.
+/// GET, POST and PUT are all ours now — `addChannelMember` and `setChannelMembers` landed with the
+/// channel-membership writes — so the probe for the proxy fallback is `PATCH`, which gorilla
+/// registers nowhere on this path. The assertion is the one [D-093] is about: an unregistered
+/// method must reach Go rather than our router's 405.
 #[tokio::test]
 async fn other_methods_on_this_path_are_still_forwarded() {
     if !stack_enabled() {
@@ -319,7 +321,7 @@ async fn other_methods_on_this_path_are_still_forwarded() {
     let path = format!("/api/v4/channels/{channel_id}/members");
 
     let response = client
-        .post(format!("{RUST}{path}"))
+        .patch(format!("{RUST}{path}"))
         .header("Authorization", format!("Bearer {token}"))
         .send()
         .await
@@ -330,13 +332,17 @@ async fn other_methods_on_this_path_are_still_forwarded() {
             .get("x-mmrs-served-by")
             .and_then(|v| v.to_str().ok()),
         Some("go"),
-        "POST is not migrated, so it must be forwarded"
+        "PATCH is unregistered on this path, so it must be forwarded"
     );
     let status = response.status().as_u16();
+    assert_ne!(
+        status, 405,
+        "a 405 here means the path was registered without a proxy fallback"
+    );
     let ours: serde_json::Value = response.json().await.expect("decodes");
 
     let direct = client
-        .post(format!("{GO}{path}"))
+        .patch(format!("{GO}{path}"))
         .header("Authorization", format!("Bearer {token}"))
         .send()
         .await
@@ -344,6 +350,24 @@ async fn other_methods_on_this_path_are_still_forwarded() {
     assert_eq!(direct.status().as_u16(), status, "Go's own answer");
     let direct_body: serde_json::Value = direct.json().await.expect("decodes");
     assert_eq!(ours["id"], direct_body["id"]);
+
+    // And the two write methods this path now serves locally are not forwarded.
+    for method in [reqwest::Method::POST, reqwest::Method::PUT] {
+        let response = client
+            .request(method.clone(), format!("{RUST}{path}"))
+            .header("Authorization", format!("Bearer {token}"))
+            .send()
+            .await
+            .expect("the Rust server answers");
+        assert_eq!(
+            response
+                .headers()
+                .get("x-mmrs-served-by")
+                .and_then(|v| v.to_str().ok()),
+            Some("rust"),
+            "{method} on this path is migrated and must not be forwarded"
+        );
+    }
 
     teardown(&client, &token, &channel_id, &users).await;
 }

@@ -2425,3 +2425,29 @@ impl SocketProbe {
             .collect()
     }
 }
+
+/// The `ChannelMemberHistory` rows for one membership, oldest first, as `(join_time, leave_time)`.
+///
+/// **No REST route reads this table.** It is the compliance-export audit trail, written on every
+/// join and closed on every leave by `addUserToChannel`/`removeUserFromChannel` — and it appears in
+/// no response body, so a parity suite comparing HTTP answers passes with both writes deleted.
+/// `parity/channel_member_writes.rs` reads it directly for that reason; the store-level behaviour of
+/// the two writes is covered by `mm-store/tests/db_channel_member_writes.rs`.
+///
+/// `None` when there is no `DATABASE_URL`, so a caller degrades to skipping rather than failing.
+pub async fn channel_member_history(
+    channel_id: &str,
+    user_id: &str,
+) -> Option<Vec<(i64, Option<i64>)>> {
+    let pool = fixture_pool().await?;
+    let rows: Vec<(i64, Option<i64>)> = sqlx::query_as(
+        "SELECT jointime, leavetime FROM channelmemberhistory \
+         WHERE channelid = $1 AND userid = $2 ORDER BY jointime",
+    )
+    .bind(channel_id)
+    .bind(user_id)
+    .fetch_all(&pool)
+    .await
+    .ok()?;
+    Some(rows)
+}
