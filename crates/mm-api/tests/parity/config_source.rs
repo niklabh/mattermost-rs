@@ -103,9 +103,12 @@ async fn the_persisted_document_excludes_the_environment_overlay() {
         .and_then(|v| v.as_str())
         .expect("the document carries ServiceSettings.SiteURL");
 
+    // **`GO`, not a literal.** `scripts/go-server.sh` sets `MM_SERVICESETTINGS_SITEURL` to its own
+    // stack's port, so a hardcoded `:8065` here passes on stack 0 and fails on every other stack
+    // for a reason that has nothing to do with the route.
     assert_eq!(
-        running_site_url, "http://localhost:8065",
-        "the compose stack sets MM_SERVICESETTINGS_SITEURL; the running server should report it"
+        running_site_url, GO,
+        "go-server.sh sets MM_SERVICESETTINGS_SITEURL; the running server should report it"
     );
     assert_eq!(
         persisted_site_url, "",

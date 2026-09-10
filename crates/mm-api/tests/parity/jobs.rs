@@ -177,6 +177,10 @@ async fn the_data_column_round_trips_as_an_object_and_as_null() {
     let _unlicensed = ACTIVE_LICENCE_ROW.read().await;
     let client = client();
     let token = go_minted_token(&client).await;
+    // The null shape is planted rather than waited for: see `plant_null_data_job`. Without it this
+    // test asserts nothing on any database younger than the product-notices worker's first tick,
+    // which is every freshly created stack.
+    common::plant_null_data_job("nulldata").await;
 
     let (go, rs) = fetch_both_stable(&client, &token, "/api/v4/jobs?per_page=200").await;
     assert_eq!(String::from_utf8_lossy(&go), String::from_utf8_lossy(&rs));
@@ -187,6 +191,8 @@ async fn the_data_column_round_trips_as_an_object_and_as_null() {
 
     let has_null = jobs.iter().any(|j| j["data"].is_null());
     let has_object = jobs.iter().any(|j| j["data"].is_object());
+    common::unplant_jobs().await;
+
     assert!(
         has_null && has_object,
         "both shapes must appear or this test proves nothing: {jobs:?}"
