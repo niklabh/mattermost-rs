@@ -9211,3 +9211,70 @@ answers coincided:
 
 One harness fault on the first run, from a control that did not compile; the tally above is the
 re-run.
+
+## Marking everything read, and a feature flag turned on deliberately (2026-09-10)
+
+`PUT /api/v4/channels/members/{user_id}/direct/read` and
+`PUT /api/v4/users/{user_id}/teams/{team_id}/read` — shift-escape in the webapp. 291 →
+**293 of 764**. Two more store queries
+(`get_team_channels_with_unread_and_mentions`, `get_direct_messages_with_unread_and_mentions`),
+two more app functions in `mm_app::channel_view`, and two handlers.
+
+### The flag is on now, on both servers
+
+`FeatureFlags.EnableShiftEscapeToMarkAllRead` defaults to **false**, and with it off both routes
+are a 501 with no comparable 200 anywhere. `FeatureFlags` is stripped before the configuration
+document is persisted (config/store.go:306), so the environment is the only place either server
+can read it from: `scripts/go-server.sh` and `scripts/mm-api-env.sh` both set it now, and
+`go-server.sh`'s standing note — "turning one on is a deliberate act with its own parity run" — is
+what this is. Unlike `IntegratedBoards` and `DiscoverableChannels` ([D-153]) this flag is read in
+exactly two places in the whole Go tree and changes no route already served.
+
+The **501** therefore has no cross-server oracle: it is asserted against a `SecondServer` started
+with the flag off, which is our answer only. Same shape as [D-213], and the gate is the *first*
+line of each handler — ahead of `RequireUserId`, so a malformed id gets the 501 too.
+
+### These two are not `MarkChannelsAsViewed` with a different WHERE
+
+Three differences, and the first is the one a port would get wrong:
+
+* **The thread store is handed every channel, not the unread ones.** A thread reply does not bump
+  `Channels.TotalMsgCount`, so a channel whose counters are caught up can still hold unread thread
+  replies; Go passes the whole membership set for exactly that reason (its comment is at
+  app/channel.go:3566) and lets the thread statement's own `LastReplyAt > LastViewed` clause bound
+  the write. `the_team_route_marks_threads_read_in_channels_that_were_already_read` is the test
+  that can tell the two apart — it views the channel first, saying it supports collapsed threads,
+  which leaves the channel read and the thread unread.
+* **The thread write is unconditional and comes before the early return.** Only the channel write
+  and its `multiple_channels_viewed` are behind "something was unread", so a second press is
+  silent except for the thread event.
+* **There is no `ThreadAutoFollow` gate and no `collapsedThreadsSupported`** on either route.
+
+### The two thread events are scoped differently, and that is the whole difference at the end
+
+The team route publishes **one** `thread_read_changed` with a `team_id` — the client turns it into
+a single `ALL_TEAM_THREADS_READ`. The direct route has no team to broadcast on, so it publishes
+one **per channel**, channel-scoped, sharing a single timestamp, and the client turns each into
+`ALL_THREADS_IN_CHANNEL_READ`. Both are gated on CRT being on for the user, which the shipped
+`always_on` default makes unconditional.
+
+### `MarkAllDirectAndGroupMessagesViewed` reuses the team query's error id
+
+Its store failure is reported as
+`app.channel.get_channels_by_team_with_unreads_and_with_mentions.app_error` (channel.go:3624) —
+the *team* id, on the route that has no team. Reproduced rather than corrected: the id is what a
+translated message keys off.
+
+### `readAllInTeam`'s two gates, and what a non-member gets
+
+`SessionHasPermissionToUser` first, then `SessionHasPermissionToTeam(view_team)`. A caller acting
+on their own account who is not in the team gets the **`view_team` 403**, not a 404 — there is no
+`GetTeamMember` on this path to produce one, unlike its neighbours in the same file.
+
+### Mutation testing: 20 run, 18 caught, 2 controls survived
+
+No real survivors. One harness fault on the first run and it was a mutation, not the code: a
+predicate rewritten to `AND ($3 = $3)` left the bind parameter untyped, so `sqlx::query!` could not
+infer `&[String]` and `mm-store` failed to compile. Rewritten as
+`AND (threads.channelid = ANY($3) OR TRUE)`, which keeps the parameter used and still deletes the
+scope.

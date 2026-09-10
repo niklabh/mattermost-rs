@@ -280,6 +280,213 @@ impl App {
         .await
     }
 
+    /// Port of `App.MarkTeamChannelsAndThreadsViewed` (channel.go:3555) — the whole of one team
+    /// marked read, behind `PUT /users/{user_id}/teams/{team_id}/read`.
+    ///
+    /// # It is `MarkChannelsAsViewed` with three deliberate differences
+    ///
+    /// - **The thread store gets every channel, not the unread ones.** `times` covers every
+    ///   membership in the team including the fully-read ones, and Go passes all of it: a
+    ///   CRT-enabled user can have unread thread *replies* in a channel whose channel-level
+    ///   counters are already up to date, because a reply does not bump `TotalMsgCount`. The
+    ///   thread store's own `LastReplyAt > LastViewed` clause keeps the UPDATE bounded.
+    /// - **There is no `ThreadAutoFollow` gate and no `collapsedThreadsSupported`.** The thread
+    ///   write happens unconditionally, and it happens *before* the early return — so a team with
+    ///   nothing unread still marks its threads read.
+    /// - **One team-scoped `thread_read_changed`, not one per channel**, and only when CRT is on
+    ///   for the user. The client routes it to a single `ALL_TEAM_THREADS_READ` action.
+    ///
+    /// The channel write and its `multiple_channels_viewed` are skipped when nothing is unread,
+    /// and the answer is still the full map.
+    #[tracing::instrument(skip(self), fields(team_id = %team_id, user_id = %user_id, viewed))]
+    pub async fn mark_team_channels_and_threads_viewed(
+        &self,
+        team_id: &str,
+        user_id: &str,
+        is_crt_enabled: bool,
+    ) -> AppResult<BTreeMap<String, i64>> {
+        let user = self.store().user().get(user_id).await.map_err(|err| {
+            tracing::error!(error = %err, "user lookup failed");
+            AppError::boxed(
+                "MarkTeamChannelsAndThreadsViewed",
+                "app.user.get.app_error",
+                None,
+                String::new(),
+                500,
+            )
+        })?;
+
+        let unreads = self
+            .store()
+            .channel()
+            .get_team_channels_with_unread_and_mentions(
+                team_id,
+                user_id,
+                user.notify_props.as_ref(),
+            )
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "team unreads-and-mentions lookup failed");
+                AppError::boxed(
+                    "MarkTeamChannelsAndThreadsViewed",
+                    "app.channel.get_channels_by_team_with_unreads_and_with_mentions.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })?;
+        tracing::Span::current().record("viewed", unreads.with_unreads.len());
+
+        self.mark_every_thread_and_the_unread_channels(
+            "MarkTeamChannelsAndThreadsViewed",
+            user_id,
+            &unreads,
+        )
+        .await?;
+
+        if is_crt_enabled {
+            let mut message = mm_model::websocket_message::WebSocketEvent::new(
+                mm_model::websocket_message::WEBSOCKET_EVENT_THREAD_READ_CHANGED,
+                team_id,
+                "",
+                user_id,
+                None,
+                "",
+            );
+            message.add("timestamp", serde_json::Value::from(get_millis()));
+            self.publish(message).await;
+        }
+
+        Ok(unreads.read_times)
+    }
+
+    /// Port of `App.MarkAllDirectAndGroupMessagesViewed` (channel.go:3616), behind
+    /// `PUT /channels/members/{user_id}/direct/read`.
+    ///
+    /// Line for line its team sibling, with one difference at the end: **there is no team to
+    /// broadcast on**, so the CRT event is published once per channel rather than once, and the
+    /// client routes each to `ALL_THREADS_IN_CHANNEL_READ`. Every channel gets one — including
+    /// the ones that were already read — because the loop is over `times`, not over the unread
+    /// set, and all of them share a single timestamp.
+    #[tracing::instrument(skip(self), fields(user_id = %user_id, viewed))]
+    pub async fn mark_all_direct_and_group_messages_viewed(
+        &self,
+        user_id: &str,
+        is_crt_enabled: bool,
+    ) -> AppResult<BTreeMap<String, i64>> {
+        let user = self.store().user().get(user_id).await.map_err(|err| {
+            tracing::error!(error = %err, "user lookup failed");
+            AppError::boxed(
+                "MarkAllDirectAndGroupMessagesViewed",
+                "app.user.get.app_error",
+                None,
+                String::new(),
+                500,
+            )
+        })?;
+
+        let unreads = self
+            .store()
+            .channel()
+            .get_direct_messages_with_unread_and_mentions(user_id, user.notify_props.as_ref())
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "direct unreads-and-mentions lookup failed");
+                AppError::boxed(
+                    "MarkAllDirectAndGroupMessagesViewed",
+                    // Go reuses the *team* query's error id here (channel.go:3624); reproduced
+                    // rather than corrected, since the id is what a translated message keys off.
+                    "app.channel.get_channels_by_team_with_unreads_and_with_mentions.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })?;
+        tracing::Span::current().record("viewed", unreads.with_unreads.len());
+
+        self.mark_every_thread_and_the_unread_channels(
+            "MarkAllDirectAndGroupMessagesViewed",
+            user_id,
+            &unreads,
+        )
+        .await?;
+
+        if is_crt_enabled {
+            let timestamp = get_millis();
+            for channel_id in unreads.read_times.keys() {
+                let mut message = mm_model::websocket_message::WebSocketEvent::new(
+                    mm_model::websocket_message::WEBSOCKET_EVENT_THREAD_READ_CHANGED,
+                    "",
+                    channel_id,
+                    user_id,
+                    None,
+                    "",
+                );
+                message.add("timestamp", serde_json::Value::from(timestamp));
+                self.publish(message).await;
+            }
+        }
+
+        Ok(unreads.read_times)
+    }
+
+    /// The body `MarkTeamChannelsAndThreadsViewed` and `MarkAllDirectAndGroupMessagesViewed`
+    /// share verbatim (channel.go:3566-3600, :3627-3661).
+    ///
+    /// **The thread write is unconditional and comes first**; only the channel write and its
+    /// event are behind "something was unread". `where_` is the caller's name, which is the only
+    /// thing that differs between the two error paths.
+    async fn mark_every_thread_and_the_unread_channels(
+        &self,
+        where_: &'static str,
+        user_id: &str,
+        unreads: &mm_store::UnreadsAndMentions,
+    ) -> AppResult<()> {
+        let all_channel_ids: Vec<String> = unreads.read_times.keys().cloned().collect();
+        self.store()
+            .thread()
+            .mark_all_as_read_by_channels(user_id, &all_channel_ids)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "thread mark-read failed");
+                AppError::boxed(
+                    where_,
+                    "app.thread.mark_all_as_read_by_channels.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })?;
+
+        if unreads.with_unreads.is_empty() {
+            return Ok(());
+        }
+
+        self.store()
+            .channel()
+            .update_last_viewed_at(&unreads.with_unreads, user_id)
+            .await
+            .map_err(update_last_viewed_at_error)?;
+
+        if self.config().enable_channel_viewed_messages {
+            let mut message = mm_model::websocket_message::WebSocketEvent::new(
+                mm_model::websocket_message::WEBSOCKET_EVENT_MULTIPLE_CHANNELS_VIEWED,
+                "",
+                "",
+                user_id,
+                None,
+                "",
+            );
+            message.add(
+                "channel_times",
+                serde_json::to_value(&unreads.read_times).unwrap_or(serde_json::Value::Null),
+            );
+            self.publish(message).await;
+        }
+
+        Ok(())
+    }
+
     /// Port of `App.GetBoardChannel` (channel.go:2243), which exists only so
     /// `rejectBoardChannelByID` (api4/channel.go:23) can turn "this id is a board" into a 400 on
     /// a `/channels` route. Its **success** is the rejection; its 404 is the ordinary path.

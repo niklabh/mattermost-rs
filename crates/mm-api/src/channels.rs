@@ -3092,6 +3092,164 @@ async fn serve_read_multiple_channels(
     view_response(times, "readMultipleChannels")
 }
 
+/// The `FeatureFlags.EnableShiftEscapeToMarkAllRead` gate the two "mark everything read" routes
+/// open with (api4/channel.go:702, :2100).
+///
+/// **It is the first line of each handler, ahead of `RequireUserId`** — so a malformed id gets the
+/// 501 too, and the 501 is what a client sees on a server that has not turned the flag on. The
+/// flag is environment-or-default only; there is no configuration document to set it in.
+#[allow(clippy::result_large_err)]
+fn require_mark_all_as_read(state: &AppState, where_: &'static str) -> Result<(), ApiError> {
+    if state
+        .app
+        .config()
+        .feature_flag_enable_shift_escape_to_mark_all_read
+    {
+        return Ok(());
+    }
+    Err(ApiError::from(mm_model::utils::AppError::new(
+        where_,
+        "api.mark_all_as_read.disabled.app_error",
+        None,
+        String::new(),
+        501,
+    )))
+}
+
+/// Port of `readAllMessages` (api4/channel.go:701), reached as
+/// `PUT /api/v4/channels/members/{user_id}/direct/read` — every DM and group message marked read
+/// at once, which is what shift-escape does in the webapp.
+///
+/// # Order of operations
+///
+/// 1. The feature-flag gate, **before** `RequireUserId`.
+/// 2. `RequireUserId`, returning early — unlike `readMultipleChannels` two routes away.
+/// 3. `SessionHasPermissionToUser` → 403 naming `edit_other_users`.
+/// 4. `MarkAllDirectAndGroupMessagesViewed`, whose `isCRTEnabled` argument the handler computes
+///    itself rather than letting the app do it.
+///
+/// There is no body: the whole scope of the write is "this user's DMs and GMs".
+///
+/// **The audit record is not reproduced.** Go builds a `model.AuditEventMarkMessagesRead` and
+/// logs it through `Srv().Audit`, which is the mlog audit stream and not the `Audits` table — so
+/// nothing a ported route can read changes. Same for its team sibling.
+#[tracing::instrument(skip_all, fields(user_id = %user_id))]
+pub async fn read_all_messages(
+    State(state): State<AppState>,
+    Path(user_id): Path<String>,
+    session: AuthenticatedSession,
+) -> Response {
+    match serve_read_all_messages(&state, &user_id, &session).await {
+        Ok(response) => response,
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn serve_read_all_messages(
+    state: &AppState,
+    user_id: &str,
+    session: &AuthenticatedSession,
+) -> Result<Response, ApiError> {
+    require_mark_all_as_read(state, "readAllMessages")?;
+
+    let user_id = if user_id == ME {
+        session.0.user_id.clone()
+    } else {
+        user_id.to_owned()
+    };
+    require_id(&user_id, "user_id")?;
+
+    if !state
+        .app
+        .session_has_permission_to_user(&session.0, &user_id)
+        .await
+    {
+        return Err(ApiError::from(make_permission_error(
+            &session.0,
+            &[&PERMISSION_EDIT_OTHER_USERS],
+        )));
+    }
+
+    let is_crt_enabled = state.app.is_crt_enabled_for_user(&user_id).await;
+    let times = state
+        .app
+        .mark_all_direct_and_group_messages_viewed(&user_id, is_crt_enabled)
+        .await?;
+
+    view_response(times, "readAllMessages")
+}
+
+/// Port of `readAllInTeam` (api4/channel.go:2099), reached as
+/// `PUT /api/v4/users/{user_id}/teams/{team_id}/read`.
+///
+/// # Two gates, and the user one is first
+///
+/// `SessionHasPermissionToUser` → `edit_other_users`, then `SessionHasPermissionToTeam(view_team)`
+/// → `view_team`. A caller who fails both is told about the first, and a caller acting on their
+/// own account who is not in the team gets the **`view_team`** refusal rather than a 404 — there
+/// is no `GetTeamMember` on this path to produce one.
+///
+/// The ids are validated user-first (`RequireUserId().RequireTeamId()`), which is only observable
+/// through a translated message this server does not produce ([D-092]); [`validate_user_then_team`]
+/// — shared with `getChannelsForTeamForUser`, which chains the same two — is where that order has
+/// an in-process oracle.
+#[tracing::instrument(skip_all, fields(user_id = %user_id, team_id = %team_id))]
+pub async fn read_all_in_team(
+    State(state): State<AppState>,
+    Path((user_id, team_id)): Path<(String, String)>,
+    session: AuthenticatedSession,
+) -> Response {
+    match serve_read_all_in_team(&state, &user_id, &team_id, &session).await {
+        Ok(response) => response,
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn serve_read_all_in_team(
+    state: &AppState,
+    user_id: &str,
+    team_id: &str,
+    session: &AuthenticatedSession,
+) -> Result<Response, ApiError> {
+    require_mark_all_as_read(state, "readAllInTeam")?;
+
+    let user_id = if user_id == ME {
+        session.0.user_id.clone()
+    } else {
+        user_id.to_owned()
+    };
+    validate_user_then_team(&user_id, team_id)?;
+
+    if !state
+        .app
+        .session_has_permission_to_user(&session.0, &user_id)
+        .await
+    {
+        return Err(ApiError::from(make_permission_error(
+            &session.0,
+            &[&PERMISSION_EDIT_OTHER_USERS],
+        )));
+    }
+    if !state
+        .app
+        .session_has_permission_to_team(&session.0, team_id, &PERMISSION_VIEW_TEAM)
+        .await
+    {
+        return Err(ApiError::from(make_permission_error(
+            &session.0,
+            &[&PERMISSION_VIEW_TEAM],
+        )));
+    }
+
+    let is_crt_enabled = state.app.is_crt_enabled_for_user(&user_id).await;
+    let times = state
+        .app
+        .mark_team_channels_and_threads_viewed(team_id, &user_id, is_crt_enabled)
+        .await?;
+
+    view_response(times, "readAllInTeam")
+}
+
 #[cfg(test)]
 mod tests {
     /// The name in the 400 for a malformed id, pinned in-process because HTTP cannot see it —

@@ -564,6 +564,14 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/users/{user_id}/teams/{team_id}/unread",
             partially_migrated_with_ids(&state, get(teams::get_team_unread)),
         )
+        // `BaseRoutes.TeamForUser` once more (api4/channel.go:76) — the whole team marked read.
+        // A `PUT` on a static leaf beside `/unread` and `/channels`, gated on the
+        // `EnableShiftEscapeToMarkAllRead` feature flag, which both servers now turn on through
+        // the environment (`scripts/go-server.sh`, `scripts/mm-api-env.sh`).
+        .route(
+            "/api/v4/users/{user_id}/teams/{team_id}/read",
+            partially_migrated_with_ids(&state, put(channels::read_all_in_team)),
+        )
         // Sibling literal segments (`/channels/direct`, `/channels/search`, …) are all POST-only
         // in Go, and all alphanumeric. A GET to one of them matches `{channel_id}` here exactly
         // as it matches gorilla's `{channel_id:[A-Za-z0-9]+}` there, and 400s identically; a POST
@@ -582,10 +590,7 @@ pub fn router(state: AppState) -> Router {
         // `/channels/members/<id>/view` here and `/channels/<id>/members/<id>` to
         // `getChannelMember`.
         //
-        // `/direct/read` is a **`PUT`** and is *not* registered: it is gated on the
-        // `EnableShiftEscapeToMarkAllRead` feature flag, which is off by default, and porting a
-        // handler whose only reachable answer is a 501 buys nothing until the flag is on. It
-        // forwards, as does the whole `{user_id}` subtree's every other method.
+        // `/direct/read` is a **`PUT`**, and one segment deeper than its two siblings.
         .route(
             "/api/v4/channels/members/{user_id}/view",
             partially_migrated_with_ids(&state, post(channels::view_channel)),
@@ -593,6 +598,10 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/channels/members/{user_id}/mark_read",
             partially_migrated_with_ids(&state, post(channels::read_multiple_channels)),
+        )
+        .route(
+            "/api/v4/channels/members/{user_id}/direct/read",
+            partially_migrated_with_ids(&state, put(channels::read_all_messages)),
         )
         .route(
             "/api/v4/channels/{channel_id}",

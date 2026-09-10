@@ -31,7 +31,10 @@
 use std::collections::BTreeMap;
 
 use mm_model::utils::StringMap;
-use mm_store::channel_store::{get_channels_with_unreads_and_with_mentions, update_last_viewed_at};
+use mm_store::channel_store::{
+    get_channels_with_unreads_and_with_mentions, get_direct_messages_with_unread_and_mentions,
+    get_team_channels_with_unread_and_mentions, update_last_viewed_at,
+};
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 
@@ -102,15 +105,17 @@ async fn seed(pool: &PgPool, membership_push: &str) {
         (SPACE, "S", 40, 15, 0, 4000, 0),
         (DIRECT, "D", 40, 15, 0, 5000, 0),
     ] {
-        // A space has no team in the schema's usual shape, but nothing here reads `TeamId`, and
-        // giving every row the same team keeps the deny-list the only difference.
+        // **The direct channel gets no team**, which is what a real `D` row looks like and what
+        // makes the team-scoped query and the DM-scoped one disjoint. A space would not really
+        // share the team either, but nothing here reads its `TeamId` and giving it one keeps the
+        // deny-list the only thing separating it from its neighbours.
         sqlx::query(
             "INSERT INTO channels (id, createat, updateat, deleteat, teamid, type, displayname,
                                    name, totalmsgcount, totalmsgcountroot, lastpostat)
              VALUES ($1, 0, 0, 0, $2, $3::channel_type, 'mmrs view', $4, $5, $6, $7)",
         )
         .bind(id)
-        .bind(TEAM)
+        .bind(if id == DIRECT { "" } else { TEAM })
         .bind(channel_type)
         .bind(format!("mmrs-view-{id}"))
         .bind(total)
@@ -406,4 +411,55 @@ async fn store_channel_view_an_empty_id_list_is_an_empty_map() {
         .await
         .expect("an empty list is not an error");
     assert!(times.is_empty());
+}
+
+/// **The team query and the DM query partition the same memberships.** Between them they see
+/// every channel the id-list query does, and neither sees the other's.
+///
+/// The team query keeps its one-type deny-list, so the board is a team channel; the DM query has
+/// an allow-list (`Type IN (D, G)`) instead and no team predicate at all, because a direct
+/// channel carries no `TeamId`.
+#[tokio::test]
+async fn store_channel_view_team_and_direct_queries_partition_the_memberships() {
+    if !db_enabled() {
+        eprintln!("skipping: set MM_STORE_DB=1 with DATABASE_URL pointing at the stack");
+        return;
+    }
+    let _fixtures = FIXTURES.lock().await;
+    let pool = pool().await;
+    purge(&pool).await;
+    seed(&pool, "default").await;
+
+    let team = get_team_channels_with_unread_and_mentions(&pool, TEAM, USER, None)
+        .await
+        .expect("the team query runs");
+    let direct = get_direct_messages_with_unread_and_mentions(&pool, USER, None)
+        .await
+        .expect("the direct query runs");
+
+    purge(&pool).await;
+
+    let mut in_team: Vec<&str> = team.read_times.keys().map(String::as_str).collect();
+    in_team.sort_unstable();
+    let mut expected = vec![UNREAD, READ, BOARD];
+    expected.sort_unstable();
+    assert_eq!(
+        in_team, expected,
+        "the board is a team channel; the space is denied and the DM has no team"
+    );
+
+    let in_direct: Vec<&str> = direct.read_times.keys().map(String::as_str).collect();
+    assert_eq!(
+        in_direct,
+        vec![DIRECT],
+        "and the DM is only in the other one"
+    );
+
+    // The classification is the same code, so the only thing worth re-asserting is that it ran.
+    assert_eq!(
+        team.read_times.get(READ),
+        Some(&9000),
+        "still max(LastPostAt, LastViewedAt)"
+    );
+    assert_eq!(direct.with_unreads, vec![DIRECT.to_owned()]);
 }

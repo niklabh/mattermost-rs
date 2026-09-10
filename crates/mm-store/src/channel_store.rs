@@ -444,6 +444,21 @@ pub trait ChannelStore {
         user_notify_props: Option<&StringMap>,
     ) -> impl std::future::Future<Output = Result<UnreadsAndMentions, StoreError>> + Send;
 
+    /// Port of `SqlChannelStore.GetTeamChannelsWithUnreadAndMentions` (channel_store.go:2306).
+    fn get_team_channels_with_unread_and_mentions(
+        &self,
+        team_id: &str,
+        user_id: &str,
+        user_notify_props: Option<&StringMap>,
+    ) -> impl std::future::Future<Output = Result<UnreadsAndMentions, StoreError>> + Send;
+
+    /// Port of `SqlChannelStore.GetDirectMessagesWithUnreadAndMentions` (channel_store.go:2374).
+    fn get_direct_messages_with_unread_and_mentions(
+        &self,
+        user_id: &str,
+        user_notify_props: Option<&StringMap>,
+    ) -> impl std::future::Future<Output = Result<UnreadsAndMentions, StoreError>> + Send;
+
     /// Port of `SqlChannelStore.UpdateLastViewedAt` (channel_store.go:2838).
     fn update_last_viewed_at(
         &self,
@@ -659,6 +674,24 @@ impl ChannelStore for SqlChannelStore {
             user_notify_props,
         )
         .await
+    }
+
+    async fn get_team_channels_with_unread_and_mentions(
+        &self,
+        team_id: &str,
+        user_id: &str,
+        user_notify_props: Option<&StringMap>,
+    ) -> Result<UnreadsAndMentions, StoreError> {
+        get_team_channels_with_unread_and_mentions(&self.pool, team_id, user_id, user_notify_props)
+            .await
+    }
+
+    async fn get_direct_messages_with_unread_and_mentions(
+        &self,
+        user_id: &str,
+        user_notify_props: Option<&StringMap>,
+    ) -> Result<UnreadsAndMentions, StoreError> {
+        get_direct_messages_with_unread_and_mentions(&self.pool, user_id, user_notify_props).await
     }
 
     async fn update_last_viewed_at(
@@ -4000,7 +4033,23 @@ pub struct UnreadsAndMentions {
     pub read_times: BTreeMap<String, i64>,
 }
 
-/// One row of the three "unreads and mentions" queries, before classification.
+/// One row of the three "unreads and mentions" queries, exactly as the SELECT returns it.
+///
+/// The field names are the **column** names because `query_as!` matches on them; the three
+/// queries share this struct so that adding a column to one and not the others is a compile
+/// error rather than a divergence.
+struct UnreadAndMentionsRow {
+    id: String,
+    channel_type: String,
+    totalmsgcount: i64,
+    lastpostat: i64,
+    msgcount: i64,
+    mentioncount: i64,
+    notifyprops: Option<serde_json::Value>,
+    lastviewedat: i64,
+}
+
+/// The same row with `NotifyProps` decoded, which is the only per-row work the query does not do.
 struct UnreadRow {
     id: String,
     channel_type: String,
@@ -4010,6 +4059,21 @@ struct UnreadRow {
     mention_count: i64,
     notify_props: Option<StringMap>,
     last_viewed_at: i64,
+}
+
+impl UnreadAndMentionsRow {
+    fn decode(self) -> Result<UnreadRow, StoreError> {
+        Ok(UnreadRow {
+            id: self.id,
+            channel_type: self.channel_type,
+            total_msg_count: self.totalmsgcount,
+            last_post_at: self.lastpostat,
+            msg_count: self.msgcount,
+            mention_count: self.mentioncount,
+            notify_props: notify_props_from_column("ChannelMember", self.notifyprops)?,
+            last_viewed_at: self.lastviewedat,
+        })
+    }
 }
 
 /// The classification body the three queries share **verbatim** (channel_store.go:2276-2299,
@@ -4111,7 +4175,8 @@ pub async fn get_channels_with_unreads_and_with_mentions(
     user_id: &str,
     user_notify_props: Option<&StringMap>,
 ) -> Result<UnreadsAndMentions, StoreError> {
-    let rows = sqlx::query!(
+    let rows = sqlx::query_as!(
+        UnreadAndMentionsRow,
         r#"
         SELECT channels.id AS "id!",
                channels.type::text AS "channel_type!",
@@ -4138,22 +4203,108 @@ pub async fn get_channels_with_unreads_and_with_mentions(
     })?;
 
     tracing::Span::current().record("found", rows.len());
+    classify_rows(rows, user_notify_props)
+}
 
-    let mut decoded = Vec::with_capacity(rows.len());
-    for row in rows {
-        decoded.push(UnreadRow {
-            id: row.id,
-            channel_type: row.channel_type,
-            total_msg_count: row.totalmsgcount,
-            last_post_at: row.lastpostat,
-            msg_count: row.msgcount,
-            mention_count: row.mentioncount,
-            notify_props: notify_props_from_column("ChannelMember", row.notifyprops)?,
-            last_viewed_at: row.lastviewedat,
-        });
-    }
-
+/// Decode then classify — the tail every one of the three queries shares.
+fn classify_rows(
+    rows: Vec<UnreadAndMentionsRow>,
+    user_notify_props: Option<&StringMap>,
+) -> Result<UnreadsAndMentions, StoreError> {
+    let decoded = rows
+        .into_iter()
+        .map(UnreadAndMentionsRow::decode)
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(classify_unreads_and_mentions(decoded, user_notify_props))
+}
+
+/// Port of `SqlChannelStore.GetTeamChannelsWithUnreadAndMentions` (channel_store.go:2306).
+///
+/// [`get_channels_with_unreads_and_with_mentions`] scoped by **team** instead of by an id list,
+/// and the difference is not only which rows come back: `readAllInTeam` passes the *whole*
+/// result — including the channels that are already read — to the thread store, because a
+/// CRT-enabled user can have unread thread replies in a channel whose channel-level counters are
+/// up to date. Go's comment at app/channel.go:3566 says so.
+///
+/// The same one-type deny-list, so a board in the team is in scope.
+#[tracing::instrument(skip(pool, user_notify_props), fields(team_id = %team_id, user_id = %user_id, found))]
+pub async fn get_team_channels_with_unread_and_mentions(
+    pool: &PgPool,
+    team_id: &str,
+    user_id: &str,
+    user_notify_props: Option<&StringMap>,
+) -> Result<UnreadsAndMentions, StoreError> {
+    let rows = sqlx::query_as!(
+        UnreadAndMentionsRow,
+        r#"
+        SELECT channels.id AS "id!",
+               channels.type::text AS "channel_type!",
+               channels.totalmsgcount AS "totalmsgcount!",
+               channels.lastpostat AS "lastpostat!",
+               channelmembers.msgcount AS "msgcount!",
+               channelmembers.mentioncount AS "mentioncount!",
+               channelmembers.notifyprops,
+               channelmembers.lastviewedat AS "lastviewedat!"
+          FROM channelmembers
+          JOIN channels ON channelmembers.channelid = channels.id
+         WHERE channels.teamid = $1
+           AND channelmembers.userid = $2
+           AND channels.type <> 'S'
+        "#,
+        team_id,
+        user_id
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: "failed to find team channels with unreads and mentions data".to_owned(),
+        source,
+    })?;
+
+    tracing::Span::current().record("found", rows.len());
+    classify_rows(rows, user_notify_props)
+}
+
+/// Port of `SqlChannelStore.GetDirectMessagesWithUnreadAndMentions` (channel_store.go:2374).
+///
+/// **The one of the three with no deny-list**, because it has an allow-list instead: `Type IN
+/// (D, G)`. Go writes the predicate against an unqualified `Type`, which resolves to
+/// `Channels.Type` — `ChannelMembers` has no such column — and a direct channel carries no
+/// `TeamId`, which is why this query is scoped by user alone.
+#[tracing::instrument(skip(pool, user_notify_props), fields(user_id = %user_id, found))]
+pub async fn get_direct_messages_with_unread_and_mentions(
+    pool: &PgPool,
+    user_id: &str,
+    user_notify_props: Option<&StringMap>,
+) -> Result<UnreadsAndMentions, StoreError> {
+    let rows = sqlx::query_as!(
+        UnreadAndMentionsRow,
+        r#"
+        SELECT channels.id AS "id!",
+               channels.type::text AS "channel_type!",
+               channels.totalmsgcount AS "totalmsgcount!",
+               channels.lastpostat AS "lastpostat!",
+               channelmembers.msgcount AS "msgcount!",
+               channelmembers.mentioncount AS "mentioncount!",
+               channelmembers.notifyprops,
+               channelmembers.lastviewedat AS "lastviewedat!"
+          FROM channelmembers
+          JOIN channels ON channelmembers.channelid = channels.id
+         WHERE channelmembers.userid = $1
+           AND channels.type IN ('D', 'G')
+        "#,
+        user_id
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: "failed to find direct or group channels with unreads and mentions data"
+            .to_owned(),
+        source,
+    })?;
+
+    tracing::Span::current().record("found", rows.len());
+    classify_rows(rows, user_notify_props)
 }
 
 /// Port of `SqlChannelStore.UpdateLastViewedAt` (channel_store.go:2838).

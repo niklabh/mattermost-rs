@@ -41,6 +41,7 @@ mod parity {
     pub mod channel_pinned;
     pub mod channel_posts;
     pub mod channel_posts_unread;
+    pub mod channel_read_all;
     pub mod channel_search;
     pub mod channel_search_autocomplete;
     pub mod channel_stats;

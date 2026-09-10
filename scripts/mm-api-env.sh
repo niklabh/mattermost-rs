@@ -10,6 +10,11 @@
 # nothing to do with the port. `MM_FILESETTINGS_DIRECTORY` was the first (a 404 for every file
 # that exists); `MM_TEAMSETTINGS_ENABLEOPENSERVER` is the second, and it is the difference
 # between a 400 and a page of users on `GET /api/v4/users/invalid_emails`.
+# `MM_FEATUREFLAGS_ENABLESHIFTESCAPETOMARKALLREAD` is the third, and it is a **feature flag**
+# rather than a setting: `FeatureFlags` is stripped before the configuration document is
+# persisted (config/store.go:306), so the environment is the only place either server can read it
+# from. It opens `PUT /channels/members/{user_id}/direct/read` and
+# `PUT /users/{user_id}/teams/{team_id}/read`, which are a 501 without it.
 #
 # **Scoped to the launch and never exported.** `cargo test` runs in the same shell, and
 # `config::go_parity::the_env_overlay_preserves_document_values_it_does_not_name` asserts that no
@@ -25,6 +30,7 @@ mmrs_launch_mm_api() {
   (
     MM_FILESETTINGS_DIRECTORY="$root/reference/.build/mmroot/data/" \
     MM_TEAMSETTINGS_ENABLEOPENSERVER=true \
+    MM_FEATUREFLAGS_ENABLESHIFTESCAPETOMARKALLREAD=true \
     nohup "$root/target/debug/mm-api" > "$log" 2>&1 &
   )
 }

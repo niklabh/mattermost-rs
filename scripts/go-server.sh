@@ -83,10 +83,19 @@ env_for_server() {
   export MM_TEAMSETTINGS_ENABLEOPENSERVER=true
   export MM_SERVICESETTINGS_ENABLELOCALMODE=false
   export MM_FILESETTINGS_DIRECTORY="$RUN/data/"
-  # Feature flags stay at their compiled defaults. `IntegratedBoards` and `DiscoverableChannels`
-  # gate whole route families (`api4/view.go`, `api4/channel_join_request.go`) and also change
-  # behaviour on routes already ported — `getChannel`'s discoverable-non-member branch, [D-153].
-  # Turning one on is a deliberate act with its own parity run, not a default.
+  # Feature flags stay at their compiled defaults **unless a session turns one on deliberately**.
+  # `IntegratedBoards` and `DiscoverableChannels` gate whole route families (`api4/view.go`,
+  # `api4/channel_join_request.go`) and also change behaviour on routes already ported —
+  # `getChannel`'s discoverable-non-member branch, [D-153]. Those two are still off.
+  #
+  # `EnableShiftEscapeToMarkAllRead` is on, turned on 2026-09-10 with the parity run its own
+  # comment asked for. It is read in exactly two places (api4/channel.go:702, :2100) and gates
+  # nothing else, so unlike the other two it cannot change an answer on a route already served.
+  # Off, both of its routes are a 501 and neither has a comparable 200.
+  #
+  # **Whatever is set here must also be set in `scripts/mm-api-env.sh`**: an environment override
+  # never reaches the configuration document, which is what `mm-api` reads.
+  export MM_FEATUREFLAGS_ENABLESHIFTESCAPETOMARKALLREAD=true
 }
 
 case "${1:-run}" in
