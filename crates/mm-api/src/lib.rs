@@ -1173,23 +1173,35 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/users/{user_id}/uploads",
             partially_migrated_with_ids(&state, get(uploads::get_uploads_for_user)),
         )
-        // `BaseRoutes.ChannelCategories` (api.go:231), the three GETs. The five writes on
-        // these same paths fall to `partially_migrated`'s method fallback and stay forwarded —
-        // asserted over HTTP in `tests/parity_sidebar_router.rs`.
+        // `BaseRoutes.ChannelCategories` (api.go:231) — **all eight**, three GETs and five
+        // writes, on three paths. `partially_migrated_with_ids` still wraps each one: the
+        // fallback now catches only methods gorilla never registered here (a `POST` to
+        // `/order`, say), and the id-charset layer is what forwards a malformed `user_id` or
+        // `team_id` for Go's own mux 404.
         //
         // One segment deeper than `/users/{user_id}/teams/{team_id}/channels` above and a
         // sibling of `…/channels/members`; all three are static at that position, so there is
         // nothing for either router to prefer.
         .route(
             "/api/v4/users/{user_id}/teams/{team_id}/channels/categories",
-            partially_migrated_with_ids(&state, get(sidebar::get_categories_for_team_for_user)),
+            partially_migrated_with_ids(
+                &state,
+                get(sidebar::get_categories_for_team_for_user)
+                    .post(sidebar::create_category_for_team_for_user)
+                    .put(sidebar::update_categories_for_team_for_user),
+            ),
         )
         // The literal `order` beside `{category}` below. gorilla registers it first
         // (api4/channel.go:80 against :82) and axum prefers a static segment outright, so both
         // routers serve `getCategoryOrderForTeamForUser` here — same answer, different reason.
+        // The `PUT` sits on the same route for the same reason.
         .route(
             "/api/v4/users/{user_id}/teams/{team_id}/channels/categories/order",
-            partially_migrated_with_ids(&state, get(sidebar::get_category_order_for_team_for_user)),
+            partially_migrated_with_ids(
+                &state,
+                get(sidebar::get_category_order_for_team_for_user)
+                    .put(sidebar::update_category_order_for_team_for_user),
+            ),
         )
         // Deliberately `{category}` and not `{category_id}`: Go's mux class here is
         // `[A-Za-z0-9_-]+`, and a default category's id is `{type}_{userId}_{teamId}`. Naming it
@@ -1198,7 +1210,12 @@ pub fn router(state: AppState) -> Router {
         // Go's own charset instead, like `username`, `role_name` and `channel_name` do.
         .route(
             "/api/v4/users/{user_id}/teams/{team_id}/channels/categories/{category}",
-            partially_migrated_with_ids(&state, get(sidebar::get_category_for_team_for_user)),
+            partially_migrated_with_ids(
+                &state,
+                get(sidebar::get_category_for_team_for_user)
+                    .put(sidebar::update_category_for_team_for_user)
+                    .delete(sidebar::delete_category_for_team_for_user),
+            ),
         )
         // ---- compliance, IP filtering, the AI-bridge test helper and scheduled posts ----
         //

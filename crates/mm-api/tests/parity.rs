@@ -99,6 +99,7 @@ mod parity {
     pub mod session_team_members;
     pub mod sessions_for_user;
     pub mod sidebar_categories;
+    pub mod sidebar_category_writes;
     pub mod sidebar_router;
     pub mod single_hooks;
     pub mod status;

@@ -36,11 +36,11 @@
 use axum::extract::{Path, Request, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use mm_app::sidebar::SidebarCategoriesResult;
 use mm_model::permission::{
     PERMISSION_EDIT_OTHER_USERS, PERMISSION_VIEW_TEAM, Permission, make_permission_error,
 };
-use mm_model::sidebar_category::is_valid_category_id;
+use mm_model::sidebar_category::{SidebarCategoryWithChannels, is_valid_category_id};
+use mm_model::utils::PAYLOAD_PARSE_ERROR;
 
 use crate::AppState;
 use crate::auth::AuthenticatedSession;
@@ -156,23 +156,23 @@ fn marshal_error(where_: &'static str) -> Response {
 /// out — see `mm_store::sidebar_category_store`. A port that returned the join alone would
 /// answer with a nearly empty sidebar and look entirely plausible doing it.
 ///
-/// # The empty case is forwarded, not answered
+/// # This `GET` writes, on first contact
 ///
-/// Zero categories means Go would **create** the three defaults inside this GET, migrating the
-/// user's favourites into `SidebarChannels` as it goes. This server does not write here, so the
-/// request is forwarded and Go performs its own migration; see
-/// [`mm_app::sidebar::SidebarCategoriesResult`]. Reachable only for an account whose rows are
-/// missing, since joining a team creates them.
+/// Zero categories means Go **creates** the three defaults inside this handler, migrating the
+/// user's favourites into `SidebarChannels` as it goes — see
+/// [`mm_app::App::get_sidebar_categories_for_team_for_user`]. Reachable only for an account whose
+/// rows are missing, since joining a team creates them.
 ///
 /// # Wire format
 ///
-/// `json.Marshal` then `w.Write` (:41) — **no trailing newline**, unlike the `/order` sibling.
-#[tracing::instrument(skip_all, fields(user_id = %user_id, team_id = %team_id, forwarded))]
+/// `json.Marshal` then `w.Write` (:41) — **no trailing newline**, unlike the `/order` sibling,
+/// and with Go's HTML escaping, which `serde_json` does not apply. A category named `Q&A` is nine
+/// bytes different between the two without [`marshal_or_500`].
+#[tracing::instrument(skip_all, fields(user_id = %user_id, team_id = %team_id))]
 pub async fn get_categories_for_team_for_user(
     State(state): State<AppState>,
     Path((user_id, team_id)): Path<(String, String)>,
     session: AuthenticatedSession,
-    request: Request,
 ) -> Response {
     let user_id = if user_id == ME {
         session.0.user_id.clone()
@@ -208,25 +208,11 @@ pub async fn get_categories_for_team_for_user(
         .get_sidebar_categories_for_team_for_user(&user_id, &team_id)
         .await
     {
-        Ok(SidebarCategoriesResult::Found(categories)) => categories,
-        Ok(SidebarCategoriesResult::NeedsInitialCategories) => {
-            tracing::Span::current().record("forwarded", true);
-            tracing::info!(
-                "no sidebar categories for this user and team; forwarding so Go runs its migration"
-            );
-            return crate::proxy::forward_to_go(State(state), request).await;
-        }
+        Ok(categories) => categories,
         Err(err) => return ApiError::from(err).into_response(),
     };
-    tracing::Span::current().record("forwarded", false);
 
-    match serde_json::to_vec(&*categories) {
-        Ok(body) => json_body(body),
-        Err(err) => {
-            tracing::error!(error = %err, "failed to serialise the sidebar categories");
-            marshal_error("getCategoriesForTeamForUser")
-        }
-    }
+    marshal_or_500(&categories, "getCategoriesForTeamForUser")
 }
 
 /// Port of `getCategoryOrderForTeamForUser` (api4/channel_category.go:95) —
@@ -292,11 +278,11 @@ pub async fn get_category_order_for_team_for_user(
     };
     tracing::Span::current().record("count", order.len());
 
-    match serde_json::to_vec(&order) {
+    match mm_model::utils::go_json_marshal(&order) {
         Ok(mut body) => {
             // `json.NewEncoder(w).Encode` writes the newline; the two siblings' `w.Write` does not.
-            body.push(b'\n');
-            json_body(body)
+            body.push('\n');
+            json_body(body.into_bytes())
         }
         Err(err) => {
             tracing::error!(error = %err, "failed to serialise the sidebar category order");
@@ -381,13 +367,600 @@ pub async fn get_category_for_team_for_user(
         Err(err) => return ApiError::from(err).into_response(),
     };
 
-    match serde_json::to_vec(&category) {
-        Ok(body) => json_body(body),
+    marshal_or_500(&category, "getCategoryForTeamForUser")
+}
+
+// ---------------------------------------------------------------------------
+// The five writes
+// ---------------------------------------------------------------------------
+
+/// Read the whole body, or Go's `SetInvalidParamWithErr("category", err)`.
+///
+/// The parameter name is `category` on **four** of the five writes, including the one whose body
+/// is an array; only `/order` names something else (see
+/// [`update_category_order_for_team_for_user`]). So a client sending a malformed array to
+/// `PUT …/categories` is told `category`, singular.
+async fn read_body(body: axum::body::Body) -> Result<axum::body::Bytes, ApiError> {
+    axum::body::to_bytes(body, usize::MAX).await.map_err(|err| {
+        tracing::warn!(error = %err, "could not read the request body");
+        ApiError::invalid_param("category")
+    })
+}
+
+/// Port of `validateSidebarCategory` (api4/channel_category.go:259) and
+/// `validateSidebarCategories` (:273), which differ only in fetching the channel list once.
+///
+/// # It is a filter, not a validator, and it mutates the request
+///
+/// Despite the name nothing is rejected: `validateSidebarCategoryChannels` (:301) **drops** every
+/// channel id the user is not a member of, logs it, and de-duplicates the rest. So a request
+/// naming somebody else's private channel succeeds and simply does not contain it — a port that
+/// answered 400 here would refuse requests Go accepts.
+///
+/// # The one branch that *is* an error is a 400 with an unexpected id
+///
+/// A failure fetching the channel list becomes
+/// `model.NewAppError("validateSidebarCategory", "api.invalid_channel", nil, "", 400)`. That is
+/// reachable: `GetChannelsForTeamForUser` answers **404** when the user is a member of no channel
+/// in the team, and this converts it to a 400 whose id says `api.invalid_channel` — nothing to do
+/// with any channel the caller named.
+///
+/// # `channel_ids` is never `null` after this
+///
+/// `RemoveDuplicateStringsNonSort` returns `list := []string{}`, a non-nil slice, even for a nil
+/// input. So every create/update answer carries `"channel_ids":[]` at worst, and the `null` that
+/// `mm_model::sidebar_category` documents as reachable is not reachable through these routes.
+async fn validate_sidebar_categories(
+    state: &AppState,
+    team_id: &str,
+    user_id: &str,
+    categories: &mut [SidebarCategoryWithChannels],
+) -> Result<(), ApiError> {
+    // `IncludeDeleted: true, LastDeleteAt: 0` — an archived channel may stay in a category.
+    let opts = mm_model::channel::ChannelSearchOpts {
+        include_deleted: true,
+        last_delete_at: 0,
+        ..Default::default()
+    };
+    let channels = state
+        .app
+        .get_channels_for_team_for_user(team_id, user_id, &opts)
+        .await
+        .map_err(|err| {
+            tracing::debug!(error = %err, "the caller's channel list is unavailable");
+            ApiError::from(mm_model::utils::AppError::new(
+                "validateSidebarCategory",
+                "api.invalid_channel",
+                None,
+                String::new(),
+                400,
+            ))
+        })?;
+
+    let allowed: std::collections::HashSet<&str> = channels
+        .0
+        .iter()
+        .map(|channel| channel.id.as_str())
+        .collect();
+
+    for category in categories {
+        let mut filtered: Vec<String> = Vec::new();
+        for channel_id in category.channel_ids.as_deref().unwrap_or_default() {
+            if allowed.contains(channel_id.as_str()) {
+                filtered.push(channel_id.clone());
+            } else {
+                tracing::info!(
+                    user_id = %user_id,
+                    channel_id = %channel_id,
+                    "Stopping user from adding channel to their sidebar when they are not a member"
+                );
+            }
+        }
+        category.channel_ids = Some(mm_model::utils::remove_duplicate_strings_non_sort(
+            &filtered,
+        ));
+    }
+
+    Ok(())
+}
+
+/// The preamble every write on `…/channels/categories` shares: resolve `me`, validate the two
+/// ids, then the two permission gates with `SessionHasPermissionToUser` as the first.
+///
+/// Returns the resolved user id, or the response to send.
+// The error is a whole `Response`; see `channels::require_id` for why the lint is allowed
+// across this crate.
+#[allow(clippy::result_large_err)]
+async fn user_and_team_write_gate(
+    state: &AppState,
+    session: &AuthenticatedSession,
+    user_id: String,
+    team_id: &str,
+) -> Result<String, Response> {
+    let user_id = if user_id == ME {
+        session.0.user_id.clone()
+    } else {
+        user_id
+    };
+
+    if let Err(err) = validate_user_and_team_ids(&user_id, team_id) {
+        return Err(err.into_response());
+    }
+
+    let denial = sidebar_denied(
+        || async {
+            state
+                .app
+                .session_has_permission_to_user(&session.0, &user_id)
+                .await
+        },
+        || async {
+            state
+                .app
+                .session_has_permission_to_team(&session.0, team_id, &PERMISSION_VIEW_TEAM)
+                .await
+        },
+    )
+    .await;
+    if let Some(permission) = denial {
+        return Err(
+            ApiError::from(make_permission_error(&session.0, &[permission])).into_response(),
+        );
+    }
+
+    Ok(user_id)
+}
+
+/// `json.Marshal` a write's answer with Go's HTML escaping, or Go's `api.marshal_error` 500.
+///
+/// **`serde_json::to_vec` is not a substitute.** Go escapes `<`, `>` and `&` inside strings and
+/// serde_json does not, and `display_name` is arbitrary user text — so a category called
+/// `Q&A` differs between the two servers by nine bytes unless this is used. Asserted over HTTP in
+/// `parity/sidebar_category_writes.rs`.
+fn marshal_or_500<T: serde::Serialize>(value: &T, where_: &'static str) -> Response {
+    match mm_model::utils::go_json_marshal(value) {
+        Ok(body) => json_body(body.into_bytes()),
         Err(err) => {
-            tracing::error!(error = %err, "failed to serialise the sidebar category");
-            marshal_error("getCategoryForTeamForUser")
+            tracing::error!(error = %err, "failed to serialise the sidebar write's answer");
+            marshal_error(where_)
         }
     }
+}
+
+/// Port of `createCategoryForTeamForUser` (api4/channel_category.go:47) —
+/// `POST /api/v4/users/{user_id}/teams/{team_id}/channels/categories`.
+///
+/// # The body's `user_id` and `team_id` must equal the path's, and the failure is a 400
+///
+/// One `if`: `err != nil || c.Params.UserId != request.UserId || c.Params.TeamId != request.TeamId`
+/// — so a decode failure and a mismatched id are the same
+/// `api.context.invalid_body_param.app_error` naming `category`. Note that `me` has already been
+/// resolved by `RequireUserId`, so a body carrying the caller's real id and a path saying `me` is
+/// accepted.
+///
+/// # Three fields of the body are ignored outright
+///
+/// `id`, `type` and `collapsed`. The store mints a fresh `NewId()`, forces
+/// `type: "custom"`, and leaves `collapsed` false — see
+/// `mm_store::sidebar_category_store::create_sidebar_category`. `display_name`, `sorting`,
+/// `muted` and `channel_ids` are the four that carry.
+///
+/// # `200`, and no trailing newline
+///
+/// `w.Write(categoryJSON)` after `json.Marshal` — the same framing as the two migrated `GET`s and
+/// not the encoder framing `/order` uses.
+#[tracing::instrument(skip_all, fields(user_id = %user_id, team_id = %team_id))]
+pub async fn create_category_for_team_for_user(
+    State(state): State<AppState>,
+    Path((user_id, team_id)): Path<(String, String)>,
+    session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    let user_id = match user_and_team_write_gate(&state, &session, user_id, &team_id).await {
+        Ok(user_id) => user_id,
+        Err(response) => return response,
+    };
+
+    let bytes = match read_body(request.into_body()).await {
+        Ok(bytes) => bytes,
+        Err(err) => return err.into_response(),
+    };
+    let mut category: SidebarCategoryWithChannels = match serde_json::from_slice(&bytes) {
+        Ok(category) => category,
+        Err(err) => {
+            tracing::debug!(error = %err, "category body did not decode");
+            return ApiError::invalid_param("category").into_response();
+        }
+    };
+    if category.category.user_id != user_id || category.category.team_id != team_id {
+        return ApiError::invalid_param("category").into_response();
+    }
+
+    if let Err(err) = validate_sidebar_categories(
+        &state,
+        &team_id,
+        &user_id,
+        std::slice::from_mut(&mut category),
+    )
+    .await
+    {
+        return err.into_response();
+    }
+
+    match state
+        .app
+        .create_sidebar_category(&user_id, &team_id, &category)
+        .await
+    {
+        Ok(created) => marshal_or_500(&created, "createCategoryForTeamForUser"),
+        Err(err) => ApiError::from(err).into_response(),
+    }
+}
+
+/// Port of `updateCategoriesForTeamForUser` (api4/channel_category.go:203) —
+/// `PUT /api/v4/users/{user_id}/teams/{team_id}/channels/categories`.
+///
+/// # A category the caller does not own is a **400**, not a 403
+///
+/// The per-category gate is `SessionHasPermissionToCategory` and its refusal is
+/// `c.SetInvalidParam("category")` — `api.context.invalid_body_param.app_error`, 400. Every other
+/// permission refusal in this file is a 403 with `api.context.permissions.app_error`, and this
+/// one is not, which is also why a category id naming no row answers 400 here: the gate fetches
+/// the row and denies when the lookup fails. The whole request is refused, not the one entry.
+///
+/// # The loop runs over every category before any of them is written
+///
+/// Permissions for all, then validation for all, then one transactional store call. So a request
+/// whose fourth entry is somebody else's category changes nothing at all.
+///
+/// # A body of `null` is accepted and answers `[]`
+///
+/// `json.Decode` into a `[]*T` leaves the slice nil without erroring, the two loops then run zero
+/// times, and the store returns its `[]*model.SidebarCategoryWithChannels{}` literal — so the
+/// answer is `[]`, not `null` and not a 400.
+#[tracing::instrument(skip_all, fields(user_id = %user_id, team_id = %team_id, count))]
+pub async fn update_categories_for_team_for_user(
+    State(state): State<AppState>,
+    Path((user_id, team_id)): Path<(String, String)>,
+    session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    let user_id = match user_and_team_write_gate(&state, &session, user_id, &team_id).await {
+        Ok(user_id) => user_id,
+        Err(response) => return response,
+    };
+
+    let bytes = match read_body(request.into_body()).await {
+        Ok(bytes) => bytes,
+        Err(err) => return err.into_response(),
+    };
+    // `Option`, so a JSON `null` is Go's nil slice rather than a decode error.
+    let mut categories: Vec<SidebarCategoryWithChannels> =
+        match serde_json::from_slice::<Option<Vec<SidebarCategoryWithChannels>>>(&bytes) {
+            Ok(categories) => categories.unwrap_or_default(),
+            Err(err) => {
+                tracing::debug!(error = %err, "categories body did not decode");
+                return ApiError::invalid_param("category").into_response();
+            }
+        };
+    tracing::Span::current().record("count", categories.len());
+
+    for category in &categories {
+        if !state
+            .app
+            .session_has_permission_to_category(
+                &session.0,
+                &user_id,
+                &team_id,
+                &category.category.id,
+            )
+            .await
+        {
+            return ApiError::invalid_param("category").into_response();
+        }
+    }
+
+    if let Err(err) = validate_sidebar_categories(&state, &team_id, &user_id, &mut categories).await
+    {
+        return err.into_response();
+    }
+
+    match state
+        .app
+        .update_sidebar_categories(&user_id, &team_id, &categories)
+        .await
+    {
+        Ok(updated) => marshal_or_500(&updated, "updateCategoriesForTeamForUser"),
+        Err(err) => ApiError::from(err).into_response(),
+    }
+}
+
+/// Port of `updateCategoryOrderForTeamForUser` (api4/channel_category.go:125) —
+/// `PUT /api/v4/users/{user_id}/teams/{team_id}/channels/categories/order`.
+///
+/// # The only route in the family whose decode failure is not `invalid_body_param`
+///
+/// It goes through `model.NonSortedArrayFromJSON`, and the handler wraps the failure itself:
+/// `model.NewAppError("updateCategoryOrderForTeamForUser", model.PayloadParseError, nil, "", 400)`
+/// — id `api.payload.parse.error`, and **no `Name` in `params`**. Its siblings answer
+/// `api.context.invalid_body_param.app_error` with `{"Name":"category"}`.
+///
+/// # A body of `null` decodes to nil *without an error*
+///
+/// `NonSortedArrayFromJSON` returns `(nil, nil)` when the decoded slice is nil, so `null` is not a
+/// 400. The nil then flows to the store, whose length check fails against any non-empty existing
+/// order and answers **500** — and `ArrayToJSON(nil)` would answer the four bytes `null` on the
+/// success path, which is reachable only for a user with no categories at all.
+///
+/// # The response is the *de-duplicated* list, not the request
+///
+/// `RemoveDuplicateStringsNonSort` runs before the permission loop, and the same slice is both
+/// stored and echoed. So sending an id twice answers with it once — and, because the store's
+/// length check then sees one fewer id than the user has categories, answers 500 while doing so.
+///
+/// # `w.Write(ArrayToJSON(...))`: no trailing newline
+///
+/// The *read* on this same path uses `json.NewEncoder` and therefore does have one ([D-086]). Two
+/// methods, one path, two framings.
+#[tracing::instrument(skip_all, fields(user_id = %user_id, team_id = %team_id, count))]
+pub async fn update_category_order_for_team_for_user(
+    State(state): State<AppState>,
+    Path((user_id, team_id)): Path<(String, String)>,
+    session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    let user_id = match user_and_team_write_gate(&state, &session, user_id, &team_id).await {
+        Ok(user_id) => user_id,
+        Err(response) => return response,
+    };
+
+    let bytes = match read_body(request.into_body()).await {
+        Ok(bytes) => bytes,
+        Err(err) => return err.into_response(),
+    };
+    let category_order: Option<Vec<String>> =
+        match serde_json::from_slice::<Option<Vec<String>>>(&bytes) {
+            // `RemoveDuplicateStringsNonSort`, which also turns a nil into `[]` — but Go applies
+            // it only on the non-nil path, so the `None` here stays `None`.
+            Ok(Some(order)) => Some(mm_model::utils::remove_duplicate_strings_non_sort(&order)),
+            Ok(None) => None,
+            Err(err) => {
+                tracing::debug!(error = %err, "category order body did not decode");
+                return ApiError::from(mm_model::utils::AppError::new(
+                    "updateCategoryOrderForTeamForUser",
+                    PAYLOAD_PARSE_ERROR,
+                    None,
+                    String::new(),
+                    400,
+                ))
+                .into_response();
+            }
+        };
+    let order = category_order.as_deref().unwrap_or_default();
+    tracing::Span::current().record("count", order.len());
+
+    for category_id in order {
+        if !state
+            .app
+            .session_has_permission_to_category(&session.0, &user_id, &team_id, category_id)
+            .await
+        {
+            return ApiError::invalid_param("category").into_response();
+        }
+    }
+
+    if let Err(err) = state
+        .app
+        .update_sidebar_category_order(&user_id, &team_id, order)
+        .await
+    {
+        return ApiError::from(err).into_response();
+    }
+
+    // `model.ArrayToJSON` discards its error and renders a nil slice as `null`.
+    match &category_order {
+        Some(order) => marshal_or_500(order, "updateCategoryOrderForTeamForUser"),
+        None => json_body(b"null".to_vec()),
+    }
+}
+
+/// The preamble the two `{category_id}` writes share, mirroring
+/// [`get_category_for_team_for_user`]'s: the mux charset, `me`, the three `Require*` calls in
+/// Go's order, then `SessionHasPermissionToCategory` **before** the team gate.
+///
+/// `Ok(Some(user_id))` means proceed; `Ok(None)` means the request was forwarded and the caller
+/// must return `forwarded`.
+// The error is a whole `Response`; see `channels::require_id` for why the lint is allowed
+// across this crate.
+#[allow(clippy::result_large_err)]
+async fn category_write_gate(
+    state: &AppState,
+    session: &AuthenticatedSession,
+    user_id: String,
+    team_id: &str,
+    category: &str,
+) -> Result<String, Response> {
+    let user_id = if user_id == ME {
+        session.0.user_id.clone()
+    } else {
+        user_id
+    };
+
+    if let Err(err) = validate_user_and_team_ids(&user_id, team_id) {
+        return Err(err.into_response());
+    }
+    if !is_valid_category_id(category) {
+        return Err(ApiError::invalid_url_param("category_id").into_response());
+    }
+
+    let denial = sidebar_denied(
+        || async {
+            state
+                .app
+                .session_has_permission_to_category(&session.0, &user_id, team_id, category)
+                .await
+        },
+        || async {
+            state
+                .app
+                .session_has_permission_to_team(&session.0, team_id, &PERMISSION_VIEW_TEAM)
+                .await
+        },
+    )
+    .await;
+    if let Some(permission) = denial {
+        return Err(
+            ApiError::from(make_permission_error(&session.0, &[permission])).into_response(),
+        );
+    }
+
+    Ok(user_id)
+}
+
+/// Port of `updateCategoryForTeamForUser` (api4/channel_category.go:317) —
+/// `PUT /api/v4/users/{user_id}/teams/{team_id}/channels/categories/{category_id}`.
+///
+/// # It is the collection route with a list of one, and the id comes from the **path**
+///
+/// `categoryUpdateRequest.Id = c.Params.CategoryId` is assigned *after* validation and before the
+/// store call, so `id` in the body is ignored entirely. The store call is the same
+/// `UpdateSidebarCategories`, which means this route shares the collection route's read-only-field
+/// rules and its Favorites/`Preferences` mirroring — and its **500** for a store failure, where
+/// its own permission gate has already turned a missing category into a 403.
+///
+/// # The gate is `SessionHasPermissionToCategory`, so a missing category is 403
+///
+/// Unlike the collection route, whose per-category refusal is a 400. Same underlying function,
+/// two different wrappers, two statuses — see [`get_category_for_team_for_user`], which documents
+/// the gate itself.
+#[tracing::instrument(skip_all, fields(user_id = %user_id, team_id = %team_id, category_id = %category, forwarded))]
+pub async fn update_category_for_team_for_user(
+    State(state): State<AppState>,
+    Path((user_id, team_id, category)): Path<(String, String, String)>,
+    session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    if !segment_matches_category_mux(&category) {
+        tracing::Span::current().record("forwarded", true);
+        tracing::debug!("category segment is outside Go's mux charset; forwarding for Go's 404");
+        return crate::proxy::forward_to_go(State(state), request).await;
+    }
+    tracing::Span::current().record("forwarded", false);
+
+    let user_id = match category_write_gate(&state, &session, user_id, &team_id, &category).await {
+        Ok(user_id) => user_id,
+        Err(response) => return response,
+    };
+
+    let bytes = match read_body(request.into_body()).await {
+        Ok(bytes) => bytes,
+        Err(err) => return err.into_response(),
+    };
+    let mut update: SidebarCategoryWithChannels = match serde_json::from_slice(&bytes) {
+        Ok(update) => update,
+        Err(err) => {
+            tracing::debug!(error = %err, "category body did not decode");
+            return ApiError::invalid_param("category").into_response();
+        }
+    };
+    // Note the order: Go tests `TeamId` first here and `UserId` first in the create handler. Same
+    // error either way, so nothing on the wire moves.
+    if update.category.team_id != team_id || update.category.user_id != user_id {
+        return ApiError::invalid_param("category").into_response();
+    }
+
+    if let Err(err) = validate_sidebar_categories(
+        &state,
+        &team_id,
+        &user_id,
+        std::slice::from_mut(&mut update),
+    )
+    .await
+    {
+        return err.into_response();
+    }
+
+    // After validation, before the store: the path wins over the body.
+    update.category.id = category;
+
+    match state
+        .app
+        .update_sidebar_categories(&user_id, &team_id, std::slice::from_ref(&update))
+        .await
+    {
+        Ok(updated) => match updated.first() {
+            Some(category) => marshal_or_500(category, "updateCategoryForTeamForUser"),
+            // Go indexes `categories[0]` unguarded; one category in means one out, so this is
+            // unreachable rather than a divergence — but it must not be a panic.
+            None => {
+                tracing::error!("UpdateSidebarCategories answered with no categories");
+                marshal_error("updateCategoryForTeamForUser")
+            }
+        },
+        Err(err) => ApiError::from(err).into_response(),
+    }
+}
+
+/// Port of `deleteCategoryForTeamForUser` (api4/channel_category.go:368) —
+/// `DELETE /api/v4/users/{user_id}/teams/{team_id}/channels/categories/{category_id}`.
+///
+/// # Deleting a default category is a 400, and the id is not a delete-specific one
+///
+/// The refusal comes from the store (`ErrInvalidInput` for a type that is not `custom`) and
+/// carries `app.channel.sidebar_categories.app_error` — the same id every other failure in this
+/// family carries. So a client cannot distinguish "you may not delete Favorites" from "the query
+/// broke" by the `id`; only the status separates them, 400 from 500.
+///
+/// # The channels are not lost and not moved by this request
+///
+/// Deleting the category deletes its `SidebarChannels` rows, which makes every channel in it an
+/// orphan; the *next read* files orphans under Channels or Direct Messages. So the channels
+/// reappear elsewhere without this handler doing anything, and a client that refetches sees them.
+///
+/// # `ReturnStatusOK`
+///
+/// `{"status":"OK"}` with no trailing newline — Go's `ReturnStatusOK` writes a marshalled
+/// `map[string]string` through `w.Write`.
+#[tracing::instrument(skip_all, fields(user_id = %user_id, team_id = %team_id, category_id = %category, forwarded))]
+pub async fn delete_category_for_team_for_user(
+    State(state): State<AppState>,
+    Path((user_id, team_id, category)): Path<(String, String, String)>,
+    session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    if !segment_matches_category_mux(&category) {
+        tracing::Span::current().record("forwarded", true);
+        tracing::debug!("category segment is outside Go's mux charset; forwarding for Go's 404");
+        return crate::proxy::forward_to_go(State(state), request).await;
+    }
+    tracing::Span::current().record("forwarded", false);
+
+    let user_id = match category_write_gate(&state, &session, user_id, &team_id, &category).await {
+        Ok(user_id) => user_id,
+        Err(response) => return response,
+    };
+
+    match state
+        .app
+        .delete_sidebar_category(&user_id, &team_id, &category)
+        .await
+    {
+        Ok(()) => status_ok(),
+        Err(err) => ApiError::from(err).into_response(),
+    }
+}
+
+/// `ReturnStatusOK` (web/handlers.go) — `{"status":"OK"}`, no trailing newline.
+fn status_ok() -> Response {
+    (
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        r#"{"status":"OK"}"#,
+    )
+        .into_response()
 }
 
 #[cfg(test)]
