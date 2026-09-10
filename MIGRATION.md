@@ -9278,3 +9278,40 @@ predicate rewritten to `AND ($3 = $3)` left the bind parameter untyped, so `sqlx
 infer `&[String]` and `mm-store` failed to compile. Rewritten as
 `AND (threads.channelid = ANY($3) OR TRUE)`, which keeps the parameter used and still deletes the
 scope.
+
+## Numbered stacks, and what a fresh one found (2026-09-10)
+
+No routes. The stack-backed suites talked to one Postgres, one Go server on :8065 and one mm-api
+on :8066, so `stack-lock.sh` serialised every checkout on the machine — which made a twenty-minute
+mutation batch block every other worktree and left the documented parallel-worktree pattern unable
+to run in parallel. A stack is now a numbered triple (`postgres 5432+k`, `go 8065+100k`,
+`mm-api 8066+100k`), the lock is per stack, and stack 0 is the historical layout byte for byte.
+**Two full workspace suites on two stacks: 150s wall, 3141 tests each.**
+
+The base URLs follow the stack through `option_env!` at **compile** time, with a `build.rs` per
+crate for `rerun-if-env-changed`, because `common::GO` and `common::RUST` are `&'static str`
+consts inside roughly thirteen hundred inline format captures; a runtime value would mean
+rewriting all of them. `SecondServer::start` shifts its literal port at runtime instead.
+
+### The first run against a fresh stack failed fifteen tests, and none of them was a flake
+
+That is the finding, and it is worth more than the parallelism. Every one had been passing for
+months on a database old enough to have accumulated the shape it assumed:
+
+* **A genuine port bug.** Go renders a SQL `NULL` `jsonb` column as `{}` and a JSON `null` as
+  `null`; `JobRow::into_job` collapsed both to `None`, and its doc comment asserted they were the
+  same. No Mattermost worker writes a SQL NULL — every null-ish `Jobs` row on a real deployment is
+  the product-notices worker's JSON null — so the assertion could only ever see one of the two
+  shapes. `scripts/stack.sh seed` plants both now.
+* **One NULL is a 500 for eleven tests.** A dozen `mm-store` and `mm-app` suites `INSERT INTO
+  teams` without `LastTeamIconUpdate`, which `GetAllTeams` scans into a plain `int64` — so
+  `GET /usage/teams` 500s and `teams_all`'s eight tests go with it, depending on which binary
+  `cargo test --workspace` happened to run first. Normalised in the purge, exactly as the `Users`
+  repair beside it already was, and for the reason that one already gives.
+* **Three tests that proved nothing.** `bots` needs a bot with a description, `jobs` needs both
+  null shapes, and both say so in their own assertion message. A fresh database has neither.
+  `config_source` asserted the literal `:8065`.
+
+The lesson is not about ports. **A suite that has only ever run against one long-lived database
+has untested dependencies on that database**, and the cheapest way to find them is to stand up a
+new one.
