@@ -423,6 +423,85 @@ async fn the_body_id_must_match_the_path_and_a_bad_body_names_channel() {
     common::delete_channel(&http, &token, &channel).await;
 }
 
+/// A name another channel in the team already holds is a **400** from both routes, carrying the
+/// *save* id — `store.sql_channel.save_channel.exists.app_error`, which reads wrong for an update
+/// and is what Go sends. It comes from the `channels_name_teamid_key` unique constraint, so it is
+/// the one error on these paths that the database rather than a guard produces.
+#[tokio::test]
+async fn a_duplicate_channel_name_is_the_save_exists_error_from_both_routes() {
+    if !stack_enabled() {
+        return;
+    }
+    let http = client();
+    let token = go_minted_token(&http).await;
+    let (team, _) = a_team_and_channel_the_user_is_in(&http, &token).await;
+    let taken = create_channel_typed(&http, &token, &team, "cwduptaken", "O").await;
+    let renaming = create_channel_typed(&http, &token, &team, "cwduprename", "O").await;
+    let taken_name = read_channel(&http, RUST, &token, &taken).await["name"]
+        .as_str()
+        .expect("a name")
+        .to_owned();
+
+    let (go_status, go_body, _) = put_channel(
+        &http,
+        GO,
+        &token,
+        &renaming,
+        &serde_json::json!({"id": renaming, "name": taken_name}),
+    )
+    .await;
+    let (rust_status, rust_body, _) = put_channel(
+        &http,
+        RUST,
+        &token,
+        &renaming,
+        &serde_json::json!({"id": renaming, "name": taken_name}),
+    )
+    .await;
+    assert_eq!(go_status, 400, "Go refuses a duplicate name: {go_body}");
+    assert_eq!(rust_status, go_status, "{rust_body}");
+    assert_eq!(
+        error_id(&rust_body),
+        "store.sql_channel.save_channel.exists.app_error"
+    );
+    common::assert_error_bodies_match_except_known_gaps(
+        go_body.as_bytes(),
+        rust_body.as_bytes(),
+        "duplicate name via update",
+    );
+
+    let (go_status, go_body, _) = patch(
+        &http,
+        GO,
+        &token,
+        &renaming,
+        &serde_json::json!({"name": taken_name}),
+    )
+    .await;
+    let (rust_status, rust_body, _) = patch(
+        &http,
+        RUST,
+        &token,
+        &renaming,
+        &serde_json::json!({"name": taken_name}),
+    )
+    .await;
+    assert_eq!(go_status, 400, "Go: {go_body}");
+    assert_eq!(rust_status, go_status, "{rust_body}");
+    assert_eq!(
+        error_id(&rust_body),
+        "store.sql_channel.save_channel.exists.app_error"
+    );
+    common::assert_error_bodies_match_except_known_gaps(
+        go_body.as_bytes(),
+        rust_body.as_bytes(),
+        "duplicate name via patch",
+    );
+
+    common::delete_channel(&http, &token, &taken).await;
+    common::delete_channel(&http, &token, &renaming).await;
+}
+
 #[tokio::test]
 async fn a_type_change_through_update_is_refused_and_privacy_is_the_only_way() {
     if !stack_enabled() {
@@ -946,6 +1025,17 @@ async fn archiving_then_restoring_a_channel_agrees_and_is_refused_the_second_tim
         "`Delete` is `SetDeleteAt(id, time, time)` — one millisecond in both columns"
     );
 
+    // **`SetDeleteAt` writes both tables.** The team's public listing reads `PublicChannels`, so an
+    // archive that touched only `Channels` would leave the channel in every "public channels in
+    // this team" answer — invisible to any assertion about the channel itself. Measured on Go too:
+    // it leaves the listing on archive and comes back on restore.
+    assert!(
+        !public_channel_ids(&http, RUST, &token, &team)
+            .await
+            .contains(&rust_channel),
+        "an archived channel must leave the public listing"
+    );
+
     for (base, channel) in [(GO, &go_channel), (RUST, &rust_channel)] {
         let (status, body, _) = restore(&http, base, &token, channel).await;
         assert_eq!(status, 200, "{base} restores: {body}");
@@ -971,6 +1061,12 @@ async fn archiving_then_restoring_a_channel_agrees_and_is_refused_the_second_tim
     assert!(
         stored["update_at"].as_i64().unwrap_or(0) > 0,
         "restore sets UpdateAt to now, not to zero: {stored}"
+    );
+    assert!(
+        public_channel_ids(&http, RUST, &token, &team)
+            .await
+            .contains(&rust_channel),
+        "and a restored channel comes back to it"
     );
 
     common::delete_channel(&http, &token, &go_channel).await;
@@ -1440,6 +1536,46 @@ async fn a_non_member_of_a_private_channel_is_refused_by_every_route() {
             label,
         );
     }
+
+    // `canEditChannelBanner` is the one refusal whose id depends on *which* failure came last: Go
+    // sets the licence error and then falls into the type switch, which overwrites it with the
+    // permission error. So a non-member sees the **permission** 403 where an admin sees the
+    // licence 403 — and a port that returned early on the licence check would answer the same
+    // thing to both. The helper compares ids, which is what separates them.
+    let banner = serde_json::json!({
+        "banner_info": {"enabled": true, "text": "hi", "background_color": "#ffffff"}
+    });
+    let path = format!("/api/v4/channels/{channel}/patch");
+    let (go_status, go_body, _) = send(
+        &http,
+        reqwest::Method::PUT,
+        GO,
+        &plain.token,
+        &path,
+        Some(&banner),
+    )
+    .await;
+    let (rust_status, rust_body, _) = send(
+        &http,
+        reqwest::Method::PUT,
+        RUST,
+        &plain.token,
+        &path,
+        Some(&banner),
+    )
+    .await;
+    assert_eq!(go_status, 403, "Go refuses the banner patch: {go_body}");
+    assert_eq!(rust_status, go_status, "{rust_body}");
+    common::assert_error_bodies_match_except_known_gaps(
+        go_body.as_bytes(),
+        rust_body.as_bytes(),
+        "non-member banner patch",
+    );
+    assert_ne!(
+        error_id(&rust_body),
+        "license_error.feature_unavailable.specific",
+        "the type switch overwrote the licence error with the permission one"
+    );
 
     common::delete_plain_user(&http, &admin, &plain.id).await;
     common::delete_channel(&http, &admin, &channel).await;
