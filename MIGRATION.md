@@ -9331,7 +9331,7 @@ Five routes, all served: `PUT /api/v4/channels/{channel_id}`, `/patch`, `/privac
 | `GetIncomingByChannel`, `GetOutgoingByChannel` | `crates/mm-store/src/webhook_store.rs` | done; their own statements, because Go omits `LIMIT`/`OFFSET` when either is negative and `DeleteChannel` passes `-1` |
 | `App.UpdateChannel`, `PatchChannel`, `UpdateChannelPrivacy`, `DeleteChannel`, `RestoreChannel` | `crates/mm-app/src/channel_write.rs` | done, minus the six system posts ([D-232]) and the persistent-notification cleanup ([D-233]) |
 | the five handlers | `crates/mm-api/src/channel_writes.rs` | done; a licensed installation and two patch branches forward ([D-234]) |
-| 25 cross-server tests | `crates/mm-api/tests/parity/channel_writes.rs` | — |
+| 26 cross-server tests and 13 unit tests | `crates/mm-api/tests/parity/channel_writes.rs`, and `#[cfg(test)]` in both new modules | — |
 
 ### `updateChannel` and `patchChannel` differ in five ways, and every one is on the wire
 
