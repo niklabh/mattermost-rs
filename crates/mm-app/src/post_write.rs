@@ -20,7 +20,7 @@
 //!
 //! | Go branch | Refused when |
 //! |---|---|
-//! | `ParseHashtags` (utils.go:750) | the edit changes the message |
+//! | `PostWithProxyRemovedFromImageURLs` (post.go:2466) | `ImageProxySettings.Enable` is on |
 //! | `processPostFileChanges` (post_file_change.go:12) | the edit changes the file id set |
 //! | `FillInPostProps`' channel mentions (post.go:568) | the post carries a `~channel` mention |
 //! | `FillInPostProps`' group-mention prop (:632) | the message holds an `@` mention **and** the installation is licensed |
@@ -45,7 +45,7 @@ use mm_model::post::{
     POST_PROPS_MM_BLOCKS_ACTIONS, POST_TYPE_BURN_ON_READ, POST_TYPE_CARD, Post, PostPatch,
 };
 use mm_model::session::Session;
-use mm_model::utils::{AppError, get_millis};
+use mm_model::utils::{AppError, get_millis, parse_hashtags};
 use mm_model::websocket_message::{WEBSOCKET_EVENT_POST_EDITED, WebSocketEvent};
 use mm_store::PostStore;
 
@@ -240,12 +240,18 @@ impl App {
 
         let mut new_post = old_post.clone();
 
+        // `PostWithProxyRemovedFromImageURLs` runs on the caller's side of this function and is
+        // the identity with the proxy off — but with it on it rewrites the message before the
+        // comparison below, so the proxy decides whether an edit is a message change at all.
+        if self.config().image_proxy_enable {
+            return Err(PrepareError::Unreproducible("image proxy is enabled"));
+        }
+
         if new_post.message != received.message {
-            // `newPost.Hashtags, _ = model.ParseHashtags(receivedUpdatedPost.Message)` — the
-            // hashtag column is derived from the message and the derivation is not ported yet.
-            return Err(PrepareError::Unreproducible(
-                "an edit that changes the message needs ParseHashtags",
-            ));
+            new_post.message.clone_from(&received.message);
+            new_post.edit_at = get_millis();
+            // Only the hashtag half is kept; Go discards the plain half here too.
+            (new_post.hashtags, _) = parse_hashtags(&received.message);
         }
 
         new_post.is_pinned = received.is_pinned;
@@ -395,6 +401,30 @@ impl App {
 
         tracing::Span::current().record("forwarded", false);
         Ok((sanitized, is_member_for_previews))
+    }
+
+    /// Port of `app.App.MaxPostSize` (app/post.go:2500), which is
+    /// `Platform().MaxPostSize()` → `Store.Post().GetMaxPostSize()`.
+    ///
+    /// **Go memoises it in a `sync.Once` and this does not**, so a request that consults it pays
+    /// an `information_schema` query. That is the same choice `max_draft_size` made; nothing about
+    /// it is on the wire, and a cache here would be a second place for the value to be stale.
+    ///
+    /// A store failure is `app.post.max_post_size.app_error` at 500 — an id Go does not have,
+    /// because Go cannot fail here: `determineMaxPostSize` swallows its own error. The store does
+    /// the swallowing, so this arm is unreachable for the same reason.
+    #[tracing::instrument(skip(self))]
+    pub async fn max_post_size(&self) -> Result<usize, Box<AppError>> {
+        self.store().post().max_post_size().await.map_err(|err| {
+            tracing::error!(error = %err, "reading the maximum post size failed");
+            AppError::boxed(
+                "MaxPostSize",
+                "app.post.max_post_size.app_error",
+                None,
+                String::new(),
+                500,
+            )
+        })
     }
 
     /// Port of `app.App.FillInPostProps` (app/post.go:566) for the shapes an edit can reach.

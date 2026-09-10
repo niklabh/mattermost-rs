@@ -934,11 +934,17 @@ pub fn router(state: AppState) -> Router {
         // GET at "". Every other `/posts/...` path Go registers is either one segment deeper
         // (`/patch`, `/thread`, `/files/info`, …) or a literal sibling of `{post_id}`
         // (`/posts/ids`, `/posts/ephemeral`) that this router does not register at all, so both
-        // fall to `Router::fallback` and stay forwarded. `partially_migrated` keeps `PUT` and
-        // `DELETE` on this exact path going to Go.
+        // fall to `Router::fallback` and stay forwarded. `DELETE` on this exact path is still
+        // Go's; `partially_migrated` keeps it forwarded.
         .route(
             "/api/v4/posts/{post_id}",
-            partially_migrated_with_ids(&state, get(posts::get_post)),
+            partially_migrated_with_ids(&state, get(posts::get_post).put(post_writes::update_post)),
+        )
+        // `BaseRoutes.Post.Handle("/patch")` (api4/post.go:44) — one segment deeper than the route
+        // above, PUT-only in Go.
+        .route(
+            "/api/v4/posts/{post_id}/patch",
+            partially_migrated_with_ids(&state, axum::routing::put(post_writes::patch_post)),
         )
         // `BaseRoutes.Posts.Handle("/ids")` (api4/post.go:28). The literal `ids` sits where
         // `{post_id}` sits above; axum prefers the literal. Nothing that used to be answered

@@ -102,10 +102,23 @@ async fn channel_through(
 }
 
 /// Replace the per-request and per-fixture values with markers so two servers' posts compare.
+///
+/// `edit_at` is among them, and it is the only one that is *not* obviously per-request: it is
+/// stamped by `UpdatePost` and `update_at` is stamped a moment later by the store, so Go — which
+/// runs fewer queries in between — usually reports the two as equal while we report a few
+/// milliseconds apart. That is latency, not a wire divergence, so the relationship is asserted
+/// separately (`0 < edit_at <= update_at`) rather than the value.
 fn normalise_post(post: &serde_json::Value) -> serde_json::Value {
     let mut out = post.clone();
     let object = out.as_object_mut().expect("a post object");
-    for key in ["id", "channel_id", "create_at", "update_at", "message"] {
+    for key in [
+        "id",
+        "channel_id",
+        "create_at",
+        "update_at",
+        "edit_at",
+        "message",
+    ] {
         object.insert(key.to_owned(), serde_json::json!(format!("<{key}>")));
     }
     out
@@ -446,5 +459,417 @@ async fn a_plain_member_may_pin_someone_elses_post() {
     );
 
     common::delete_plain_user(&http, &token, &plain.id).await;
+    common::delete_channel(&http, &token, &channel).await;
+}
+
+/// `PUT /posts/{post_id}` against one server, with the body as given.
+async fn put_post(
+    http: &reqwest::Client,
+    base: &str,
+    token: &str,
+    post_id: &str,
+    body: &serde_json::Value,
+) -> (u16, String, bool) {
+    let path = format!("/api/v4/posts/{post_id}");
+    let response = http
+        .put(format!("{base}{path}"))
+        .header("Authorization", format!("Bearer {token}"))
+        .json(body)
+        .send()
+        .await
+        .unwrap_or_else(|e| panic!("{base}{path} unreachable: {e}"));
+    let status = response.status().as_u16();
+    let served_by_rust = response
+        .headers()
+        .get("x-mmrs-served-by")
+        .and_then(|v| v.to_str().ok())
+        == Some("rust");
+    (
+        status,
+        response.text().await.expect("a body"),
+        served_by_rust,
+    )
+}
+
+/// `PUT /posts/{post_id}/patch` against one server.
+async fn patch_post_request(
+    http: &reqwest::Client,
+    base: &str,
+    token: &str,
+    post_id: &str,
+    body: &serde_json::Value,
+) -> (u16, String, bool) {
+    let path = format!("/api/v4/posts/{post_id}/patch");
+    let response = http
+        .put(format!("{base}{path}"))
+        .header("Authorization", format!("Bearer {token}"))
+        .json(body)
+        .send()
+        .await
+        .unwrap_or_else(|e| panic!("{base}{path} unreachable: {e}"));
+    let status = response.status().as_u16();
+    let served_by_rust = response
+        .headers()
+        .get("x-mmrs-served-by")
+        .and_then(|v| v.to_str().ok())
+        == Some("rust");
+    (
+        status,
+        response.text().await.expect("a body"),
+        served_by_rust,
+    )
+}
+
+#[tokio::test]
+async fn editing_a_post_matches_go_body_for_body() {
+    if !stack_enabled() {
+        return;
+    }
+    let http = client();
+    let token = go_minted_token(&http).await;
+    let (team, _) = a_team_and_channel_the_user_is_in(&http, &token).await;
+    let go_channel = common::create_channel_typed(&http, &token, &team, "editg", "O").await;
+    let rust_channel = common::create_channel_typed(&http, &token, &team, "editr", "O").await;
+    let go_post = post_message(&http, &token, &go_channel, "mmrs before", None).await;
+    let rust_post = post_message(&http, &token, &rust_channel, "mmrs before", None).await;
+
+    // A `#hashtag` in the new message is what exercises `ParseHashtags` end to end: the column is
+    // derived from the message on every edit, and `hashtags` is on the wire.
+    let edited = "mmrs after #edited-tag and ##double";
+    let (go_status, go_raw, _) = put_post(
+        &http,
+        GO,
+        &token,
+        &go_post,
+        &serde_json::json!({"id": go_post, "message": edited}),
+    )
+    .await;
+    let (rust_status, rust_raw, served_by_rust) = put_post(
+        &http,
+        RUST,
+        &token,
+        &rust_post,
+        &serde_json::json!({"id": rust_post, "message": edited}),
+    )
+    .await;
+    assert!(served_by_rust, "we forwarded the edit: {rust_raw}");
+
+    assert_eq!(go_status, 200, "Go edits: {go_raw}");
+    assert_eq!(rust_status, go_status, "the edit status differs");
+    // `EncodeJSON` goes through `json.Encoder`, so the body **does** carry a trailing newline —
+    // the opposite of the pin route's `ReturnStatusOK`.
+    assert!(
+        go_raw.ends_with('\n'),
+        "Go's edit body is encoder-framed: {go_raw:?}"
+    );
+    assert_eq!(
+        rust_raw.ends_with('\n'),
+        go_raw.ends_with('\n'),
+        "the edit body's framing differs"
+    );
+
+    let go_body: serde_json::Value = serde_json::from_str(&go_raw).expect("a post");
+    let rust_body: serde_json::Value = serde_json::from_str(&rust_raw).expect("a post");
+    assert_eq!(
+        normalise_post(&go_body),
+        normalise_post(&rust_body),
+        "the edited post differs:\n go: {go_body}\nrust: {rust_body}"
+    );
+
+    // `ParseHashtags`: the pound run collapses and both tags land, in message order.
+    assert_eq!(
+        rust_body["hashtags"], "#edited-tag #double",
+        "the hashtag column is derived from the new message: {rust_body}"
+    );
+    for (base, body) in [(GO, &go_body), (RUST, &rust_body)] {
+        let edit_at = body["edit_at"].as_i64().unwrap_or(0);
+        let update_at = body["update_at"].as_i64().unwrap_or(0);
+        assert!(edit_at > 0, "{base}: a message change sets edit_at: {body}");
+        assert!(
+            edit_at <= update_at,
+            "{base}: EditAt is stamped by UpdatePost and UpdateAt by the store after it: {body}"
+        );
+    }
+    assert_eq!(
+        rust_body["message"], edited,
+        "and the response carries the new message"
+    );
+
+    // Read back through the writing server: the answer and the row agree.
+    let stored = post_through(&http, RUST, &token, &rust_post).await;
+    assert_eq!(stored["message"], edited);
+    assert_eq!(stored["hashtags"], "#edited-tag #double");
+    assert_eq!(stored["edit_at"], rust_body["edit_at"]);
+
+    // The history row holds the *old* message.
+    for (base, post) in [(GO, &go_post), (RUST, &rust_post)] {
+        let (status, entries) = edit_history_through(&http, base, &token, post).await;
+        assert_eq!(status, 200, "{base}: the edit wrote a history row");
+        assert_eq!(entries.len(), 1, "{base}: one row: {entries:?}");
+        assert_eq!(
+            entries[0]["message"], "mmrs before",
+            "{base}: the history row is the old version"
+        );
+    }
+
+    // **An update can pin.** `updatePost` assigns `IsPinned` straight from the body, so a `PUT`
+    // carrying `is_pinned` does what the pin route does.
+    let (status, raw, _) = put_post(
+        &http,
+        RUST,
+        &token,
+        &rust_post,
+        &serde_json::json!({"id": rust_post, "message": edited, "is_pinned": true}),
+    )
+    .await;
+    assert_eq!(status, 200, "{raw}");
+    let body: serde_json::Value = serde_json::from_str(&raw).expect("a post");
+    assert_eq!(body["is_pinned"], true, "a PUT can pin: {body}");
+
+    common::delete_channel(&http, &token, &go_channel).await;
+    common::delete_channel(&http, &token, &rust_channel).await;
+}
+
+#[tokio::test]
+async fn patching_a_post_matches_go_and_an_empty_patch_still_writes() {
+    if !stack_enabled() {
+        return;
+    }
+    let http = client();
+    let token = go_minted_token(&http).await;
+    let (team, _) = a_team_and_channel_the_user_is_in(&http, &token).await;
+    let go_channel = common::create_channel_typed(&http, &token, &team, "patchg", "O").await;
+    let rust_channel = common::create_channel_typed(&http, &token, &team, "patchr", "O").await;
+    let go_post = post_message(&http, &token, &go_channel, "mmrs patch before", None).await;
+    let rust_post = post_message(&http, &token, &rust_channel, "mmrs patch before", None).await;
+
+    let patch = serde_json::json!({"message": "mmrs patch after #patched", "is_pinned": true});
+    let (go_status, go_raw, _) = patch_post_request(&http, GO, &token, &go_post, &patch).await;
+    let (rust_status, rust_raw, served_by_rust) =
+        patch_post_request(&http, RUST, &token, &rust_post, &patch).await;
+    assert!(served_by_rust, "we forwarded the patch: {rust_raw}");
+
+    assert_eq!(go_status, 200, "Go patches: {go_raw}");
+    assert_eq!(rust_status, go_status, "the patch status differs");
+    assert_eq!(rust_raw.ends_with('\n'), go_raw.ends_with('\n'));
+
+    let go_body: serde_json::Value = serde_json::from_str(&go_raw).expect("a post");
+    let rust_body: serde_json::Value = serde_json::from_str(&rust_raw).expect("a post");
+    assert_eq!(
+        normalise_post(&go_body),
+        normalise_post(&rust_body),
+        "the patched post differs:\n go: {go_body}\nrust: {rust_body}"
+    );
+    assert_eq!(rust_body["is_pinned"], true, "the patch pinned it");
+    assert_eq!(rust_body["hashtags"], "#patched");
+
+    // **An empty patch is a 200 that still writes.** `postPatchChecks` skips the age limit for it,
+    // and `UpdatePost` runs anyway — so `UpdateAt` moves and a history row appears.
+    let before = post_through(&http, RUST, &token, &rust_post).await;
+    let (status, raw, _) =
+        patch_post_request(&http, RUST, &token, &rust_post, &serde_json::json!({})).await;
+    assert_eq!(status, 200, "an empty patch is accepted: {raw}");
+    let (go_status, go_raw, _) =
+        patch_post_request(&http, GO, &token, &go_post, &serde_json::json!({})).await;
+    assert_eq!(go_status, status, "and Go agrees: {go_raw}");
+
+    let after = post_through(&http, RUST, &token, &rust_post).await;
+    assert!(
+        after["update_at"].as_i64() > before["update_at"].as_i64(),
+        "an empty patch still moves update_at"
+    );
+    assert_eq!(
+        after["message"], before["message"],
+        "and changes nothing a reader can see"
+    );
+    assert_eq!(
+        after["edit_at"], before["edit_at"],
+        "including edit_at, since the message did not change"
+    );
+    for (base, post) in [(GO, &go_post), (RUST, &rust_post)] {
+        let (_, entries) = edit_history_through(&http, base, &token, post).await;
+        assert_eq!(
+            entries.len(),
+            2,
+            "{base}: the empty patch added a second history row: {entries:?}"
+        );
+    }
+
+    common::delete_channel(&http, &token, &go_channel).await;
+    common::delete_channel(&http, &token, &rust_channel).await;
+}
+
+#[tokio::test]
+async fn the_edit_routes_refuse_the_same_way() {
+    if !stack_enabled() {
+        return;
+    }
+    let http = client();
+    let token = go_minted_token(&http).await;
+    let (team, _) = a_team_and_channel_the_user_is_in(&http, &token).await;
+    let channel = common::create_channel_typed(&http, &token, &team, "editerr", "P").await;
+    let post = post_message(&http, &token, &channel, "mmrs edit errors", None).await;
+
+    // The body's `id` must match the path's, and the check is **after** `SanitizeInput` and before
+    // any lookup — so it fires even for a post that does not exist.
+    for base in [GO, RUST] {
+        let (status, raw, _) = put_post(
+            &http,
+            base,
+            &token,
+            &post,
+            &serde_json::json!({"id": "aaaaaaaaaaaaaaaaaaaaaaaaaa", "message": "x"}),
+        )
+        .await;
+        assert_eq!(status, 400, "{base}: a mismatched id is a 400: {raw}");
+        let body: serde_json::Value = serde_json::from_str(&raw).expect("an AppError");
+        assert_eq!(body["id"], "api.context.invalid_body_param.app_error");
+    }
+
+    // A body that is not a post at all.
+    for base in [GO, RUST] {
+        let path = format!("/api/v4/posts/{post}");
+        let response = http
+            .put(format!("{base}{path}"))
+            .header("Authorization", format!("Bearer {token}"))
+            .header("Content-Type", "application/json")
+            .body("not json")
+            .send()
+            .await
+            .expect("a response");
+        assert_eq!(
+            response.status().as_u16(),
+            400,
+            "{base}: an undecodable body is a 400"
+        );
+        let body: serde_json::Value = response.json().await.expect("an AppError");
+        assert_eq!(body["id"], "api.context.invalid_body_param.app_error");
+    }
+
+    // A post that does not exist is a **403** naming `edit_post`, not a 404 — `GetSinglePost`'s
+    // error is thrown away. Same for the patch route.
+    let missing = "aaaaaaaaaaaaaaaaaaaaaaaaaa";
+    for base in [GO, RUST] {
+        let (status, raw, _) = put_post(
+            &http,
+            base,
+            &token,
+            missing,
+            &serde_json::json!({"id": missing, "message": "x"}),
+        )
+        .await;
+        assert_eq!(status, 403, "{base}: an unknown post is a 403: {raw}");
+        let body: serde_json::Value = serde_json::from_str(&raw).expect("an AppError");
+        assert_eq!(body["id"], "api.context.permissions.app_error");
+
+        let (status, raw, _) = patch_post_request(
+            &http,
+            base,
+            &token,
+            missing,
+            &serde_json::json!({"message": "x"}),
+        )
+        .await;
+        assert_eq!(status, 403, "{base}: and so is patching one: {raw}");
+        let body: serde_json::Value = serde_json::from_str(&raw).expect("an AppError");
+        assert_eq!(body["id"], "api.context.permissions.app_error");
+    }
+
+    // A short id is `RequirePostId`'s 400 on both routes.
+    for base in [GO, RUST] {
+        let (status, raw, _) = put_post(
+            &http,
+            base,
+            &token,
+            "short",
+            &serde_json::json!({"id": "short", "message": "x"}),
+        )
+        .await;
+        assert_eq!(status, 400, "{base}: a short id is a 400: {raw}");
+        let body: serde_json::Value = serde_json::from_str(&raw).expect("an AppError");
+        assert_eq!(body["id"], "api.context.invalid_url_param.app_error");
+    }
+
+    // A channel member who is not the author needs `edit_others_posts`, which a plain user does
+    // not have. **Private** channel, because a public one grants a team member read access anyway.
+    let plain = common::create_plain_user(&http, &token, &team, "edit").await;
+    common::add_user_to_channel(&http, &token, &channel, &plain.id).await;
+    for base in [GO, RUST] {
+        let (status, raw, _) = put_post(
+            &http,
+            base,
+            &plain.token,
+            &post,
+            &serde_json::json!({"id": post, "message": "mmrs hijacked"}),
+        )
+        .await;
+        assert_eq!(
+            status, 403,
+            "{base}: a member may not edit someone else's post: {raw}"
+        );
+        let (status, raw, _) = patch_post_request(
+            &http,
+            base,
+            &plain.token,
+            &post,
+            &serde_json::json!({"message": "mmrs hijacked"}),
+        )
+        .await;
+        assert_eq!(status, 403, "{base}: nor patch it: {raw}");
+    }
+    assert_eq!(
+        post_through(&http, RUST, &token, &post).await["message"],
+        "mmrs edit errors",
+        "the refused edits must not have landed"
+    );
+
+    common::delete_plain_user(&http, &token, &plain.id).await;
+    common::delete_channel(&http, &token, &channel).await;
+}
+
+/// An edit whose message carries a `~channel` mention is **forwarded**: `FillInPostProps` resolves
+/// the mention into a prop through channel and team lookups this port does not do.
+///
+/// The point of the test is that the forward is *invisible* to a client — same status, same body —
+/// and that it happens for the mention rather than for the route.
+#[tokio::test]
+async fn an_edit_that_mentions_a_channel_is_forwarded_to_go() {
+    if !stack_enabled() {
+        return;
+    }
+    let http = client();
+    let token = go_minted_token(&http).await;
+    let (team, _) = a_team_and_channel_the_user_is_in(&http, &token).await;
+    let channel = common::create_channel_typed(&http, &token, &team, "editmention", "O").await;
+    let post = post_message(&http, &token, &channel, "mmrs mention before", None).await;
+
+    let (status, raw, served_by_rust) = put_post(
+        &http,
+        RUST,
+        &token,
+        &post,
+        &serde_json::json!({"id": post, "message": "see ~town-square for details"}),
+    )
+    .await;
+    assert_eq!(status, 200, "the forwarded edit still succeeds: {raw}");
+    assert!(
+        !served_by_rust,
+        "a ~channel mention must be forwarded, not answered here: {raw}"
+    );
+    let body: serde_json::Value = serde_json::from_str(&raw).expect("a post");
+    assert_eq!(body["message"], "see ~town-square for details");
+
+    // And a message with no mention is answered here, so the forward is about the mention.
+    let (status, raw, served_by_rust) = put_post(
+        &http,
+        RUST,
+        &token,
+        &post,
+        &serde_json::json!({"id": post, "message": "no mention at all"}),
+    )
+    .await;
+    assert_eq!(status, 200, "{raw}");
+    assert!(served_by_rust, "this one is ours: {raw}");
+
     common::delete_channel(&http, &token, &channel).await;
 }
