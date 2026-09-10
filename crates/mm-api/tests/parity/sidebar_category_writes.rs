@@ -1798,10 +1798,7 @@ async fn the_me_alias_is_resolved_before_the_bodys_user_id_is_checked() {
 
     let mut created = Vec::new();
     for (base, subject) in [(GO, &f.go), (RUST, &f.rust)] {
-        let path = format!(
-            "/api/v4/users/me/teams/{}/channels/categories",
-            f.team_id
-        );
+        let path = format!("/api/v4/users/me/teams/{}/channels/categories", f.team_id);
 
         // The real id in the body, `me` in the path: accepted.
         let (status, raw) = send(
@@ -1820,7 +1817,8 @@ async fn the_me_alias_is_resolved_before_the_bodys_user_id_is_checked() {
         assert_eq!(status, 200, "{base}: {}", String::from_utf8_lossy(&raw));
         let value = parse(&raw, "the created category");
         assert_eq!(
-            value["user_id"], subject.id.as_str(),
+            value["user_id"],
+            subject.id.as_str(),
             "{base}: the answer carries the resolved id, not the literal `me`"
         );
 
@@ -1839,7 +1837,8 @@ async fn the_me_alias_is_resolved_before_the_bodys_user_id_is_checked() {
         )
         .await;
         assert_eq!(
-            status, 400,
+            status,
+            400,
             "{base}: `me` is not substituted into the body: {}",
             String::from_utf8_lossy(&raw)
         );

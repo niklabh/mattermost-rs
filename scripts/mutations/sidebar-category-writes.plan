@@ -20,12 +20,19 @@
 # everything visible over HTTP gets `api` with the `sidebar` filter, which runs the three sidebar
 # modules and nothing else.
 #
+# The three `store-initial-run-inserts-*-regardless` lines were one line, on the Channels guard
+# alone, and it SURVIVED: the test's only second run deleted the Channels category first, so the
+# guard it mutated was unreachable. Fixed in the test (there is now a run with nothing missing) and
+# split three ways, one per guard, because the primary key is what makes each of them observable.
+#
 # The last two lines are the no-op controls and must SURVIVE.
 store-favorites-takes-the-channels-sort-order	crates/mm-store/src/sidebar_category_store.rs	            DEFAULT_SIDEBAR_SORT_ORDER_FAVORITES,\n            SIDEBAR_CATEGORY_SORT_DEFAULT,\n            SIDEBAR_CATEGORY_FAVORITES,	            DEFAULT_SIDEBAR_SORT_ORDER_CHANNELS,\n            SIDEBAR_CATEGORY_SORT_DEFAULT,\n            SIDEBAR_CATEGORY_FAVORITES,	store	default_categories_carry
 store-dms-sort-by-default-not-recent	crates/mm-store/src/sidebar_category_store.rs	            SIDEBAR_CATEGORY_SORT_RECENT,\n            SIDEBAR_CATEGORY_DIRECT_MESSAGES,	            SIDEBAR_CATEGORY_SORT_DEFAULT,\n            SIDEBAR_CATEGORY_DIRECT_MESSAGES,	store	default_categories_carry
 store-dms-display-name-loses-its-space	crates/mm-store/src/sidebar_category_store.rs	            "Direct Messages",	            "DirectMessages",	store	default_categories_carry
 store-default-id-repeats-the-user-instead-of-the-team	crates/mm-store/src/sidebar_category_store.rs	    format!("{category_type}_{user_id}_{team_id}")	    format!("{category_type}_{user_id}_{user_id}")	store	default_categories_carry
-store-initial-run-inserts-every-type-regardless	crates/mm-store/src/sidebar_category_store.rs	    if !existing.iter().any(|t| t == SIDEBAR_CATEGORY_CHANNELS) {	    if true {	store	second_run_inserts_only
+store-initial-run-inserts-channels-regardless	crates/mm-store/src/sidebar_category_store.rs	    if !existing.iter().any(|t| t == SIDEBAR_CATEGORY_CHANNELS) {	    if true {	store	second_run_inserts_only
+store-initial-run-inserts-favorites-regardless	crates/mm-store/src/sidebar_category_store.rs	    if !existing.iter().any(|t| t == SIDEBAR_CATEGORY_FAVORITES) {	    if true {	store	second_run_inserts_only
+store-initial-run-inserts-dms-regardless	crates/mm-store/src/sidebar_category_store.rs	    if !existing\n        .iter()\n        .any(|t| t == SIDEBAR_CATEGORY_DIRECT_MESSAGES)\n    {	    if true {	store	second_run_inserts_only
 store-initial-read-back-reads-the-wrong-user	crates/mm-store/src/sidebar_category_store.rs	    let ordered = get_sidebar_categories(&mut tx, user_id, team_id).await?;	    let ordered = get_sidebar_categories(&mut tx, team_id, team_id).await?;	store	default_categories_carry
 store-favourites-migration-accepts-any-value	crates/mm-store/src/sidebar_category_store.rs	          AND preferences.value = 'true'	          AND preferences.value <> 'nope'	store	favourite_preferences_become
 store-favourites-migration-drops-the-empty-team-arm	crates/mm-store/src/sidebar_category_store.rs	          AND (channels.teamid = $2 OR channels.teamid = '')	          AND channels.teamid = $2	store	favourite_preferences_become
