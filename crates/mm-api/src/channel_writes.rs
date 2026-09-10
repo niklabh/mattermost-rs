@@ -57,7 +57,7 @@ use mm_model::permission::{
     make_permission_error,
 };
 use mm_model::session::Session;
-use mm_model::utils::AppError;
+use mm_model::utils::{AppError, decode_one_from_json};
 
 use crate::AppState;
 use crate::auth::AuthenticatedSession;
@@ -232,7 +232,11 @@ pub async fn update_channel(
 
     // Go decodes into `*model.Channel`, so a body of `null` decodes *successfully* into a nil
     // pointer and is caught by the same `err != nil || channel == nil` test as a malformed one.
-    let submitted: Channel = match serde_json::from_slice::<Option<Channel>>(&bytes) {
+    //
+    // `decode_one_from_json` rather than `serde_json::from_slice`: `json.Decoder.Decode` reads one
+    // value and **stops**, so `{"id":"…"} garbage` and two concatenated objects are both a 200 on
+    // Go, taking the first. `from_slice` rejects the trailing bytes and would 400. Measured.
+    let submitted: Channel = match decode_one_from_json::<Option<Channel>>(&bytes) {
         Ok(Some(channel)) => channel,
         Ok(None) => return ApiError::invalid_param("channel").into_response(),
         Err(err) => {
@@ -445,8 +449,8 @@ pub async fn patch_channel(
     };
 
     // The invalid-param name is **`channel`**, not `patch` — the handler decodes a `ChannelPatch`
-    // and calls it a channel.
-    let patch: ChannelPatch = match serde_json::from_slice::<Option<ChannelPatch>>(&bytes) {
+    // and calls it a channel. `decode_one_from_json` for the same reason as `updateChannel`'s body.
+    let patch: ChannelPatch = match decode_one_from_json::<Option<ChannelPatch>>(&bytes) {
         Ok(Some(patch)) => patch,
         Ok(None) => return ApiError::invalid_param("channel").into_response(),
         Err(err) => {
@@ -837,7 +841,10 @@ pub async fn update_channel_privacy(
 /// non-string value and an out-of-set string all fail the same `if`. Returns a `&'static str`
 /// rather than the parsed value so a caller cannot accidentally widen the accepted set.
 fn requested_privacy(body: &[u8]) -> Option<&'static str> {
-    let props: serde_json::Map<String, serde_json::Value> = serde_json::from_slice(body).ok()?;
+    // `json.NewDecoder(data).Decode(&objmap)` — one value, trailing bytes unread, and the error
+    // discarded. `serde_json::from_slice` differs on the first of those, which is why this goes
+    // through the shared helper rather than the obvious call.
+    let props: serde_json::Map<String, serde_json::Value> = decode_one_from_json(body).ok()?;
     match props.get("privacy")?.as_str()? {
         CHANNEL_TYPE_OPEN => Some(CHANNEL_TYPE_OPEN),
         CHANNEL_TYPE_PRIVATE => Some(CHANNEL_TYPE_PRIVATE),
@@ -1184,6 +1191,52 @@ mod tests {
                 String::from_utf8_lossy(rejected)
             );
         }
+    }
+
+    /// `json.Decoder.Decode` reads one value and stops, so trailing bytes cannot turn a good body
+    /// into a 400. Three shapes Go accepts and `serde_json::from_slice` would refuse — all three
+    /// measured against the running server on `/privacy`, `PUT` and `/patch`.
+    #[test]
+    fn trailing_bytes_after_the_first_value_are_ignored_like_go() {
+        assert_eq!(
+            requested_privacy(br#"{"privacy":"P"}trailing"#),
+            Some("P"),
+            "Decode stops after the first object"
+        );
+        assert_eq!(
+            requested_privacy(br#"{"privacy":"P"}{"privacy":"O"}"#),
+            Some("P"),
+            "the second object is never read"
+        );
+
+        // A body that is only `null` decodes to a nil map, which Go replaces with an empty one —
+        // so it fails the `privacy` lookup rather than the decode, and reaches the same 400.
+        assert_eq!(requested_privacy(b"null"), None);
+    }
+
+    /// The same laxity on the two typed bodies, and the `null`-is-a-nil-pointer case beside it.
+    #[test]
+    fn a_channel_body_decodes_its_first_value_and_null_is_a_nil_pointer() {
+        let decoded: Option<Channel> =
+            decode_one_from_json(br#"{"id":"abc","header":"h"} trailing"#)
+                .expect("Go accepts this");
+        let decoded = decoded.expect("an object, not null");
+        assert_eq!(decoded.id, "abc");
+        assert_eq!(decoded.header, "h");
+
+        let null: Option<Channel> = decode_one_from_json(b"null").expect("null is not an error");
+        assert!(
+            null.is_none(),
+            "a nil pointer, which the handler turns into a 400"
+        );
+
+        let patch: Option<ChannelPatch> =
+            decode_one_from_json(br#"{"header":"h"}{"header":"i"}"#).expect("Go accepts this");
+        assert_eq!(
+            patch.expect("an object").header.as_deref(),
+            Some("h"),
+            "the second patch is never read"
+        );
     }
 
     #[test]

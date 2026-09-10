@@ -535,6 +535,66 @@ async fn a_type_change_through_update_is_refused_and_privacy_is_the_only_way() {
     common::delete_channel(&http, &token, &channel).await;
 }
 
+/// `json.Decoder.Decode` reads one value and **stops**, so trailing bytes are never looked at.
+/// Three bodies Go accepts and a strict decoder would 400 — the difference between
+/// `serde_json::from_slice` and `mm_model::utils::decode_one_from_json`, and the reason all three
+/// handlers use the latter.
+#[tokio::test]
+async fn trailing_bytes_after_the_body_are_accepted_by_both_servers() {
+    if !stack_enabled() {
+        return;
+    }
+    let http = client();
+    let token = go_minted_token(&http).await;
+    let (team, _) = a_team_and_channel_the_user_is_in(&http, &token).await;
+    let go_channel = create_channel_typed(&http, &token, &team, "cwtrailg", "O").await;
+    let rust_channel = create_channel_typed(&http, &token, &team, "cwtrailr", "O").await;
+
+    let cases: [(&str, &str); 3] = [
+        ("", "trailing"),
+        ("/patch", "trailing"),
+        ("/privacy", "{\"privacy\":\"O\"}"),
+    ];
+    for (base, channel) in [(GO, &go_channel), (RUST, &rust_channel)] {
+        for (suffix, garbage) in cases {
+            let body = match suffix {
+                "/patch" => format!("{{\"header\":\"mmrs trailing\"}}{garbage}"),
+                "/privacy" => format!("{{\"privacy\":\"P\"}}{garbage}"),
+                _ => format!("{{\"id\":\"{channel}\",\"header\":\"mmrs trailing\"}}{garbage}"),
+            };
+            let response = http
+                .put(format!("{base}/api/v4/channels/{channel}{suffix}"))
+                .header("Authorization", format!("Bearer {token}"))
+                .header("Content-Type", "application/json")
+                .body(body.clone())
+                .send()
+                .await
+                .expect("the server answers");
+            let status = response.status().as_u16();
+            let text = response.text().await.expect("a body");
+            assert_eq!(
+                status, 200,
+                "{base}{suffix} must accept {body:?}, not 400 it: {text}"
+            );
+            // Put the type back so the next iteration starts from `O` again.
+            if suffix == "/privacy" {
+                let (status, body, _) = set_privacy(
+                    &http,
+                    base,
+                    &token,
+                    channel,
+                    &serde_json::json!({"privacy": "O"}),
+                )
+                .await;
+                assert_eq!(status, 200, "{base} converts back: {body}");
+            }
+        }
+    }
+
+    common::delete_channel(&http, &token, &go_channel).await;
+    common::delete_channel(&http, &token, &rust_channel).await;
+}
+
 // -------------------------------------------------------------------------------------------
 // town-square
 // -------------------------------------------------------------------------------------------
@@ -542,6 +602,16 @@ async fn a_type_change_through_update_is_refused_and_privacy_is_the_only_way() {
 /// `town-square` is refused a rename by both routes, an archive, and a conversion to private —
 /// four guards, one name. **`off-topic` has none of them**, which is the half of this test that
 /// pins a port that guessed at a second default channel.
+///
+/// # The team is this test's own, and that is a mutation-testing requirement
+///
+/// Every request here is expected to *fail*, and the only thing stopping it is the guard under
+/// test. So a mutation that removes the guard makes the request **succeed** — and against the
+/// shared fixture team that means archiving its `town-square` for good, or renaming its
+/// `off-topic`, poisoning every later test in the batch. Both happened: the first mutation run
+/// left the fixture team's town-square archived and its off-topic renamed and private, and the two
+/// no-op controls at the end of the plan were then CAUGHT by the wreckage rather than by any
+/// change. A disposable team makes the damage local to the mutation that caused it.
 #[tokio::test]
 async fn only_town_square_is_special_and_off_topic_is_not() {
     if !stack_enabled() {
@@ -549,7 +619,7 @@ async fn only_town_square_is_special_and_off_topic_is_not() {
     }
     let http = client();
     let token = go_minted_token(&http).await;
-    let (team, _) = a_team_and_channel_the_user_is_in(&http, &token).await;
+    let team = common::create_team(&http, &token, "cwtsguards").await;
 
     let town_square = channel_named(&http, &token, &team, "town-square").await;
 
@@ -642,8 +712,12 @@ async fn only_town_square_is_special_and_off_topic_is_not() {
     );
 }
 
-/// `off-topic` gets renamed and put back, on **one** server, because the guard being tested is the
-/// absence of a guard rather than an agreement between two answers.
+/// `off-topic` gets renamed and converted, on **one** server, because what is being tested is the
+/// *absence* of a guard rather than an agreement between two answers.
+///
+/// On this test's own team, so nothing needs putting back: renaming a shared `off-topic` and
+/// restoring it at the end works only while the test passes, and the whole point of a mutation run
+/// is that it does not. See the note on the town-square test.
 #[tokio::test]
 async fn off_topic_can_be_renamed_archived_and_made_private() {
     if !stack_enabled() {
@@ -651,7 +725,7 @@ async fn off_topic_can_be_renamed_archived_and_made_private() {
     }
     let http = client();
     let token = go_minted_token(&http).await;
-    let (team, _) = a_team_and_channel_the_user_is_in(&http, &token).await;
+    let team = common::create_team(&http, &token, "cwotguards").await;
     let off_topic = channel_named(&http, &token, &team, "off-topic").await;
 
     let (status, body, by_rust) = patch(
@@ -677,7 +751,9 @@ async fn off_topic_can_be_renamed_archived_and_made_private() {
     let converted: serde_json::Value = serde_json::from_str(&body).expect("a channel");
     assert_eq!(converted["type"], "P");
 
-    // Put it back, both ways, through the same server.
+    // Both round trips, which assert something the one-way conversion does not: that a default
+    // channel's *name* can be taken back and its type flipped again. Not cleanup — the team is
+    // disposable — so a failure here is a finding rather than a leak.
     let (status, _, _) = set_privacy(
         &http,
         RUST,
@@ -695,7 +771,12 @@ async fn off_topic_can_be_renamed_archived_and_made_private() {
         &serde_json::json!({"name": "off-topic"}),
     )
     .await;
-    assert_eq!(status, 200, "off-topic's name is restored");
+    assert_eq!(status, 200, "off-topic's name can be taken back");
+
+    // And it archives, which `town-square` does not.
+    let (status, body, by_rust) = archive(&http, RUST, &token, &off_topic, "").await;
+    assert_eq!(status, 200, "off-topic has no archive guard: {body}");
+    assert!(by_rust);
 }
 
 async fn channel_named(http: &reqwest::Client, token: &str, team: &str, name: &str) -> String {
@@ -1098,6 +1179,27 @@ async fn archiving_a_channel_archives_its_webhooks_a_moment_later() {
     let hook: serde_json::Value = serde_json::from_str(&body).expect("a hook");
     let hook_id = hook["id"].as_str().expect("an id").to_owned();
 
+    // An outgoing hook as well, because the two loops are separate code and separate store methods
+    // — a port that archived only the incoming ones passes every assertion about the other half.
+    let (status, body, _) = send(
+        &http,
+        reqwest::Method::POST,
+        GO,
+        &token,
+        "/api/v4/hooks/outgoing",
+        Some(&serde_json::json!({
+            "team_id": team,
+            "channel_id": channel,
+            "display_name": "mmrs parity outgoing",
+            "trigger_words": ["mmrsparitytrigger"],
+            "callback_urls": ["http://127.0.0.1:9/mmrs"],
+        })),
+    )
+    .await;
+    assert_eq!(status, 201, "the outgoing hook is created: {body}");
+    let outgoing: serde_json::Value = serde_json::from_str(&body).expect("a hook");
+    let outgoing_id = outgoing["id"].as_str().expect("an id").to_owned();
+
     let (status, body, by_rust) = archive(&http, RUST, &token, &channel, "").await;
     assert_eq!(status, 200, "our archive: {body}");
     assert!(by_rust);
@@ -1118,6 +1220,17 @@ async fn archiving_a_channel_archives_its_webhooks_a_moment_later() {
         status, 404,
         "archiving the channel must archive its incoming hook: {body}"
     );
+
+    let (status, body, _) = send(
+        &http,
+        reqwest::Method::GET,
+        GO,
+        &token,
+        &format!("/api/v4/hooks/outgoing/{outgoing_id}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, 404, "and its outgoing hook: {body}");
 
     common::delete_channel(&http, &token, &channel).await;
 }
