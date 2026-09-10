@@ -6517,31 +6517,6 @@ parity suite against Go rather than one that would be changing it in passing.
 
 ---
 
-## D-217 · Half the workspace's test wall clock is 42 password tests
-
-**Status** OPEN · **Severity** untested · **Raised** 2026-09-10 (phase 2, channel view)
-
-Measured, because CLAUDE.md asks for the cause before anything is added to a suite crossing ~90s
-and the workspace run is now **~110s**:
-
-```
-cargo test -p mm-app --lib -- --skip password   223 passed in  1.53s
-cargo test -p mm-app --lib password              42 passed in 55.11s
-cargo test -p mm-api --test parity              979 passed in 44.26s
-```
-
-So `mm-app`'s password module is **half the total**, and everything else in that crate is a second
-and a half. The tests are not sleeping on anything — the previous offender, six suites sitting on
-sqlx's 30-second `acquire_timeout`, was fixed long ago — they are doing real PBKDF2 work at the
-production cost factor, 42 times.
-
-What is owed is not "make them faster": a hash test that runs at a reduced cost factor is testing
-a configuration nothing ships. It is to **stop paying for it on every run** — a `#[ignore]` on the
-cost-factor sweep with a `--ignored` job, or a single test that exercises the parameters once and
-lets the rest assert against precomputed digests. Neither has been done because neither is this
-session's route, and the suite is honest at 110s in a way it would not be at 55s with the coverage
-quietly dropped.
-
 ## D-224 · Muting a sidebar category does not mute its channels
 
 **Status** OPEN · **Severity** divergence · **Raised** 2026-09-10 (phase 2, sidebar category writes)

@@ -9370,7 +9370,7 @@ would have made the channel ids differ too, leaving nothing to compare. Fixtures
 
 All six member-write routes on `/api/v4/channels/{channel_id}/members…`: `addChannelMember`,
 `setChannelMembers`, `removeChannelMember`, and the `/roles`, `/schemeRoles` and `/notify_props`
-updates. 293 → **299 of 764**. `Channel.SaveMember` was the single most-shared unported store
+updates. 298 → **304 of 764**. `Channel.SaveMember` was the single most-shared unported store
 method in the tree — `scripts/deps.py` counted **18** unserved routes waiting on it — which is why
 this group went first; `POST /api/v4/channels` is the next of the eighteen and needs nothing new.
 
@@ -9644,8 +9644,14 @@ archived channel's absence from the public listing, and the banner licence-versu
 ordering. All three are now asserted.
 ## The post writes, and what a pin actually costs (2026-09-10)
 
+> **On the four counts above.** The sidebar, membership, lifecycle and post-write sections were
+> written in parallel worktrees that each branched at **293 of 764**, so each originally counted
+> from 293 and the four could not be added up. They are restated here in merge order — sidebar
+> 293 → 298, membership 298 → 304, lifecycle 304 → 309, posts 309 → **314** — which is what
+> `scripts/routes.py` reports on the merged tree. 21 route+method pairs in one session.
+
 `POST /api/v4/posts/{post_id}/pin`, `.../unpin`, `PUT /api/v4/posts/{post_id}`,
-`PUT /api/v4/posts/{post_id}/patch` and `DELETE /api/v4/posts/{post_id}`. 293 → **298 of 764**.
+`PUT /api/v4/posts/{post_id}/patch` and `DELETE /api/v4/posts/{post_id}`. 309 → **314 of 764**.
 One store primitive, `SqlPostStore.Update`, is behind the first four; `SqlPostStore.Delete` is
 behind the fifth. `POST /api/v4/posts` is **not** here — see [D-221], which names what it is
 waiting on.

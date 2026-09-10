@@ -340,7 +340,7 @@ mod go_parity {
     /// Note this runs at Go's real 600,000 iterations — a cheap work factor would prove nothing,
     /// since the iteration count is part of what is being matched.
     #[test]
-    #[ignore = "D-217: bulk production-cost KDF work. Run with scripts/slow-tests.sh"]
+    #[ignore = "bulk production-cost KDF work; run scripts/slow-tests.sh"]
     fn recomputes_go_s_hashes_byte_for_byte() {
         let h = Pbkdf2::default_params();
         let mut checked = 0;

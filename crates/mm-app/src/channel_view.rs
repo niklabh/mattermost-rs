@@ -15,7 +15,7 @@
 //! `channelsToClearPushNotifications` (notification_push.go:406). There is no push hub in this
 //! port and no device to clear, so the list is computed — the store query that produces it is
 //! ported in full, because getting its notify-prop fall-through wrong would be invisible until
-//! there *is* a hub — and then dropped. Nothing about it reaches the HTTP response. [D-217].
+//! there *is* a hub — and then dropped. Nothing about it reaches the HTTP response. [D-215].
 
 use mm_model::config::{COLLAPSED_THREADS_ALWAYS_ON, COLLAPSED_THREADS_DISABLED};
 use mm_model::preference::{
