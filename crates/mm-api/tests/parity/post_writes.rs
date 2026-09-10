@@ -873,3 +873,804 @@ async fn an_edit_that_mentions_a_channel_is_forwarded_to_go() {
 
     common::delete_channel(&http, &token, &channel).await;
 }
+
+/// The three things `UpdatePost` does to a post's props, in one exchange against both servers:
+/// replace them wholesale, re-apply the integration identity markers from the old post, and delete
+/// `mm_blocks_actions` when the post carries no interactive content to justify it.
+#[tokio::test]
+async fn an_edit_replaces_props_but_keeps_the_identity_markers() {
+    if !stack_enabled() {
+        return;
+    }
+    let http = client();
+    let token = go_minted_token(&http).await;
+    let (team, _) = a_team_and_channel_the_user_is_in(&http, &token).await;
+    let go_channel = common::create_channel_typed(&http, &token, &team, "propsg", "O").await;
+    let rust_channel = common::create_channel_typed(&http, &token, &team, "propsr", "O").await;
+    let go_post = post_message(&http, &token, &go_channel, "mmrs props", None).await;
+    let rust_post = post_message(&http, &token, &rust_channel, "mmrs props", None).await;
+
+    // `from_webhook` is one of the five identity markers `PreserveIdentityPropsFrom` re-applies.
+    // Hardened mode is off by default, so a plain client really can set it.
+    let first = serde_json::json!({
+        "from_webhook": "true",
+        "mmrs_scratch": "kept for now",
+        "mm_blocks_actions": {"act": {"type": "external", "url": "https://example.com"}},
+    });
+    for (base, post) in [(GO, &go_post), (RUST, &rust_post)] {
+        let (status, raw, _) = put_post(
+            &http,
+            base,
+            &token,
+            post,
+            &serde_json::json!({"id": post, "message": "mmrs props", "props": first}),
+        )
+        .await;
+        assert_eq!(status, 200, "{base}: props accepted: {raw}");
+        let body: serde_json::Value = serde_json::from_str(&raw).expect("a post");
+        assert_eq!(
+            body["props"]["from_webhook"], "true",
+            "{base}: the prop we set is there: {body}"
+        );
+        assert_eq!(body["props"]["mmrs_scratch"], "kept for now");
+        // **`mm_blocks_actions` is pruned to the actions the content references, and there are
+        // none** — so `RefreshInteractiveActionsOnPost` deletes the whole registry.
+        assert!(
+            body["props"].get("mm_blocks_actions").is_none(),
+            "{base}: an unreferenced action registry is deleted: {body}"
+        );
+    }
+
+    // Now replace the props with an empty map. `SetProps` is wholesale, so `mmrs_scratch` goes —
+    // and then `PreserveIdentityPropsFrom` puts `from_webhook` back, because an edit must not be
+    // able to strip an integration's identity.
+    for (base, post) in [(GO, &go_post), (RUST, &rust_post)] {
+        let (status, raw, _) = put_post(
+            &http,
+            base,
+            &token,
+            post,
+            &serde_json::json!({"id": post, "message": "mmrs props", "props": {}}),
+        )
+        .await;
+        assert_eq!(status, 200, "{base}: {raw}");
+        let body: serde_json::Value = serde_json::from_str(&raw).expect("a post");
+        assert!(
+            body["props"].get("mmrs_scratch").is_none(),
+            "{base}: props are replaced wholesale, not merged: {body}"
+        );
+        assert_eq!(
+            body["props"]["from_webhook"], "true",
+            "{base}: the identity marker is re-applied from the old post: {body}"
+        );
+    }
+
+    // And `null` props mean "leave them alone", which is not the same as `{}`. A scratch prop
+    // first, so the assertion can distinguish "kept" from "re-applied by the identity pass" —
+    // `from_webhook` alone would survive either way.
+    for (base, post) in [(GO, &go_post), (RUST, &rust_post)] {
+        let (status, raw, _) = put_post(
+            &http,
+            base,
+            &token,
+            post,
+            &serde_json::json!({
+                "id": post, "message": "mmrs props", "props": {"mmrs_keep": "yes"},
+            }),
+        )
+        .await;
+        assert_eq!(status, 200, "{base}: {raw}");
+
+        let (status, raw, _) = put_post(
+            &http,
+            base,
+            &token,
+            post,
+            &serde_json::json!({"id": post, "message": "mmrs props untouched"}),
+        )
+        .await;
+        assert_eq!(status, 200, "{base}: {raw}");
+        let body: serde_json::Value = serde_json::from_str(&raw).expect("a post");
+        assert_eq!(
+            body["props"]["mmrs_keep"], "yes",
+            "{base}: an omitted props map keeps the original's: {body}"
+        );
+        assert_eq!(
+            body["props"]["from_webhook"], "true",
+            "{base}: and the identity marker is still there: {body}"
+        );
+    }
+
+    common::delete_channel(&http, &token, &go_channel).await;
+    common::delete_channel(&http, &token, &rust_channel).await;
+}
+
+/// `rejectOversizedMessage` measures **runes** against `Store.Post().GetMaxPostSize()`, which is
+/// `max(character_maximum_length/4, 16383)` — a deployment artifact, not a constant. The error
+/// carries both numbers, so this pins the limit as well as the refusal.
+#[tokio::test]
+async fn an_oversized_message_is_refused_with_the_same_limit() {
+    if !stack_enabled() {
+        return;
+    }
+    let http = client();
+    let token = go_minted_token(&http).await;
+    let (team, _) = a_team_and_channel_the_user_is_in(&http, &token).await;
+    let channel = common::create_channel_typed(&http, &token, &team, "oversize", "O").await;
+    let post = post_message(&http, &token, &channel, "mmrs oversize", None).await;
+
+    // One rune over 16383. Multi-byte on purpose: the cap is runes, so a port measuring bytes
+    // would refuse this at a quarter of the length.
+    let long = "é".repeat(16_384);
+    for base in [GO, RUST] {
+        let (status, raw, _) = put_post(
+            &http,
+            base,
+            &token,
+            &post,
+            &serde_json::json!({"id": post, "message": long}),
+        )
+        .await;
+        assert_eq!(status, 400, "{base}: an oversized message is a 400: {raw}");
+        let body: serde_json::Value = serde_json::from_str(&raw).expect("an AppError");
+        assert_eq!(body["id"], "model.post.is_valid.message_length.app_error");
+    }
+
+    // **The handler's check and `Post::is_valid`'s produce the same id, so the only thing that can
+    // tell them apart is the *order*.** `rejectOversizedMessage` runs before the ownership check,
+    // so a non-author sending an oversized edit gets the length 400 and not the `edit_others_posts`
+    // 403 — which is how a mutation removing the handler's check becomes visible at all. Measured;
+    // without this assertion the mutation survives, because the store's own `IsValid` answers with
+    // the same `id`, status and params a moment later.
+    let plain = common::create_plain_user(&http, &token, &team, "oversz").await;
+    common::add_user_to_channel(&http, &token, &channel, &plain.id).await;
+    for base in [GO, RUST] {
+        let (status, raw, _) = put_post(
+            &http,
+            base,
+            &plain.token,
+            &post,
+            &serde_json::json!({"id": post, "message": long}),
+        )
+        .await;
+        assert_eq!(
+            status, 400,
+            "{base}: the length check comes before the ownership check: {raw}"
+        );
+        let body: serde_json::Value = serde_json::from_str(&raw).expect("an AppError");
+        assert_eq!(
+            body["id"], "model.post.is_valid.message_length.app_error",
+            "{base}: a non-author gets the length error, not the 403: {body}"
+        );
+    }
+    common::delete_plain_user(&http, &token, &plain.id).await;
+
+    // And one rune under the cap is accepted, which is what makes the number above the limit and
+    // not merely "big".
+    let just_under = "é".repeat(16_383);
+    let (status, raw, served_by_rust) = put_post(
+        &http,
+        RUST,
+        &token,
+        &post,
+        &serde_json::json!({"id": post, "message": just_under}),
+    )
+    .await;
+    assert_eq!(
+        status,
+        200,
+        "16383 runes is accepted: {}",
+        &raw[..80.min(raw.len())]
+    );
+    assert!(served_by_rust, "and it is ours");
+
+    common::delete_channel(&http, &token, &channel).await;
+}
+
+/// `DELETE /posts/{post_id}` against one server, with an optional `?permanent=` value.
+async fn delete_post_request(
+    http: &reqwest::Client,
+    base: &str,
+    token: &str,
+    post_id: &str,
+    permanent: Option<&str>,
+) -> (u16, String, bool) {
+    let path = match permanent {
+        Some(value) => format!("/api/v4/posts/{post_id}?permanent={value}"),
+        None => format!("/api/v4/posts/{post_id}"),
+    };
+    let response = http
+        .delete(format!("{base}{path}"))
+        .header("Authorization", format!("Bearer {token}"))
+        .send()
+        .await
+        .unwrap_or_else(|e| panic!("{base}{path} unreachable: {e}"));
+    let status = response.status().as_u16();
+    let served_by_rust = response
+        .headers()
+        .get("x-mmrs-served-by")
+        .and_then(|v| v.to_str().ok())
+        == Some("rust");
+    (
+        status,
+        response.text().await.expect("a body"),
+        served_by_rust,
+    )
+}
+
+/// A post read back with `?include_deleted=true`, which only a `manage_system` caller may do.
+/// Returns `(status, body)` so a caller can assert the post is gone as well as what it looks like.
+async fn deleted_post_through(
+    http: &reqwest::Client,
+    base: &str,
+    token: &str,
+    post_id: &str,
+) -> (u16, serde_json::Value) {
+    let response = http
+        .get(format!(
+            "{base}/api/v4/posts/{post_id}?include_deleted=true"
+        ))
+        .header("Authorization", format!("Bearer {token}"))
+        .send()
+        .await
+        .expect("the post route answers");
+    let status = response.status().as_u16();
+    let body = response.json().await.unwrap_or(serde_json::Value::Null);
+    (status, body)
+}
+
+#[tokio::test]
+async fn deleting_a_root_post_matches_go_and_takes_its_replies_with_it() {
+    if !stack_enabled() {
+        return;
+    }
+    let http = client();
+    let token = go_minted_token(&http).await;
+    let me = common::logged_in_user_id();
+    let (team, _) = a_team_and_channel_the_user_is_in(&http, &token).await;
+    let go_channel = common::create_channel_typed(&http, &token, &team, "delg", "O").await;
+    let rust_channel = common::create_channel_typed(&http, &token, &team, "delr", "O").await;
+
+    let mut roots = Vec::new();
+    for (base, channel) in [(GO, &go_channel), (RUST, &rust_channel)] {
+        let root = post_message(&http, &token, channel, "mmrs delete root", None).await;
+        let reply = post_message(&http, &token, channel, "mmrs delete reply", Some(&root)).await;
+        roots.push((base, root, reply));
+    }
+
+    let (_, go_root, go_reply) = roots[0].clone();
+    let (_, rust_root, rust_reply) = roots[1].clone();
+
+    let (go_status, go_raw, _) = delete_post_request(&http, GO, &token, &go_root, None).await;
+    let (rust_status, rust_raw, served_by_rust) =
+        delete_post_request(&http, RUST, &token, &rust_root, None).await;
+    assert!(served_by_rust, "we forwarded the delete: {rust_raw}");
+
+    assert_eq!(go_status, 200, "Go deletes: {go_raw}");
+    assert_eq!(rust_status, go_status, "the delete status differs");
+    // `ReturnStatusOK` again — no trailing newline.
+    assert_eq!(go_raw, r#"{"status":"OK"}"#);
+    assert_eq!(rust_raw, go_raw, "the delete body differs");
+
+    // A soft delete: the row is still there, and only a `manage_system` caller can see it.
+    for (base, root) in [(GO, &go_root), (RUST, &rust_root)] {
+        let (status, _) = deleted_post_through(&http, base, &token, root).await;
+        assert_eq!(status, 200, "{base}: the row survives the delete");
+
+        let plain = http
+            .get(format!("{base}/api/v4/posts/{root}"))
+            .header("Authorization", format!("Bearer {token}"))
+            .send()
+            .await
+            .expect("a response");
+        assert_eq!(
+            plain.status().as_u16(),
+            404,
+            "{base}: and is invisible without include_deleted"
+        );
+    }
+
+    let (_, go_deleted) = deleted_post_through(&http, GO, &token, &go_root).await;
+    let (_, rust_deleted) = deleted_post_through(&http, RUST, &token, &rust_root).await;
+    // `delete_at` is a per-request timestamp like the ones `normalise_post` already masks; its
+    // *relationship* to `update_at` is asserted below instead of its value.
+    let mut go_normalised = normalise_post(&go_deleted);
+    let mut rust_normalised = normalise_post(&rust_deleted);
+    for normalised in [&mut go_normalised, &mut rust_normalised] {
+        normalised["delete_at"] = serde_json::json!("<delete_at>");
+    }
+    assert_eq!(
+        go_normalised, rust_normalised,
+        "the deleted post differs:\n go: {go_deleted}\nrust: {rust_deleted}"
+    );
+
+    for (base, deleted) in [(GO, &go_deleted), (RUST, &rust_deleted)] {
+        assert_ne!(
+            deleted["delete_at"], 0,
+            "{base}: DeleteAt is stamped: {deleted}"
+        );
+        assert_eq!(
+            deleted["delete_at"], deleted["update_at"],
+            "{base}: one timestamp is written to both columns: {deleted}"
+        );
+        // `jsonb_set(props, '{deleteBy}', '"<id>"')` — the deleter's id, in the post's own props.
+        assert_eq!(
+            deleted["props"]["deleteBy"], me,
+            "{base}: props.deleteBy names the deleter: {deleted}"
+        );
+    }
+
+    // **The reply went with it.** One statement, `WHERE Id = $4 OR RootId = $4`.
+    for (base, reply) in [(GO, &go_reply), (RUST, &rust_reply)] {
+        let (status, deleted) = deleted_post_through(&http, base, &token, reply).await;
+        assert_eq!(status, 200, "{base}: the reply's row survives too");
+        assert_ne!(
+            deleted["delete_at"], 0,
+            "{base}: deleting a root deletes its replies: {deleted}"
+        );
+        assert_eq!(
+            deleted["props"]["deleteBy"], me,
+            "{base}: and stamps deleteBy on them: {deleted}"
+        );
+    }
+
+    common::delete_channel(&http, &token, &go_channel).await;
+    common::delete_channel(&http, &token, &rust_channel).await;
+}
+
+/// Deleting a **reply** is forwarded: `App.DeletePost` runs `RemoveNotifications` for it, which is
+/// the mention engine. A `?permanent=true` delete is forwarded for its own reason — the hard-delete
+/// cascade — and both forwards are invisible to the client.
+#[tokio::test]
+async fn deleting_a_reply_and_a_permanent_delete_are_forwarded() {
+    if !stack_enabled() {
+        return;
+    }
+    let http = client();
+    let token = go_minted_token(&http).await;
+    let (team, _) = a_team_and_channel_the_user_is_in(&http, &token).await;
+    let channel = common::create_channel_typed(&http, &token, &team, "delfwd", "O").await;
+    let root = post_message(&http, &token, &channel, "mmrs fwd root", None).await;
+    let reply = post_message(&http, &token, &channel, "mmrs fwd reply", Some(&root)).await;
+
+    let (status, raw, served_by_rust) =
+        delete_post_request(&http, RUST, &token, &reply, None).await;
+    assert_eq!(status, 200, "the forwarded reply delete succeeds: {raw}");
+    assert!(
+        !served_by_rust,
+        "deleting a reply must be forwarded, not answered here: {raw}"
+    );
+
+    // `?permanent=yes` is **not** a true value — `strconv.ParseBool`'s error is discarded — so it
+    // takes the ordinary path and is ours.
+    let second = post_message(&http, &token, &channel, "mmrs fwd root two", None).await;
+    let (status, raw, served_by_rust) =
+        delete_post_request(&http, RUST, &token, &second, Some("yes")).await;
+    assert_eq!(status, 200, "{raw}");
+    assert!(
+        served_by_rust,
+        "an unparseable permanent flag is false and stays here: {raw}"
+    );
+
+    // `?permanent=true` is forwarded, and Go's own gate answers it: `EnableAPIPostDeletion` is off
+    // by default, which is a **501**.
+    let third = post_message(&http, &token, &channel, "mmrs fwd root three", None).await;
+    let (rust_status, rust_raw, served_by_rust) =
+        delete_post_request(&http, RUST, &token, &third, Some("true")).await;
+    assert!(
+        !served_by_rust,
+        "a permanent delete must be forwarded: {rust_raw}"
+    );
+    let fourth = post_message(&http, &token, &channel, "mmrs fwd root four", None).await;
+    let (go_status, go_raw, _) =
+        delete_post_request(&http, GO, &token, &fourth, Some("true")).await;
+    assert_eq!(
+        rust_status, go_status,
+        "the forwarded permanent delete answers what Go answers: {rust_raw} / {go_raw}"
+    );
+
+    common::delete_channel(&http, &token, &channel).await;
+}
+
+#[tokio::test]
+async fn the_delete_route_refuses_the_same_way() {
+    if !stack_enabled() {
+        return;
+    }
+    let http = client();
+    let token = go_minted_token(&http).await;
+    let (team, _) = a_team_and_channel_the_user_is_in(&http, &token).await;
+    let channel = common::create_channel_typed(&http, &token, &team, "delerr", "P").await;
+
+    // A short id is `RequirePostId`'s 400.
+    for base in [GO, RUST] {
+        let (status, raw, _) = delete_post_request(&http, base, &token, "short", None).await;
+        assert_eq!(status, 400, "{base}: a short id is a 400: {raw}");
+        let body: serde_json::Value = serde_json::from_str(&raw).expect("an AppError");
+        assert_eq!(body["id"], "api.context.invalid_url_param.app_error");
+    }
+
+    // **A post that does not exist is a 404 here**, unlike the pin and edit routes, which turn the
+    // same lookup failure into a 403. This route lets `GetSinglePost`'s error through.
+    for base in [GO, RUST] {
+        let (status, raw, _) =
+            delete_post_request(&http, base, &token, "aaaaaaaaaaaaaaaaaaaaaaaaaa", None).await;
+        assert_eq!(status, 404, "{base}: an unknown post is a 404: {raw}");
+        let body: serde_json::Value = serde_json::from_str(&raw).expect("an AppError");
+        assert_eq!(body["id"], "app.post.get.app_error");
+    }
+
+    let plain = common::create_plain_user(&http, &token, &team, "del").await;
+    let admins_post = post_message(&http, &token, &channel, "mmrs admin post", None).await;
+
+    // A non-member cannot delete: the permission check is on the channel.
+    for base in [GO, RUST] {
+        let (status, raw, _) =
+            delete_post_request(&http, base, &plain.token, &admins_post, None).await;
+        assert_eq!(status, 403, "{base}: a non-member cannot delete: {raw}");
+        let body: serde_json::Value = serde_json::from_str(&raw).expect("an AppError");
+        assert_eq!(body["id"], "api.context.permissions.app_error");
+    }
+
+    // A **member** still cannot delete somebody else's post: that needs `delete_others_posts`.
+    common::add_user_to_channel(&http, &token, &channel, &plain.id).await;
+    for base in [GO, RUST] {
+        let (status, raw, _) =
+            delete_post_request(&http, base, &plain.token, &admins_post, None).await;
+        assert_eq!(
+            status, 403,
+            "{base}: a member cannot delete another user's post: {raw}"
+        );
+    }
+    assert_eq!(
+        post_through(&http, RUST, &token, &admins_post).await["delete_at"],
+        0,
+        "the refused deletes must not have landed"
+    );
+
+    // But it can delete its own, which is the `delete_post` arm.
+    let own = post_message(&http, &plain.token, &channel, "mmrs own post", None).await;
+    let (status, raw, served_by_rust) =
+        delete_post_request(&http, RUST, &plain.token, &own, None).await;
+    assert_eq!(status, 200, "a member may delete its own post: {raw}");
+    assert!(served_by_rust, "and it is ours: {raw}");
+
+    common::delete_plain_user(&http, &token, &plain.id).await;
+    common::delete_channel(&http, &token, &channel).await;
+}
+
+/// The two `post_deleted` events, and the fact that **which one a client gets depends on
+/// `manage_system`**. The admin's socket sees the sensitive one carrying `delete_by`; a plain
+/// member's sees the sanitized one, which has no `delete_by` at all.
+#[tokio::test]
+async fn deleting_a_post_publishes_two_events_to_two_audiences() {
+    if !stack_enabled() {
+        return;
+    }
+    let _broadcast = common::BROADCAST_STREAM.lock().await;
+    let http = client();
+    let token = go_minted_token(&http).await;
+    let me = common::logged_in_user_id();
+    let (team, _) = a_team_and_channel_the_user_is_in(&http, &token).await;
+    let channel = common::create_channel_typed(&http, &token, &team, "delev", "P").await;
+    let plain = common::create_plain_user(&http, &token, &team, "delev").await;
+    common::add_user_to_channel(&http, &token, &channel, &plain.id).await;
+    let post = post_message(&http, &token, &channel, "mmrs delete event", None).await;
+
+    let mut admin_socket = SocketProbe::connect(RUST, &token).await;
+    let mut member_socket = SocketProbe::connect(RUST, &plain.token).await;
+
+    let (status, raw, _) = delete_post_request(&http, RUST, &token, &post, None).await;
+    assert_eq!(status, 200, "the delete succeeded: {raw}");
+
+    let arrived = admin_socket
+        .collect_until(Duration::from_millis(2_000), |frames| {
+            frames.iter().any(|f| f["event"] == "post_deleted")
+        })
+        .await;
+    assert!(
+        arrived,
+        "no post_deleted on the admin socket: {:?}",
+        admin_socket.raw
+    );
+    member_socket.collect_for(Duration::from_millis(600)).await;
+
+    let admin_events = admin_socket.events_named("post_deleted");
+    let member_events = member_socket.events_named("post_deleted");
+    assert_eq!(
+        admin_events.len(),
+        1,
+        "the admin gets exactly one of the two: {:?}",
+        admin_socket.raw
+    );
+    assert_eq!(
+        member_events.len(),
+        1,
+        "and so does the member: {:?}",
+        member_socket.raw
+    );
+
+    // The admin's is the **sensitive** one: it carries who deleted the post.
+    assert_eq!(
+        admin_events[0]["data"]["delete_by"], me,
+        "the admin's event names the deleter: {}",
+        admin_events[0]
+    );
+    assert_eq!(
+        admin_events[0]["broadcast"]["contains_sensitive_data"], true,
+        "and is tagged as sensitive: {}",
+        admin_events[0]
+    );
+    // The member's is the **sanitized** one, with no `delete_by`.
+    assert!(
+        member_events[0]["data"].get("delete_by").is_none(),
+        "the member's event must not name the deleter: {}",
+        member_events[0]
+    );
+    assert_eq!(
+        member_events[0]["broadcast"]["contains_sanitized_data"], true,
+        "and is tagged as sanitized: {}",
+        member_events[0]
+    );
+
+    // Both carry the post as it was **before** the delete.
+    let carried: serde_json::Value = admin_events[0]["data"]["post"]
+        .as_str()
+        .and_then(|raw| serde_json::from_str(raw).ok())
+        .expect("the post is a JSON string");
+    assert_eq!(carried["id"], post.as_str());
+    assert_eq!(
+        carried["delete_at"], 0,
+        "the payload is the pre-delete post: {carried}"
+    );
+    assert!(
+        carried["props"].get("deleteBy").is_none(),
+        "and has no deleteBy prop yet: {carried}"
+    );
+
+    common::delete_plain_user(&http, &token, &plain.id).await;
+    common::delete_channel(&http, &token, &channel).await;
+}
+
+/// The three cascades a client can see: the flagged-post preference, the thread drafts, and the
+/// post's own file infos. Go runs all three from goroutines; this port runs them inline, so the
+/// assertions read back through the server that made the write and Go's side is retried.
+#[tokio::test]
+async fn deleting_a_post_clears_its_flag_its_drafts_and_its_files() {
+    if !stack_enabled() {
+        return;
+    }
+    let http = client();
+    let token = go_minted_token(&http).await;
+    let me = common::logged_in_user_id();
+    let (team, _) = a_team_and_channel_the_user_is_in(&http, &token).await;
+    let channel = common::create_channel_typed(&http, &token, &team, "delcasc", "O").await;
+
+    let file = common::upload_file(
+        &http,
+        &token,
+        &channel,
+        "mmrs-delete.txt",
+        "text/plain",
+        b"mmrs parity delete cascade",
+    )
+    .await;
+    let post = common::post_message_with_files(
+        &http,
+        &token,
+        &channel,
+        "mmrs cascade",
+        std::slice::from_ref(&file),
+    )
+    .await;
+
+    // A reply with a file of its own. The two are deleted by **different** statements: the root's
+    // by `App.DeletePost`'s own `DeleteForPost`, the reply's by `deleteThreadFiles` inside the
+    // store transaction, joined through `Posts.RootId`.
+    let reply_file = common::upload_file(
+        &http,
+        &token,
+        &channel,
+        "mmrs-delete-reply.txt",
+        "text/plain",
+        b"mmrs parity delete cascade reply",
+    )
+    .await;
+    let reply_response = http
+        .post(format!("{GO}/api/v4/posts"))
+        .header("Authorization", format!("Bearer {token}"))
+        .json(&serde_json::json!({
+            "channel_id": channel, "root_id": post, "message": "mmrs cascade reply",
+            "file_ids": [reply_file],
+        }))
+        .send()
+        .await
+        .expect("Go answers");
+    assert!(
+        reply_response.status().is_success(),
+        "posting the reply with a file failed"
+    );
+
+    // Flag it, and start a reply draft in its thread.
+    let flagged = http
+        .put(format!("{RUST}/api/v4/users/me/preferences"))
+        .header("Authorization", format!("Bearer {token}"))
+        .json(&serde_json::json!([{
+            "user_id": me, "category": "flagged_post", "name": post, "value": "true",
+        }]))
+        .send()
+        .await
+        .expect("the flag saves");
+    assert!(flagged.status().is_success(), "flagging the post failed");
+
+    let drafted = http
+        .post(format!("{RUST}/api/v4/drafts"))
+        .header("Authorization", format!("Bearer {token}"))
+        .json(&serde_json::json!({
+            "channel_id": channel, "root_id": post, "message": "mmrs cascade draft",
+        }))
+        .send()
+        .await
+        .expect("the draft saves");
+    assert!(drafted.status().is_success(), "drafting a reply failed");
+
+    let (status, raw, served_by_rust) = delete_post_request(&http, RUST, &token, &post, None).await;
+    assert_eq!(status, 200, "the delete succeeded: {raw}");
+    assert!(served_by_rust, "and it is ours: {raw}");
+
+    // The flag is gone — `DeleteCategoryAndName` is not scoped to a user, so *everyone's* flag on
+    // this post goes, and this reads back the only one there was.
+    let prefs: serde_json::Value = http
+        .get(format!("{RUST}/api/v4/users/me/preferences/flagged_post"))
+        .header("Authorization", format!("Bearer {token}"))
+        .send()
+        .await
+        .expect("preferences are readable")
+        .json()
+        .await
+        .expect("a JSON body");
+    assert!(
+        !prefs
+            .as_array()
+            .map(|rows| rows.iter().any(|row| row["name"] == post.as_str()))
+            .unwrap_or(false),
+        "the flag survived the delete: {prefs}"
+    );
+
+    // The thread draft is gone — a hard delete keyed on `(ChannelId, RootId)`.
+    let drafts: serde_json::Value = http
+        .get(format!("{RUST}/api/v4/users/{me}/teams/{team}/drafts"))
+        .header("Authorization", format!("Bearer {token}"))
+        .send()
+        .await
+        .expect("drafts are readable")
+        .json()
+        .await
+        .expect("a JSON body");
+    assert!(
+        !drafts
+            .as_array()
+            .map(|rows| rows.iter().any(|row| row["root_id"] == post.as_str()))
+            .unwrap_or(false),
+        "the thread draft survived the delete: {drafts}"
+    );
+
+    // Both file infos are soft-deleted, so `GET /files/{id}/info` no longer finds either — and
+    // they got there by different statements, so a port can lose one and keep the other.
+    for (which, file_id) in [("the post's own", &file), ("the reply's", &reply_file)] {
+        let response = http
+            .get(format!("{RUST}/api/v4/files/{file_id}/info"))
+            .header("Authorization", format!("Bearer {token}"))
+            .send()
+            .await
+            .expect("the file info route answers");
+        assert_eq!(
+            response.status().as_u16(),
+            404,
+            "{which} file info survived the delete: {}",
+            response.text().await.unwrap_or_default()
+        );
+    }
+
+    common::delete_channel(&http, &token, &channel).await;
+}
+
+/// Plant a post carrying `props` directly, returning its id.
+///
+/// Local to this module rather than in `common`: it exists for **one** branch, and that branch
+/// needs a post whose stored props carry `mm_blocks_actions`, which no route can produce — every
+/// write path prunes the registry when the post has no interactive content to justify it, and a
+/// post that *has* interactive content is forwarded. So the only way to reach
+/// `RefreshInteractiveActionsOnPost`'s delete as something distinct from the preservation branch's
+/// is to write the row.
+async fn plant_post_with_props(
+    channel_id: &str,
+    user_id: &str,
+    props: &serde_json::Value,
+) -> Option<String> {
+    let url = std::env::var("DATABASE_URL").ok()?;
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .acquire_timeout(Duration::from_secs(5))
+        .connect(&url)
+        .await
+        .ok()?;
+    let id: String = format!("mmrsplantedprops{:010}", std::process::id());
+    let now = chrono::Utc::now().timestamp_millis();
+    sqlx::query("DELETE FROM posts WHERE id = $1")
+        .bind(&id)
+        .execute(&pool)
+        .await
+        .ok()?;
+    sqlx::query(
+        "INSERT INTO posts (id, createat, updateat, deleteat, userid, channelid, rootid, \
+         originalid, message, type, props, hashtags, filenames, fileids, hasreactions, editat, \
+         ispinned, remoteid) \
+         VALUES ($1, $2, $2, 0, $3, $4, '', '', 'mmrs planted props', '', $5::jsonb, '', '[]', \
+         '[]', false, 0, false, '')",
+    )
+    .bind(&id)
+    .bind(now)
+    .bind(user_id)
+    .bind(channel_id)
+    .bind(props.to_string())
+    .execute(&pool)
+    .await
+    .expect("the planted post is written");
+    Some(id)
+}
+
+/// `RefreshInteractiveActionsOnPost` deletes an action registry the post's content no longer
+/// references — and that delete is **distinct** from the one the preservation branch does a few
+/// lines earlier, which only fires when the old post had no registry at all.
+///
+/// Reaching the distinction needs a stored post that carries `mm_blocks_actions` without any
+/// interactive content, which no route will write. Planted.
+#[tokio::test]
+async fn an_edit_prunes_an_action_registry_the_content_no_longer_references() {
+    if !stack_enabled() {
+        return;
+    }
+    let http = client();
+    let token = go_minted_token(&http).await;
+    let me = common::logged_in_user_id();
+    let (team, _) = a_team_and_channel_the_user_is_in(&http, &token).await;
+    let channel = common::create_channel_typed(&http, &token, &team, "prune", "O").await;
+
+    let props = serde_json::json!({
+        "mm_blocks_actions": {"act": {"type": "external", "url": "https://example.com"}},
+        "mmrs_keep": "1",
+    });
+    let Some(post) = plant_post_with_props(&channel, me, &props).await else {
+        return;
+    };
+
+    // The edit carries no `mm_blocks_actions`, so the preservation branch puts the old one back —
+    // and then the prune removes it, because the post references no action.
+    for base in [GO, RUST] {
+        let (status, raw, _) = put_post(
+            &http,
+            base,
+            &token,
+            &post,
+            &serde_json::json!({"id": post, "message": "mmrs planted props", "props": {"mmrs_keep": "2"}}),
+        )
+        .await;
+        assert_eq!(status, 200, "{base}: the planted post edits: {raw}");
+        let body: serde_json::Value = serde_json::from_str(&raw).expect("a post");
+        assert_eq!(body["props"]["mmrs_keep"], "2", "{base}: the edit landed");
+        assert!(
+            body["props"].get("mm_blocks_actions").is_none(),
+            "{base}: the unreferenced registry is pruned, not preserved: {body}"
+        );
+
+        // Plant it again for the next server, since the edit consumed it.
+        if base == GO {
+            common::delete_planted_post(&post).await;
+            plant_post_with_props(&channel, me, &props).await;
+        }
+    }
+
+    common::delete_planted_post(&post).await;
+    common::delete_channel(&http, &token, &channel).await;
+}

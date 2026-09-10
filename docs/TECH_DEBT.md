@@ -6541,3 +6541,65 @@ cost-factor sweep with a `--ignored` job, or a single test that exercises the pa
 lets the rest assert against precomputed digests. Neither has been done because neither is this
 session's route, and the suite is honest at 110s in a way it would not be at 55s with the coverage
 quietly dropped.
+
+---
+
+## D-221 · `createPost` needs the notification pipeline, not the post write
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-10 (phase 2, post writes)
+
+`POST /api/v4/posts` is the one route of the post-write group this session did not take, and the
+reason is not the row. `SqlPostStore.SaveMultiple` is a day's work — an insert, a `Channels`
+counter update, a `Threads` upsert, `PostsPriority` and `PersistentNotifications` — and its
+response body is `PreparePostForClient`, which is already ported for the read routes.
+
+What is missing is everything `App.CreatePost` (app/post.go:173) does **after** the insert, and
+each item is observable to a client:
+
+* **`SendNotifications`** — mention parsing over the channel's members and their notify-prop
+  keywords, which produces the `mentions` and `followers` fields on the `posted` event, the
+  per-member `MentionCount`/`UrgentMentionCount` increments, the push and email fan-out, and the
+  auto-responder. Nothing of this exists in the Rust tree.
+* **`attachFilesToPost`** — binds `FileInfo` rows to the new post and *overwrites* the post when
+  not all of them could be attached.
+* **`followThreadIfNeeded` / `ThreadAutoFollow`** — a reply makes its author a thread follower,
+  which is what `GET /users/{id}/teams/{id}/threads` reads.
+* **post priority, persistent notifications and the acknowledgement rows**, all written inside the
+  same store call.
+* **the preview/permalink path** (`addPostPreviewProp`, `SanitizePostMetadataForUser`) and the
+  plugin `MessageWillBePosted` / `MessageHasBeenPosted` hooks.
+
+A `createPost` that returned the right JSON and dropped the notification pass would be wrong in
+the way this project exists to avoid: no test of the response body would notice, and a connected
+client would silently stop being told it had been mentioned. So the route stays forwarded, and the
+work it is waiting on is the **notification engine** rather than anything about posts.
+
+The same engine is what forwards **deleting a reply**: `App.DeletePost` on a reply runs
+`RemoveNotifications` (notification.go:914), which re-derives the reply's mentions to decrement
+`ThreadMemberships.UnreadMentions`. Deleting a *root* post does not — the whole function is behind
+`post.RootId != ""` — so `DELETE /posts/{id}` is served for a root and forwarded for a reply. See
+`mm_app::App::delete_post`.
+
+---
+
+## D-222 · The `PostEditTimeLimit` branch is ported and untested
+
+**Status** OPEN · **Severity** unverified · **Raised** 2026-09-10 (phase 2, post writes)
+
+`ServiceSettings.PostEditTimeLimit` is `-1` on a default-configured server, and
+`postEditTimeLimitExpired` (api4/post.go:1052) returns `false` on that value before it looks at
+anything else. So the **400** `api.post.update_post.permissions_time_limit.app_error` that three
+of the four write routes raise has no cross-server oracle on this stack, and no mutation of that
+branch can be caught — every one of them is unreachable rather than uncovered.
+
+Two things are covered without it: the value's *sign* convention, which is not obvious (`-1` is
+"no limit" and `0` means every post is already past its window — the opposite), and the unit
+(seconds, multiplied by 1000 against `CreateAt`). Both are unit-tested in
+`mm_app::post_write::tests`.
+
+What is owed is a parity run with the setting changed on **both** servers, which needs
+`scripts/go-server.sh` to set `MM_SERVICESETTINGS_POSTEDITTIMELIMIT` and a Go restart — the same
+shape as the feature-flag run that [D-213] describes. Until then the branch is transcribed from
+the Go source and not measured, and the one thing a reader should know is that the pin routes check
+it **after** their no-op short circuit, so pinning an already-pinned ancient post is a 200 on both
+servers and only a *change* can hit the 400.

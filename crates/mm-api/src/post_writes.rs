@@ -1,6 +1,6 @@
-//! Port of `api4/post.go`'s post writes: `updatePost` (:1060), `patchPost` (:1186) and
-//! `saveIsPinnedPost` (:1353) behind both `POST /api/v4/posts/{post_id}/pin` and
-//! `POST /api/v4/posts/{post_id}/unpin`.
+//! Port of `api4/post.go`'s post writes: `deletePost` (:745), `updatePost` (:1060),
+//! `patchPost` (:1186) and `saveIsPinnedPost` (:1353) behind both
+//! `POST /api/v4/posts/{post_id}/pin` and `POST /api/v4/posts/{post_id}/unpin`.
 //!
 //! Kept out of [`crate::posts`], which is 1,800 lines of read path.
 //!
@@ -26,9 +26,10 @@ use axum::response::{IntoResponse, Response};
 use mm_app::post::PrepareError;
 use mm_app::post_write::post_edit_time_limit_expired;
 use mm_model::permission::{
-    PERMISSION_CREATE_POST, PERMISSION_CREATE_POST_PUBLIC, PERMISSION_EDIT_FILE_ATTACHMENT,
-    PERMISSION_EDIT_OTHERS_POSTS, PERMISSION_EDIT_POST, PERMISSION_READ_CHANNEL_CONTENT,
-    PERMISSION_UPLOAD_FILE, make_permission_error,
+    PERMISSION_CREATE_POST, PERMISSION_CREATE_POST_PUBLIC, PERMISSION_DELETE_OTHERS_POSTS,
+    PERMISSION_DELETE_POST, PERMISSION_EDIT_FILE_ATTACHMENT, PERMISSION_EDIT_OTHERS_POSTS,
+    PERMISSION_EDIT_POST, PERMISSION_READ_CHANNEL_CONTENT, PERMISSION_UPLOAD_FILE,
+    make_permission_error,
 };
 use mm_model::post::{POST_TYPE_CARD, Post, PostPatch};
 use mm_model::utils::{AppError, is_valid_id, string_interface_to_json};
@@ -173,6 +174,96 @@ fn status_ok() -> Response {
         r#"{"status":"OK"}"#,
     )
         .into_response()
+}
+
+/// Port of `deletePost` (api4/post.go:745) — `DELETE /api/v4/posts/{post_id}`.
+///
+/// # `?permanent=true` is forwarded whole
+///
+/// It selects `PermanentDeletePost`, a hard delete with its own cascade across seven tables, and
+/// it is gated on `ServiceSettings.EnableAPIPostDeletion` (**501** when off) and on
+/// `manage_system` (403). None of that is ported, and the forward happens before any of it, so Go
+/// answers the 501 and the 403 as well as the delete. `strconv.ParseBool` with the error
+/// discarded, so `?permanent=yes` is `false` and lands here rather than upstream.
+///
+/// # The permission split is on authorship, and the refusal names different permissions
+///
+/// Deleting your own post needs `delete_post`; deleting anybody else's needs
+/// `delete_others_posts`. The 403 names whichever was missing, and clients branch on that id.
+///
+/// # The body is `{"status":"OK"}`
+///
+/// The deleted post is returned by the app layer and dropped by the handler.
+#[tracing::instrument(skip_all, fields(post_id = %post_id, forwarded))]
+pub async fn delete_post(
+    State(state): State<AppState>,
+    Path(post_id): Path<String>,
+    session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    if !is_valid_id(&post_id) {
+        return ApiError::invalid_url_param("post_id").into_response();
+    }
+
+    // `c.Params.Permanent` is `strconv.ParseBool(query.Get("permanent"))` with the error dropped
+    // (web/params.go:232) — so `?permanent=yes` is `false`, not a 400.
+    let permanent = crate::channels::query_flag_is_true(request.uri().query(), "permanent");
+    if permanent {
+        tracing::Span::current().record("forwarded", true);
+        tracing::debug!("handing a permanent delete to Go");
+        return proxy::forward_to_go(State(state), request).await;
+    }
+
+    match serve_delete(&state, &post_id, &session).await {
+        Ok(response) => response,
+        Err(PrepareError::App(err)) => ApiError::from(err).into_response(),
+        Err(PrepareError::Unreproducible(why)) => {
+            tracing::Span::current().record("forwarded", true);
+            tracing::debug!(reason = why, "handing the post delete to Go");
+            proxy::forward_to_go(State(state), request).await
+        }
+    }
+}
+
+async fn serve_delete(
+    state: &AppState,
+    post_id: &str,
+    session: &AuthenticatedSession,
+) -> Result<Response, PrepareError> {
+    // Unlike the pin and edit routes, this one lets `GetSinglePost`'s error through: a post that
+    // does not exist is a **404 `app.post.get.app_error`** here and a 403 there.
+    let post = state.app.get_single_post(post_id, false).await?;
+
+    if post.post_type == POST_TYPE_CARD {
+        // The card arm gives *any* holder of `delete_post` the right to delete somebody else's
+        // card, and it turns on `FeatureFlags.IntegratedBoards`, which is not in the configuration
+        // document either server persists.
+        return Err(PrepareError::Unreproducible(
+            "a card post's delete permission turns on FeatureFlags.IntegratedBoards",
+        ));
+    }
+
+    let permission = if session.0.user_id == post.user_id {
+        &PERMISSION_DELETE_POST
+    } else {
+        &PERMISSION_DELETE_OTHERS_POSTS
+    };
+    let (granted, _is_member) = state
+        .app
+        .session_has_permission_to_channel(&session.0, &post.channel_id, permission)
+        .await;
+    if !granted {
+        return Err(PrepareError::App(make_permission_error(
+            &session.0,
+            &[permission],
+        )));
+    }
+
+    state
+        .app
+        .delete_post(post_id, &session.0.user_id)
+        .await
+        .map(|_deleted| status_ok())
 }
 
 /// Port of `updatePost` (api4/post.go:1060) — `PUT /api/v4/posts/{post_id}`.

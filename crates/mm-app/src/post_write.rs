@@ -46,8 +46,10 @@ use mm_model::post::{
 };
 use mm_model::session::Session;
 use mm_model::utils::{AppError, get_millis, parse_hashtags};
-use mm_model::websocket_message::{WEBSOCKET_EVENT_POST_EDITED, WebSocketEvent};
-use mm_store::PostStore;
+use mm_model::websocket_message::{
+    WEBSOCKET_EVENT_POST_DELETED, WEBSOCKET_EVENT_POST_EDITED, WebSocketEvent,
+};
+use mm_store::{DraftStore, FileInfoStore, PostStore, PreferenceStore};
 
 use crate::App;
 use crate::channel::RestrictedDm;
@@ -403,6 +405,267 @@ impl App {
         Ok((sanitized, is_member_for_previews))
     }
 
+    /// Port of `app.App.DeletePost` (app/post.go:1978) and the `CleanUpAfterPostDeletion`
+    /// (:3362) it ends in, for a **root** post.
+    ///
+    /// # Deleting a reply is forwarded, and the reason is `RemoveNotifications`
+    ///
+    /// `RemoveNotifications` (notification.go:914) runs the whole mention pass over the deleted
+    /// post — explicit mentions, group mentions and every member's notify-prop keywords — to
+    /// decrement `ThreadMemberships.UnreadMentions` for anyone whose unread mention it was. Its
+    /// entire body is behind `post.RootId != "" && CRT is allowed`, so for a root post it is a
+    /// no-op and for a reply it is the notification engine. Hence the split: a root deletion is
+    /// reproducible here and a reply's is not. Dropping it silently would leave a phantom mention
+    /// count on a thread the client can still see.
+    ///
+    /// # A missing post here is a **400**, not a 404
+    ///
+    /// `errors.Wrap(err, …).NewAppError(…, http.StatusBadRequest)` covers every store failure,
+    /// not-found included. The handler has already answered 404 for a post that is not there, so
+    /// this status is reachable only by a delete racing another delete.
+    ///
+    /// # Two `post_deleted` events, and the hub splits the channel between them
+    ///
+    /// See [`App::clean_up_after_post_deletion`]. The audit trail a client sees depends on which
+    /// of the two it is allowed to receive.
+    ///
+    /// # Three side effects Go runs from goroutines and this runs inline
+    ///
+    /// The post's own file infos, the flagged-post preferences and the thread drafts. Go spawns
+    /// each with `a.Srv().Go(...)`, so a client can briefly read a deleted post's file infos back;
+    /// doing them inline closes a window rather than opening one, and reproducing the window would
+    /// mean reproducing a race. `deletePostFiles`' error is logged and swallowed in Go, so it is
+    /// logged and swallowed here.
+    #[tracing::instrument(skip(self), fields(post_id = %post_id, forwarded))]
+    pub async fn delete_post(
+        &self,
+        post_id: &str,
+        delete_by_id: &str,
+    ) -> Result<Post, PrepareError> {
+        // `sqlstore.RequestContextWithMaster` — the writer connection, which this port has only
+        // one of.
+        let post = self
+            .store()
+            .post()
+            .get_single(post_id, false)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "post lookup failed");
+                PrepareError::App(AppError::boxed(
+                    "DeletePost",
+                    "app.post.get.app_error",
+                    None,
+                    String::new(),
+                    400,
+                ))
+            })?;
+
+        if !post.root_id.is_empty()
+            && self.config().collapsed_threads != mm_model::config::COLLAPSED_THREADS_DISABLED
+        {
+            return Err(PrepareError::Unreproducible(
+                "deleting a reply recomputes thread mentions through the notification engine",
+            ));
+        }
+
+        let channel = self.get_channel(&post.channel_id).await?;
+
+        if channel.delete_at != 0 {
+            return Err(app_error_400(
+                "DeletePost",
+                "api.post.delete_post.can_not_delete_post_in_deleted.error",
+            ));
+        }
+
+        match self.check_if_channel_is_restricted_dm(&channel).await? {
+            RestrictedDm::No => {}
+            RestrictedDm::Yes => {
+                return Err(app_error_400(
+                    "DeletePost",
+                    "api.post.delete_post.can_not_delete_from_restricted_dm.error",
+                ));
+            }
+            RestrictedDm::Undecidable => {
+                return Err(PrepareError::Unreproducible(
+                    "a bot's exemption from DM restrictions is a plugin decision",
+                ));
+            }
+        }
+
+        self.store()
+            .post()
+            .delete(post_id, get_millis(), delete_by_id)
+            .await
+            .map_err(|err| {
+                let status = if err.is_not_found() { 404 } else { 500 };
+                if status == 500 {
+                    tracing::error!(error = %err, "post delete failed");
+                }
+                PrepareError::App(AppError::boxed(
+                    "DeletePost",
+                    "app.post.delete.app_error",
+                    None,
+                    String::new(),
+                    status,
+                ))
+            })?;
+
+        // Guarded on the post *having* files, as Go is — an empty list means no statement at all,
+        // and the two cache invalidations beside it have nothing to invalidate here.
+        if post.file_ids.as_deref().is_some_and(|ids| !ids.is_empty()) {
+            if let Err(err) = self.store().file_info().delete_for_post(post_id).await {
+                tracing::warn!(error = %err, post_id = %post_id,
+                    "Encountered error when deleting files for post");
+            }
+        }
+
+        if post.root_id.is_empty() {
+            self.delete_persistent_notification(&post).await?;
+        }
+
+        self.clean_up_after_post_deletion(&post, &channel, delete_by_id)
+            .await?;
+
+        tracing::Span::current().record("forwarded", false);
+        Ok(post)
+    }
+
+    /// Port of `app.App.DeletePersistentNotification` (post_persistent_notification.go:81).
+    ///
+    /// # The gate is two config settings and **no licence check**
+    ///
+    /// `IsPersistentNotificationsEnabled` is `IsPostPriorityEnabled() && AllowPersistentNotifications`,
+    /// and `IsPostPriorityEnabled` reads only `ServiceSettings.PostPriority` — no licence, despite
+    /// persistent notifications being a paid feature elsewhere. Both default `true`, so this runs
+    /// on every root deletion.
+    ///
+    /// # A post that never had a notification is not an error
+    ///
+    /// `GetSingle`'s not-found means "either already deleted or never a notification post" and
+    /// returns nil. Only a real store failure becomes the 500, and both the read and the write
+    /// report it with the **same** id.
+    async fn delete_persistent_notification(&self, post: &Post) -> Result<(), PrepareError> {
+        if !(self.config().post_priority && self.config().allow_persistent_notifications) {
+            return Ok(());
+        }
+
+        let exists = self
+            .store()
+            .post()
+            .has_persistent_notification(&post.id)
+            .await
+            .map_err(persistent_notification_error)?;
+        if !exists {
+            return Ok(());
+        }
+
+        self.store()
+            .post()
+            .delete_persistent_notification(&post.id)
+            .await
+            .map_err(persistent_notification_error)
+    }
+
+    /// Port of `app.App.CleanUpAfterPostDeletion` (app/post.go:3362).
+    ///
+    /// # Two events, one post, two audiences
+    ///
+    /// Both are `post_deleted` on the channel, and the hub's `ShouldSendEvent` splits the channel
+    /// between them: `ContainsSanitizedData` is delivered only to a connection **without**
+    /// `manage_system`, `ContainsSensitiveData` only to one **with** it. So the `delete_by` — who
+    /// deleted the post — reaches an admin's client and nobody else's, and a port that published
+    /// one event would either leak that or lose it.
+    ///
+    /// # Both events carry the post as it was *before* the delete
+    ///
+    /// `post` is the struct read at the top of `DeletePost`, so the payload has `delete_at: 0` and
+    /// no `deleteBy` prop even though the row now has both. A client learns the post is gone from
+    /// the event *type*, not from the post in it.
+    ///
+    /// The two payloads differ only for a post carrying interactive actions: the sanitized one is
+    /// `post.ToJSON()`, which strips the private action integrations from a copy, and the other is
+    /// a plain `json.Marshal`.
+    ///
+    /// Go fetches the channel again here; it is passed in, which is the same value one query
+    /// cheaper.
+    async fn clean_up_after_post_deletion(
+        &self,
+        post: &Post,
+        channel: &Channel,
+        delete_by_id: &str,
+    ) -> Result<(), PrepareError> {
+        let sanitized_json = post.to_json().map_err(marshal_error)?;
+        let plain_json = mm_model::utils::go_json_marshal(post).map_err(marshal_error)?;
+
+        let mut user_message = WebSocketEvent::new(
+            WEBSOCKET_EVENT_POST_DELETED,
+            "",
+            &post.channel_id,
+            "",
+            None,
+            "",
+        );
+        user_message.add("post", serde_json::Value::String(sanitized_json));
+        let user_message = {
+            let mut broadcast = user_message.get_broadcast().cloned().unwrap_or_default();
+            broadcast.contains_sanitized_data = true;
+            user_message.set_broadcast(broadcast)
+        };
+        self.publish(user_message).await;
+
+        let mut admin_message = WebSocketEvent::new(
+            WEBSOCKET_EVENT_POST_DELETED,
+            "",
+            &post.channel_id,
+            "",
+            None,
+            "",
+        );
+        admin_message.add("post", serde_json::Value::String(plain_json));
+        admin_message.add(
+            "delete_by",
+            serde_json::Value::String(delete_by_id.to_owned()),
+        );
+        let admin_message = {
+            let mut broadcast = admin_message.get_broadcast().cloned().unwrap_or_default();
+            broadcast.contains_sensitive_data = true;
+            admin_message.set_broadcast(broadcast)
+        };
+        self.publish(admin_message).await;
+
+        // `deleteFlaggedPosts` — **not** scoped to a user: everyone's flag on this post goes. Go
+        // logs its failure and continues, so this does too.
+        if let Err(err) = self
+            .store()
+            .preference()
+            .delete_category_and_name(
+                mm_model::preference::PREFERENCE_CATEGORY_FLAGGED_POST,
+                &post.id,
+            )
+            .await
+        {
+            tracing::warn!(error = %err,
+                "Unable to delete flagged post preference when deleting post.");
+        }
+
+        // `MessageHasBeenDeleted` is a plugin hook, and `RemoveNotifications` is a no-op for the
+        // root post this function is reachable with — see [`App::delete_post`].
+
+        // `deleteDraftsAssociatedWithPost` — every user's reply draft in this thread, keyed on
+        // `(ChannelId, RootId)`. Go logs and returns on failure.
+        if let Err(err) = self
+            .store()
+            .draft()
+            .delete_drafts_associated_with_post(&channel.id, &post.id)
+            .await
+        {
+            tracing::error!(error = %err,
+                "Failed to delete drafts associated with post when deleting post");
+        }
+
+        Ok(())
+    }
+
     /// Port of `app.App.MaxPostSize` (app/post.go:2500), which is
     /// `Platform().MaxPostSize()` → `Store.Post().GetMaxPostSize()`.
     ///
@@ -556,6 +819,32 @@ fn has_at_mention(message: &str) -> bool {
     })
 }
 
+/// `app.post_priority.delete_persistent_notification_post.app_error` at 500, which Go gives both
+/// the read and the write.
+fn persistent_notification_error(err: mm_store::StoreError) -> PrepareError {
+    tracing::error!(error = %err, "persistent notification delete failed");
+    PrepareError::App(AppError::boxed(
+        "DeletePersistentNotification",
+        "app.post_priority.delete_persistent_notification_post.app_error",
+        None,
+        String::new(),
+        500,
+    ))
+}
+
+/// `api.marshal_error` at 500, raised with `Where: "DeletePost"` even inside
+/// `CleanUpAfterPostDeletion` — Go passes the caller's name, not the function's.
+fn marshal_error(err: serde_json::Error) -> PrepareError {
+    tracing::error!(error = %err, "failed to serialise the deleted post");
+    PrepareError::App(AppError::boxed(
+        "DeletePost",
+        "api.marshal_error",
+        None,
+        String::new(),
+        500,
+    ))
+}
+
 /// The four `400`s this module raises, which differ only in their id.
 fn app_error_400(where_: &'static str, id: &'static str) -> PrepareError {
     PrepareError::App(AppError::boxed(where_, id, None, String::new(), 400))
@@ -594,11 +883,19 @@ mod tests {
     }
 
     /// `-1` is off. `0` is not — it expires every post immediately, which is the opposite.
+    ///
+    /// The post is dated one millisecond ago because Go's comparison is **strictly** greater
+    /// (`GetMillis() > post.CreateAt + limit*1000`), so a post created inside the current
+    /// millisecond is not yet expired at a limit of zero. Written with `get_millis()` first, and
+    /// the full-workspace run caught it: the two clock reads landed in the same millisecond.
     #[test]
     fn the_edit_time_limit_treats_minus_one_and_zero_oppositely() {
-        let post = post_at(get_millis());
+        let post = post_at(get_millis() - 1);
         assert!(!post_edit_time_limit_expired(-1, &post));
         assert!(post_edit_time_limit_expired(0, &post));
+        // And a post stamped *now* is not expired at zero, which is the strictness of the `>`.
+        let fresh = post_at(get_millis() + 1);
+        assert!(!post_edit_time_limit_expired(0, &fresh));
     }
 
     /// The unit is seconds, so a five-second limit still admits a post made a second ago.

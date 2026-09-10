@@ -298,6 +298,49 @@ pub trait PostStore {
         new_post: &Post,
         old_post: &Post,
     ) -> impl std::future::Future<Output = Result<Post, StoreError>> + Send;
+
+    /// Port of `SqlPostStore.Delete` (post_store.go:972) — the **soft** delete behind
+    /// `DELETE /api/v4/posts/{post_id}`, narrowed to a **root** post.
+    ///
+    /// # It deletes a thread, not a post
+    ///
+    /// `WHERE Id = $4 OR RootId = $4`: one statement takes the post and every reply to it, so
+    /// deleting a root ends the conversation. The rows stay — `DeleteAt` and `UpdateAt` are stamped
+    /// and `props.deleteBy` is written with `jsonb_set`. **A NULL `props` column stays NULL**,
+    /// because `jsonb_set(NULL, …)` is NULL, so a post written before that column was populated
+    /// comes back with `"props":{}` and no `deleteBy` at all.
+    ///
+    /// # Narrowed to the root branch on purpose
+    ///
+    /// Go's reply branch calls `updateThreadAfterReplyDeletion`, which recomputes the thread's
+    /// `ReplyCount`, `LastReplyAt` and `Participants`. It is absent here because its **caller** is:
+    /// `App.DeletePost` on a reply runs `RemoveNotifications`, which needs the mention engine, so
+    /// [`mm_app::App::delete_post`] forwards a reply's deletion whole. A query with no reachable
+    /// caller is the thing this project has 20,000 lines of. A reply reaching this is a
+    /// [`StoreError::Argument`] rather than a silent half-delete.
+    ///
+    /// # `Threads` and `FileInfo` are marked, not removed
+    ///
+    /// `deleteThread` stamps `Threads.ThreadDeleteAt`, and `deleteThreadFiles` stamps
+    /// `FileInfo.DeleteAt` for the files of the **replies** — joined through `Posts.RootId`, so the
+    /// root's own files are not among them. Those are soft-deleted separately by the app layer,
+    /// from a goroutine in Go.
+    fn delete(
+        &self,
+        post_id: &str,
+        time: i64,
+        delete_by_id: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlPostPersistentNotificationStore.Delete`
+    /// (post_persistent_notification_store.go:88) for the one id its reachable caller passes.
+    ///
+    /// A **soft** delete, stamping `DeleteAt` from its own clock rather than the caller's delete
+    /// timestamp — which is what [`PostStore::has_persistent_notification`] reads back.
+    fn delete_persistent_notification(
+        &self,
+        post_id: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 }
 
 /// Port of `model.GetPostsOptions` (post.go:456), narrowed to the fields the page branch of
@@ -2673,6 +2716,120 @@ impl PostStore for SqlPostStore {
             })?;
 
         Ok(new_post)
+    }
+
+    #[tracing::instrument(skip(self), fields(post_id = %post_id))]
+    async fn delete(&self, post_id: &str, time: i64, delete_by_id: &str) -> Result<(), StoreError> {
+        // Unlike `update`, this one **is** a transaction in Go.
+        let mut tx = self.pool.begin().await.map_err(|source| StoreError::Db {
+            context: "begin_transaction".to_owned(),
+            source,
+        })?;
+
+        // Go selects `RootId, UserId`. `UserId` is read only by the reply branch, which is not
+        // ported, so this selects the one column that decides anything here.
+        let row = sqlx::query!(
+            r#"SELECT rootid AS "root_id!" FROM posts WHERE id = $1"#,
+            post_id
+        )
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to delete Post with id={post_id}"),
+            source,
+        })?;
+
+        let Some(row) = row else {
+            // `sql.ErrNoRows` is the **only** error Go turns into a not-found here; every other
+            // failure keeps its wrapped form and becomes a 500 at the app layer.
+            return Err(StoreError::NotFound {
+                entity: "Post",
+                criteria: post_id.to_owned(),
+            });
+        };
+
+        if !row.root_id.is_empty() {
+            return Err(StoreError::Argument {
+                entity: "Post",
+                detail: "deleting a reply needs updateThreadAfterReplyDeletion, whose caller the \
+                         app layer forwards",
+            });
+        }
+
+        sqlx::query!(
+            r#"
+            UPDATE posts
+               SET deleteat = $1,
+                   updateat = $1,
+                   props    = jsonb_set(props, ARRAY[$2::text], $3)
+             WHERE id = $4 OR rootid = $4
+            "#,
+            time,
+            mm_model::post::POST_PROPS_DELETE_BY,
+            serde_json::Value::String(delete_by_id.to_owned()),
+            post_id,
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to update Posts".to_owned(),
+            source,
+        })?;
+
+        // `deleteThread` — the `Threads` row is marked, not removed, so the thread's reply count
+        // and participants survive the delete.
+        sqlx::query!(
+            "UPDATE threads SET threaddeleteat = $1 WHERE postid = $2",
+            time,
+            post_id
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to mark thread for root post {post_id} as deleted"),
+            source,
+        })?;
+
+        // `deleteThreadFiles` — the **replies'** files, joined through `Posts.RootId`. The root's
+        // own attachments are not in this set.
+        sqlx::query!(
+            r#"
+            UPDATE fileinfo
+               SET deleteat = $1
+              FROM posts
+             WHERE fileinfo.postid = posts.id
+               AND posts.rootid = $2
+            "#,
+            time,
+            post_id
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to mark files of thread post {post_id} as deleted"),
+            source,
+        })?;
+
+        tx.commit().await.map_err(|source| StoreError::Db {
+            context: "commit_transaction".to_owned(),
+            source,
+        })
+    }
+
+    #[tracing::instrument(skip(self), fields(post_id = %post_id))]
+    async fn delete_persistent_notification(&self, post_id: &str) -> Result<(), StoreError> {
+        sqlx::query!(
+            "UPDATE persistentnotifications SET deleteat = $1 WHERE postid = $2",
+            get_millis(),
+            post_id
+        )
+        .execute(&self.pool)
+        .await
+        .map(|_| ())
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to delete notifications for posts [{post_id}]"),
+            source,
+        })
     }
 }
 
