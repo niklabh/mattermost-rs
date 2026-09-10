@@ -1,16 +1,29 @@
-//! Port of the **read** side of `BaseRoutes.ChannelCategories` (api4/api.go:231), handlers in
+//! Port of `BaseRoutes.ChannelCategories` (api4/api.go:231) — **all eight** handlers in
 //! `api4/channel_category.go`:
 //!
 //! | route | Go handler |
 //! |---|---|
 //! | `GET /api/v4/users/{user_id}/teams/{team_id}/channels/categories` | `getCategoriesForTeamForUser` (:14) |
-//! | `GET …/channels/categories/order` | `getCategoryOrderForTeamForUser` (:95) |
-//! | `GET …/channels/categories/{category_id}` | `getCategoryForTeamForUser` (:166) |
+//! | `POST …/channels/categories` | `createCategoryForTeamForUser` (:47) |
+//! | `PUT …/channels/categories` | `updateCategoriesForTeamForUser` (:203) |
+//! | `GET …/channels/categories/order` | `getCategoryOrderForTeamForUser` (:97) |
+//! | `PUT …/channels/categories/order` | `updateCategoryOrderForTeamForUser` (:125) |
+//! | `GET …/channels/categories/{category_id}` | `getCategoryForTeamForUser` (:170) |
+//! | `PUT …/channels/categories/{category_id}` | `updateCategoryForTeamForUser` (:317) |
+//! | `DELETE …/channels/categories/{category_id}` | `deleteCategoryForTeamForUser` (:368) |
 //!
-//! The five writes on the same three paths (`POST`/`PUT` on the collection, `PUT` on `/order`,
-//! `PUT`/`DELETE` on the singular) stay forwarded, through [`crate::partially_migrated`]'s method
-//! fallback. `tests/parity_sidebar_router.rs` asserts that over HTTP, because "still forwarded"
-//! is a claim about the router rather than about anything in this file.
+//! [`crate::partially_migrated`]'s method fallback still wraps each route, and still matters: a
+//! method gorilla never registered here — `POST /order`, `DELETE` on the collection — must reach
+//! Go for Go's own answer rather than getting axum's 405.
+//!
+//! # The same permission gate, two statuses
+//!
+//! `SessionHasPermissionToCategory` is the first gate of the two `{category_id}` writes *and* the
+//! per-entry gate of the collection `PUT`. On the singular routes its refusal is
+//! `SetPermissionError` — **403**, `api.context.permissions.app_error`. In the collection route's
+//! loop it is `SetInvalidParam("category")` — **400**, `api.context.invalid_body_param.app_error`,
+//! and it refuses the whole request rather than the one entry. One function, two wrappers, and the
+//! difference is invisible in the Go source unless both call sites are read together.
 //!
 //! # `order` beside `{category_id}`: both routers agree, for different reasons
 //!
@@ -26,12 +39,20 @@
 //! handler has to forward the difference by hand. There is no such case here: `/order` is the
 //! only literal under `/categories/`, and it is registered first.
 //!
-//! # Wire framing differs between the three, in one Go file
+//! # Wire framing differs between the eight, and the two methods on `/order` disagree
 //!
-//! `getCategoriesForTeamForUser` and `getCategoryForTeamForUser` both end in `json.Marshal`
-//! followed by `w.Write` — **no trailing newline**. `getCategoryOrderForTeamForUser` ends in
-//! `json.NewEncoder(w).Encode` — **a trailing newline** ([D-086]). Three handlers, two framings,
-//! forty lines apart. The parity suite compares raw bytes for exactly this reason.
+//! Seven of the eight end in `json.Marshal` followed by `w.Write` — **no trailing newline**.
+//! `getCategoryOrderForTeamForUser` alone ends in `json.NewEncoder(w).Encode` — **a trailing
+//! newline** ([D-086]) — while `updateCategoryOrderForTeamForUser`, on the same path, writes
+//! `ArrayToJSON` through `w.Write` and has none. The parity suite compares raw bytes for exactly
+//! this reason.
+//!
+//! # Go's `json.Marshal` escapes `<`, `>` and `&`; `serde_json` does not
+//!
+//! `display_name` is arbitrary user text, so every body here goes through
+//! [`mm_model::utils::go_json_marshal`] rather than `serde_json::to_vec` — a category called `Q&A`
+//! otherwise differs from Go's answer by nine bytes. This applies to the reads too and was a
+//! latent gap in them until the writes landed.
 
 use axum::extract::{Path, Request, State};
 use axum::http::StatusCode;
@@ -92,14 +113,20 @@ fn validate_user_and_team_ids(user_id: &str, team_id: &str) -> Result<(), ApiErr
 /// the first gate refuses — cheap as well as correct — and that the refusal names
 /// `edit_other_users` for the first and `view_team` for the second.
 ///
-/// **The first gate is not the same function on all three routes.** The two list handlers pass
-/// `SessionHasPermissionToUser`; the singular one passes `SessionHasPermissionToCategory`, which
-/// shares only the `edit_other_users` branch (see
+/// **The first gate is not the same function on all eight routes.** The five that name no category
+/// in the path — the two `GET`s and the `POST`/`PUT` on the collection, plus `PUT /order` — pass
+/// `SessionHasPermissionToUser`; the three `{category_id}` routes pass
+/// `SessionHasPermissionToCategory`, which shares only the `edit_other_users` branch (see
 /// `mm_app::App::session_has_permission_to_category`). Both refusals name
 /// `model.PermissionEditOtherUsers`, which is why the two are so easy to confuse and why the
-/// *difference* is asserted over HTTP instead: `parity_sidebar_category.rs` asks for a category
+/// *difference* is asserted over HTTP instead: `parity/sidebar_categories.rs` asks for a category
 /// belonging to somebody else while naming oneself in the path, which the user gate would allow
-/// and the category gate refuses.
+/// and the category gate refuses, and
+/// `parity/sidebar_category_writes.rs::the_singular_update_takes_its_id_from_the_path_and_refuses_with_403`
+/// does the same for the write.
+///
+/// The collection `PUT` and `PUT /order` run `SessionHasPermissionToCategory` too, but *per entry*
+/// and **after** this pair — and their refusal is a 400, not this function's 403.
 async fn sidebar_denied<F, FFut, T, TFut>(
     first_gate_allowed: F,
     team_allowed: T,
