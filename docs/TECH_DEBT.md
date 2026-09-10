@@ -6541,3 +6541,91 @@ cost-factor sweep with a `--ignored` job, or a single test that exercises the pa
 lets the rest assert against precomputed digests. Neither has been done because neither is this
 session's route, and the suite is honest at 110s in a way it would not be at 55s with the coverage
 quietly dropped.
+
+---
+
+## D-232 · Six system posts the channel-lifecycle writes owe
+
+**Status** OPEN · **Severity** divergent behaviour · **Raised** 2026-09-10 (phase 2, channel
+lifecycle)
+
+Five routes landed — `PUT /channels/{id}`, `/patch`, `/privacy`, `DELETE /channels/{id}`,
+`POST /channels/{id}/restore` — and every one of them creates a system post on Go's side that
+this server does not:
+
+| route | Go's post | type |
+|---|---|---|
+| `DELETE /channels/{id}` | "@user archived the channel" | `system_channel_deleted` |
+| `POST /channels/{id}/restore` | "@user unarchived the channel" | `system_channel_restored` |
+| `PUT /channels/{id}/privacy` | "…changed to public/private" | `system_change_chan_privacy` |
+| `PUT /channels/{id}/patch` | display-name, header and purpose change notices | three types |
+| `PUT /channels/{id}` | the display-name change notice | `system_displayname_change` |
+
+`Posts` writes are not ported at all yet — that is the blocker, and it is one store method
+(`PostStore::save`) plus `App::CreatePost`, not five separate pieces of work. Go **logs and
+swallows** every one of these failures, so none of them is part of any response body and no
+parity test can see the absence; `mm_app::channel_write`'s module docs say so at the point where
+the calls would go.
+
+Two second-order consequences are visible and neither is a bug:
+
+- A channel written through mm-api keeps the `total_msg_count`, `last_post_at` and
+  `last_root_post_at` it had, where Go's moves. `crates/mm-api/tests/parity/channel_writes.rs`
+  normalises those three keys for exactly this reason and compares every other field exactly.
+- `App::UpdateChannelPrivacy`'s **rollback is unreachable here**. Go flips the type back if
+  `postChannelPrivacyMessage` fails; there is no post to fail, so the conversion always stands.
+  That is closer to Go's success path than inventing a failure would be, but a Go-side post
+  failure and ours diverge.
+
+What is owed: the posts, once post writes land. `App::restore_channel` and `App::delete_channel`
+already do the `User().Get` those posts exist to feed — the lookups are there because their
+*errors* are on the wire — so the remaining work is the `CreatePost` call itself.
+
+---
+
+## D-233 · Archiving a channel does not retire its persistent notifications
+
+**Status** OPEN · **Severity** divergent behaviour · **Raised** 2026-09-10 (phase 2, channel
+lifecycle)
+
+`App.DeleteChannel` (app/channel.go:1818) calls
+`PostPersistentNotification().DeleteByChannel([]string{channel.Id})` and answers **500** if it
+fails — the one cleanup on that path that is not logged and swallowed. It is a single statement,
+`UPDATE PersistentNotifications SET DeleteAt = <now> FROM Posts WHERE Posts.Id =
+PersistentNotifications.PostId AND Posts.ChannelId = ?`, against a table this port has no store
+for at all.
+
+Not done here because it would mean a new store module and five edits to `mm-store`'s `lib.rs`
+while two sibling agents are working in that crate, for a subsystem that is otherwise entirely
+unported: the job that reads those rows and re-sends the notifications does not run on this side
+either. So the observable divergence is confined to a Go server sharing this database, which would
+keep notifying for posts in a channel mm-api archived.
+
+What is owed: `post_persistent_notification_store.rs` with the one method, wired into `SqlStore`,
+and the call restored to `App::delete_channel` — where the comment marking its absence already
+sits.
+
+---
+
+## D-234 · Two channel-patch branches are forwarded because they write what this file does not own
+
+**Status** OPEN · **Severity** forwarded route · **Raised** 2026-09-10 (phase 2, channel
+lifecycle)
+
+`PUT /api/v4/channels/{channel_id}/patch` is served here except for two bodies, both decided
+before anything is written (`mm_api::channel_writes::patch_needs_go`):
+
+- **`group_constrained` going from off to on.** Go then runs
+  `DeleteGroupConstrainedChannelMemberships` in a goroutine, which removes every member who is not
+  in one of the channel's groups. That is a `ChannelMembers` write. Setting the flag to `false`, or
+  to `true` on a channel that already has it, writes no memberships and is served here — Go's
+  condition is `*patch.GroupConstrained && (old == nil || !*old)` and both halves matter.
+- **A non-empty `default_category_name` after the patch.** `addChannelToDefaultCategory` creates a
+  custom sidebar category, or moves the channel into an existing one, and updates the category
+  order. That is three `SidebarCategories`/`SidebarChannels` writes; the store is read-only today.
+  Gated on `TeamSettings.EnableChannelCategorySorting`, whose Go default is `true`.
+
+Both are pinned by unit tests and by a parity test asserting the answer comes back **without**
+`x-mmrs-served-by: rust` and still took effect. What is owed is the two write groups, at which
+point both conditions come out of `patch_needs_go` — the member half belongs with the rest of the
+`ChannelMembers` writes, and the sidebar half with the sidebar category writes.

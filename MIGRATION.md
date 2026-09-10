@@ -9315,3 +9315,89 @@ months on a database old enough to have accumulated the shape it assumed:
 The lesson is not about ports. **A suite that has only ever run against one long-lived database
 has untested dependencies on that database**, and the cheapest way to find them is to stand up a
 new one.
+
+---
+
+## The channel lifecycle, minus creation (2026-09-10)
+
+Five routes, all served: `PUT /api/v4/channels/{channel_id}`, `/patch`, `/privacy`,
+`DELETE /api/v4/channels/{channel_id}`, `POST /api/v4/channels/{channel_id}/restore`.
+`POST /api/v4/channels` is *not* among them — it adds the creator as a member, and every
+`ChannelMembers` write belongs to another session.
+
+| what | where | status |
+|---|---|---|
+| `Channel().Update`, `Delete`, `Restore`, `SetDeleteAt`, `upsertPublicChannelT` | `crates/mm-store/src/channel_store.rs` (end of both blocks) | done; `Update` takes `&mut Channel` because Go's `PreUpdate` mutates in place |
+| `GetIncomingByChannel`, `GetOutgoingByChannel` | `crates/mm-store/src/webhook_store.rs` | done; their own statements, because Go omits `LIMIT`/`OFFSET` when either is negative and `DeleteChannel` passes `-1` |
+| `App.UpdateChannel`, `PatchChannel`, `UpdateChannelPrivacy`, `DeleteChannel`, `RestoreChannel` | `crates/mm-app/src/channel_write.rs` | done, minus the six system posts ([D-232]) and the persistent-notification cleanup ([D-233]) |
+| the five handlers | `crates/mm-api/src/channel_writes.rs` | done; a licensed installation and two patch branches forward ([D-234]) |
+| 25 cross-server tests | `crates/mm-api/tests/parity/channel_writes.rs` | — |
+
+### `updateChannel` and `patchChannel` differ in five ways, and every one is on the wire
+
+Measured field by field against the running server rather than read off the source, because four of
+the five are the sort of thing a happy-path test agrees with either way:
+
+| | `PUT /channels/{id}` | `PUT /channels/{id}/patch` |
+|---|---|---|
+| fields honoured | `header`, `purpose`, `display_name`, `name`, `group_constrained` and **nothing else** — a submitted `create_at`, `total_msg_count`, `scheme_id`, `discoverable`, `autotranslation` or `default_category_name` is silently discarded | everything `Channel::patch` applies |
+| an empty string | `header: ""` clears, `display_name: ""` **leaves the old value** | `null` leaves, `""` clears, for all four |
+| archived channel | 400 `api.channel.update_channel.deleted.app_error`, from the handler | 400 `app.channel.update.bad_id`, from the **store** — `patchChannel` has no guard of its own |
+| `props` in the answer | absent | `FillInChannelProps` runs, so a `~mention` in the header comes back as `channel_mentions` |
+| a type change | 400 `typechange` — `/privacy` is the only way to convert a channel | not expressible |
+
+The third row is the one worth remembering: the archived-channel guard for `/patch` is
+`updateChannelT`'s `DeleteAt != 0` becoming a `store.ErrInvalidInput`, which is why the two routes
+answer different ids for the same request.
+
+### Only `town-square` is special
+
+`off-topic` is created by the same team bootstrap and has **no** guard anywhere: it renames,
+archives and converts to private, all measured. Four guards mention `model.DefaultChannelName` and
+all four test that one name.
+
+### The websocket addressing is team-for-public and channel-for-private on two of the four events
+
+`channel_updated` goes to the channel, `channel_converted` to the team, and `channel_deleted` and
+`channel_restored` to the **team for a public channel and the channel for a private one**.
+Inverting that last branch broadcasts a private channel's archive to everyone on the team, which no
+assertion about a response body can see. None of the five routes carries an `omit_connection_id`:
+Go passes an empty string, so unlike `upsertDraft` the client's `Connection-Id` header does not stop
+its own tab being told. `mm_app::channel_write`'s module docs carry the table; the parity suite
+asserts each event with `common::SocketProbe`.
+
+### Four fields `patchChannel` accepts and refuses, and one it accepts and ignores
+
+On this unlicensed deployment, measured: `autotranslation` → 403
+`api.channel.patch_update_channel.feature_not_available.app_error`; `discoverable` → 400
+`api.channel.discoverable_join_request.feature_disabled.app_error`; `banner_info` → 403
+`license_error.feature_unavailable.specific`. `managed_category_name` is the silent one — it counts
+towards "is this patch empty", gets past the gate, and then does nothing at all, so a patch of
+nothing but that field is a 200 whose body differs only in `update_at`.
+
+`canEditChannelBanner` has a shape worth naming: its licence branch sets `c.Err` and **does not
+return**, falling into a type switch that can overwrite it. So an admin sees the licence error and a
+caller without the banner permission sees the permission error, both 403. A port that returned
+early would answer the same thing to both.
+
+### The `WebConn` membership cache excludes an archived channel, and it broke a test
+
+A channel-addressed event reaches a connection only if the channel is in that connection's
+`allChannelMembers` snapshot, taken from `get_all_channel_members_for_user(user, include_deleted =
+false)` and cached for thirty minutes — Go's `WebConn` the same way. That snapshot **omits a
+member's archived channels**, so a socket whose snapshot happens to be taken while the channel is
+archived never hears its restore, however correct the publish is. A probe opened after the archive
+did exactly that and passed in isolation, where the restore's own event populated the snapshot with
+`DeleteAt` already zero. The fix is a warm-up event on the live channel, not a longer window: see
+the note on `a_private_channels_archive_and_restore_are_addressed_to_the_channel`.
+
+The same suite also found that one probe held open across five sequential exchanges is dropped
+under whole-suite load — a `WebConn` whose send queue fills is *disconnected*, not throttled. Four
+short tests, each with its own probe, replaced one long one.
+
+### Mutation testing: 42 run, 40 caught, 2 controls survived
+
+Plan at `scripts/mutations/channel-writes.plan`. Three mutations had nothing to catch them on the
+first pass and each named a missing fixture rather than a shrug — a duplicate channel name, an
+archived channel's absence from the public listing, and the banner licence-versus-permission
+ordering above. All three are now asserted.
