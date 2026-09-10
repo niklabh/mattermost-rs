@@ -10,6 +10,7 @@ pub mod bot;
 pub mod brand;
 pub mod channel;
 pub mod channel_view;
+pub mod channel_write;
 pub mod command;
 pub mod common_teams;
 pub mod config;
