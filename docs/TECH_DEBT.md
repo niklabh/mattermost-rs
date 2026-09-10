@@ -6586,10 +6586,19 @@ third assertion failed. The suites that create posts add roughly a hundred user 
 and do not all purge them, so the count walks upward and eventually sits near a bucket boundary —
 at which point the test fails in the concurrent run and passes in isolation, indefinitely.
 
+`the_usage_counters_need_no_permission`, in the same module, compares an admin's numbers against a
+plain user's and fails the same way — two consecutive full runs failed a *different* one of the two,
+which is what rules out a fixed bug in either. Both pass with `--test parity system_usage`, 16
+passed in 0.88s.
+
 **Not caused by the sidebar routes**: zero of those 466 posts belong to any `mmrssbwrite%` fixture,
 and none of the eight category routes writes a post. Recorded rather than fixed because it is not
 this session's route, and left as a `divergence`-free `unverified` because nothing about Go's answer
-is in doubt — only the test's assumption that a global counter holds still.
+is in doubt — only the two tests' assumption that a global counter holds still for 44 seconds.
+
+Note also that `cargo test --workspace` **fail-fasts**: this one failure stopped 45 of the 48 test
+binaries from running at all, and the run still exited 0 through a pipe. Use `--no-fail-fast` when
+reading a full-suite number.
 
 What is owed is to make the assertion local: count the planted posts' contribution against a
 *delta* the test controls, or seed the count to a bucket midpoint before reading. Note that
