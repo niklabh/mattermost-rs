@@ -211,6 +211,23 @@ pub struct Config {
     /// `ServiceSettings.EnableBurnOnRead` (config.go:472). Go default **`true`**.
     pub enable_burn_on_read: bool,
 
+    /// `ServiceSettings.PostEditTimeLimit` (config.go:437). Go default **`-1`**, which means
+    /// "no limit" and is checked for explicitly rather than compared.
+    ///
+    /// Read by [`crate::App::post_edit_time_limit_expired`], which every write that changes a
+    /// stored post consults: `updatePost`, `patchPost` and both pin routes. Seconds, not
+    /// milliseconds — `post.CreateAt + int64(limit)*1000` is the deadline, so a limit of `0` is
+    /// not "no limit" but "expired the moment the post was created".
+    pub post_edit_time_limit: i64,
+
+    /// `ServiceSettings.ExperimentalEnableHardenedMode` (config.go:458). Go default **`false`**.
+    ///
+    /// When on, a non-integration session may not set the props reserved for integrations
+    /// (`Post::contains_integrations_reserved_props`) — a **400**
+    /// `api.context.invalid_body_param.app_error` naming `props`. Off, the check is a no-op, which
+    /// is why being wrong about the default would be silent: every post would be accepted.
+    pub experimental_enable_hardened_mode: bool,
+
     /// `FeatureFlags.BurnOnRead` (feature_flags.go:90). Go default **`true`**.
     ///
     /// Kept apart from the setting above because `isBurnOnReadEnabled` (app/post_helpers.go:270)
@@ -672,6 +689,10 @@ impl Default for Config {
             guest_restrict_creation_to_domains: String::new(),
             allow_synced_drafts: true,
             enable_burn_on_read: true,
+            // config.go:870 — `new(-1)`.
+            post_edit_time_limit: -1,
+            // config.go:906 — `new(false)`.
+            experimental_enable_hardened_mode: false,
             feature_flag_burn_on_read: true,
             file_driver_name: "local".to_owned(),
             // config.go:1904 — `FileSettingsDefaultDirectory`.
@@ -865,6 +886,16 @@ impl Config {
                 lookup,
                 "MM_SERVICESETTINGS_ENABLEBURNONREAD",
                 default.enable_burn_on_read,
+            ),
+            post_edit_time_limit: lookup_int(
+                lookup,
+                "MM_SERVICESETTINGS_POSTEDITTIMELIMIT",
+                default.post_edit_time_limit,
+            ),
+            experimental_enable_hardened_mode: lookup_bool(
+                lookup,
+                "MM_SERVICESETTINGS_EXPERIMENTALENABLEHARDENEDMODE",
+                default.experimental_enable_hardened_mode,
             ),
             feature_flag_burn_on_read: lookup_bool(
                 lookup,
@@ -1181,6 +1212,12 @@ impl Config {
             enable_burn_on_read: service
                 .enable_burn_on_read
                 .unwrap_or(default.enable_burn_on_read),
+            post_edit_time_limit: service
+                .post_edit_time_limit
+                .unwrap_or(default.post_edit_time_limit),
+            experimental_enable_hardened_mode: service
+                .experimental_enable_hardened_mode
+                .unwrap_or(default.experimental_enable_hardened_mode),
             // Deliberately NOT read from the document: Go clears `FeatureFlags` before persisting
             // (store.go:306-310), so the section is absent from every row it writes. Sourcing it
             // here would read an absence as a deliberate `false` on the next `readOnlyFF` change.
@@ -1510,6 +1547,10 @@ struct ServiceSettingsDocument {
     allow_synced_drafts: Option<bool>,
     #[serde(rename = "EnableBurnOnRead")]
     enable_burn_on_read: Option<bool>,
+    #[serde(rename = "PostEditTimeLimit")]
+    post_edit_time_limit: Option<i64>,
+    #[serde(rename = "ExperimentalEnableHardenedMode")]
+    experimental_enable_hardened_mode: Option<bool>,
     #[serde(rename = "EnableIncomingWebhooks")]
     enable_incoming_webhooks: Option<bool>,
     #[serde(rename = "EnableOutgoingWebhooks")]
@@ -2150,8 +2191,8 @@ mod go_parity {
             .sum();
 
         assert_eq!(
-            keys, 44,
-            "the fixture covers {keys} settings and Config reads 44 from the document. \
+            keys, 46,
+            "the fixture covers {keys} settings and Config reads 46 from the document. \
              Add the new key to scripts/dump-config-fixture.sh and re-run it — a modelled \
              setting the fixture does not carry is a setting Go's own output never checked"
         );

@@ -86,6 +86,7 @@ mod parity {
     pub mod post_get;
     pub mod post_reactions;
     pub mod post_thread;
+    pub mod post_writes;
     pub mod posts_by_ids;
     pub mod preference_reads;
     pub mod preferences;

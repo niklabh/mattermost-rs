@@ -57,7 +57,8 @@ import json, sys
 MODELLED = {
     "ServiceSettings": [
         "EnablePostIconOverride", "EnableCustomEmoji", "PostPriority", "AllowSyncedDrafts",
-        "EnableBurnOnRead", "EnableIncomingWebhooks", "EnableOutgoingWebhooks",
+        "EnableBurnOnRead", "PostEditTimeLimit", "ExperimentalEnableHardenedMode",
+        "EnableIncomingWebhooks", "EnableOutgoingWebhooks",
         "EnableOAuthServiceProvider", "SessionIdleTimeoutInMinutes",
         "ExtendSessionLengthWithActivity", "GoroutineHealthThreshold", "EnableTesting",
         "ScheduledPosts", "EnableUserStatuses", "EnableDynamicClientRegistration",

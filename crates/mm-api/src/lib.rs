@@ -37,6 +37,7 @@ pub mod licensed_features;
 pub mod limits;
 pub mod oauth;
 pub mod permissions;
+pub mod post_writes;
 pub mod posts;
 pub mod preferences;
 pub mod proxy;
@@ -1012,6 +1013,18 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/posts/{post_id}/edit_history",
             partially_migrated_with_ids(&state, get(posts::get_edit_history_for_post)),
+        )
+        // `BaseRoutes.Post.Handle("/pin")` and `.Handle("/unpin")` (api4/post.go:47-48) — two more
+        // siblings of `/thread` under `{post_id}`, POST-only in Go. They are one handler there
+        // (`saveIsPinnedPost`) reached through two registrations, which is why they are two
+        // `.route` calls here and not one path with two methods.
+        .route(
+            "/api/v4/posts/{post_id}/pin",
+            partially_migrated_with_ids(&state, post(post_writes::pin_post)),
+        )
+        .route(
+            "/api/v4/posts/{post_id}/unpin",
+            partially_migrated_with_ids(&state, post(post_writes::unpin_post)),
         )
         // `BaseRoutes.Post.Handle("/files/info")` (api4/post.go:33) — two segments deeper than
         // `/posts/{post_id}`, so it shadows nothing and nothing shadows it. `POST /files` and
