@@ -1684,3 +1684,101 @@ fn member_events(probe: &SocketProbe, channel_id: &str) -> Vec<serde_json::Value
         })
         .collect()
 }
+
+/// A multi-id add where one id succeeds and another is refused answers **two JSON documents**:
+/// the member array, then the error object.
+///
+/// The per-id loop calls `c.SetPermissionError`, which sets `c.Err` and is never cleared by a later
+/// success; `handleContextError` runs after the handler and writes the error body on top of the
+/// already-committed `201`. A reader would guess either a 403 or a clean 201 — it is both.
+///
+/// The fixture is a plain user who holds `join_public_channels` on the team (so they may add
+/// **themselves** to a public channel) and not `manage_public_channel_members` (so they may not add
+/// anybody else).
+#[tokio::test]
+async fn a_partly_refused_multi_add_answers_a_member_array_and_then_an_error() {
+    if !stack_enabled() {
+        return;
+    }
+    let http = client();
+    let token = go_minted_token(&http).await;
+    let fixture = pair(&http, &token, "cmwpartial", "O").await;
+    let joiner = create_plain_user(&http, &token, &fixture.team, "cmwpartial2").await;
+
+    let body = serde_json::json!({"user_ids": [joiner.id, fixture.other_user]});
+    let (go_status, go_raw) = call(
+        &http,
+        GO,
+        reqwest::Method::POST,
+        &format!("/api/v4/channels/{}/members", fixture.go_channel),
+        &joiner.token,
+        Some(&body),
+    )
+    .await;
+    let (rust_status, rust_raw) = call(
+        &http,
+        RUST,
+        reqwest::Method::POST,
+        &format!("/api/v4/channels/{}/members", fixture.rust_channel),
+        &joiner.token,
+        Some(&body),
+    )
+    .await;
+
+    // The status is the **success** one: it was written before the refusal was known.
+    assert_eq!(
+        go_status, 201,
+        "Go commits the 201 before the error is written: {go_raw}"
+    );
+    assert_eq!(rust_status, go_status, "the partial-add status differs");
+
+    // Two documents, concatenated. `serde_json::StreamDeserializer` is what reads them apart, the
+    // same way an NDJSON client would.
+    let split = |raw: &str| -> Vec<serde_json::Value> {
+        serde_json::Deserializer::from_str(raw)
+            .into_iter::<serde_json::Value>()
+            .map(|value| value.expect("each document decodes"))
+            .collect()
+    };
+    let go_docs = split(&go_raw);
+    let rust_docs = split(&rust_raw);
+    assert_eq!(
+        go_docs.len(),
+        2,
+        "Go writes the members and then the error: {go_raw:?}"
+    );
+    assert_eq!(
+        rust_docs.len(),
+        go_docs.len(),
+        "the number of documents differs\n go: {go_raw:?}\nrust: {rust_raw:?}"
+    );
+
+    // The first document is the one member that *was* added — the array shape, because the body
+    // carried `user_ids` and not `user_id`.
+    assert!(
+        go_docs[0].is_array(),
+        "the first document is the member array"
+    );
+    assert_eq!(
+        go_docs[0].as_array().map(Vec::len),
+        rust_docs[0].as_array().map(Vec::len),
+        "a different number of members was added"
+    );
+    assert_eq!(rust_docs[0][0]["user_id"], joiner.id.as_str());
+
+    // The second is an ordinary `AppError` envelope, with `detailed_error` wiped and a fresh
+    // `request_id`, exactly as if it had been the whole response.
+    assert_eq!(go_docs[1]["id"], "api.context.permissions.app_error");
+    assert_eq!(
+        rust_docs[1]["id"], go_docs[1]["id"],
+        "the appended error differs"
+    );
+    assert_eq!(rust_docs[1]["status_code"], 403);
+    assert_eq!(
+        rust_docs[1]["detailed_error"], "",
+        "the appended error must still have its detail wiped"
+    );
+
+    common::delete_plain_user(&http, &token, &joiner.id).await;
+    cleanup(&http, &token, &fixture).await;
+}

@@ -267,6 +267,16 @@ async fn update_member_rewrites_every_column_and_404s_a_member_that_is_not_there
         .expect("the member saves");
     let first_update_at = saved.last_update_at;
 
+    // **A bystander in the same channel.** Without one, dropping `AND userid = $2` from the UPDATE
+    // is invisible: the statement would rewrite every member of the channel and the only member is
+    // the one being tested. Measured — that mutation survived until this row existed.
+    let bystander = id("mmrsuser", "upb");
+    let mut bystander_member = member(&channel, &bystander);
+    bystander_member.mention_count = 3;
+    let bystander_saved = save_member(&pool, bystander_member)
+        .await
+        .expect("the bystander saves");
+
     let mut changed = saved;
     changed.scheme_admin = true;
     changed.mention_count = 7;
@@ -282,6 +292,25 @@ async fn update_member_rewrites_every_column_and_404s_a_member_that_is_not_there
     assert!(
         updated.last_update_at >= first_update_at,
         "PreUpdate moves LastUpdateAt forward"
+    );
+
+    // The bystander is untouched: the UPDATE is scoped to one `(channelid, userid)` pair.
+    let store = SqlChannelStore::new(pool.clone());
+    let bystander_now = store
+        .get_member(&channel, &bystander)
+        .await
+        .expect("the bystander is still there");
+    assert_eq!(
+        bystander_now.mention_count, 3,
+        "the update reached another member's row"
+    );
+    assert_eq!(
+        bystander_now.scheme_admin, bystander_saved.scheme_admin,
+        "the update changed another member's roles"
+    );
+    assert_eq!(
+        bystander_now.last_update_at, bystander_saved.last_update_at,
+        "the update moved another member's LastUpdateAt"
     );
 
     // A member that is not there is **not-found**, and it comes from the re-select rather than
@@ -328,6 +357,27 @@ async fn notify_props_are_merged_and_the_rune_cap_is_checked_before_the_query() 
     assert_eq!(props.get("mark_unread").map(String::as_str), Some("all"));
     assert_eq!(props.get("push").map(String::as_str), Some("default"));
     assert_eq!(props.len(), 6, "no key was dropped or added: {props:?}");
+
+    // `LastUpdateAt` is set from `model.GetMillis()` in the same statement, so a client polling the
+    // member sees the change. A mutation that drops that `SET` leaves the timestamp behind and no
+    // response body notices.
+    let stored_update_at: Option<i64> = sqlx::query_scalar(
+        "SELECT lastupdateat FROM channelmembers WHERE channelid = $1 AND userid = $2",
+    )
+    .bind(&channel)
+    .bind(&user)
+    .fetch_one(&pool)
+    .await
+    .expect("the row is there");
+    assert!(
+        stored_update_at.is_some_and(|at| at > 0),
+        "the notify-props write must move LastUpdateAt: {stored_update_at:?}"
+    );
+    assert_eq!(
+        updated.last_update_at,
+        stored_update_at.unwrap_or_default(),
+        "the answer and the row disagree about LastUpdateAt"
+    );
 
     // **No validation on this path**: an invalid value is stored, and it is the app layer's filter
     // that decides which *keys* get through, not which values.
