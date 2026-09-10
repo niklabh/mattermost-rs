@@ -31,6 +31,14 @@
 #   MUTATE_FILTER='sidebar_categories' scripts/mutate.sh ...     # one module's tests
 #   MUTATE_FILTER='sidebar' scripts/mutate.sh ...                # multiple modules
 #
+# **A multi-line pattern needs a real newline here, not `\n`.** `mutate-batch.sh` converts the
+# two-character `\n` in a plan line into a newline; this script does not — it hands `$FROM` to
+# python verbatim. So a `\n` typed on this command line is substituted into the Rust source as a
+# literal backslash-n, which does not compile, and the run is reported as a HARNESS FAULT whose
+# message blames the mutation rather than the quoting. Use bash's `$'...'`:
+#
+#   scripts/mutate.sh name file $'a();\n        b()' $'a();\n        c()' unit
+#
 # Previously separate --test binaries (MUTATE_API_SUITE=parity_foo, MUTATE_API_TARGETS) are
 # now converted automatically: `parity_foo` → `foo` in MUTATE_FILTER.
 #
