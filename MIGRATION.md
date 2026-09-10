@@ -9395,9 +9395,37 @@ The same suite also found that one probe held open across five sequential exchan
 under whole-suite load — a `WebConn` whose send queue fills is *disconnected*, not throttled. Four
 short tests, each with its own probe, replaced one long one.
 
-### Mutation testing: 42 run, 40 caught, 2 controls survived
+### `json.Decoder.Decode` reads one value and stops, and three handlers were stricter than Go
 
-Plan at `scripts/mutations/channel-writes.plan`. Three mutations had nothing to catch them on the
-first pass and each named a missing fixture rather than a shrug — a duplicate channel name, an
+`{"id":"…","header":"h"} trailing` and two concatenated objects are both a **200** on Go, taking
+the first value — `json.Decoder` never looks past it. `serde_json::from_slice` rejects the trailing
+bytes and would have answered 400. Measured on `PUT /channels/{id}`, `/patch` and `/privacy`; all
+three now go through `mm_model::utils::decode_one_from_json`, which the project already had for
+exactly this and which also handles the lone-surrogate escape serde refuses.
+
+### The first mutation run's controls were CAUGHT, and the wreckage was why
+
+Both no-op controls failed, which by the standing rule voids a tally. The cause was not a noisy
+harness: **every request in the town-square and off-topic tests is expected to fail, and the only
+thing stopping it is the guard under test.** So the mutation that removes the archive guard made
+the request *succeed* — archiving the shared fixture team's `town-square` for good — and the
+rename mutation left its `off-topic` renamed and private. Every later test in the batch then failed
+on the wreckage, the controls among them.
+
+Two lessons, and the second is the general one:
+
+* A test whose subject is a **guard** must own a disposable fixture, because a mutation run is
+  precisely the case where the guard is gone. Both tests now create their own team.
+* **Cleanup that runs only when the test passes is not cleanup.** The off-topic test used to rename
+  the shared channel and put it back at the end; the "put it back" never ran on the runs that
+  needed it. It now leaves its own team's channel however it likes.
+
+### Mutation testing: 42 run, first run's tally void, clean re-run in progress
+
+Plan at `scripts/mutations/channel-writes.plan`. The first run reached 40 CAUGHT and then **both
+controls CAUGHT**, which voids it — see above for the cause and the fix. A clean re-run against the
+repaired suite was started and its tally belongs in this line; until it is written here, treat the
+42 as "run", not as "caught". Three mutations had nothing to catch them on the
+first pass and each named a missing fixture rather than a shrug: a duplicate channel name, an
 archived channel's absence from the public listing, and the banner licence-versus-permission
-ordering above. All three are now asserted.
+ordering. All three are now asserted.
