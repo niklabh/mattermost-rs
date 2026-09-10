@@ -26,7 +26,7 @@
 use crate::common;
 
 use common::{
-    a_team_and_channel_the_user_is_in, add_user_to_channel,
+    GO, RUST, a_team_and_channel_the_user_is_in, add_user_to_channel,
     assert_error_bodies_match_except_known_gaps, client, create_channel, create_plain_user,
     delete_channel, delete_plain_user, fetch_both_raw, fetch_both_stable, go_minted_token,
     logged_in_user_id, null_out_member_column, post_message, purge_api_fixtures,
@@ -562,7 +562,7 @@ async fn a_non_alphanumeric_segment_answers_exactly_as_go_does() {
         format!("/api/v4/channels/no-pe/members/{}", logged_in_user_id()),
     ] {
         let response = client
-            .get(format!("http://127.0.0.1:8066{path}"))
+            .get(format!("{RUST}{path}"))
             .header("Authorization", format!("Bearer {token}"))
             .send()
             .await
@@ -597,7 +597,7 @@ async fn a_non_alphanumeric_segment_answers_exactly_as_go_does() {
 
         // And the same request against Go directly, byte for byte apart from the URL it echoes.
         let direct = client
-            .get(format!("http://localhost:8065{path}"))
+            .get(format!("{GO}{path}"))
             .header("Authorization", format!("Bearer {token}"))
             .send()
             .await
@@ -629,7 +629,7 @@ async fn other_methods_on_this_path_are_still_forwarded() {
     );
 
     let response = client
-        .post(format!("http://127.0.0.1:8066{path}"))
+        .post(format!("{RUST}{path}"))
         .header("Authorization", format!("Bearer {token}"))
         .send()
         .await

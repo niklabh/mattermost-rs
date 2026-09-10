@@ -380,10 +380,15 @@ impl JobStore for SqlJobStore {
 mod tests {
     use super::*;
 
-    /// A NULL column and a JSON `null` are the same answer, and it is `None` — which serialises
-    /// back as `"data":null`, the value the running server returns for every product-notices job.
+    /// **The two null-ish forms are different answers**, and the difference is on the wire:
+    /// a SQL `NULL` column serialises back as `"data":{}` and a JSON `null` as `"data":null`.
+    ///
+    /// This test asserted they were the same until 2026-09-10, when a freshly seeded stack put a
+    /// SQL NULL row in front of both servers for the first time and Go answered `{}`. Every
+    /// null-ish row a real deployment accumulates is the JSON-null kind, written by the
+    /// product-notices worker — which is exactly why the wrong half went unnoticed.
     #[test]
-    fn null_data_in_either_form_is_none() {
+    fn the_two_null_forms_are_not_the_same_answer() {
         let row = |data| JobRow {
             id: "fmuj6jho4jd65j54dpg83m7eyh".to_owned(),
             job_type: "product_notices".to_owned(),
@@ -396,13 +401,18 @@ mod tests {
             data,
         };
 
-        assert_eq!(row(None).into_job().expect("maps").data, None);
+        assert_eq!(
+            row(None).into_job().expect("maps").data,
+            Some(StringMap::new()),
+            "an absent column is an empty map, which marshals as {{}}"
+        );
         assert_eq!(
             row(Some(serde_json::Value::Null))
                 .into_job()
                 .expect("maps")
                 .data,
-            None
+            None,
+            "a JSON null is a nil map, which marshals as null"
         );
     }
 
