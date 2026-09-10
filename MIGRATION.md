@@ -9633,15 +9633,19 @@ Two lessons, and the second is the general one:
   the shared channel and put it back at the end; the "put it back" never ran on the runs that
   needed it. It now leaves its own team's channel however it likes.
 
-### Mutation testing: 42 run, first run's tally void, clean re-run in progress
+### Mutation testing: 42 run, 40 caught, 2 controls survived
 
 Plan at `scripts/mutations/channel-writes.plan`. The first run reached 40 CAUGHT and then **both
-controls CAUGHT**, which voids it — see above for the cause and the fix. A clean re-run against the
-repaired suite was started and its tally belongs in this line; until it is written here, treat the
-42 as "run", not as "caught". Three mutations had nothing to catch them on the
-first pass and each named a missing fixture rather than a shrug: a duplicate channel name, an
-archived channel's absence from the public listing, and the banner licence-versus-permission
-ordering. All three are now asserted.
+controls CAUGHT**, which voids it — see above for the cause and the fix. The clean re-run landed
+after the session that wrote this was cut off by a rate limit: **42 run, 40 caught, both controls
+SURVIVED**, so every real mutation in the plan is caught and the harness's verdicts are
+trustworthy.
+
+Three mutations had nothing to catch them on the first pass and each named a missing fixture
+rather than a shrug: a duplicate channel name, an archived channel's absence from the public
+listing, and the banner licence-versus-permission ordering. All three are now asserted, which is
+why the re-run caught 40 of 40.
+
 ## The post writes, and what a pin actually costs (2026-09-10)
 
 > **On the four counts above.** The sidebar, membership, lifecycle and post-write sections were
@@ -9735,4 +9739,29 @@ published one event would either leak that or lose it. Both payloads carry the p
 **before** the delete — `delete_at: 0`, no `deleteBy` — so a client learns the post is gone from the
 event type, not from the post in it.
 
-### Mutation testing: TALLYPLACEHOLDER
+### Mutation testing: 52 run, 50 caught, 2 controls survived
+
+Plan at `scripts/mutations/post-writes.plan`. The session that wrote it was cut off by a rate
+limit partway through, and its partial run is not the tally above — that one reported a harness
+fault, which voids a run. Re-run from scratch against the **merged** tree.
+
+Two things came out of the void run that the tally would have hidden.
+
+**`store-delete-does-not-mark-the-thread` did not compile.** It mutated the SQL to
+`... WHERE postid = $2 AND $1 < 0`, and sqlx types a bind parameter from how the statement uses
+it — `$1` as both `SET threaddeleteat = $1` and a comparison operand is E0308. The harness
+reported HARNESS FAULT, which reads as though the mutation ran and the server merely failed to
+come up. `AND FALSE` says the same thing and compiles.
+
+**Rewritten, it then SURVIVED — and that was a real gap.** Deleting a root post stamps
+`Threads.ThreadDeleteAt`, and nothing asserted it. The reason is structural rather than an
+oversight: nothing about that stamp reaches the delete response, and every other test here
+asserts on the response or on the posts themselves, so the one write that is invisible from the
+route performing it was the one nothing checked. It is observable one route over —
+`getThreadsForUser` is served — and
+`post_writes::deleting_a_root_post_takes_its_thread_out_of_the_list` now asserts it and catches
+the mutation.
+
+One caution for the next parallel session: `unreferenced-action-registry-kept` SURVIVED in the
+worktree and is CAUGHT against merged `main`. A per-branch mutation verdict is a verdict against
+that branch's test binary, which is smaller than the one that ships.

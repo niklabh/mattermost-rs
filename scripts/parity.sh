@@ -94,15 +94,28 @@ else
   # verdict a merge is decided on. Told "1 failed", a reader either dismisses a genuine
   # regression as "the usual flake" or reverts a good branch over a race. Re-running the
   # failures in isolation distinguishes the two in about two seconds and states it in words.
-  failing=(${(f)"$(grep -oE '^    [a-z_]+::[a-z_:]+' "$LOG" | sed 's/^ *//' | sort -u)"})
+  # `[A-Za-z0-9_:]`, not `[a-z_:]` — a digit in a test name (`a_304_is_not_activity…`) truncated
+  # the match to `a_`, and the isolation re-run below then matched **no test**, ran zero tests,
+  # exited 0 and was reported as "PASSES ALONE". A filter that matches nothing looks exactly like
+  # a filter whose test passed; that is the same trap `mutate.sh`'s header documents, reproduced
+  # here. Hence both this character class and the zero-tests guard below.
+  failing=(${(f)"$(grep -oE '^    [A-Za-z0-9_]+::[A-Za-z0-9_:]+' "$LOG" | sed 's/^ *//' | sort -u)"})
   grep -E '^failures:' -A0 "$LOG" > /dev/null && printf '  failed: %s\n' "${failing[@]}"
   if [ ${#failing[@]} -gt 0 ] && [ ${#failing[@]} -le 12 ]; then
     echo ""
     echo "  re-running each alone to separate a real regression from a test-level race…"
     still=0
     for t in "${failing[@]}"; do
-      if cargo test -p mm-api --test parity "$t" -- --exact --test-threads=1 \
-           > "$LOG.solo" 2>&1; then
+      cargo test -p mm-api --test parity "$t" -- --exact --test-threads=1 \
+        > "$LOG.solo" 2>&1
+      solo_rc=$?
+      # A run of zero tests exits 0. Treat it as inconclusive, never as a pass.
+      ran=$(grep -oE 'test result: (ok|FAILED)\. [0-9]+ passed; [0-9]+ failed' "$LOG.solo" \
+            | grep -oE '[0-9]+' | paste -sd+ | bc)
+      if [ "${ran:-0}" -eq 0 ]; then
+        echo "    NO TEST MATCHED  $t   <-- inconclusive, check the name by hand"
+        still=$((still + 1))
+      elif [ "$solo_rc" -eq 0 ]; then
         echo "    PASSES ALONE  $t   (concurrency-sensitive test, not a route regression)"
       else
         echo "    FAILS ALONE   $t   <-- REAL"

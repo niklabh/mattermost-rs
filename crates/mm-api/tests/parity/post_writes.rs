@@ -1674,3 +1674,84 @@ async fn an_edit_prunes_an_action_registry_the_content_no_longer_references() {
     common::delete_planted_post(&post).await;
     common::delete_channel(&http, &token, &channel).await;
 }
+
+/// The `Threads` row is marked when its root is deleted, and the thread leaves the caller's list.
+///
+/// `deleteThread` is `UPDATE Threads SET ThreadDeleteAt = ? WHERE PostId = ?` — the row is marked
+/// rather than removed, so the thread's reply count and participants survive the delete.
+///
+/// This test exists because a mutation that disabled that statement outright **survived the whole
+/// post-write suite**. Nothing about the stamp reaches the delete response, and every other test
+/// here asserts on the response or on the posts themselves, so the one write that is invisible
+/// from the route that performs it was also the one nothing checked. It is observable one route
+/// over: a thread whose root is deleted stops being listed by `getThreadsForUser`.
+///
+/// Both the write and the read-back go through the **same** server — Go's caches do not see our
+/// writes ([D-190]).
+#[tokio::test]
+async fn deleting_a_root_post_takes_its_thread_out_of_the_list() {
+    if !stack_enabled() {
+        return;
+    }
+    let http = client();
+    let token = go_minted_token(&http).await;
+    let me = common::logged_in_user_id();
+    let (team, _) = a_team_and_channel_the_user_is_in(&http, &token).await;
+
+    /// The caller's thread roots in a team, read through one server.
+    async fn thread_roots(
+        http: &reqwest::Client,
+        base: &str,
+        token: &str,
+        user_id: &str,
+        team_id: &str,
+    ) -> Vec<String> {
+        let path = format!("/api/v4/users/{user_id}/teams/{team_id}/threads");
+        let response = http
+            .get(format!("{base}{path}"))
+            .header("Authorization", format!("Bearer {token}"))
+            .send()
+            .await
+            .unwrap_or_else(|e| panic!("{base}{path} unreachable: {e}"));
+        assert_eq!(response.status().as_u16(), 200, "{base}{path} answers 200");
+        let body: serde_json::Value = response.json().await.expect("a thread list");
+        body["threads"]
+            .as_array()
+            .map(|threads| {
+                threads
+                    .iter()
+                    .filter_map(|thread| thread["id"].as_str().map(str::to_owned))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    // One channel per server: the delete is destructive and the two must not race for a root.
+    for base in [GO, RUST] {
+        let tag = if base == GO { "thrg" } else { "thrr" };
+        let channel = common::create_channel_typed(&http, &token, &team, tag, "O").await;
+
+        // Replying is what creates the `Threads` row and makes the caller a participant, which
+        // is what puts it in this list at all.
+        let root = post_message(&http, &token, &channel, "mmrs thread root", None).await;
+        post_message(&http, &token, &channel, "mmrs thread reply", Some(&root)).await;
+
+        let before = thread_roots(&http, base, &token, me, &team).await;
+        assert!(
+            before.contains(&root),
+            "{base}: a followed thread is listed before its root is deleted: {before:?}"
+        );
+
+        let (status, raw, _) = delete_post_request(&http, base, &token, &root, None).await;
+        assert_eq!(status, 200, "{base}: the root deletes: {raw}");
+
+        let after = thread_roots(&http, base, &token, me, &team).await;
+        assert!(
+            !after.contains(&root),
+            "{base}: a thread whose root is deleted is no longer listed — \
+             `Threads.ThreadDeleteAt` was not stamped: {after:?}"
+        );
+
+        common::delete_channel(&http, &token, &channel).await;
+    }
+}

@@ -71,7 +71,12 @@ delete-publishes-only-the-sanitized-event	crates/mm-app/src/post_write.rs	      
 store-delete-does-not-take-the-replies	crates/mm-store/src/post_store.rs	             WHERE id = $4 OR rootid = $4	             WHERE id = $4 OR rootid = 'nothing'	api	post_writes
 store-delete-does-not-stamp-update-at	crates/mm-store/src/post_store.rs	               SET deleteat = $1,\n                   updateat = $1,	               SET deleteat = $1,\n                   updateat = updateat,	api	post_writes
 store-delete-writes-the-wrong-props-key	crates/mm-store/src/post_store.rs	                   props    = jsonb_set(props, ARRAY[$2::text], $3)	                   props    = jsonb_set(props, ARRAY[$2::text || 'x'], $3)	api	post_writes
-store-delete-does-not-mark-the-thread	crates/mm-store/src/post_store.rs	            "UPDATE threads SET threaddeleteat = $1 WHERE postid = $2",	            "UPDATE threads SET threaddeleteat = $1 WHERE postid = $2 AND $1 < 0",	api	post_writes
+#
+# `AND FALSE`, not `AND $1 < 0`: the latter does not compile. sqlx types the bind from its use in
+# the statement, and using $1 in both `SET threaddeleteat = $1` and a comparison makes the macro
+# infer a different parameter type — E0308, reported by the harness as a HARNESS FAULT that reads
+# as though the mutation ran. It voided this plan's first tally.
+store-delete-does-not-mark-the-thread	crates/mm-store/src/post_store.rs	            "UPDATE threads SET threaddeleteat = $1 WHERE postid = $2",	            "UPDATE threads SET threaddeleteat = $1 WHERE postid = $2 AND FALSE",	api	post_writes
 store-delete-marks-the-roots-files-not-the-replies	crates/mm-store/src/post_store.rs	             WHERE fileinfo.postid = posts.id\n               AND posts.rootid = $2	             WHERE fileinfo.postid = posts.id\n               AND posts.id = $2	api	post_writes
 control-rename-the-channel-binding	crates/mm-app/src/post_write.rs	        let channel = self.get_channel(&old_post.channel_id).await?;	        let fetched = self.get_channel(&old_post.channel_id).await?;\n        let channel = fetched;	api	post_writes
 control-reorder-two-independent-update-columns	crates/mm-store/src/post_store.rs	                   hasreactions = $16,\n                   remoteid     = $17	                   remoteid     = $17,\n                   hasreactions = $16	api	post_writes
