@@ -61,7 +61,9 @@ pub use reaction_store::{ReactionStore, SqlReactionStore};
 pub use role_store::{RoleStore, SqlRoleStore};
 pub use scheme_store::{SchemeStore, SqlSchemeStore};
 pub use session_store::{SessionStore, SqlSessionStore};
-pub use sidebar_category_store::{SidebarCategoryStore, SqlSidebarCategoryStore};
+pub use sidebar_category_store::{
+    SidebarCategoryStore, SidebarCategoryUpdate, SqlSidebarCategoryStore,
+};
 pub use status_store::{SqlStatusStore, StatusStore};
 pub use system_store::{SYSTEM_ACTIVE_LICENSE_ID, SqlSystemStore, SystemStore};
 pub use team_store::{SqlTeamStore, TeamStore};
