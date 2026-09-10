@@ -58,6 +58,19 @@ pub trait FileInfoStore {
         &self,
         include_deleted: bool,
     ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
+
+    /// Port of `SqlFileInfoStore.DeleteForPost` (file_info_store.go:457) — the soft delete
+    /// `App.DeletePost` runs for a deleted post's own attachments.
+    ///
+    /// It stamps `DeleteAt` and **not** `UpdateAt`, so a withdrawn file still says when its
+    /// metadata last changed, and it uses its own clock rather than the post's delete timestamp —
+    /// the two differ by however long the delete took.
+    ///
+    /// Go returns the post id it was given and every caller ignores it.
+    fn delete_for_post(
+        &self,
+        post_id: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 }
 
 #[derive(Debug, Clone)]
@@ -114,6 +127,22 @@ impl FileInfoStore for SqlFileInfoStore {
 
         tracing::Span::current().record("bytes", bytes);
         Ok(bytes)
+    }
+
+    #[tracing::instrument(skip(self), fields(post_id = %post_id))]
+    async fn delete_for_post(&self, post_id: &str) -> Result<(), StoreError> {
+        sqlx::query!(
+            "UPDATE fileinfo SET deleteat = $1 WHERE postid = $2",
+            mm_model::utils::get_millis(),
+            post_id,
+        )
+        .execute(&self.pool)
+        .await
+        .map(|_| ())
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to update FileInfo with postId={post_id}"),
+            source,
+        })
     }
 
     /// # `ORDER BY CreateAt DESC` is not the order a client sees

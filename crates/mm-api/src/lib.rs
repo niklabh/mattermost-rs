@@ -39,6 +39,7 @@ pub mod licensed_features;
 pub mod limits;
 pub mod oauth;
 pub mod permissions;
+pub mod post_writes;
 pub mod posts;
 pub mod preferences;
 pub mod proxy;
@@ -999,15 +1000,25 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/roles/{role_id}",
             partially_migrated_with_ids(&state, get(roles::get_role)),
         )
-        // `BaseRoutes.Post` (api4/api.go:239) — `/posts/{post_id:[A-Za-z0-9]+}` with a single
-        // GET at "". Every other `/posts/...` path Go registers is either one segment deeper
-        // (`/patch`, `/thread`, `/files/info`, …) or a literal sibling of `{post_id}`
-        // (`/posts/ids`, `/posts/ephemeral`) that this router does not register at all, so both
-        // fall to `Router::fallback` and stay forwarded. `partially_migrated` keeps `PUT` and
-        // `DELETE` on this exact path going to Go.
+        // `BaseRoutes.Post` (api4/api.go:239) — `/posts/{post_id:[A-Za-z0-9]+}`, which Go gives a
+        // GET, a PUT and a DELETE. All three are served here now. Every other `/posts/...` path Go
+        // registers is either one segment deeper (`/patch`, `/thread`, `/files/info`, …) or a
+        // literal sibling of `{post_id}` (`/posts/ids`, `/posts/ephemeral`); the ones not
+        // registered below fall to `Router::fallback` and stay forwarded.
         .route(
             "/api/v4/posts/{post_id}",
-            partially_migrated_with_ids(&state, get(posts::get_post)),
+            partially_migrated_with_ids(
+                &state,
+                get(posts::get_post)
+                    .put(post_writes::update_post)
+                    .delete(post_writes::delete_post),
+            ),
+        )
+        // `BaseRoutes.Post.Handle("/patch")` (api4/post.go:44) — one segment deeper than the route
+        // above, PUT-only in Go.
+        .route(
+            "/api/v4/posts/{post_id}/patch",
+            partially_migrated_with_ids(&state, axum::routing::put(post_writes::patch_post)),
         )
         // `BaseRoutes.Posts.Handle("/ids")` (api4/post.go:28). The literal `ids` sits where
         // `{post_id}` sits above; axum prefers the literal. Nothing that used to be answered
@@ -1082,6 +1093,18 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/posts/{post_id}/edit_history",
             partially_migrated_with_ids(&state, get(posts::get_edit_history_for_post)),
+        )
+        // `BaseRoutes.Post.Handle("/pin")` and `.Handle("/unpin")` (api4/post.go:47-48) — two more
+        // siblings of `/thread` under `{post_id}`, POST-only in Go. They are one handler there
+        // (`saveIsPinnedPost`) reached through two registrations, which is why they are two
+        // `.route` calls here and not one path with two methods.
+        .route(
+            "/api/v4/posts/{post_id}/pin",
+            partially_migrated_with_ids(&state, post(post_writes::pin_post)),
+        )
+        .route(
+            "/api/v4/posts/{post_id}/unpin",
+            partially_migrated_with_ids(&state, post(post_writes::unpin_post)),
         )
         // `BaseRoutes.Post.Handle("/files/info")` (api4/post.go:33) — two segments deeper than
         // `/posts/{post_id}`, so it shadows nothing and nothing shadows it. `POST /files` and

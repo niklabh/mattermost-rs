@@ -50,6 +50,18 @@ pub trait PreferenceStore {
         category: &str,
         name: &str,
     ) -> impl std::future::Future<Output = Result<Preference, StoreError>> + Send;
+
+    /// Port of `SqlPreferenceStore.DeleteCategoryAndName` (preference_store.go:208).
+    ///
+    /// **Not scoped to a user**, unlike every other delete in this store: `WHERE Name = ? AND
+    /// Category = ?`. So `deleteFlaggedPosts` removes a deleted post's flag for *everyone* who
+    /// flagged it, which is the point — and a reader who assumed the three-column delete beside it
+    /// would leave other users' flags pointing at a post that is gone.
+    fn delete_category_and_name(
+        &self,
+        category: &str,
+        name: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 }
 
 /// One row of Go's `preferenceSelectQuery`, in its column order.
@@ -107,6 +119,26 @@ impl PreferenceStore for SqlPreferenceStore {
             source,
         })?;
         Ok(())
+    }
+
+    #[tracing::instrument(skip(self), fields(category = %category, name = %name))]
+    async fn delete_category_and_name(&self, category: &str, name: &str) -> Result<(), StoreError> {
+        // Two predicates, not three — see the trait docs. Go builds them in the order
+        // `Name` then `Category`; the order of two ANDs is not observable, and the columns are.
+        sqlx::query!(
+            "DELETE FROM preferences WHERE name = $1 AND category = $2",
+            name,
+            category,
+        )
+        .execute(&self.pool)
+        .await
+        .map(|_| ())
+        .map_err(|source| StoreError::Db {
+            context: format!(
+                "failed to delete Preference with category={category} and name={name}"
+            ),
+            source,
+        })
     }
 
     /// Port of `Save` (preference_store.go:44) together with `saveTx` (:89), which it calls per

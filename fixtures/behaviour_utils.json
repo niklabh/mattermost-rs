@@ -3666,6 +3666,258 @@
         "2019-11-12": "2019-11-12",
         "a-b": "0a-0b"
     },
+    "parse_hashtags": [
+        {
+            "in": "",
+            "hashtags": "",
+            "plain": ""
+        },
+        {
+            "in": "   ",
+            "hashtags": "",
+            "plain": ""
+        },
+        {
+            "in": "no hashtags here",
+            "hashtags": "",
+            "plain": "no hashtags here"
+        },
+        {
+            "in": "#tag",
+            "hashtags": "#tag",
+            "plain": ""
+        },
+        {
+            "in": "#tag and #another",
+            "hashtags": "#tag #another",
+            "plain": "and"
+        },
+        {
+            "in": "#tag #tag",
+            "hashtags": "#tag #tag",
+            "plain": ""
+        },
+        {
+            "in": "##tag",
+            "hashtags": "#tag",
+            "plain": ""
+        },
+        {
+            "in": "###tag",
+            "hashtags": "#tag",
+            "plain": ""
+        },
+        {
+            "in": "#a",
+            "hashtags": "",
+            "plain": "#a"
+        },
+        {
+            "in": "#ab",
+            "hashtags": "#ab",
+            "plain": ""
+        },
+        {
+            "in": "#1a",
+            "hashtags": "",
+            "plain": "#1a"
+        },
+        {
+            "in": "#a1",
+            "hashtags": "#a1",
+            "plain": ""
+        },
+        {
+            "in": "#a-b_c.d",
+            "hashtags": "#a-b_c.d",
+            "plain": ""
+        },
+        {
+            "in": "#a-",
+            "hashtags": "",
+            "plain": "#a"
+        },
+        {
+            "in": "#a.",
+            "hashtags": "",
+            "plain": "#a"
+        },
+        {
+            "in": "#a_",
+            "hashtags": "",
+            "plain": "#a"
+        },
+        {
+            "in": "(#tag)",
+            "hashtags": "#tag",
+            "plain": ""
+        },
+        {
+            "in": "[#tag]",
+            "hashtags": "#tag",
+            "plain": ""
+        },
+        {
+            "in": "«#tag»",
+            "hashtags": "#tag",
+            "plain": ""
+        },
+        {
+            "in": "#tag.",
+            "hashtags": "#tag",
+            "plain": ""
+        },
+        {
+            "in": "#tag!",
+            "hashtags": "#tag",
+            "plain": ""
+        },
+        {
+            "in": "#tag#",
+            "hashtags": "#tag",
+            "plain": ""
+        },
+        {
+            "in": "#tag##",
+            "hashtags": "#tag",
+            "plain": ""
+        },
+        {
+            "in": "-#tag",
+            "hashtags": "#tag",
+            "plain": ""
+        },
+        {
+            "in": "#-tag",
+            "hashtags": "",
+            "plain": "#-tag"
+        },
+        {
+            "in": "#_tag",
+            "hashtags": "",
+            "plain": "#_tag"
+        },
+        {
+            "in": "#.tag",
+            "hashtags": "",
+            "plain": "#.tag"
+        },
+        {
+            "in": "a#tag",
+            "hashtags": "",
+            "plain": "a#tag"
+        },
+        {
+            "in": "#tag@example",
+            "hashtags": "",
+            "plain": "#tag@example"
+        },
+        {
+            "in": "#é",
+            "hashtags": "",
+            "plain": "#é"
+        },
+        {
+            "in": "#éa",
+            "hashtags": "#éa",
+            "plain": ""
+        },
+        {
+            "in": "#タグ",
+            "hashtags": "#タグ",
+            "plain": ""
+        },
+        {
+            "in": "#tagé",
+            "hashtags": "#tagé",
+            "plain": ""
+        },
+        {
+            "in": "#tag١",
+            "hashtags": "#tag",
+            "plain": ""
+        },
+        {
+            "in": "#tag１",
+            "hashtags": "#tag",
+            "plain": ""
+        },
+        {
+            "in": "#taǵ",
+            "hashtags": "#taǵ",
+            "plain": ""
+        },
+        {
+            "in": "#日本語",
+            "hashtags": "#日本語",
+            "plain": ""
+        },
+        {
+            "in": "tabs\tand\nnewlines #tag",
+            "hashtags": "#tag",
+            "plain": "tabs and newlines"
+        },
+        {
+            "in": "nbsp #tag",
+            "hashtags": "#tag",
+            "plain": "nbsp"
+        },
+        {
+            "in": "ideographic　#tag",
+            "hashtags": "#tag",
+            "plain": "ideographic"
+        },
+        {
+            "in": "#tag #other",
+            "hashtags": "#tag #other",
+            "plain": ""
+        },
+        {
+            "in": "#tag mixed #another plain words #third",
+            "hashtags": "#tag #another #third",
+            "plain": "mixed plain words"
+        },
+        {
+            "in": "#UPPER #lower",
+            "hashtags": "#UPPER #lower",
+            "plain": ""
+        },
+        {
+            "in": "#tag1 #tag2 #tag3",
+            "hashtags": "#tag1 #tag2 #tag3",
+            "plain": ""
+        },
+        {
+            "in": "#hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength ",
+            "hashtags": "#hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength #hashtagofsomelength",
+            "plain": ""
+        },
+        {
+            "in": "#日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ ",
+            "hashtags": "#日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ #日本語のハッシュタグ",
+            "plain": ""
+        },
+        {
+            "in": "#aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "hashtags": "",
+            "plain": ""
+        },
+        {
+            "in": "#éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+            "hashtags": "",
+            "plain": ""
+        },
+        {
+            "in": "#ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #zzz",
+            "hashtags": "#ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab #ab",
+            "plain": ""
+        },
+        {
+            "in": "plain #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged trail",
+            "hashtags": "#tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged #tagged",
+            "plain": "plain trail"
+        }
+    ],
     "redact_device_id": {
         "": "",
         "-v1:token": "-v1:token",

@@ -1803,6 +1803,96 @@ pub mod go_time {
     }
 }
 
+/// Port of `model.puncStart` (utils.go:745). Go: `^[^\pL\d\s#]+`.
+///
+/// `\d` and `\s` are spelled out for the reason [`is_valid_hashtag`] gives: RE2's Perl classes are
+/// ASCII (`[0-9]` and `[\t\n\f\r ]`) and the `regex` crate's are Unicode. The `\s` half cannot
+/// fire — `split_whitespace` has already removed every whitespace character from the words this
+/// runs against — but it is transcribed so a reader diffing the two files finds four patterns and
+/// not three-and-a-half.
+///
+/// **`#` is in the negated set**, so a leading pound is never stripped. That is the only reason a
+/// hashtag inside brackets is found at all.
+static PUNC_START: LazyLock<Option<Regex>> =
+    LazyLock::new(|| compile("^[^\\p{L}0-9\t\n\u{c}\r #]+"));
+
+/// Port of `model.puncEnd` (utils.go:747). Go: `[^\pL\d\s]+$`.
+///
+/// No `#` exclusion, unlike [`PUNC_START`] — so `#tag#` becomes `#tag`, and a trailing Unicode
+/// digit is stripped as punctuation because it is not RE2's `\d`.
+static PUNC_END: LazyLock<Option<Regex>> = LazyLock::new(|| compile("[^\\p{L}0-9\t\n\u{c}\r ]+$"));
+
+/// Go's 1000-byte cap on the hashtag string (utils.go:771).
+const HASHTAG_STRING_MAX_BYTES: usize = 1000;
+
+/// Port of `model.ParseHashtags` (utils.go:750). Returns `(hashtags, plain)`.
+///
+/// Called by `App.UpdatePost` whenever an edit changes the message, and by the create path, to
+/// derive the `Posts.Hashtags` column. Only the first return value is stored; every caller in the
+/// server discards the second, which is returned here so the oracle can pin it.
+///
+/// # There is no de-duplication and no sort
+///
+/// `#tag #tag` is stored as `#tag #tag`. The column is a multiset in message order — unlike
+/// `FileIds`, which `PreCommit` sorts and de-duplicates.
+///
+/// # The cap is bytes, cut at 999, and rolled back to a space
+///
+/// A multi-byte rune split by the cut is discarded with the rest of its hashtag, because the
+/// rollback lands on the space before it — so the result is valid UTF-8 despite the byte slice.
+/// **A single hashtag longer than the cap yields the empty string**: the only space in the prefix
+/// is the one at index 0, so the rollback removes everything.
+pub fn parse_hashtags(text: &str) -> (String, String) {
+    let (Some(punc_start), Some(punc_end)) = (PUNC_START.as_ref(), PUNC_END.as_ref()) else {
+        return (String::new(), String::new());
+    };
+
+    let mut hashtag_string = String::new();
+    let mut plain_string = String::new();
+
+    // `strings.Fields` splits on `unicode.IsSpace`, the White_Space property —
+    // `split_whitespace` uses the same property.
+    for word in text.split_whitespace() {
+        // Two anchored replacements, so each removes at most one run.
+        let word = punc_start.replace(word, "");
+        let word = punc_end.replace(&word, "");
+        // "remove extra pound #s" — two or more collapse to one; a single `#` is untouched here
+        // and matched by `is_valid_hashtag` directly.
+        let word = collapse_leading_hashes(&word);
+
+        // Go writes `" " + word` into whichever builder, so both halves start with a space and are
+        // trimmed at the end.
+        let target = if is_valid_hashtag(&word) {
+            &mut hashtag_string
+        } else {
+            &mut plain_string
+        };
+        target.push(' ');
+        target.push_str(&word);
+    }
+
+    if hashtag_string.len() > HASHTAG_STRING_MAX_BYTES {
+        // `hashtagString[:999]`, then `strings.LastIndex(" ")`. A space is ASCII, so its byte never
+        // appears inside a multi-byte sequence and the position found is always a character
+        // boundary — the guard exists because a `panic!` in library code is not allowed, not
+        // because the branch is reachable.
+        let cut = &hashtag_string.as_bytes()[..HASHTAG_STRING_MAX_BYTES - 1];
+        match cut.iter().rposition(|byte| *byte == b' ') {
+            Some(position) if hashtag_string.is_char_boundary(position) => {
+                hashtag_string.truncate(position);
+            }
+            // Go's `else { hashtagString = "" }`, which needs `LastIndex` to return -1 — it
+            // cannot, because a non-empty hashtag string starts with the space.
+            _ => hashtag_string.clear(),
+        }
+    }
+
+    (
+        hashtag_string.trim().to_owned(),
+        plain_string.trim().to_owned(),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2281,6 +2371,77 @@ mod go_parity {
 
     fn oracle() -> Value {
         serde_json::from_str(include_str!("../../../fixtures/behaviour_utils.json")).unwrap()
+    }
+
+    /// `ParseHashtags` over the recorded corpus — both return values, every case.
+    ///
+    /// The cases that matter most are the ones a transcription of the four patterns gets wrong:
+    /// `#tag١` and `#tag１` (Unicode digits, which RE2's `\d` excludes and `puncEnd` therefore
+    /// strips), `#tag#` (only `puncStart` spares the pound), `#tag #tag` (no de-duplication) and
+    /// the four over-cap inputs, one of which answers the empty string.
+    #[test]
+    fn parse_hashtags_matches_go() {
+        let oracle = oracle();
+        let cases = oracle["parse_hashtags"].as_array().unwrap();
+        assert!(cases.len() > 40, "the corpus shrank: {}", cases.len());
+        for case in cases {
+            let input = case["in"].as_str().unwrap();
+            let want_hashtags = case["hashtags"].as_str().unwrap();
+            let want_plain = case["plain"].as_str().unwrap();
+            let (hashtags, plain) = parse_hashtags(input);
+            assert_eq!(
+                hashtags, want_hashtags,
+                "hashtags for {input:?}: Go said {want_hashtags:?}"
+            );
+            assert_eq!(plain, want_plain, "plain for {input:?}");
+        }
+    }
+
+    /// The corpus must actually contain the traps the port is written against, or
+    /// `parse_hashtags_matches_go` passes for the wrong reason.
+    #[test]
+    fn the_hashtag_corpus_covers_the_transcription_traps() {
+        let oracle = oracle();
+        let cases = oracle["parse_hashtags"].as_array().unwrap();
+        let by_input: std::collections::HashMap<&str, &Value> = cases
+            .iter()
+            .map(|case| (case["in"].as_str().unwrap(), case))
+            .collect();
+
+        // A Unicode digit is not RE2's `\d`, so it is stripped as trailing punctuation.
+        assert_eq!(by_input["#tag١"]["hashtags"], "#tag");
+        // `puncStart` spares the pound; `puncEnd` does not.
+        assert_eq!(by_input["(#tag)"]["hashtags"], "#tag");
+        assert_eq!(by_input["#tag#"]["hashtags"], "#tag");
+        // Two or more pounds collapse; one letter is not enough.
+        assert_eq!(by_input["##tag"]["hashtags"], "#tag");
+        assert_eq!(by_input["#a"]["hashtags"], "");
+        assert_eq!(by_input["#a"]["plain"], "#a");
+        // No de-duplication.
+        assert_eq!(by_input["#tag #tag"]["hashtags"], "#tag #tag");
+
+        // At least one input is over the byte cap and truncated, and at least one answers "".
+        let over_cap: Vec<&Value> = cases
+            .iter()
+            .filter(|case| case["in"].as_str().unwrap().len() > 1000)
+            .collect();
+        assert!(
+            over_cap.len() >= 3,
+            "the cap needs more than one shape to be evidence"
+        );
+        assert!(
+            over_cap
+                .iter()
+                .any(|case| case["hashtags"].as_str().unwrap().is_empty()),
+            "one over-cap input must answer the empty string"
+        );
+        assert!(
+            over_cap.iter().any(|case| {
+                let out = case["hashtags"].as_str().unwrap();
+                !out.is_empty() && out.len() <= 1000
+            }),
+            "and one must be truncated rather than emptied"
+        );
     }
 
     /// Asserts a predicate against every recorded `input -> bool` pair.

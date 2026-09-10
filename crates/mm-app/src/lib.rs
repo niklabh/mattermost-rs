@@ -35,6 +35,7 @@ pub mod limits;
 pub mod oauth;
 pub mod password;
 pub mod post;
+pub mod post_write;
 pub mod preference;
 pub mod reaction;
 pub mod report;

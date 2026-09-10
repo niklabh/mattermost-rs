@@ -52,7 +52,7 @@ use mm_model::post_list::PostList;
 use mm_model::post_metadata::PostPriority;
 use mm_model::preference::PREFERENCE_CATEGORY_FLAGGED_POST;
 use mm_model::user::User;
-use mm_model::utils::{StringArray, StringInterface};
+use mm_model::utils::{StringArray, StringInterface, array_to_json, get_millis, new_id};
 use sqlx::PgPool;
 
 use crate::error::StoreError;
@@ -231,6 +231,116 @@ pub trait PostStore {
     fn analytics_posts_usage_count(
         &self,
     ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
+
+    /// Port of `SqlPostStore.GetMaxPostSize` (post_store.go:2747) and the `determineMaxPostSize`
+    /// (:2721) it memoises.
+    ///
+    /// **A deployment artifact, not a constant** — the same shape as
+    /// [`crate::draft_store::DraftStore::max_draft_size`], with one difference that matters: this
+    /// one takes `max(bytes/4, PostMessageMaxRunesV2)`, so a server whose `Posts.Message` column
+    /// was never widened still reports 16383 rather than 1000. The floor makes the *value* stable
+    /// on every deployment this project has seen; it does not make the query pointless, because a
+    /// column widened past 65535 bytes raises the limit above the floor.
+    ///
+    /// Go swallows the query's failure with a `mlog.Warn` and leaves the byte count at zero, which
+    /// the floor then rescues — so a broken `information_schema` read still yields a working
+    /// limit. Reproduced: the error is logged here and `0` is used, rather than propagated.
+    fn max_post_size(&self) -> impl std::future::Future<Output = Result<usize, StoreError>> + Send;
+
+    /// Port of `SqlPostStore.Update` (post_store.go:393) — the write behind every edit,
+    /// `PUT /posts/{id}`, `PUT /posts/{id}/patch` and both pin routes alike.
+    ///
+    /// # It is four statements and **no transaction**
+    ///
+    /// Go runs them straight off `GetMaster()`: the `UPDATE Posts`, the `UPDATE Channels` that
+    /// moves `LastPostAt`, an `UPDATE Posts` on the thread root, and finally the `INSERT` of the
+    /// old version. A failure part-way leaves the earlier statements committed, and the edit
+    /// history row is the *last* thing written — so a post whose row was updated but whose
+    /// history insert failed simply loses that history entry. Reproduced as written; wrapping
+    /// these in a transaction would be a different behaviour under failure, and this store's job
+    /// is to be the same one.
+    ///
+    /// # Editing a post writes a row, it does not move one
+    ///
+    /// `oldPost` is turned into the history entry in place: `DeleteAt` and `UpdateAt` both become
+    /// the new post's `UpdateAt`, `OriginalId` becomes the id it had, and it is given a **fresh
+    /// id**. That is the shape `get_edit_history_for_post` reads back (`OriginalId = <live id>`),
+    /// and it is why pinning a post — which changes nothing a reader can see except `is_pinned` —
+    /// still adds an entry to its edit history.
+    ///
+    /// # `IsValid` runs here, and its error reaches the client unwrapped
+    ///
+    /// After `UpdateAt` and `PreCommit`, which is the order that decides the answer: `PreCommit`
+    /// sorts and de-duplicates `FileIds`, so the length `IsValid` measures is the length of the
+    /// *de-duplicated* JSON. It is returned as [`StoreError::Invalid`] because `App.UpdatePost`
+    /// does `errors.As(nErr, &appErr)` and hands it straight back — a message over the limit
+    /// answers `model.post.is_valid.message_length.app_error`, not `app.post.update.app_error`.
+    ///
+    /// `ValidateProps` is deliberately absent: it only ever logs (post.go:899).
+    ///
+    /// # The `LastPostAt` bump is guarded and the root bump is guarded differently
+    ///
+    /// `LastPostAt = time WHERE Id = ? AND LastPostAt < time` — an editing client cannot drag a
+    /// channel's `LastPostAt` backwards, but it *does* drag it forwards to now, so editing an old
+    /// post reorders the sidebar. The root post's `UpdateAt` moves under the same guard, which is
+    /// what makes a reply's edit visible to a client polling the thread by `UpdateAt`.
+    ///
+    /// **The `time` here is a second `GetMillis()`, not the post's `UpdateAt`.** They differ by a
+    /// millisecond often enough to matter to a test that asserts equality.
+    ///
+    /// Go mutates the caller's `newPost` and `oldPost` in place; this takes them by reference and
+    /// returns the saved post, so the two clones inside are the price of not lying about what the
+    /// caller still holds. Nothing observable depends on the mutation — the only Go reader of the
+    /// mutated `oldPost` is the plugin hook, which sees an old post carrying the *history row's*
+    /// fresh id.
+    fn update(
+        &self,
+        new_post: &Post,
+        old_post: &Post,
+    ) -> impl std::future::Future<Output = Result<Post, StoreError>> + Send;
+
+    /// Port of `SqlPostStore.Delete` (post_store.go:972) — the **soft** delete behind
+    /// `DELETE /api/v4/posts/{post_id}`, narrowed to a **root** post.
+    ///
+    /// # It deletes a thread, not a post
+    ///
+    /// `WHERE Id = $4 OR RootId = $4`: one statement takes the post and every reply to it, so
+    /// deleting a root ends the conversation. The rows stay — `DeleteAt` and `UpdateAt` are stamped
+    /// and `props.deleteBy` is written with `jsonb_set`. **A NULL `props` column stays NULL**,
+    /// because `jsonb_set(NULL, …)` is NULL, so a post written before that column was populated
+    /// comes back with `"props":{}` and no `deleteBy` at all.
+    ///
+    /// # Narrowed to the root branch on purpose
+    ///
+    /// Go's reply branch calls `updateThreadAfterReplyDeletion`, which recomputes the thread's
+    /// `ReplyCount`, `LastReplyAt` and `Participants`. It is absent here because its **caller** is:
+    /// `App.DeletePost` on a reply runs `RemoveNotifications`, which needs the mention engine, so
+    /// [`mm_app::App::delete_post`] forwards a reply's deletion whole. A query with no reachable
+    /// caller is the thing this project has 20,000 lines of. A reply reaching this is a
+    /// [`StoreError::Argument`] rather than a silent half-delete.
+    ///
+    /// # `Threads` and `FileInfo` are marked, not removed
+    ///
+    /// `deleteThread` stamps `Threads.ThreadDeleteAt`, and `deleteThreadFiles` stamps
+    /// `FileInfo.DeleteAt` for the files of the **replies** — joined through `Posts.RootId`, so the
+    /// root's own files are not among them. Those are soft-deleted separately by the app layer,
+    /// from a goroutine in Go.
+    fn delete(
+        &self,
+        post_id: &str,
+        time: i64,
+        delete_by_id: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlPostPersistentNotificationStore.Delete`
+    /// (post_persistent_notification_store.go:88) for the one id its reachable caller passes.
+    ///
+    /// A **soft** delete, stamping `DeleteAt` from its own clock rather than the caller's delete
+    /// timestamp — which is what [`PostStore::has_persistent_notification`] reads back.
+    fn delete_persistent_notification(
+        &self,
+        post_id: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 }
 
 /// Port of `model.GetPostsOptions` (post.go:456), narrowed to the fields the page branch of
@@ -2466,6 +2576,314 @@ impl PostStore for SqlPostStore {
 
         Ok(list)
     }
+
+    #[tracing::instrument(skip(self), fields(max_post_size))]
+    async fn max_post_size(&self) -> Result<usize, StoreError> {
+        // `Get` into an `int32`: a failure is warned about and leaves the value at zero, which the
+        // floor below then rescues. No row is `sql.ErrNoRows`, which takes the same branch.
+        let bytes: i32 = sqlx::query_scalar!(
+            r#"
+            SELECT COALESCE(character_maximum_length, 0) AS "length!"
+              FROM information_schema.columns
+             WHERE table_name = 'posts'
+               AND column_name = 'message'
+            "#
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .unwrap_or_else(|err| {
+            tracing::warn!(error = %err, "Unable to determine the maximum supported post size");
+            None
+        })
+        .unwrap_or(0);
+
+        // `max(int(maxPostSizeBytes)/4, model.PostMessageMaxRunesV2)` — Go's integer division,
+        // truncating. A negative `character_maximum_length` is not representable in Postgres, so
+        // the cast cannot lose a sign here.
+        let max_post_size =
+            (bytes.max(0) as usize / 4).max(mm_model::post::POST_MESSAGE_MAX_RUNES_V2);
+        tracing::Span::current().record("max_post_size", max_post_size);
+        Ok(max_post_size)
+    }
+
+    #[tracing::instrument(skip(self, new_post, old_post), fields(post_id = %new_post.id))]
+    async fn update(&self, new_post: &Post, old_post: &Post) -> Result<Post, StoreError> {
+        // Owned copies because Go mutates its arguments and the mutation is part of the write:
+        // `new_post` gains an `UpdateAt` and a `PreCommit`, and `old_post` becomes the history row.
+        let mut new_post = new_post.clone();
+        let mut old_post = old_post.clone();
+
+        new_post.update_at = get_millis();
+        new_post.pre_commit();
+
+        old_post.delete_at = new_post.update_at;
+        old_post.update_at = new_post.update_at;
+        old_post.original_id = old_post.id.clone();
+        old_post.id = new_id();
+        old_post.pre_commit();
+
+        let max_post_size = self.max_post_size().await?;
+        new_post
+            .is_valid(max_post_size)
+            .map_err(|app_error| StoreError::Invalid {
+                entity: "Post",
+                app_error,
+            })?;
+        // `ValidateProps` would run here. It only logs — see the trait docs.
+
+        let props = props_for_column(&new_post);
+        sqlx::query!(
+            r#"
+            UPDATE posts
+               SET createat     = $1,
+                   updateat     = $2,
+                   editat       = $3,
+                   deleteat     = $4,
+                   ispinned     = $5,
+                   userid       = $6,
+                   channelid    = $7,
+                   rootid       = $8,
+                   originalid   = $9,
+                   message      = $10,
+                   type         = $11,
+                   props        = $12,
+                   hashtags     = $13,
+                   filenames    = $14,
+                   fileids      = $15,
+                   hasreactions = $16,
+                   remoteid     = $17
+             WHERE id = $18
+            "#,
+            new_post.create_at,
+            new_post.update_at,
+            new_post.edit_at,
+            new_post.delete_at,
+            new_post.is_pinned,
+            new_post.user_id,
+            new_post.channel_id,
+            new_post.root_id,
+            new_post.original_id,
+            new_post.message,
+            new_post.post_type,
+            props,
+            new_post.hashtags,
+            array_to_json(Some(&new_post.filenames)),
+            array_to_json(new_post.file_ids.as_deref()),
+            new_post.has_reactions,
+            new_post.remote_id,
+            new_post.id,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to update Post with id={}", new_post.id),
+            source,
+        })?;
+
+        // A **second** clock read, not `new_post.update_at`.
+        let time = get_millis();
+        sqlx::query!(
+            "UPDATE channels SET lastpostat = $1 WHERE id = $2 AND lastpostat < $1",
+            time,
+            new_post.channel_id,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to update lastpostat of channels".to_owned(),
+            source,
+        })?;
+
+        if !new_post.root_id.is_empty() {
+            sqlx::query!(
+                "UPDATE posts SET updateat = $1 WHERE id = $2 AND updateat < $1",
+                time,
+                new_post.root_id,
+            )
+            .execute(&self.pool)
+            .await
+            .map_err(|source| StoreError::Db {
+                context: "failed to update updateAt of posts".to_owned(),
+                source,
+            })?;
+        }
+
+        insert_post(&self.pool, &old_post)
+            .await
+            .map_err(|source| StoreError::Db {
+                context: "failed to insert the old post".to_owned(),
+                source,
+            })?;
+
+        Ok(new_post)
+    }
+
+    #[tracing::instrument(skip(self), fields(post_id = %post_id))]
+    async fn delete(&self, post_id: &str, time: i64, delete_by_id: &str) -> Result<(), StoreError> {
+        // Unlike `update`, this one **is** a transaction in Go.
+        let mut tx = self.pool.begin().await.map_err(|source| StoreError::Db {
+            context: "begin_transaction".to_owned(),
+            source,
+        })?;
+
+        // Go selects `RootId, UserId`. `UserId` is read only by the reply branch, which is not
+        // ported, so this selects the one column that decides anything here.
+        let row = sqlx::query!(
+            r#"SELECT rootid AS "root_id!" FROM posts WHERE id = $1"#,
+            post_id
+        )
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to delete Post with id={post_id}"),
+            source,
+        })?;
+
+        let Some(row) = row else {
+            // `sql.ErrNoRows` is the **only** error Go turns into a not-found here; every other
+            // failure keeps its wrapped form and becomes a 500 at the app layer.
+            return Err(StoreError::NotFound {
+                entity: "Post",
+                criteria: post_id.to_owned(),
+            });
+        };
+
+        if !row.root_id.is_empty() {
+            return Err(StoreError::Argument {
+                entity: "Post",
+                detail: "deleting a reply needs updateThreadAfterReplyDeletion, whose caller the \
+                         app layer forwards",
+            });
+        }
+
+        sqlx::query!(
+            r#"
+            UPDATE posts
+               SET deleteat = $1,
+                   updateat = $1,
+                   props    = jsonb_set(props, ARRAY[$2::text], $3)
+             WHERE id = $4 OR rootid = $4
+            "#,
+            time,
+            mm_model::post::POST_PROPS_DELETE_BY,
+            serde_json::Value::String(delete_by_id.to_owned()),
+            post_id,
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to update Posts".to_owned(),
+            source,
+        })?;
+
+        // `deleteThread` — the `Threads` row is marked, not removed, so the thread's reply count
+        // and participants survive the delete.
+        sqlx::query!(
+            "UPDATE threads SET threaddeleteat = $1 WHERE postid = $2",
+            time,
+            post_id
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to mark thread for root post {post_id} as deleted"),
+            source,
+        })?;
+
+        // `deleteThreadFiles` — the **replies'** files, joined through `Posts.RootId`. The root's
+        // own attachments are not in this set.
+        sqlx::query!(
+            r#"
+            UPDATE fileinfo
+               SET deleteat = $1
+              FROM posts
+             WHERE fileinfo.postid = posts.id
+               AND posts.rootid = $2
+            "#,
+            time,
+            post_id
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to mark files of thread post {post_id} as deleted"),
+            source,
+        })?;
+
+        tx.commit().await.map_err(|source| StoreError::Db {
+            context: "commit_transaction".to_owned(),
+            source,
+        })
+    }
+
+    #[tracing::instrument(skip(self), fields(post_id = %post_id))]
+    async fn delete_persistent_notification(&self, post_id: &str) -> Result<(), StoreError> {
+        sqlx::query!(
+            "UPDATE persistentnotifications SET deleteat = $1 WHERE postid = $2",
+            get_millis(),
+            post_id
+        )
+        .execute(&self.pool)
+        .await
+        .map(|_| ())
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to delete notifications for posts [{post_id}]"),
+            source,
+        })
+    }
+}
+
+/// `model.StringInterfaceToJSON(post.Props)` for a `jsonb` column.
+///
+/// Go marshals the map to text and lets the driver hand it to Postgres, so a **nil** map is the
+/// four bytes `null` and lands as jsonb `'null'` — not as SQL NULL, and not as `'{}'`. That is
+/// the value `post_from_row` reads back as `props: None`, so the round trip is closed. Every post
+/// that has been through `PreCommit` carries a materialised map, which is why the `null` arm is
+/// hard to reach through a route; it is here because dropping it would silently rewrite the one
+/// row shape that can.
+fn props_for_column(post: &Post) -> serde_json::Value {
+    match post.get_props() {
+        Some(props) => serde_json::Value::Object(props.clone()),
+        None => serde_json::Value::Null,
+    }
+}
+
+/// The `INSERT INTO Posts (postSliceColumns()) VALUES (postToSlice(post))` that both
+/// `SqlPostStore.Update` (for the edit-history row) and `SaveMultiple` build.
+///
+/// The column order is `postSliceColumnsWithTypes` (post_store.go:53) exactly. It is not the
+/// table's own column order — `EditAt`, `IsPinned` and `RemoteId` were added later and sit at the
+/// end of the physical table — so naming the columns is what keeps the two apart.
+async fn insert_post(pool: &PgPool, post: &Post) -> Result<(), sqlx::Error> {
+    sqlx::query!(
+        r#"
+        INSERT INTO posts
+            (id, createat, updateat, editat, deleteat, ispinned, userid, channelid, rootid,
+             originalid, message, type, props, hashtags, filenames, fileids, hasreactions, remoteid)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+        "#,
+        post.id,
+        post.create_at,
+        post.update_at,
+        post.edit_at,
+        post.delete_at,
+        post.is_pinned,
+        post.user_id,
+        post.channel_id,
+        post.root_id,
+        post.original_id,
+        post.message,
+        post.post_type,
+        props_for_column(post),
+        post.hashtags,
+        array_to_json(Some(&post.filenames)),
+        array_to_json(post.file_ids.as_deref()),
+        post.has_reactions,
+        post.remote_id,
+    )
+    .execute(pool)
+    .await
+    .map(|_| ())
 }
 
 /// Go's `hasNext` block, which both branches of `SqlPostStore.Get` repeat verbatim

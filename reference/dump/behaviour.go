@@ -113,6 +113,7 @@ func writeBehaviourFixture(outDir string) error {
 		"redact_device_id":                              redactAll(),
 		"session_is_mobile":                             sessionBoolAll(),
 		"sorted_array_from_json":                        sortedArrayFromJSONAll(),
+		"parse_hashtags":                               parseHashtagsAll(),
 	}
 
 	blob, err := json.MarshalIndent(out, "", "    ")

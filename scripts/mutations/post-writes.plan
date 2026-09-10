@@ -1,0 +1,77 @@
+# Mutation plan for the post writes: pinPost, unpinPost, updatePost, patchPost.
+#
+#   scripts/mutate-batch.sh scripts/mutations/post-writes.plan
+#
+# What is worth mutating on these four routes, and why:
+#
+#   * the pin no-op short circuit, which is the whole difference between a 200 that writes
+#     nothing and a 200 that writes a row, an edit-history entry and a websocket event;
+#   * the *identity* of the four `SqlPostStore.Update` statements — the history row's fresh id and
+#     `OriginalId`, the `LastPostAt` bump, and the columns it does NOT touch;
+#   * `ParseHashtags`, whose four patterns are ASCII in RE2 and Unicode in the `regex` crate, and
+#     whose 1000-byte cap is measured in bytes and rolled back to a space;
+#   * the props triad: replaced wholesale, identity markers re-applied, action registry pruned;
+#   * the `post_edited` event's addressing, which decides *who* is told rather than whether
+#     anyone is.
+#
+# NOT mutated, and why: the `PostEditTimeLimit` gate. It is `-1` on a default-configured server,
+# so `postEditTimeLimitExpired` returns false before it looks at anything and every mutation of
+# that branch is unreachable from the running stack. Exercising it needs the setting changed on
+# *both* servers, which means a Go restart. Recorded in MIGRATION.md as untested rather than
+# mutated into a false CAUGHT.
+#
+# The last two lines are the no-op controls and must SURVIVE.
+pin-noop-short-circuit-removed	crates/mm-api/src/post_writes.rs	    if post.is_pinned == is_pinned {	    if false {	api	post_writes
+pin-missing-post-answers-its-own-error	crates/mm-api/src/post_writes.rs	        .map_err(|_| make_permission_error(&session.0, &[&PERMISSION_READ_CHANNEL_CONTENT]))?;	        .map_err(|err| err)?;	api	post_writes
+pin-body-is-encoder-framed	crates/mm-api/src/post_writes.rs	        r#"{"status":"OK"}"#,	        r#"{"status":"OK"}\n"#,	api	post_writes
+pin-read-permission-check-skipped	crates/mm-api/src/post_writes.rs	    if !may_read {	    if false && !may_read {	api	post_writes
+update-id-mismatch-accepted	crates/mm-api/src/post_writes.rs	    if post.id != post_id {	    if false {	api	post_writes
+update-others-posts-check-skipped	crates/mm-api/src/post_writes.rs	    if session.0.user_id != original.user_id {	    if false {	api	post_writes
+patch-permission-choice-always-edit-post	crates/mm-api/src/post_writes.rs	    let permission = if session.0.user_id == original.user_id {	    let permission = if true {	api	post_writes
+update-omitted-props-not-restored	crates/mm-api/src/post_writes.rs	    if post.props.is_none() {\n        post.set_props(original.get_props().cloned());\n    }	    if false {\n        post.set_props(original.get_props().cloned());\n    }	api	post_writes
+oversized-message-accepted	crates/mm-api/src/post_writes.rs	    if length <= max_post_size {	    if length <= usize::MAX {	api	post_writes
+oversized-message-measured-in-bytes	crates/mm-api/src/post_writes.rs	    let length = message.chars().count();	    let length = message.len();	api	post_writes
+update-answers-created	crates/mm-api/src/post_writes.rs	    Ok((\n        StatusCode::OK,\n        [\n            ("Content-Type", "application/json"),	    Ok((\n        StatusCode::CREATED,\n        [\n            ("Content-Type", "application/json"),	api	post_writes
+edit-does-not-copy-the-new-message	crates/mm-app/src/post_write.rs	            new_post.message.clone_from(&received.message);\n            new_post.edit_at = get_millis();	            new_post.edit_at = get_millis();	api	post_writes
+edit-does-not-set-edit-at	crates/mm-app/src/post_write.rs	            new_post.message.clone_from(&received.message);\n            new_post.edit_at = get_millis();	            new_post.message.clone_from(&received.message);	api	post_writes
+hashtags-not-derived-from-the-message	crates/mm-app/src/post_write.rs	            (new_post.hashtags, _) = parse_hashtags(&received.message);	            (new_post.hashtags, _) = (String::new(), String::new());	api	post_writes
+hashtags-take-the-plain-half	crates/mm-app/src/post_write.rs	            (new_post.hashtags, _) = parse_hashtags(&received.message);	            (_, new_post.hashtags) = parse_hashtags(&received.message);	api	post_writes
+props-not-replaced-wholesale	crates/mm-app/src/post_write.rs	        new_post.set_props(received.get_props().cloned());	        let _ = received.get_props();	api	post_writes
+identity-props-not-preserved	crates/mm-app/src/post_write.rs	        new_post.preserve_identity_props_from(&old_post);	        let _ = &old_post;	api	post_writes
+unreferenced-action-registry-kept	crates/mm-app/src/post_write.rs	        new_post.del_prop(POST_PROPS_MM_BLOCKS_ACTIONS);	        let _ = POST_PROPS_MM_BLOCKS_ACTIONS;	api	post_writes
+channel-mention-not-forwarded	crates/mm-app/src/post_write.rs	        if !channel_mentions.is_empty() {	        if false {	api	post_writes
+post-edited-event-is-the-posted-event	crates/mm-app/src/post_write.rs	        self.publish_websocket_event_for_post(WEBSOCKET_EVENT_POST_EDITED, &prepared)	        self.publish_websocket_event_for_post(mm_model::websocket_message::WEBSOCKET_EVENT_POSTED, &prepared)	api	post_writes
+post-edited-event-is-user-scoped	crates/mm-app/src/post_write.rs	        let mut message = WebSocketEvent::new(event, "", &post.channel_id, "", None, "");	        let mut message = WebSocketEvent::new(event, "", "", &post.user_id, None, "");	api	post_writes
+post-edited-event-omits-a-connection	crates/mm-app/src/post_write.rs	        let mut message = WebSocketEvent::new(event, "", &post.channel_id, "", None, "");	        let mut message = WebSocketEvent::new(event, "", &post.channel_id, "", None, "mmrs-parity-pin-conn");	api	post_writes
+post-edited-event-not-published	crates/mm-app/src/post_write.rs	        self.publish_websocket_event_for_post(WEBSOCKET_EVENT_POST_EDITED, &prepared)\n            .await;	        let _ = WEBSOCKET_EVENT_POST_EDITED;	api	post_writes
+store-update-does-not-bump-update-at	crates/mm-store/src/post_store.rs	        new_post.update_at = get_millis();	        new_post.update_at += 0;	api	post_writes
+store-history-row-has-no-original-id	crates/mm-store/src/post_store.rs	        old_post.original_id = old_post.id.clone();	        old_post.original_id = String::new();	api	post_writes
+store-history-row-keeps-the-live-id	crates/mm-store/src/post_store.rs	        old_post.id = new_id();	        old_post.id = old_post.id.clone();	api	post_writes
+store-history-row-not-inserted	crates/mm-store/src/post_store.rs	        insert_post(&self.pool, &old_post)	        insert_post(&self.pool, &new_post)	api	post_writes
+store-update-does-not-move-lastpostat	crates/mm-store/src/post_store.rs	            "UPDATE channels SET lastpostat = $1 WHERE id = $2 AND lastpostat < $1",	            "UPDATE channels SET lastpostat = $1 WHERE id = $2 AND lastpostat < 0",	api	post_writes
+store-update-bumps-the-message-count	crates/mm-store/src/post_store.rs	            "UPDATE channels SET lastpostat = $1 WHERE id = $2 AND lastpostat < $1",	            "UPDATE channels SET lastpostat = $1, totalmsgcount = totalmsgcount + 1 WHERE id = $2 AND lastpostat < $1",	api	post_writes
+store-update-writes-the-wrong-pinned-column	crates/mm-store/src/post_store.rs	                   ispinned     = $5,	                   ispinned     = NOT $5,	api	post_writes
+hashtag-cap-not-rolled-back-to-a-space	crates/mm-model/src/utils.rs	            Some(position) if hashtag_string.is_char_boundary(position) => {\n                hashtag_string.truncate(position);\n            }	            Some(_position) => {\n                hashtag_string.clear();\n            }	unit	parse_hashtags
+hashtag-cap-measured-in-runes	crates/mm-model/src/utils.rs	    if hashtag_string.len() > HASHTAG_STRING_MAX_BYTES {	    if hashtag_string.chars().count() > HASHTAG_STRING_MAX_BYTES {	unit	parse_hashtags
+hashtag-punc-end-not-stripped	crates/mm-model/src/utils.rs	        let word = punc_end.replace(&word, "");	        let word = word;	unit	parse_hashtags
+hashtag-leading-hashes-not-collapsed	crates/mm-model/src/utils.rs	        let word = collapse_leading_hashes(&word);	        let word = word;	unit	parse_hashtags
+hashtag-halves-swapped	crates/mm-model/src/utils.rs	        let target = if is_valid_hashtag(&word) {\n            &mut hashtag_string\n        } else {\n            &mut plain_string\n        };	        let target = if is_valid_hashtag(&word) {\n            &mut plain_string\n        } else {\n            &mut hashtag_string\n        };	unit	parse_hashtags
+#
+# deletePost, added with the route.
+delete-permanent-not-forwarded	crates/mm-api/src/post_writes.rs	    if permanent {	    if false {	api	post_writes
+delete-unknown-post-is-a-403	crates/mm-api/src/post_writes.rs	    let post = state.app.get_single_post(post_id, false).await?;	    let post = state\n        .app\n        .get_single_post(post_id, false)\n        .await\n        .map_err(|_| make_permission_error(&session.0, &[&PERMISSION_DELETE_POST]))?;	api	post_writes
+delete-permission-always-delete-post	crates/mm-api/src/post_writes.rs	    let permission = if session.0.user_id == post.user_id {	    let permission = if true {	api	post_writes
+delete-of-a-reply-not-forwarded	crates/mm-app/src/post_write.rs	        if !post.root_id.is_empty()\n            && self.config().collapsed_threads != mm_model::config::COLLAPSED_THREADS_DISABLED\n        {	        if false\n            && self.config().collapsed_threads != mm_model::config::COLLAPSED_THREADS_DISABLED\n        {	api	post_writes
+delete-does-not-remove-the-posts-own-files	crates/mm-app/src/post_write.rs	        if post.file_ids.as_deref().is_some_and(|ids| !ids.is_empty()) {	        if false {	api	post_writes
+delete-clears-the-wrong-flagged-preference	crates/mm-app/src/post_write.rs	                &post.id,\n            )\n            .await\n        {\n            tracing::warn!(error = %err,\n                "Unable to delete flagged post preference when deleting post.");	                &post.channel_id,\n            )\n            .await\n        {\n            tracing::warn!(error = %err,\n                "Unable to delete flagged post preference when deleting post.");	api	post_writes
+delete-clears-the-wrong-thread-drafts	crates/mm-app/src/post_write.rs	            .delete_drafts_associated_with_post(&channel.id, &post.id)	            .delete_drafts_associated_with_post(&channel.id, &channel.id)	api	post_writes
+delete-both-events-are-sanitized	crates/mm-app/src/post_write.rs	            broadcast.contains_sensitive_data = true;	            broadcast.contains_sanitized_data = true;	api	post_writes
+delete-event-does-not-carry-delete-by	crates/mm-app/src/post_write.rs	        admin_message.add(\n            "delete_by",	        admin_message.add(\n            "deleted_by",	api	post_writes
+delete-publishes-only-the-sanitized-event	crates/mm-app/src/post_write.rs	        self.publish(admin_message).await;	        drop(admin_message);	api	post_writes
+store-delete-does-not-take-the-replies	crates/mm-store/src/post_store.rs	             WHERE id = $4 OR rootid = $4	             WHERE id = $4 OR rootid = 'nothing'	api	post_writes
+store-delete-does-not-stamp-update-at	crates/mm-store/src/post_store.rs	               SET deleteat = $1,\n                   updateat = $1,	               SET deleteat = $1,\n                   updateat = updateat,	api	post_writes
+store-delete-writes-the-wrong-props-key	crates/mm-store/src/post_store.rs	                   props    = jsonb_set(props, ARRAY[$2::text], $3)	                   props    = jsonb_set(props, ARRAY[$2::text || 'x'], $3)	api	post_writes
+store-delete-does-not-mark-the-thread	crates/mm-store/src/post_store.rs	            "UPDATE threads SET threaddeleteat = $1 WHERE postid = $2",	            "UPDATE threads SET threaddeleteat = $1 WHERE postid = $2 AND $1 < 0",	api	post_writes
+store-delete-marks-the-roots-files-not-the-replies	crates/mm-store/src/post_store.rs	             WHERE fileinfo.postid = posts.id\n               AND posts.rootid = $2	             WHERE fileinfo.postid = posts.id\n               AND posts.id = $2	api	post_writes
+control-rename-the-channel-binding	crates/mm-app/src/post_write.rs	        let channel = self.get_channel(&old_post.channel_id).await?;	        let fetched = self.get_channel(&old_post.channel_id).await?;\n        let channel = fetched;	api	post_writes
+control-reorder-two-independent-update-columns	crates/mm-store/src/post_store.rs	                   hasreactions = $16,\n                   remoteid     = $17	                   remoteid     = $17,\n                   hasreactions = $16	api	post_writes
