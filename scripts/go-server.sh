@@ -35,10 +35,13 @@ cd "$(dirname "$0")/.."
 ROOT=$(pwd)
 SRC="$ROOT/reference/mattermost/server"
 BUILD="$ROOT/reference/.build"
-RUN="$BUILD/mmroot"
-LOG="$BUILD/server.log"
-PORT=8065
-DSN="postgres://mmuser:mmuser_password@localhost:5432/mattermost?sslmode=disable&connect_timeout=10"
+# Everything below is per-stack, so several Go servers can run at once — one per worktree. Stack
+# 0 is the historical layout (:8065, `mmroot`, `server.log`) exactly as before; see stack-env.sh.
+source "$ROOT/scripts/stack-env.sh"
+RUN="$BUILD/mmroot$MMRS_RUN_SUFFIX"
+LOG="$BUILD/server$MMRS_STACK_SUFFIX.log"
+PORT=$MMRS_GO_PORT
+DSN="postgres://mmuser:mmuser_password@localhost:$MMRS_PG_PORT/mattermost?sslmode=disable&connect_timeout=10"
 
 [ -d "$SRC" ] || { echo "reference/mattermost is not cloned — see MIGRATION.md for the pinned SHA"; exit 2; }
 
@@ -80,6 +83,11 @@ env_for_server() {
   export MM_SQLSETTINGS_DRIVERNAME=postgres
   export MM_SQLSETTINGS_DATASOURCE="$DSN"
   export MM_SERVICESETTINGS_SITEURL="http://localhost:$PORT"
+  # **Not optional once there is more than one stack.** The listen address lives in the
+  # configuration document, which `SetDefaults` fills with `:8065` on a fresh database — so
+  # without this every stack's server binds 8065 and all but the first die with
+  # "address already in use", having already migrated their own database.
+  export MM_SERVICESETTINGS_LISTENADDRESS=":$PORT"
   export MM_TEAMSETTINGS_ENABLEOPENSERVER=true
   export MM_SERVICESETTINGS_ENABLELOCALMODE=false
   export MM_FILESETTINGS_DIRECTORY="$RUN/data/"

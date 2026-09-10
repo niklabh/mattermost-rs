@@ -8,8 +8,23 @@
 
 use std::time::Duration;
 
-pub const GO: &str = "http://localhost:8065";
-pub const RUST: &str = "http://127.0.0.1:8066";
+/// The two servers under comparison, **baked in at compile time** from the stack this checkout
+/// is pinned to (`scripts/stack-env.sh`), defaulting to stack 0's historical ports.
+///
+/// Compile-time, not runtime, for one reason: these are `&'static str` consts used inside inline
+/// format captures — `format!("{GO}/api/v4/x")` — in about thirteen hundred places across this
+/// suite. A runtime lookup would mean rewriting all of them. `crates/mm-api/build.rs` registers
+/// the `rerun-if-env-changed` lines that keep a stale binary from comparing the wrong two
+/// servers, and each worktree has its own `target/`, so a worktree pinned to a stack pays one
+/// rebuild.
+pub const GO: &str = match option_env!("MMRS_GO_BASE") {
+    Some(base) => base,
+    None => "http://localhost:8065",
+};
+pub const RUST: &str = match option_env!("MMRS_RUST_BASE") {
+    Some(base) => base,
+    None => "http://127.0.0.1:8066",
+};
 pub const LOGIN_ID: &str = "slice@example.com";
 pub const PASSWORD: &str = "Slice-Test-1234";
 
@@ -2162,7 +2177,16 @@ impl SecondServer {
     ///
     /// Returns [`None`] when the binary is not where `parity.sh` leaves it — a `cargo test` run
     /// outside the harness — so a caller can skip rather than fail for the wrong reason.
+    /// `port` is the stack-0 port the caller names; `MMRS_PORT_OFFSET` shifts it onto this
+    /// stack. Read at **runtime**, unlike [`GO`] and [`RUST`], because there are only a handful of
+    /// callers and each names a literal — so two stacks never race for :8071 while the call sites
+    /// keep saying one number.
     pub async fn start(port: u16, env: &[(&str, &str)]) -> Option<Self> {
+        let port = port
+            + std::env::var("MMRS_PORT_OFFSET")
+                .ok()
+                .and_then(|v| v.parse::<u16>().ok())
+                .unwrap_or(0);
         let binary =
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/debug/mm-api");
         if !binary.exists() {

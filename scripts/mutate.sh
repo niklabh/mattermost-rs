@@ -51,8 +51,9 @@
 set -e
 cd "$(dirname "$0")/.."
 ROOT=$(pwd)
-: ${DATABASE_URL:=postgres://mmuser:mmuser_password@localhost:5432/mattermost}
-export DATABASE_URL MM_STORE_DB=1 MM_PARITY_STACK=1
+source "$ROOT/scripts/stack-env.sh"
+export MM_STORE_DB=1 MM_PARITY_STACK=1
+export MMRS_GO_BASE MMRS_RUST_BASE MMRS_PORT_OFFSET
 
 NAME="$1"; FILE="$2"; FROM="$3"; TO="$4"; SUITE="${5:-unit}"
 [ -n "$FILE" ] || { sed -n '2,28p' "$0"; exit 2; }
@@ -101,11 +102,11 @@ restart_server() {
     return 1
   fi
   for attempt in 1 2; do
-    pkill -f 'target/debug/mm-api' 2>/dev/null || true
+    pkill -f "$ROOT/target/debug/mm-api" 2>/dev/null || true
     sleep 1
     mmrs_launch_mm_api "$WORK/mm-api.log"
     for _ in $(seq 60); do
-      curl -sf -o /dev/null http://127.0.0.1:8066/api/v4/system/ping && return 0
+      curl -sf -o /dev/null "$MMRS_RUST_BASE/api/v4/system/ping" && return 0
       sleep 0.5
     done
     echo "  mm-api did not answer within 30s (attempt $attempt); last log lines:"
