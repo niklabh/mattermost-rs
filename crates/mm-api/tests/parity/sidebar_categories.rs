@@ -1,4 +1,8 @@
-//! Cross-server parity for the read side of `BaseRoutes.ChannelCategories`:
+//! Cross-server parity for the read side of `BaseRoutes.ChannelCategories`. The five writes on the
+//! same three paths have their own suite, `sidebar_category_writes.rs`; the fixture here is built
+//! by writing through **Go** and stays that way, so a regression in our writes cannot mask one in
+//! our reads.
+//!
 //!
 //! ```text
 //! GET /api/v4/users/{user_id}/teams/{team_id}/channels/categories

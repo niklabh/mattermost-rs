@@ -6541,3 +6541,66 @@ cost-factor sweep with a `--ignored` job, or a single test that exercises the pa
 lets the rest assert against precomputed digests. Neither has been done because neither is this
 session's route, and the suite is honest at 110s in a way it would not be at 55s with the coverage
 quietly dropped.
+
+## D-224 · Muting a sidebar category does not mute its channels
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-10 (phase 2, sidebar category writes)
+**Blocked on** a `ChannelMembers` write in `mm-store/src/channel_store.rs`.
+
+`UpdateSidebarCategories` ends in `muteChannelsForUpdatedCategories` (app/channel_category.go:164),
+which reconciles the category's `muted` flag with its channels' `ChannelMembers.NotifyProps
+["mark_unread"]` through `setChannelsMuted` (app/channel.go:4032) → `Channel().UpdateMultipleMembers`.
+That store write is not ported, so on this server:
+
+- muting a category sets `SidebarCategories.Muted` and leaves every channel in it unmuted;
+- **no `channel_member_updated` event is published**, one of which Go sends per affected channel, so
+  a connected client's membership state goes stale with no TTL to recover it;
+- the same applies to a channel *moved* between categories of differing `muted`.
+
+The **decision** is ported and has thirteen unit tests
+(`mm-app/src/sidebar.rs::mute_reconciliation`): the index pairing between the updated and original
+lists, both mute directions, the move-between-categories diff, the "moved outside these categories"
+case Go declines to handle, and the fact that the two sources of mutes are not de-duplicated against
+each other. `App::mute_channels_for_updated_categories` computes it on every update and logs a
+`warn!` naming the channels a Go server would have touched, so the gap is visible in a running
+server rather than only here.
+
+What is owed is `setChannelsMuted` on top of a ported `UpdateMultipleMembers`, plus a parity test
+that mutes a category and reads the channel member back. Not done in this session because
+`channel_store.rs` belonged to two other agents; the reconciliation is deliberately a free function
+so the write can be dropped in behind it without touching the tested part.
+
+## D-225 · `system_usage`'s post counter asserts a whole-database number three times in one run
+
+**Status** OPEN · **Severity** unverified · **Raised** 2026-09-10 (phase 2, sidebar category writes —
+found by the full suite, not by the route)
+
+`parity::system_usage::a_custom_typed_post_is_not_counted` reads
+`GET /api/v4/usage/posts` three times and asserts the number does not move. That number is
+`RoundOffToZeroesResolution(count, 3)` (app/usage.go:21) over **every** row of `Posts` with
+`Type = ''`, so it is a global counter, and the three reads are ~40 seconds apart while 996 other
+tests run.
+
+Measured on a stack whose count had reached **466**: the reads answered `300`, then `400`, and the
+third assertion failed. The suites that create posts add roughly a hundred user posts per full run
+and do not all purge them, so the count walks upward and eventually sits near a bucket boundary —
+at which point the test fails in the concurrent run and passes in isolation, indefinitely.
+
+`the_usage_counters_need_no_permission`, in the same module, compares an admin's numbers against a
+plain user's and fails the same way — two consecutive full runs failed a *different* one of the two,
+which is what rules out a fixed bug in either. Both pass with `--test parity system_usage`, 16
+passed in 0.88s.
+
+**Not caused by the sidebar routes**: zero of those 466 posts belong to any `mmrssbwrite%` fixture,
+and none of the eight category routes writes a post. Recorded rather than fixed because it is not
+this session's route, and left as a `divergence`-free `unverified` because nothing about Go's answer
+is in doubt — only the two tests' assumption that a global counter holds still for 44 seconds.
+
+Note also that `cargo test --workspace` **fail-fasts**: this one failure stopped 45 of the 48 test
+binaries from running at all, and the run still exited 0 through a pipe. Use `--no-fail-fast` when
+reading a full-suite number.
+
+What is owed is to make the assertion local: count the planted posts' contribution against a
+*delta* the test controls, or seed the count to a bucket midpoint before reading. Note that
+lowering the resolution is not available — the rounding is Go's, and asserting the raw count would
+stop testing the route.
