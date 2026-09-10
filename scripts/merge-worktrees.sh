@@ -27,7 +27,23 @@
 #   crates/mm-api/tests/common/mod.rs   shared helpers appended at the end
 #   MIGRATION.md, docs/TECH_DEBT.md     appended rows and entries
 #
-# **One conflict class here is NOT keep-both**: axum panics at startup on a duplicate route path,
+# **A second conflict class that is NOT keep-both, and it does not announce itself**: when both
+# agents append to the same file, git can place the `=======` at a point where *both* sides end
+# mid-item and the lines that close them sit AFTER the `>>>>>>>` marker — so that shared tail
+# closes only the second side. Stripping the three marker lines then produces a file with an
+# unclosed delimiter thousands of lines from the actual edit. This happened on
+# `channel_store.rs`, in three of its four regions, with three different tails:
+#
+#     region 1 (trait decls)    both sides end in `;`            nothing to duplicate
+#     region 2 (impl methods)   shared tail `    }`              duplicate onto the first side
+#     region 3 (free fns)       shared tail `source, })?; Ok(())` and its closing brace
+#     region 4 (free fns)       shared tail `}`
+#
+# So: inspect the last lines of each side and the first lines after the marker before resolving.
+# If both sides end mid-item, the first side needs its own copy of the shared tail. `cargo check`
+# catches it, but it reports the error at the end of the file rather than at the merge.
+#
+# **The other conflict class that is NOT keep-both**: axum panics at startup on a duplicate route path,
 # so two agents adding different methods to the same path must end up as ONE `.route()` call
 # chaining them (`get(a).put(b).delete(c)`), never two calls for the same path. Taking both sides
 # of that conflict compiles cleanly and dies at boot, so the suite catches it only because every
