@@ -31,8 +31,8 @@ use std::collections::{BTreeMap, HashMap};
 use mm_model::channel::{CHANNEL_TYPE_DIRECT, Channel, ChannelBannerInfo, ChannelSearchOpts};
 use mm_model::channel_list::ChannelList;
 use mm_model::channel_member::{
-    CHANNEL_NOTIFY_DEFAULT, ChannelMember, ChannelMemberWithTeamData, ChannelMembersWithTeamData,
-    ChannelUnread,
+    CHANNEL_MEMBER_NOTIFY_PROPS_MAX_RUNES, CHANNEL_NOTIFY_DEFAULT, ChannelMember,
+    ChannelMemberWithTeamData, ChannelMembersWithTeamData, ChannelUnread,
 };
 use mm_model::post_list::PostList;
 use mm_model::role::{CHANNEL_ADMIN_ROLE_ID, CHANNEL_GUEST_ROLE_ID, CHANNEL_USER_ROLE_ID};
@@ -471,6 +471,64 @@ pub trait ChannelStore {
         &self,
         id: &str,
     ) -> impl std::future::Future<Output = Result<Channel, StoreError>> + Send;
+
+    // ---------------------------------------------------------------------------
+    // Channel-member writes (`POST`/`PUT`/`DELETE …/channels/{id}/members…`)
+    // ---------------------------------------------------------------------------
+
+    /// Port of `SqlChannelStore.GetChannelOfType` (channel_store.go:1024).
+    ///
+    /// Unlike [`ChannelStore::get`] this carries **no** `Type IN ('O','P','D','G')` allow-list —
+    /// it is how a caller reaches a backing channel type that `Get` deliberately hides, which is
+    /// the entire reason `rejectSpaceChannelByID` (api4/channel.go:36) can answer 400 for a space
+    /// id instead of letting it fall through to `Get`'s 404.
+    fn get_channel_of_type(
+        &self,
+        id: &str,
+        channel_type: &str,
+    ) -> impl std::future::Future<Output = Result<Channel, StoreError>> + Send;
+
+    /// Port of `SqlChannelStore.SaveMember` (channel_store.go:1827) and the
+    /// `saveMultipleMembers` (channel_store.go:1835) behind it, for one member.
+    ///
+    /// Takes the member **by value** because Go's `PreSave` mutates it and the returned copy is a
+    /// third value again: the row that was inserted, with its *effective* roles resolved.
+    fn save_member(
+        &self,
+        member: ChannelMember,
+    ) -> impl std::future::Future<Output = Result<ChannelMember, StoreError>> + Send;
+
+    /// Port of `SqlChannelStore.UpdateMember` (channel_store.go:2052) and the
+    /// `UpdateMultipleMembers` (channel_store.go:1991) behind it, for one member.
+    fn update_member(
+        &self,
+        member: ChannelMember,
+    ) -> impl std::future::Future<Output = Result<ChannelMember, StoreError>> + Send;
+
+    /// Port of `SqlChannelStore.UpdateMemberNotifyProps` (channel_store.go:2060).
+    ///
+    /// A **merge**, not a replace: the SQL is `notifyprops || $1::jsonb`, so a key the caller did
+    /// not send keeps its stored value.
+    fn update_member_notify_props(
+        &self,
+        channel_id: &str,
+        user_id: &str,
+        props: &StringMap,
+    ) -> impl std::future::Future<Output = Result<ChannelMember, StoreError>> + Send;
+
+    /// Port of `SqlChannelStore.RemoveMember` (channel_store.go:2802), which is
+    /// `RemoveMembers` (channel_store.go:2771) with a one-element list.
+    fn remove_member(
+        &self,
+        channel_id: &str,
+        user_id: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlChannelStore.GetAllChannelMemberIdsByChannelId` (channel_store.go:1329).
+    fn get_all_channel_member_ids_by_channel_id(
+        &self,
+        channel_id: &str,
+    ) -> impl std::future::Future<Output = Result<Vec<String>, StoreError>> + Send;
 }
 
 /// Postgres-backed implementation.
@@ -873,6 +931,52 @@ impl ChannelStore for SqlChannelStore {
     async fn get_pinned_posts(&self, channel_id: &str) -> Result<PostList, StoreError> {
         get_pinned_posts(&self.pool, channel_id).await
     }
+
+    // ---------------------------------------------------------------------------
+    // Channel-member writes
+    // ---------------------------------------------------------------------------
+
+    #[tracing::instrument(skip_all, fields(channel_id = %id, channel_type = %channel_type))]
+    async fn get_channel_of_type(
+        &self,
+        id: &str,
+        channel_type: &str,
+    ) -> Result<Channel, StoreError> {
+        get_channel_of_type(&self.pool, id, channel_type).await
+    }
+
+    #[tracing::instrument(skip_all, fields(channel_id = %member.channel_id, user_id = %member.user_id))]
+    async fn save_member(&self, member: ChannelMember) -> Result<ChannelMember, StoreError> {
+        save_member(&self.pool, member).await
+    }
+
+    #[tracing::instrument(skip_all, fields(channel_id = %member.channel_id, user_id = %member.user_id))]
+    async fn update_member(&self, member: ChannelMember) -> Result<ChannelMember, StoreError> {
+        update_member(&self.pool, member).await
+    }
+
+    #[tracing::instrument(skip_all, fields(channel_id = %channel_id, user_id = %user_id, keys = props.len()))]
+    async fn update_member_notify_props(
+        &self,
+        channel_id: &str,
+        user_id: &str,
+        props: &StringMap,
+    ) -> Result<ChannelMember, StoreError> {
+        update_member_notify_props(&self.pool, channel_id, user_id, props).await
+    }
+
+    #[tracing::instrument(skip_all, fields(channel_id = %channel_id, user_id = %user_id))]
+    async fn remove_member(&self, channel_id: &str, user_id: &str) -> Result<(), StoreError> {
+        remove_member(&self.pool, channel_id, user_id).await
+    }
+
+    #[tracing::instrument(skip_all, fields(channel_id = %channel_id, members))]
+    async fn get_all_channel_member_ids_by_channel_id(
+        &self,
+        channel_id: &str,
+    ) -> Result<Vec<String>, StoreError> {
+        get_all_channel_member_ids_by_channel_id(&self.pool, channel_id).await
+    }
 }
 
 /// One row of Go's `channelMembersForTeamWithSchemeSelectQuery` (channel_store.go:558) — the
@@ -995,49 +1099,14 @@ pub async fn get_member(
     //
     // `COALESCE(UrgentMentionCount, 0)` is Go's, reproduced in SQL rather than defaulted
     // Rust-side so the database answers the same question for both servers.
-    let row = sqlx::query_as!(
-        ChannelMemberRow,
-        r#"
-        SELECT cm.channelid,
-               cm.userid,
-               cm.roles,
-               cm.lastviewedat,
-               cm.msgcount,
-               cm.mentioncount,
-               cm.mentioncountroot,
-               COALESCE(cm.urgentmentioncount, 0) AS "urgentmentioncount!",
-               cm.msgcountroot,
-               cm.notifyprops,
-               cm.lastupdateat,
-               cm.schemeuser,
-               cm.schemeadmin,
-               cm.schemeguest,
-               teamscheme.defaultchannelguestrole    AS teamschemedefaultguestrole,
-               teamscheme.defaultchanneluserrole     AS teamschemedefaultuserrole,
-               teamscheme.defaultchanneladminrole    AS teamschemedefaultadminrole,
-               channelscheme.defaultchannelguestrole AS channelschemedefaultguestrole,
-               channelscheme.defaultchanneluserrole  AS channelschemedefaultuserrole,
-               channelscheme.defaultchanneladminrole AS channelschemedefaultadminrole,
-               cm.autotranslationdisabled
-          FROM channelmembers cm
-          INNER JOIN channels c ON cm.channelid = c.id
-          LEFT JOIN schemes channelscheme ON c.schemeid = channelscheme.id
-          LEFT JOIN teams t ON c.teamid = t.id
-          LEFT JOIN schemes teamscheme ON t.schemeid = teamscheme.id
-         WHERE cm.channelid = $1
-           AND cm.userid = $2
-        "#,
-        channel_id,
-        user_id
-    )
-    .fetch_optional(pool)
-    .await
-    .map_err(|source| StoreError::Db {
-        context: format!(
-            "failed to get ChannelMember with channelId={channel_id} and userId={user_id}"
-        ),
-        source,
-    })?;
+    let row = select_member_with_scheme_roles(pool, channel_id, user_id)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!(
+                "failed to get ChannelMember with channelId={channel_id} and userId={user_id}"
+            ),
+            source,
+        })?;
 
     let Some(row) = row else {
         tracing::Span::current().record("found", false);
@@ -4461,6 +4530,593 @@ pub async fn get_board_channel(pool: &PgPool, id: &str) -> Result<Channel, Store
     tracing::Span::current().record("found", true);
 
     channel_from_row(row)
+}
+
+/// Go's `channelMembersForTeamWithSchemeSelectQuery` (channel_store.go:558) with `GetMember`'s two
+/// equality predicates, generic over the executor so the three member writes can re-select inside
+/// their own transaction — which is where Go does it.
+///
+/// The join shape is Go's exactly:
+///
+///   - **INNER** on `Channels`. A membership row whose channel is gone returns *nothing*, not a
+///     member with empty scheme defaults. Widening this to a LEFT join would resurrect orphaned
+///     memberships, and a permission check reading one would grant against a channel that no
+///     longer exists.
+///   - **LEFT** on the two `Schemes` rows and on `Teams`. Every channel on Team Edition has a NULL
+///     `SchemeId` — `Schemes` is an enterprise feature and the table is empty — so an INNER join
+///     anywhere in that chain would return no members at all. `Teams` is LEFT because a DM or GM
+///     channel has an empty `TeamId` and matches no team.
+///
+/// `COALESCE(UrgentMentionCount, 0)` is Go's, reproduced in SQL rather than defaulted Rust-side so
+/// the database answers the same question for both servers.
+async fn select_member_with_scheme_roles<'e, E>(
+    executor: E,
+    channel_id: &str,
+    user_id: &str,
+) -> Result<Option<ChannelMemberRow>, sqlx::Error>
+where
+    E: sqlx::PgExecutor<'e>,
+{
+    sqlx::query_as!(
+        ChannelMemberRow,
+        r#"
+        SELECT cm.channelid,
+               cm.userid,
+               cm.roles,
+               cm.lastviewedat,
+               cm.msgcount,
+               cm.mentioncount,
+               cm.mentioncountroot,
+               COALESCE(cm.urgentmentioncount, 0) AS "urgentmentioncount!",
+               cm.msgcountroot,
+               cm.notifyprops,
+               cm.lastupdateat,
+               cm.schemeuser,
+               cm.schemeadmin,
+               cm.schemeguest,
+               teamscheme.defaultchannelguestrole    AS teamschemedefaultguestrole,
+               teamscheme.defaultchanneluserrole     AS teamschemedefaultuserrole,
+               teamscheme.defaultchanneladminrole    AS teamschemedefaultadminrole,
+               channelscheme.defaultchannelguestrole AS channelschemedefaultguestrole,
+               channelscheme.defaultchanneluserrole  AS channelschemedefaultuserrole,
+               channelscheme.defaultchanneladminrole AS channelschemedefaultadminrole,
+               cm.autotranslationdisabled
+          FROM channelmembers cm
+          INNER JOIN channels c ON cm.channelid = c.id
+          LEFT JOIN schemes channelscheme ON c.schemeid = channelscheme.id
+          LEFT JOIN teams t ON c.teamid = t.id
+          LEFT JOIN schemes teamscheme ON t.schemeid = teamscheme.id
+         WHERE cm.channelid = $1
+           AND cm.userid = $2
+        "#,
+        channel_id,
+        user_id
+    )
+    .fetch_optional(executor)
+    .await
+}
+
+// ---------------------------------------------------------------------------
+// Channel-member writes
+//
+// Five writes and one read behind `POST`, `PUT` and `DELETE` on
+// `/api/v4/channels/{channel_id}/members…`. The read is `GetChannelOfType`, which those handlers
+// need only so a space channel is refused with a 400 rather than a 404.
+// ---------------------------------------------------------------------------
+
+/// Port of `SqlChannelStore.GetChannelOfType` (channel_store.go:1024).
+///
+/// `tableSelectQuery` with `Id` and `Type` — the same column list as [`get`] and
+/// [`get_board_channel`], and **no** message-channel allow-list. The type is compared as `text`
+/// because `channels.type` is a Postgres enum and the caller names it with a `&str` constant.
+#[tracing::instrument(skip(pool), fields(channel_id = %id, found))]
+pub async fn get_channel_of_type(
+    pool: &PgPool,
+    id: &str,
+    channel_type: &str,
+) -> Result<Channel, StoreError> {
+    let row = sqlx::query_as!(
+        ChannelRow,
+        r#"
+        SELECT c.id,
+               c.createat,
+               c.updateat,
+               c.deleteat,
+               c.teamid,
+               c.type::text AS "channel_type!",
+               c.displayname,
+               c.name,
+               c.header,
+               c.purpose,
+               c.lastpostat,
+               c.totalmsgcount,
+               c.extraupdateat,
+               c.creatorid,
+               c.schemeid,
+               c.groupconstrained,
+               c.autotranslation,
+               c.shared,
+               c.totalmsgcountroot,
+               c.lastrootpostat,
+               c.bannerinfo,
+               c.defaultcategoryname,
+               c.discoverable,
+               EXISTS (
+                   SELECT 1 FROM accesscontrolpolicies acp
+                    WHERE acp.id = c.id AND acp.type = 'channel'
+               ) AS "policy_enforced!",
+               COALESCE((
+                   SELECT acp.active FROM accesscontrolpolicies acp
+                    WHERE acp.id = c.id AND acp.type = 'channel' AND acp.active = TRUE
+                    LIMIT 1
+               ), false) AS "policy_is_active!"
+          FROM channels c
+         WHERE c.id = $1
+           AND c.type::text = $2
+        "#,
+        id,
+        channel_type
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: format!("failed to find channel with id = {id} and type = {channel_type}"),
+        source,
+    })?;
+
+    let Some(row) = row else {
+        tracing::Span::current().record("found", false);
+        return Err(StoreError::NotFound {
+            entity: "Channel",
+            criteria: id.to_owned(),
+        });
+    };
+    tracing::Span::current().record("found", true);
+
+    channel_from_row(row)
+}
+
+/// The two schemes' **channel**-role defaults for one channel, which is what a member's effective
+/// roles fall back to. Go asks for these in two separate queries (channel_store.go:1863 and
+/// :1899) keyed on the same channel id; one query with the same three LEFT JOINs answers both,
+/// because `Channels.Id` and `Schemes.Id` are primary keys and neither join can fan out.
+///
+/// A channel id that matches nothing yields **no row**, which is Go's `map[...]` miss: every
+/// default reads as `""` and `get_channel_roles` falls through to the constants. Reproduced rather
+/// than turned into a not-found, because Go inserts the membership anyway.
+struct SchemeDefaultsRow {
+    channel_guest: Option<String>,
+    channel_user: Option<String>,
+    channel_admin: Option<String>,
+    team_guest: Option<String>,
+    team_user: Option<String>,
+    team_admin: Option<String>,
+}
+
+async fn scheme_defaults_for_channel(
+    pool: &PgPool,
+    channel_id: &str,
+) -> Result<SchemeDefaultsRow, StoreError> {
+    let row = sqlx::query_as!(
+        SchemeDefaultsRow,
+        r#"
+        SELECT channelscheme.defaultchannelguestrole AS channel_guest,
+               channelscheme.defaultchanneluserrole  AS channel_user,
+               channelscheme.defaultchanneladminrole AS channel_admin,
+               teamscheme.defaultchannelguestrole    AS team_guest,
+               teamscheme.defaultchanneluserrole     AS team_user,
+               teamscheme.defaultchanneladminrole    AS team_admin
+          FROM channels c
+          LEFT JOIN schemes channelscheme ON c.schemeid = channelscheme.id
+          LEFT JOIN teams t ON c.teamid = t.id
+          LEFT JOIN schemes teamscheme ON t.schemeid = teamscheme.id
+         WHERE c.id = $1
+        "#,
+        channel_id
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: format!("default_channel_roles_select channelId={channel_id}"),
+        source,
+    })?;
+
+    Ok(row.unwrap_or(SchemeDefaultsRow {
+        channel_guest: None,
+        channel_user: None,
+        channel_admin: None,
+        team_guest: None,
+        team_user: None,
+        team_admin: None,
+    }))
+}
+
+/// Go's `model.MapToJSON` reaching a `jsonb` parameter.
+///
+/// **A nil map is the JSON value `null`, not `{}`** — `json.Marshal` of a nil Go map writes
+/// `null`, and the column is `jsonb`, so the row afterwards holds a JSON null rather than SQL
+/// NULL or an empty object. [`channel_member_from_row`] reads all three back as `None`, so the
+/// distinction is invisible on the wire and very visible in the table.
+fn notify_props_to_jsonb(props: Option<&StringMap>) -> serde_json::Value {
+    match props {
+        None => serde_json::Value::Null,
+        Some(props) => serde_json::json!(props),
+    }
+}
+
+/// Port of `SqlChannelStore.SaveMember` (channel_store.go:1827) → `saveMultipleMembers`
+/// (channel_store.go:1835), for the single-member case every ported caller uses.
+///
+/// # The three values here are not the same struct
+///
+/// 1. The **argument** as the app layer built it, with `explicit_roles` set and `roles` unused.
+/// 2. The **row**, after `PreSave` stamps `last_update_at` — and note the `Roles` *column* is
+///    written from `explicit_roles`, not from `roles` (`channelMemberToSlice`,
+///    channel_store.go:226). Writing `roles` there would persist the scheme-implied role names as
+///    explicit grants, which survives a scheme change and quietly outlives it.
+/// 3. The **return**, whose `roles`, `explicit_roles` and three scheme flags come back out of
+///    [`get_channel_roles`] — resolved against the schemes, not read back from the database. Go
+///    never re-selects here.
+///
+/// # `IsValid` runs inside the store, so its error reaches the client unwrapped
+///
+/// A member with no `notify_props` fails `ChannelMember::is_valid` with
+/// `model.channel_member.is_valid.notify_level.app_error` at 400, and the app layer's
+/// `errors.As(err, &appErr)` passes it straight through. So the id a client sees for a malformed
+/// member is a *model* id, not `app.channel.add_user.to.channel.failed.app_error`.
+#[tracing::instrument(skip(pool, member), fields(channel_id = %member.channel_id, user_id = %member.user_id))]
+pub async fn save_member(
+    pool: &PgPool,
+    mut member: ChannelMember,
+) -> Result<ChannelMember, StoreError> {
+    let defaults = scheme_defaults_for_channel(pool, &member.channel_id).await?;
+
+    member.pre_save();
+    member.is_valid().map_err(|app_error| StoreError::Invalid {
+        entity: "ChannelMember",
+        app_error,
+    })?;
+
+    let notify_props = notify_props_to_jsonb(member.notify_props.as_ref());
+
+    // `channelMemberSliceColumns()` (channel_store.go:146) in order. The order matters only for
+    // readability against Go, but the *contents* matter: `roles` receives `explicit_roles`.
+    let inserted = sqlx::query!(
+        r#"
+        INSERT INTO channelmembers
+            (channelid, userid, roles, lastviewedat, msgcount, msgcountroot, mentioncount,
+             mentioncountroot, urgentmentioncount, notifyprops, lastupdateat, schemeuser,
+             schemeadmin, schemeguest, autotranslationdisabled)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+        "#,
+        member.channel_id,
+        member.user_id,
+        member.explicit_roles,
+        member.last_viewed_at,
+        member.msg_count,
+        member.msg_count_root,
+        member.mention_count,
+        member.mention_count_root,
+        member.urgent_mention_count,
+        notify_props,
+        member.last_update_at,
+        member.scheme_user,
+        member.scheme_admin,
+        member.scheme_guest,
+        member.auto_translation_disabled,
+    )
+    .execute(pool)
+    .await;
+
+    if let Err(source) = inserted {
+        // Go's `IsUniqueConstraintError(execErr, []string{"ChannelId", "channelmembers_pkey", …})`
+        // → `store.NewErrConflict("ChannelMembers", …)`. The app layer does not branch on it
+        // (`AddUserToChannel` wraps everything into one 500), but the *resource* string is what a
+        // future caller would branch on, so it is typed rather than folded into `Db`.
+        if source
+            .as_database_error()
+            .is_some_and(|db| db.is_unique_violation())
+        {
+            return Err(StoreError::Conflict {
+                resource: "ChannelMembers",
+                source,
+            });
+        }
+        return Err(StoreError::Db {
+            context: format!(
+                "channel_members_save channelId={}, userId={}",
+                member.channel_id, member.user_id
+            ),
+            source,
+        });
+    }
+
+    // `strings.Fields(member.ExplicitRoles)` — **not** `member.Roles`. Feeding `roles` in would
+    // make every scheme-implied role an explicit one on the returned struct.
+    let resolved = get_channel_roles(
+        member.scheme_guest,
+        member.scheme_user,
+        member.scheme_admin,
+        defaults.team_guest.as_deref().unwrap_or_default(),
+        defaults.team_user.as_deref().unwrap_or_default(),
+        defaults.team_admin.as_deref().unwrap_or_default(),
+        defaults.channel_guest.as_deref().unwrap_or_default(),
+        defaults.channel_user.as_deref().unwrap_or_default(),
+        defaults.channel_admin.as_deref().unwrap_or_default(),
+        &member.explicit_roles,
+    );
+
+    member.scheme_guest = resolved.scheme_guest;
+    member.scheme_user = resolved.scheme_user;
+    member.scheme_admin = resolved.scheme_admin;
+    member.roles = resolved.roles.join(" ");
+    member.explicit_roles = resolved.explicit_roles.join(" ");
+    Ok(member)
+}
+
+/// Port of `SqlChannelStore.UpdateMember` (channel_store.go:2052) → `UpdateMultipleMembers`
+/// (channel_store.go:1991), for the single-member case.
+///
+/// # It writes every column and then reads the row back
+///
+/// `NewMapFromChannelMemberModel` (channel_store.go:93) is a full `SET` map, not a patch — a
+/// caller that loaded a member, changed one flag and passed it here also rewrites the unread
+/// counters from whatever it happened to be holding. That is Go's contract and the reason
+/// `updateChannelMemberNotifyProps` uses its own merge query instead of this.
+///
+/// The `Roles` column again receives `explicit_roles`, and the **return value comes from a fresh
+/// `SELECT`** through the scheme joins — so the effective `roles` on the answer are the database's
+/// view, not the caller's.
+///
+/// # The re-select is inside the transaction
+///
+/// Go's own comment wishes it were not ("TODO: Get this out of the transaction when is possible").
+/// Kept inside, because moving it out changes what a concurrent write can interleave.
+#[tracing::instrument(skip(pool, member), fields(channel_id = %member.channel_id, user_id = %member.user_id))]
+pub async fn update_member(
+    pool: &PgPool,
+    mut member: ChannelMember,
+) -> Result<ChannelMember, StoreError> {
+    member.pre_update();
+    member.is_valid().map_err(|app_error| StoreError::Invalid {
+        entity: "ChannelMember",
+        app_error,
+    })?;
+
+    let notify_props = notify_props_to_jsonb(member.notify_props.as_ref());
+
+    let mut tx = pool.begin().await.map_err(|source| StoreError::Db {
+        context: "begin_transaction".to_owned(),
+        source,
+    })?;
+
+    sqlx::query!(
+        r#"
+        UPDATE channelmembers
+           SET roles = $3,
+               lastviewedat = $4,
+               msgcount = $5,
+               mentioncount = $6,
+               mentioncountroot = $7,
+               urgentmentioncount = $8,
+               msgcountroot = $9,
+               notifyprops = $10,
+               lastupdateat = $11,
+               schemeguest = $12,
+               schemeuser = $13,
+               schemeadmin = $14,
+               autotranslationdisabled = $15
+         WHERE channelid = $1
+           AND userid = $2
+        "#,
+        member.channel_id,
+        member.user_id,
+        member.explicit_roles,
+        member.last_viewed_at,
+        member.msg_count,
+        member.mention_count,
+        member.mention_count_root,
+        member.urgent_mention_count,
+        member.msg_count_root,
+        notify_props,
+        member.last_update_at,
+        member.scheme_guest,
+        member.scheme_user,
+        member.scheme_admin,
+        member.auto_translation_disabled,
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: "failed to update ChannelMember".to_owned(),
+        source,
+    })?;
+
+    let row = select_member_with_scheme_roles(&mut *tx, &member.channel_id, &member.user_id)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!(
+                "failed to get ChannelMember with channelId={} and userId={}",
+                member.channel_id, member.user_id
+            ),
+            source,
+        })?;
+
+    // **The UPDATE matching nothing is not the error** — the `SELECT` finding nothing is. Go's
+    // `Exec` reports no rows affected and carries on; only `sql.ErrNoRows` from the read below
+    // becomes `ErrNotFound`, which the app layer turns into a 404. Checking `rows_affected` here
+    // instead would answer 404 for a no-op update of a member that does exist.
+    let Some(row) = row else {
+        return Err(StoreError::NotFound {
+            entity: "ChannelMember",
+            criteria: format!("channelId={}, userId={}", member.channel_id, member.user_id),
+        });
+    };
+
+    let updated = channel_member_from_row(row)?;
+
+    tx.commit().await.map_err(|source| StoreError::Db {
+        context: "commit_transaction".to_owned(),
+        source,
+    })?;
+
+    Ok(updated)
+}
+
+/// Port of `SqlChannelStore.UpdateMemberNotifyProps` (channel_store.go:2060).
+///
+/// # `||` is a merge and the caller depends on it
+///
+/// `notifyprops = notifyprops || $1::jsonb` keeps every key the caller did not name. Replacing the
+/// column instead would silently reset `mark_unread` — the muted flag — whenever a client saved
+/// only `desktop`, which is what the webapp's notification dialog does.
+///
+/// # The rune cap is measured on Go's own encoding, before the query runs
+///
+/// `utf8.RuneCountInString(model.MapToJSON(props)) > model.ChannelMemberNotifyPropsMaxRunes`
+/// → `store.NewErrInvalidInput`, which the app layer turns into a **400**
+/// (`app.channel.update_member.notify_props_limit_exceeded.app_error`). Note it is checked on the
+/// *submitted* props, not on the merged result, so a member already over the limit can be edited.
+#[tracing::instrument(skip(pool, props), fields(channel_id = %channel_id, user_id = %user_id, keys = props.len()))]
+pub async fn update_member_notify_props(
+    pool: &PgPool,
+    channel_id: &str,
+    user_id: &str,
+    props: &StringMap,
+) -> Result<ChannelMember, StoreError> {
+    let encoded = mm_model::utils::go_json_marshal_string_map(Some(props));
+    if encoded.chars().count() > CHANNEL_MEMBER_NOTIFY_PROPS_MAX_RUNES {
+        return Err(StoreError::InvalidInput {
+            entity: "ChannelMember",
+            field: "NotifyProps",
+            value: format!("length={}", encoded.chars().count()),
+        });
+    }
+
+    let mut tx = pool.begin().await.map_err(|source| StoreError::Db {
+        context: "begin_transaction".to_owned(),
+        source,
+    })?;
+
+    let patch = serde_json::json!(props);
+    // `model.GetMillis()` is read at query-build time in Go, i.e. once per call.
+    let now = mm_model::utils::get_millis();
+    sqlx::query!(
+        r#"
+        UPDATE channelmembers
+           SET notifyprops = notifyprops || $1::jsonb,
+               lastupdateat = $2
+         WHERE userid = $3
+           AND channelid = $4
+        "#,
+        patch,
+        now,
+        user_id,
+        channel_id
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: format!(
+            "failed to update ChannelMember with channelID={channel_id} and userID={user_id}"
+        ),
+        source,
+    })?;
+
+    let row = select_member_with_scheme_roles(&mut *tx, channel_id, user_id)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!(
+                "failed to get ChannelMember with channelId={channel_id} and userId={user_id}"
+            ),
+            source,
+        })?;
+
+    let Some(row) = row else {
+        return Err(StoreError::NotFound {
+            entity: "ChannelMember",
+            criteria: format!("channelId={channel_id}, userId={user_id}"),
+        });
+    };
+
+    let updated = channel_member_from_row(row)?;
+
+    tx.commit().await.map_err(|source| StoreError::Db {
+        context: "commit_transaction".to_owned(),
+        source,
+    })?;
+
+    Ok(updated)
+}
+
+/// Port of `SqlChannelStore.RemoveMember` (channel_store.go:2802) → `RemoveMembers`
+/// (channel_store.go:2771).
+///
+/// # Two deletes, no transaction, and the second one is not optional
+///
+/// The membership goes, and then the user's `SidebarChannels` rows for that channel go — "cleanup
+/// sidebarchannels table if the user is no longer a member of that channel". Skipping it leaves a
+/// channel pinned in the user's sidebar categories that they are no longer in, which
+/// `GET /users/{id}/teams/{team}/channels/categories` will happily keep returning.
+///
+/// Go runs both on `GetMaster()` with **no transaction**, so a failure of the second leaves the
+/// first committed. Reproduced: wrapping them would change which partial states are reachable.
+#[tracing::instrument(skip(pool), fields(channel_id = %channel_id, user_id = %user_id))]
+pub async fn remove_member(
+    pool: &PgPool,
+    channel_id: &str,
+    user_id: &str,
+) -> Result<(), StoreError> {
+    sqlx::query!(
+        "DELETE FROM channelmembers WHERE channelid = $1 AND userid = $2",
+        channel_id,
+        user_id
+    )
+    .execute(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: "failed to delete ChannelMembers".to_owned(),
+        source,
+    })?;
+
+    sqlx::query!(
+        "DELETE FROM sidebarchannels WHERE channelid = $1 AND userid = $2",
+        channel_id,
+        user_id
+    )
+    .execute(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: "failed to delete SidebarChannels".to_owned(),
+        source,
+    })?;
+
+    Ok(())
+}
+
+/// Port of `SqlChannelStore.GetAllChannelMemberIdsByChannelId` (channel_store.go:1329).
+///
+/// **Unordered and unpaginated** — Go's `SELECT UserId FROM ChannelMembers WHERE ChannelId=?` with
+/// no `ORDER BY`, and `App.SetChannelMembers` immediately turns it into a set, so no caller may
+/// depend on the order. An empty channel is an empty list, not a miss.
+#[tracing::instrument(skip(pool), fields(channel_id = %channel_id, members))]
+pub async fn get_all_channel_member_ids_by_channel_id(
+    pool: &PgPool,
+    channel_id: &str,
+) -> Result<Vec<String>, StoreError> {
+    let ids = sqlx::query_scalar!(
+        r#"SELECT userid AS "userid!" FROM channelmembers WHERE channelid = $1"#,
+        channel_id
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: format!("failed to get ChannelMembers with channelID={channel_id}"),
+        source,
+    })?;
+
+    tracing::Span::current().record("members", ids.len());
+    Ok(ids)
 }
 
 #[cfg(test)]

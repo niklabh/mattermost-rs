@@ -9,6 +9,7 @@ pub mod audits;
 pub mod auth;
 /// The two bot reads. `getBot` and `getBots`.
 pub mod bots;
+pub mod channel_member_writes;
 pub mod channels;
 pub mod cloud;
 pub mod commands;
@@ -614,9 +615,18 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/channels/{channel_id}/stats",
             partially_migrated_with_ids(&state, get(channels::get_channel_stats)),
         )
+        // Three methods on one path. **axum panics on a duplicate route path**, so the POST and
+        // PUT are chained onto the GET's `MethodRouter` rather than added as a second `.route`.
+        // gorilla registers all three separately on `BaseRoutes.ChannelMembers`
+        // (api4/channel.go:107-110) and picks by method, which is what chaining reproduces.
         .route(
             "/api/v4/channels/{channel_id}/members",
-            partially_migrated_with_ids(&state, get(channels::get_channel_members)),
+            partially_migrated_with_ids(
+                &state,
+                get(channels::get_channel_members)
+                    .post(channel_member_writes::add_channel_member)
+                    .put(channel_member_writes::set_channel_members),
+            ),
         )
         // The first migrated path with parameters. axum's `{name}` segments bind by position in
         // the handler's `Path` tuple, so the order here is the order there.
@@ -632,7 +642,40 @@ pub fn router(state: AppState) -> Router {
         )
         .route(
             "/api/v4/channels/{channel_id}/members/{user_id}",
-            partially_migrated_with_ids(&state, get(channels::get_channel_member)),
+            partially_migrated_with_ids(
+                &state,
+                get(channels::get_channel_member)
+                    .delete(channel_member_writes::remove_channel_member),
+            ),
+        )
+        // The three `PUT`s one segment deeper. `BaseRoutes.ChannelMember` (api4/channel.go:113-116)
+        // registers `/roles`, `/schemeRoles` and `/notify_props` as literals under the `{user_id}`
+        // parameter, so neither router has a precedence puzzle here — and `/autotranslation`, the
+        // fourth literal, is deliberately unregistered (it needs the AutoTranslation store) and
+        // falls to `Router::fallback` whole.
+        //
+        // **`schemeRoles` is camelCase**, alone among these paths. gorilla matches it literally and
+        // so does axum, so `/schemeroles` reaches neither and is forwarded.
+        .route(
+            "/api/v4/channels/{channel_id}/members/{user_id}/roles",
+            partially_migrated_with_ids(
+                &state,
+                put(channel_member_writes::update_channel_member_roles),
+            ),
+        )
+        .route(
+            "/api/v4/channels/{channel_id}/members/{user_id}/schemeRoles",
+            partially_migrated_with_ids(
+                &state,
+                put(channel_member_writes::update_channel_member_scheme_roles),
+            ),
+        )
+        .route(
+            "/api/v4/channels/{channel_id}/members/{user_id}/notify_props",
+            partially_migrated_with_ids(
+                &state,
+                put(channel_member_writes::update_channel_member_notify_props),
+            ),
         )
         // `BaseRoutes.PostsForChannel` (api.go:240) — a `PathPrefix("/posts")` subrouter with a
         // single `GET` at `""`. gorilla's prefix router 404s anything deeper (`/posts/unread`
