@@ -6569,3 +6569,29 @@ What is owed is `setChannelsMuted` on top of a ported `UpdateMultipleMembers`, p
 that mutes a category and reads the channel member back. Not done in this session because
 `channel_store.rs` belonged to two other agents; the reconciliation is deliberately a free function
 so the write can be dropped in behind it without touching the tested part.
+
+## D-225 · `system_usage`'s post counter asserts a whole-database number three times in one run
+
+**Status** OPEN · **Severity** unverified · **Raised** 2026-09-10 (phase 2, sidebar category writes —
+found by the full suite, not by the route)
+
+`parity::system_usage::a_custom_typed_post_is_not_counted` reads
+`GET /api/v4/usage/posts` three times and asserts the number does not move. That number is
+`RoundOffToZeroesResolution(count, 3)` (app/usage.go:21) over **every** row of `Posts` with
+`Type = ''`, so it is a global counter, and the three reads are ~40 seconds apart while 996 other
+tests run.
+
+Measured on a stack whose count had reached **466**: the reads answered `300`, then `400`, and the
+third assertion failed. The suites that create posts add roughly a hundred user posts per full run
+and do not all purge them, so the count walks upward and eventually sits near a bucket boundary —
+at which point the test fails in the concurrent run and passes in isolation, indefinitely.
+
+**Not caused by the sidebar routes**: zero of those 466 posts belong to any `mmrssbwrite%` fixture,
+and none of the eight category routes writes a post. Recorded rather than fixed because it is not
+this session's route, and left as a `divergence`-free `unverified` because nothing about Go's answer
+is in doubt — only the test's assumption that a global counter holds still.
+
+What is owed is to make the assertion local: count the planted posts' contribution against a
+*delta* the test controls, or seed the count to a bucket midpoint before reading. Note that
+lowering the resolution is not available — the rounding is Go's, and asserting the raw count would
+stop testing the route.
