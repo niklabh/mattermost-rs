@@ -8901,7 +8901,8 @@ live number; it reads **73**.
 The 73 are not one queue. They fall into four groups, and the next session should pick from the
 first:
 
-**Ordinary work (~30).** `report.go` (2), `post.go` (2), `channel.go` (4), `team.go` (4),
+**Ordinary work (~30).** ~~`report.go` (2)~~ *— done 2026-09-09, see below*, `post.go` (2),
+`channel.go` (4), `team.go` (4),
 `user.go`'s `auth_data`/`invalid_emails`/`uploads` (3), `properties.go` (3) and
 `custom_profile_attributes.go` (2) behind one property service, `access_control.go` (4),
 `shared_channel.go` (1), `saml/certificate/status` (1), `config.go` (3), `api.go`'s `/manualtest`
@@ -8930,3 +8931,106 @@ faster, and that exposed **nine** latent races — four socket assertions counti
 shared admin, two fixed-window waits, a live user count compared across two instants, a tied
 sort key on direct-message channels, and a fifty-one-request test whose post another suite deleted
 underneath it. All nine are fixed rather than retried, and the suite is 906 tests over ~40s.
+
+## The two user-report reads, and a keyset cursor that disagrees with its own tiebreaker (2026-09-09)
+
+`GET /api/v4/reports/users` and `GET /api/v4/reports/users/count` — the System Console's *User
+Management → Users* table and its total. `mm-model`'s `report.rs` was already ported, so this was
+a store query, two app functions, two handlers and a parity suite:
+`mm_store::UserStore::get_user_report`, `mm_app::App::get_users_for_reporting`, `mm_api::reports`.
+
+Go builds the report from nine `squirrel` fragments, a keyset cursor whose *sort column is a
+parameter*, and an outer `SELECT … FROM (…)` that re-sorts a backwards page. All of it is one
+`query_as!` here, with the sort key computed in a lateral join — `k_num` for `CreateAt`, `k_txt`
+for the six text columns, each NULL when the other is in use, so `ORDER BY` can name both and let
+the unused one tie.
+
+### The `Users.Id` tiebreaker does not follow the sort
+
+`GetUserReport` decides its direction twice: from `SortDesc`, then again from `Direction` when a
+cursor is present, where `prev`-on-ascending and `next`-on-descending both flip it to `DESC`. The
+cursor predicate follows that flip — `<` for `DESC`, `>` for `ASC`. The `ORDER BY`'s `Users.Id`
+tiebreaker is written with no direction at all and is therefore **always ascending**, even on a
+descending page whose predicate reads `Users.Id <`. Reproduced rather than corrected; the test
+that pins it is `every_sort_column_and_direction_matches`, which passes only because three of the
+seven sort columns are empty on every fixture user and tie on the id alone.
+
+### `direction=prev` reverses a page it did not paginate
+
+The reversing wrapper is applied on `Direction == "prev"` **whether or not a cursor was given**.
+With no cursor the inner query still sorts ascending, so `?direction=prev` returns the *same first
+page*, handed back reversed — not the page before. A reader expecting "prev means the previous
+page" writes the wrapper into the cursor branch and gets a test failure only from
+`a_prev_page_with_no_cursor_is_the_tail_in_forward_order`.
+
+### The count route reads six of the thirteen parameters
+
+`getUserCountForReporting` calls `fillUserReportOptions` and **not** `fillReportingBaseOptions`,
+and `App.GetUserCountForReport` does **not** call `IsValid`. So `?sort_column=nonsense` is a 400
+on the list and silently ignored on the count, and `?date_range=previous_month` narrows the
+aggregates on the list and cannot change the count at all — the date range reaches only the
+`PostStats` join condition, which the count query has not got.
+
+Two more small ones on the wire: the three boolean filters compare against the literal string
+`"true"`, so `?hide_active=1` is **false**; and `page_size` goes through `strconv.ParseInt` with
+the error discarded, so `?page_size=abc` is 50 rather than a 400.
+
+### A `CreateAt` cursor that is not a number is a 500
+
+Go binds `FromColumnValue` as a string and lets Postgres coerce it against a `bigint`, so
+`?sort_column=CreateAt&from_id=…&from_column_value=yesterday` fails the query and answers
+`app.report.get_user_report.store_error`. Rust has to parse, and parsing quietly with `.ok()`
+would compare against SQL NULL and answer **200 with an empty page** — the plausible wrong answer.
+`ReportFilter::from_options` returns a `StoreError::Argument` instead; measured against Go, not
+inferred.
+
+### `PostStats` is a materialized view nothing refreshes
+
+`MAX(ps.LastPostDate)`, `COUNT(ps.Day)` and `SUM(ps.NumPosts)` all read `poststats`, which only
+`RefreshPostStatsForUsers` — a scheduled job, reachable from no route — ever populates. Against an
+unrefreshed view every `total_posts` is absent and every `days_active` is `0`, the date-range join
+condition is dead, and four of this session's mutations survive catching nothing. The suite
+refreshes it, and plants posts on four separate days — today, the first of this month, the first
+of last month, and a hundred days back — because posting through the API only ever writes today's
+date, and `ps.Day >= start` / `ps.Day < end` are then unreachable in both directions.
+
+### The bot fixture was poisoning a route it has nothing to do with
+
+`common::plant_bot` wrote `MfaUsedTimestamps` as `'{}'` — a JSON **object**, where Go scans a
+`model.StringArray`. Any `GET /api/v4/users` that returned that row was a 500 *from Go*, for every
+caller. It never showed as a bug because the bots suite deletes its rows on the way out, so the
+poison lasted exactly as long as that suite did; this session planted a bot and left it behind,
+and three `users_list` tests failed on a row they never asked for. Now `'null'::jsonb`, which is
+what the Go server itself writes and what `purge_api_fixtures` normalises to. Same family as the
+NULL `LastPictureUpdate` the previous entry records: a hand-planted row that only Go cannot read.
+
+### Mutation testing: 51 run, 49 caught, 2 controls survived
+
+Three real survivors on the first pass, each the same shape — the right answer and the wrong
+answer coincided:
+
+* `count-guest-single-counts-many` swaps `= 1` for `> 1` in the **count** query's guest filter.
+  The fixture had one single-channel guest and one multi-channel guest, so both readings counted
+  one user. A third guest, on the `> 1` side, separates them.
+* `report-channel-count-includes-dms` adds `'D'` to `c.Type IN ('O','P')`. No fixture user had a
+  direct message. One DM — opened **after** the channel-count surgery, since that deletes every
+  membership row but one and a DM membership is a row like any other — closes it.
+* `report-search-is-prefix-only` narrows the `Username` arm to `term%`. `create_plain_user`
+  derives the email from the username, so every term matching one matches the other and the five
+  `LIKE` arms can never disagree. A user whose email shares no substring with their username
+  tests the `Username` and `Email` arms one at a time.
+
+The batch also **aborted at mutation 47 with the mutation still applied**, because a plan line
+with an empty `to` field shifts `read -r`'s remaining fields: the replacement text became the
+literal string `api`, which is what ended up in `reports.rs`. `preflight-plans.sh` is what caught
+it — a zero-match anchor in a file nobody had edited. A plan's `to` should be a no-op statement,
+never empty.
+
+### The ledger's own number was 21 short
+
+The section above records the inventory as **231/764 to 264/764**. `scripts/routes.py` against
+that commit reads **285/764**, and the commit message for the file-backend work says
+`264 -> 285` — so the prose was written before those 21 pairs were registered and never caught
+up, while the commit had it right. Reading the number out of `scripts/routes.py` rather than out
+of the previous entry is the whole reason that script exists. This session takes it to
+**287/764**; `306 HTTP pairs remain`.

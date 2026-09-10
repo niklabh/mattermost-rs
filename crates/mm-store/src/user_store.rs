@@ -219,6 +219,43 @@ pub trait UserStore {
         term: &str,
         options: &UserSearchOptions,
     ) -> impl std::future::Future<Output = Result<Vec<User>, StoreError>> + Send;
+
+    /// Port of `SqlUserStore.GetUserReport` (user_store.go:2503) — the System Console's user
+    /// report, one row per non-bot user with four aggregates attached.
+    ///
+    /// # Keyset pagination, and the tiebreaker that does not follow the sort
+    ///
+    /// Go decides the SQL sort direction *twice*: from `SortDesc`, and then again from
+    /// `Direction` when a cursor is present, where `prev`-on-ascending and `next`-on-descending
+    /// both flip it to `DESC`. The cursor predicate follows that flip — `<` for `DESC`, `>` for
+    /// `ASC` — but the `Users.Id` tiebreaker in the `ORDER BY` is written without a direction and
+    /// is therefore **always `ASC`**, even on a descending page whose predicate reads
+    /// `Users.Id <`. That asymmetry is Go's and it is reproduced, not corrected.
+    ///
+    /// # `prev` re-sorts the page it just fetched
+    ///
+    /// A backwards page comes out of the database in reverse and Go wraps the whole statement in
+    /// a `SELECT … FROM (…) data` that sorts it back. The wrapper is applied whenever
+    /// `Direction == "prev"` — **including with no cursor at all**, where it simply reverses the
+    /// first page.
+    fn get_user_report(
+        &self,
+        options: &mm_model::report::UserReportOptions,
+    ) -> impl std::future::Future<
+        Output = Result<Vec<mm_model::report::UserReportQuery>, StoreError>,
+    > + Send;
+
+    /// Port of `SqlUserStore.GetUserCountForReport` (user_store.go:2483).
+    ///
+    /// The same `applyUserReportFilter` as [`UserStore::get_user_report`] over a bare
+    /// `COUNT(Users.Id)`, so the two agree by construction — **except** that the count ignores
+    /// the date range entirely. `StartAt`/`EndAt` reach the report only through the `PostStats`
+    /// join condition, which this query does not have, so narrowing the date range changes the
+    /// aggregates on a row and never the number of rows.
+    fn get_user_count_for_report(
+        &self,
+        options: &mm_model::report::UserReportOptions,
+    ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
 }
 
 /// `model.UserSearchDefaultLimit` (model/user_search.go:7).
@@ -2059,6 +2096,473 @@ impl UserStore for SqlUserStore {
 
         tracing::Span::current().record("exists", exists);
         Ok(exists)
+    }
+
+    #[tracing::instrument(skip_all, fields(sort_column = %options.base.sort_column, found))]
+    async fn get_user_report(
+        &self,
+        options: &mm_model::report::UserReportOptions,
+    ) -> Result<Vec<mm_model::report::UserReportQuery>, StoreError> {
+        let filter = ReportFilter::from_options(options)?;
+        let (start_day, end_day) = report_date_bounds(options);
+
+        // Go builds nine independent `squirrel` fragments here; this is the same query with each
+        // fragment turned into a guarded predicate, which is what the rest of this store does
+        // (see [`UserStore::count`]). Two lateral joins carry the parts that are needed twice:
+        // `k` holds the sort key, whose *column* is chosen by a parameter and cannot be one, and
+        // `cc` the channel count, which is both a selected column and the guest filter's subject.
+        let rows = sqlx::query_as!(
+            UserReportRow,
+            r#"
+            SELECT data.id AS "id!",
+                   data.createat,
+                   data.updateat,
+                   data.deleteat,
+                   data.username,
+                   data.password,
+                   data.authdata,
+                   data.authservice,
+                   data.email,
+                   data.emailverified,
+                   data.nickname,
+                   data.firstname,
+                   data.lastname,
+                   data.position,
+                   data.roles,
+                   data.allowmarketing,
+                   data.props,
+                   data.notifyprops,
+                   data.lastpasswordupdate,
+                   data.lastpictureupdate,
+                   data.failedattempts,
+                   data.locale,
+                   data.timezone,
+                   data.mfaactive,
+                   data.mfasecret,
+                   data.mfausedtimestamps,
+                   data.remoteid,
+                   data.lastlogin AS "lastlogin!",
+                   data.laststatusat,
+                   data.lastpostdate,
+                   data.daysactive,
+                   data.totalposts,
+                   data.channelcount,
+                   data.teams AS "teams!"
+              FROM (
+                SELECT u.id,
+                       u.createat,
+                       u.updateat,
+                       u.deleteat,
+                       u.username,
+                       u.password,
+                       u.authdata,
+                       u.authservice,
+                       u.email,
+                       u.emailverified,
+                       u.nickname,
+                       u.firstname,
+                       u.lastname,
+                       u.position,
+                       u.roles,
+                       u.allowmarketing,
+                       u.props,
+                       u.notifyprops,
+                       u.lastpasswordupdate,
+                       u.lastpictureupdate,
+                       u.failedattempts::bigint AS failedattempts,
+                       u.locale,
+                       u.timezone,
+                       u.mfaactive,
+                       u.mfasecret,
+                       u.mfausedtimestamps,
+                       u.remoteid,
+                       u.lastlogin,
+                       MAX(s.lastactivityat) AS laststatusat,
+                       MAX(ps.lastpostdate) AS lastpostdate,
+                       COUNT(ps.day) AS daysactive,
+                       SUM(ps.numposts)::bigint AS totalposts,
+                       cc.n AS channelcount,
+                       COALESCE((SELECT string_agg(t.displayname, ', ' ORDER BY t.displayname)
+                                   FROM teammembers tmt
+                                   INNER JOIN teams t ON t.id = tmt.teamid AND t.deleteat = 0
+                                  WHERE tmt.userid = u.id AND tmt.deleteat = 0), '') AS teams,
+                       k.k_num,
+                       k.k_txt
+                  FROM users u
+                  CROSS JOIN LATERAL (
+                    SELECT (CASE WHEN $1 = 'CreateAt' THEN u.createat END) AS k_num,
+                           (CASE $1 WHEN 'Username'  THEN u.username
+                                    WHEN 'FirstName' THEN u.firstname
+                                    WHEN 'LastName'  THEN u.lastname
+                                    WHEN 'Nickname'  THEN u.nickname
+                                    WHEN 'Email'     THEN u.email
+                                    WHEN 'Roles'     THEN u.roles END) AS k_txt
+                  ) k
+                  CROSS JOIN LATERAL (
+                    SELECT COUNT(*) AS n
+                      FROM channelmembers cm
+                      INNER JOIN channels c
+                        ON c.id = cm.channelid AND c.deleteat = 0 AND c.type IN ('O', 'P')
+                     WHERE cm.userid = u.id
+                  ) cc
+                  LEFT JOIN status s ON s.userid = u.id
+                  LEFT JOIN poststats ps
+                    ON ps.userid = u.id
+                   AND ($2::date IS NULL OR ps.day >= $2)
+                   AND ($3::date IS NULL OR ps.day < $3)
+                  LEFT JOIN teammembers tm
+                    ON (tm.userid = u.id AND tm.deleteat = 0 AND tm.teamid = $4)
+                 WHERE u.id NOT IN (SELECT userid FROM bots)
+                   AND ($4 = '' OR tm.userid IS NOT NULL)
+                   AND (NOT $5 OR u.id NOT IN (SELECT userid FROM teammembers WHERE deleteat = 0))
+                   AND (NOT $6 OR u.deleteat > 0)
+                   AND (NOT $7 OR u.deleteat = 0)
+                   AND ($8::text IS NULL OR u.roles LIKE LOWER($8))
+                   AND ($9 = 0 OR ($9 = 1 AND cc.n = 1) OR ($9 = 2 AND cc.n > 1))
+                   AND NOT EXISTS (
+                         SELECT 1
+                           FROM unnest($10::text[]) AS srch(term)
+                          WHERE NOT (
+                                    lower(u.username)  LIKE lower('%' || srch.term || '%') ESCAPE '*'
+                                 OR lower(u.firstname) LIKE lower('%' || srch.term || '%') ESCAPE '*'
+                                 OR lower(u.lastname)  LIKE lower('%' || srch.term || '%') ESCAPE '*'
+                                 OR lower(u.nickname)  LIKE lower('%' || srch.term || '%') ESCAPE '*'
+                                 OR lower(u.email)     LIKE lower('%' || srch.term || '%') ESCAPE '*'
+                                 OR u.id = srch.term
+                                )
+                       )
+                   AND (NOT $11
+                        OR ($12 AND (CASE WHEN $13 THEN (k.k_num, u.id) < ($14, $15)
+                                          ELSE (k.k_num, u.id) > ($14, $15) END))
+                        OR (NOT $12 AND (CASE WHEN $13 THEN (k.k_txt, u.id) < ($16, $15)
+                                              ELSE (k.k_txt, u.id) > ($16, $15) END)))
+                 GROUP BY u.id, cc.n, k.k_num, k.k_txt
+                 ORDER BY (CASE WHEN NOT $13 THEN k.k_num END) ASC,
+                          (CASE WHEN NOT $13 THEN k.k_txt END) ASC,
+                          (CASE WHEN $13 THEN k.k_num END) DESC,
+                          (CASE WHEN $13 THEN k.k_txt END) DESC,
+                          u.id ASC
+                 LIMIT (CASE WHEN $17::bigint > 0 THEN $17::bigint END)
+              ) data
+             ORDER BY (CASE WHEN NOT $18 THEN data.k_num END) ASC,
+                      (CASE WHEN NOT $18 THEN data.k_txt END) ASC,
+                      (CASE WHEN $18 THEN data.k_num END) DESC,
+                      (CASE WHEN $18 THEN data.k_txt END) DESC,
+                      data.id ASC
+            "#,
+            options.base.sort_column,
+            start_day,
+            end_day,
+            filter.team_id,
+            filter.has_no_team,
+            filter.hide_active,
+            filter.hide_inactive,
+            filter.role_like,
+            filter.guest_channel_mode,
+            &filter.terms,
+            filter.use_cursor,
+            filter.sort_is_numeric,
+            filter.sort_desc,
+            filter.cursor_num,
+            options.base.from_id,
+            options.base.from_column_value,
+            options.base.page_size,
+            filter.outer_desc,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to get users for reporting".to_string(),
+            source,
+        })?;
+
+        tracing::Span::current().record("found", rows.len());
+        rows.into_iter().map(UserReportRow::into_query).collect()
+    }
+
+    #[tracing::instrument(skip_all, fields(count))]
+    async fn get_user_count_for_report(
+        &self,
+        options: &mm_model::report::UserReportOptions,
+    ) -> Result<i64, StoreError> {
+        let filter = ReportFilter::from_options(options)?;
+
+        let count = sqlx::query_scalar!(
+            r#"
+            SELECT COUNT(u.id) AS "count!"
+              FROM users u
+              CROSS JOIN LATERAL (
+                SELECT COUNT(*) AS n
+                  FROM channelmembers cm
+                  INNER JOIN channels c
+                    ON c.id = cm.channelid AND c.deleteat = 0 AND c.type IN ('O', 'P')
+                 WHERE cm.userid = u.id
+              ) cc
+              LEFT JOIN bots b ON u.id = b.userid
+              LEFT JOIN teammembers tm
+                ON (tm.userid = u.id AND tm.deleteat = 0 AND tm.teamid = $1)
+             WHERE b.userid IS NULL
+               AND ($1 = '' OR tm.userid IS NOT NULL)
+               AND (NOT $2 OR u.id NOT IN (SELECT userid FROM teammembers WHERE deleteat = 0))
+               AND (NOT $3 OR u.deleteat > 0)
+               AND (NOT $4 OR u.deleteat = 0)
+               AND ($5::text IS NULL OR u.roles LIKE LOWER($5))
+               AND ($6 = 0 OR ($6 = 1 AND cc.n = 1) OR ($6 = 2 AND cc.n > 1))
+               AND NOT EXISTS (
+                     SELECT 1
+                       FROM unnest($7::text[]) AS srch(term)
+                      WHERE NOT (
+                                lower(u.username)  LIKE lower('%' || srch.term || '%') ESCAPE '*'
+                             OR lower(u.firstname) LIKE lower('%' || srch.term || '%') ESCAPE '*'
+                             OR lower(u.lastname)  LIKE lower('%' || srch.term || '%') ESCAPE '*'
+                             OR lower(u.nickname)  LIKE lower('%' || srch.term || '%') ESCAPE '*'
+                             OR lower(u.email)     LIKE lower('%' || srch.term || '%') ESCAPE '*'
+                             OR u.id = srch.term
+                            )
+                   )
+            "#,
+            filter.team_id,
+            filter.has_no_team,
+            filter.hide_active,
+            filter.hide_inactive,
+            filter.role_like,
+            filter.guest_channel_mode,
+            &filter.terms,
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to count Users for report".to_string(),
+            source,
+        })?;
+
+        tracing::Span::current().record("count", count);
+        Ok(count)
+    }
+}
+
+/// The parameters `applyUserReportFilter` (user_store.go:2448) and the cursor arithmetic above it
+/// reduce to, computed once so the report and its count cannot drift apart.
+struct ReportFilter {
+    /// `applyRoleFilter`'s `LIKE` pattern, already wildcarded and escaped, or `None` for no role
+    /// predicate. A guest filter **overrides** `Role` rather than combining with it.
+    role_like: Option<String>,
+    /// `0` no channel-count predicate, `1` exactly one channel, `2` more than one.
+    guest_channel_mode: i32,
+    has_no_team: bool,
+    /// Empty when there is no team predicate — including when `has_no_team` is set, which Go
+    /// treats as mutually exclusive with a team id rather than as an additional filter.
+    team_id: String,
+    hide_active: bool,
+    hide_inactive: bool,
+    terms: Vec<String>,
+    use_cursor: bool,
+    sort_is_numeric: bool,
+    /// The direction the *database* sorts in, after Go's second, cursor-dependent assignment.
+    sort_desc: bool,
+    /// The direction the result is handed back in — reversed from [`Self::sort_desc`] for a
+    /// `prev` page.
+    outer_desc: bool,
+    cursor_num: Option<i64>,
+}
+
+impl ReportFilter {
+    fn from_options(options: &mm_model::report::UserReportOptions) -> Result<Self, StoreError> {
+        use mm_model::report::{
+            GUEST_FILTER_ALL, GUEST_FILTER_MULTIPLE_CHANNEL, GUEST_FILTER_SINGLE_CHANNEL,
+        };
+
+        let guest = options.guest_filter.as_str();
+        // Go's `switch` reaches `applyRoleFilter(query, filter.Role)` only in the `default` arm,
+        // so a guest filter silently discards `role_filter`.
+        let role = match guest {
+            GUEST_FILTER_ALL | GUEST_FILTER_SINGLE_CHANNEL | GUEST_FILTER_MULTIPLE_CHANNEL => {
+                "system_guest"
+            }
+            _ => options.role.as_str(),
+        };
+        // `fmt.Sprintf("%%%s%%", sanitizeSearchTerm(role, "\\"))` — a **backslash** escape here,
+        // not the `*` the search terms use, and no `ESCAPE` clause, so the pattern relies on
+        // Postgres' default escape character being a backslash.
+        let role_like =
+            (!role.is_empty()).then(|| format!("%{}%", sanitize_search_term(role, '\\')));
+
+        let guest_channel_mode = match guest {
+            GUEST_FILTER_SINGLE_CHANNEL => 1,
+            GUEST_FILTER_MULTIPLE_CHANNEL => 2,
+            _ => 0,
+        };
+
+        let base = &options.base;
+        let use_cursor = !base.from_id.is_empty() && !base.from_column_value.is_empty();
+        let sort_desc = if use_cursor {
+            (base.direction == "prev" && !base.sort_desc)
+                || (base.direction == "next" && base.sort_desc)
+        } else {
+            base.sort_desc
+        };
+        let sort_is_numeric = base.sort_column == "CreateAt";
+
+        // Go hands `FromColumnValue` to the driver as a string and lets Postgres coerce it to the
+        // column's type, so a non-numeric cursor value on a `CreateAt` sort is a **failed query**
+        // and a 500 — not an empty page. Parsing here reproduces the failure rather than
+        // silently comparing against NULL, which would answer 200 with no rows.
+        let cursor_num = if use_cursor && sort_is_numeric {
+            Some(
+                base.from_column_value
+                    .parse::<i64>()
+                    .map_err(|_| StoreError::Argument {
+                        entity: "UserReport",
+                        detail: "from_column_value is not an integer for a CreateAt sort",
+                    })?,
+            )
+        } else {
+            None
+        };
+
+        Ok(Self {
+            role_like,
+            guest_channel_mode,
+            has_no_team: options.has_no_team,
+            team_id: if options.has_no_team {
+                String::new()
+            } else {
+                options.team.clone()
+            },
+            hide_active: options.hide_active,
+            hide_inactive: options.hide_inactive,
+            terms: search_terms(&options.search_term),
+            use_cursor,
+            sort_is_numeric,
+            sort_desc,
+            outer_desc: if base.direction == "prev" {
+                !sort_desc
+            } else {
+                sort_desc
+            },
+            cursor_num,
+        })
+    }
+}
+
+/// `time.UnixMilli(filter.StartAt).Format("2006-01-02")`, and the same for `EndAt`.
+///
+/// **Local dates, not UTC.** `time.UnixMilli` returns a `time.Time` in `time.Local`, so the day
+/// a boundary falls on depends on the server's zone — the same reason
+/// `model::report::get_report_date_range` does its month arithmetic in `chrono::Local`. A zero
+/// bound is Go's `if filter.StartAt > 0` guard: no predicate at all.
+fn report_date_bounds(
+    options: &mm_model::report::UserReportOptions,
+) -> (Option<chrono::NaiveDate>, Option<chrono::NaiveDate>) {
+    use chrono::TimeZone;
+
+    let day = |millis: i64| {
+        (millis > 0)
+            .then(|| chrono::Local.timestamp_millis_opt(millis).single())
+            .flatten()
+            .map(|t| t.date_naive())
+    };
+    (day(options.base.start_at), day(options.base.end_at))
+}
+
+/// One row of [`UserStore::get_user_report`] — `getUsersColumns()` plus the six report columns.
+///
+/// It repeats the twenty-eight user columns rather than reusing [`UserRow`] because this query
+/// selects **no bot columns**: `getUsersColumns()` is used bare here, where `usersQuery` adds
+/// `getBotInfoColumns()`. Bots are excluded by a `NOT IN` predicate instead, so `IsBot`,
+/// `BotDescription` and `BotLastIconUpdate` are left at their zero values on every row — which
+/// is what Go's `UserReportQuery` scan does too.
+struct UserReportRow {
+    id: String,
+    createat: Option<i64>,
+    updateat: Option<i64>,
+    deleteat: Option<i64>,
+    username: Option<String>,
+    password: Option<String>,
+    authdata: Option<String>,
+    authservice: Option<String>,
+    email: Option<String>,
+    emailverified: Option<bool>,
+    nickname: Option<String>,
+    firstname: Option<String>,
+    lastname: Option<String>,
+    position: Option<String>,
+    roles: Option<String>,
+    allowmarketing: Option<bool>,
+    props: Option<serde_json::Value>,
+    notifyprops: Option<serde_json::Value>,
+    lastpasswordupdate: Option<i64>,
+    lastpictureupdate: Option<i64>,
+    failedattempts: Option<i64>,
+    locale: Option<String>,
+    timezone: Option<serde_json::Value>,
+    mfaactive: Option<bool>,
+    mfasecret: Option<String>,
+    mfausedtimestamps: Option<serde_json::Value>,
+    remoteid: Option<String>,
+    lastlogin: i64,
+    laststatusat: Option<i64>,
+    lastpostdate: Option<i64>,
+    /// `COUNT(ps.Day)`, which is `0` and never NULL — so Go's `*int` is always non-nil and
+    /// `days_active` is on the wire even for a user who has never posted.
+    daysactive: Option<i64>,
+    /// `SUM(ps.NumPosts)`, which **is** NULL for a user with no matching `PostStats` rows, and
+    /// therefore the one aggregate that is omitted from the response.
+    totalposts: Option<i64>,
+    channelcount: Option<i64>,
+    teams: String,
+}
+
+impl UserReportRow {
+    fn into_query(self) -> Result<mm_model::report::UserReportQuery, StoreError> {
+        let stats = mm_model::user::UserPostStats {
+            last_status_at: self.laststatusat,
+            last_post_date: self.lastpostdate,
+            days_active: self.daysactive,
+            total_posts: self.totalposts,
+        };
+        let channel_count = self.channelcount;
+        let teams = self.teams;
+        let user = user_from_row(UserRow {
+            id: self.id,
+            createat: self.createat,
+            updateat: self.updateat,
+            deleteat: self.deleteat,
+            username: self.username,
+            password: self.password,
+            authdata: self.authdata,
+            authservice: self.authservice,
+            email: self.email,
+            emailverified: self.emailverified,
+            nickname: self.nickname,
+            firstname: self.firstname,
+            lastname: self.lastname,
+            position: self.position,
+            roles: self.roles,
+            allowmarketing: self.allowmarketing,
+            props: self.props,
+            notifyprops: self.notifyprops,
+            lastpasswordupdate: self.lastpasswordupdate,
+            lastpictureupdate: self.lastpictureupdate,
+            failedattempts: self.failedattempts,
+            locale: self.locale,
+            timezone: self.timezone,
+            mfaactive: self.mfaactive,
+            mfasecret: self.mfasecret,
+            mfausedtimestamps: self.mfausedtimestamps,
+            remoteid: self.remoteid,
+            lastlogin: self.lastlogin,
+            isbot: false,
+            botdescription: String::new(),
+            botlasticonupdate: 0,
+        })?;
+
+        Ok(mm_model::report::UserReportQuery {
+            user,
+            post_stats: stats,
+            channel_count,
+            teams,
+        })
     }
 }
 

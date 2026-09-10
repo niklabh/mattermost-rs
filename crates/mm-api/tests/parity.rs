@@ -121,6 +121,7 @@ mod parity {
     pub mod user_by_email;
     pub mod user_by_username;
     pub mod user_get;
+    pub mod user_reports;
     pub mod user_terms_of_service;
     pub mod users_autocomplete;
     pub mod users_by_ids;

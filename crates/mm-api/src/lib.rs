@@ -42,6 +42,7 @@ pub mod preferences;
 pub mod proxy;
 pub mod reactions;
 pub mod recaps;
+pub mod reports;
 pub mod roles;
 pub mod schemes;
 /// Port of `web.WriteFileResponse` and the `http.ServeContent` behind it.
@@ -1617,6 +1618,18 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/audits",
             partially_migrated(get(audits::get_audits)),
+        )
+        // `api4/report.go`'s two reads. `/reports/users/count` is registered as its own literal
+        // path and not as a parameter of `/reports/users`, exactly as Go's
+        // `BaseRoutes.Reports.Handle("/users/count", …)` is — so `POST /reports/users/export`
+        // and `POST /reports/posts`, which share the prefix and are not migrated, still forward.
+        .route(
+            "/api/v4/reports/users",
+            partially_migrated(get(reports::get_users_for_reporting)),
+        )
+        .route(
+            "/api/v4/reports/users/count",
+            partially_migrated(get(reports::get_user_count_for_reporting)),
         )
         // `api4/group.go`'s eight remaining reads, every one of which opens with
         // `requireLicense`. `{syncable_type}` is gorilla's `teams|channels` alternation and is not

@@ -1982,6 +1982,16 @@ pub async fn set_channel_scheme(channel_id: &str, scheme_id: Option<&str>) -> bo
 /// what the two unreachable branches of `getBot` and `getBots` need. Planted, therefore, the same
 /// way `plant_role` and `plant_channel_of_type` are.
 ///
+/// # `MfaUsedTimestamps` is `null`, not `{}`
+///
+/// Go scans that column into a `model.StringArray`, so a JSON **object** there is a 500 from
+/// `GET /api/v4/users` — for every caller, not just one that asks about bots. This row used to
+/// carry `'{}'`, which only ever showed up as an ordering-dependent failure in *other* suites:
+/// the bots suite deletes its rows on the way out, so the poison lasted as long as that suite
+/// did. A suite that plants a bot and leaves it behind makes it permanent, and three
+/// `users_list` tests failed on a row they never asked for. `'null'` is what the Go server
+/// itself writes, and [`purge_api_fixtures`] normalises it the same way.
+///
 /// Returns the bot's user id, or `None` when there is no `DATABASE_URL` to plant into.
 pub async fn plant_bot(tag: &str, owner_id: &str, delete_at: i64) -> Option<String> {
     let pool = fixture_pool().await?;
@@ -1995,7 +2005,7 @@ pub async fn plant_bot(tag: &str, owner_id: &str, delete_at: i64) -> Option<Stri
              mfaactive, mfasecret, remoteid, lastlogin, mfausedtimestamps)
          VALUES ($1, 1788600000000, 1788600000000, $3, $2, '', NULL, '', $2 || '@mmrs.invalid',
                  false, '', $4, '', '', 'system_user', false, '{}'::jsonb, '{}'::jsonb,
-                 1788600000000, 0, 0, 'en', '{}'::jsonb, false, '', NULL, 0, '{}')
+                 1788600000000, 0, 0, 'en', '{}'::jsonb, false, '', NULL, 0, 'null'::jsonb)
          ON CONFLICT (id) DO NOTHING",
     )
     .bind(&id)

@@ -1,0 +1,73 @@
+# Mutation plan for the two `api4/report.go` reads — `GET /api/v4/reports/users` and
+# `GET /api/v4/reports/users/count`.
+#
+#   scripts/mutate-batch.sh scripts/mutations/user-reports.plan
+#
+# Four layers, and the interesting one is the store.
+#
+# The report query folds nine `squirrel` fragments, a keyset cursor whose *column* is a parameter,
+# and a reversing outer wrapper into one statement. Almost every mutation below is a predicate a
+# reader could plausibly write the other way round: `= 1` against `> 1` for the guest filter,
+# `>=` against `>` on the date window, `<` against `>` on the cursor, and the `Users.Id`
+# tiebreaker that stays **ASC** even on a descending page.
+#
+# The date-window block is the reason the fixture plants posts on four separate days — today, the
+# first of this month, the first of last month, and a hundred days back. Posting only through the
+# API puts every row on today's date, and then `ps.Day >= start` / `ps.Day < end` are unreachable:
+# four of the mutations here survive against such a fixture and catch nothing.
+#
+# `report-search-is-prefix-only` and `report-search-drops-the-id-arm` are likewise only catchable
+# because the suite searches for a *middle* substring and for a bare user id; a suite that only
+# searched for the username prefix would report both as CAUGHT-by-nothing.
+
+report-guest-single-counts-many	crates/mm-store/src/user_store.rs	($9 = 1 AND cc.n = 1)	($9 = 1 AND cc.n > 1)	api	user_reports
+report-guest-multi-includes-one	crates/mm-store/src/user_store.rs	($9 = 2 AND cc.n > 1)	($9 = 2 AND cc.n >= 1)	api	user_reports
+count-guest-single-counts-many	crates/mm-store/src/user_store.rs	($6 = 1 AND cc.n = 1)	($6 = 1 AND cc.n > 1)	api	user_reports
+report-hide-active-keeps-the-active	crates/mm-store/src/user_store.rs	AND (NOT $6 OR u.deleteat > 0)	AND (NOT $6 OR u.deleteat = 0)	api	user_reports
+report-hide-inactive-inverted	crates/mm-store/src/user_store.rs	AND (NOT $7 OR u.deleteat = 0)	AND (NOT $7 OR u.deleteat > 0)	api	user_reports
+count-hide-active-keeps-the-active	crates/mm-store/src/user_store.rs	AND (NOT $3 OR u.deleteat > 0)	AND (NOT $3 OR u.deleteat = 0)	api	user_reports
+report-has-no-team-counts-left-teams	crates/mm-store/src/user_store.rs	AND (NOT $5 OR u.id NOT IN (SELECT userid FROM teammembers WHERE deleteat = 0))	AND (NOT $5 OR u.id NOT IN (SELECT userid FROM teammembers))	api	user_reports
+report-teams-aggregate-keeps-left-teams	crates/mm-store/src/user_store.rs	WHERE tmt.userid = u.id AND tmt.deleteat = 0), '') AS teams,	WHERE tmt.userid = u.id), '') AS teams,	api	user_reports
+report-channel-count-includes-dms	crates/mm-store/src/user_store.rs	                      INNER JOIN channels c\n                        ON c.id = cm.channelid AND c.deleteat = 0 AND c.type IN ('O', 'P')	                      INNER JOIN channels c\n                        ON c.id = cm.channelid AND c.deleteat = 0 AND c.type IN ('O', 'P', 'D')	api	user_reports
+report-team-join-ignores-membership-deleteat	crates/mm-store/src/user_store.rs	ON (tm.userid = u.id AND tm.deleteat = 0 AND tm.teamid = $4)	ON (tm.userid = u.id AND tm.teamid = $4)	api	user_reports
+report-bots-are-not-excluded	crates/mm-store/src/user_store.rs	WHERE u.id NOT IN (SELECT userid FROM bots)	WHERE TRUE	api	user_reports
+count-bots-are-not-excluded	crates/mm-store/src/user_store.rs	WHERE b.userid IS NULL	WHERE TRUE	api	user_reports
+report-last-status-reads-the-wrong-column	crates/mm-store/src/user_store.rs	MAX(s.lastactivityat) AS laststatusat	MAX(s.dndendtime) AS laststatusat	api	user_reports
+report-date-start-bound-dropped	crates/mm-store/src/user_store.rs	AND ($2::date IS NULL OR ps.day >= $2)	AND ($2::date IS NULL OR TRUE)	api	user_reports
+report-date-end-bound-dropped	crates/mm-store/src/user_store.rs	AND ($3::date IS NULL OR ps.day < $3)	AND ($3::date IS NULL OR TRUE)	api	user_reports
+report-date-start-is-exclusive	crates/mm-store/src/user_store.rs	ps.day >= $2	ps.day > $2	api	user_reports
+report-date-end-is-inclusive	crates/mm-store/src/user_store.rs	ps.day < $3	ps.day <= $3	api	user_reports
+store-date-bounds-swapped	crates/mm-store/src/user_store.rs	    (day(options.base.start_at), day(options.base.end_at))	    (day(options.base.end_at), day(options.base.start_at))	api	user_reports
+store-zero-date-bound-is-a-date	crates/mm-store/src/user_store.rs	        (millis > 0)	        (millis >= 0)	api	user_reports
+report-inner-tiebreak-descends	crates/mm-store/src/user_store.rs	\n                          u.id ASC\n	\n                          u.id DESC\n	api	user_reports
+report-outer-tiebreak-descends	crates/mm-store/src/user_store.rs	\n                      data.id ASC\n	\n                      data.id DESC\n	api	user_reports
+report-numeric-sort-key-is-lastlogin	crates/mm-store/src/user_store.rs	(CASE WHEN $1 = 'CreateAt' THEN u.createat END) AS k_num	(CASE WHEN $1 = 'CreateAt' THEN u.lastlogin END) AS k_num	api	user_reports
+report-email-sorts-by-username	crates/mm-store/src/user_store.rs	WHEN 'Email'     THEN u.email	WHEN 'Email'     THEN u.username	api	user_reports
+report-text-cursor-includes-the-anchor	crates/mm-store/src/user_store.rs	ELSE (k.k_txt, u.id) > ($16, $15) END)))	ELSE (k.k_txt, u.id) >= ($16, $15) END)))	api	user_reports
+report-text-cursor-descending-arm-flipped	crates/mm-store/src/user_store.rs	CASE WHEN $13 THEN (k.k_txt, u.id) < ($16, $15)	CASE WHEN $13 THEN (k.k_txt, u.id) > ($16, $15)	api	user_reports
+report-numeric-cursor-descending-arm-flipped	crates/mm-store/src/user_store.rs	CASE WHEN $13 THEN (k.k_num, u.id) < ($14, $15)	CASE WHEN $13 THEN (k.k_num, u.id) > ($14, $15)	api	user_reports
+report-limit-ignored	crates/mm-store/src/user_store.rs	LIMIT (CASE WHEN $17::bigint > 0 THEN $17::bigint END)	LIMIT NULL	api	user_reports
+report-search-is-prefix-only	crates/mm-store/src/user_store.rs	lower(u.username)  LIKE lower('%' || srch.term || '%') ESCAPE '*'\n                                 OR lower(u.firstname)	lower(u.username)  LIKE lower(srch.term || '%') ESCAPE '*'\n                                 OR lower(u.firstname)	api	user_reports
+report-search-drops-the-id-arm	crates/mm-store/src/user_store.rs	                                 OR u.id = srch.term\n                                )\n                       )	                                 OR FALSE\n                                )\n                       )	api	user_reports
+store-cursor-needs-either-half	crates/mm-store/src/user_store.rs	let use_cursor = !base.from_id.is_empty() && !base.from_column_value.is_empty();	let use_cursor = !base.from_id.is_empty() || !base.from_column_value.is_empty();	api	user_reports
+store-cursor-flip-drops-the-prev-arm	crates/mm-store/src/user_store.rs	            (base.direction == "prev" && !base.sort_desc)\n                || (base.direction == "next" && base.sort_desc)	            base.direction == "next" && base.sort_desc	api	user_reports
+store-prev-page-is-not-reversed	crates/mm-store/src/user_store.rs	            outer_desc: if base.direction == "prev" {\n                !sort_desc\n            } else {\n                sort_desc\n            },	            outer_desc: sort_desc,	api	user_reports
+store-guest-filter-does-not-override-role	crates/mm-store/src/user_store.rs	            GUEST_FILTER_ALL | GUEST_FILTER_SINGLE_CHANNEL | GUEST_FILTER_MULTIPLE_CHANNEL => {\n                "system_guest"\n            }	            GUEST_FILTER_ALL | GUEST_FILTER_SINGLE_CHANNEL | GUEST_FILTER_MULTIPLE_CHANNEL => {\n                options.role.as_str()\n            }	api	user_reports
+store-has-no-team-keeps-the-team-filter	crates/mm-store/src/user_store.rs	            team_id: if options.has_no_team {\n                String::new()\n            } else {\n                options.team.clone()\n            },	            team_id: options.team.clone(),	api	user_reports
+store-numeric-cursor-parse-is-lenient	crates/mm-store/src/user_store.rs	            Some(\n                base.from_column_value\n                    .parse::<i64>()\n                    .map_err(|_| StoreError::Argument {\n                        entity: "UserReport",\n                        detail: "from_column_value is not an integer for a CreateAt sort",\n                    })?,\n            )	            base.from_column_value.parse::<i64>().ok()	api	user_reports
+app-options-are-not-validated	crates/mm-app/src/report.rs	        options.is_valid()?;	        let _ = options.is_valid();	api	user_reports
+app-count-validates-its-options	crates/mm-app/src/report.rs	options: &UserReportOptions) -> AppResult<i64> {\n        let count = self	options: &UserReportOptions) -> AppResult<i64> {\n        options.is_valid()?;\n        let count = self	api	user_reports
+api-page-size-bound-is-exclusive	crates/mm-api/src/reports.rs	options.base.page_size > REPORTING_MAX_PAGE_SIZE	options.base.page_size >= REPORTING_MAX_PAGE_SIZE	api	user_reports
+api-page-size-zero-is-allowed	crates/mm-api/src/reports.rs	if options.base.page_size <= 0 ||	if options.base.page_size < 0 ||	api	user_reports
+api-page-size-default-is-zero	crates/mm-api/src/reports.rs	page_size: get("page_size").parse::<i64>().unwrap_or(50),	page_size: get("page_size").parse::<i64>().unwrap_or(0),	api	user_reports
+api-sort-column-default-is-createat	crates/mm-api/src/reports.rs	column if column.is_empty() => "Username".to_owned(),	column if column.is_empty() => "CreateAt".to_owned(),	api	user_reports
+api-direction-defaults-to-prev	crates/mm-api/src/reports.rs	        direction: if get("direction") == "prev" {\n            "prev".to_owned()\n        } else {\n            "next".to_owned()\n        },	        direction: if get("direction") == "next" {\n            "next".to_owned()\n        } else {\n            "prev".to_owned()\n        },	api	user_reports
+api-sort-direction-is-case-insensitive	crates/mm-api/src/reports.rs	sort_desc: get("sort_direction") == "desc",	sort_desc: get("sort_direction").to_lowercase() == "desc",	api	user_reports
+api-hide-flags-parse-as-booleans	crates/mm-api/src/reports.rs	let hide_active = get("hide_active") == "true";	let hide_active = !get("hide_active").is_empty();	api	user_reports
+api-both-hide-flags-are-allowed	crates/mm-api/src/reports.rs	    if hide_active && hide_inactive {	    if false {	api	user_reports
+api-team-filter-is-not-validated	crates/mm-api/src/reports.rs	    if !(team_filter.is_empty() || is_valid_id(&team_filter)) {	    if false {	api	user_reports
+api-page-size-is-bounded-first	crates/mm-api/src/reports.rs	    let base = fill_reporting_base_options(query.as_deref());\n    let mut options = fill_user_report_options(query.as_deref())?;	    let base = fill_reporting_base_options(query.as_deref());\n    if base.page_size <= 0 || base.page_size > REPORTING_MAX_PAGE_SIZE {\n        return Err(ApiError(AppError::boxed(\n            "getUsersForReporting",\n            "api.getUsersForReporting.invalid_page_size",\n            None,\n            String::new(),\n            400,\n        )));\n    }\n    let mut options = fill_user_report_options(query.as_deref())?;	api	user_reports
+api-encoder-newline-dropped	crates/mm-api/src/reports.rs	    body.push(b'\\n');	    body.truncate(body.len());	api	user_reports
+model-report-sanitises-as-a-non-admin	crates/mm-model/src/report.rs	        self.user.clear_non_profile_fields(true);	        self.user.clear_non_profile_fields(false);	api	user_reports
+control-reorder-two-select-columns	crates/mm-store/src/user_store.rs	                       u.updateat,\n                       u.deleteat,	                       u.deleteat,\n                       u.updateat,	api	user_reports
+control-rename-the-day-closure	crates/mm-store/src/user_store.rs	    let day = |millis: i64| {\n        (millis > 0)\n            .then(|| chrono::Local.timestamp_millis_opt(millis).single())\n            .flatten()\n            .map(|t| t.date_naive())\n    };\n    (day(options.base.start_at), day(options.base.end_at))	    let as_day = |millis: i64| {\n        (millis > 0)\n            .then(|| chrono::Local.timestamp_millis_opt(millis).single())\n            .flatten()\n            .map(|t| t.date_naive())\n    };\n    (\n        as_day(options.base.start_at),\n        as_day(options.base.end_at),\n    )	api	user_reports

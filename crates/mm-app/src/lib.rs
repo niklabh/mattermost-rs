@@ -34,6 +34,7 @@ pub mod password;
 pub mod post;
 pub mod preference;
 pub mod reaction;
+pub mod report;
 pub mod role;
 pub mod scheme;
 pub mod session;
