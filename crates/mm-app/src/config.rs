@@ -208,6 +208,24 @@ pub struct Config {
     /// than a 403.
     pub allow_synced_drafts: bool,
 
+    /// `ServiceSettings.EnableAPIChannelDeletion` (config.go:476). Go default **`false`**.
+    ///
+    /// Gates `DELETE /api/v4/channels/{id}?permanent=true`. When it is off the request is refused
+    /// with **401** — not 403 — and the id depends on who asked: a system admin gets
+    /// `api.user.delete_channel.not_enabled.for_admin.app_error`, everybody else
+    /// `api.user.delete_channel.not_enabled.app_error`. See
+    /// [`crate::channel_write`]'s delete path.
+    pub enable_api_channel_deletion: bool,
+
+    /// `TeamSettings.EnableChannelCategorySorting` (config.go:2558). Go default **`true`**.
+    ///
+    /// Read only as the second half of `addChannelToDefaultCategory`'s gate
+    /// (app/channel.go:4708), which `PatchChannel` calls after the channel is written. The first
+    /// half is `channel.DefaultCategoryName != ""`, so on a stock server a patch that leaves that
+    /// field empty never reaches the sidebar at all — which is what makes the common patch
+    /// serviceable here while a `default_category_name` patch is forwarded.
+    pub enable_channel_category_sorting: bool,
+
     /// `ServiceSettings.EnableBurnOnRead` (config.go:472). Go default **`true`**.
     pub enable_burn_on_read: bool,
 
@@ -671,6 +689,8 @@ impl Default for Config {
             require_email_verification: false,
             guest_restrict_creation_to_domains: String::new(),
             allow_synced_drafts: true,
+            enable_api_channel_deletion: false,
+            enable_channel_category_sorting: true,
             enable_burn_on_read: true,
             feature_flag_burn_on_read: true,
             file_driver_name: "local".to_owned(),
@@ -860,6 +880,16 @@ impl Config {
                 lookup,
                 "MM_SERVICESETTINGS_ALLOWSYNCEDDRAFTS",
                 default.allow_synced_drafts,
+            ),
+            enable_api_channel_deletion: lookup_bool(
+                lookup,
+                "MM_SERVICESETTINGS_ENABLEAPICHANNELDELETION",
+                default.enable_api_channel_deletion,
+            ),
+            enable_channel_category_sorting: lookup_bool(
+                lookup,
+                "MM_TEAMSETTINGS_ENABLECHANNELCATEGORYSORTING",
+                default.enable_channel_category_sorting,
             ),
             enable_burn_on_read: lookup_bool(
                 lookup,
@@ -1178,6 +1208,12 @@ impl Config {
             allow_synced_drafts: service
                 .allow_synced_drafts
                 .unwrap_or(default.allow_synced_drafts),
+            enable_api_channel_deletion: service
+                .enable_api_channel_deletion
+                .unwrap_or(default.enable_api_channel_deletion),
+            enable_channel_category_sorting: team_settings
+                .enable_channel_category_sorting
+                .unwrap_or(default.enable_channel_category_sorting),
             enable_burn_on_read: service
                 .enable_burn_on_read
                 .unwrap_or(default.enable_burn_on_read),
@@ -1405,6 +1441,8 @@ struct TeamSettingsDocument {
     user_status_away_timeout: Option<i64>,
     #[serde(rename = "EnableCustomUserStatuses")]
     enable_custom_user_statuses: Option<bool>,
+    #[serde(rename = "EnableChannelCategorySorting")]
+    enable_channel_category_sorting: Option<bool>,
 }
 
 /// The one field of `EmailSettings` a migrated route reads.
@@ -1508,6 +1546,8 @@ struct ServiceSettingsDocument {
     unique_emoji_reaction_limit_per_post: Option<i64>,
     #[serde(rename = "AllowSyncedDrafts")]
     allow_synced_drafts: Option<bool>,
+    #[serde(rename = "EnableAPIChannelDeletion")]
+    enable_api_channel_deletion: Option<bool>,
     #[serde(rename = "EnableBurnOnRead")]
     enable_burn_on_read: Option<bool>,
     #[serde(rename = "EnableIncomingWebhooks")]

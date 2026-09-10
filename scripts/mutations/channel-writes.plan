@@ -1,0 +1,63 @@
+# Mutation plan for the five channel-lifecycle routes.
+#
+#   scripts/mutate-batch.sh scripts/mutations/channel-writes.plan
+#
+# The decisions worth mutating here are the ones a reader would plausibly "tidy":
+#
+#   * which table `SetDeleteAt` and `upsertPublicChannelT` write — a channel that stays in
+#     `PublicChannels` after being archived or made private is invisible to any assertion about
+#     the channel row itself;
+#   * the websocket **addressing**, which is team-for-public and channel-for-private on two of the
+#     four events and would leak a private channel's archive to a whole team if inverted;
+#   * `updateChannel`'s five-field copy, where two fields are unconditional and two are guarded on
+#     non-empty — the asymmetry is the route;
+#   * the four gates `patchChannel` decides without touching the channel, plus the licence branch
+#     of `canEditChannelBanner` that deliberately does **not** return;
+#   * the two ids that differ only by `for_admin.` in the middle, and the two permissions that
+#     differ only by `public`/`private`. Neither reaches a client except through `detailed_error`,
+#     so both are pinned by unit tests rather than over HTTP.
+#
+# `unit` lines carry a filter naming the unit test's own function, `api` lines name the parity
+# module. The last two lines are the no-op controls and must SURVIVE.
+store-pre-update-never-runs	crates/mm-store/src/channel_store.rs	    channel.pre_update();	    let _ = &channel.id;	api	channel_writes
+store-archived-guard-dropped	crates/mm-store/src/channel_store.rs	    if channel.delete_at != 0 {\n        return Err(StoreError::InvalidInput {	    if false {\n        return Err(StoreError::InvalidInput {	api	channel_writes
+store-non-open-channel-still-upserted	crates/mm-store/src/channel_store.rs	    if channel.channel_type != mm_model::channel::CHANNEL_TYPE_OPEN {	    if false {	api	channel_writes
+store-open-channel-deleted-from-publicchannels	crates/mm-store/src/channel_store.rs	    if channel.channel_type != mm_model::channel::CHANNEL_TYPE_OPEN {	    if true {	api	channel_writes
+store-delete-leaves-update-at-at-zero	crates/mm-store/src/channel_store.rs	        set_delete_at(&self.pool, channel_id, time, time).await	        set_delete_at(&self.pool, channel_id, time, 0).await	api	channel_writes
+store-restore-writes-a-delete-at	crates/mm-store/src/channel_store.rs	        set_delete_at(&self.pool, channel_id, 0, time).await	        set_delete_at(&self.pool, channel_id, time, time).await	api	channel_writes
+store-set-delete-at-skips-publicchannels	crates/mm-store/src/channel_store.rs	        "UPDATE publicchannels SET deleteat = $1 WHERE id = $2",	        "UPDATE publicchannels SET deleteat = $1 WHERE id = $2 AND FALSE",	api	channel_writes
+store-name-conflict-not-recognised	crates/mm-store/src/channel_store.rs	        .is_some_and(|constraint| constraint == "channels_name_teamid_key")	        .is_some_and(|constraint| constraint == "channels_name_teamid_nope")	api	channel_writes
+app-channel-updated-never-published	crates/mm-app/src/channel_write.rs	        message.add("channel", serde_json::Value::String(encoded));\n        self.publish(message).await;	        message.add("channel", serde_json::Value::String(encoded));\n        let _ = message;	api	channel_writes
+app-channel-updated-addressed-to-the-team	crates/mm-app/src/channel_write.rs	WEBSOCKET_EVENT_CHANNEL_UPDATED,\n            "",\n            &channel.id,	WEBSOCKET_EVENT_CHANNEL_UPDATED,\n            &channel.team_id,\n            "",	api	channel_writes
+app-channel-converted-addressed-to-the-channel	crates/mm-app/src/channel_write.rs	            WEBSOCKET_EVENT_CHANNEL_CONVERTED,\n            &channel.team_id,\n            "",	            WEBSOCKET_EVENT_CHANNEL_CONVERTED,\n            "",\n            &channel.id,	api	channel_writes
+app-channel-converted-never-published	crates/mm-app/src/channel_write.rs	            serde_json::Value::String(channel.channel_type.clone()),\n        );\n        self.publish(message).await;	            serde_json::Value::String(channel.channel_type.clone()),\n        );\n        let _ = message;	api	channel_writes
+app-deleted-addressing-inverted	crates/mm-app/src/channel_write.rs	        let mut message = if channel.channel_type == CHANNEL_TYPE_OPEN {\n            WebSocketEvent::new(\n                WEBSOCKET_EVENT_CHANNEL_DELETED,	        let mut message = if channel.channel_type != CHANNEL_TYPE_OPEN {\n            WebSocketEvent::new(\n                WEBSOCKET_EVENT_CHANNEL_DELETED,	api	channel_writes
+app-restored-addressing-inverted	crates/mm-app/src/channel_write.rs	        let mut message = if channel.channel_type == CHANNEL_TYPE_OPEN {\n            WebSocketEvent::new(\n                WEBSOCKET_EVENT_CHANNEL_RESTORED,	        let mut message = if channel.channel_type != CHANNEL_TYPE_OPEN {\n            WebSocketEvent::new(\n                WEBSOCKET_EVENT_CHANNEL_RESTORED,	api	channel_writes
+app-delete-at-in-the-event-is-a-string	crates/mm-app/src/channel_write.rs	        message.add("delete_at", serde_json::Value::from(delete_at));	        message.add("delete_at", serde_json::Value::from(delete_at.to_string()));	api	channel_writes
+app-default-channel-archive-guard-dropped	crates/mm-app/src/channel_write.rs	        if channel.name == DEFAULT_CHANNEL_NAME {	        if false {	api	channel_writes
+app-restore-guard-dropped	crates/mm-app/src/channel_write.rs	        if channel.delete_at == 0 {\n            return Err(AppError::boxed(	        if false {\n            return Err(AppError::boxed(	api	channel_writes
+app-incoming-webhooks-not-archived	crates/mm-app/src/channel_write.rs	                .delete_incoming(&hook.id, hook_deleted_at)	                .delete_incoming("", hook_deleted_at)	api	channel_writes
+app-discoverable-not-cleared-on-convert-to-public	crates/mm-app/src/channel_write.rs	            channel.discoverable = false;	            channel.discoverable = true;	api	channel_writes
+app-default-category-name-not-trimmed	crates/mm-app/src/channel_write.rs	        Some(name) => name.trim().to_owned(),	        Some(name) => name.to_owned(),	unit	default_category_gate
+api-update-honours-an-empty-display-name	crates/mm-api/src/channel_writes.rs	    if !submitted.display_name.is_empty() {	    if true {	unit	update_copy_honours
+api-update-will-not-clear-the-header	crates/mm-api/src/channel_writes.rs	    channel.header = submitted.header.clone();\n    channel.purpose = submitted.purpose.clone();	    if !submitted.header.is_empty() {\n        channel.header = submitted.header.clone();\n    }\n    channel.purpose = submitted.purpose.clone();	unit	update_copy_honours
+api-group-constrained-copied-on-truth	crates/mm-api/src/channel_writes.rs	    if submitted.group_constrained.is_some() {\n        channel.group_constrained = submitted.group_constrained;	    if submitted.group_constrained == Some(true) {\n        channel.group_constrained = submitted.group_constrained;	unit	group_constrained_is_copied
+api-privacy-accepts-anything	crates/mm-api/src/channel_writes.rs	        CHANNEL_TYPE_PRIVATE => Some(CHANNEL_TYPE_PRIVATE),\n        _ => None,	        CHANNEL_TYPE_PRIVATE => Some(CHANNEL_TYPE_PRIVATE),\n        _ => Some(CHANNEL_TYPE_OPEN),	unit	exact_privacy_strings
+api-property-permissions-swapped	crates/mm-api/src/channel_writes.rs	        CHANNEL_TYPE_OPEN => Some(&PERMISSION_MANAGE_PUBLIC_CHANNEL_PROPERTIES),\n        CHANNEL_TYPE_PRIVATE => Some(&PERMISSION_MANAGE_PRIVATE_CHANNEL_PROPERTIES),	        CHANNEL_TYPE_OPEN => Some(&PERMISSION_MANAGE_PRIVATE_CHANNEL_PROPERTIES),\n        CHANNEL_TYPE_PRIVATE => Some(&PERMISSION_MANAGE_PUBLIC_CHANNEL_PROPERTIES),	unit	property_permissions_are_paired
+api-permanent-ids-swapped	crates/mm-api/src/channel_writes.rs	    if is_system_admin {\n        "api.user.delete_channel.not_enabled.for_admin.app_error"\n    } else {\n        "api.user.delete_channel.not_enabled.app_error"	    if is_system_admin {\n        "api.user.delete_channel.not_enabled.app_error"\n    } else {\n        "api.user.delete_channel.not_enabled.for_admin.app_error"	api	channel_writes
+api-no-changes-gate-dropped	crates/mm-api/src/channel_writes.rs	    if !updating_properties\n        && !updating_auto_translation	    if false\n        && !updating_auto_translation	api	channel_writes
+api-discoverable-gate-dropped	crates/mm-api/src/channel_writes.rs	    if updating_discoverable && !FEATURE_FLAG_DISCOVERABLE_CHANNELS {	    if false {	api	channel_writes
+api-autotranslation-gate-dropped	crates/mm-api/src/channel_writes.rs	    if updating_auto_translation && !AUTO_TRANSLATION_AVAILABLE {	    if false {	api	channel_writes
+api-banner-licence-error-returns-early	crates/mm-api/src/channel_writes.rs	    if !allowed {\n        error = make_permission_error(session, &[permission]);\n    }\n    ApiError::from(error)	    if false {\n        error = make_permission_error(session, &[permission]);\n    }\n    ApiError::from(error)	api	channel_writes
+api-patch-does-not-fill-in-props	crates/mm-api/src/channel_writes.rs	    if let Err(err) = state.app.fill_in_channel_props(&mut channel).await {	    if let Err(err) = state.app.fill_in_channel_props(&mut channel.clone()).await {	api	channel_writes
+api-group-constrained-off-also-forwarded	crates/mm-api/src/channel_writes.rs	    if patch.group_constrained == Some(true) && !channel.is_group_constrained() {	    if patch.group_constrained.is_some() && !channel.is_group_constrained() {	unit	group_constrained_turning_on
+api-default-category-forward-ignores-the-config	crates/mm-api/src/channel_writes.rs	    if category_sorting_enabled && !default_category_after_patch(channel, patch).is_empty() {	    if !default_category_after_patch(channel, patch).is_empty() {	unit	default_category_branch_is_gated
+api-dm-type-guard-dropped-on-archive	crates/mm-api/src/channel_writes.rs	    if channel.channel_type == CHANNEL_TYPE_DIRECT || channel.channel_type == CHANNEL_TYPE_GROUP {	    if false {	api	channel_writes
+api-status-ok-gets-a-newline	crates/mm-api/src/channel_writes.rs	        r#"{"status":"OK"}"#,	        "{\\"status\\":\\"OK\\"}\\n",	api	channel_writes
+api-channel-body-not-newline-framed	crates/mm-api/src/channel_writes.rs	    body.push(b'\\n');	    body.push(b' ');	api	channel_writes
+api-typechange-guard-dropped	crates/mm-api/src/channel_writes.rs	    if !submitted.channel_type.is_empty() && submitted.channel_type != channel.channel_type {	    if false {	api	channel_writes
+api-update-town-square-rename-allowed	crates/mm-api/src/channel_writes.rs	    if channel.name == DEFAULT_CHANNEL_NAME\n        && !submitted.name.is_empty()\n        && submitted.name != channel.name\n    {	    if false\n        && !submitted.name.is_empty()\n        && submitted.name != channel.name\n    {	api	channel_writes
+api-privacy-default-channel-guard-dropped	crates/mm-api/src/channel_writes.rs	    if channel.name == DEFAULT_CHANNEL_NAME && privacy == CHANNEL_TYPE_PRIVATE {	    if false {	api	channel_writes
+api-update-archived-guard-dropped	crates/mm-api/src/channel_writes.rs	    if channel.delete_at > 0 {\n        return Err(AppError::boxed(\n            "updateChannel",	    if false {\n        return Err(AppError::boxed(\n            "updateChannel",	api	channel_writes
+CONTROL-rename-a-binding	crates/mm-api/src/channel_writes.rs	fn not_enabled_error_id(is_system_admin: bool) -> &'static str {\n    if is_system_admin {	fn not_enabled_error_id(admin: bool) -> &'static str {\n    if admin {	api	channel_writes
+CONTROL-reorder-two-independent-set-columns	crates/mm-store/src/channel_store.rs	               header              = $9,\n               purpose             = $10,	               purpose             = $10,\n               header              = $9,	api	channel_writes
