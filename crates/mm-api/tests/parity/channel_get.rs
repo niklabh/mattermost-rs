@@ -482,7 +482,14 @@ async fn a_non_alphanumeric_segment_answers_exactly_as_go_does() {
     );
 }
 
-/// `partially_migrated` again: only GET is ours, so a PUT (Go's `updateChannel`) must reach Go.
+/// `partially_migrated` again, and the answer changed when the channel-lifecycle routes landed:
+/// **GET, PUT and DELETE are all ours now** (`updateChannel` and `deleteChannel` — see
+/// `parity::channel_writes`), and only a method Go registers on no route at all still forwards.
+///
+/// That is what the method fallback is for: axum's `MethodRouter` handles the three registered
+/// verbs and anything else falls through to Go, which 404s it exactly as gorilla always did. This
+/// test used to assert PUT was forwarded; keeping the *shape* of the assertion while moving the
+/// verbs is the point — it is the only test that pins which methods this path serves itself.
 #[tokio::test]
 async fn other_methods_on_this_path_are_still_forwarded() {
     if !stack_enabled() {
@@ -512,14 +519,34 @@ async fn other_methods_on_this_path_are_still_forwarded() {
             .headers()
             .get("x-mmrs-served-by")
             .and_then(|v| v.to_str().ok()),
-        Some("go"),
-        "PUT is not migrated, so it must be forwarded"
+        Some("rust"),
+        "PUT is migrated now"
     );
-    assert_eq!(
-        response.status().as_u16(),
-        200,
-        "Go's updateChannel accepts it"
-    );
+    assert_eq!(response.status().as_u16(), 200, "and it accepts the update");
+
+    // `PATCH` and `POST` are registered on this path by neither server, so both fall through and
+    // Go answers its own 404 — the method fallback still works for everything not migrated.
+    for method in [reqwest::Method::PATCH, reqwest::Method::POST] {
+        let response = client
+            .request(
+                method.clone(),
+                format!("{RUST}/api/v4/channels/{channel_id}"),
+            )
+            .header("Authorization", format!("Bearer {token}"))
+            .json(&serde_json::json!({}))
+            .send()
+            .await
+            .expect("the Rust server answers");
+        assert_eq!(
+            response
+                .headers()
+                .get("x-mmrs-served-by")
+                .and_then(|v| v.to_str().ok()),
+            Some("go"),
+            "{method} is on no route here, so it must be forwarded"
+        );
+        assert_eq!(response.status().as_u16(), 404, "and Go 404s it");
+    }
 
     delete_channel(&client, &token, &channel_id).await;
 }
