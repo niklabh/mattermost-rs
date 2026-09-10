@@ -76,6 +76,13 @@ pub trait ThreadStore {
         user_id: &str,
         team_id: &str,
     ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
+
+    /// Port of `SqlThreadStore.MarkAllAsReadByChannels` (thread_store.go:634).
+    fn mark_all_as_read_by_channels(
+        &self,
+        user_id: &str,
+        channel_ids: &[String],
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 }
 
 #[derive(Debug, Clone)]
@@ -594,5 +601,60 @@ impl ThreadStore for SqlThreadStore {
             source,
         })?;
         Ok(row.sum)
+    }
+
+    /// **Three predicates and every one of them bounds the write.**
+    ///
+    /// - `Threads.PostId = ThreadMemberships.PostId` is the join — written as a `WHERE` because
+    ///   Go builds it with squirrel's `Update(...).From(...)`, and Postgres's `UPDATE … FROM`
+    ///   has no `ON`. Dropping it updates every membership the user has against every thread.
+    /// - `Threads.ChannelId = ANY(...)` is the scope: only threads rooted in these channels.
+    /// - `Threads.LastReplyAt > ThreadMemberships.LastViewed` is what keeps the statement cheap
+    ///   for the "mark a whole team read" callers, which pass **every** channel the user is in
+    ///   rather than only the unread ones. It also means a membership already caught up is not
+    ///   touched, so its `LastUpdated` does not move.
+    ///
+    /// `LastViewed` and `LastUpdated` are set from **one** `GetMillis()` call, so the two columns
+    /// are equal for every row in a single call; reading the clock twice would let them differ.
+    ///
+    /// An empty `channel_ids` is a no-op with no statement sent, matching Go's early return.
+    #[tracing::instrument(skip(self), fields(user_id = %user_id, channels = channel_ids.len()))]
+    async fn mark_all_as_read_by_channels(
+        &self,
+        user_id: &str,
+        channel_ids: &[String],
+    ) -> Result<(), StoreError> {
+        if channel_ids.is_empty() {
+            return Ok(());
+        }
+
+        let now = mm_model::utils::get_millis();
+
+        sqlx::query!(
+            r#"
+            UPDATE threadmemberships
+               SET lastviewed = $1,
+                   unreadmentions = 0,
+                   lastupdated = $1
+              FROM threads
+             WHERE threadmemberships.userid = $2
+               AND threads.postid = threadmemberships.postid
+               AND threads.channelid = ANY($3)
+               AND threads.lastreplyat > threadmemberships.lastviewed
+            "#,
+            now,
+            user_id,
+            channel_ids,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!(
+                "failed to mark all threads as read by channels for user id={user_id}"
+            ),
+            source,
+        })?;
+
+        Ok(())
     }
 }

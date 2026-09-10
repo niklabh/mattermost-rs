@@ -46,6 +46,7 @@ mod parity {
     pub mod channel_stats;
     pub mod channel_timezones;
     pub mod channel_unread;
+    pub mod channel_view;
     pub mod channels_for_team_for_user;
     pub mod channels_for_user;
     pub mod channels_member_count;

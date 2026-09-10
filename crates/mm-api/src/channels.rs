@@ -2808,6 +2808,290 @@ pub(crate) async fn licence_gate(state: &AppState, request: Request) -> LicenceG
     }
 }
 
+/// Port of `rejectBoardChannelByID` (api4/channel.go:23).
+///
+/// **Its success is the refusal.** `GetBoardChannel` returning a channel means the id names a
+/// board, which is a 400 on a `/channels` route; a 404 — or any other error — means it does not,
+/// and the request carries on. So a database failure here reads as "not a board", which is Go's
+/// behaviour and not an oversight of this port: the check `errors.As`-es nothing, it tests
+/// `err == nil`.
+///
+/// The `AppError`'s `where` is the **empty string**, not a handler name — `NewAppError("", …)` —
+/// and `handleContextError` overwrites it with the request path before it reaches the wire, so
+/// this is invisible to a client and visible in a log line.
+async fn reject_board_channel_by_id(state: &AppState, channel_id: &str) -> Option<ApiError> {
+    state.app.get_board_channel(channel_id).await.ok().map(|_| {
+        ApiError::from(mm_model::utils::AppError::new(
+            "",
+            "api.channel.board_channel.app_error",
+            None,
+            "board channels cannot be accessed via /channels endpoints".to_owned(),
+            400,
+        ))
+    })
+}
+
+/// Build the `{"status":"OK","last_viewed_at_times":{…}}` body the four view/read routes share.
+///
+/// `ChannelViewResponse` has no `omitempty`, so both keys are always present, and the map is
+/// **always non-nil** on this path — Go's `times` is either the store's map or a `map[string]int64{}`
+/// — which is a `{}` on the wire, never a `null`. Encoder-framed, so a trailing newline ([D-086]).
+#[allow(clippy::result_large_err)]
+fn view_response(
+    times: std::collections::BTreeMap<String, i64>,
+    where_: &'static str,
+) -> Result<Response, ApiError> {
+    let response = mm_model::channel_view::ChannelViewResponse {
+        status: "OK".to_owned(),
+        last_viewed_at_times: Some(times),
+    };
+    let mut body = serde_json::to_vec(&response).map_err(|err| {
+        tracing::error!(error = %err, "failed to serialise ChannelViewResponse");
+        ApiError::from(mm_model::utils::AppError::new(
+            where_,
+            "api.marshal_error",
+            None,
+            String::new(),
+            500,
+        ))
+    })?;
+    body.push(b'\n');
+
+    Ok((
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
+    )
+        .into_response())
+}
+
+/// Port of `viewChannel` (api4/channel.go:2011), reached as
+/// `POST /api/v4/channels/members/{user_id}/view` — the request every Mattermost client makes on
+/// every channel switch.
+///
+/// # Order of operations
+///
+/// 1. `RequireUserId` — `me` resolved, then `IsValidId`, and it **returns early** here (unlike
+///    its sibling [`read_multiple_channels`], which does not).
+/// 2. `SessionHasPermissionToUser` → 403 naming `edit_other_users`. The gate is before the body,
+///    so a caller with no rights over the target user never has their body parsed.
+/// 3. The body decodes into `ChannelView` → 400 `channel_view`.
+/// 4. Each id is validated **only when non-empty**, `channel_id` first → 400
+///    `channel_view.channel_id` / `channel_view.prev_channel_id`. A blank id is the documented way
+///    to say "focus loss or initial view" and must not be rejected.
+/// 5. Each non-empty id is checked against [`reject_board_channel_by_id`], again `channel_id`
+///    first.
+/// 6. `App.ViewChannel`, then `UpdateLastActivityAtIfNeeded`.
+///
+/// # What a bad `channel_id` is *not*
+///
+/// There is no membership check and no channel-existence check. A well-formed id naming a channel
+/// the caller is not in contributes no row to the join, so it is simply absent from
+/// `last_viewed_at_times` — a **200**, not a 403 or a 404.
+///
+/// # `ExtendSessionExpiryIfNeeded` is not ported
+///
+/// Go calls it after `UpdateLastActivityAtIfNeeded` (channel.go:2052). It is a no-op unless
+/// `ServiceSettings.ExtendSessionLengthWithActivity` is on, and that setting defaults to
+/// `!isUpdate` — false for every persisted configuration document (see [D-088]'s note). When it
+/// *is* on it rewrites `Sessions.ExpiresAt` and re-attaches the session cookies, neither of which
+/// this port does anywhere yet. [D-214].
+#[tracing::instrument(skip_all, fields(user_id = %user_id, channels))]
+pub async fn view_channel(
+    State(state): State<AppState>,
+    Path(user_id): Path<String>,
+    session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    match serve_view_channel(&state, &user_id, &session, request).await {
+        Ok(response) => response,
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn serve_view_channel(
+    state: &AppState,
+    user_id: &str,
+    session: &AuthenticatedSession,
+    request: Request,
+) -> Result<Response, ApiError> {
+    let user_id = if user_id == ME {
+        session.0.user_id.clone()
+    } else {
+        user_id.to_owned()
+    };
+    require_id(&user_id, "user_id")?;
+
+    if !state
+        .app
+        .session_has_permission_to_user(&session.0, &user_id)
+        .await
+    {
+        return Err(ApiError::from(make_permission_error(
+            &session.0,
+            &[&PERMISSION_EDIT_OTHER_USERS],
+        )));
+    }
+
+    let bytes = read_body(request, "viewChannel").await?;
+    // `json.NewDecoder(r.Body).Decode(&view)` into a **value**, not a pointer. Two consequences,
+    // and both need the `Value` round-trip rather than a direct `from_slice`:
+    //
+    // - A body of `null` decodes without error and leaves every field at its zero value — the
+    //   "focus loss" request, a **200**. Deserialising straight into the struct would reject it.
+    // - A JSON **array** is refused by Go's decoder ("cannot unmarshal array into Go value of
+    //   type model.ChannelView") but serde's derive builds a struct from a sequence positionally,
+    //   so `["x","y",true]` would decode to a populated view and answer 200. Same trap
+    //   `search_channels_for_team` documents.
+    //
+    // The two decoding divergences already measured on this type stand and are not re-litigated
+    // here: Go accepts `null` into an individual scalar where serde rejects the whole document
+    // ([D-057]), and Go matches field names case-insensitively ([D-040]).
+    let decoded: Option<serde_json::Value> = mm_model::utils::decode_one_from_json(&bytes)
+        .map_err(|err| {
+            tracing::debug!(error = %err, "channel view body did not decode");
+            ApiError::invalid_param("channel_view")
+        })?;
+    let view: mm_model::channel_view::ChannelView = match decoded {
+        None => mm_model::channel_view::ChannelView::default(),
+        Some(value @ serde_json::Value::Object(_)) => {
+            serde_json::from_value(value).map_err(|err| {
+                tracing::debug!(error = %err, "channel view body has the wrong field types");
+                ApiError::invalid_param("channel_view")
+            })?
+        }
+        Some(_) => return Err(ApiError::invalid_param("channel_view")),
+    };
+    tracing::Span::current().record(
+        "channels",
+        !view.channel_id.is_empty() as usize + !view.prev_channel_id.is_empty() as usize,
+    );
+
+    // "Check IDs are valid or blank. Blank IDs are used to denote focus loss or initial channel
+    // view" — Go's own comment (channel.go:2028).
+    if !view.channel_id.is_empty() && !is_valid_id(&view.channel_id) {
+        return Err(ApiError::invalid_param("channel_view.channel_id"));
+    }
+    if !view.prev_channel_id.is_empty() && !is_valid_id(&view.prev_channel_id) {
+        return Err(ApiError::invalid_param("channel_view.prev_channel_id"));
+    }
+
+    if !view.channel_id.is_empty()
+        && let Some(err) = reject_board_channel_by_id(state, &view.channel_id).await
+    {
+        return Err(err);
+    }
+    if !view.prev_channel_id.is_empty()
+        && let Some(err) = reject_board_channel_by_id(state, &view.prev_channel_id).await
+    {
+        return Err(err);
+    }
+
+    let times = state
+        .app
+        .view_channel(&view, &user_id, view.collapsed_threads_supported)
+        .await?;
+
+    state
+        .app
+        .update_last_activity_at_if_needed(&session.0)
+        .await;
+
+    view_response(times, "viewChannel")
+}
+
+/// Port of `readMultipleChannels` (api4/channel.go:2066), reached as
+/// `POST /api/v4/channels/members/{user_id}/mark_read`.
+///
+/// # `RequireUserId` here does **not** return early, and that is observable
+///
+/// The handler calls `c.RequireUserId()` and then carries straight on (channel.go:2067) — no
+/// `if c.Err != nil { return }`. Go's `c.Err` is a single slot that later assignments overwrite,
+/// so a malformed `user_id` is *replaced* by whichever refusal comes next:
+///
+/// | body | session | answer |
+/// |---|---|---|
+/// | unparseable | any | 400 `api.context.payload_parse.app_error` |
+/// | `[]` or `null` | any | 400 `api.context.invalid_body_param.app_error` (`channel_ids`) |
+/// | good | no `edit_other_users` | 403 |
+/// | good | has `edit_other_users` | 500 `app.user.get.app_error` — the store lookup for a
+/// | | | malformed id fails |
+///
+/// So the 400 `RequireUserId` raises is never the answer: something always overwrites it. The one
+/// path that would let it survive — the app call *succeeding* for a malformed id — cannot happen,
+/// because `MarkChannelsAsViewed` reads the user row first. If it could, Go would write the
+/// success body **and then append the error JSON to it**; this port would answer the error alone.
+/// Unreachable, and recorded rather than reproduced.
+///
+/// # Everything else is the sibling's order, reversed
+///
+/// The body is read *before* the permission check here, where [`view_channel`] checks first. A
+/// caller with no rights over the target user therefore gets a 400 for a bad body rather than the
+/// 403 — the same inversion `getChannelMembersByIds` has against `getChannelMembers`.
+///
+/// `collapsedThreadsSupported` is not a body field on this route: Go passes the literal `true`
+/// (channel.go:2081), so the thread half of the write is skipped whenever CRT is on for the user.
+#[tracing::instrument(skip_all, fields(user_id = %user_id, asked))]
+pub async fn read_multiple_channels(
+    State(state): State<AppState>,
+    Path(user_id): Path<String>,
+    session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    match serve_read_multiple_channels(&state, &user_id, &session, request).await {
+        Ok(response) => response,
+        Err(err) => err.into_response(),
+    }
+}
+
+async fn serve_read_multiple_channels(
+    state: &AppState,
+    user_id: &str,
+    session: &AuthenticatedSession,
+    request: Request,
+) -> Result<Response, ApiError> {
+    let user_id = if user_id == ME {
+        session.0.user_id.clone()
+    } else {
+        user_id.to_owned()
+    };
+    // Deliberately **not** `?`: see the table in the doc comment. Go keeps this in `c.Err` and
+    // lets the next refusal overwrite it, and every path that reaches the response has one.
+    let malformed_user_id = require_id(&user_id, "user_id").err();
+
+    let bytes = read_body(request, "readMultipleChannels").await?;
+    let channel_ids = ids_from_body(&bytes, "channel_ids", "readMultipleChannels")?;
+    tracing::Span::current().record("asked", channel_ids.len());
+
+    if !state
+        .app
+        .session_has_permission_to_user(&session.0, &user_id)
+        .await
+    {
+        return Err(ApiError::from(make_permission_error(
+            &session.0,
+            &[&PERMISSION_EDIT_OTHER_USERS],
+        )));
+    }
+
+    let is_crt_enabled = state.app.is_crt_enabled_for_user(&user_id).await;
+    let times = state
+        .app
+        .mark_channels_as_viewed(&channel_ids, &user_id, true, is_crt_enabled)
+        .await?;
+
+    // Unreachable — the app call above reads the user row and fails for a malformed id — but the
+    // slot Go would still be holding is honoured rather than dropped.
+    if let Some(err) = malformed_user_id {
+        return Err(err);
+    }
+
+    view_response(times, "readMultipleChannels")
+}
+
 #[cfg(test)]
 mod tests {
     /// The name in the 400 for a malformed id, pinned in-process because HTTP cannot see it —

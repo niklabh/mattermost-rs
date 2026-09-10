@@ -28,13 +28,15 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use mm_model::channel::{Channel, ChannelBannerInfo, ChannelSearchOpts};
+use mm_model::channel::{CHANNEL_TYPE_DIRECT, Channel, ChannelBannerInfo, ChannelSearchOpts};
 use mm_model::channel_list::ChannelList;
 use mm_model::channel_member::{
-    ChannelMember, ChannelMemberWithTeamData, ChannelMembersWithTeamData, ChannelUnread,
+    CHANNEL_NOTIFY_DEFAULT, ChannelMember, ChannelMemberWithTeamData, ChannelMembersWithTeamData,
+    ChannelUnread,
 };
 use mm_model::post_list::PostList;
 use mm_model::role::{CHANNEL_ADMIN_ROLE_ID, CHANNEL_GUEST_ROLE_ID, CHANNEL_USER_ROLE_ID};
+use mm_model::user::{PUSH_NOTIFY_PROP, USER_NOTIFY_ALL, USER_NOTIFY_MENTION};
 use mm_model::utils::StringMap;
 use sqlx::PgPool;
 
@@ -433,6 +435,27 @@ pub trait ChannelStore {
         &self,
         channel_id: &str,
     ) -> impl std::future::Future<Output = Result<PostList, StoreError>> + Send;
+
+    /// Port of `SqlChannelStore.GetChannelsWithUnreadsAndWithMentions` (channel_store.go:2232).
+    fn get_channels_with_unreads_and_with_mentions(
+        &self,
+        channel_ids: &[String],
+        user_id: &str,
+        user_notify_props: Option<&StringMap>,
+    ) -> impl std::future::Future<Output = Result<UnreadsAndMentions, StoreError>> + Send;
+
+    /// Port of `SqlChannelStore.UpdateLastViewedAt` (channel_store.go:2838).
+    fn update_last_viewed_at(
+        &self,
+        channel_ids: &[String],
+        user_id: &str,
+    ) -> impl std::future::Future<Output = Result<BTreeMap<String, i64>, StoreError>> + Send;
+
+    /// Port of `SqlChannelStore.GetBoardChannel` (channel_store.go:1003).
+    fn get_board_channel(
+        &self,
+        id: &str,
+    ) -> impl std::future::Future<Output = Result<Channel, StoreError>> + Send;
 }
 
 /// Postgres-backed implementation.
@@ -621,6 +644,33 @@ impl ChannelStore for SqlChannelStore {
         user_id: &str,
     ) -> Result<ChannelUnread, StoreError> {
         get_channel_unread(&self.pool, channel_id, user_id).await
+    }
+
+    async fn get_channels_with_unreads_and_with_mentions(
+        &self,
+        channel_ids: &[String],
+        user_id: &str,
+        user_notify_props: Option<&StringMap>,
+    ) -> Result<UnreadsAndMentions, StoreError> {
+        get_channels_with_unreads_and_with_mentions(
+            &self.pool,
+            channel_ids,
+            user_id,
+            user_notify_props,
+        )
+        .await
+    }
+
+    async fn update_last_viewed_at(
+        &self,
+        channel_ids: &[String],
+        user_id: &str,
+    ) -> Result<BTreeMap<String, i64>, StoreError> {
+        update_last_viewed_at(&self.pool, channel_ids, user_id).await
+    }
+
+    async fn get_board_channel(&self, id: &str) -> Result<Channel, StoreError> {
+        get_board_channel(&self.pool, id).await
     }
 
     #[tracing::instrument(skip_all, fields(team_id = %team_id, names = names.len(), found))]
@@ -3928,6 +3978,340 @@ pub async fn get_channels_by_scheme(
     rows.into_iter().map(channel_from_row).collect()
 }
 
+/// The read-state a channel-view request needs, as the three "unreads and mentions" queries
+/// return it (channel_store.go:2232, :2306, :2374).
+///
+/// Go returns a bare `([]string, []string, map[string]int64, error)`; naming the three makes the
+/// call sites at `MarkChannelsAsViewed` (app/channel.go:3678) readable, because two of them are
+/// id lists that differ only in *which* channels they hold.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct UnreadsAndMentions {
+    /// The channels with anything unread — the set `UpdateLastViewedAt` is then run over.
+    pub with_unreads: Vec<String>,
+    /// The subset whose notification level means a push notification was (or would have been)
+    /// raised, so the clear goes out for them.
+    pub with_mentions: Vec<String>,
+    /// `max(Channels.LastPostAt, ChannelMembers.LastViewedAt)` per channel, for **every**
+    /// membership the query matched — read or unread. This is what reaches the wire as
+    /// `ChannelViewResponse.last_viewed_at_times`.
+    ///
+    /// A `BTreeMap` because Go's `encoding/json` sorts map keys when it marshals, so the ordering
+    /// is wire surface and sorted is the ordering.
+    pub read_times: BTreeMap<String, i64>,
+}
+
+/// One row of the three "unreads and mentions" queries, before classification.
+struct UnreadRow {
+    id: String,
+    channel_type: String,
+    total_msg_count: i64,
+    last_post_at: i64,
+    msg_count: i64,
+    mention_count: i64,
+    notify_props: Option<StringMap>,
+    last_viewed_at: i64,
+}
+
+/// The classification body the three queries share **verbatim** (channel_store.go:2276-2299,
+/// :2340-2363, :2408-2431). Ported once; the queries differ only in their `WHERE`.
+///
+/// Three decisions live here and each one is easy to invert:
+///
+/// - **A mention counts as unread on its own.** `hasUnreads` is `TotalMsgCount - MsgCount > 0`
+///   *or* `hasMentions`, so a member whose `MsgCount` was written ahead of the channel's total —
+///   which the schema permits — still gets marked read when they have a mention pending.
+/// - **The channel's `push` prop falls back to the user's, and only when it is the literal
+///   `"default"`.** A missing prop is `""`, which is neither `"default"` nor `"all"` nor
+///   `"mention"`, so it falls through *all three* arms and the channel is never in
+///   `with_mentions`. Substituting the user's props for a missing prop as well would send a push
+///   clear for channels Go leaves alone.
+/// - **A direct channel is treated as `all` regardless of its prop**, but a *group* channel is
+///   not — `ChannelTypeGroup` is not in the test.
+///
+/// `user_notify_props` is `None` for a user whose column decoded to a nil map; Go's index of a
+/// nil map is `""`, which the same fall-through covers.
+fn classify_unreads_and_mentions(
+    rows: Vec<UnreadRow>,
+    user_notify_props: Option<&StringMap>,
+) -> UnreadsAndMentions {
+    let mut result = UnreadsAndMentions::default();
+
+    for row in rows {
+        let has_mentions = row.mention_count > 0;
+        let has_unreads = (row.total_msg_count - row.msg_count) > 0 || has_mentions;
+
+        if has_unreads {
+            result.with_unreads.push(row.id.clone());
+        }
+
+        let channel_push = row
+            .notify_props
+            .as_ref()
+            .and_then(|props| props.get(PUSH_NOTIFY_PROP))
+            .map(String::as_str)
+            .unwrap_or_default();
+        let notify = if channel_push == CHANNEL_NOTIFY_DEFAULT {
+            user_notify_props
+                .and_then(|props| props.get(PUSH_NOTIFY_PROP))
+                .map(String::as_str)
+                .unwrap_or_default()
+        } else {
+            channel_push
+        };
+
+        if notify == USER_NOTIFY_ALL || row.channel_type == CHANNEL_TYPE_DIRECT {
+            if has_unreads {
+                result.with_mentions.push(row.id.clone());
+            }
+        } else if notify == USER_NOTIFY_MENTION && has_mentions {
+            result.with_mentions.push(row.id.clone());
+        }
+
+        result
+            .read_times
+            .insert(row.id, row.last_post_at.max(row.last_viewed_at));
+    }
+
+    result
+}
+
+/// `ChannelMembers.NotifyProps` as [`get_member`] reads it: SQL `NULL` and the JSON value `null`
+/// are different rows and Go turns both into a nil map rather than an error ([D-135]).
+fn notify_props_from_column(
+    entity: &'static str,
+    value: Option<serde_json::Value>,
+) -> Result<Option<StringMap>, StoreError> {
+    match value {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(value) => Ok(Some(serde_json::from_value::<StringMap>(value).map_err(
+            |source| StoreError::Decode {
+                entity,
+                column: "notifyprops",
+                source,
+            },
+        )?)),
+    }
+}
+
+/// Port of `SqlChannelStore.GetChannelsWithUnreadsAndWithMentions` (channel_store.go:2232).
+///
+/// **The deny-list is one type wide.** Go filters `Channels.Type NOT IN (S)` —
+/// `nonMessageBackingChannelTypes` (channel_store.go:52) — and *not* the `IN (O, P, D, G)`
+/// allow-list [`get`] uses. Boards (`BO`/`BP`) are therefore in scope here: a board channel the
+/// caller is a member of is marked read by `POST /channels/members/{user_id}/view` even though
+/// [`get`] would call the same channel missing. Narrowing this to the allow-list would silently
+/// leave board read-state behind.
+///
+/// A channel id in the list the user is not a member of contributes nothing — the join is on
+/// `ChannelMembers` — and is not an error.
+#[tracing::instrument(skip(pool, user_notify_props), fields(user_id = %user_id, requested = channel_ids.len(), found))]
+pub async fn get_channels_with_unreads_and_with_mentions(
+    pool: &PgPool,
+    channel_ids: &[String],
+    user_id: &str,
+    user_notify_props: Option<&StringMap>,
+) -> Result<UnreadsAndMentions, StoreError> {
+    let rows = sqlx::query!(
+        r#"
+        SELECT channels.id AS "id!",
+               channels.type::text AS "channel_type!",
+               channels.totalmsgcount AS "totalmsgcount!",
+               channels.lastpostat AS "lastpostat!",
+               channelmembers.msgcount AS "msgcount!",
+               channelmembers.mentioncount AS "mentioncount!",
+               channelmembers.notifyprops,
+               channelmembers.lastviewedat AS "lastviewedat!"
+          FROM channelmembers
+         INNER JOIN channels ON channelmembers.channelid = channels.id
+         WHERE channelmembers.channelid = ANY($1)
+           AND channelmembers.userid = $2
+           AND channels.type <> 'S'
+        "#,
+        channel_ids,
+        user_id
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: "failed to find channels with unreads and with mentions data".to_owned(),
+        source,
+    })?;
+
+    tracing::Span::current().record("found", rows.len());
+
+    let mut decoded = Vec::with_capacity(rows.len());
+    for row in rows {
+        decoded.push(UnreadRow {
+            id: row.id,
+            channel_type: row.channel_type,
+            total_msg_count: row.totalmsgcount,
+            last_post_at: row.lastpostat,
+            msg_count: row.msgcount,
+            mention_count: row.mentioncount,
+            notify_props: notify_props_from_column("ChannelMember", row.notifyprops)?,
+            last_viewed_at: row.lastviewedat,
+        });
+    }
+
+    Ok(classify_unreads_and_mentions(decoded, user_notify_props))
+}
+
+/// Port of `SqlChannelStore.UpdateLastViewedAt` (channel_store.go:2838).
+///
+/// # It is one statement, and the rows it returns do not come from the UPDATE
+///
+/// Go builds `WITH c AS (SELECT … FROM Channels WHERE Id IN …), updated AS (UPDATE ChannelMembers
+/// … FROM c …) SELECT Id, LastPostAt FROM c`. Two consequences a straightforward
+/// `UPDATE … RETURNING` would get wrong:
+///
+/// - **The returned rows are the *channels*, not the memberships.** A channel id the user is not
+///   a member of updates nothing and is still in the answer, with its `LastPostAt`.
+/// - **Empty is only empty when no `Channels` row matched.** That — not "no membership was
+///   updated" — is what raises `ErrInvalidInput`, which the app layer turns into a **400**.
+///
+/// # `LastUpdateAt` is set from `LastViewedAt`, not from now
+///
+/// Both are `greatest(cm.LastViewedAt, c.LastPostAt)`, and the `cm.LastViewedAt` inside them is
+/// the value *before* this statement — Postgres evaluates every `SET` expression against the old
+/// row — so the two columns end up equal. Writing `LastUpdateAt = now()` would drift a column the
+/// client sorts on.
+///
+/// The map this returns is `LastPostAt` per channel, which is **not** what the view routes answer
+/// with: `MarkChannelsAsViewed` discards it in favour of the `read_times` from
+/// [`get_channels_with_unreads_and_with_mentions`] (app/channel.go:3705).
+#[tracing::instrument(skip(pool), fields(user_id = %user_id, channels = channel_ids.len()))]
+pub async fn update_last_viewed_at(
+    pool: &PgPool,
+    channel_ids: &[String],
+    user_id: &str,
+) -> Result<BTreeMap<String, i64>, StoreError> {
+    if channel_ids.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+
+    let rows = sqlx::query!(
+        r#"
+        WITH c AS (
+            SELECT id, lastpostat, totalmsgcount, totalmsgcountroot
+              FROM channels
+             WHERE id = ANY($1)
+        ),
+        updated AS (
+            UPDATE channelmembers cm
+               SET mentioncount = 0,
+                   mentioncountroot = 0,
+                   urgentmentioncount = 0,
+                   msgcount = greatest(cm.msgcount, c.totalmsgcount),
+                   msgcountroot = greatest(cm.msgcountroot, c.totalmsgcountroot),
+                   lastviewedat = greatest(cm.lastviewedat, c.lastpostat),
+                   lastupdateat = greatest(cm.lastviewedat, c.lastpostat)
+              FROM c
+             WHERE cm.userid = $2 AND c.id = cm.channelid
+        )
+        SELECT id AS "id!", lastpostat AS "lastpostat!" FROM c
+        "#,
+        channel_ids,
+        user_id
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: format!(
+            "failed to find ChannelMembers data with userId={user_id} and channelId in {}",
+            go_slice_debug(channel_ids)
+        ),
+        source,
+    })?;
+
+    if rows.is_empty() {
+        return Err(StoreError::InvalidInput {
+            entity: "Channel",
+            field: "Id",
+            value: go_slice_debug(channel_ids),
+        });
+    }
+
+    Ok(rows
+        .into_iter()
+        .map(|row| (row.id, row.lastpostat))
+        .collect())
+}
+
+/// Go's `fmt.Sprintf("%v", []string{…})` — space-separated inside square brackets, no quoting.
+/// Only ever reaches a log line or a store error's `Detail`, but reproducing it keeps the two
+/// servers' logs comparable when a parity run diverges.
+fn go_slice_debug(values: &[String]) -> String {
+    format!("[{}]", values.join(" "))
+}
+
+/// Port of `SqlChannelStore.GetBoardChannel` (channel_store.go:1003).
+///
+/// Column for column [`get`], with `Type IN (BO, BP)` in place of the message-channel allow-list.
+/// It exists for `rejectBoardChannelByID` (api4/channel.go:23), whose whole job is to answer
+/// **400** for a board id on a `/channels` route rather than let it fall through to a 404 — so
+/// "found" here is the *rejection* path, and a miss is the ordinary one.
+#[tracing::instrument(skip(pool), fields(channel_id = %id, found))]
+pub async fn get_board_channel(pool: &PgPool, id: &str) -> Result<Channel, StoreError> {
+    let row = sqlx::query_as!(
+        ChannelRow,
+        r#"
+        SELECT c.id,
+               c.createat,
+               c.updateat,
+               c.deleteat,
+               c.teamid,
+               c.type::text AS "channel_type!",
+               c.displayname,
+               c.name,
+               c.header,
+               c.purpose,
+               c.lastpostat,
+               c.totalmsgcount,
+               c.extraupdateat,
+               c.creatorid,
+               c.schemeid,
+               c.groupconstrained,
+               c.autotranslation,
+               c.shared,
+               c.totalmsgcountroot,
+               c.lastrootpostat,
+               c.bannerinfo,
+               c.defaultcategoryname,
+               c.discoverable,
+               EXISTS (
+                   SELECT 1 FROM accesscontrolpolicies acp
+                    WHERE acp.id = c.id AND acp.type = 'channel'
+               ) AS "policy_enforced!",
+               COALESCE((
+                   SELECT acp.active FROM accesscontrolpolicies acp
+                    WHERE acp.id = c.id AND acp.type = 'channel' AND acp.active = TRUE
+                    LIMIT 1
+               ), false) AS "policy_is_active!"
+          FROM channels c
+         WHERE c.id = $1
+           AND c.type IN ('BO', 'BP')
+        "#,
+        id
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: format!("failed to find board channel with id = {id}"),
+        source,
+    })?;
+
+    let Some(row) = row else {
+        tracing::Span::current().record("found", false);
+        return Err(StoreError::NotFound {
+            entity: "Channel",
+            criteria: id.to_owned(),
+        });
+    };
+    tracing::Span::current().record("found", true);
+
+    channel_from_row(row)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4293,6 +4677,95 @@ mod tests {
         assert_eq!(wildcard_search_term("Town"), "%town%");
         assert_eq!(wildcard_search_term(""), "%%");
         assert_eq!(wildcard_search_term("*%"), "%*%%");
+    }
+
+    /// The classification branches the DB suite cannot separate, on the pure function.
+    ///
+    /// `db_channel_view_reads.rs` covers `all`, the `default` fall-back and the direct-channel
+    /// override against real rows. What is left is the `mention` arm and the fall-through, and
+    /// both are cheaper — and clearer — asserted here.
+    ///
+    /// **Transcribed from `channel_store.go:2276-2299`, not generated.** The classification lives
+    /// inside a `SqlChannelStore` method that `reference/dump` cannot call without a database, so
+    /// there is no fixture oracle for it; if upstream changes the branch order this test keeps
+    /// passing while the port drifts. Recorded as such rather than dressed up.
+    fn row(id: &str, channel_type: &str, mentions: i64, push: Option<&str>) -> UnreadRow {
+        UnreadRow {
+            id: id.to_owned(),
+            channel_type: channel_type.to_owned(),
+            total_msg_count: 40,
+            last_post_at: 100,
+            msg_count: 15,
+            mention_count: mentions,
+            notify_props: push.map(|value| {
+                StringMap::from(BTreeMap::from([(
+                    PUSH_NOTIFY_PROP.to_owned(),
+                    value.to_owned(),
+                )]))
+            }),
+            last_viewed_at: 0,
+        }
+    }
+
+    #[test]
+    fn the_mention_arm_needs_a_mention_and_not_merely_an_unread() {
+        let rows = vec![
+            row("unread", "O", 0, Some("mention")),
+            row("mentioned", "O", 3, Some("mention")),
+        ];
+        let got = classify_unreads_and_mentions(rows, None);
+        assert_eq!(
+            got.with_unreads,
+            vec!["unread".to_owned(), "mentioned".to_owned()],
+            "both are unread — the second by its mention count alone"
+        );
+        assert_eq!(
+            got.with_mentions,
+            vec!["mentioned".to_owned()],
+            "`mention` is not `all`"
+        );
+    }
+
+    /// A membership with **no** `push` prop resolves to `""`, which is neither `default` (so the
+    /// user's props are not consulted) nor `all` nor `mention` — so it falls through every arm
+    /// and the channel is in no push clear at all. Substituting the user's props for a missing
+    /// prop as well is the plausible wrong reading.
+    #[test]
+    fn a_missing_push_prop_falls_through_every_arm() {
+        let user = StringMap::from(BTreeMap::from([(
+            PUSH_NOTIFY_PROP.to_owned(),
+            USER_NOTIFY_ALL.to_owned(),
+        )]));
+        let got = classify_unreads_and_mentions(vec![row("open", "O", 5, None)], Some(&user));
+        assert_eq!(got.with_unreads, vec!["open".to_owned()]);
+        assert!(
+            got.with_mentions.is_empty(),
+            "a missing prop is not `default`"
+        );
+    }
+
+    /// A mention makes a channel unread even when the member's `MsgCount` is **ahead** of the
+    /// channel's total, which the schema permits and the subtraction alone would call read.
+    #[test]
+    fn a_mention_alone_makes_a_channel_unread() {
+        let mut r = row("ahead", "O", 2, Some("all"));
+        r.msg_count = 90;
+        let got = classify_unreads_and_mentions(vec![r], None);
+        assert_eq!(got.with_unreads, vec!["ahead".to_owned()], "40 - 90 < 0");
+        assert_eq!(got.with_mentions, vec!["ahead".to_owned()]);
+    }
+
+    /// `read_times` is the larger of the two columns, and it is populated for a channel that is
+    /// in neither id list.
+    #[test]
+    fn read_times_covers_every_row_including_the_read_ones() {
+        let mut caught_up = row("read", "O", 0, Some("all"));
+        caught_up.msg_count = 40;
+        caught_up.last_viewed_at = 900;
+        let got = classify_unreads_and_mentions(vec![caught_up], None);
+        assert!(got.with_unreads.is_empty());
+        assert!(got.with_mentions.is_empty());
+        assert_eq!(got.read_times.get("read"), Some(&900), "max(100, 900)");
     }
 
     /// `buildFulltextClause`'s term: punctuation to spaces, pipes dropped, each field suffixed

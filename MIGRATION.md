@@ -9120,3 +9120,94 @@ the other two are not — they are branches no route reaches, which no amount of
 suite would have covered. `scripts/mutations/user-lookups.plan` runs across four suites for that
 reason: `store` for the SQL, `app` for the status mapping, `unit` for the configuration, `api` for
 the handlers.
+
+## The channel a client says it is looking at (2026-09-10)
+
+`POST /api/v4/channels/members/{user_id}/view` and
+`POST /api/v4/channels/members/{user_id}/mark_read` — the first **channel writes** in the port,
+and the first route a real client calls on every single channel switch. 289 → **291 of 764**.
+Store, app and handlers: `mm_store::channel_store::{get_channels_with_unreads_and_with_mentions,
+update_last_viewed_at, get_board_channel}`, `mm_store::ThreadStore::mark_all_as_read_by_channels`,
+`mm_app::channel_view` (a new module), and two handlers in `mm_api::channels`.
+
+### The deny-list is one type wide, and it is not the allow-list next to it
+
+`GetChannelsWithUnreadsAndWithMentions` filters `Channels.Type NOT IN ('S')`
+(`nonMessageBackingChannelTypes`, channel_store.go:52). Every neighbouring channel query — `Get`,
+`GetMany`, `GetChannelUnread` — uses the `IN (O, P, D, G)` **allow-list** instead. So a board
+(`BO`/`BP`) the caller is a member of **is** marked read by this route while `SqlChannelStore.Get`
+would call the same channel missing. Narrowing it to the allow-list is invisible over HTTP (a
+board id is refused by the handler before the query runs) and silently strands board read-state;
+`db_channel_view_reads` is where that is pinned.
+
+### `readMultipleChannels` never answers the 400 it raises
+
+The handler calls `c.RequireUserId()` and then **does not return** (channel.go:2067). Go's `c.Err`
+is one slot, so the malformed-id 400 is overwritten by whatever refuses next: an unparseable body
+is `api.payload.parse.error`, an empty list is `invalid_body_param`, a caller without
+`edit_other_users` is a 403, and a caller *with* it reaches `MarkChannelsAsViewed`, whose user
+lookup fails on the malformed id and gives a 500. Its sibling `viewChannel`, one `if` away,
+returns early and answers the 400. Both are asserted against Go
+(`a_malformed_path_user_id_answers_differently_on_the_two_routes`).
+
+The one path that would let the 400 survive — the app call succeeding for a malformed id — cannot
+happen, and if it could, Go would write the success body and then **append the error JSON to it**.
+Recorded in the handler rather than reproduced.
+
+### The write answers from `Channels` and the timestamps come from the old row
+
+`UpdateLastViewedAt` is one CTE: a `WITH c AS (SELECT … FROM Channels …)`, an `UPDATE` in a second
+CTE, and `SELECT Id, LastPostAt FROM c`. Two things follow that `UPDATE … RETURNING` would get
+wrong — a channel the user is **not a member of** is in the answer, and "empty" means no
+*channel* matched, not that no membership was updated. That is the only thing that raises
+`ErrInvalidInput`, which the app layer turns into a 400.
+
+Inside the statement, `LastViewedAt` and `LastUpdateAt` are both
+`greatest(cm.LastViewedAt, c.LastPostAt)` — evaluated against the **pre-update** row, so the two
+columns end up equal and neither is a clock reading. And the map the store returns is discarded:
+the routes answer with `max(LastPostAt, LastViewedAt)` from the *read*, computed before the write.
+
+### `collapsed_threads_supported` is the only half of the thread decision a client can move
+
+`updateThreads` is `ThreadAutoFollow && (!collapsedThreadsSupported || !isCRTEnabled)`. The shipped
+`ServiceSettings.CollapsedThreads` is `always_on`, which makes `IsCRTEnabledForUser` return true
+**without reading the user's preference at all** — so the expression reduces to
+`!collapsedThreadsSupported`. A client that renders threads itself gets no thread write and no
+`thread_read_changed`; one that says nothing gets both. `mark_read` passes the literal `true`, so
+it never publishes a thread event where `view` with the same body would. All three are asserted on
+the socket.
+
+### The two routes disagree about which refusal comes first
+
+`view` gates on `edit_other_users` **before** it reads the body; `mark_read` parses the body
+first. The same request — another user's id, `not json` — is a 403 on one and a 400 on the other.
+
+### Three things this port does not do on these routes
+
+* **`ExtendSessionExpiryIfNeeded`** ([D-214]). Off on every persisted configuration document, so
+  both servers do nothing here today; it is a `Set-Cookie` when it is on.
+* **`clearPushNotification`** ([D-215]). There is no hub. The channel list it would consume is
+  computed in full anyway, because its notify-prop fall-through is three branches deep and would
+  be invisible until there *is* a hub.
+* **Reading the status cache back** ([D-216]). `SetActiveChannel` writes only to it, and
+  `get_user_statuses_by_ids` reads the table — so the one mutation with no catcher is the one that
+  deletes that call.
+
+### Mutation testing: 31 run, 29 caught, 2 controls survived
+
+Three real survivors on the first run, and none of them was a fixture where the right and wrong
+answers coincided:
+
+* `app-view-drops-the-prev-channel` — no test sent a `prev_channel_id` naming a real channel, so
+  the field every client fills on every switch was untested. Now
+  `the_previous_channel_is_marked_read_as_well`.
+* `app-invalid-input-is-a-500` — the 400/500 split is **unreachable through the route**: the ids
+  handed to `UpdateLastViewedAt` came out of a join against `Channels`, so no request can produce
+  the empty result that raises `ErrInvalidInput`. Go has the same dead branch. Extracted as
+  `update_last_viewed_at_error` so the reproduction has an oracle a unit test can reach.
+* `api-view-checks-the-body-before-the-gate` — the mutation was wrong, not the tests: it moved
+  `read_body`, which only fails on a transport error, rather than the decode. Moving the decode is
+  caught.
+
+One harness fault on the first run, from a control that did not compile; the tally above is the
+re-run.

@@ -14,8 +14,8 @@ use crate::common;
 
 use common::{
     GO, RUST, assert_error_bodies_match_except_known_gaps, client, create_plain_user, create_team,
-    delete_plain_user, go_minted_token, logged_in_user_id, post_both_raw, purge_api_fixtures,
-    stack_enabled,
+    delete_plain_user, go_minted_token, logged_in_user_id, post_both_raw, post_both_raw_stable,
+    purge_api_fixtures, stack_enabled,
 };
 
 const PATH: &str = "/api/v4/users/usernames";
@@ -87,7 +87,12 @@ async fn the_list_is_byte_identical_and_username_ordered() {
     // Deliberately not in username order, and `SortedArrayFromJSON` plus the query's `ORDER BY`
     // both put it back.
     let asked = body(&[&f.deactivated, &f.admin_username, &f.alive]);
-    let ((go_status, go), (rs_status, rs)) = post_both_raw(&client, &token, PATH, &asked).await;
+    // The answer embeds the admin's whole `User`, whose `UpdateAt` other suites in this
+    // binary move — `custom_status_writes` writes `Users.Props`. A single Go-then-Rust pair
+    // compares two instants and fails on that churn alone; the bracket is what that helper is
+    // for.
+    let ((go_status, go), (rs_status, rs)) =
+        post_both_raw_stable(&client, &token, PATH, &asked).await;
     assert_eq!(go_status, 200);
     assert_eq!(rs_status, go_status);
     assert_eq!(
@@ -131,7 +136,12 @@ async fn unknown_names_are_dropped_rather_than_refused() {
     // One real name, one that names nobody, and one that is not a valid username at all —
     // nothing here validates the shape, so both misses are the same absence.
     let asked = body(&[&f.alive, "mmrs-parity-nobody", "NOT A USERNAME"]);
-    let ((go_status, go), (rs_status, rs)) = post_both_raw(&client, &token, PATH, &asked).await;
+    // The answer embeds the admin's whole `User`, whose `UpdateAt` other suites in this
+    // binary move — `custom_status_writes` writes `Users.Props`. A single Go-then-Rust pair
+    // compares two instants and fails on that churn alone; the bracket is what that helper is
+    // for.
+    let ((go_status, go), (rs_status, rs)) =
+        post_both_raw_stable(&client, &token, PATH, &asked).await;
     assert_eq!(go_status, 200, "no validation, no not-found");
     assert_eq!(rs_status, go_status);
     assert_eq!(
@@ -185,7 +195,7 @@ async fn a_plain_caller_sees_the_non_admin_view() {
 
     let asked = body(&[&f.admin_username]);
     let ((go_status, go), (rs_status, rs)) =
-        post_both_raw(&client, &f.plain_token, PATH, &asked).await;
+        post_both_raw_stable(&client, &f.plain_token, PATH, &asked).await;
     assert_eq!(go_status, 200);
     assert_eq!(rs_status, go_status);
     assert_eq!(

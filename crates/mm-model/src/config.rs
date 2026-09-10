@@ -33,6 +33,16 @@ use crate::content_flagging_settings::ContentFlaggingSettings;
 use crate::feature_flags::FeatureFlags;
 use crate::utils::StringInterface;
 
+/// `model.CollapsedThreadsDisabled` (config.go:109) — CRT off for everyone, no preference read.
+pub const COLLAPSED_THREADS_DISABLED: &str = "disabled";
+/// `model.CollapsedThreadsDefaultOn` (config.go:110) — on unless the user's preference says off.
+pub const COLLAPSED_THREADS_DEFAULT_ON: &str = "default_on";
+/// `model.CollapsedThreadsDefaultOff` (config.go:111) — off unless the user's preference says on.
+pub const COLLAPSED_THREADS_DEFAULT_OFF: &str = "default_off";
+/// `model.CollapsedThreadsAlwaysOn` (config.go:112) — CRT on for everyone, no preference read.
+/// This is the shipped default for `ServiceSettings.CollapsedThreads` (config.go:982).
+pub const COLLAPSED_THREADS_ALWAYS_ON: &str = "always_on";
+
 /// Port of `model.ServiceSettings` (config.go). Field names are the wire keys — see the module docs.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]

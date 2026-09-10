@@ -391,6 +391,44 @@ pub struct Config {
     /// is no database source to read and giving it one would be inventing a value.
     pub feature_flag_session_attributes: bool,
 
+    /// `ServiceSettings.CollapsedThreads` (config.go:485, defaulted **`"always_on"`** at :982).
+    ///
+    /// **The default short-circuits the preference lookup entirely.**
+    /// `App.IsCRTEnabledForUser` (app/channel.go:3183) reads the user's
+    /// `display_settings/collapsed_reply_threads` preference only for `default_on` and
+    /// `default_off`; `disabled` is always false and `always_on` — the shipped default — is
+    /// always true, with no query. Treating this as a plain "CRT on/off" boolean would send a
+    /// per-user query the server never makes.
+    pub collapsed_threads: String,
+
+    /// `ServiceSettings.ThreadAutoFollow` (config.go:484, defaulted **`true`** at :978).
+    ///
+    /// In `MarkChannelsAsViewed` this gates the *thread* half of marking a channel read:
+    /// `ThreadAutoFollow && (!collapsedThreadsSupported || !isCRTEnabled)`. With the shipped
+    /// defaults `isCRTEnabled` is true, so the whole expression reduces to
+    /// `!collapsedThreadsSupported` — a client that says it renders threads itself gets no
+    /// thread write, and a client that does not gets one.
+    pub thread_auto_follow: bool,
+
+    /// `ServiceSettings.EnableChannelViewedMessages` (config.go:444, defaulted **`true`** at
+    /// :707).
+    ///
+    /// Gates only the `multiple_channels_viewed` websocket event, never the write — so with it
+    /// off a channel is still marked read and the client is simply not told. Nothing on the HTTP
+    /// response body changes either way.
+    pub enable_channel_viewed_messages: bool,
+
+    /// `FeatureFlags.EnableShiftEscapeToMarkAllRead` (feature_flags.go:77, defaulted **`false`**
+    /// at :181).
+    ///
+    /// Gates `PUT /channels/members/{user_id}/direct/read` and
+    /// `PUT /users/{user_id}/teams/{team_id}/read`, both of which answer **501**
+    /// `api.mark_all_as_read.disabled.app_error` when it is off — and the check is the *first*
+    /// line of each handler, ahead of `RequireUserId`, so a malformed id gets the 501 too.
+    ///
+    /// Environment-or-default only, like [`Config::feature_flag_burn_on_read`].
+    pub feature_flag_enable_shift_escape_to_mark_all_read: bool,
+
     /// `ServiceSettings.EnableDynamicClientRegistration` (config.go:386, defaulted **`false`** at
     /// :599).
     ///
@@ -656,6 +694,14 @@ impl Default for Config {
             maximum_personal_access_token_lifetime_days: 0,
             message_export_download_export_results: false,
             feature_flag_session_attributes: false,
+            // config.go:982 — `new(CollapsedThreadsAlwaysOn)`.
+            collapsed_threads: mm_model::config::COLLAPSED_THREADS_ALWAYS_ON.to_owned(),
+            // config.go:978 — `new(true)`.
+            thread_auto_follow: true,
+            // config.go:708 — `new(true)`.
+            enable_channel_viewed_messages: true,
+            // feature_flags.go:181 — `false`.
+            feature_flag_enable_shift_escape_to_mark_all_read: false,
             show_full_name: true,
             show_email_address: true,
             // Absent, not empty: `SetDefaults` never fills `SiteURL`, and this constructor
@@ -942,6 +988,23 @@ impl Config {
                 "MM_FEATUREFLAGS_SESSIONATTRIBUTES",
                 default.feature_flag_session_attributes,
             ),
+            collapsed_threads: lookup("MM_SERVICESETTINGS_COLLAPSEDTHREADS")
+                .unwrap_or(default.collapsed_threads),
+            thread_auto_follow: lookup_bool(
+                lookup,
+                "MM_SERVICESETTINGS_THREADAUTOFOLLOW",
+                default.thread_auto_follow,
+            ),
+            enable_channel_viewed_messages: lookup_bool(
+                lookup,
+                "MM_SERVICESETTINGS_ENABLECHANNELVIEWEDMESSAGES",
+                default.enable_channel_viewed_messages,
+            ),
+            feature_flag_enable_shift_escape_to_mark_all_read: lookup_bool(
+                lookup,
+                "MM_FEATUREFLAGS_ENABLESHIFTESCAPETOMARKALLREAD",
+                default.feature_flag_enable_shift_escape_to_mark_all_read,
+            ),
             show_full_name: lookup_bool(
                 lookup,
                 "MM_PRIVACYSETTINGS_SHOWFULLNAME",
@@ -1057,6 +1120,18 @@ impl Config {
             // The same rule as `feature_flag_burn_on_read` above: `FeatureFlags` never reaches the
             // persisted document, so there is nothing here to read.
             feature_flag_session_attributes: default.feature_flag_session_attributes,
+            collapsed_threads: service
+                .collapsed_threads
+                .unwrap_or(default.collapsed_threads),
+            thread_auto_follow: service
+                .thread_auto_follow
+                .unwrap_or(default.thread_auto_follow),
+            enable_channel_viewed_messages: service
+                .enable_channel_viewed_messages
+                .unwrap_or(default.enable_channel_viewed_messages),
+            // `FeatureFlags` is stripped before the document is persisted; see the field docs.
+            feature_flag_enable_shift_escape_to_mark_all_read: default
+                .feature_flag_enable_shift_escape_to_mark_all_read,
             enable_post_username_override: service
                 .enable_post_username_override
                 .unwrap_or(default.enable_post_username_override),
@@ -1407,6 +1482,12 @@ struct ServiceSettingsDocument {
     enable_post_icon_override: Option<bool>,
     #[serde(rename = "EnableUserStatuses")]
     enable_user_statuses: Option<bool>,
+    #[serde(rename = "CollapsedThreads")]
+    collapsed_threads: Option<String>,
+    #[serde(rename = "ThreadAutoFollow")]
+    thread_auto_follow: Option<bool>,
+    #[serde(rename = "EnableChannelViewedMessages")]
+    enable_channel_viewed_messages: Option<bool>,
     #[serde(rename = "EnableDynamicClientRegistration")]
     enable_dynamic_client_registration: Option<bool>,
     #[serde(rename = "EnableOutgoingOAuthConnections")]

@@ -6443,3 +6443,74 @@ a second `reference/.build` instance on another port, which the harness has no n
 Until then: the shape of the response, the five store predicates and the paging are all tested, and
 the *bytes* of a successful body are not. If a field of `model.User` were serialised differently on
 this route than on the ones that are compared, nothing here would catch it.
+
+---
+
+## D-214 · `ExtendSessionExpiryIfNeeded` is not ported on any route
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-10 (phase 2, channel view)
+
+Go calls `c.ExtendSessionExpiryIfNeeded(w, r)` at the end of `viewChannel` (api4/channel.go:2052)
+— the request every client makes on every channel switch, and therefore the one that keeps a long
+session alive. It rewrites `Sessions.ExpiresAt` to `now + sessionLength` and re-attaches the
+session cookies with the new max-age (web/context.go:174, app/session.go:421).
+
+Nothing in this port does either. The route was migrated anyway because the whole thing is behind
+`ServiceSettings.ExtendSessionLengthWithActivity`, which Go defaults to `!isUpdate` — **false for
+every persisted configuration document**, since `Store.Load` plants a `SiteURL` before calling
+`SetDefaults` ([D-088] measured this). On this stack it is off, so both servers do nothing.
+
+What is owed, when the setting is on:
+
+* the 1%-of-session-length-or-one-day threshold, floored at five minutes, so a session's expiry is
+  not rewritten on every request;
+* `platform.ExtendSessionExpiry`, which updates the row **and** the session cache;
+* `AttachSessionCookies`, which is a `Set-Cookie` on the response — the only piece of this that is
+  wire-visible, and the reason it cannot be quietly skipped for ever.
+
+Until then a client talking to the Rust server on a stack with the setting enabled would have its
+session expire on schedule while the same client talking to Go would not.
+
+---
+
+## D-215 · No push-notification hub, so `clearPushNotification` does nothing
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-10 (phase 2, channel view)
+
+`MarkChannelsAsViewed` ends by queueing a `notificationTypeClear` on
+`Srv().PushNotificationsHub` for every channel in `channelsToClearPushNotifications`
+(app/channel.go:3722, notification_push.go:406) — the badge-clearing message a mobile device gets
+when the user reads a channel somewhere else.
+
+This port has no hub and no device registry, so the list is computed and dropped.
+`mm_store::channel_store::classify_unreads_and_mentions` produces it in full deliberately: its
+notify-prop fall-through is three branches deep and getting it wrong would be invisible until
+there *is* a hub, at which point the bug would look like a hub bug. `db_channel_view_reads` and
+the `channel_store::tests` module assert it today; nothing on the wire does.
+
+What is owed is the hub itself — `app/notification_push.go`, the `Sessions.DeviceId` fan-out and
+the Mattermost Push Proxy protocol — which is a session of its own and blocks nothing. Every route
+that clears or sends a push notification inherits this entry.
+
+---
+
+## D-216 · A view's status-cache write cannot be read back through any route we serve
+
+**Status** OPEN · **Severity** untested · **Raised** 2026-09-10 (phase 2, channel view)
+
+`App::set_active_channel` runs on every `POST /channels/members/{user_id}/view`. It puts the
+user's status — with the new `ActiveChannel` and a fresh `LastActivityAt` — into
+`mm-app`'s status cache, and broadcasts `status_change` when the status *string* changed. It
+writes no row, which is Go's behaviour and is asserted
+(`channel_view::a_view_writes_no_status_row_on_either_server`).
+
+The cache entry itself is unreadable: `App::get_user_statuses_by_ids` — which both status routes
+go through — reads the `Status` **table** only, as its own doc comment records, and Go reads its
+cache first. So a mutation that deletes the `set_active_channel` call from `App::view_channel`
+survives the whole suite, and is listed as such in `scripts/mutations/channel-view.plan`.
+
+Two things are owed and they are the same work: make `get_user_statuses_by_ids` consult the cache
+before the table, which is what Go does and would close both this and the `active_channel`/
+`last_activity_at` staleness the status module already documents. It was not done here because it
+changes an already-migrated route's answers and belongs in a session that can re-verify the status
+parity suite against Go rather than one that would be changing it in passing.

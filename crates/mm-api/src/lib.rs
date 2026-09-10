@@ -575,6 +575,25 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/channels/stats/member_count",
             partially_migrated(post(channels::get_channels_member_count)),
         )
+        // `BaseRoutes.Channels.Handle("/members/{user_id}/view")` and its two siblings
+        // (api4/channel.go:53-55). The literal `members` sits in the `{channel_id}` slot of the
+        // routes below, exactly as `stats` does above — matchit prefers the static segment, and
+        // gorilla's ordered matcher picks the same registration, so both routers send
+        // `/channels/members/<id>/view` here and `/channels/<id>/members/<id>` to
+        // `getChannelMember`.
+        //
+        // `/direct/read` is a **`PUT`** and is *not* registered: it is gated on the
+        // `EnableShiftEscapeToMarkAllRead` feature flag, which is off by default, and porting a
+        // handler whose only reachable answer is a 501 buys nothing until the flag is on. It
+        // forwards, as does the whole `{user_id}` subtree's every other method.
+        .route(
+            "/api/v4/channels/members/{user_id}/view",
+            partially_migrated_with_ids(&state, post(channels::view_channel)),
+        )
+        .route(
+            "/api/v4/channels/members/{user_id}/mark_read",
+            partially_migrated_with_ids(&state, post(channels::read_multiple_channels)),
+        )
         .route(
             "/api/v4/channels/{channel_id}",
             partially_migrated_with_ids(&state, get(channels::get_channel)),
