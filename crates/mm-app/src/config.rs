@@ -150,6 +150,14 @@ pub struct Config {
     /// the check is a no-op, and a server that sets it refuses updates Go would refuse too.
     pub restrict_creation_to_domains: String,
 
+    /// `TeamSettings.EnableOpenServer` (config.go:2546, defaulted **`false`** at :2588).
+    ///
+    /// Read by exactly one route, and read **backwards** from what the name suggests:
+    /// `getUsersWithInvalidEmails` answers **400** when it is *enabled*. An open server lets
+    /// anyone sign up, so "which accounts have emails outside the allowed domains" has no
+    /// meaning; the handler refuses rather than returning an empty list.
+    pub enable_open_server: bool,
+
     /// `ServiceSettings.EnableUserStatuses` (config.go:445, defaulted **`true`** at :711).
     ///
     /// **`ServiceSettings`, not `TeamSettings`** — its sibling `UserStatusAwayTimeout` *is* in
@@ -617,6 +625,8 @@ impl Default for Config {
             restrict_direct_message: DIRECT_MESSAGE_ANY.to_owned(),
             // config.go:2592 — `new("")`.
             restrict_creation_to_domains: String::new(),
+            // config.go:2588 — `new(false)`.
+            enable_open_server: false,
             enable_user_statuses: true,
             user_status_away_timeout: 300,
             enable_custom_user_statuses: true,
@@ -766,6 +776,11 @@ impl Config {
                 .unwrap_or(default.restrict_direct_message),
             restrict_creation_to_domains: lookup("MM_TEAMSETTINGS_RESTRICTCREATIONTODOMAINS")
                 .unwrap_or(default.restrict_creation_to_domains),
+            enable_open_server: lookup_bool(
+                lookup,
+                "MM_TEAMSETTINGS_ENABLEOPENSERVER",
+                default.enable_open_server,
+            ),
             enable_user_statuses: lookup_bool(
                 lookup,
                 "MM_SERVICESETTINGS_ENABLEUSERSTATUSES",
@@ -1067,6 +1082,9 @@ impl Config {
             restrict_creation_to_domains: team_settings
                 .restrict_creation_to_domains
                 .unwrap_or(default.restrict_creation_to_domains),
+            enable_open_server: team_settings
+                .enable_open_server
+                .unwrap_or(default.enable_open_server),
             enable_user_statuses: service
                 .enable_user_statuses
                 .unwrap_or(default.enable_user_statuses),
@@ -1306,6 +1324,8 @@ struct TeamSettingsDocument {
     restrict_direct_message: Option<String>,
     #[serde(rename = "RestrictCreationToDomains")]
     restrict_creation_to_domains: Option<String>,
+    #[serde(rename = "EnableOpenServer")]
+    enable_open_server: Option<bool>,
     #[serde(rename = "UserStatusAwayTimeout")]
     user_status_away_timeout: Option<i64>,
     #[serde(rename = "EnableCustomUserStatuses")]
@@ -1566,6 +1586,11 @@ mod tests {
         assert!(!config.restrict_system_admin, "config.go:1269 — new(false)");
         assert!(!config.compliance_enable, "config.go:2875 — new(false)");
         assert!(!config.image_proxy_enable, "config.go:3996 — new(false)");
+        // `getUsersWithInvalidEmails` answers 400 when this is **on**, so a wrong default turns
+        // a working route into an unconditional refusal on any server that has not set it. The
+        // stack's own servers both set it in the environment, which is exactly why the default
+        // needs a test of its own rather than a route to exercise it.
+        assert!(!config.enable_open_server, "config.go:2588 — new(false)");
         assert!(
             !config.enable_post_icon_override,
             "config.go:848 — new(false)"
@@ -1722,6 +1747,30 @@ mod tests {
         assert!(
             !config.extend_session_length_with_activity,
             "and it moved off the fresh-config default of true"
+        );
+    }
+
+    /// `MM_TEAMSETTINGS_ENABLEOPENSERVER` reaches the overlay.
+    ///
+    /// The Go server beside us sets this variable and nothing else does, so without the overlay
+    /// the two servers disagree about `GET /api/v4/users/invalid_emails` — a 400 on one and a
+    /// page of users on the other. `scripts/mm-api-env.sh` is the other half of the fix.
+    #[test]
+    fn the_open_server_flag_is_overridable_by_environment() {
+        let config = Config::default().apply_env_from(&|key| match key {
+            "MM_TEAMSETTINGS_ENABLEOPENSERVER" => Some("true".to_owned()),
+            _ => None,
+        });
+        assert!(
+            config.enable_open_server,
+            "and it moved off the fresh-config default of false"
+        );
+
+        assert!(
+            !Config::default()
+                .apply_env_from(&|_| None)
+                .enable_open_server,
+            "with no variable set the default stands"
         );
     }
 

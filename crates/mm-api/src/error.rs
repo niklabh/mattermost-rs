@@ -124,7 +124,15 @@ impl ApiError {
             .and_then(|code| StatusCode::from_u16(code).ok())
             .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
 
-        let body = serde_json::to_vec(&self.0)
+        // `json.Marshal`, **not** `serde_json::to_string`: Go's encoder HTML-escapes `<`, `>`
+        // and `&` by default, and an `AppError` can carry all three. `model.NoTranslation` is
+        // the literal `<untranslated>`, so a route that uses it — `getUsersWithInvalidEmails` is
+        // the first ported one — writes `\u003cuntranslated\u003e` on Go and wrote the raw
+        // angle brackets here until this line existed. Every error body goes through it, so any
+        // future id, `where` or surviving `detailed_error` carrying those characters is right
+        // too.
+        let body = mm_model::utils::go_json_marshal(&self.0)
+            .map(String::into_bytes)
             .map_err(|err| tracing::error!(error = %err, "failed to serialise AppError"))
             .ok();
         (status, body)

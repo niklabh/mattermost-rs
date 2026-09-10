@@ -88,6 +88,12 @@ restore_source() { cp "$BACKUP" "$FILE"; }
 # failure now prints the compiler's own last lines, and the start is retried once with a longer
 # budget — 30 seconds against the old 10, because this machine also carries Postgres, the Go
 # server and a concurrent cargo.
+# The same launch environment `parity.sh` uses. Without it an `api`-suite verdict belongs to a
+# server configured unlike the one the tests were written against — which is a harness fault
+# reported as a mutation result.
+MMRS_ROOT="$ROOT"
+source "$ROOT/scripts/mm-api-env.sh"
+
 restart_server() {
   if ! cargo build -p mm-api > "$WORK/build.log" 2>&1; then
     echo "  the mutated source does not compile:"
@@ -97,7 +103,7 @@ restart_server() {
   for attempt in 1 2; do
     pkill -f 'target/debug/mm-api' 2>/dev/null || true
     sleep 1
-    (nohup "$ROOT/target/debug/mm-api" > "$WORK/mm-api.log" 2>&1 &)
+    mmrs_launch_mm_api "$WORK/mm-api.log"
     for _ in $(seq 60); do
       curl -sf -o /dev/null http://127.0.0.1:8066/api/v4/system/ping && return 0
       sleep 0.5

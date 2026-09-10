@@ -324,10 +324,20 @@ pub fn assert_error_bodies_match_except_known_gaps(
         .map(|(key, _)| key.as_str())
         .collect();
 
-    assert_eq!(
-        differing,
-        vec!["message", "request_id"],
-        "{context}: only `message` (D-092, i18n) and `request_id` may differ.\n  go:   {go}\n  rust: {rs}"
+    // A **subset**, not an equality. `request_id` always differs and `message` almost always
+    // does — but not when the id is `model.NoTranslation`, whose "translation" is the sentinel
+    // itself, so both servers write `<untranslated>` and the two messages agree. Requiring the
+    // message to differ failed `getUsersWithInvalidEmails` for agreeing with Go *more* closely
+    // than the helper expected.
+    let unexpected: Vec<&str> = differing
+        .iter()
+        .copied()
+        .filter(|key| !matches!(*key, "message" | "request_id"))
+        .collect();
+    assert!(
+        unexpected.is_empty(),
+        "{context}: only `message` (D-092, i18n) and `request_id` may differ, but {unexpected:?} \
+         also did.\n  go:   {go}\n  rust: {rs}"
     );
 
     // And pin what our `message` actually is, so the divergence stays the documented one rather

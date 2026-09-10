@@ -256,6 +256,42 @@ pub trait UserStore {
         &self,
         options: &mm_model::report::UserReportOptions,
     ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
+
+    /// Port of `SqlUserStore.GetByAuthData` (user_store.go:1322).
+    ///
+    /// **Not `GetByAuth`**, which is the neighbouring function and adds an `AuthService`
+    /// predicate. This one matches on `AuthData` alone, so a single value can only belong to one
+    /// account however that account authenticates.
+    ///
+    /// An empty `auth_data` is `ErrInvalidInput`, which the app layer answers **400** to rather
+    /// than the 404 a miss gets. Unreachable through `getUserByAuthData`, which rejects an empty
+    /// `value` two lines earlier — ported because the two errors are different status codes and a
+    /// later caller would meet the distinction.
+    fn get_by_auth_data(
+        &self,
+        auth_data: &str,
+    ) -> impl std::future::Future<Output = Result<User, StoreError>> + Send;
+
+    /// Port of `SqlUserStore.GetUsersWithInvalidEmails` (user_store.go:2404).
+    ///
+    /// "Invalid" means **outside every allowed domain**: the caller passes
+    /// `TeamSettings.RestrictCreationToDomains`, the store splits it on `,` and adds one
+    /// `Email NOT LIKE '%domain%'` per non-empty piece. There is no `@` anchoring and no
+    /// trimming, so a configured `" example.com"` matches nothing and every account is reported.
+    ///
+    /// Bots, guests, deactivated accounts and anyone with an `AuthService` are excluded — a user
+    /// who signs in through LDAP or SAML did not choose their email, so it is not theirs to be
+    /// wrong.
+    ///
+    /// **No `ORDER BY`.** The page is whatever order Postgres returns, and page 1 is not
+    /// guaranteed to be disjoint from page 0. Both servers issue the same statement to the same
+    /// database, so they agree; neither is stable across an `UPDATE`.
+    fn get_users_with_invalid_emails(
+        &self,
+        page: i64,
+        per_page: i64,
+        restricted_domains: &str,
+    ) -> impl std::future::Future<Output = Result<Vec<User>, StoreError>> + Send;
 }
 
 /// `model.UserSearchDefaultLimit` (model/user_search.go:7).
@@ -2338,6 +2374,168 @@ impl UserStore for SqlUserStore {
 
         tracing::Span::current().record("count", count);
         Ok(count)
+    }
+
+    #[tracing::instrument(skip_all, fields(found))]
+    async fn get_by_auth_data(&self, auth_data: &str) -> Result<User, StoreError> {
+        if auth_data.is_empty() {
+            return Err(StoreError::InvalidInput {
+                entity: "User",
+                field: "<authData>",
+                value: "empty or nil".to_owned(),
+            });
+        }
+
+        let row = sqlx::query_as!(
+            UserRow,
+            r#"
+            SELECT u.id,
+                   u.createat,
+                   u.updateat,
+                   u.deleteat,
+                   u.username,
+                   u.password,
+                   u.authdata,
+                   u.authservice,
+                   u.email,
+                   u.emailverified,
+                   u.nickname,
+                   u.firstname,
+                   u.lastname,
+                   u.position,
+                   u.roles,
+                   u.allowmarketing,
+                   u.props,
+                   u.notifyprops,
+                   u.lastpasswordupdate,
+                   u.lastpictureupdate,
+                   u.failedattempts::bigint AS failedattempts,
+                   u.locale,
+                   u.timezone,
+                   u.mfaactive,
+                   u.mfasecret,
+                   u.mfausedtimestamps,
+                   u.remoteid,
+                   u.lastlogin,
+                   (b.userid IS NOT NULL) AS "isbot!",
+                   COALESCE(b.description, '') AS "botdescription!",
+                   COALESCE(b.lasticonupdate, 0) AS "botlasticonupdate!"
+              FROM users u
+              LEFT JOIN bots b ON b.userid = u.id
+             WHERE u.authdata = $1
+            "#,
+            auth_data,
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to find User with authData={auth_data}"),
+            source,
+        })?;
+
+        tracing::Span::current().record("found", row.is_some());
+        match row {
+            Some(row) => user_from_row(row),
+            None => Err(StoreError::NotFound {
+                entity: "User",
+                criteria: format!("authData={auth_data}"),
+            }),
+        }
+    }
+
+    #[tracing::instrument(skip_all, fields(page, per_page, domains, found))]
+    async fn get_users_with_invalid_emails(
+        &self,
+        page: i64,
+        per_page: i64,
+        restricted_domains: &str,
+    ) -> Result<Vec<User>, StoreError> {
+        // `strings.Split(restrictedDomains, ",")`, with the empty pieces dropped by the loop's
+        // own `if d != ""`. **Nothing is trimmed**: a configured `"a.com, b.com"` yields
+        // `" b.com"`, whose `LIKE '% b.com%'` matches no address.
+        let domains: Vec<String> = restricted_domains
+            .split(',')
+            .filter(|domain| !domain.is_empty())
+            .map(str::to_owned)
+            .collect();
+        tracing::Span::current().record("page", page);
+        tracing::Span::current().record("per_page", per_page);
+        tracing::Span::current().record("domains", domains.len());
+
+        let rows = sqlx::query_as!(
+            UserRow,
+            r#"
+            SELECT u.id,
+                   u.createat,
+                   u.updateat,
+                   u.deleteat,
+                   u.username,
+                   u.password,
+                   u.authdata,
+                   u.authservice,
+                   u.email,
+                   u.emailverified,
+                   u.nickname,
+                   u.firstname,
+                   u.lastname,
+                   u.position,
+                   u.roles,
+                   u.allowmarketing,
+                   u.props,
+                   u.notifyprops,
+                   u.lastpasswordupdate,
+                   u.lastpictureupdate,
+                   u.failedattempts::bigint AS failedattempts,
+                   u.locale,
+                   u.timezone,
+                   u.mfaactive,
+                   u.mfasecret,
+                   u.mfausedtimestamps,
+                   u.remoteid,
+                   u.lastlogin,
+                   (b.userid IS NOT NULL) AS "isbot!",
+                   COALESCE(b.description, '') AS "botdescription!",
+                   COALESCE(b.lasticonupdate, 0) AS "botlasticonupdate!"
+              FROM users u
+              LEFT JOIN bots b ON b.userid = u.id
+             WHERE b.userid IS NULL
+               AND u.roles <> 'system_guest'
+               AND u.deleteat = 0
+               AND (u.authservice = '' OR u.authservice IS NULL)
+               AND (cardinality($3::text[]) = 0
+                    OR (u.email IS NOT NULL
+                        AND NOT EXISTS (
+                              SELECT 1
+                                FROM unnest($3::text[]) AS d(domain)
+                               WHERE u.email LIKE LOWER('%' || d.domain || '%')
+                            )))
+             OFFSET $1
+             LIMIT $2
+            "#,
+            page * per_page,
+            per_page,
+            &domains,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to find Users with invalid emails".to_owned(),
+            source,
+        })?;
+
+        tracing::Span::current().record("found", rows.len());
+        rows.into_iter()
+            .map(|row| {
+                let mut user = user_from_row(row)?;
+                // `u.Sanitize(map[string]bool{})` — the **empty** options map, which
+                // `ClearNonProfileFields` is not: it blanks the password, the MFA secret and
+                // `LastLogin`, and then, because the map is empty, leaves the email and the auth
+                // fields alone. Blanking the email here would empty the one column the route
+                // exists to show.
+                user.sanitize(&std::collections::HashMap::new());
+                Ok(user)
+            })
+            .collect()
     }
 }
 

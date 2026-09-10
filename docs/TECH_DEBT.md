@@ -6417,3 +6417,29 @@ mostly made of.
 
 Both spellings — `/file/test` and the backwards-compatible `/file/s3_test` — stay forwarded.
 
+
+## D-213 · `GET /api/v4/users/invalid_emails` has no cross-server comparison of its 200
+
+**Status** OPEN · **Severity** untested · **Raised** 2026-09-10 (phase 2, user lookups)
+
+The handler refuses with a **400** whenever `TeamSettings.EnableOpenServer` is on, and
+`scripts/go-server.sh` pins that variable on through the **environment**. An environment override
+never reaches the configuration document, so there is no value either server could be told to read
+that would open the gate on :8065 — only a restart with different environment would, and that
+moves the ground under every other suite in the parity binary.
+
+So the route ships with:
+
+* the 400, and its precedence over the permission check, compared against Go
+  (`user_lookups::the_open_server_refusal_matches_and_precedes_the_permission`);
+* the 200 served by a `SecondServer` with the variable off — **our answer only**, no Go
+  counterpart (`with_the_open_server_off_the_route_serves_a_page`);
+* the query underneath it against planted rows (`mm-store`'s `db_users_invalid_emails`).
+
+What is owed is a Go server on a second configuration to compare the successful response against —
+a second `reference/.build` instance on another port, which the harness has no notion of today.
+`SecondServer` starts a second **mm-api**, not a second Go.
+
+Until then: the shape of the response, the five store predicates and the paging are all tested, and
+the *bytes* of a successful body are not. If a field of `model.User` were serialised differently on
+this route than on the ones that are compared, nothing here would catch it.

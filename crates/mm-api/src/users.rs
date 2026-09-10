@@ -11,8 +11,8 @@ use axum::response::{IntoResponse, Response};
 use mm_app::user::{UserPage, ViewUsersRestriction};
 use mm_model::permission::{
     PERMISSION_EDIT_OTHER_USERS, PERMISSION_MANAGE_SYSTEM, PERMISSION_READ_CHANNEL,
-    PERMISSION_READ_CHANNEL_CONTENT, PERMISSION_VIEW_MEMBERS, PERMISSION_VIEW_TEAM,
-    make_permission_error,
+    PERMISSION_READ_CHANNEL_CONTENT, PERMISSION_SYSCONSOLE_READ_USER_MANAGEMENT_USERS,
+    PERMISSION_VIEW_MEMBERS, PERMISSION_VIEW_TEAM, make_permission_error,
 };
 use mm_model::post::POST_PROPS_ATTACHMENTS;
 use mm_model::user::User;
@@ -2260,6 +2260,228 @@ fn parse_page_allowing_negative(query: Option<&str>) -> i64 {
         Some(val) if val >= -1 => val,
         _ => parse_page(query),
     }
+}
+
+/// Port of `getUserByAuthData` (api4/user.go:472) — `GET /api/v4/users/auth_data?value=…`.
+///
+/// # It is `getUser` with four differences, and each one is on the wire
+///
+/// | | `getUser` | this |
+/// |---|---|---|
+/// | gate | `SessionHasPermissionToUser` — self or admin | `IsSystemAdmin`, and nothing else |
+/// | terms of service | only for self or an admin | **always** |
+/// | sanitisation | `Sanitize` for self, `SanitizeProfile` otherwise | `SanitizeProfile`, always |
+/// | last activity | touched | not touched |
+///
+/// The third row is the one that bites: an admin who looks up **their own** account by auth data
+/// gets the `SanitizeProfile` answer, not the fuller self view `GET /users/me` gives them.
+/// `ClearNonProfileFields(true)` runs either way, so the two responses genuinely differ for the
+/// same user.
+///
+/// # `UserCanSeeOtherUser` cannot fail here
+///
+/// It is called, and its first branch is the self comparison and its second is the
+/// `view_members` permission a system admin holds. So the `view_members` 403 below is
+/// unreachable through this route — the `IsSystemAdmin` gate eleven lines earlier has already
+/// refused everyone who could reach it. Ported because it is a permission check, and a port that
+/// drops permission checks it believes are redundant is how one stops being redundant.
+#[tracing::instrument(skip_all, fields(user_id))]
+pub async fn get_user_by_auth_data(
+    State(state): State<AppState>,
+    axum::extract::RawQuery(query): axum::extract::RawQuery,
+    session: AuthenticatedSession,
+    request: axum::extract::Request,
+) -> Response {
+    match serve_user_by_auth_data(&state, query.as_deref(), &session, request.headers()).await {
+        Ok(Some(response)) => response,
+        Ok(None) => crate::proxy::forward_to_go(State(state), request).await,
+        Err(err) => err.into_response(),
+    }
+}
+
+/// `Ok(None)` means "forward": the only branch that produces it is a caller under view-user
+/// restrictions, which `mm_app::App::user_can_see_other_user` cannot reproduce. That caller
+/// cannot exist on this route — the `IsSystemAdmin` gate above refuses everyone who is not an
+/// admin, and an admin holds `view_members` — so the arm is here for shape, not for traffic.
+async fn serve_user_by_auth_data(
+    state: &AppState,
+    query: Option<&str>,
+    session: &AuthenticatedSession,
+    headers: &HeaderMap,
+) -> Result<Option<Response>, ApiError> {
+    if !state
+        .app
+        .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)
+        .await
+    {
+        return Err(ApiError::from(make_permission_error(
+            &session.0,
+            &[&PERMISSION_MANAGE_SYSTEM],
+        )));
+    }
+
+    // Two separate `SetInvalidParam("value")` calls, one for empty and one for over-long, and
+    // they produce the **same** body — so the bound is invisible to a client except as the
+    // difference between a 400 and a 200.
+    let auth_data = query_first(query, "value").unwrap_or_default();
+    if auth_data.is_empty() || auth_data.len() > mm_model::user::USER_AUTH_DATA_MAX_LENGTH {
+        return Err(ApiError::invalid_param("value"));
+    }
+
+    let mut user = state.app.get_user_by_auth_data(&auth_data).await?;
+    tracing::Span::current().record("user_id", user.id.as_str());
+
+    let can_see = match state
+        .app
+        .user_can_see_other_user(&session.0.user_id, &user.id)
+        .await
+    {
+        Ok(can_see) => can_see,
+        Err(mm_app::post::PrepareError::Unreproducible(reason)) => {
+            tracing::debug!(reason, "forwarding to Go");
+            return Ok(None);
+        }
+        Err(mm_app::post::PrepareError::App(err)) => return Err(ApiError::from(*err)),
+    };
+    if !can_see {
+        return Err(ApiError::from(make_permission_error(
+            &session.0,
+            &[&PERMISSION_VIEW_MEMBERS],
+        )));
+    }
+
+    // Unconditional here, unlike `getUser`, which guards it with self-or-admin.
+    match state.app.get_user_terms_of_service(&user.id).await {
+        Ok(terms) => {
+            user.terms_of_service_id = terms.terms_of_service_id;
+            user.terms_of_service_create_at = terms.create_at;
+        }
+        Err(err) if err.status_code == 404 => {}
+        Err(err) => return Err(ApiError::from(err)),
+    }
+
+    let etag = user.etag(state.show_full_name(), state.show_email_address());
+    if let Some(if_none_match) = headers.get(IF_NONE_MATCH).and_then(|v| v.to_str().ok())
+        && if_none_match == etag
+    {
+        return Ok(Some(
+            (StatusCode::NOT_MODIFIED, [(ETAG, etag)]).into_response(),
+        ));
+    }
+
+    // `c.App.SanitizeProfile(user, c.IsSystemAdmin())`, and the caller is a system admin by the
+    // gate above — so `as_admin` is always `true` on this route.
+    user.sanitize_profile(
+        &sanitize_options(state.show_full_name(), state.show_email_address(), true),
+        true,
+    );
+
+    let mut body = serde_json::to_vec(&user).map_err(|err| {
+        tracing::error!(error = %err, "failed to serialise User");
+        ApiError::from(AppError::new(
+            "getUserByAuthData",
+            "api.marshal_error",
+            None,
+            String::new(),
+            500,
+        ))
+    })?;
+    body.push(b'\n');
+
+    Ok(Some(
+        (
+            StatusCode::OK,
+            [
+                (HEADER_ETAG_SERVER, etag.as_str()),
+                ("Content-Type", "application/json"),
+                ("x-mmrs-served-by", "rust"),
+            ],
+            body,
+        )
+            .into_response(),
+    ))
+}
+
+/// Port of `getUsersWithInvalidEmails` (api4/user.go:4234) — `GET /api/v4/users/invalid_emails`.
+///
+/// # The configuration check runs *before* the permission check
+///
+/// `TeamSettings.EnableOpenServer` being **on** is a **400**, and it is tested first — so on an
+/// open server an unprivileged caller gets the 400 rather than the 403, and learns a configuration
+/// value they have no permission to read. Reproduced; the order is observable.
+///
+/// That 400 carries `model.NoTranslation` as its id — the literal string `<untranslated>` — so
+/// both `id` and `message` are that sentinel on the wire, and the detail that says *why*
+/// (`TeamSettings.EnableOpenServer is enabled`) is wiped with every other `detailed_error`. The
+/// client is told the request was refused and nothing else.
+///
+/// # No etag, and `null` for an empty page
+///
+/// `json.NewEncoder(w).Encode(users)` over the `[]*model.User` the store returned. The store
+/// declares it as `users := []*model.User{}`, so an empty page is `[]` — the opposite of the
+/// audits route, and for the same reason: the initialiser, not the query.
+#[tracing::instrument(skip_all, fields(page, per_page, found))]
+pub async fn get_users_with_invalid_emails(
+    State(state): State<AppState>,
+    axum::extract::RawQuery(query): axum::extract::RawQuery,
+    session: AuthenticatedSession,
+) -> Result<Response, ApiError> {
+    if state.app.config().enable_open_server {
+        return Err(ApiError(AppError::boxed(
+            "GetUsersWithInvalidEmails",
+            mm_model::utils::NO_TRANSLATION,
+            None,
+            "TeamSettings.EnableOpenServer is enabled".to_owned(),
+            400,
+        )));
+    }
+
+    if !state
+        .app
+        .session_has_permission_to(
+            &session.0,
+            &PERMISSION_SYSCONSOLE_READ_USER_MANAGEMENT_USERS,
+        )
+        .await
+    {
+        return Err(ApiError::from(make_permission_error(
+            &session.0,
+            &[&PERMISSION_SYSCONSOLE_READ_USER_MANAGEMENT_USERS],
+        )));
+    }
+
+    let page = parse_page(query.as_deref());
+    let per_page = parse_per_page(query.as_deref());
+    tracing::Span::current().record("page", page);
+    tracing::Span::current().record("per_page", per_page);
+
+    let users = state
+        .app
+        .get_users_with_invalid_emails(page, per_page)
+        .await?;
+    tracing::Span::current().record("found", users.len());
+
+    let mut body = serde_json::to_vec(&users).map_err(|err| {
+        tracing::error!(error = %err, "failed to serialise the invalid-email page");
+        ApiError::from(AppError::new(
+            "getUsersWithInvalidEmails",
+            "api.marshal_error",
+            None,
+            String::new(),
+            500,
+        ))
+    })?;
+    body.push(b'\n');
+
+    Ok((
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
+    )
+        .into_response())
 }
 
 #[cfg(test)]

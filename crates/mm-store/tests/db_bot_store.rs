@@ -79,6 +79,11 @@ async fn purge(pool: &PgPool) {
 
 /// Both an owner and a bot need a `Users` row: the bot's, because `GetAll` joins it for the
 /// username, and the owner's, because `OnlyOrphaned` joins it for the `DeleteAt`.
+///
+/// `MfaUsedTimestamps` is `'null'::jsonb` and not `'{}'`: Go scans that column into a
+/// `model.StringArray`, so an object there makes **Go** answer 500 to any `GET /api/v4/users`
+/// whose page contains the row — a failure in the parity binary, which runs concurrently with
+/// this one, caused by a fixture in this one.
 async fn plant_user(pool: &PgPool, id: &str, username: &str, first_name: &str, delete_at: i64) {
     sqlx::query(
         "INSERT INTO users
@@ -88,7 +93,7 @@ async fn plant_user(pool: &PgPool, id: &str, username: &str, first_name: &str, d
              mfaactive, mfasecret, remoteid, lastlogin, mfausedtimestamps)
          VALUES ($1, 1788600000000, 1788600000000, $4, $2, '', NULL, '', $2 || '@mmrs.invalid',
                  false, '', $3, '', '', 'system_user', false, '{}'::jsonb, '{}'::jsonb,
-                 1788600000000, 0, 0, 'en', '{}'::jsonb, false, '', NULL, 0, '{}')",
+                 1788600000000, 0, 0, 'en', '{}'::jsonb, false, '', NULL, 0, 'null'::jsonb)",
     )
     .bind(id)
     .bind(username)

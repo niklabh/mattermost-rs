@@ -1619,6 +1619,18 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/audits",
             partially_migrated(get(audits::get_audits)),
         )
+        // `api4/user.go`'s two remaining literal-path reads. Both sit under `/api/v4/users`
+        // beside `{user_id}`, and gorilla matches literals before parameters — so `auth_data`
+        // and `invalid_emails` are these handlers and never `getUser`. axum's router agrees, and
+        // `mux_segments_or_forward` is not involved because neither path has a parameter.
+        .route(
+            "/api/v4/users/auth_data",
+            partially_migrated(get(users::get_user_by_auth_data)),
+        )
+        .route(
+            "/api/v4/users/invalid_emails",
+            partially_migrated(get(users::get_users_with_invalid_emails)),
+        )
         // `api4/report.go`'s two reads. `/reports/users/count` is registered as its own literal
         // path and not as a parameter of `/reports/users`, exactly as Go's
         // `BaseRoutes.Reports.Handle("/users/count", …)` is — so `POST /reports/users/export`

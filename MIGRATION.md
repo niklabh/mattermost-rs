@@ -9034,3 +9034,89 @@ that commit reads **285/764**, and the commit message for the file-backend work 
 up, while the commit had it right. Reading the number out of `scripts/routes.py` rather than out
 of the previous entry is the whole reason that script exists. This session takes it to
 **287/764**; `306 HTTP pairs remain`.
+
+## `auth_data`, `invalid_emails`, and an escape every error body was missing (2026-09-10)
+
+`GET /api/v4/users/auth_data` and `GET /api/v4/users/invalid_emails`, the last two literal-path
+reads in `api4/user.go`. 287 → **289 of 764**. Store, app and handler:
+`mm_store::UserStore::{get_by_auth_data, get_users_with_invalid_emails}`,
+`mm_app::App::{get_user_by_auth_data, get_users_with_invalid_emails}`, and two handlers in
+`mm_api::users`.
+
+### Go's error bodies are HTML-escaped and ours were not
+
+`ApiError::into_wire` used `serde_json::to_vec`. Go writes error bodies with `encoding/json`,
+whose default escapes `<`, `>` and `&` — so `model.NoTranslation`, the literal `<untranslated>`,
+goes out as `<untranslated>`. **Every error body on every route** went through the
+unescaped encoder; it had simply never mattered, because no ported route had put one of those
+three characters in an `id`, a `where` or a surviving `detailed_error` until this one. Now
+`mm_model::utils::go_json_marshal`, which the model layer already had for exactly this reason.
+
+### `getUsersWithInvalidEmails` reads its configuration before its permission
+
+`TeamSettings.EnableOpenServer` being **on** is a 400, and it is checked first — so an
+unprivileged caller on an open server is told a configuration value they have no permission to
+read. The 400's id is `model.NoTranslation`, so the body carries no error id at all, and the
+detail that says *why* is wiped with every other `detailed_error`.
+
+**The stack's Go server pins that variable on**, through the environment, where it cannot reach
+the configuration document. So the 200 path has no Go counterpart at any price short of a second
+Go server: the refusal is compared, the success is served by a `SecondServer` with the gate open
+and asserted against itself, and the query is tested against planted rows in `mm-store`'s
+`db_users_invalid_emails`. [D-213] holds what is owed.
+
+### `Users.Roles != 'system_guest'` is an exact comparison
+
+Every other guest predicate in the user store is `LIKE '%system_guest%'`. This one is `!=` against
+the whole column, so an account whose roles are `system_guest system_user` **is** reported as
+having an invalid email. Pinned by `store_invalid_emails_a_guest_with_a_second_role_is_kept`,
+because "fixing" it to a `LIKE` changes which accounts an administrator is told to chase.
+
+Two more from the same query: the domain list is **not trimmed**, so `"a.com, b.com"` yields
+`" b.com"` and a `LIKE '% b.com%'` no address matches; and there is no `@` anchor, so configuring
+`invalid` allows every `@mmrs.invalid` address and every address that merely contains the word.
+
+### `getUserByAuthData` is `getUser` with four differences
+
+Same shape, and each difference is on the wire: the gate is `IsSystemAdmin` rather than
+self-or-admin; the terms-of-service lookup is unconditional rather than self-or-admin; the
+sanitisation is always `SanitizeProfile` — so an admin looking up **their own** account by auth
+data gets a smaller answer than `GET /users/me` gives them — and last activity is not touched.
+
+### One launch environment, sourced twice
+
+`scripts/parity.sh` set `MM_FILESETTINGS_DIRECTORY` on the server it starts and `scripts/mutate.sh`
+did not, so every `api`-suite mutation ran against a server configured unlike the one the tests
+were written against. Both now source `scripts/mm-api-env.sh`, which also carries
+`MM_TEAMSETTINGS_ENABLEOPENSERVER` — without which this session's two servers disagreed about a
+route for a reason that had nothing to do with the port.
+
+### The error-body helper required a divergence
+
+`assert_error_bodies_match_except_known_gaps` asserted the set of differing keys **equals**
+`["message", "request_id"]`. When the id is the untranslated sentinel both servers write the same
+`message`, only `request_id` differs, and the helper failed the comparison for agreeing with Go
+more closely than it expected. It now asserts a subset.
+
+### Mutation testing: 27 run, 25 caught, 2 controls survived
+
+Three real survivors, and each one was a test in the wrong place rather than a missing assertion:
+
+* `invemail-rows-are-not-sanitised` deletes the `Sanitize` call. The planted rows already had an
+  empty password, an empty MFA secret and a zero `LastLogin` — the three fields it blanks — so
+  sanitised and unsanitised were the same row. The fixture now plants values for it to remove.
+* `app-authdata-invalid-input-is-a-404` swaps the two status codes `App::get_user_by_auth_data`
+  maps its store errors onto. The 400 is **unreachable through the route**, because the handler
+  refuses an empty `value` before the app is called, so no parity test can distinguish them. It
+  now has `mm-app`'s `db_user_by_auth_data`, where the app is called directly.
+* `config-open-server-defaults-on` flips the default of `enable_open_server`. Both servers set
+  that variable in the environment, where the overlay wins, so the *default* is never read on a
+  running server. It is now a unit test on `Config::default()` — with a second one pinning the
+  overlay itself, which is the half that had been missing and let the two servers disagree in the
+  first place.
+
+The first of those is the familiar shape (a fixture where the right and wrong answers coincide);
+the other two are not — they are branches no route reaches, which no amount of fixing the parity
+suite would have covered. `scripts/mutations/user-lookups.plan` runs across four suites for that
+reason: `store` for the SQL, `app` for the status mapping, `unit` for the configuration, `api` for
+the handlers.

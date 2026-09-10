@@ -921,6 +921,83 @@ fn update_user_error(err: StoreError, user_id: &str) -> Box<AppError> {
     }
 }
 
+impl App {
+    /// Port of `App.GetUserByAuthData` (app/user.go:627).
+    ///
+    /// Three store errors, three status codes, and **one id for all of them**:
+    /// `app.user.missing_account.const` is 400 for invalid input, 404 for a miss and 500 for a
+    /// broken query. A client cannot tell the three apart from the body — only from the status
+    /// line — which is Go's choice and is on the wire.
+    #[tracing::instrument(skip_all, fields(found))]
+    pub async fn get_user_by_auth_data(&self, auth_data: &str) -> AppResult<User> {
+        let user = self
+            .store()
+            .user()
+            .get_by_auth_data(auth_data)
+            .await
+            .map_err(|err| {
+                let status = if err.is_invalid_input() {
+                    400
+                } else if err.is_not_found() {
+                    404
+                } else {
+                    tracing::error!(error = %err, "auth-data lookup failed");
+                    500
+                };
+                AppError::boxed(
+                    "GetUserByAuthData",
+                    "app.user.missing_account.const",
+                    None,
+                    String::new(),
+                    status,
+                )
+            })?;
+
+        tracing::Span::current().record("found", true);
+        Ok(user)
+    }
+
+    /// Port of `App.GetUsersWithInvalidEmails` (app/user.go:3293).
+    ///
+    /// The allowed-domain list is read from configuration here rather than passed in, as Go does
+    /// — `*a.Config().TeamSettings.RestrictCreationToDomains` is the store call's third argument.
+    ///
+    /// Note the `where`: Go names it **`GetUsersPage`**, not `GetUsersWithInvalidEmails`, and
+    /// reuses `app.user.get_profiles.app_error`. Both are on the wire.
+    #[tracing::instrument(skip_all, fields(page, per_page, found))]
+    pub async fn get_users_with_invalid_emails(
+        &self,
+        page: i64,
+        per_page: i64,
+    ) -> AppResult<Vec<User>> {
+        tracing::Span::current().record("page", page);
+        tracing::Span::current().record("per_page", per_page);
+
+        let users = self
+            .store()
+            .user()
+            .get_users_with_invalid_emails(
+                page,
+                per_page,
+                &self.config().restrict_creation_to_domains,
+            )
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "invalid-email lookup failed");
+                AppError::boxed(
+                    "GetUsersPage",
+                    "app.user.get_profiles.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })?;
+
+        tracing::Span::current().record("found", users.len());
+        Ok(users)
+    }
+}
+
 fn get_user_error(err: StoreError) -> Box<AppError> {
     match err {
         StoreError::NotFound { .. } => AppError::boxed(
