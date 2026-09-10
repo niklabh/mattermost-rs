@@ -129,6 +129,28 @@ pub trait WebhookStore {
         &self,
         id: &str,
     ) -> impl std::future::Future<Output = Result<OutgoingWebhook, StoreError>> + Send;
+
+    /// Port of `SqlWebhookStore.GetIncomingByChannel` (webhook_store.go:225).
+    ///
+    /// Archiving a channel archives its webhooks, so `App.DeleteChannel` reads both lists first
+    /// and soft-deletes each hook it finds. Only live hooks are returned (`DeleteAt = 0`), which
+    /// is what makes a second archive of the same channel a no-op here rather than a re-write.
+    fn get_incoming_by_channel(
+        &self,
+        channel_id: &str,
+    ) -> impl std::future::Future<Output = Result<Vec<IncomingWebhook>, StoreError>> + Send;
+
+    /// Port of `SqlWebhookStore.GetOutgoingByChannel(channelId, -1, -1)` (webhook_store.go:333).
+    ///
+    /// Its own statement rather than a call into [`Self::get_outgoing_by_channel_by_user`]: Go
+    /// adds the `LIMIT`/`OFFSET` clause **only when both are non-negative**, and `DeleteChannel`
+    /// passes `-1` for each. That method's SQL carries `LIMIT $3 OFFSET $4` unconditionally, and
+    /// Postgres refuses a negative `LIMIT` — so reusing it would turn archiving a channel into a
+    /// 500.
+    fn get_outgoing_by_channel(
+        &self,
+        channel_id: &str,
+    ) -> impl std::future::Future<Output = Result<Vec<OutgoingWebhook>, StoreError>> + Send;
 }
 
 /// Postgres-backed implementation.
@@ -922,6 +944,89 @@ impl WebhookStore for SqlWebhookStore {
 
         tracing::Span::current().record("found", true);
         row.into_model()
+    }
+
+    #[tracing::instrument(skip_all, fields(channel_id = %channel_id, found))]
+    async fn get_incoming_by_channel(
+        &self,
+        channel_id: &str,
+    ) -> Result<Vec<IncomingWebhook>, StoreError> {
+        // No `ORDER BY` — Go's query has none, and the only caller iterates to delete.
+        let rows = sqlx::query_as!(
+            IncomingWebhookRow,
+            r#"
+            SELECT id                          AS "id!",
+                   COALESCE(createat, 0)       AS "createat!",
+                   COALESCE(updateat, 0)       AS "updateat!",
+                   COALESCE(deleteat, 0)       AS "deleteat!",
+                   COALESCE(userid, '')        AS "userid!",
+                   COALESCE(channelid, '')     AS "channelid!",
+                   COALESCE(teamid, '')        AS "teamid!",
+                   COALESCE(displayname, '')   AS "displayname!",
+                   COALESCE(description, '')   AS "description!",
+                   COALESCE(username, '')      AS "username!",
+                   COALESCE(iconurl, '')       AS "iconurl!",
+                   COALESCE(channellocked, FALSE) AS "channellocked!",
+                   lastused                    AS "lastused!"
+              FROM incomingwebhooks
+             WHERE channelid = $1
+               AND deleteat = 0
+            "#,
+            channel_id
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to find IncomingWebhooks with channelId={channel_id}"),
+            source,
+        })?;
+
+        tracing::Span::current().record("found", rows.len());
+        Ok(rows.into_iter().map(IncomingWebhook::from).collect())
+    }
+
+    #[tracing::instrument(skip_all, fields(channel_id = %channel_id, found))]
+    async fn get_outgoing_by_channel(
+        &self,
+        channel_id: &str,
+    ) -> Result<Vec<OutgoingWebhook>, StoreError> {
+        let rows = sqlx::query_as!(
+            OutgoingWebhookRow,
+            r#"
+            SELECT id                          AS "id!",
+                   COALESCE(token, '')         AS "token!",
+                   COALESCE(createat, 0)       AS "createat!",
+                   COALESCE(updateat, 0)       AS "updateat!",
+                   COALESCE(deleteat, 0)       AS "deleteat!",
+                   COALESCE(creatorid, '')     AS "creatorid!",
+                   COALESCE(channelid, '')     AS "channelid!",
+                   COALESCE(teamid, '')        AS "teamid!",
+                   triggerwords                AS "triggerwords?",
+                   COALESCE(triggerwhen, 0)    AS "triggerwhen!",
+                   callbackurls                AS "callbackurls?",
+                   COALESCE(displayname, '')   AS "displayname!",
+                   COALESCE(description, '')   AS "description!",
+                   COALESCE(contenttype, '')   AS "contenttype!",
+                   COALESCE(username, '')      AS "username!",
+                   COALESCE(iconurl, '')       AS "iconurl!"
+              FROM outgoingwebhooks
+             WHERE channelid = $1
+               AND deleteat = 0
+             ORDER BY displayname, id
+            "#,
+            channel_id
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to find OutgoingWebhooks".to_owned(),
+            source,
+        })?;
+
+        tracing::Span::current().record("found", rows.len());
+        rows.into_iter()
+            .map(OutgoingWebhookRow::into_model)
+            .collect()
     }
 }
 

@@ -471,6 +471,66 @@ pub trait ChannelStore {
         &self,
         id: &str,
     ) -> impl std::future::Future<Output = Result<Channel, StoreError>> + Send;
+
+    // -----------------------------------------------------------------------------------------
+    // Channel-row writes, behind the five channel-lifecycle routes (`PUT /channels/{id}`,
+    // `/patch`, `/privacy`, `DELETE /channels/{id}`, `POST /channels/{id}/restore`).
+    // Member writes are a separate group and live above; nothing here touches `ChannelMembers`.
+    // -----------------------------------------------------------------------------------------
+
+    /// Port of `SqlChannelStore.Update` (channel_store.go:845) and the `updateChannelT`
+    /// (channel_store.go:868) inside its transaction.
+    ///
+    /// **The store mutates the channel it is handed**, exactly as Go does: `PreUpdate` mints a
+    /// fresh `UpdateAt` and `SanitizeUnicode`s `Name`/`DisplayName` *before* validation, and the
+    /// caller then publishes and returns that same value. Hence `&mut`; a by-value port would
+    /// answer with the caller's stale `update_at`.
+    ///
+    /// Three error shapes the app layer tells apart, so they are three variants here:
+    ///
+    /// - `DeleteAt != 0` → [`StoreError::InvalidInput`]. **The guard is in the store, not the
+    ///   handler**, which is why `PUT /channels/{id}/patch` on an archived channel answers
+    ///   `app.channel.update.bad_id` while `PUT /channels/{id}` answers
+    ///   `api.channel.update_channel.deleted.app_error` — measured against the running server.
+    /// - `IsValid` → [`StoreError::Invalid`], carrying the model's own `AppError` so the id
+    ///   (`model.channel.is_valid.*`) reaches the client unwrapped.
+    /// - the `channels_name_teamid_key` unique constraint → [`StoreError::Conflict`] on `Name`.
+    ///
+    /// The write also propagates to `PublicChannels`, which is what makes a public↔private
+    /// conversion visible to (or invisible in) every "public channels in this team" query.
+    fn update(
+        &self,
+        channel: &mut Channel,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlChannelStore.Delete` (channel_store.go:1070) — a **soft** delete that writes
+    /// `time` into both `DeleteAt` and `UpdateAt`.
+    fn delete(
+        &self,
+        channel_id: &str,
+        time: i64,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlChannelStore.Restore` (channel_store.go:1075) — `DeleteAt = 0`, `UpdateAt =
+    /// time`. The inverse of [`Self::delete`] and the same one query pair behind it.
+    fn restore(
+        &self,
+        channel_id: &str,
+        time: i64,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlChannelStore.SetDeleteAt` (channel_store.go:1080).
+    ///
+    /// **No row-count check anywhere.** Setting `DeleteAt` on an id that does not exist updates
+    /// nothing and returns `Ok` — the "is this channel really there / really archived" questions
+    /// are all answered above the store, and a port that 404'd here would change which error the
+    /// route reports.
+    fn set_delete_at(
+        &self,
+        channel_id: &str,
+        delete_at: i64,
+        update_at: i64,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 }
 
 /// Postgres-backed implementation.
@@ -872,6 +932,34 @@ impl ChannelStore for SqlChannelStore {
     #[tracing::instrument(skip_all, fields(channel_id = %channel_id, count))]
     async fn get_pinned_posts(&self, channel_id: &str) -> Result<PostList, StoreError> {
         get_pinned_posts(&self.pool, channel_id).await
+    }
+
+    #[tracing::instrument(skip_all, fields(channel_id = %channel.id, channel_type = %channel.channel_type))]
+    async fn update(&self, channel: &mut Channel) -> Result<(), StoreError> {
+        update(&self.pool, channel).await
+    }
+
+    #[tracing::instrument(skip_all, fields(channel_id = %channel_id, delete_at = time))]
+    async fn delete(&self, channel_id: &str, time: i64) -> Result<(), StoreError> {
+        // Go's one-liner: `Delete` is `SetDeleteAt(id, time, time)`, so an archived channel's
+        // `UpdateAt` and `DeleteAt` are the same millisecond. Kept as a delegation rather than a
+        // second statement so the two can never drift.
+        set_delete_at(&self.pool, channel_id, time, time).await
+    }
+
+    #[tracing::instrument(skip_all, fields(channel_id = %channel_id, update_at = time))]
+    async fn restore(&self, channel_id: &str, time: i64) -> Result<(), StoreError> {
+        set_delete_at(&self.pool, channel_id, 0, time).await
+    }
+
+    #[tracing::instrument(skip_all, fields(channel_id = %channel_id, delete_at, update_at))]
+    async fn set_delete_at(
+        &self,
+        channel_id: &str,
+        delete_at: i64,
+        update_at: i64,
+    ) -> Result<(), StoreError> {
+        set_delete_at(&self.pool, channel_id, delete_at, update_at).await
     }
 }
 
@@ -4461,6 +4549,277 @@ pub async fn get_board_channel(pool: &PgPool, id: &str) -> Result<Channel, Store
     tracing::Span::current().record("found", true);
 
     channel_from_row(row)
+}
+
+// ---------------------------------------------------------------------------------------------
+// Channel-row writes
+// ---------------------------------------------------------------------------------------------
+
+/// `Channels.BannerInfo` as a `jsonb` parameter, reproducing
+/// `(ChannelBannerInfo).Value` (channel.go:73).
+///
+/// **A pointer to an all-nil struct is stored as SQL NULL, not as `{}`.** Go's `Value()` compares
+/// the struct against its zero value and returns `nil, nil` first, so `banner_info: {}` on the
+/// wire and no `banner_info` at all reach the same column value. Serialising the empty struct
+/// instead would put `{"enabled":null,"text":null,"background_color":null}` in the column, which
+/// the read path would then hand back as `Some(default)` where Go hands back `None` — a
+/// round-trip that changes the wire.
+fn banner_info_column(
+    banner: Option<&ChannelBannerInfo>,
+) -> Result<Option<serde_json::Value>, StoreError> {
+    let Some(banner) = banner else {
+        return Ok(None);
+    };
+    if *banner == ChannelBannerInfo::default() {
+        return Ok(None);
+    }
+    serde_json::to_value(banner)
+        .map(Some)
+        .map_err(|source| StoreError::Decode {
+            entity: "Channel",
+            column: "bannerinfo",
+            source,
+        })
+}
+
+/// Port of `IsUniqueConstraintError(err, []string{"Name", "channels_name_teamid_key"})` as
+/// `updateChannelT` (channel_store.go:906) calls it.
+///
+/// Only this one constraint becomes a [`StoreError::Conflict`]. `PublicChannels` has a
+/// `(Name, TeamId)` unique constraint of its own, and Go wraps a violation of *that* as an
+/// ordinary "failed to insert public channel" error — a 500, not the 400 a duplicate name earns.
+/// Widening the match would turn one into the other.
+fn channel_name_conflict(err: &sqlx::Error) -> bool {
+    err.as_database_error()
+        .and_then(|db| db.constraint())
+        .is_some_and(|constraint| constraint == "channels_name_teamid_key")
+}
+
+/// Port of `SqlChannelStore.upsertPublicChannelT` (channel_store.go:589).
+///
+/// **A non-open channel is DELETEd from `PublicChannels` rather than upserted**, which is the
+/// whole mechanism behind `PUT /channels/{id}/privacy`: converting to `P` takes the row out of
+/// every public-channel listing and search, and converting back puts it in. Seven columns are
+/// copied; `Type` is not among them, because membership of the table *is* the type.
+async fn upsert_public_channel(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    channel: &Channel,
+) -> Result<(), StoreError> {
+    if channel.channel_type != mm_model::channel::CHANNEL_TYPE_OPEN {
+        sqlx::query!("DELETE FROM publicchannels WHERE id = $1", channel.id)
+            .execute(&mut **tx)
+            .await
+            .map_err(|source| StoreError::Db {
+                context: "failed to delete public channel".to_owned(),
+                source,
+            })?;
+        return Ok(());
+    }
+
+    sqlx::query!(
+        r#"
+        INSERT INTO publicchannels (id, deleteat, teamid, displayname, name, header, purpose)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        ON CONFLICT (id) DO UPDATE
+           SET deleteat    = $2,
+               teamid      = $3,
+               displayname = $4,
+               name        = $5,
+               header      = $6,
+               purpose     = $7
+        "#,
+        channel.id,
+        channel.delete_at,
+        channel.team_id,
+        channel.display_name,
+        channel.name,
+        channel.header,
+        channel.purpose,
+    )
+    .execute(&mut **tx)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: "failed to insert public channel".to_owned(),
+        source,
+    })?;
+
+    Ok(())
+}
+
+/// Port of `SqlChannelStore.Update` (channel_store.go:845) — see the trait for the error contract.
+///
+/// The order inside `updateChannelT` is load-bearing and each step is a plausible mutation:
+/// `PreUpdate` **first** (so `UpdateAt` is fresh and the name is unicode-sanitised before it is
+/// validated), then the `DeleteAt` guard, then `IsValid`, then the statement. Validating before
+/// sanitising would accept a name Go rejects and vice versa.
+///
+/// Twenty-two columns are written, every one of them from the struct — including
+/// `TotalMsgCount`, `LastPostAt` and `CreateAt`, which no route lets a client set but which are
+/// nonetheless overwritten with whatever the caller read earlier. That is Go's lost-update
+/// window and it is reproduced rather than narrowed: a port that wrote only the mutable columns
+/// would keep counters Go clobbers.
+#[tracing::instrument(skip(pool, channel), fields(channel_id = %channel.id))]
+pub async fn update(pool: &PgPool, channel: &mut Channel) -> Result<(), StoreError> {
+    channel.pre_update();
+
+    if channel.delete_at != 0 {
+        return Err(StoreError::InvalidInput {
+            entity: "Channel",
+            field: "DeleteAt",
+            value: channel.delete_at.to_string(),
+        });
+    }
+
+    channel
+        .is_valid()
+        .map_err(|app_error| StoreError::Invalid {
+            entity: "Channel",
+            app_error,
+        })?;
+
+    let banner_info = banner_info_column(channel.banner_info.as_ref())?;
+
+    let mut tx = pool.begin().await.map_err(|source| StoreError::Db {
+        context: "begin_transaction".to_owned(),
+        source,
+    })?;
+
+    let affected = sqlx::query!(
+        r#"
+        UPDATE channels
+           SET createat            = $2,
+               updateat            = $3,
+               deleteat            = $4,
+               teamid              = $5,
+               type                = $6::text::channel_type,
+               displayname         = $7,
+               name                = $8,
+               header              = $9,
+               purpose             = $10,
+               lastpostat          = $11,
+               totalmsgcount       = $12,
+               extraupdateat       = $13,
+               creatorid           = $14,
+               schemeid            = $15,
+               groupconstrained    = $16,
+               shared              = $17,
+               totalmsgcountroot   = $18,
+               lastrootpostat      = $19,
+               bannerinfo          = $20,
+               defaultcategoryname = $21,
+               autotranslation     = $22,
+               discoverable        = $23
+         WHERE id = $1
+        "#,
+        channel.id,
+        channel.create_at,
+        channel.update_at,
+        channel.delete_at,
+        channel.team_id,
+        channel.channel_type,
+        channel.display_name,
+        channel.name,
+        channel.header,
+        channel.purpose,
+        channel.last_post_at,
+        channel.total_msg_count,
+        channel.extra_update_at,
+        channel.creator_id,
+        channel.scheme_id,
+        channel.group_constrained,
+        channel.shared,
+        channel.total_msg_count_root,
+        channel.last_root_post_at,
+        banner_info,
+        channel.default_category_name,
+        channel.auto_translation,
+        channel.discoverable,
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(|source| {
+        if channel_name_conflict(&source) {
+            StoreError::Conflict {
+                resource: "Name",
+                source,
+            }
+        } else {
+            StoreError::Db {
+                context: format!("failed to update channel with id={}", channel.id),
+                source,
+            }
+        }
+    })?
+    .rows_affected();
+
+    // Go refuses `count > 1` and says nothing about zero: an `Id =` on the primary key can only
+    // match one row, so this is a corruption assertion, and **zero rows is a success** — which is
+    // how `PUT /channels/{id}` on a row deleted between the read and the write answers 200 with
+    // a body nothing stored.
+    if affected > 1 {
+        return Err(StoreError::Db {
+            context: format!(
+                "the expected number of channels to be updated is <=1 but was {affected}"
+            ),
+            source: sqlx::Error::RowNotFound,
+        });
+    }
+
+    upsert_public_channel(&mut tx, channel).await?;
+
+    tx.commit().await.map_err(|source| StoreError::Db {
+        context: "commit_transaction".to_owned(),
+        source,
+    })
+}
+
+/// Port of `SqlChannelStore.SetDeleteAt` (channel_store.go:1080) and the `setDeleteAtT`
+/// (channel_store.go:1119) inside its transaction.
+///
+/// Two statements, one transaction, and the **`PublicChannels` half only touches `DeleteAt`** —
+/// unlike [`update`]'s upsert it neither inserts nor deletes, so a private channel simply has no
+/// row here and the second statement is a no-op for it.
+#[tracing::instrument(skip(pool), fields(channel_id = %channel_id, delete_at, update_at))]
+pub async fn set_delete_at(
+    pool: &PgPool,
+    channel_id: &str,
+    delete_at: i64,
+    update_at: i64,
+) -> Result<(), StoreError> {
+    let mut tx = pool.begin().await.map_err(|source| StoreError::Db {
+        context: "SetDeleteAt: begin_transaction".to_owned(),
+        source,
+    })?;
+
+    sqlx::query!(
+        "UPDATE channels SET deleteat = $1, updateat = $2 WHERE id = $3",
+        delete_at,
+        update_at,
+        channel_id,
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: format!("failed to delete channel with id={channel_id}"),
+        source,
+    })?;
+
+    sqlx::query!(
+        "UPDATE publicchannels SET deleteat = $1 WHERE id = $2",
+        delete_at,
+        channel_id,
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: format!("failed to delete public channels with id={channel_id}"),
+        source,
+    })?;
+
+    tx.commit().await.map_err(|source| StoreError::Db {
+        context: "SetDeleteAt: commit_transaction".to_owned(),
+        source,
+    })
 }
 
 #[cfg(test)]
