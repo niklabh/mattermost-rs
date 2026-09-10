@@ -4061,9 +4061,9 @@ Also worth knowing:
 | Go file | Rust file | Status | Tests | Notes |
 |---|---|---|---|---|
 | model/channel_sidebar.go | `mm-model/src/sidebar_category.rs` | DONE | 10 pass | `SidebarCategory`, `SidebarCategoryWithChannels` (Go embeds, so `#[serde(flatten)]` — nine inlined keys then `channel_ids`), `OrderedSidebarCategories`, `SidebarChannel` (`SortOrder` is `json:"-"`). **`IsValidCategoryId`'s regexp is unanchored** and its two halves are `[a-z0-9]` where `IsValidId` accepts upper case, so the two branches disagree about case and `zzfavorites_<26>_<26>!!` is valid; corpus in `fixtures/behaviour_sidebar_category.json`. The three arrays carry no `omitempty`, so nil is `null` and empty is `[]` — modelled `Option<Vec<_>>`. |
-| store/sqlstore/channel_store_categories.go (the three reads) | `mm-store/src/sidebar_category_store.rs` | PARTIAL | 2 pass + 23 parity | **The answer is not what is in `SidebarChannels`.** Every read appends *orphans* — channels the user is a member of that appear in no category of theirs — to the Channels or DMs category, so on a normal server most of a user's sidebar is rows the join never returns. Orphans come last, in `DisplayName` order, after the explicit channels' `SortOrder` order. Ported in its own module rather than into `channel_store.rs`; Go hangs them off `ChannelStore`. |
-| app/channel_category.go (the three reads) + app/authorization.go (`SessionHasPermissionToCategory`) | `mm-app/src/sidebar.rs` | PARTIAL | 3 pass | One error id (`app.channel.sidebar_categories.app_error`) for every branch of all four; only the status code moves. `SessionHasPermissionToCategory` is **not** `SessionHasPermissionToUser` — no unrestricted branch, no `manage_system`, no self shortcut, and it compares `category.UserId` against *both* the session and the path's `user_id`. The create-on-empty branch is a write and is not ported; it is reported as `SidebarCategoriesResult::NeedsInitialCategories` and the API forwards. |
-| api4/channel_category.go (`getCategoriesForTeamForUser`, `getCategoryOrderForTeamForUser`, `getCategoryForTeamForUser`) | `mm-api/src/sidebar.rs` | PARTIAL | 7 pass + 23 parity | The three GETs served; the five writes on the same paths still forwarded (asserted over HTTP). **The path parameter is `{category}`, not `{category_id}`** — Go's mux class is `[A-Za-z0-9_-]+` and a default category id is `{type}_{userId}_{teamId}`, so the `_id` suffix would have enrolled it in the shared `[A-Za-z0-9]+` middleware and forwarded the common case. Two framings in one Go file: `/order` carries a trailing newline, the other two do not. Mutations: 21 run, 21 caught, 2 controls survived. |
+| store/sqlstore/channel_store_categories.go (the three reads; the five writes landed 2026-09-10, see below) | `mm-store/src/sidebar_category_store.rs` | PARTIAL | 14 pass + 40 parity | **The answer is not what is in `SidebarChannels`.** Every read appends *orphans* — channels the user is a member of that appear in no category of theirs — to the Channels or DMs category, so on a normal server most of a user's sidebar is rows the join never returns. Orphans come last, in `DisplayName` order, after the explicit channels' `SortOrder` order. Ported in its own module rather than into `channel_store.rs`; Go hangs them off `ChannelStore`. |
+| app/channel_category.go (the three reads; the four writes landed 2026-09-10, see below) + app/authorization.go (`SessionHasPermissionToCategory`) | `mm-app/src/sidebar.rs` | PARTIAL | 16 pass | One error id (`app.channel.sidebar_categories.app_error`) for every branch of all four; only the status code moves. `SessionHasPermissionToCategory` is **not** `SessionHasPermissionToUser` — no unrestricted branch, no `manage_system`, no self shortcut, and it compares `category.UserId` against *both* the session and the path's `user_id`. The create-on-empty branch **is** ported now (2026-09-10) and nothing is forwarded. |
+| api4/channel_category.go (`getCategoriesForTeamForUser`, `getCategoryOrderForTeamForUser`, `getCategoryForTeamForUser`; the five writes landed 2026-09-10, see below) | `mm-api/src/sidebar.rs` | DONE | 7 pass + 40 parity | All eight methods on the three paths served. **The path parameter is `{category}`, not `{category_id}`** — Go's mux class is `[A-Za-z0-9_-]+` and a default category id is `{type}_{userId}_{teamId}`, so the `_id` suffix would have enrolled it in the shared `[A-Za-z0-9]+` middleware and forwarded the common case. Two framings in one Go file: `/order` carries a trailing newline, the other two do not. Mutations: 21 run, 21 caught, 2 controls survived. |
 
 ## Notes — api4/channel_category.go (the read side)
 
@@ -9315,3 +9315,54 @@ months on a database old enough to have accumulated the shape it assumed:
 The lesson is not about ports. **A suite that has only ever run against one long-lived database
 has untested dependencies on that database**, and the cheapest way to find them is to stand up a
 new one.
+
+## The five sidebar-category writes, and a `GET` that writes (2026-09-10)
+
+`POST`/`PUT` on `…/channels/categories`, `PUT` on `…/categories/order`, `PUT`/`DELETE` on
+`…/categories/{category_id}`. All eight methods on the three paths are served now; the family is
+complete apart from `getManagedCategories`, which is licensed and feature-flagged and was not
+started.
+
+| Go source | Rust | Status | Tests | Notes |
+|---|---|---|---|---|
+| store/sqlstore/channel_store_categories.go — `CreateInitialSidebarCategories`, `CreateSidebarCategory`, `UpdateSidebarCategoryOrder`, `UpdateSidebarCategories`, `DeleteSidebarCategory` | `mm-store/src/sidebar_category_store.rs` | DONE | 12 pass (`tests/db_sidebar_category_writes.rs`) | Each one transaction, with Go's statement order inside it — categories before channels, and the category updates in **id** order, both for deadlock avoidance against a concurrent transaction. `UpdateSidebarCategories` also writes `favorite_channel` **`Preferences`** rows, and its two branches are asymmetrical: Favorites deletes the *original* channel list and re-adds the new one, every other type deletes the *request's*. |
+| app/channel_category.go — `createInitialSidebarCategories` and the four writes | `mm-app/src/sidebar.rs` | DONE | 16 pass | Four websocket events with **two payload conventions**: `order` is a JSON array, `updatedCategories` a marshalled string. None of the four omits the originating connection (Go passes `""`), unlike the draft and preference writes. `muteChannelsForUpdatedCategories` is ported as far as the decision only — see [D-224]. |
+| api4/channel_category.go — the five writes | `mm-api/src/sidebar.rs` | DONE | 40 parity | The per-category refusal on the collection route is a **400** naming `category`, not the 403 its singular sibling answers from the same gate. `/order` is the one route whose decode failure is `api.payload.parse.error` with no `Name`, and `null` is not a decode failure there at all. Mutations: see the tally below. |
+
+Four things a reader would otherwise get wrong, each of them a test:
+
+1. **`validateSidebarCategory` validates nothing.** It silently *drops* every channel the caller is
+   not a member of, logs it, and de-duplicates the rest — so a request naming somebody else's
+   private channel succeeds and simply does not contain it. Its one error branch is a 400 with
+   `api.invalid_channel`, reached when `GetChannelsForTeamForUser` answers its **404** for a user
+   who is in no channel on the team. And because `RemoveDuplicateStringsNonSort` returns a non-nil
+   `[]string{}`, `channel_ids` is never `null` on any create or update answer.
+2. **`GET .../categories` writes.** Go creates the Favorites/Channels/DirectMessages triple inside
+   the read when the user has none, migrating their `favorite_channel` preferences into
+   `SidebarChannels` as it goes. That case used to be forwarded to Go on the grounds that two
+   servers would race to insert the same ids; it is not forwarded any more, because the
+   deterministic `{type}_{userId}_{teamId}` ids and the primary key on `SidebarCategories.Id` are
+   Go's own mechanism for making that race converge. Only the *missing* types are inserted, so a
+   user who has Favorites and lost Channels gains Channels alone.
+3. **Go's `json.Marshal` escapes `<`, `>` and `&`; `serde_json` does not.** `display_name` is
+   arbitrary user text, so a category called `Q&A` differed by nine bytes. All five writes and —
+   this was the latent half — **all three reads** now go through `mm_model::utils::go_json_marshal`.
+   The same applies inside the `sidebar_category_updated` event, whose payload is a marshalled
+   string.
+4. **Five fields are read-only, per field and per category type.** `UserId`, `TeamId`, `SortOrder`
+   and `Type` come back from the row; `DisplayName` is read-only unless the category is `custom`;
+   `Muted` is read-only for **Direct Messages** alone. Two loops later, Go branches on the
+   *request's* `Type` rather than the row's — so a Channels category mislabelled `direct_messages`
+   has its channels deleted and not reinserted. Reproduced, and pinned by
+   `db_sidebar_category_writes::a_category_mislabelled_direct_messages_has_its_channels_deleted_and_not_restored`.
+
+Two branches are **unreachable through HTTP** and are therefore covered only in `mm-store`:
+`UpdateSidebarCategoryOrder`'s store-level `ErrInvalidInput` → 400 (the handler's own per-id
+permission loop refuses first, and a duplicate id becomes a length mismatch → 500 before it), and
+`UpdateSidebarCategories`' 500-for-everything mapping (the same gate turns an unknown id into a
+400). Both are stated in the doc comments on the functions that carry them.
+
+The parity suite runs **two subject users on one team**, so channel ids appear identically in both
+servers' answers and only the user id and the minted category id need substituting out. Two teams
+would have made the channel ids differ too, leaving nothing to compare. Fixtures are prefixed
+`mmrssbwrite`, cleared by the suite's own purge, for the reason `mmrssidebar` gives.

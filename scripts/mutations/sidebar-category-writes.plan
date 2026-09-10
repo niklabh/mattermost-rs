@@ -1,0 +1,77 @@
+# Mutation plan for the five sidebar-category writes.
+#
+#   scripts/mutate-batch.sh scripts/mutations/sidebar-category-writes.plan
+#
+# The decisions worth mutating here are the ones a reader would "tidy":
+#
+#   * the three defaults, whose ids, sort orders and `sorting` values differ from each other in
+#     ways no single fixture makes obvious;
+#   * the favourites migration's three joins and its `value = 'true'`, each of which drops rows
+#     whose absence looks exactly like a correct answer;
+#   * the `Preferences` mirror, which has two asymmetrical branches — one deletes the *original*
+#     channel list and one the *request's*;
+#   * the read-only fields, which are read-only per *field* and per *category type*;
+#   * the two order guards, whose statuses are 500 and 400 and whose order decides which fires;
+#   * `w.Write` versus `json.NewEncoder` on one path, and Go's HTML escaping, which
+#     `serde_json` does not apply;
+#   * a publish that does not happen, and an event type swapped for its sibling.
+#
+# Store-only observables get the `store` suite with a filter naming the db test that covers them;
+# everything visible over HTTP gets `api` with the `sidebar` filter, which runs the three sidebar
+# modules and nothing else.
+#
+# The last two lines are the no-op controls and must SURVIVE.
+store-favorites-takes-the-channels-sort-order	crates/mm-store/src/sidebar_category_store.rs	            DEFAULT_SIDEBAR_SORT_ORDER_FAVORITES,\n            SIDEBAR_CATEGORY_SORT_DEFAULT,\n            SIDEBAR_CATEGORY_FAVORITES,	            DEFAULT_SIDEBAR_SORT_ORDER_CHANNELS,\n            SIDEBAR_CATEGORY_SORT_DEFAULT,\n            SIDEBAR_CATEGORY_FAVORITES,	store	default_categories_carry
+store-dms-sort-by-default-not-recent	crates/mm-store/src/sidebar_category_store.rs	            SIDEBAR_CATEGORY_SORT_RECENT,\n            SIDEBAR_CATEGORY_DIRECT_MESSAGES,	            SIDEBAR_CATEGORY_SORT_DEFAULT,\n            SIDEBAR_CATEGORY_DIRECT_MESSAGES,	store	default_categories_carry
+store-dms-display-name-loses-its-space	crates/mm-store/src/sidebar_category_store.rs	            "Direct Messages",	            "DirectMessages",	store	default_categories_carry
+store-default-id-repeats-the-user-instead-of-the-team	crates/mm-store/src/sidebar_category_store.rs	    format!("{category_type}_{user_id}_{team_id}")	    format!("{category_type}_{user_id}_{user_id}")	store	default_categories_carry
+store-initial-run-inserts-every-type-regardless	crates/mm-store/src/sidebar_category_store.rs	    if !existing.iter().any(|t| t == SIDEBAR_CATEGORY_CHANNELS) {	    if true {	store	second_run_inserts_only
+store-initial-read-back-reads-the-wrong-user	crates/mm-store/src/sidebar_category_store.rs	    let ordered = get_sidebar_categories(&mut tx, user_id, team_id).await?;	    let ordered = get_sidebar_categories(&mut tx, team_id, team_id).await?;	store	default_categories_carry
+store-favourites-migration-accepts-any-value	crates/mm-store/src/sidebar_category_store.rs	          AND preferences.value = 'true'	          AND preferences.value <> 'nope'	store	favourite_preferences_become
+store-favourites-migration-drops-the-empty-team-arm	crates/mm-store/src/sidebar_category_store.rs	          AND (channels.teamid = $2 OR channels.teamid = '')	          AND channels.teamid = $2	store	favourite_preferences_become
+store-favourites-migration-orders-by-name-first	crates/mm-store/src/sidebar_category_store.rs	        ORDER BY channels.displayname, channels.name ASC	        ORDER BY channels.name ASC, channels.displayname	store	favourite_preferences_become
+store-favourites-migration-does-not-require-membership	crates/mm-store/src/sidebar_category_store.rs	        JOIN channelmembers ON preferences.name = channelmembers.channelid	        LEFT JOIN channelmembers ON preferences.name = channelmembers.channelid	store	favourite_preferences_become
+store-sidebar-channel-sort-order-is-flat	crates/mm-store/src/sidebar_category_store.rs	            FROM unnest($1::text[]) WITH ORDINALITY AS entry(channelid, ord)\n            "#,\n            channel_ids,\n            user_id,\n            category_id,\n            MINIMAL_SIDEBAR_SORT_DISTANCE,\n        )\n        .execute(&mut **tx)\n        .await\n    }\n    .map_err(	            FROM unnest($1::text[]) WITH ORDINALITY AS entry(channelid, ord)\n            "#,\n            channel_ids,\n            user_id,\n            category_id,\n            0,\n        )\n        .execute(&mut **tx)\n        .await\n    }\n    .map_err(	store	favourite_preferences_become
+store-create-places-the-new-category-last	crates/mm-store/src/sidebar_category_store.rs	        new_order.insert(1, new_category_id.clone());	        new_order.push(new_category_id.clone());	api	sidebar
+store-create-does-not-patch-the-sort-order	crates/mm-store/src/sidebar_category_store.rs	    category.sort_order = new_category_sort_order;	    category.sort_order = new_category_sort_order + 1;	api	sidebar
+store-create-takes-the-type-from-the-request	crates/mm-store/src/sidebar_category_store.rs	        category_type: SIDEBAR_CATEGORY_CUSTOM.to_owned(),	        category_type: new_category.category.category_type.clone(),	api	sidebar
+store-create-takes-collapsed-from-the-request	crates/mm-store/src/sidebar_category_store.rs	        collapsed: false,\n    };	        collapsed: new_category.category.collapsed,\n    };	api	sidebar
+store-create-leaves-channels-in-their-old-category	crates/mm-store/src/sidebar_category_store.rs	              AND sidebarchannels.userid = $1\n              AND sidebarchannels.channelid = ANY($2::text[])	              AND sidebarchannels.userid <> $1\n              AND sidebarchannels.channelid = ANY($2::text[])	store	new_category_lands_after_favorites
+store-create-clears-channels-on-every-team	crates/mm-store/src/sidebar_category_store.rs	              AND sidebarcategories.teamid = $3	              AND sidebarcategories.teamid <> $3	store	new_category_lands_after_favorites
+store-order-length-guard-removed	crates/mm-store/src/sidebar_category_store.rs	    if existing_order.len() != category_order.len() {	    if false {	api	sidebar
+store-order-membership-guard-removed	crates/mm-store/src/sidebar_category_store.rs	        if !category_order.contains(original) {	        if false {	store	order_guards_are_length_first
+store-order-sort-distance-off-by-one	crates/mm-store/src/sidebar_category_store.rs	        running_order += MINIMAL_SIDEBAR_SORT_DISTANCE;	        running_order += MINIMAL_SIDEBAR_SORT_DISTANCE + 1;	store	order_guards_are_length_first
+store-update-display-name-is-writable-everywhere	crates/mm-store/src/sidebar_category_store.rs	        if dest.category_type != SIDEBAR_CATEGORY_CUSTOM {	        if false {	api	sidebar
+store-update-sort-order-is-writable	crates/mm-store/src/sidebar_category_store.rs	        dest.sort_order = src.category.sort_order;	        dest.sort_order = category.category.sort_order;	store	updating_favorites_mirrors_preferences
+store-update-team-id-is-writable	crates/mm-store/src/sidebar_category_store.rs	        dest.team_id = src.category.team_id.clone();	        dest.team_id = category.category.team_id.clone();	store	updating_favorites_mirrors_preferences
+store-update-muted-is-writable-for-dms	crates/mm-store/src/sidebar_category_store.rs	        let dest_channels = if dest.category_type == SIDEBAR_CATEGORY_DIRECT_MESSAGES {	        let dest_channels = if false {	api	sidebar
+store-update-favorites-deletes-the-new-list-not-the-old	crates/mm-store/src/sidebar_category_store.rs	                src.channel_ids.as_deref().unwrap_or_default(),	                request_channels.as_slice(),	api	sidebar
+store-update-non-favorites-leaves-preferences-alone	crates/mm-store/src/sidebar_category_store.rs	            delete_favorite_preferences(&mut tx, user_id, &request_channels).await?;	            delete_favorite_preferences(&mut tx, user_id, &request_channels[..0]).await?;	api	sidebar
+store-update-channel-insert-reads-the-stored-type	crates/mm-store/src/sidebar_category_store.rs	        if category.category.category_type == SIDEBAR_CATEGORY_DIRECT_MESSAGES {\n            // "The order of the DM category isn't stored explicitly, so there's nothing to do"\n            continue;	        if false {\n            // "The order of the DM category isn't stored explicitly, so there's nothing to do"\n            continue;	store	mislabelled_direct_messages
+store-update-deletes-no-old-sidebar-channels	crates/mm-store/src/sidebar_category_store.rs	        "DELETE FROM sidebarchannels WHERE categoryid = ANY($1::text[])",	        "DELETE FROM sidebarchannels WHERE categoryid = ANY($1::text[]) AND sortorder < 0",	api	sidebar
+store-delete-allows-a-default-category	crates/mm-store/src/sidebar_category_store.rs	    if category_type != SIDEBAR_CATEGORY_CUSTOM {	    if false {	api	sidebar
+store-delete-leaves-the-sidebar-channels-behind	crates/mm-store/src/sidebar_category_store.rs	        "DELETE FROM sidebarchannels WHERE categoryid = $1",\n        category_id	        "DELETE FROM sidebarchannels WHERE categoryid = $1 AND $1 <> $1",\n        category_id	store	only_a_custom_category_deletes
+app-create-publishes-the-updated-event	crates/mm-app/src/sidebar.rs	            WEBSOCKET_EVENT_SIDEBAR_CATEGORY_CREATED,\n            team_id,	            WEBSOCKET_EVENT_SIDEBAR_CATEGORY_UPDATED,\n            team_id,	api	sidebar
+app-create-publishes-nothing	crates/mm-app/src/sidebar.rs	        message.add(\n            "category_id",\n            serde_json::Value::String(category.category.id.clone()),\n        );\n        self.publish(message).await;	        message.add(\n            "category_id",\n            serde_json::Value::String(category.category.id.clone()),\n        );\n        let _ = message;	api	sidebar
+app-create-event-omits-the-user	crates/mm-app/src/sidebar.rs	            WEBSOCKET_EVENT_SIDEBAR_CATEGORY_CREATED,\n            team_id,\n            "",\n            user_id,	            WEBSOCKET_EVENT_SIDEBAR_CATEGORY_CREATED,\n            team_id,\n            "",\n            "",	api	sidebar
+app-order-event-omits-the-team	crates/mm-app/src/sidebar.rs	            WEBSOCKET_EVENT_SIDEBAR_CATEGORY_ORDER_UPDATED,\n            team_id,	            WEBSOCKET_EVENT_SIDEBAR_CATEGORY_ORDER_UPDATED,\n            "",	api	sidebar
+app-order-event-payload-is-renamed	crates/mm-app/src/sidebar.rs	        message.add(\n            "order",	        message.add(\n            "orders",	api	sidebar
+app-update-event-payload-is-an-array-not-a-string	crates/mm-app/src/sidebar.rs	        message.add("updatedCategories", serde_json::Value::String(encoded));	        message.add(\n            "updatedCategories",\n            serde_json::from_str(&encoded).unwrap_or(serde_json::Value::Null),\n        );	api	sidebar
+app-update-event-payload-is-not-html-escaped	crates/mm-app/src/sidebar.rs	        let encoded = mm_model::utils::go_json_marshal(&update.updated).map_err(|err| {	        let encoded = serde_json::to_string(&update.updated).map_err(|err| {	api	sidebar
+app-delete-publishes-nothing	crates/mm-app/src/sidebar.rs	        message.add(\n            "category_id",\n            serde_json::Value::String(category_id.to_owned()),\n        );\n        self.publish(message).await;	        message.add(\n            "category_id",\n            serde_json::Value::String(category_id.to_owned()),\n        );\n        let _ = message;	api	sidebar
+app-delete-invalid-input-is-a-500	crates/mm-app/src/sidebar.rs	                if err.is_invalid_input() {\n                    tracing::debug!(error = %err, "refusing to delete a non-custom category");	                if false {\n                    tracing::debug!(error = %err, "refusing to delete a non-custom category");	api	sidebar
+app-get-does-not-create-the-initial-categories	crates/mm-app/src/sidebar.rs	                    self.create_initial_sidebar_categories(user_id, team_id)\n                        .await	                    Ok(categories)	api	sidebar
+api-create-ignores-the-bodys-ids	crates/mm-api/src/sidebar.rs	    if category.category.user_id != user_id || category.category.team_id != team_id {	    if false {	api	sidebar
+api-validate-does-not-filter-out-non-member-channels	crates/mm-api/src/sidebar.rs	            if allowed.contains(channel_id.as_str()) {	            if true {	api	sidebar
+api-validate-does-not-deduplicate	crates/mm-api/src/sidebar.rs	        category.channel_ids = Some(mm_model::utils::remove_duplicate_strings_non_sort(\n            &filtered,\n        ));	        category.channel_ids = Some(filtered);	api	sidebar
+api-write-bodies-are-encoder-framed	crates/mm-api/src/sidebar.rs	        Ok(body) => json_body(body.into_bytes()),	        Ok(body) => json_body((body + "\\n").into_bytes()),	api	sidebar
+api-order-parse-failure-is-invalid-body-param	crates/mm-api/src/sidebar.rs	                    PAYLOAD_PARSE_ERROR,	                    "api.context.invalid_body_param.app_error",	api	sidebar
+api-order-does-not-deduplicate	crates/mm-api/src/sidebar.rs	            Ok(Some(order)) => Some(mm_model::utils::remove_duplicate_strings_non_sort(&order)),	            Ok(Some(order)) => Some(order),	api	sidebar
+api-singular-update-prefers-the-bodys-id	crates/mm-api/src/sidebar.rs	    update.category.id = category;	    if update.category.id.is_empty() {\n        update.category.id = category;\n    }	api	sidebar
+api-singular-gate-is-the-user-gate-not-the-category-gate	crates/mm-api/src/sidebar.rs	                .session_has_permission_to_category(&session.0, &user_id, team_id, category)	                .session_has_permission_to_user(&session.0, &user_id)	api	sidebar
+api-collection-per-category-refusal-is-a-403	crates/mm-api/src/sidebar.rs	            .await\n        {\n            return ApiError::invalid_param("category").into_response();\n        }\n    }\n\n    if let Err(err) = validate_sidebar_categories(&state, &team_id, &user_id, &mut categories).await	            .await\n        {\n            return ApiError::from(make_permission_error(&session.0, &[&PERMISSION_EDIT_OTHER_USERS]))\n                .into_response();\n        }\n    }\n\n    if let Err(err) = validate_sidebar_categories(&state, &team_id, &user_id, &mut categories).await	api	sidebar
+api-categories-body-must-be-an-array	crates/mm-api/src/sidebar.rs	        match serde_json::from_slice::<Option<Vec<SidebarCategoryWithChannels>>>(&bytes) {	        match serde_json::from_slice::<Vec<SidebarCategoryWithChannels>>(&bytes).map(Some) {	api	sidebar
+api-delete-answers-an-empty-body	crates/mm-api/src/sidebar.rs	        Ok(()) => status_ok(),	        Ok(()) => json_body(Vec::new()),	api	sidebar
+api-read-does-not-html-escape	crates/mm-api/src/sidebar.rs	    marshal_or_500(&categories, "getCategoriesForTeamForUser")	    json_body(serde_json::to_vec(&categories).unwrap_or_default())	api	sidebar
+control-rename-the-requested-channels-binding	crates/mm-store/src/sidebar_category_store.rs	    let channel_ids = new_category.channel_ids.clone().unwrap_or_default();	    let requested = new_category.channel_ids.clone().unwrap_or_default();\n    let channel_ids = requested;	api	sidebar
+control-reorder-independent-update-set-clauses	crates/mm-store/src/sidebar_category_store.rs	            SET displayname = $1, sorting = $2, muted = $3, collapsed = $4	            SET sorting = $2, displayname = $1, collapsed = $4, muted = $3	api	sidebar

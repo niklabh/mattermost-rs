@@ -6541,3 +6541,31 @@ cost-factor sweep with a `--ignored` job, or a single test that exercises the pa
 lets the rest assert against precomputed digests. Neither has been done because neither is this
 session's route, and the suite is honest at 110s in a way it would not be at 55s with the coverage
 quietly dropped.
+
+## D-224 · Muting a sidebar category does not mute its channels
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-10 (phase 2, sidebar category writes)
+**Blocked on** a `ChannelMembers` write in `mm-store/src/channel_store.rs`.
+
+`UpdateSidebarCategories` ends in `muteChannelsForUpdatedCategories` (app/channel_category.go:164),
+which reconciles the category's `muted` flag with its channels' `ChannelMembers.NotifyProps
+["mark_unread"]` through `setChannelsMuted` (app/channel.go:4032) → `Channel().UpdateMultipleMembers`.
+That store write is not ported, so on this server:
+
+- muting a category sets `SidebarCategories.Muted` and leaves every channel in it unmuted;
+- **no `channel_member_updated` event is published**, one of which Go sends per affected channel, so
+  a connected client's membership state goes stale with no TTL to recover it;
+- the same applies to a channel *moved* between categories of differing `muted`.
+
+The **decision** is ported and has thirteen unit tests
+(`mm-app/src/sidebar.rs::mute_reconciliation`): the index pairing between the updated and original
+lists, both mute directions, the move-between-categories diff, the "moved outside these categories"
+case Go declines to handle, and the fact that the two sources of mutes are not de-duplicated against
+each other. `App::mute_channels_for_updated_categories` computes it on every update and logs a
+`warn!` naming the channels a Go server would have touched, so the gap is visible in a running
+server rather than only here.
+
+What is owed is `setChannelsMuted` on top of a ported `UpdateMultipleMembers`, plus a parity test
+that mutes a category and reads the channel member back. Not done in this session because
+`channel_store.rs` belonged to two other agents; the reconciliation is deliberately a free function
+so the write can be dropped in behind it without touching the tested part.

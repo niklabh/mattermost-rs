@@ -305,6 +305,17 @@ async fn the_three_default_categories_carry_gos_ids_orders_and_sortings() {
 }
 
 /// Only the missing types are inserted, and an existing category is left exactly as it was.
+///
+/// # Three runs, because one of them proves the guard and another proves the insert
+///
+/// The `SELECT type` up front is what stops a run duplicating a category, and the primary key on
+/// `SidebarCategories.Id` is what makes getting it wrong an **error** rather than a second row. So
+/// the case that catches a dropped guard is a run with **nothing missing**: it must succeed and
+/// write nothing.
+///
+/// The first version of this test deleted the Channels category before its only second run, which
+/// made `if !hasCategoryOfType[channels]` unreachable — mutating it to `if true` changed nothing,
+/// because the category really was missing. That survivor is why the no-deletion run exists.
 #[tokio::test]
 async fn a_second_run_inserts_only_what_is_missing_and_rewrites_nothing() {
     if !db_enabled() {
@@ -320,8 +331,8 @@ async fn a_second_run_inserts_only_what_is_missing_and_rewrites_nothing() {
         .await
         .expect("the first run");
 
-    // Rename Favorites and move it to the end, then drop the Channels category — a state no API
-    // call produces, which is exactly why it is worth constructing.
+    // Rename Favorites and move it to the end — a state no API call produces, which is exactly
+    // why it is worth constructing: it makes "rewrites nothing" observable.
     sqlx::query(
         "UPDATE sidebarcategories SET displayname = 'Renamed', sortorder = 99 WHERE id = $1",
     )
@@ -329,6 +340,26 @@ async fn a_second_run_inserts_only_what_is_missing_and_rewrites_nothing() {
     .execute(&pool)
     .await
     .expect("renames");
+
+    // Nothing is missing. All three guards must hold, or the insert hits the primary key and this
+    // is an `Err`.
+    store
+        .create_initial_sidebar_categories(USER, TEAM)
+        .await
+        .expect("a run with all three present inserts nothing and does not conflict");
+
+    let untouched = rows(&pool).await;
+    assert_eq!(untouched.len(), 3, "no duplicates: {untouched:?}");
+    assert_eq!(
+        untouched
+            .iter()
+            .find(|row| row.0 == default_id(SIDEBAR_CATEGORY_FAVORITES))
+            .map(|row| (row.3.as_str(), row.1)),
+        Some(("Renamed", 99)),
+        "an existing category is not rewritten, name or order"
+    );
+
+    // Now drop one, and only that one comes back.
     sqlx::query("DELETE FROM sidebarcategories WHERE id = $1")
         .bind(default_id(SIDEBAR_CATEGORY_CHANNELS))
         .execute(&pool)
@@ -338,7 +369,7 @@ async fn a_second_run_inserts_only_what_is_missing_and_rewrites_nothing() {
     store
         .create_initial_sidebar_categories(USER, TEAM)
         .await
-        .expect("the second run");
+        .expect("the third run");
 
     let rows = rows(&pool).await;
     assert_eq!(rows.len(), 3, "the missing one came back and nothing else");
