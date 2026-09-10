@@ -34,12 +34,20 @@ ROOT=$(pwd)
 
 usage() { sed -n '2,10p' "$0"; exit 2; }
 
+login_token() {
+  curl -si -X POST "$1/api/v4/users/login" -H 'Content-Type: application/json' \
+    -d '{"login_id":"slice@example.com","password":"Slice-Test-1234"}' \
+    | grep -i '^token:' | tr -d '\r' | awk '{print $2}'
+}
+
+# Idempotent throughout, so `up` can always call it: the user/team half is skipped when the login
+# already works, and the deployment-shape half is re-checked every time — it is cheap and a stack
+# that lost it is a stack whose suites quietly stop asserting anything.
 seed_stack() {
-  local base="$1"
-  if curl -sf -o /dev/null -X POST "$base/api/v4/users/login" \
-       -H 'Content-Type: application/json' \
-       -d '{"login_id":"slice@example.com","password":"Slice-Test-1234"}'; then
+  local base="$1" token user team
+  if token=$(login_token "$base") && [ -n "$token" ]; then
     echo "  fixture user already present"
+    seed_deployment_shape "$base" "$token"
     return 0
   fi
 
@@ -50,10 +58,7 @@ seed_stack() {
     -d '{"email":"slice@example.com","username":"sliceuser","password":"Slice-Test-1234"}' \
     || { echo "  could not create the fixture user"; return 1; }
 
-  local token user team
-  token=$(curl -si -X POST "$base/api/v4/users/login" -H 'Content-Type: application/json' \
-    -d '{"login_id":"slice@example.com","password":"Slice-Test-1234"}' \
-    | grep -i '^token:' | tr -d '\r' | awk '{print $2}')
+  token=$(login_token "$base")
   [ -n "$token" ] || { echo "  the fixture user cannot log in"; return 1; }
 
   user=$(curl -s "$base/api/v4/users/me" -H "Authorization: Bearer $token" \
@@ -66,6 +71,66 @@ seed_stack() {
     -H "Authorization: Bearer $token" -H 'Content-Type: application/json' \
     -d "{\"team_id\":\"$team\",\"user_id\":\"$user\"}"
   echo "  seeded: user=$user team=$team"
+  seed_deployment_shape "$base" "$token"
+}
+
+# The shapes several parity suites assert *about the deployment* rather than about a fixture they
+# built themselves. Both were ambient accidents on the original stack and absent on a fresh one,
+# which is how a suite that passes for months starts proving nothing the day someone recreates the
+# volume:
+#
+# * a bot **with** a description, so `bots`'s `description,omitempty` claim has both sides —
+#   `system-bot` supplies the side that omits it;
+# * a `Jobs` row whose `data` column is SQL NULL, which in production is written by the
+#   product-notices worker and here by nobody.
+#
+# Deliberately **not** planted by the tests: `bots.rs` has other tests that plant and unplant
+# `mmrsbot%` rows, so a list test doing the same deletes theirs mid-run. This is stack furniture,
+# created once, swept by no purge.
+seed_deployment_shape() {
+  local base="$1" token="$2"
+  local owner
+  owner=$(curl -s "$base/api/v4/users/me" -H "Authorization: Bearer $token" \
+    | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+
+  # **Written straight to the tables, not through `POST /bots`.** Bot creation is refused on this
+  # deployment — `ServiceSettings.EnableBotAccountCreation` defaults false and turning it on would
+  # change what other routes answer — so the two rows go in the way `common::plant_bot` writes
+  # them, with an id no purge prefix matches.
+  docker exec -i "mmrs-postgres$MMRS_STACK_SUFFIX" psql -q -U mmuser -d mattermost >/dev/null <<SQL
+INSERT INTO users
+  (id, createat, updateat, deleteat, username, password, authdata, authservice, email,
+   emailverified, nickname, firstname, lastname, position, roles, allowmarketing, props,
+   notifyprops, lastpasswordupdate, lastpictureupdate, failedattempts, locale, timezone,
+   mfaactive, mfasecret, remoteid, lastlogin, mfausedtimestamps)
+VALUES ('seedbotdescribed0000000000', 1788600000000, 1788600000000, 0, 'seed-bot', '', NULL, '',
+        'seed-bot@mmrs.invalid', false, '', 'Seed Bot', '', '', 'system_user', false,
+        '{}'::jsonb, '{}'::jsonb, 1788600000000, 0, 0, 'en', '{}'::jsonb, false, '', NULL, 0,
+        'null'::jsonb)
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO bots (userid, description, ownerid, createat, updateat, deleteat, lasticonupdate)
+VALUES ('seedbotdescribed0000000000',
+        'stack furniture: the described side of description,omitempty', '$owner',
+        1788600000000, 1788600000000, 0, 0)
+ON CONFLICT (userid) DO UPDATE SET description = EXCLUDED.description, ownerid = EXCLUDED.ownerid;
+
+-- Both null-ish shapes, because Go renders them differently and only one occurs naturally:
+-- a SQL NULL comes back as an empty object and a literal JSON null as null. See
+-- mm_store::job_store::JobRow::into_job. Every null-ish row a real deployment accumulates is the
+-- second kind, written by the product-notices worker; the first is here so the divergence that
+-- hid behind that fact stays tested. (No backticks: this heredoc expands $owner.)
+INSERT INTO jobs (id, type, priority, createat, startat, lastactivityat, status, progress, data)
+VALUES ('seedjobsqlnull000000000000', 'product_notices', 0, 1788600000000, 1788600000000,
+        1788600000000, 'success', 0, NULL)
+ON CONFLICT (id) DO UPDATE SET data = NULL;
+
+INSERT INTO jobs (id, type, priority, createat, startat, lastactivityat, status, progress, data)
+VALUES ('seedjobjsonnull00000000000', 'product_notices', 0, 1788600000000, 1788600000000,
+        1788600000000, 'success', 0, 'null'::jsonb)
+ON CONFLICT (id) DO UPDATE SET data = 'null'::jsonb;
+SQL
+  echo "  seeded: a described bot and both null-ish job shapes"
 }
 
 up_stack() {
