@@ -53,10 +53,6 @@ async fn the_bot_list_matches_byte_for_byte_and_carries_no_system_owned() {
     let _unlicensed = ACTIVE_LICENCE_ROW.read().await;
     let client = client();
     let token = go_minted_token(&client).await;
-    // The `omitempty` claim below needs a bot **with** a description and one without. A fresh
-    // stack has only `system-bot`, which has none — so the described side is planted rather than
-    // assumed, and the test says the same thing on a database that is minutes old.
-    common::plant_bot("desc", common::logged_in_user_id(), 0).await;
 
     let (go, rs) = fetch_both_stable(&client, &token, LIST).await;
     assert_eq!(
@@ -102,7 +98,6 @@ async fn the_bot_list_matches_byte_for_byte_and_carries_no_system_owned() {
     // description, so its key is absent while the calls bot's is present.
     let has_description = bots.iter().any(|b| b.get("description").is_some());
     let omits_description = bots.iter().any(|b| b.get("description").is_none());
-    common::unplant_bots().await;
     assert!(
         has_description && omits_description,
         "both sides of `description,omitempty` must appear or this proves nothing: {bots:?}"

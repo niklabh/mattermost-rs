@@ -1000,7 +1000,6 @@ async fn purge_api_fixtures_once() {
         // `bots` compares. Cheap to sweep, and the alternative is an unexplained off-by-two.
         "DELETE FROM bots WHERE userid LIKE 'mmrsbot%'",
         "DELETE FROM users WHERE id LIKE 'mmrsbot%'",
-        "DELETE FROM jobs WHERE id LIKE 'mmrsjob%'",
         // Go's DELETE on an emoji is a **soft** delete and the name stays taken, so the row has
         // to go or the next run cannot create one.
         "DELETE FROM emoji WHERE name LIKE 'mmrsparity%'",
@@ -2058,41 +2057,6 @@ pub async fn plant_bot(tag: &str, owner_id: &str, delete_at: i64) -> Option<Stri
     .expect("the bot row is written");
 
     Some(id)
-}
-
-/// Plant a `Jobs` row whose `data` column is SQL `NULL`.
-///
-/// **A fresh database has exactly one job** — the `migration_advanced_permissions_phase_2` row the
-/// server writes on its first boot — and its `data` is an object. The null shape is written in
-/// production by the product-notices worker, which does not run here, so on any stack younger than
-/// that worker's first tick the "both shapes appear" assertion has only one shape to find. Planting
-/// it makes the test say the same thing on a stack that is minutes old and one that is months old.
-pub async fn plant_null_data_job(tag: &str) -> Option<String> {
-    let pool = fixture_pool().await?;
-    let id = format!("mmrsjob{tag:0>19}");
-    sqlx::query(
-        "INSERT INTO jobs (id, type, priority, createat, startat, lastactivityat, status,
-                           progress, data)
-         VALUES ($1, 'product_notices', 0, 1788600000000, 1788600000000, 1788600000000,
-                 'success', 0, NULL)
-         ON CONFLICT (id) DO UPDATE SET data = NULL",
-    )
-    .bind(&id)
-    .execute(&pool)
-    .await
-    .expect("the job row is written");
-    Some(id)
-}
-
-/// Remove what [`plant_null_data_job`] wrote.
-pub async fn unplant_jobs() {
-    let Some(pool) = fixture_pool().await else {
-        return;
-    };
-    sqlx::query("DELETE FROM jobs WHERE id LIKE 'mmrsjob%'")
-        .execute(&pool)
-        .await
-        .expect("the planted jobs are removed");
 }
 
 /// [`purge_api_fixtures`] sweeps `mmrsbot%`, so this is belt-and-braces for a run that continues
