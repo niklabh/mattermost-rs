@@ -9315,3 +9315,167 @@ months on a database old enough to have accumulated the shape it assumed:
 The lesson is not about ports. **A suite that has only ever run against one long-lived database
 has untested dependencies on that database**, and the cheapest way to find them is to stand up a
 new one.
+
+## Channel membership, written (2026-09-10)
+
+All six member-write routes on `/api/v4/channels/{channel_id}/members…`: `addChannelMember`,
+`setChannelMembers`, `removeChannelMember`, and the `/roles`, `/schemeRoles` and `/notify_props`
+updates. 293 → **299 of 764**. `Channel.SaveMember` was the single most-shared unported store
+method in the tree — `scripts/deps.py` counted **18** unserved routes waiting on it — which is why
+this group went first; `POST /api/v4/channels` is the next of the eighteen and needs nothing new.
+
+New: `mm_store::channel_member_history_store`, `mm_store::group_store` (one query),
+`mm_app::channel_member`, `mm_api::channel_member_writes`. Appended to `ChannelStore`:
+`save_member`, `update_member`, `update_member_notify_props`, `remove_member`,
+`get_all_channel_member_ids_by_channel_id`, `get_channel_of_type`. Also
+`ThreadStore::delete_memberships_for_channel`.
+
+### The join and leave system posts are not written, and one of them shows in a body
+
+Four `Posts` writes are missing — see **[D-231]**, which is the only thing this session owes. The
+surprise is that it is not invisible: `PostAddToChannelMessage` @-mentions the added user, so a
+**re-add** of an existing member answers Go's `mention_count: 1` against our `0`. Masked in the
+parity suite with Go's value asserted, so the exclusion cannot widen.
+
+### `ReturnStatusOK` is the one success body here that is not encoder-framed
+
+`w.Write([]byte(MapToJSON(m)))`, not `json.NewEncoder(w).Encode` (web/web.go:127) — so no trailing
+newline, where `addChannelMember`'s body and every NDJSON line have one. Four tests caught the
+first version. See `mm_api::channel_member_writes::status_ok`.
+
+### `MapFromJSON` never returns nil, which kills a branch and softens two routes
+
+`json.NewDecoder(...).Decode(&map[string]string)`'s error is **discarded** and a nil map replaced
+with an empty one (utils.go:507). So `updateChannelMemberNotifyProps`' `if props == nil {
+SetInvalidParam }` is unreachable, and `PUT …/notify_props` with a body of `[]` is a **200**. On
+`/roles`, `{"roles": 5}` is not a 400 either: the value is dropped and the request fails four layers
+down with `unset_user_scheme`. Both measured, both asserted.
+
+### Nothing validates a notify-prop *value* on the update path
+
+`UpdateChannelMemberNotifyProps` (app/channel.go:1519) copies out ten known keys and drops the rest,
+and neither it nor the store calls `IsChannelMemberNotifyPropsValid`. `{"desktop": "banana"}` is a
+200 that stores `banana` — while the *same* value reaching `ChannelMember::IsValid` through the add
+path is a 400. The existing `mm_model::channel_member::is_channel_member_notify_props_valid` is
+correct and simply not on this path.
+
+### The write is a merge, and that is why the route is usable
+
+`notifyprops = notifyprops || $1::jsonb` (channel_store.go:2075). A client saving only `desktop`
+keeps its `mark_unread` — i.e. keeps its mute. `SET notifyprops = $1::jsonb` is one character away
+and would clear it.
+
+### `/roles` and `/schemeRoles` write disjoint halves of the same row
+
+`/roles` **sets** the three scheme flags from the submitted names and writes `ExplicitRoles`;
+`/schemeRoles` sets the flags from three booleans and (on a migrated server) leaves `ExplicitRoles`
+alone. So `channel_admin` alone on `/roles` is a 400 — the flags are set, not patched — and neither
+route can move a member in or out of guest: `prevSchemeGuestValue != member.SchemeGuest` is
+`changing_guest_role`, and `scheme_guest: true` is `user_and_guest`. Every id in both families is
+spelled `api.channel.update_channel_member_roles.*`, including the ones raised from
+`UpdateChannelMemberSchemeRoles`.
+
+Note the inverted gate in `UpdateChannelMemberSchemeRoles`: `if err = IsPhase2MigrationCompleted();
+err != nil` strips the built-in channel roles when the migration has **not** finished, and discards
+the error. Reading it the other way round drops a member's explicit roles on every call.
+
+### `addChannelMember` takes three body shapes and the answer's shape follows a *key*
+
+`user_ids` wins when it is an array; anything else falls through to `user_id`, which is why
+`{"user_ids": "x"}` reports `user_id or user_ids`. The answer is a bare object when the body carried
+a `user_id` **key**, exactly one member resulted, and it is that user — so `{"user_ids":["x"]}`
+answers `[{…}]` and a body with both keys answers `{…}`. `{"user_ids": []}` is a `201` with
+**`null`**: the member slice is never appended to and Go encodes a nil slice as `null`.
+
+### A partly-refused multi-add answers two JSON documents
+
+The per-id loop's `SetPermissionError` sets `c.Err`, a later success does not clear it, and
+`handleContextError` runs after the handler — on top of a `201` that is already committed. So adding
+`[self, someone-else]` as a user who may only add themselves yields the member array **and then the
+403 envelope**, concatenated. Reproduced via `ApiError::into_wire`, the same split
+`getChannelsForUser`'s streaming error uses.
+
+### Two `user_added` events and two `user_removed`, with different payloads
+
+`AddUserToChannel` publishes one addressed to the **channel** (with the added user in `omit_users`)
+and one addressed to the **added user**; Go's comment says why — a cluster node that has not seen
+the new membership yet would filter the first one out for that user. The two `user_removed` events
+carry **different keys**: `user_id`+`remover_id` on the channel-addressed one, `channel_id`+
+`remover_id` on the user-addressed one, which has no channel in its broadcast and nothing else to
+tell the client which channel it just left. `channel_member_updated` is addressed to the member's
+user id and to **no channel**, with the member as a JSON *string* under `channelMember`.
+
+### `ChannelMemberHistory` is written on both paths and shows in no response
+
+Asserted twice — at the store level in `mm-store/tests/db_channel_member_writes.rs` and through the
+route via `common::channel_member_history`, because without the second the app layer could stop
+calling it and every HTTP assertion would still pass. `LogLeaveEvent`'s `LeaveTime IS NULL` is what
+keeps a closed stay closed; dropping it rewrites the whole audit trail for that membership, and it
+is best-effort by design (no open stay is a warning, not an error).
+
+### `setChannelMembers` is NDJSON, and its diff order is a Go map iteration
+
+Four phases in order — removals, additions, promotions, demotions — each a batch, each one line.
+`added` and `removed` are forced from nil to `[]` **in the handler's callback**, so both keys are
+always arrays while `promoted`/`demoted`/`errors` are `omitempty`; a no-op still emits exactly one
+`{"added":[],"removed":[]}`. Go builds `toAdd`/`toRemove` by ranging over a `map`, so **which ids
+land in which batch is not stable across runs on the Go side** — anything asserting on these lines
+has to sort. Two divergences, both deliberate: this port **buffers** rather than streaming (same
+bytes, no per-batch flush) and `errors[].error` is `where: <id>` where Go has `where: <translated
+message>, <detail>` ([D-092]).
+
+### Three of the six reject board and space channels; three do not
+
+The guards are on the three `PUT …/{user_id}/…` handlers only (api4/channel.go:2147-2159 and
+siblings). `addChannelMember`, `setChannelMembers` and `removeChannelMember` have neither, so a
+board id there reaches `GetChannel` and gets its **404** rather than the guards' 400. The two guards
+are also asymmetric: `rejectBoardChannelByID` tests `err == nil`, so a database failure reads as
+"not a board", while `rejectSpaceChannelByID` fails **closed** and returns anything that is not a
+404.
+
+### What is forwarded, and why each one
+
+Group-constrained channels (`FilterNonGroupChannelMembers`), attribute-based access control, shared
+channels, guest sessions (`UserCanSeeOtherUser`'s restricted branch), a `post_root_id` (a
+`ThreadMemberships` write), a discoverable private channel (the join-request queue), and a channel
+carrying a `default_category_name` (`addChannelToDefaultCategory` writes `SidebarChannels`).
+`set_channel_members` resolves all of them **before its first write**, because a half-applied
+reconcile handed to Go would be applied twice.
+
+### Mutation testing: 56 run, 54 caught, 2 controls survived
+
+`scripts/mutations/channel-member-writes.plan`. Five mutations survived the first pass and each was
+a finding about a **fixture**, not a shrug:
+
+* **Two `LastUpdateAt` writes were untestable against themselves.** `PreSave` and `PreUpdate` both
+  stamp `model.GetMillis()`, and the save and the update in one test land in the same millisecond —
+  so `last_update_at >= first_update_at` is true whether the call ran or not. Deleting
+  `pre_update()` and replacing `SET lastupdateat = $2` with `LEAST(lastupdateat, $2)` both survived.
+  The fix is to **backdate the column to `1` and the struct with it**, so only the code under test
+  can raise it.
+* **`promoted` is a list, not a claim.** Flipping the third positional boolean of
+  `UpdateChannelMemberSchemeRoles(channelID, userID, false, true, true)` still reports the user as
+  promoted and leaves them a plain member. The reconcile test now reads the member back on both
+  servers.
+* **The `batch_delay_ms` bounds were mutated at a call site the unit test does not use.** The unit
+  test exercises `bounded_query_int` with bounds of its own, so raising the *handler's* minimum from
+  0 to 1 was invisible to it. That plan line moved to the `api` suite, where every reconcile request
+  carries `batch_delay_ms=0`.
+* **A duplicate of an existing member is not a test of deduplication.** `{"members": [me, u, u]}`
+  where `u` is already a member diffs to nothing either way. It has to be a duplicate of a
+  **non-member**: undeduplicated, the add loop runs twice and the second pass — which finds the
+  member already there — appends the id to `added` a second time.
+
+One mutation was also **destructive to the shared fixture**: `town-square-is-leavable-by-a-non-guest`
+makes the removal succeed, so the run that catches it leaves the caller out of `town-square` and
+every later run of that test fails on an unrelated 404. The test now re-joins on both servers first,
+which is idempotent because a self-add to a public channel is a `201` either way.
+
+### And one bug the mutation plan did not find
+
+`add_user_to_channel` forwarded a **shared** channel and a channel with a `default_category_name`
+*after* `add_user_to_channel_row` had already committed the membership and its history row. Go then
+finds the member present, returns it, and publishes nothing — so the body was right and no
+`user_added` event went out from either server. Both checks moved above the write. No test could see
+it: this deployment has no shared channel and no channel with a default category, which is exactly
+why the two branches forward in the first place.

@@ -277,7 +277,22 @@ async fn update_member_rewrites_every_column_and_404s_a_member_that_is_not_there
         .await
         .expect("the bystander saves");
 
+    // **Backdate the column before the update.** `PreUpdate` and `PreSave` both stamp
+    // `model.GetMillis()`, and the two writes here land in the same millisecond — so
+    // `last_update_at >= first_update_at` is true whether `pre_update` ran or not, and a mutation
+    // deleting the call survived on exactly that. Planting `1` makes the movement visible.
+    sqlx::query("UPDATE channelmembers SET lastupdateat = 1 WHERE channelid = $1 AND userid = $2")
+        .bind(&channel)
+        .bind(&user)
+        .execute(&pool)
+        .await
+        .expect("the timestamp is backdated");
+
     let mut changed = saved;
+    // **And carry the backdated value into the struct**, so the only thing that can raise the
+    // column is `PreUpdate` itself. Leaving the loaded timestamp here made a mutation deleting
+    // `pre_update()` survive twice: the UPDATE wrote a real timestamp either way.
+    changed.last_update_at = 1;
     changed.scheme_admin = true;
     changed.mention_count = 7;
     changed.explicit_roles = "mmrs_custom_role".to_owned();
@@ -290,8 +305,13 @@ async fn update_member_rewrites_every_column_and_404s_a_member_that_is_not_there
     assert_eq!(updated.roles, "mmrs_custom_role channel_user channel_admin");
     assert_eq!(updated.mention_count, 7, "the counters are rewritten too");
     assert!(
+        updated.last_update_at > 1,
+        "PreUpdate must stamp a fresh LastUpdateAt, not leave the backdated one: {}",
+        updated.last_update_at
+    );
+    assert!(
         updated.last_update_at >= first_update_at,
-        "PreUpdate moves LastUpdateAt forward"
+        "and it moves forward, never back"
     );
 
     // The bystander is untouched: the UPDATE is scoped to one `(channelid, userid)` pair.
@@ -345,6 +365,15 @@ async fn notify_props_are_merged_and_the_rune_cap_is_checked_before_the_query() 
         .await
         .expect("the member saves");
 
+    // Backdated for the same reason as the update test above: the `SET lastupdateat = $2` is
+    // invisible against a value `PreSave` wrote in the same millisecond.
+    sqlx::query("UPDATE channelmembers SET lastupdateat = 1 WHERE channelid = $1 AND userid = $2")
+        .bind(&channel)
+        .bind(&user)
+        .execute(&pool)
+        .await
+        .expect("the timestamp is backdated");
+
     let mut patch = mm_model::utils::StringMap::new();
     patch.insert("desktop".to_owned(), "mention".to_owned());
     let updated = update_member_notify_props(&pool, &channel, &user, &patch)
@@ -370,8 +399,8 @@ async fn notify_props_are_merged_and_the_rune_cap_is_checked_before_the_query() 
     .await
     .expect("the row is there");
     assert!(
-        stored_update_at.is_some_and(|at| at > 0),
-        "the notify-props write must move LastUpdateAt: {stored_update_at:?}"
+        stored_update_at.is_some_and(|at| at > 1),
+        "the notify-props write must move LastUpdateAt past the backdated 1: {stored_update_at:?}"
     );
     assert_eq!(
         updated.last_update_at,

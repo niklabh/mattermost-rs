@@ -572,6 +572,23 @@ impl App {
         channel: &Channel,
         skip_team_member_integrity_check: bool,
     ) -> Result<MemberWrite<ChannelMember>, Box<AppError>> {
+        // **Both forwards happen before the write, and that ordering is the point.** They used to
+        // sit after `add_user_to_channel_row`, which meant the membership row and its history row
+        // were committed here and *then* the request was handed to Go — where `AddChannelMember`
+        // finds the member already present, returns it, and publishes nothing. The body was right
+        // and no `user_added` event went out from either server, which is the stale-client failure
+        // a body comparison cannot see.
+        if channel.is_shared() {
+            return Ok(MemberWrite::Forward(
+                "a shared channel's membership change has to reach the remote cluster",
+            ));
+        }
+        if !channel.default_category_name.is_empty() {
+            return Ok(MemberWrite::Forward(
+                "addChannelToDefaultCategory writes SidebarChannels",
+            ));
+        }
+
         if !skip_team_member_integrity_check {
             let team_member = self.get_team_member(&channel.team_id, &user.id).await;
             match team_member {
@@ -602,17 +619,6 @@ impl App {
         match self.add_user_to_channel_row(user, channel).await? {
             MemberWrite::Forward(why) => return Ok(MemberWrite::Forward(why)),
             MemberWrite::Done(new_member) => {
-                if channel.is_shared() {
-                    return Ok(MemberWrite::Forward(
-                        "a shared channel's membership change has to reach the remote cluster",
-                    ));
-                }
-                if !channel.default_category_name.is_empty() {
-                    return Ok(MemberWrite::Forward(
-                        "addChannelToDefaultCategory writes SidebarChannels",
-                    ));
-                }
-
                 let mut channel_event = WebSocketEvent::new(
                     WEBSOCKET_EVENT_USER_ADDED,
                     "",

@@ -33,10 +33,9 @@ use mm_model::channel::{
 };
 use mm_model::channel_member::ChannelMember;
 use mm_model::permission::{
-    PERMISSION_EDIT_OTHER_USERS, PERMISSION_INVITE_USER, PERMISSION_JOIN_PUBLIC_CHANNELS,
-    PERMISSION_MANAGE_CHANNEL_ROLES, PERMISSION_MANAGE_PRIVATE_CHANNEL_MEMBERS,
-    PERMISSION_MANAGE_PUBLIC_CHANNEL_MEMBERS, PERMISSION_MANAGE_SYSTEM, PERMISSION_READ_CHANNEL,
-    make_permission_error,
+    PERMISSION_EDIT_OTHER_USERS, PERMISSION_JOIN_PUBLIC_CHANNELS, PERMISSION_MANAGE_CHANNEL_ROLES,
+    PERMISSION_MANAGE_PRIVATE_CHANNEL_MEMBERS, PERMISSION_MANAGE_PUBLIC_CHANNEL_MEMBERS,
+    PERMISSION_MANAGE_SYSTEM, make_permission_error,
 };
 use mm_model::role::is_valid_channel_member_roles;
 use mm_model::scheme::SchemeRoles;
@@ -539,8 +538,10 @@ pub async fn add_channel_member(
     };
 
     if session.0.is_guest() {
-        // Go checks `read_channel` and then `UserCanSeeOtherUser` per id; the latter's restricted
-        // branch needs the team/channel membership lookups this port does not have.
+        // Go checks `read_channel` on the channel and then `UserCanSeeOtherUser` per id, refusing
+        // with `invite_user`; the latter's restricted branch needs the team/channel membership
+        // lookups this port does not have, so neither check is reproduced and the whole request
+        // goes to Go.
         tracing::Span::current().record("forwarded", true);
         return forward(state, parts, bytes).await;
     }
@@ -1015,12 +1016,6 @@ async fn forward(
     let request = Request::from_parts(parts, Body::from(bytes));
     proxy::forward_to_go(State(state), request).await
 }
-
-/// Go's `read_channel`/`invite_user` pair, referenced only from the guest branch's doc comment.
-/// Named here so a reader grepping for the permissions this file checks finds them all.
-#[allow(dead_code)]
-const GUEST_BRANCH_PERMISSIONS: [&mm_model::permission::Permission; 2] =
-    [&PERMISSION_READ_CHANNEL, &PERMISSION_INVITE_USER];
 
 #[cfg(test)]
 mod tests {

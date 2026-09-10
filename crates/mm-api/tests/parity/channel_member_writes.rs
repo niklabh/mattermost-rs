@@ -650,6 +650,24 @@ async fn town_square_refuses_the_removal_for_a_non_guest() {
     let town_square: serde_json::Value = serde_json::from_str(&body).expect("a channel");
     let town_square = town_square["id"].as_str().expect("an id");
 
+    // **Re-join first, on both servers.** This test's own mutation
+    // (`town-square-is-leavable-by-a-non-guest`) makes the removal *succeed*, so the run that
+    // catches it leaves the caller out of town-square — and every later run of this test then fails
+    // on a 404 that has nothing to do with the route. A self-add to a public channel is a `201`
+    // whether or not the member is already there, so this is idempotent and self-healing.
+    for base in [GO, RUST] {
+        let (status, body) = call(
+            &http,
+            base,
+            reqwest::Method::POST,
+            &format!("/api/v4/channels/{town_square}/members"),
+            &token,
+            Some(&serde_json::json!({"user_id": me})),
+        )
+        .await;
+        assert_eq!(status, 201, "{base} would not re-add the caller: {body}");
+    }
+
     let path = format!("/api/v4/channels/{town_square}/members/{me}");
     both(
         &http,
@@ -1278,6 +1296,27 @@ async fn set_channel_members_reconciles_and_frames_ndjson() {
     let promotion: serde_json::Value = serde_json::from_str(rust_raw.trim()).expect("one line");
     assert_eq!(promotion["promoted"], serde_json::json!([me]));
 
+    // **The line says `promoted`; the row has to agree.** `UpdateChannelMemberSchemeRoles` takes
+    // three positional booleans and the promotion passes `(false, true, true)` — flipping the last
+    // one still reports the user as promoted and leaves them a plain member, which is what a
+    // mutation of that call survived on until this read-back existed.
+    for (base, channel) in [(GO, &fixture.go_channel), (RUST, &fixture.rust_channel)] {
+        let (_, body) = call(
+            &http,
+            base,
+            reqwest::Method::GET,
+            &format!("/api/v4/channels/{channel}/members/{me}"),
+            &token,
+            None,
+        )
+        .await;
+        let member: serde_json::Value = serde_json::from_str(&body).expect("a member");
+        assert_eq!(
+            member["scheme_admin"], true,
+            "{base} reported a promotion it did not make: {body}"
+        );
+    }
+
     // An id nobody holds becomes an **error line**, not a failed request — and the line carries
     // the *unwiped* detail, because it never goes through `handleContextError`.
     //
@@ -1330,6 +1369,30 @@ async fn set_channel_members_reconciles_and_frames_ndjson() {
         "the added list differs on a partly-failing batch"
     );
     assert_eq!(go_line["removed"], rust_line["removed"]);
+
+    // **A duplicate id is deduplicated before the diff runs.** It has to be a duplicate of somebody
+    // who is *not* yet a member: repeating an existing member changes nothing either way, which is
+    // why the first version of this case let the mutation survive. Undeduplicated, the add loop runs
+    // twice and the second pass — which finds the member already there — appends the id to `added`
+    // a second time.
+    let newcomer = create_plain_user(&http, &token, &fixture.team, "cmwsetdup").await;
+    let rust_raw = both(
+        &http,
+        &token,
+        &go,
+        &rust,
+        reqwest::Method::PUT,
+        Some(&serde_json::json!({"members": [me, newcomer.id, newcomer.id]})),
+        "a duplicated member id",
+    )
+    .await;
+    let line: serde_json::Value = serde_json::from_str(rust_raw.trim()).expect("one line");
+    assert_eq!(
+        line["added"],
+        serde_json::json!([newcomer.id]),
+        "the duplicate was added twice: {rust_raw}"
+    );
+    common::delete_plain_user(&http, &token, &newcomer.id).await;
 
     cleanup(&http, &token, &fixture).await;
 }
