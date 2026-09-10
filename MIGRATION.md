@@ -9315,3 +9315,92 @@ months on a database old enough to have accumulated the shape it assumed:
 The lesson is not about ports. **A suite that has only ever run against one long-lived database
 has untested dependencies on that database**, and the cheapest way to find them is to stand up a
 new one.
+
+## The post writes, and what a pin actually costs (2026-09-10)
+
+`POST /api/v4/posts/{post_id}/pin`, `.../unpin`, `PUT /api/v4/posts/{post_id}`,
+`PUT /api/v4/posts/{post_id}/patch` and `DELETE /api/v4/posts/{post_id}`. 293 → **298 of 764**.
+One store primitive, `SqlPostStore.Update`, is behind the first four; `SqlPostStore.Delete` is
+behind the fifth. `POST /api/v4/posts` is **not** here — see [D-221], which names what it is
+waiting on.
+
+### A pin is an edit, and an edit is two rows
+
+`saveIsPinnedPost` builds a one-field `PostPatch` and goes through `PatchPost` → `UpdatePost` →
+`SqlPostStore.Update`, which rewrites the live post **and inserts the old version as a new row**
+carrying `OriginalId` and a stamped `DeleteAt`. So pinning a post bumps its `UpdateAt`, drags the
+channel's `LastPostAt` to now, and adds an entry to `GET /posts/{id}/edit_history` — four side
+effects for a boolean, and the response body is `{"status":"OK"}` either way. The parity suite
+asserts all four, because the body asserts almost nothing.
+`mm_store::post_store::PostStore::update` says why each of its four statements is where it is, and
+that they are deliberately **not** in a transaction.
+
+The two pin routes are not symmetric with each other: `post.IsPinned == isPinned` short-circuits to
+a 200 that writes nothing, *before* the edit-time-limit check, so pinning an already-pinned post
+cannot 400 on age while pinning an unpinned one can.
+
+### `ParseHashtags` is four ASCII regexes wearing Unicode clothes
+
+`model.ParseHashtags` derives the `Posts.Hashtags` column from the message on every edit that
+changes it, and all four of its patterns are transcription hazards: **RE2's `\d` is `[0-9]` and its
+`\s` is `[\t\n\f\r ]`, where the `regex` crate's are Unicode.** The 51-case corpus in
+`fixtures/behaviour_utils.json` under `parse_hashtags` records `#tag١` — an Arabic-Indic digit that
+Go strips as trailing punctuation and a copied pattern would have accepted. Also recorded: `#` is
+the one character `puncStart` will not strip and `puncEnd` will, there is no de-duplication
+(`#tag #tag` is stored twice), and the 1000-byte cap is measured in **bytes**, cut at 999 and
+rolled back to the last space — which is what keeps a split multi-byte rune out of the answer and
+what makes a single over-long hashtag come back as the empty string.
+
+### What these routes refuse is a shape, never a route
+
+`mm_app::post_write` has the table. Each entry is a forward, gated on something the request
+carries: a `~channel` mention (`FillInPostProps` resolves channels and teams into a prop), an `@`
+mention on a licensed installation (the group-mention prop needs the licence's `LDAPGroups` bit), a
+change to the file-id set (`processPostFileChanges` attaches and detaches `FileInfo` rows),
+`ai_generated_by`, interactive content (`mm_blocks_actions` has to be pruned to the actions the
+content still references), a card post, and `ImageProxySettings.Enable`. A parity test asserts that
+a `~town-square` in an edited message forwards and the same edit without it does not, so the
+refusal is measured rather than assumed.
+
+### Three things the edit path does that a reader would tidy away
+
+* **`null` file ids and `null` props mean "leave them alone"**, and an empty array does not: a
+  `PUT` carrying only `id` and `message` keeps a post's attachments, while `"file_ids": []`
+  detaches every one of them.
+* **The age-limit gate compares file ids *ordered* (`slices.Equal`) and the permission check three
+  lines later compares them as a multiset (`SliceEqualUnordered`).** Reordering a post's file ids
+  is therefore a change for one and not for the other.
+* **An empty patch is a 200 that still writes.** `postPatchChecks` skips the age limit for it and
+  `UpdatePost` runs anyway, so `{}` moves `UpdateAt` and adds an edit-history row while changing
+  nothing a reader can see.
+
+`props` are replaced wholesale and then the five integration identity markers are re-applied from
+the old post, so an edit cannot strip a webhook's `from_webhook` — and `mm_blocks_actions` is
+deleted outright on any post without interactive content. All three are asserted in one exchange.
+
+### `deletePost` serves a root and forwards a reply
+
+`SqlPostStore.Delete` is `WHERE Id = $4 OR RootId = $4`: deleting a root soft-deletes the whole
+thread, stamps `props.deleteBy` with `jsonb_set`, marks `Threads.ThreadDeleteAt` and soft-deletes
+the **replies'** file infos. The root's own file infos, the flagged-post preferences and the thread
+drafts are three more cascades Go runs from goroutines; they are inline here, which closes a window
+rather than opening one.
+
+Deleting a *reply* is forwarded, because `App.DeletePost` runs `RemoveNotifications` for one and
+that is the mention engine — see [D-221]. `?permanent=true` is forwarded too: it selects
+`PermanentDeletePost`, a hard delete across seven tables, and Go's own 501 gate answers it.
+
+The route's refusals differ from its neighbours': a post that does not exist is a **404** here,
+where the pin and edit routes turn the same lookup failure into a 403.
+
+### The two `post_deleted` events go to two different halves of the channel
+
+`CleanUpAfterPostDeletion` publishes the event **twice**: once tagged `ContainsSanitizedData` and
+once tagged `ContainsSensitiveData` with a `delete_by`. `ShouldSendEvent` delivers the first only to
+a connection *without* `manage_system` and the second only to one *with* it, so who deleted the post
+reaches an admin's client and nobody else's. Two sockets in one parity test, because a port that
+published one event would either leak that or lose it. Both payloads carry the post as it was
+**before** the delete — `delete_at: 0`, no `deleteBy` — so a client learns the post is gone from the
+event type, not from the post in it.
+
+### Mutation testing: TALLYPLACEHOLDER
