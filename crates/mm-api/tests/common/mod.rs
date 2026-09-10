@@ -908,6 +908,31 @@ async fn make_every_user_scannable_by_go(pool: &sqlx::PgPool) {
     )
     .execute(pool)
     .await;
+
+    make_every_team_scannable_by_go(pool).await;
+}
+
+/// The same repair for `Teams`, and it was found the same way.
+///
+/// `GET /api/v4/usage/teams` goes through `GetAllTeams`, whose scan takes
+/// `Teams.LastTeamIconUpdate` into a plain `int64` — so one NULL anywhere in the table is a **500
+/// for the whole route**, and `teams_all`'s eight tests go with it. A dozen `mm-store` and
+/// `mm-app` suites `INSERT INTO teams` without that column, and `cargo test --workspace` runs
+/// their binaries before or after the parity one depending on nothing in particular. On a
+/// months-old stack the rows had long since been swept; on a stack created an hour ago they had
+/// not, which is the whole difference.
+///
+/// Normalised rather than deleted, and `UpdateAt` is untouched so no etag moves — the same
+/// reasoning as the `Users` repair above. Fixing the dozen inserting suites instead would be
+/// twelve places to keep right rather than one.
+async fn make_every_team_scannable_by_go(pool: &sqlx::PgPool) {
+    let _ = sqlx::query(
+        "UPDATE teams
+            SET lastteamiconupdate = COALESCE(lastteamiconupdate, 0)
+          WHERE lastteamiconupdate IS NULL",
+    )
+    .execute(pool)
+    .await;
 }
 
 async fn purge_api_fixtures_once() {
