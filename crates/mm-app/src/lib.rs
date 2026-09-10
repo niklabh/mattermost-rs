@@ -9,6 +9,7 @@ pub mod bot;
 /// Port of `app/brand.go` — the brand image read and delete.
 pub mod brand;
 pub mod channel;
+pub mod channel_member;
 pub mod channel_view;
 pub mod command;
 pub mod common_teams;

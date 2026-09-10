@@ -6604,3 +6604,51 @@ What is owed is to make the assertion local: count the planted posts' contributi
 *delta* the test controls, or seed the count to a bucket midpoint before reading. Note that
 lowering the resolution is not available — the rounding is Go's, and asserting the raw count would
 stop testing the route.
+## D-231 · The join and leave system posts are missing from all six membership writes
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-10 (phase 2, channel-member writes)
+
+`POST /api/v4/channels/{channel_id}/members`, `PUT …/members`,
+`DELETE …/members/{user_id}` — and, through the bulk reconcile, every add and remove
+`setChannelMembers` performs — all end in a **write to `Posts`** that this port does not make:
+
+| Go function | Go site | when |
+|---|---|---|
+| `postJoinChannelMessage` | app/channel.go:2776 | a self-add (`opts.UserRequestorID == ""` or equal to the added user) |
+| `PostAddToChannelMessage` | app/channel.go:2903 | somebody else did the adding |
+| `postLeaveChannelMessage` | app/channel.go:2882 | a self-removal |
+| `postRemoveFromChannelMessage` | app/channel.go:2954 | somebody else did the removing |
+
+Blocked on post writes in the store: `mm_store::post_store` is read-only, and the post-write
+session was a sibling worktree's this session. Nothing else is missing — the membership row, the
+`ChannelMemberHistory` row, the two websocket events and the response body are all ported and
+tested.
+
+**Two of the four are not fire-and-forget**, so their absence also removes an error branch: a
+self-add whose join post fails is a failed `POST /members` in Go (`return nil, err`, app/channel.go
+:2044) and a self-removal whose leave post fails is a failed `DELETE` (:3132). Both are unreachable
+in practice; both are branches this port does not have.
+
+### It is visible in a response body, which is where it was least expected
+
+The system post was expected to be invisible to these six routes — it is a different table and a
+different route reads it. It is not. `PostAddToChannelMessage` **@-mentions the added user**, so the
+notification pass raises that member's `MentionCount`, and `POST …/members` for a user who is
+*already* a member answers with the stored row. So:
+
+```
+POST /channels/{c}/members {"user_id": U}   # first time:  both servers say mention_count 0
+POST /channels/{c}/members {"user_id": U}   # again:       Go says 1, we say 0
+```
+
+`parity/channel_member_writes.rs` masks `mention_count` and `mention_count_root` on the re-add and
+asserts Go's value really is 1, so the exclusion cannot quietly widen. Everything else on that row
+is still compared byte for byte.
+
+### What paying it off looks like
+
+`mm_store::post_store` gains `save`, and `mm_app::channel_member` gains the four `post*Message`
+functions plus `postJoinMessageForDefaultChannel` (app/channel.go:132). The message text is
+`i18n.T(...)` with the username interpolated, so it also needs the i18n decision ([D-092]) — until
+that lands, a ported system post would carry an untranslated id as its message and be *worse* than
+no post at all for a reading client. Sequence it behind i18n, not merely behind the post store.
