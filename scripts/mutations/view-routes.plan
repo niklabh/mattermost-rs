@@ -1,0 +1,59 @@
+# Mutation plan for the seven routes of `api4/view.go` (the integrated-boards surface).
+#
+#   scripts/go-boards.sh start
+#   scripts/mutate-batch.sh scripts/mutations/view-routes.plan
+#
+# **The boards oracle must be running.** Eleven of the twelve parity tests skip without it, and a
+# batch run against a suite that skips returns "caught: 0" for reasons that have nothing to do
+# with the code. Check the log for twelve tests, not one.
+#
+# The decisions these cover: the list's `CreateAt` tiebreak (every seeded view shares
+# `SortOrder = 0`, so dropping it reorders the answer); `DeleteAt = 0` on the *get* and on the
+# *count*, which are separate predicates; the sort rewrite being a move rather than a copy, and
+# renumbering from zero under **one** shared `UpdateAt`; the store's out-of-range guard being
+# `> len-1` rather than `>= len-1`; the `IsValid` passthrough that keeps a `model.view.is_valid.*`
+# id instead of folding it into the app's 500; `createView` overwriting `ChannelId` and `CreatorId`
+# from the path and the session; the write gate being `create_post` via membership where the read
+# gate has an open-channel fallback; the 201; the trailing newline, which `ReturnStatusOK` does
+# not have; and the feature flag itself.
+#
+# A `\n` in a pattern becomes a newline, so no anchor here can quote Rust's own `b'\n'` — which is
+# why `ENCODER_NEWLINE` is a named constant in `views.rs` rather than a literal.
+#
+# The last two lines are the no-op controls and must SURVIVE.
+
+store-list-drops-the-createat-tiebreak	crates/mm-store/src/view_store.rs	             ORDER BY sortorder ASC, createat ASC, id ASC\n             LIMIT $2 OFFSET $3	             ORDER BY sortorder ASC, id ASC\n             LIMIT $2 OFFSET $3	api	views
+store-list-offset-is-not-multiplied	crates/mm-store/src/view_store.rs	            page * per_page,	            page,	api	views
+store-get-forgets-the-delete-predicate	crates/mm-store/src/view_store.rs	             WHERE id = $1 AND deleteat = 0	             WHERE id = $1	api	views
+store-count-forgets-the-delete-predicate	crates/mm-store/src/view_store.rs	FROM views WHERE channelid = $1 AND deleteat = 0"#	FROM views WHERE channelid = $1"#	api	views
+store-update-writes-title-into-description	crates/mm-store/src/view_store.rs	               SET title = $1, description = $2, sortorder = $3, props = $4, updateat = $5	               SET title = $2, description = $1, sortorder = $3, props = $4, updateat = $5	api	views
+store-sort-guard-refuses-the-last-index	crates/mm-store/src/view_store.rs	        if views.is_empty() || new_index > (views.len() as i64) - 1 {	        if views.is_empty() || new_index >= (views.len() as i64) - 1 {	api	views
+store-sort-copies-instead-of-moving	crates/mm-store/src/view_store.rs	        let current = views.remove(current_index);	        let current = views[current_index].clone();	api	views
+store-sort-gives-each-row-its-own-clock	crates/mm-store/src/view_store.rs	            view.update_at = now;	            view.update_at = now + index as i64;	api	views
+store-sort-renumbers-from-one	crates/mm-store/src/view_store.rs	            view.sort_order = i64::from(order);	            view.sort_order = i64::from(order) + 1;	api	views
+store-sort-reads-a-page-not-the-channel	crates/mm-store/src/view_store.rs	             ORDER BY sortorder ASC, createat ASC, id ASC\n            "#,\n            channel_id,\n        )\n        .fetch_all(&mut *transaction)	             ORDER BY sortorder ASC, createat ASC, id ASC\n             LIMIT 2\n            "#,\n            channel_id,\n        )\n        .fetch_all(&mut *transaction)	api	views
+store-clamp-zero-takes-the-maximum	crates/mm-store/src/view_store.rs	        VIEW_QUERY_DEFAULT_PER_PAGE\n    } else if opts.per_page > VIEW_QUERY_MAX_PER_PAGE {	        VIEW_QUERY_MAX_PER_PAGE\n    } else if opts.per_page > VIEW_QUERY_MAX_PER_PAGE {	unit	view_store
+store-clamp-keeps-a-negative-page	crates/mm-store/src/view_store.rs	    let page = if opts.page < 0 { 0 } else { opts.page };	    let page = opts.page;	unit	view_store
+store-sort-order-column-clamps-instead-of-refusing	crates/mm-store/src/view_store.rs	    i32::try_from(sort_order).map_err(|_| StoreError::Argument {	    i32::try_from(sort_order.clamp(i64::from(i32::MIN), i64::from(i32::MAX))).map_err(|_| StoreError::Argument {	unit	view_store
+app-create-limit-is-off-by-one	crates/mm-app/src/view.rs	    count >= MAX_VIEWS_PER_CHANNEL as i64	    count > MAX_VIEWS_PER_CHANNEL as i64	unit	view::
+app-get-view-miss-is-a-500	crates/mm-app/src/view.rs	                    "app.view.get.not_found.app_error",\n                    None,\n                    String::new(),\n                    404,	                    "app.view.get.not_found.app_error",\n                    None,\n                    String::new(),\n                    500,	api	views
+app-create-swallows-the-validation-error	crates/mm-app/src/view.rs	            // `errors.As(err, &appErr)` — a validation failure keeps its own id and status.\n            if let mm_store::StoreError::Invalid { app_error, .. } = err {\n                return app_error;\n            }	            // `errors.As(err, &appErr)` — a validation failure keeps its own id and status.\n            if let mm_store::StoreError::Invalid { .. } = err {\n            }	api	views
+app-update-swallows-the-validation-error	crates/mm-app/src/view.rs	        self.store().view().update(&mut view).await.map_err(|err| {\n            if let mm_store::StoreError::Invalid { app_error, .. } = err {\n                return app_error;\n            }	        self.store().view().update(&mut view).await.map_err(|err| {\n            if let mm_store::StoreError::Invalid { .. } = err {\n            }	api	views
+app-sort-invalid-input-is-a-404	crates/mm-app/src/view.rs	                        "app.view.update_sort_order.invalid_input.app_error",\n                        None,\n                        String::new(),\n                        400,	                        "app.view.update_sort_order.invalid_input.app_error",\n                        None,\n                        String::new(),\n                        404,	api	views
+app-delete-stamps-a-zero-deleteat	crates/mm-app/src/view.rs	            .delete(&view.id, get_millis())	            .delete(&view.id, 0)	api	views
+api-feature-flag-inverted-on-create	crates/mm-api/src/views.rs	    if !integrated_boards_enabled() {\n        return proxy::forward_to_go(State(state), request).await;\n    }\n    let connection_id = connection_id(&request);\n    let (parts, body) = request.into_parts();\n    let body = match axum::body::to_bytes(body, usize::MAX).await {\n        Ok(body) => body,\n        Err(err) => {\n            tracing::debug!(error = %err, "could not read the create-view body");	    if integrated_boards_enabled() {\n        return proxy::forward_to_go(State(state), request).await;\n    }\n    let connection_id = connection_id(&request);\n    let (parts, body) = request.into_parts();\n    let body = match axum::body::to_bytes(body, usize::MAX).await {\n        Ok(body) => body,\n        Err(err) => {\n            tracing::debug!(error = %err, "could not read the create-view body");	api	views
+api-create-answers-200-not-201	crates/mm-api/src/views.rs	    encoded("createView", StatusCode::CREATED, &view)	    encoded("createView", StatusCode::OK, &view)	api	views
+api-encoder-drops-the-trailing-newline	crates/mm-api/src/views.rs	            body.push(ENCODER_NEWLINE);	            let _ = ENCODER_NEWLINE;	api	views
+api-status-ok-goes-through-the-encoder	crates/mm-api/src/views.rs	fn status_ok() -> Outcome {\n    Outcome::Served(	fn status_ok() -> Outcome {\n    return encoded("ReturnStatusOK", StatusCode::OK, &serde_json::json!({"status": "OK"}));\n    #[allow(unreachable_code)]\n    Outcome::Served(	api	views
+api-create-honours-the-bodys-channel-id	crates/mm-api/src/views.rs	    view.channel_id = channel_id.to_owned();\n    view.creator_id = session.0.user_id.clone();	    view.creator_id = session.0.user_id.clone();	api	views
+api-create-honours-the-bodys-creator-id	crates/mm-api/src/views.rs	    view.channel_id = channel_id.to_owned();\n    view.creator_id = session.0.user_id.clone();	    view.channel_id = channel_id.to_owned();	api	views
+api-write-gate-uses-the-read-permission	crates/mm-api/src/views.rs	        .session_has_permission_to_channel(&session.0, channel_id, &PERMISSION_CREATE_POST)\n        .await;	        .session_has_permission_to_channel(&session.0, channel_id, &PERMISSION_READ_CHANNEL_CONTENT)\n        .await;	api	views
+api-read-gate-uses-the-membership-check	crates/mm-api/src/views.rs	    let (allowed, is_member) = state\n        .app\n        .session_has_permission_to_read_channel(&session.0, channel)\n        .await;	    let (allowed, is_member) = state\n        .app\n        .session_has_permission_to_channel(&session.0, &channel.id, &PERMISSION_CREATE_POST)\n        .await;	api	views
+api-get-view-mismatch-inverted	crates/mm-api/src/views.rs	    if view.channel_id != channel_id {\n        return Outcome::Failed(ApiError::from(AppError::new(\n            "getView",	    if view.channel_id == channel_id {\n        return Outcome::Failed(ApiError::from(AppError::new(\n            "getView",	api	views
+api-sort-order-zero-is-refused	crates/mm-api/src/views.rs	    if new_sort_order < 0 {	    if new_sort_order <= 0 {	api	views
+api-total-count-flag-misspelled	crates/mm-api/src/views.rs	    if query_flag_is_true(query, "include_total_count") {	    if query_flag_is_true(query, "include_total_counts") {	api	views
+api-posts-route-skips-fetching-threads	crates/mm-api/src/views.rs	        skip_fetch_threads: false,\n        collapsed_threads: false,	        skip_fetch_threads: true,\n        collapsed_threads: false,	api	views
+#
+# --- no-op controls: these must SURVIVE ---
+control-rename-binding	crates/mm-api/src/views.rs	    let view = match state.app.get_view(view_id).await {\n        Ok(view) => view,\n        Err(err) => return Outcome::Failed(ApiError::from(err)),\n    };\n\n    if view.channel_id != channel_id {\n        return Outcome::Failed(ApiError::from(AppError::new(\n            "getView",	    let found = match state.app.get_view(view_id).await {\n        Ok(view) => view,\n        Err(err) => return Outcome::Failed(ApiError::from(err)),\n    };\n    let view = found;\n\n    if view.channel_id != channel_id {\n        return Outcome::Failed(ApiError::from(AppError::new(\n            "getView",	api	views
+control-reorder-independent-selects	crates/mm-store/src/view_store.rs	                   createat      AS "create_at!",\n                   updateat      AS "update_at!",\n                   deleteat      AS "delete_at!"\n              FROM views\n             WHERE channelid = $1 AND deleteat = 0\n             ORDER BY sortorder ASC, createat ASC, id ASC\n             LIMIT $2 OFFSET $3	                   updateat      AS "update_at!",\n                   createat      AS "create_at!",\n                   deleteat      AS "delete_at!"\n              FROM views\n             WHERE channelid = $1 AND deleteat = 0\n             ORDER BY sortorder ASC, createat ASC, id ASC\n             LIMIT $2 OFFSET $3	api	views

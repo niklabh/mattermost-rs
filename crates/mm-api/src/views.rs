@@ -126,11 +126,17 @@ impl Outcome {
     }
 }
 
+/// The byte `json.NewEncoder(w).Encode` appends after every document, and `w.Write` does not.
+///
+/// Named rather than inlined because it is a decision, not a detail: six of this file's seven
+/// routes have it and [`status_ok`] must not.
+const ENCODER_NEWLINE: u8 = b'\n';
+
 /// `json.NewEncoder(w).Encode(value)` — a **trailing newline**, which a plain `to_vec` omits.
 fn encoded(handler: &'static str, status: StatusCode, value: &impl serde::Serialize) -> Outcome {
     match serde_json::to_vec(value) {
         Ok(mut body) => {
-            body.push(b'\n');
+            body.push(ENCODER_NEWLINE);
             Outcome::Served(
                 (
                     status,
