@@ -340,10 +340,9 @@ async fn a_token_round_trips_and_deletes() {
         "the miss message must not carry the token itself"
     );
 
-    store
-        .delete(&token.token)
-        .await
-        .expect("deleting an absent token is success, which is what makes consume-on-use idempotent");
+    store.delete(&token.token).await.expect(
+        "deleting an absent token is success, which is what makes consume-on-use idempotent",
+    );
 
     purge(&pool).await;
 }

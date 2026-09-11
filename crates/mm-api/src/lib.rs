@@ -7,6 +7,7 @@
 
 pub mod audits;
 pub mod auth;
+pub mod auth_writes;
 /// The two bot reads. `getBot` and `getBots`.
 pub mod bots;
 pub mod channel_member_writes;
@@ -382,6 +383,56 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/users/{user_id}/sessions",
             partially_migrated_with_ids(&state, get(sessions::get_sessions)),
+        )
+        // `BaseRoutes.Users.Handle("/logout", APIHandler(logout))` (api4/user.go:75) — a literal
+        // sibling of `{user_id}`, so axum's static-first preference lands `POST /users/logout`
+        // here while the `{user_id}` route keeps every other method and every other segment. The
+        // handler needs no session, which is why it takes `OptionalSession` rather than being
+        // registered behind the extractor that 401s.
+        .route(
+            "/api/v4/users/logout",
+            partially_migrated(post(auth_writes::logout)),
+        )
+        // `BaseRoutes.Users.Handle("/password/reset", APIHandler(resetPassword))`
+        // (api4/user.go:55). Two segments under `/users/`, so it is a sibling of
+        // `/users/{user_id}/{anything}` and the literal `password` wins over the parameter.
+        //
+        // Its neighbour `/password/reset/send` (user.go:56) is **not** registered: it exists only
+        // to send an e-mail, and there is no e-mail service here. Leaving it unregistered is what
+        // keeps it forwarded — adding it as a 405-only path would break it. See [D-219].
+        .route(
+            "/api/v4/users/password/reset",
+            partially_migrated(post(auth_writes::reset_password)),
+        )
+        // `BaseRoutes.Users.Handle("/email/verify", APIHandler(verifyUserEmail))`
+        // (api4/user.go:57), and the one registration on this list with a real routing subtlety.
+        //
+        // `/api/v4/users/email/{*email}` is already registered above as a **catch-all** — Go's
+        // `PathPrefix("/email/{email:.+}")`, whose `.+` matches slashes. matchit prefers a static
+        // segment to a catch-all, so `POST /users/email/verify` lands here rather than being read
+        // as an e-mail address of `verify`. That is also Go's outcome, reached differently: there
+        // the literal route is registered *first* and gorilla matches in order.
+        //
+        // `GET /users/email/verify` falls to this route's `partially_migrated` fallback and is
+        // forwarded, so Go still answers it as a lookup for the address `verify` — unchanged.
+        //
+        // `/email/verify/send` (user.go:58) is unregistered for the same reason as
+        // `/password/reset/send`: it is an e-mail and nothing else.
+        .route(
+            "/api/v4/users/email/verify",
+            partially_migrated(post(auth_writes::verify_user_email)),
+        )
+        // `BaseRoutes.User.Handle("/password", APISessionRequired(updatePassword))`
+        // (api4/user.go:51), PUT only — a sibling of `/users/{user_id}/status` and one segment
+        // deeper than `/users/{user_id}`, so it shadows nothing.
+        .route(
+            "/api/v4/users/{user_id}/password",
+            partially_migrated_with_ids(&state, put(auth_writes::update_password)),
+        )
+        // `BaseRoutes.User.Handle("/reset_failed_attempts", ...)` (api4/user.go:62), POST only.
+        .route(
+            "/api/v4/users/{user_id}/reset_failed_attempts",
+            partially_migrated_with_ids(&state, post(auth_writes::reset_password_failed_attempts)),
         )
         .route(
             "/api/v4/users/{user_id}/status",

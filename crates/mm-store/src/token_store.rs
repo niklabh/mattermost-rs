@@ -158,7 +158,6 @@ impl TokenStore for SqlTokenStore {
         tracing::Span::current().record("deleted", result.rows_affected());
         Ok(())
     }
-
 }
 
 #[cfg(test)]
