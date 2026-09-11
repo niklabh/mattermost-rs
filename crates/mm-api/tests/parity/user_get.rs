@@ -160,28 +160,54 @@ async fn each_servers_etag_round_trips_to_its_own_304() {
     let path = format!("/api/v4/users/{}", common::logged_in_user_id());
 
     for base in [GO, RUST] {
-        let first = client
-            .get(format!("{base}{path}"))
-            .header("Authorization", format!("Bearer {token}"))
-            .send()
-            .await
-            .expect("answers");
-        assert_eq!(first.status().as_u16(), 200, "{base}");
-        let etag = first
-            .headers()
-            .get("etag")
-            .expect("a 200 carries the etag")
-            .to_str()
-            .expect("ASCII")
-            .to_owned();
+        // The subject is the **shared admin**, and a sibling suite writes that row:
+        // `custom_status_writes` sets a custom status on it, which bumps `Users.UpdateAt`, which
+        // is an input to this route's etag. When that lands between the two requests below the
+        // etag has genuinely changed and **200 is the correct answer** — the route is right and
+        // the test is wrong to insist on 304.
+        //
+        // So retry the pair rather than assert on the first one, which is the same
+        // quiescent-window treatment `common::fetch_both_stable` gives a byte comparison. The
+        // subject is deliberately left as the admin: swapping in a per-test user would make this
+        // deterministic but would also add a user to a database this suite has already been
+        // taught to keep small, and it would stop covering the self-viewer sanitise path that
+        // makes this row interesting.
+        //
+        // Measured on a full-suite run on 2026-09-11, one failure in six: left 200, right 304.
+        let mut attempts = 0;
+        let (etag, revalidated) = loop {
+            attempts += 1;
+            let first = client
+                .get(format!("{base}{path}"))
+                .header("Authorization", format!("Bearer {token}"))
+                .send()
+                .await
+                .expect("answers");
+            assert_eq!(first.status().as_u16(), 200, "{base}");
+            let etag = first
+                .headers()
+                .get("etag")
+                .expect("a 200 carries the etag")
+                .to_str()
+                .expect("ASCII")
+                .to_owned();
 
-        let revalidated = client
-            .get(format!("{base}{path}"))
-            .header("Authorization", format!("Bearer {token}"))
-            .header("If-None-Match", &etag)
-            .send()
-            .await
-            .expect("answers");
+            let revalidated = client
+                .get(format!("{base}{path}"))
+                .header("Authorization", format!("Bearer {token}"))
+                .header("If-None-Match", &etag)
+                .send()
+                .await
+                .expect("answers");
+            // A 200 here means the row moved under us. Exhausting the budget falls through to
+            // the assertion below, so a route that has genuinely stopped answering 304 still
+            // fails, and fails with its own message.
+            if revalidated.status().as_u16() == 200 && attempts < 12 {
+                continue;
+            }
+            break (etag, revalidated);
+        };
+
         assert_eq!(revalidated.status().as_u16(), 304, "{base}");
         assert_eq!(
             revalidated
