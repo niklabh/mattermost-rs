@@ -40,6 +40,7 @@ pub mod system_store;
 pub mod team_store;
 pub mod terms_of_service_store;
 pub mod thread_store;
+pub mod token_store;
 /// Port of `SqlUploadSessionStore` — the two reads.
 pub mod upload_session_store;
 pub mod user_access_token_store;
@@ -74,6 +75,7 @@ pub use system_store::{SYSTEM_ACTIVE_LICENSE_ID, SqlSystemStore, SystemStore};
 pub use team_store::{SqlTeamStore, TeamStore};
 pub use terms_of_service_store::{SqlTermsOfServiceStore, TermsOfServiceStore};
 pub use thread_store::{SqlThreadStore, ThreadStore};
+pub use token_store::{SqlTokenStore, TokenStore};
 pub use upload_session_store::{SqlUploadSessionStore, UploadSessionStore};
 pub use user_access_token_store::{SqlUserAccessTokenStore, UserAccessTokenStore};
 pub use user_store::{SqlUserStore, UserStore};
@@ -114,6 +116,7 @@ pub struct SqlStore {
     status: SqlStatusStore,
     system: SqlSystemStore,
     team: SqlTeamStore,
+    token: SqlTokenStore,
     user: SqlUserStore,
     user_access_token: SqlUserAccessTokenStore,
     user_terms_of_service: SqlUserTermsOfServiceStore,
@@ -172,6 +175,7 @@ impl SqlStore {
             status: SqlStatusStore::new(pool.clone()),
             system: SqlSystemStore::new(pool.clone()),
             team: SqlTeamStore::new(pool.clone()),
+            token: SqlTokenStore::new(pool.clone()),
             user_terms_of_service: SqlUserTermsOfServiceStore::new(pool.clone()),
             webhook: SqlWebhookStore::new(pool.clone()),
             user: SqlUserStore::new(pool.clone()),
@@ -344,6 +348,11 @@ impl SqlStore {
     /// Port of `store.Store.Team()`.
     pub fn team(&self) -> &SqlTeamStore {
         &self.team
+    }
+
+    /// Port of `store.Store.Token()` — the one-shot `Tokens` table, not `UserAccessTokens`.
+    pub fn token(&self) -> &SqlTokenStore {
+        &self.token
     }
 
     /// Port of `store.Store.User()`.
