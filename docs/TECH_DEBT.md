@@ -7044,4 +7044,12 @@ several: `teams_for_user.rs:66`, `users_list.rs:76`, `team_name_members.rs:82`) 
 it. If that is it, the fix is a dedicated user for this test rather than the shared admin — not a
 longer timeout, which would only make the flake rarer.
 
+**Reproduction attempted and failed, 2026-09-11:** twelve further full-suite runs on the merge
+stack, deliberately under load from four concurrent worktree builds, did not reproduce it. Three
+*other* flakes surfaced in those runs and were fixed (`user_get`'s etag pair, and the bot pair
+below); this one did not recur. So it is either rarer than 1 in 12 or it needs something a
+worktree stack has and the merge stack does not — note that two worktrees shared stack 1 during
+the round in which all three reports were made, which would put two servers and two purges on one
+database. Check that before assuming the hub.
+
 **Where the pin lives:** the doc comment on the test.
