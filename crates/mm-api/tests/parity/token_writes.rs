@@ -82,10 +82,18 @@ async fn post_token_id(base: &str, token: &str, path: &str, token_id: &str) -> (
 const TOKEN_BOT: &str = "seedbotdescribed0000000000";
 
 /// Remove everything this suite writes: the planted rows (`mmrstok%`), the rows the create and
-/// rotate routes minted with random ids, and any session they authenticated.
+/// rotate routes minted with ids we did not choose, and any session they authenticated.
 ///
-/// Swept by **description**, because a token created through the route has an id we did not
-/// choose. Every body this suite posts carries a description starting `mmrs-write`.
+/// # Swept by **owner**, not by description
+///
+/// A token created through the route has a random id, so the obvious key is the `mmrs-write`
+/// description every body here posts. That is not enough, and a mutation run proved it: the
+/// `store-save-token-and-description-swapped` line writes the *secret* into the description
+/// column, so two rows survived a description-keyed sweep and the **reads** suite's
+/// `an_empty_page_is_an_empty_array` failed on debris from a mutation, next door, hours later.
+///
+/// A sweep keyed on a column a mutation can change is not a sweep. `TOKEN_BOT` owns nothing but
+/// what this suite creates, so the owner is the stable key.
 async fn sweep() {
     unplant_tokens().await;
     let Some(pool) = common::fixture_pool().await else {
@@ -93,12 +101,15 @@ async fn sweep() {
     };
     sqlx::query(
         "DELETE FROM sessions WHERE token IN
-             (SELECT token FROM useraccesstokens WHERE description LIKE 'mmrs-write%')",
+             (SELECT token FROM useraccesstokens
+               WHERE description LIKE 'mmrs-write%' OR userid = $1)",
     )
+    .bind(TOKEN_BOT)
     .execute(&pool)
     .await
     .expect("the sessions go first");
-    sqlx::query("DELETE FROM useraccesstokens WHERE description LIKE 'mmrs-write%'")
+    sqlx::query("DELETE FROM useraccesstokens WHERE description LIKE 'mmrs-write%' OR userid = $1")
+        .bind(TOKEN_BOT)
         .execute(&pool)
         .await
         .expect("the created tokens are removed");
@@ -382,6 +393,31 @@ async fn a_created_token_carries_a_fresh_secret_on_both_servers() {
         minted["token"].as_str().expect("a secret"),
         "the response's secret is the stored one — this is the only time a client sees it"
     );
+
+    // **A JSON array must not mint a token**, and this is the case that makes the array branch of
+    // `decode_go_struct` visible over HTTP rather than only in a unit test. `serde` fills a struct
+    // from a sequence **positionally**, so these six elements are a complete, valid
+    // `UserAccessToken` as far as `serde_json::from_slice` is concerned: a port without the array
+    // guard answers **200** here and writes a real credential, where Go answers 400
+    // (`cannot unmarshal array into Go value`). A mutation run found the gap — the earlier
+    // assertions compared only the parameter name, which lives in Go's translated message and
+    // never reaches our wire at all (D-092).
+    let positional = format!(
+        r#"["zzzzzzzzzzzzzzzzzzzzzzzzzz","tttttttttttttttttttttttttt","{bot}","mmrs-write positional",true,0]"#
+    );
+    let ((array_go_status, array_go), (array_rs_status, array_rs)) =
+        post_both_raw(&client, &token, &path, positional.as_bytes()).await;
+    assert_eq!(
+        array_go_status, 400,
+        "Go will not unmarshal an array into a struct"
+    );
+    assert_eq!(
+        array_rs_status,
+        array_go_status,
+        "a positional array must not become a token: {}",
+        String::from_utf8_lossy(&array_rs)
+    );
+    assert_error_bodies_match_except_known_gaps(&array_go, &array_rs, "positional array");
 
     sweep().await;
 }

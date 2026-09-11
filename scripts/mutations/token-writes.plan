@@ -25,6 +25,16 @@
 #   * `IsRemote()` on create and rotate, and the system-admin-target gate: no remote user exists
 #     here and the parity caller is an admin, so neither branch has a reachable false side.
 #
+# Two lines moved to the `unit` suite after a run, and the reason is the same for both:
+# **the invalid-param *name* never reaches our wire.** Go distinguishes `Name: token_id` from
+# `Name: rotate_user_access_token` only through its translated `message`, and ours is the raw id
+# until i18n lands (D-092) - so over HTTP those two 400s are the same document. The null branch is
+# therefore asserted in `tokens::tests::a_struct_body_decodes_the_way_gos_decoder_does`, where it
+# is visible. The array branch stayed on the `api` suite because it *does* have an observable
+# form: serde fills a struct from a sequence positionally, so a six-element array would mint a
+# real token (200) where Go answers 400, and `a_created_token_carries_a_fresh_secret_on_both_servers`
+# now sends exactly that.
+#
 # The last two lines are the no-op controls and must SURVIVE.
 
 
@@ -39,7 +49,7 @@ store-revoke-leaves-the-row	crates/mm-store/src/user_access_token_store.rs	sqlx:
 store-disable-sets-active	crates/mm-store/src/user_access_token_store.rs	"UPDATE useraccesstokens SET isactive = FALSE WHERE id = $1",	"UPDATE useraccesstokens SET isactive = TRUE WHERE id = $1",	api	token_writes
 store-enable-sets-inactive	crates/mm-store/src/user_access_token_store.rs	"UPDATE useraccesstokens SET isactive = TRUE WHERE id = $1",	"UPDATE useraccesstokens SET isactive = FALSE WHERE id = $1",	api	token_writes
 store-rotate-updates-before-deleting-sessions	crates/mm-store/src/user_access_token_store.rs	        delete_sessions_for_token(&mut transaction, token_id).await?;\n\n        sqlx::query!(\n            "UPDATE useraccesstokens SET token = $1, expiresat = $2 WHERE id = $3",	        sqlx::query!(\n            "UPDATE useraccesstokens SET token = $1, expiresat = $2 WHERE id = $3",	api	token_writes
-store-rotate-keeps-the-old-expiry	crates/mm-store/src/user_access_token_store.rs	"UPDATE useraccesstokens SET token = $1, expiresat = $2 WHERE id = $3",\n            new_token,\n            expires_at,	"UPDATE useraccesstokens SET token = $1, expiresat = expiresat WHERE id = $3 AND $2 = $2",\n            new_token,\n            expires_at,	api	token_writes
+store-rotate-keeps-the-old-expiry	crates/mm-store/src/user_access_token_store.rs	"UPDATE useraccesstokens SET token = $1, expiresat = $2 WHERE id = $3",\n            new_token,\n            expires_at,	"UPDATE useraccesstokens SET token = $1, expiresat = expiresat + ($2::bigint * 0) WHERE id = $3",\n            new_token,\n            expires_at,	api	token_writes
 app-create-bot-exemption-inverted	crates/mm-app/src/user_access_token.rs	        if !self.config().enable_user_access_tokens && !user.is_bot {\n            return Err(AppError::boxed(\n                "CreateUserAccessToken",	        if !self.config().enable_user_access_tokens && user.is_bot {\n            return Err(AppError::boxed(\n                "CreateUserAccessToken",	api	token_writes
 app-rotate-bot-exemption-inverted	crates/mm-app/src/user_access_token.rs	        if !self.config().enable_user_access_tokens && !user.is_bot {\n            return Err(AppError::boxed(\n                "RotateUserAccessToken",	        if !self.config().enable_user_access_tokens && user.is_bot {\n            return Err(AppError::boxed(\n                "RotateUserAccessToken",	api	token_writes
 app-create-sanitizes-the-new-secret	crates/mm-app/src/user_access_token.rs	        tracing::Span::current().record("token_id", &saved.id);\n        Ok(saved)	        tracing::Span::current().record("token_id", &saved.id);\n        let mut saved = saved;\n        saved.token.clear();\n        Ok(saved)	api	token_writes
@@ -51,7 +61,7 @@ app-expiry-in-past-is-exclusive	crates/mm-app/src/user_access_token.rs	    if ex
 app-expiry-window-far-edge-excluded	crates/mm-app/src/user_access_token.rs	    if max_days > 0 && expires_at > now_millis + max_days * MILLIS_PER_DAY {	    if max_days > 0 && expires_at >= now_millis + max_days * MILLIS_PER_DAY {	unit	user_access_token
 app-zero-days-still-requires-an-expiry	crates/mm-app/src/user_access_token.rs	    if expires_at == 0 {\n        if max_days > 0 {	    if expires_at == 0 {\n        if max_days >= 0 {	unit	user_access_token
 app-negative-lifetime-enables-the-policy	crates/mm-app/src/user_access_token.rs	    if max_days <= 0 {	    if max_days < 0 {	unit	user_access_token
-api-decode-treats-null-as-an-error	crates/mm-api/src/tokens.rs	        Some(Ok(serde_json::Value::Null)) => Ok(T::default()),	        Some(Ok(serde_json::Value::Null)) => Err("EOF".to_owned()),	api	token_writes
+api-decode-treats-null-as-an-error	crates/mm-api/src/tokens.rs	        Some(Ok(serde_json::Value::Null)) => Ok(T::default()),	        Some(Ok(serde_json::Value::Null)) => Err("EOF".to_owned()),	unit	tokens
 api-decode-accepts-an-array	crates/mm-api/src/tokens.rs	        Some(Ok(value @ serde_json::Value::Object(_))) => {	        #[allow(unreachable_patterns)]\n        Some(Ok(value)) => {	api	token_writes
 api-decode-reads-past-the-first-value	crates/mm-api/src/tokens.rs	        .next();	        .last();	unit	tokens
 api-lifecycle-returns-on-an-empty-token-id	crates/mm-api/src/tokens.rs	    let token_id = props\n        .get("token_id")\n        .map(String::as_str)\n        .unwrap_or_default();	    let token_id = props\n        .get("token_id")\n        .map(String::as_str)\n        .unwrap_or_default();\n    if token_id.is_empty() {\n        return Err(ApiError::invalid_param("token_id"));\n    }	api	token_writes

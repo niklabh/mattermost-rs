@@ -6871,3 +6871,31 @@ has to mask both columns — `parity::team_member_writes::adding_a_member_agrees
 does, and says so. And the config field itself is **not** read by this port: when the post write
 lands, `Config` needs `experimental_enable_default_channel_leave_join_messages` adding alongside
 the other `ServiceSettings` fields, because both arms of that branch then matter.
+
+---
+
+## D-270 · The migrated writes do not append to `Audits`, and one served route reads that table
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-11 (phase 2, token writes)
+
+`Context.LogAudit` (web/context.go:95) builds a `model.Audit` and calls `Store().Audit().Save`
+**unconditionally** — no config gate, no feature flag. Five of the seven personal-access-token
+writes call it, once on entry and again on success, so a token revoked through Go leaves two
+`Audits` rows and the same revoke through `mm-api` leaves none.
+
+That is observable through the API, which is what makes this an entry rather than a note:
+`GET /api/v4/users/{user_id}/audits` is already served from Rust (`mm_api::audits`) and reads the
+same table. So the two servers disagree about a user's audit history in proportion to how much of
+their traffic each one answered.
+
+It is **not** specific to this family. Every migrated write has the gap — the channel-member
+writes, the team-member writes, the auth writes, the post writes — and it had not been written
+down. Raised here because this is the first family whose Go handlers call `LogAudit` on *every*
+route rather than on some of them, and because the reading route is already ported, so the
+divergence can be measured rather than argued about.
+
+What is needed: `AuditStore::save` (`mm-store/src/audit_store.rs` is read-only today) and a
+`Context`-equivalent hook in `mm-api` that has the session, the request path and the client IP —
+`mm_model::audit_record` is already ported in full. `LogAuditRec`/`MakeAuditRecord` are a
+**separate** and much smaller question: those write to the audit *log* (mlog) rather than to the
+database, so nothing over the API can see them and they need no entry.
