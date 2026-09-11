@@ -91,6 +91,19 @@ pub enum StoreError {
         value: String,
     },
 
+    /// Port of `store.NewErrLimitExceeded(what, count, meta)` (store/errors.go).
+    ///
+    /// A quota the store itself enforces, refused before the row is written. Kept apart from
+    /// every other write failure because the app layer answers **400** to it — `CreateChannel`
+    /// maps it to `store.sql_channel.save_channel.limit.app_error` while folding an ordinary
+    /// driver error into a 500. `count` is the value that was measured, not the limit.
+    #[error("{what} limit exceeded: {count} ({details})")]
+    LimitExceeded {
+        what: &'static str,
+        count: i64,
+        details: String,
+    },
+
     /// A `jsonb` column held something the model type cannot represent.
     ///
     /// Go decodes these columns into `model.StringMap` with `encoding/json` and surfaces a
@@ -124,6 +137,11 @@ impl StoreError {
     /// True when a store function refused its input, which the app layer answers 400 to.
     pub fn is_invalid_input(&self) -> bool {
         matches!(self, StoreError::InvalidInput { .. })
+    }
+
+    /// True when a store-enforced quota refused the write, which the app layer answers 400 to.
+    pub fn is_limit_exceeded(&self) -> bool {
+        matches!(self, StoreError::LimitExceeded { .. })
     }
 
     /// True when a store function refused its page size, which the app layer answers 400 to.
