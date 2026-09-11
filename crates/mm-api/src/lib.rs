@@ -71,6 +71,10 @@ pub mod webhooks;
 /// `GET /api/v4/websocket` — the upgrade, the pumps, and the action router.
 pub mod websocket;
 
+/// The three `/api/v4/config` reads. Appended rather than filed alphabetically, because this
+/// list is shared by every worktree and a middle insertion is somebody else's merge conflict.
+pub mod config;
+
 use axum::Router;
 use axum::extract::{RawPathParams, Request, State};
 use axum::middleware::Next;
@@ -2162,6 +2166,24 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/permissions/ancillary",
             partially_migrated(post(permissions::append_ancillary_permissions_post)),
+        )
+        // ---- the config reads (2026-09-11) ----
+        //
+        // `/config` shares its path with `PUT /config`, which is still Go's, so it must go
+        // through `partially_migrated` or the PUT becomes a 405 — see that function's comment.
+        .route(
+            "/api/v4/config",
+            partially_migrated(get(config::get_config)),
+        )
+        // `APIHandler`, not `APISessionRequired`: an anonymous caller gets the limited map rather
+        // than a 401, which is what every client reads before it can log in.
+        .route(
+            "/api/v4/config/client",
+            partially_migrated(get(config::get_client_config)),
+        )
+        .route(
+            "/api/v4/config/environment",
+            partially_migrated(get(config::get_environment_config)),
         )
         .fallback(proxy::forward_to_go)
         // Outermost, so it sees every response this server produces — including the proxy's,
