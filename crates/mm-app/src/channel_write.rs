@@ -15,12 +15,21 @@
 //! for it on every one of these paths, so unlike `upsertDraft` the client's `Connection-Id`
 //! header does **not** stop its own tab being told. Asserted in the parity suite.
 //!
-//! # The system posts are not written here
+//! # Six system posts, and one of them can undo the write it follows
 //!
-//! Go's delete, restore, privacy, display-name, header and purpose paths each create a system
-//! post, and logs-and-swallows every failure. Post writes are not ported yet, so those posts are
-//! missing — a recorded gap ([D-232]), not a silent one. Nothing in any of these five response
-//! bodies depends on them, because Go marshals the channel it read *before* the post is created.
+//! Archive, restore, privacy, display-name, header and purpose each end in a
+//! [`App::create_system_post`]. Five are logged and swallowed, so no response body moves when one
+//! fails — Go marshals the channel it read *before* the post is created.
+//!
+//! **The privacy post is the exception.** `UpdateChannelPrivacy` flips the type back and
+//! re-updates the channel when its post fails, and answers the post's error. That rollback was
+//! unreachable while there was no post to fail; it is reachable now, so it is ported. See
+//! [`App::update_channel_privacy`].
+//!
+//! The message strings are English literals rather than untranslated ids, for the reason
+//! [`App::create_system_post`] gives — with one caveat the archive and restore posts add: Go
+//! builds *those two* with `i18n.GetUserTranslations(user.Locale)`, the **acting user's** locale
+//! rather than the server's, so a non-English admin's archive message differs from ours.
 //!
 //! # What is deliberately absent
 //!
@@ -34,15 +43,20 @@
 //!   enterprise, and Go logs rather than returns their failures.
 
 use mm_model::channel::{CHANNEL_TYPE_OPEN, Channel, ChannelPatch, DEFAULT_CHANNEL_NAME};
+use mm_model::post::{
+    POST_TYPE_CHANGE_CHANNEL_PRIVACY, POST_TYPE_CHANNEL_DELETED, POST_TYPE_CHANNEL_RESTORED,
+    POST_TYPE_DISPLAYNAME_CHANGE, POST_TYPE_HEADER_CHANGE, POST_TYPE_PURPOSE_CHANGE, Post,
+};
 use mm_model::user::User;
 use mm_model::utils::{AppError, AppResult, get_millis};
 use mm_model::websocket_message::{
     WEBSOCKET_EVENT_CHANNEL_CONVERTED, WEBSOCKET_EVENT_CHANNEL_DELETED,
     WEBSOCKET_EVENT_CHANNEL_RESTORED, WEBSOCKET_EVENT_CHANNEL_UPDATED, WebSocketEvent,
 };
-use mm_store::{ChannelStore, StoreError, UserStore, WebhookStore};
+use mm_store::{ChannelStore, PostStore, StoreError, UserStore, WebhookStore};
 
 use crate::App;
+use crate::channel_member::system_props;
 
 /// What a channel write did, or why it declined to do it.
 ///
@@ -181,15 +195,27 @@ impl App {
     /// 2. `channel.Patch(patch)` — see [`Channel::patch`], including the two fields it trims and
     ///    the `managed_category_name` it accepts and ignores.
     /// 3. [`App::update_channel`].
-    /// 4. `addChannelToDefaultCategory`, then four "the display name / header / purpose /
-    ///    autotranslation changed" system posts. The sidebar step is the caller's problem (it has
-    ///    to be decided *before* step 3, see [`default_category_after_patch`]) and the posts are
-    ///    [D-232].
+    /// 4. `addChannelToDefaultCategory`, then the display-name, header and purpose system posts —
+    ///    **in that order**, each guarded on its own field having changed, each logged and
+    ///    swallowed. The sidebar step is the caller's problem (it has to be decided *before*
+    ///    step 3, see [`default_category_after_patch`]).
+    ///
+    /// The fourth post, `postUpdateChannelAutotranslationMessage`, has no call site here: an
+    /// `autotranslation` patch is a **403** from the handler on an unlicensed installation, so
+    /// the field cannot change.
+    ///
+    /// # The old values are read before `patch` is applied and compared after
+    ///
+    /// Go captures all three ahead of `channel.Patch(patch)` and then tests `channel.Header !=
+    /// oldChannelHeader`. A patch that sets a field to the value it already had therefore writes
+    /// no post, and one that omits a field cannot write one — [`Channel::patch`] only assigns
+    /// what the patch carries.
     #[tracing::instrument(skip_all, fields(channel_id = %channel.id))]
     pub async fn patch_channel(
         &self,
         channel: &mut Channel,
         patch: &ChannelPatch,
+        user_id: &str,
     ) -> AppResult<ChannelWrite> {
         match self.check_if_channel_is_restricted_dm(channel).await? {
             crate::channel::RestrictedDm::No => {}
@@ -209,8 +235,41 @@ impl App {
             }
         }
 
+        let old_display_name = channel.display_name.clone();
+        let old_header = channel.header.clone();
+        let old_purpose = channel.purpose.clone();
+
         channel.patch(patch);
         self.update_channel(channel).await?;
+
+        if old_display_name != channel.display_name {
+            self.post_update_channel_display_name_message(
+                user_id,
+                channel,
+                &old_display_name,
+                &channel.display_name.clone(),
+            )
+            .await;
+        }
+        if channel.header != old_header {
+            self.post_update_channel_header_message(
+                user_id,
+                channel,
+                &old_header,
+                &channel.header.clone(),
+            )
+            .await;
+        }
+        if channel.purpose != old_purpose {
+            self.post_update_channel_purpose_message(
+                user_id,
+                channel,
+                &old_purpose,
+                &channel.purpose.clone(),
+            )
+            .await;
+        }
+
         Ok(ChannelWrite::Done)
     }
 
@@ -228,12 +287,14 @@ impl App {
     /// (`model.channel.is_valid.discoverable.app_error`) — so a port that cleared it afterwards
     /// would turn every private→public conversion of a discoverable channel into a 400.
     ///
-    /// # Go's rollback is unreachable here, and that is the whole reason the post matters
+    /// # The rollback, which the system post makes reachable
     ///
-    /// If `postChannelPrivacyMessage` fails, Go flips the type back and re-updates. This port
-    /// creates no post, so it never rolls back — which is *closer* to the successful path than a
-    /// port that invented a failure would be, but it does mean a Go-side post failure and ours
-    /// diverge. Recorded with the rest of [D-232].
+    /// If `postChannelPrivacyMessage` fails, Go flips `Type` back, restores the `discoverable`
+    /// flag it eagerly cleared, re-runs `UpdateChannel` — **logging rather than returning that
+    /// second update's failure** — and answers the post's error. So a failed post leaves the
+    /// channel as it was and the caller sees a 500, having received no `channel_converted` event.
+    /// The `channel_updated` event from the first update has already gone out and the rollback
+    /// sends a second one, which is Go's behaviour and not a tidiness this port should improve.
     ///
     /// # Two events, not one
     ///
@@ -242,7 +303,11 @@ impl App {
     /// second to move the channel between their public and private lists; dropping it leaves
     /// every open tab showing the old privacy until it refetches.
     #[tracing::instrument(skip_all, fields(channel_id = %channel.id, channel_type = %channel.channel_type))]
-    pub async fn update_channel_privacy(&self, channel: &mut Channel) -> AppResult<ChannelWrite> {
+    pub async fn update_channel_privacy(
+        &self,
+        channel: &mut Channel,
+        user: &User,
+    ) -> AppResult<ChannelWrite> {
         if channel.discoverable && channel.channel_type == CHANNEL_TYPE_OPEN {
             // `CancelPendingChannelJoinRequestsOnConvert` fans out over the pending join requests
             // of a formerly discoverable private channel and broadcasts a cancellation to each
@@ -255,11 +320,31 @@ impl App {
             ));
         }
 
+        let was_discoverable = channel.discoverable;
         if channel.channel_type == CHANNEL_TYPE_OPEN {
             channel.discoverable = false;
         }
 
         self.update_channel(channel).await?;
+
+        if let Err(post_err) = self
+            .create_system_post(channel_privacy_post(user, channel), channel)
+            .await
+        {
+            if channel.channel_type == CHANNEL_TYPE_OPEN {
+                channel.channel_type = mm_model::channel::CHANNEL_TYPE_PRIVATE.to_owned();
+                channel.discoverable = was_discoverable;
+            } else {
+                channel.channel_type = CHANNEL_TYPE_OPEN.to_owned();
+            }
+            if let Err(err) = self.update_channel(channel).await {
+                tracing::error!(
+                    error = %err,
+                    "Failed to revert channel privacy after posting an update message failed",
+                );
+            }
+            return Err(privacy_message_error(&post_err));
+        }
 
         let mut message = WebSocketEvent::new(
             WEBSOCKET_EVENT_CHANNEL_CONVERTED,
@@ -314,8 +399,10 @@ impl App {
         let incoming = self.store().webhook().get_incoming_by_channel(&channel.id);
         let outgoing = self.store().webhook().get_outgoing_by_channel(&channel.id);
 
-        if !user_id.is_empty() {
-            self.store().user().get(user_id).await.map_err(|err| {
+        let user = if user_id.is_empty() {
+            None
+        } else {
+            Some(self.store().user().get(user_id).await.map_err(|err| {
                 if err.is_not_found() {
                     AppError::boxed(
                         "DeleteChannel",
@@ -334,8 +421,8 @@ impl App {
                         500,
                     )
                 }
-            })?;
-        }
+            })?)
+        };
 
         let incoming = incoming.await.map_err(|err| {
             tracing::error!(error = %err, "incoming webhook lookup failed");
@@ -397,6 +484,24 @@ impl App {
                 )
             })?;
 
+        // The archive post comes **before** the webhook cleanup, not after it — so a channel whose
+        // archive post fails still loses its webhooks. `if channel.IsSpace()` guards it: a space's
+        // backing channel is archived silently.
+        if !channel.is_space() {
+            match &user {
+                Some(user) => {
+                    self.post_system_message(channel_deleted_post(user, &channel.id), channel)
+                        .await;
+                }
+                // Go's `else` posts as the system bot, which `GetSystemBot` would create. Not
+                // reachable from `DELETE /channels/{id}` — the handler always has a session.
+                None => tracing::warn!(
+                    channel_id = %channel.id,
+                    "Failed to post archive message: GetSystemBot is not ported",
+                ),
+            }
+        }
+
         // A second `GetMillis()`: the hooks' `DeleteAt` is later than the channel's.
         let hook_deleted_at = get_millis();
         for hook in &incoming {
@@ -420,9 +525,21 @@ impl App {
             }
         }
 
-        // `PostPersistentNotification().DeleteByChannel` is not ported — [D-233]. Go answers 500
-        // when it fails; there is nothing here to fail, and the rows it would have retired stay
-        // live for a job that does not run on this side either.
+        // The one cleanup on this path Go does **not** swallow.
+        self.store()
+            .post()
+            .delete_persistent_notifications_by_channel(&channel.id)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "retiring the channel's persistent notifications failed");
+                AppError::boxed(
+                    "DeleteChannel",
+                    "app.post_persistent_notification.delete_by_channel.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })?;
 
         let mut message = if channel.channel_type == CHANNEL_TYPE_OPEN {
             WebSocketEvent::new(
@@ -518,7 +635,7 @@ impl App {
         self.publish(message).await;
 
         if !user_id.is_empty() {
-            self.store().user().get(user_id).await.map_err(|err| {
+            let user = self.store().user().get(user_id).await.map_err(|err| {
                 if err.is_not_found() {
                     AppError::boxed(
                         "RestoreChannel",
@@ -538,9 +655,183 @@ impl App {
                     )
                 }
             })?;
+
+            self.post_system_message(channel_restored_post(&user, &channel.id), channel)
+                .await;
         }
 
         Ok(())
+    }
+
+    /// Port of `app.App.PostUpdateChannelDisplayNameMessage` (app/channel.go:2198).
+    ///
+    /// # One sentence, three props, and no "removed" variant
+    ///
+    /// Unlike the header and purpose notices this has a single message form — Go uses
+    /// `…updated_from` whatever the old and new values are, so clearing a display name reads
+    /// "updated the channel display name from: Old to: ".
+    ///
+    /// # It is called from two places with two different "new" values
+    ///
+    /// [`App::patch_channel`] passes the **patched** channel's display name. `updateChannel`'s
+    /// handler passes the **submitted** one, which is not the same thing: a body that omits
+    /// `display_name` leaves the channel's unchanged and still posts, with an empty new value.
+    /// See `mm_api::channel_writes::update_channel`.
+    ///
+    /// The user lookup is this function's, and its failure is a 400 in Go — swallowed by every
+    /// caller, so it is logged here.
+    #[tracing::instrument(skip_all, fields(channel_id = %channel.id, user_id = %user_id))]
+    pub async fn post_update_channel_display_name_message(
+        &self,
+        user_id: &str,
+        channel: &Channel,
+        old_display_name: &str,
+        new_display_name: &str,
+    ) {
+        let Some(user) = self
+            .system_post_author(user_id, "channel display name")
+            .await
+        else {
+            return;
+        };
+
+        let post = Post {
+            channel_id: channel.id.clone(),
+            message: format!(
+                "{} updated the channel display name from: {} to: {}",
+                user.username, old_display_name, new_display_name
+            ),
+            post_type: POST_TYPE_DISPLAYNAME_CHANGE.to_owned(),
+            user_id: user_id.to_owned(),
+            props: Some(system_props([
+                ("username", user.username.as_str()),
+                ("old_displayname", old_display_name),
+                ("new_displayname", new_display_name),
+            ])),
+            ..Post::default()
+        };
+
+        self.post_system_message(post, channel).await;
+    }
+
+    /// Port of `app.App.PostUpdateChannelHeaderMessage` (app/channel.go:2100).
+    ///
+    /// Three sentences, chosen by which side is empty, and the empty-old test comes **first** —
+    /// so setting a header on a channel that had none reads "updated … to:", and clearing one
+    /// reads "removed … (was:". A reader who swapped the two branches would get both halves of
+    /// every pair backwards.
+    #[tracing::instrument(skip_all, fields(channel_id = %channel.id, user_id = %user_id))]
+    pub async fn post_update_channel_header_message(
+        &self,
+        user_id: &str,
+        channel: &Channel,
+        old_header: &str,
+        new_header: &str,
+    ) {
+        let Some(user) = self.system_post_author(user_id, "channel header").await else {
+            return;
+        };
+
+        let message = if old_header.is_empty() {
+            format!(
+                "{} updated the channel header to: {}",
+                user.username, new_header
+            )
+        } else if new_header.is_empty() {
+            format!(
+                "{} removed the channel header (was: {})",
+                user.username, old_header
+            )
+        } else {
+            format!(
+                "{} updated the channel header from: {} to: {}",
+                user.username, old_header, new_header
+            )
+        };
+
+        let post = Post {
+            channel_id: channel.id.clone(),
+            message,
+            post_type: POST_TYPE_HEADER_CHANGE.to_owned(),
+            user_id: user_id.to_owned(),
+            props: Some(system_props([
+                ("username", user.username.as_str()),
+                ("old_header", old_header),
+                ("new_header", new_header),
+            ])),
+            ..Post::default()
+        };
+
+        self.post_system_message(post, channel).await;
+    }
+
+    /// Port of `app.App.PostUpdateChannelPurposeMessage` (app/channel.go:2134).
+    ///
+    /// The same three-way shape as the header notice with one difference that is not cosmetic:
+    /// its i18n ids live under **`app.channel.`** where the header's live under `api.channel.`,
+    /// and the error it raises on a missing user is `app.channel.…retrieve_user.error` rather
+    /// than `api.channel.…retrieve_user.error`. Neither reaches the wire, both are swallowed.
+    #[tracing::instrument(skip_all, fields(channel_id = %channel.id, user_id = %user_id))]
+    pub async fn post_update_channel_purpose_message(
+        &self,
+        user_id: &str,
+        channel: &Channel,
+        old_purpose: &str,
+        new_purpose: &str,
+    ) {
+        let Some(user) = self.system_post_author(user_id, "channel purpose").await else {
+            return;
+        };
+
+        let message = if old_purpose.is_empty() {
+            format!(
+                "{} updated the channel purpose to: {}",
+                user.username, new_purpose
+            )
+        } else if new_purpose.is_empty() {
+            format!(
+                "{} removed the channel purpose (was: {})",
+                user.username, old_purpose
+            )
+        } else {
+            format!(
+                "{} updated the channel purpose from: {} to: {}",
+                user.username, old_purpose, new_purpose
+            )
+        };
+
+        let post = Post {
+            channel_id: channel.id.clone(),
+            message,
+            post_type: POST_TYPE_PURPOSE_CHANGE.to_owned(),
+            user_id: user_id.to_owned(),
+            props: Some(system_props([
+                ("username", user.username.as_str()),
+                ("old_purpose", old_purpose),
+                ("new_purpose", new_purpose),
+            ])),
+            ..Post::default()
+        };
+
+        self.post_system_message(post, channel).await;
+    }
+
+    /// The `Store().User().Get(userID)` the three "the channel changed" notices each open with.
+    ///
+    /// Go turns its failure into an `AppError` that every caller logs and discards, so the
+    /// post simply does not happen. Returning `None` keeps that in one place.
+    async fn system_post_author(&self, user_id: &str, what: &str) -> Option<User> {
+        match self.store().user().get(user_id).await {
+            Ok(user) => Some(user),
+            Err(err) => {
+                tracing::warn!(
+                    error = %err,
+                    user_id = %user_id,
+                    "Error while posting {what} message",
+                );
+                None
+            }
+        }
     }
 
     /// The acting user for `updateChannelPrivacy`, which Go fetches through `App.GetUser` — so
@@ -552,6 +843,74 @@ impl App {
     pub async fn privacy_change_author(&self, user_id: &str) -> AppResult<User> {
         self.get_user(user_id).await
     }
+}
+
+/// The `model.Post` literal of `postChannelPrivacyMessage` (app/channel.go:963).
+///
+/// # The sentence is picked by the **new** type and says nothing about who changed it
+///
+/// A map literal indexed by `channel.Type`, so the public sentence is the one a channel that is
+/// now open gets. Neither string interpolates the username, which only reaches `props`.
+fn channel_privacy_post(user: &User, channel: &Channel) -> Post {
+    let message = if channel.channel_type == CHANNEL_TYPE_OPEN {
+        "This channel has been converted to a Public Channel and can be joined by any team member."
+    } else {
+        "This channel has been converted to a Private Channel."
+    };
+
+    Post {
+        channel_id: channel.id.clone(),
+        message: message.to_owned(),
+        post_type: POST_TYPE_CHANGE_CHANNEL_PRIVACY.to_owned(),
+        user_id: user.id.clone(),
+        props: Some(system_props([("username", user.username.as_str())])),
+        ..Post::default()
+    }
+}
+
+/// The `model.Post` literal of `App.DeleteChannel`'s archive notice (app/channel.go:1768).
+fn channel_deleted_post(user: &User, channel_id: &str) -> Post {
+    Post {
+        channel_id: channel_id.to_owned(),
+        message: format!("{} archived the channel.", user.username),
+        post_type: POST_TYPE_CHANNEL_DELETED.to_owned(),
+        user_id: user.id.clone(),
+        props: Some(system_props([("username", user.username.as_str())])),
+        ..Post::default()
+    }
+}
+
+/// The `model.Post` literal of `App.RestoreChannel`'s unarchive notice (app/channel.go:1029).
+///
+/// Its i18n string is the one **named-parameter** template among the twelve
+/// (`{{.Username}} unarchived the channel.`) where the others are `%v`. The rendered sentence is
+/// the same shape; the difference is only visible in `en.json`.
+fn channel_restored_post(user: &User, channel_id: &str) -> Post {
+    Post {
+        channel_id: channel_id.to_owned(),
+        message: format!("{} unarchived the channel.", user.username),
+        post_type: POST_TYPE_CHANNEL_RESTORED.to_owned(),
+        user_id: user.id.clone(),
+        props: Some(system_props([("username", user.username.as_str())])),
+        ..Post::default()
+    }
+}
+
+/// `NewAppError("postChannelPrivacyMessage", "api.channel.post_channel_privacy_message.error",
+/// nil, "", 500)` — the wrap `UpdateChannelPrivacy` returns to the client after it rolls back.
+///
+/// A different id from the membership posts' shared
+/// `api.channel.post_user_add_remove_message_and_forget.error`, and this is the **only** one of
+/// the six lifecycle posts whose id can reach a response body.
+fn privacy_message_error(cause: &AppError) -> Box<AppError> {
+    tracing::error!(error = %cause, "the channel privacy system post failed");
+    AppError::boxed(
+        "postChannelPrivacyMessage",
+        "api.channel.post_channel_privacy_message.error",
+        None,
+        String::new(),
+        500,
+    )
 }
 
 /// Go's four-arm `switch` on the store error in `App.UpdateChannel` (app/channel.go:806-820).
@@ -597,6 +956,96 @@ fn update_channel_error(err: StoreError) -> Box<AppError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn acting_user() -> User {
+        User {
+            id: "uuuuuuuuuuuuuuuuuuuuuuuua".to_owned(),
+            username: "alice".to_owned(),
+            ..User::default()
+        }
+    }
+
+    fn props_of(post: &Post) -> Vec<(String, String)> {
+        post.get_props()
+            .into_iter()
+            .flatten()
+            .map(|(k, v)| (k.clone(), v.as_str().unwrap_or("<not a string>").to_owned()))
+            .collect()
+    }
+
+    fn typed(channel_type: &str) -> Channel {
+        Channel {
+            id: "cccccccccccccccccccccccc1".to_owned(),
+            channel_type: channel_type.to_owned(),
+            ..Channel::default()
+        }
+    }
+
+    /// The privacy notice's sentence is picked by the type the channel **now** has, and neither
+    /// sentence names the user. Swapping the two arms tells every client in the channel the
+    /// opposite of what happened.
+    #[test]
+    fn the_privacy_post_sentence_follows_the_new_type() {
+        let user = acting_user();
+
+        let to_public = channel_privacy_post(&user, &typed(CHANNEL_TYPE_OPEN));
+        assert_eq!(to_public.post_type, "system_change_chan_privacy");
+        assert_eq!(
+            to_public.message,
+            "This channel has been converted to a Public Channel and can be joined by any team \
+             member."
+        );
+        assert_eq!(
+            props_of(&to_public),
+            vec![("username".to_owned(), "alice".to_owned())]
+        );
+
+        let to_private =
+            channel_privacy_post(&user, &typed(mm_model::channel::CHANNEL_TYPE_PRIVATE));
+        assert_eq!(
+            to_private.message,
+            "This channel has been converted to a Private Channel."
+        );
+        assert_eq!(to_private.user_id, user.id);
+    }
+
+    /// Archive and restore differ by one word and one type constant, and both count towards the
+    /// channel's message total — neither is a join/leave message.
+    #[test]
+    fn the_archive_and_restore_posts_are_counted_messages() {
+        let user = acting_user();
+
+        let archived = channel_deleted_post(&user, "c1");
+        assert_eq!(archived.post_type, "system_channel_deleted");
+        assert_eq!(archived.message, "alice archived the channel.");
+        assert!(!archived.excludes_from_channel_message_count());
+
+        let restored = channel_restored_post(&user, "c1");
+        assert_eq!(restored.post_type, "system_channel_restored");
+        assert_eq!(restored.message, "alice unarchived the channel.");
+        assert!(!restored.excludes_from_channel_message_count());
+
+        assert_eq!(
+            props_of(&restored),
+            vec![("username".to_owned(), "alice".to_owned())]
+        );
+    }
+
+    /// The one id that can reach a client from any of the six lifecycle posts.
+    #[test]
+    fn the_privacy_post_failure_has_its_own_id() {
+        let cause = AppError::new(
+            "CreatePost",
+            "app.post.save.app_error",
+            None,
+            String::new(),
+            500,
+        );
+        let wrapped = privacy_message_error(&cause);
+        assert_eq!(wrapped.id, "api.channel.post_channel_privacy_message.error");
+        assert_eq!(wrapped.status_code, 500);
+        assert_eq!(wrapped.where_, "postChannelPrivacyMessage");
+    }
 
     fn channel_with_category(name: &str) -> Channel {
         Channel {

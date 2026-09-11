@@ -57,6 +57,7 @@ use mm_model::permission::{
     make_permission_error,
 };
 use mm_model::session::Session;
+use mm_model::user::User;
 use mm_model::utils::{AppError, decode_one_from_json};
 
 use crate::AppState;
@@ -356,13 +357,30 @@ async fn serve_update_channel(
         .into());
     }
 
+    // Captured **before** `apply_update`, which is the only place the pre-update value survives.
+    let old_display_name = channel.display_name.clone();
+
     apply_update(&mut channel, submitted);
 
     state.app.update_channel(&mut channel).await?;
 
-    // `PostUpdateChannelDisplayNameMessage` — [D-232]. Note Go's condition compares the *old*
-    // display name against the **submitted** one rather than the applied one, so an update that
-    // omits `display_name` posts "renamed to <empty>"; there is nothing to reproduce here.
+    // `oldChannelDisplayName != channel.DisplayName` — and `channel` on Go's right-hand side is
+    // the **submitted** body, not the channel that was written. A body that omits `display_name`
+    // leaves the stored one alone (see `apply_update`) and still trips this test, so it posts
+    // "updated the channel display name from: Old to: " with an empty new value. The post also
+    // goes to `channel.Id` from the body, which `GetChannel` has already proved is this channel.
+    if old_display_name != submitted.display_name {
+        state
+            .app
+            .post_update_channel_display_name_message(
+                &session.user_id,
+                &channel,
+                &old_display_name,
+                &submitted.display_name,
+            )
+            .await;
+    }
+
     //
     // **No `FillInChannelProps`.** `patchChannel` calls it and this does not, so the same channel
     // answers with `props` from one route and without from the other.
@@ -471,7 +489,11 @@ pub async fn patch_channel(
         Err(err) => return err.into_response(),
     };
 
-    match state.app.patch_channel(&mut channel, &patch).await {
+    match state
+        .app
+        .patch_channel(&mut channel, &patch, &session.0.user_id)
+        .await
+    {
         Ok(ChannelWrite::Done) => {}
         Ok(ChannelWrite::Forward(why)) => {
             tracing::Span::current().record("forwarded", true);
@@ -815,12 +837,17 @@ pub async fn update_channel_privacy(
         Err(err) => return err.into_response(),
     }
 
-    let mut channel = match prepare_privacy_change(&state, &session.0, &channel_id, privacy).await {
-        Ok(channel) => channel,
-        Err(err) => return err.into_response(),
-    };
+    let (mut channel, author) =
+        match prepare_privacy_change(&state, &session.0, &channel_id, privacy).await {
+            Ok(prepared) => *prepared,
+            Err(err) => return err.into_response(),
+        };
 
-    match state.app.update_channel_privacy(&mut channel).await {
+    match state
+        .app
+        .update_channel_privacy(&mut channel, &author)
+        .await
+    {
         Ok(ChannelWrite::Done) => match channel_response("updateChannelPrivacy", &channel) {
             Ok(response) => response,
             Err(err) => err.into_response(),
@@ -859,7 +886,7 @@ async fn prepare_privacy_change(
     session: &Session,
     channel_id: &str,
     privacy: &'static str,
-) -> Result<Box<Channel>, ApiError> {
+) -> Result<Box<(Channel, User)>, ApiError> {
     let mut channel = state.app.get_channel(channel_id).await?;
 
     // Two `if`s, not an `if`/`else` — Go's shape, and the permission each reports differs.
@@ -909,12 +936,12 @@ async fn prepare_privacy_change(
         .into());
     }
 
-    // Only the username reaches the (unported) system post, but the error is Go's and it is
-    // raised here — before the conversion, unlike `RestoreChannel`'s user lookup.
-    state.app.privacy_change_author(&session.user_id).await?;
+    // The author of the privacy system post. The error is Go's and it is raised here — before
+    // the conversion, unlike `RestoreChannel`'s user lookup.
+    let author = state.app.privacy_change_author(&session.user_id).await?;
 
     channel.channel_type = privacy.to_owned();
-    Ok(Box::new(channel))
+    Ok(Box::new((channel, author)))
 }
 
 // ---------------------------------------------------------------------------------------------
