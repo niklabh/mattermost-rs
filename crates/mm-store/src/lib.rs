@@ -48,6 +48,8 @@ pub mod upload_session_store;
 pub mod user_access_token_store;
 pub mod user_store;
 pub mod user_terms_of_service_store;
+/// Port of `SqlViewStore` — the whole of the integrated-boards store.
+pub mod view_store;
 pub mod webhook_store;
 
 pub use audit_store::{AUDIT_LIMIT_MAXIMUM, AuditStore, SqlAuditStore};
@@ -83,6 +85,7 @@ pub use upload_session_store::{SqlUploadSessionStore, UploadSessionStore};
 pub use user_access_token_store::{SqlUserAccessTokenStore, UserAccessTokenStore};
 pub use user_store::{SqlUserStore, UserStore};
 pub use user_terms_of_service_store::{SqlUserTermsOfServiceStore, UserTermsOfServiceStore};
+pub use view_store::{SqlViewStore, ViewStore};
 pub use webhook_store::{SqlWebhookStore, WebhookStore};
 
 use mm_model::system::AppliedMigration;
@@ -127,6 +130,7 @@ pub struct SqlStore {
     webhook: SqlWebhookStore,
     channel_member_history: SqlChannelMemberHistoryStore,
     group: SqlGroupStore,
+    view: SqlViewStore,
     /// Go's `SqlStore` owns the connections and hands them to each sub-store; a handful of its
     /// methods — [`SqlStore::get_applied_migrations`] is the first ported — query directly rather
     /// than through a sub-store, which is why the pool is held here too. `PgPool` is a handle over
@@ -187,6 +191,7 @@ impl SqlStore {
             user_access_token: SqlUserAccessTokenStore::new(pool.clone()),
             channel_member_history: SqlChannelMemberHistoryStore::new(pool.clone()),
             group: SqlGroupStore::new(pool.clone()),
+            view: SqlViewStore::new(pool.clone()),
             pool,
         }
     }
@@ -374,5 +379,10 @@ impl SqlStore {
     /// Port of `store.Store.UserTermsOfService()`.
     pub fn user_terms_of_service(&self) -> &SqlUserTermsOfServiceStore {
         &self.user_terms_of_service
+    }
+
+    /// Port of `store.Store.View()`.
+    pub fn view(&self) -> &SqlViewStore {
+        &self.view
     }
 }
