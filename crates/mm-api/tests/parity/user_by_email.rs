@@ -295,6 +295,18 @@ async fn the_etag_answers_304() {
 }
 
 /// The admin's own address, read by a plain user: served, and sanitised the same way on both.
+///
+/// **This one comparison must use [`fetch_both_stable`], and its siblings above must not.** Every
+/// other byte comparison in this file names a *plain* fixture user, whose row nobody else in the
+/// binary writes; this one names the **shared admin**, and `custom_status_writes`'s two broadcast
+/// tests write that row — `PUT /users/{me}/status/custom` bumps `Users.UpdateAt`. A single-shot
+/// `fetch_both_raw` reads Go and then Rust, so a write landing between the two calls makes the
+/// bodies differ in `update_at` alone and the failure reads exactly like a port bug.
+///
+/// Measured on a full-suite run: the two bodies were identical but for `update_at`, 39ms apart,
+/// Go's the older. Those writers hold `common::BROADCAST_STREAM`, but that lock is scoped to
+/// tests asserting a *count of frames* — it does not and should not cover every reader of the
+/// admin's row, so the quiescent-window retry is what closes this, not a wider lock.
 #[tokio::test]
 async fn a_plain_caller_reads_an_admin_address() {
     if !stack_enabled() {
@@ -305,9 +317,10 @@ async fn a_plain_caller_reads_an_admin_address() {
     let f = fixture(&client, &token).await;
 
     let p = path(&f.admin_email);
-    let ((go_status, go), (rs_status, rs)) = fetch_both_raw(&client, &f.plain_token, &p).await;
-    assert_eq!(go_status, 200, "ShowEmailAddress is on for this deployment");
-    assert_eq!(rs_status, go_status);
+    // Asserts 200 on both internally, and that the Rust side served it rather than forwarding.
+    // The `ShowEmailAddress` precondition this used to spell out is carried by the `email`
+    // assertion at the end of the test, which is the thing that setting actually controls.
+    let (go, rs) = fetch_both_stable(&client, &f.plain_token, &p).await;
     assert_eq!(
         String::from_utf8_lossy(&go),
         String::from_utf8_lossy(&rs),
