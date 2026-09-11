@@ -153,4 +153,9 @@ mod parity {
     pub mod views;
     pub mod webhook_writes;
     pub mod websocket;
+
+    // Appended 2026-09-11: the local-mode (unix socket) API. Out of alphabetical order on
+    // purpose — four agents were editing this file in parallel and an append conflicts with
+    // nothing.
+    pub mod local_mode;
 }

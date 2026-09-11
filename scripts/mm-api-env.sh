@@ -27,6 +27,12 @@
 # Both launch sites source this. They used to differ: `parity.sh` set the file directory and
 # `mutate.sh` did not, so every `api`-suite mutation ran against a server configured unlike the
 # one the tests were written against.
+#
+# The three local-mode variables opened the unix-socket admin API, 2026-09-11. They are the same
+# names Go reads, and the socket paths are the per-stack ones from `stack-env.sh` —
+# `MM_SERVICESETTINGS_LOCALMODESOCKETLOCATION` names the **Go** server's socket, which is mm-api's
+# forward target, and `MM_API_LOCAL_SOCKET` is mm-api's own. Pointing both at one path is refused
+# at startup. `scripts/go-server.sh` sets the matching pair on the other side.
 mmrs_launch_mm_api() {
   local root="${MMRS_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)}"
   source "$root/scripts/stack-env.sh"
@@ -38,6 +44,9 @@ mmrs_launch_mm_api() {
     MM_FILESETTINGS_DIRECTORY="$root/reference/.build/mmroot$MMRS_RUN_SUFFIX/data/" \
     MM_TEAMSETTINGS_ENABLEOPENSERVER=true \
     MM_FEATUREFLAGS_ENABLESHIFTESCAPETOMARKALLREAD=true \
+    MM_SERVICESETTINGS_ENABLELOCALMODE=true \
+    MM_SERVICESETTINGS_LOCALMODESOCKETLOCATION="$MMRS_GO_LOCAL_SOCKET" \
+    MM_API_LOCAL_SOCKET="$MMRS_LOCAL_SOCKET" \
     nohup "$root/target/debug/mm-api" > "$log" 2>&1 &
   )
 }

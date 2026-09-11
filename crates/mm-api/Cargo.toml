@@ -18,6 +18,10 @@ tokio.workspace = true
 # `MaxFileSize` defaults to 100MB and a range request can ask for all of it.
 tokio-util = { version = "0.7", default-features = false, features = ["io"] }
 reqwest.workspace = true
+# The local-mode socket proxy — see `src/local.rs` for why this is not reqwest.
+hyper.workspace = true
+hyper-util.workspace = true
+http-body-util.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

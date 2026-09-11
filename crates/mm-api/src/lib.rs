@@ -40,6 +40,8 @@ pub mod jobs;
 pub mod license;
 pub mod licensed_features;
 pub mod limits;
+/// The local-mode admin API: the api4 handlers on a unix socket, with an unrestricted session.
+pub mod local;
 pub mod oauth;
 pub mod permissions;
 pub mod post_writes;
@@ -232,7 +234,7 @@ fn partially_migrated_with_ids(
 ///
 /// `Strict-Transport-Security` is not reproduced: it is gated on `TLSStrictTransport`, which
 /// defaults to `false` and is not modelled in [`mm_app::config::Config`].
-async fn go_global_headers(
+pub(crate) async fn go_global_headers(
     State(state): State<AppState>,
     request: Request,
     next: Next,
@@ -2224,6 +2226,18 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/channels/{channel_id}/views/{view_id}/sort_order",
             partially_migrated_with_ids(&state, post(views::update_view_sort_order)),
+        )
+        // `api.BaseRoutes.APIRoot.Handle("/server_busy", …)` three times (api4/system.go:60-62).
+        // The state behind them is in *this* process's memory and Go's is in its own, which is
+        // [D-320] — the routes are ported, the divergence is recorded, and the local twins of all
+        // three are in `local::router`.
+        .route(
+            "/api/v4/server_busy",
+            partially_migrated(
+                get(system::get_server_busy_expires)
+                    .post(system::set_server_busy)
+                    .delete(system::clear_server_busy),
+            ),
         )
         .fallback(proxy::forward_to_go)
         // Outermost, so it sees every response this server produces — including the proxy's,

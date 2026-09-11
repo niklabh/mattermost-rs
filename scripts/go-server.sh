@@ -89,7 +89,16 @@ env_for_server() {
   # "address already in use", having already migrated their own database.
   export MM_SERVICESETTINGS_LISTENADDRESS=":$PORT"
   export MM_TEAMSETTINGS_ENABLEOPENSERVER=true
-  export MM_SERVICESETTINGS_ENABLELOCALMODE=false
+  # **On, since 2026-09-11.** It was `false`, which left the local-mode admin API — 171 of the
+  # project's 764 route+method pairs — with no oracle to compare against at all. `mmctl --local`
+  # and `mm-api`'s own local router both need a Go socket on the other side of the forward leg.
+  #
+  # The socket path is per-stack (`stack-env.sh`) and NOT the config default: that default is the
+  # shared `/var/tmp/mattermost_local.socket`, and `startLocalModeServer` opens with
+  # `os.RemoveAll(socket)` — so on a shared path the last stack to start silently unlinks every
+  # other stack's socket out from under it.
+  export MM_SERVICESETTINGS_ENABLELOCALMODE=true
+  export MM_SERVICESETTINGS_LOCALMODESOCKETLOCATION="$MMRS_GO_LOCAL_SOCKET"
   export MM_FILESETTINGS_DIRECTORY="$RUN/data/"
   # Feature flags stay at their compiled defaults **unless a session turns one on deliberately**.
   # `IntegratedBoards` and `DiscoverableChannels` gate whole route families (`api4/view.go`,
