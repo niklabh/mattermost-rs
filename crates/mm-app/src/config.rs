@@ -435,6 +435,16 @@ pub struct Config {
     /// (`maxDays*24*60*60*1000`) before it is used, and that product is an `int64` in Go too.
     pub maximum_personal_access_token_lifetime_days: i64,
 
+    /// `ServiceSettings.EnableUserAccessTokens` (config.go:408, defaulted **`false`** at :579).
+    ///
+    /// Gates `CreateUserAccessToken` and `RotateUserAccessToken` with a **501**
+    /// (`app.user_access_token.disabled`), not a 403 — and the check is
+    /// `!enabled && !user.IsBot`, so **bot accounts mint tokens whatever this says**. That
+    /// exemption is the only reason the two write routes are reachable on a stock installation,
+    /// and it is what their parity suite exercises. Read by
+    /// [`crate::App::create_user_access_token`] and [`crate::App::rotate_user_access_token`].
+    pub enable_user_access_tokens: bool,
+
     /// `MessageExportSettings.DownloadExportResults` (config.go:3880, defaulted **`false`** at
     /// :3893).
     ///
@@ -812,6 +822,7 @@ impl Default for Config {
             enable_public_link: false,
             cloud_preview_modal_bucket_url: String::new(),
             maximum_personal_access_token_lifetime_days: 0,
+            enable_user_access_tokens: false,
             message_export_download_export_results: false,
             feature_flag_session_attributes: false,
             // config.go:982 — `new(CollapsedThreadsAlwaysOn)`.
@@ -1142,6 +1153,11 @@ impl Config {
                 "MM_SERVICESETTINGS_MAXIMUMPERSONALACCESSTOKENLIFETIMEDAYS",
                 default.maximum_personal_access_token_lifetime_days,
             ),
+            enable_user_access_tokens: lookup_bool(
+                lookup,
+                "MM_SERVICESETTINGS_ENABLEUSERACCESSTOKENS",
+                default.enable_user_access_tokens,
+            ),
             message_export_download_export_results: lookup_bool(
                 lookup,
                 "MM_MESSAGEEXPORTSETTINGS_DOWNLOADEXPORTRESULTS",
@@ -1302,6 +1318,9 @@ impl Config {
             maximum_personal_access_token_lifetime_days: service
                 .maximum_personal_access_token_lifetime_days
                 .unwrap_or(default.maximum_personal_access_token_lifetime_days),
+            enable_user_access_tokens: service
+                .enable_user_access_tokens
+                .unwrap_or(default.enable_user_access_tokens),
             enable_commands: service.enable_commands.unwrap_or(default.enable_commands),
             enable_public_link: file_settings
                 .enable_public_link
@@ -1767,6 +1786,8 @@ struct ServiceSettingsDocument {
     enable_outgoing_oauth_connections: Option<bool>,
     #[serde(rename = "MaximumPersonalAccessTokenLifetimeDays")]
     maximum_personal_access_token_lifetime_days: Option<i64>,
+    #[serde(rename = "EnableUserAccessTokens")]
+    enable_user_access_tokens: Option<bool>,
     #[serde(rename = "EnableCommands")]
     enable_commands: Option<bool>,
     #[serde(rename = "EnablePostUsernameOverride")]

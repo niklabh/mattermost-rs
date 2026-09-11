@@ -17,6 +17,20 @@ pub struct NonCompliantUserAccessTokenResult {
     pub count: i64,
 }
 
+/// Port of `model.UserAccessTokenSearch` (user_access_token_search.go:6) — the body of
+/// `POST /users/tokens/search`.
+///
+/// One field, and the handler rejects an empty `term` before the store sees it. Note what the
+/// store then does with it: the term is escaped and bound into three `LIKE`s with no `%` added,
+/// so the "search" is an **equality** and a wildcard the caller writes matches itself. See
+/// `mm_store::UserAccessTokenStore::search`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct UserAccessTokenSearch {
+    #[serde(rename = "term")]
+    pub term: String,
+}
+
 /// Port of `model.UserAccessToken` (user_access_token.go:15).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -138,6 +152,10 @@ mod wire_parity {
             NonCompliantUserAccessTokenResult,
             "non_compliant_user_access_token_result"
         );
+    }
+    #[test]
+    fn user_access_token_search_round_trips_the_fixture() {
+        assert_fixture_round_trips!(UserAccessTokenSearch, "user_access_token_search");
     }
     #[test]
     fn user_access_token_round_trips_the_fixture() {

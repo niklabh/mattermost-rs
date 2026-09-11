@@ -2011,7 +2011,39 @@ pub fn router(state: AppState) -> Router {
         )
         .route(
             "/api/v4/users/{user_id}/tokens",
-            partially_migrated_with_ids(&state, get(tokens::get_user_access_tokens_for_user)),
+            partially_migrated_with_ids(
+                &state,
+                get(tokens::get_user_access_tokens_for_user).post(tokens::create_user_access_token),
+            ),
+        )
+        // The six personal-access-token **writes**. Five are literal children of `/users/tokens`
+        // and therefore siblings of the `{token_id}` route above; matchit prefers the literal for
+        // **every** method, so registering `POST /users/tokens/revoke` also takes `GET` on that
+        // path away from the `{token_id}` handler — which is why each of these goes through
+        // `partially_migrated` and forwards its other methods to Go rather than 405-ing.
+        .route(
+            "/api/v4/users/tokens/revoke",
+            partially_migrated(post(tokens::revoke_user_access_token)),
+        )
+        .route(
+            "/api/v4/users/tokens/disable",
+            partially_migrated(post(tokens::disable_user_access_token)),
+        )
+        .route(
+            "/api/v4/users/tokens/enable",
+            partially_migrated(post(tokens::enable_user_access_token)),
+        )
+        .route(
+            "/api/v4/users/tokens/rotate",
+            partially_migrated(post(tokens::rotate_user_access_token)),
+        )
+        .route(
+            "/api/v4/users/tokens/search",
+            partially_migrated(post(tokens::search_user_access_tokens)),
+        )
+        .route(
+            "/api/v4/users/tokens/non_compliant/revoke",
+            partially_migrated(post(tokens::revoke_non_compliant_user_access_tokens)),
         )
         // `BaseRoutes.Teams.Handle("/invite/{invite_id:[A-Za-z0-9]+}")` (api4/team.go:75) — a
         // literal `invite` sibling of `{team_id}`, and an `APIHandler`, so no session extractor.
