@@ -37,9 +37,12 @@ use mm_model::permission::{
     PERMISSION_READ_USER_ACCESS_TOKEN, PERMISSION_REVOKE_USER_ACCESS_TOKEN, Permission,
     make_permission_error,
 };
-use mm_model::user_access_token::{
-    NonCompliantUserAccessTokenResult, UserAccessToken, UserAccessTokenSearch,
-};
+// **`UserAccessTokenSearch` lives in `search_requests`, not next to `UserAccessToken`.** Go
+// declares it in its own file (`user_access_token_search.go`) and this port grouped it with
+// `EmojiSearch` for that reason; a second copy beside the token type would be a silent fork of a
+// wire type.
+use mm_model::search_requests::UserAccessTokenSearch;
+use mm_model::user_access_token::{NonCompliantUserAccessTokenResult, UserAccessToken};
 use mm_model::utils::{AppError, is_valid_id};
 
 use crate::AppState;
