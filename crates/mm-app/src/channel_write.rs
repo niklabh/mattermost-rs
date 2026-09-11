@@ -582,8 +582,8 @@ impl App {
     /// told. Reproduced: the lookup is a real query on a real path, and moving it earlier would
     /// turn that error into one raised before the write.
     ///
-    /// The post itself is [D-232]. It is the only reason the lookup exists, which is exactly why
-    /// a port that dropped it would look tidier and answer differently.
+    /// The unarchive post is the only reason the lookup exists, which is exactly why a port that
+    /// dropped it would look tidier and answer differently.
     #[tracing::instrument(skip_all, fields(channel_id = %channel.id, channel_type = %channel.channel_type))]
     pub async fn restore_channel(&self, channel: &mut Channel, user_id: &str) -> AppResult<()> {
         if channel.delete_at == 0 {

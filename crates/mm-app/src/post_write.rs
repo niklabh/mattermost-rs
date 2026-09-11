@@ -899,6 +899,16 @@ impl App {
     /// system post never has. A **group** channel's `channel_display_name` is Go's sorted member
     /// list and falls back to the stored display name here; see D-235.
     async fn publish_posted_event(&self, post: &Post, channel: &Channel, sender: &User) {
+        // `SendNotifications` opens with `if channel.DeleteAt > 0 { return }` (notification.go:55),
+        // so a post written into an archived channel publishes nothing.
+        //
+        // **The archive notice itself is not caught by this.** `DeleteChannel` stamps `DeleteAt`
+        // in the database and leaves the struct it hands `CreatePost` at zero, so that post does
+        // publish. What this guards is a membership change on an already-archived channel.
+        if channel.delete_at > 0 {
+            return;
+        }
+
         let mut message =
             WebSocketEvent::new(WEBSOCKET_EVENT_POSTED, "", &post.channel_id, "", None, "");
 

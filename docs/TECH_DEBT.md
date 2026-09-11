@@ -6579,116 +6579,36 @@ What is owed is to make the assertion local: count the planted posts' contributi
 *delta* the test controls, or seed the count to a bucket midpoint before reading. Note that
 lowering the resolution is not available — the rounding is Go's, and asserting the raw count would
 stop testing the route.
-## D-231 · The join and leave system posts are missing from all six membership writes
+## D-235 · What the system posts still do not do
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-10 (phase 2, channel-member writes)
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-11 (phase 2, system posts)
+**Supersedes** D-231, D-232 and D-233, which are paid off.
 
-`POST /api/v4/channels/{channel_id}/members`, `PUT …/members`,
-`DELETE …/members/{user_id}` — and, through the bulk reconcile, every add and remove
-`setChannelMembers` performs — all end in a **write to `Posts`** that this port does not make:
+The twelve routes that owed a system post now write one, byte-compatible in `type`, `props`,
+`message` and the `posted` event — `crates/mm-api/tests/parity/system_posts.rs` reads each one
+back off the timeline. Four things `App.CreatePost` does that [`App::create_system_post`] does not:
 
-| Go function | Go site | when |
-|---|---|---|
-| `postJoinChannelMessage` | app/channel.go:2776 | a self-add (`opts.UserRequestorID == ""` or equal to the added user) |
-| `PostAddToChannelMessage` | app/channel.go:2903 | somebody else did the adding |
-| `postLeaveChannelMessage` | app/channel.go:2882 | a self-removal |
-| `postRemoveFromChannelMessage` | app/channel.go:2954 | somebody else did the removing |
+- **The notification pass.** `SendNotifications` adds an implicit mention for
+  `props["addedUserId"]` on a `system_add_to_channel` post (notification.go:1115) and then
+  `IncrementMentionCount`s it. So a **re-add** of an existing member still answers Go's
+  `mention_count: 1` against our `0`, which is the one place this is visible in a response body;
+  `parity/channel_member_writes.rs` masks the two mention counters and asserts Go's value, so the
+  exclusion cannot widen. `getExplicitMentions` over the message text is absent with it — with
+  default keywords it finds nothing in these twelve sentences, but a user whose custom mention key
+  matches one would be mentioned by Go and not by us.
+- **`channel_mentions`.** `FillInPostProps` resolves a `~channel` mention into a prop. The header,
+  purpose and display-name notices quote text a user wrote, so a header naming a channel gets a
+  post with the prop missing and the client renders the raw `~name`.
+- **A group channel's `channel_display_name`** in the `posted` event is Go's sorted member list
+  (`PostNotification.GetChannelName`) and the stored display name here. Reachable only through a
+  header or purpose patch on a GM, which is the one lifecycle route a GM allows.
+- **`GetSystemBot`.** Go posts as the system bot when a removal has no remover and when an archive
+  has no acting user, creating the bot account on first use. No api4 route reaches either — every
+  caller carries a session — so both are logged and skipped.
 
-Blocked on post writes in the store: `mm_store::post_store` is read-only, and the post-write
-session was a sibling worktree's this session. Nothing else is missing — the membership row, the
-`ChannelMemberHistory` row, the two websocket events and the response body are all ported and
-tested.
-
-**Two of the four are not fire-and-forget**, so their absence also removes an error branch: a
-self-add whose join post fails is a failed `POST /members` in Go (`return nil, err`, app/channel.go
-:2044) and a self-removal whose leave post fails is a failed `DELETE` (:3132). Both are unreachable
-in practice; both are branches this port does not have.
-
-### It is visible in a response body, which is where it was least expected
-
-The system post was expected to be invisible to these six routes — it is a different table and a
-different route reads it. It is not. `PostAddToChannelMessage` **@-mentions the added user**, so the
-notification pass raises that member's `MentionCount`, and `POST …/members` for a user who is
-*already* a member answers with the stored row. So:
-
-```
-POST /channels/{c}/members {"user_id": U}   # first time:  both servers say mention_count 0
-POST /channels/{c}/members {"user_id": U}   # again:       Go says 1, we say 0
-```
-
-`parity/channel_member_writes.rs` masks `mention_count` and `mention_count_root` on the re-add and
-asserts Go's value really is 1, so the exclusion cannot quietly widen. Everything else on that row
-is still compared byte for byte.
-
-### What paying it off looks like
-
-`mm_store::post_store` gains `save`, and `mm_app::channel_member` gains the four `post*Message`
-functions plus `postJoinMessageForDefaultChannel` (app/channel.go:132). The message text is
-`i18n.T(...)` with the username interpolated, so it also needs the i18n decision ([D-092]) — until
-that lands, a ported system post would carry an untranslated id as its message and be *worse* than
-no post at all for a reading client. Sequence it behind i18n, not merely behind the post store.
----
-
-## D-232 · Six system posts the channel-lifecycle writes owe
-
-**Status** OPEN · **Severity** divergent behaviour · **Raised** 2026-09-10 (phase 2, channel
-lifecycle)
-
-Five routes landed — `PUT /channels/{id}`, `/patch`, `/privacy`, `DELETE /channels/{id}`,
-`POST /channels/{id}/restore` — and every one of them creates a system post on Go's side that
-this server does not:
-
-| route | Go's post | type |
-|---|---|---|
-| `DELETE /channels/{id}` | "@user archived the channel" | `system_channel_deleted` |
-| `POST /channels/{id}/restore` | "@user unarchived the channel" | `system_channel_restored` |
-| `PUT /channels/{id}/privacy` | "…changed to public/private" | `system_change_chan_privacy` |
-| `PUT /channels/{id}/patch` | display-name, header and purpose change notices | three types |
-| `PUT /channels/{id}` | the display-name change notice | `system_displayname_change` |
-
-`Posts` writes are not ported at all yet — that is the blocker, and it is one store method
-(`PostStore::save`) plus `App::CreatePost`, not five separate pieces of work. Go **logs and
-swallows** every one of these failures, so none of them is part of any response body and no
-parity test can see the absence; `mm_app::channel_write`'s module docs say so at the point where
-the calls would go.
-
-Two second-order consequences are visible and neither is a bug:
-
-- A channel written through mm-api keeps the `total_msg_count`, `last_post_at` and
-  `last_root_post_at` it had, where Go's moves. `crates/mm-api/tests/parity/channel_writes.rs`
-  normalises those three keys for exactly this reason and compares every other field exactly.
-- `App::UpdateChannelPrivacy`'s **rollback is unreachable here**. Go flips the type back if
-  `postChannelPrivacyMessage` fails; there is no post to fail, so the conversion always stands.
-  That is closer to Go's success path than inventing a failure would be, but a Go-side post
-  failure and ours diverge.
-
-What is owed: the posts, once post writes land. `App::restore_channel` and `App::delete_channel`
-already do the `User().Get` those posts exist to feed — the lookups are there because their
-*errors* are on the wire — so the remaining work is the `CreatePost` call itself.
-
----
-
-## D-233 · Archiving a channel does not retire its persistent notifications
-
-**Status** OPEN · **Severity** divergent behaviour · **Raised** 2026-09-10 (phase 2, channel
-lifecycle)
-
-`App.DeleteChannel` (app/channel.go:1818) calls
-`PostPersistentNotification().DeleteByChannel([]string{channel.Id})` and answers **500** if it
-fails — the one cleanup on that path that is not logged and swallowed. It is a single statement,
-`UPDATE PersistentNotifications SET DeleteAt = <now> FROM Posts WHERE Posts.Id =
-PersistentNotifications.PostId AND Posts.ChannelId = ?`, against a table this port has no store
-for at all.
-
-Not done here because it would mean a new store module and five edits to `mm-store`'s `lib.rs`
-while two sibling agents are working in that crate, for a subsystem that is otherwise entirely
-unported: the job that reads those rows and re-sends the notifications does not run on this side
-either. So the observable divergence is confined to a Go server sharing this database, which would
-keep notifying for posts in a channel mm-api archived.
-
-What is owed: `post_persistent_notification_store.rs` with the one method, wired into `SqlStore`,
-and the call restored to `App::delete_channel` — where the comment marking its absence already
-sits.
+One more, which is not a gap in the posts but in their translation: `DeleteChannel` and
+`RestoreChannel` build their message with `i18n.GetUserTranslations(user.Locale)`, the **acting
+user's** locale, where the other ten use the server's. Ours are English throughout ([D-092]).
 
 ---
 

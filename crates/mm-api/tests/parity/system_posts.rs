@@ -380,18 +380,29 @@ async fn a_join_post_moves_last_post_at_without_counting_as_a_message() {
             "{base}: a root post moves both dates together",
         );
 
-        // The contrast: an ordinary message *is* counted, so the guard above is not simply a
-        // statement that never runs.
+        // The contrast: a system post that is **not** a join or leave *is* counted, so the guard
+        // above is not a predicate that never fires.
         //
-        // Posted as the **admin**, not as the user who just joined. `post_message` goes to Go,
-        // and Go's channel-member cache has not seen a membership mm-api wrote — so posting as
-        // the joiner is a 403 from Go on the Rust half of this loop. That is [D-190] exactly, and
-        // it cost this test one run.
-        common::post_message(&http, &admin, channel, "an ordinary message", None).await;
+        // It has to be a post **this** server writes. The first version of this test posted an
+        // ordinary message through `common::post_message`, which goes to Go — so Go's own
+        // `SaveMultiple` moved the counter on both halves of the loop and the assertion held with
+        // our `count` hard-wired to zero. That mutation survived, and this is the fixture fix:
+        // a header patch is served by each server and writes `system_header_change`, which
+        // `IsJoinLeaveMessage` does not cover.
+        let (status, raw) = call(
+            &http,
+            base,
+            reqwest::Method::PUT,
+            &format!("/api/v4/channels/{channel}/patch"),
+            &admin,
+            Some(&serde_json::json!({"header": "a counted system post"})),
+        )
+        .await;
+        assert_eq!(status, 200, "{base} refused the header patch: {raw}");
         let posted = channel_row(&http, base, channel, &admin).await;
         assert_eq!(
             posted["total_msg_count"], 1,
-            "{base}: an ordinary post counts: {posted}",
+            "{base}: a header-change post is not a join/leave, so it counts: {posted}",
         );
     }
 

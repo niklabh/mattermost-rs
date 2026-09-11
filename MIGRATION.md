@@ -9382,10 +9382,11 @@ New: `mm_store::channel_member_history_store`, `mm_store::group_store` (one quer
 
 ### The join and leave system posts are not written, and one of them shows in a body
 
-Four `Posts` writes are missing — see **[D-231]**, which is the only thing this session owes. The
-surprise is that it is not invisible: `PostAddToChannelMessage` @-mentions the added user, so a
-**re-add** of an existing member answers Go's `mention_count: 1` against our `0`. Masked in the
-parity suite with Go's value asserted, so the exclusion cannot widen.
+Four `Posts` writes were missing when this group landed; they were written the next session — see
+*The system posts twelve served routes owed*. What remains is that `PostAddToChannelMessage`'s
+mention is Go's **notification pass**, not the post: a **re-add** of an existing member still
+answers Go's `mention_count: 1` against our `0` ([D-235]). Masked in the parity suite with Go's
+value asserted, so the exclusion cannot widen.
 
 ### `ReturnStatusOK` is the one success body here that is not encoder-framed
 
@@ -9542,7 +9543,7 @@ Five routes, all served: `PUT /api/v4/channels/{channel_id}`, `/patch`, `/privac
 |---|---|---|
 | `Channel().Update`, `Delete`, `Restore`, `SetDeleteAt`, `upsertPublicChannelT` | `crates/mm-store/src/channel_store.rs` (end of both blocks) | done; `Update` takes `&mut Channel` because Go's `PreUpdate` mutates in place |
 | `GetIncomingByChannel`, `GetOutgoingByChannel` | `crates/mm-store/src/webhook_store.rs` | done; their own statements, because Go omits `LIMIT`/`OFFSET` when either is negative and `DeleteChannel` passes `-1` |
-| `App.UpdateChannel`, `PatchChannel`, `UpdateChannelPrivacy`, `DeleteChannel`, `RestoreChannel` | `crates/mm-app/src/channel_write.rs` | done, minus the six system posts ([D-232]) and the persistent-notification cleanup ([D-233]) |
+| `App.UpdateChannel`, `PatchChannel`, `UpdateChannelPrivacy`, `DeleteChannel`, `RestoreChannel` | `crates/mm-app/src/channel_write.rs` | done; the six system posts and the persistent-notification cleanup landed the next session |
 | the five handlers | `crates/mm-api/src/channel_writes.rs` | done; a licensed installation and two patch branches forward ([D-234]) |
 | 26 cross-server tests and 13 unit tests | `crates/mm-api/tests/parity/channel_writes.rs`, and `#[cfg(test)]` in both new modules | — |
 
@@ -9765,3 +9766,69 @@ the mutation.
 One caution for the next parallel session: `unreferenced-action-registry-kept` SURVIVED in the
 worktree and is CAUGHT against merged `main`. A per-branch mutation verdict is a verdict against
 that branch's test binary, which is smaller than the one that ships.
+
+---
+
+## The system posts twelve served routes owed (2026-09-11)
+
+No new routes. Twelve route+method pairs already served — the six on
+`/channels/{id}/members…` and the five channel-lifecycle writes, plus `updateChannel`'s
+display-name notice — each ended in a `Posts` write Go makes and this server did not. **D-231,
+D-232 and D-233 are paid off and deleted**; what is still owed is the narrower [D-235].
+
+| what | where | status |
+|---|---|---|
+| `SqlPostStore.Save`/`SaveMultiple` for one root post, and `PostPersistentNotification.DeleteByChannel` | `crates/mm-store/src/post_store.rs` (end of both blocks) | done; the insert itself reuses the existing `insert_post` |
+| the slice of `App.CreatePost` a server-constructed post reaches, plus the `posted` event | `crates/mm-app/src/post_write.rs` | `create_system_post` propagates, `post_system_message` swallows — Go has both |
+| the four membership posts | `crates/mm-app/src/channel_member.rs` | done |
+| the six lifecycle posts and the privacy rollback | `crates/mm-app/src/channel_write.rs` | done |
+| `updateChannel`'s display-name notice | `crates/mm-api/src/channel_writes.rs` | it lives in Go's handler, not in `App.UpdateChannel` |
+| 5 cross-server tests, 7 unit tests | `crates/mm-api/tests/parity/system_posts.rs`, and `#[cfg(test)]` in both app modules | — |
+
+### The message text is English here, and that is a deliberate exception to [D-092]
+
+Every other string this server emits for an `i18n.T` id is the **id**. A post body is not an error
+`message` a client ignores — it is stored, and it is what an old client renders — so the twelve
+sentences are English literals beside their call sites. This is not an i18n bundle and must not
+grow into one. The cost is stated in [D-235]: `DeleteChannel` and `RestoreChannel` interpolate the
+**acting user's** locale in Go, so a non-English admin's archive message differs from ours.
+
+### A join post moves the channel without making it unread
+
+`SaveMultiple`'s post-commit `UPDATE Channels` sets `LastPostAt` with `GREATEST` unconditionally
+and adds `count` to `TotalMsgCount`, where `count` is zero when
+`Post.ExcludesFromChannelMessageCount()`. So a join reorders every member's sidebar and leaves the
+unread count alone. **`system_guest_join_channel` and `system_add_guest_to_chan` are not in
+`IsJoinLeaveMessage`**, so a guest's join *does* count — the asymmetry is Go's, and it is the one
+line here a reader is most likely to "fix".
+
+### Which of the four membership posts is written is decided by who asked
+
+`POST /members` with your own `user_id` writes `system_join_channel`; with somebody else's, it
+writes `system_add_to_channel` with four props instead of one. Two of the four are inline in Go and
+two run on `a.Srv().Go`, so **a failed join post fails `POST /members`** and a failed add post does
+not. `ServiceSettings.ExperimentalEnableDefaultChannelLeaveJoinMessages` does not reach any of
+these six routes: it gates `JoinDefaultChannels` and `App.LeaveChannel`, which api4's member routes
+do not call.
+
+### The privacy post makes a rollback reachable that never was
+
+`UpdateChannelPrivacy` flips the type back, restores the `discoverable` flag and re-updates when
+its post fails, then answers the post's error. Nothing could fail while there was no post, so the
+branch was recorded as unreachable; it is ported now. It is also the only one of the six lifecycle
+posts whose error id can reach a response body.
+
+### `updateChannel` posts against the body, not against what it wrote
+
+Go's condition is `oldChannelDisplayName != channel.DisplayName` where `channel` is the **submitted**
+body. A body that omits `display_name` changes nothing and still posts, with an empty new value.
+Pinned by `system_posts::update_channel_posts_the_display_name_it_was_sent`.
+
+### Two things the parity fixtures taught on the first run
+
+**Creating a channel already writes a system post.** `CreateChannelWithUser` runs
+`postJoinChannelMessage` for the creator, so a fresh fixture channel's timeline is not empty; every
+test counts the baseline and slices it off rather than assuming zero.
+
+**Posting as a user whose membership mm-api wrote is a 403 from Go** — [D-190] arriving on
+schedule, in a helper that posts to Go by construction.
