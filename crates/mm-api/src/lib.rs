@@ -67,6 +67,8 @@ pub mod tokens;
 pub mod uploads;
 pub mod usage;
 pub mod users;
+/// Port of `api4/view.go` — the seven integrated-boards routes.
+pub mod views;
 pub mod webhooks;
 /// `GET /api/v4/websocket` — the upgrade, the pumps, and the action router.
 pub mod websocket;
@@ -2162,6 +2164,35 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/permissions/ancillary",
             partially_migrated(post(permissions::append_ancillary_permissions_post)),
+        )
+        // `api.BaseRoutes.ChannelViews` / `ChannelView` / `ChannelViewPosts` (api4/api.go), all
+        // seven registered by `InitView` (api4/view.go:14) — and registered here
+        // **unconditionally**, unlike Go. The `FeatureFlags.IntegratedBoards` gate is the first
+        // statement of each handler instead, and forwards when it is off, so a dark deployment
+        // answers Go's own mux 404 rather than one reproduced here. See [`views`].
+        .route(
+            "/api/v4/channels/{channel_id}/views",
+            partially_migrated_with_ids(
+                &state,
+                get(views::get_views_for_channel).post(views::create_view),
+            ),
+        )
+        .route(
+            "/api/v4/channels/{channel_id}/views/{view_id}",
+            partially_migrated_with_ids(
+                &state,
+                get(views::get_view)
+                    .patch(views::update_view)
+                    .delete(views::delete_view),
+            ),
+        )
+        .route(
+            "/api/v4/channels/{channel_id}/views/{view_id}/posts",
+            partially_migrated_with_ids(&state, get(views::get_posts_for_view)),
+        )
+        .route(
+            "/api/v4/channels/{channel_id}/views/{view_id}/sort_order",
+            partially_migrated_with_ids(&state, post(views::update_view_sort_order)),
         )
         .fallback(proxy::forward_to_go)
         // Outermost, so it sees every response this server produces — including the proxy's,
