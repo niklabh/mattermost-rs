@@ -66,7 +66,18 @@ impl App {
     ///
     /// Everything is counted in **bytes**. `SYMBOLS` includes a space.
     pub fn is_password_valid(&self, password: &str) -> AppResult {
-        let config = self.config();
+        is_password_valid_with_settings(self.config(), password)
+    }
+}
+
+/// Port of `users.IsPasswordValidWithSettings` (app/users/password.go:18), as a free function over
+/// the settings.
+///
+/// Split from [`App::is_password_valid`] so the rules can be tested without a store: every branch
+/// here is pure, and constructing an `App` to reach them needs a `PgPool`, which needs a Tokio
+/// context a `#[test]` does not have.
+fn is_password_valid_with_settings(config: &crate::config::Config, password: &str) -> AppResult {
+    {
         let mut id = String::from("model.user.is_valid.pwd");
         let mut is_error = false;
         let mut is_min_max_error = false;
@@ -114,7 +125,7 @@ impl App {
             std::collections::HashMap::new();
         params.insert(
             "Min".to_owned(),
-            serde_json::Value::from(self.config().password_minimum_length),
+            serde_json::Value::from(config.password_minimum_length),
         );
         Err(Box::new(AppError::new(
             "User.IsValid",
@@ -124,7 +135,9 @@ impl App {
             400,
         )))
     }
+}
 
+impl App {
     /// Port of `App.checkUserPassword` (authentication.go:65).
     ///
     /// # Three outcomes, and the middle one is a 500
@@ -955,14 +968,20 @@ mod tests {
     use super::*;
     use crate::config::Config;
 
-    fn app_with(config: Config) -> App {
-        // A store that is never reached: every test here exercises a pure function.
-        let pool = sqlx::postgres::PgPoolOptions::new()
-            .max_connections(1)
-            .acquire_timeout(std::time::Duration::from_millis(1))
-            .connect_lazy("postgres://unreachable/mattermost")
-            .expect("a lazy pool needs no server");
-        App::with_config(mm_store::SqlStore::from_pool(pool), config)
+    /// The rules, over a bare `Config`. No `App`, and therefore no pool: `App::with_config` builds
+    /// a `PgPool`, and `connect_lazy` panics with "this functionality requires a Tokio context"
+    /// inside a plain `#[test]`. Measured — five of these tests failed that way before
+    /// [`is_password_valid_with_settings`] was split out.
+    struct Rules(Config);
+
+    impl Rules {
+        fn is_password_valid(&self, password: &str) -> AppResult {
+            is_password_valid_with_settings(&self.0, password)
+        }
+    }
+
+    fn app_with(config: Config) -> Rules {
+        Rules(config)
     }
 
     fn strict() -> Config {

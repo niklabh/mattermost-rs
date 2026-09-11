@@ -246,7 +246,11 @@ async fn a_session_revoked_here_is_gone_here_but_lingers_in_gos_cache() {
             .as_u16()
     };
 
-    assert_eq!(me(RUST).await, 401, "the row is gone and we do not cache it");
+    assert_eq!(
+        me(RUST).await,
+        401,
+        "the row is gone and we do not cache it"
+    );
     assert_eq!(
         me(GO).await,
         200,
@@ -458,6 +462,59 @@ async fn a_wrong_current_password_consumes_an_attempt_and_a_right_one_clears_the
         failed_attempts(&user.id).await,
         0,
         "a verified current password clears the counter even when the write is then refused"
+    );
+
+    delete_plain_user(&http, &admin, &user.id).await;
+}
+
+/// The lockout, which is the reason the failed-attempt counter exists and which nothing else in
+/// this suite reaches.
+///
+/// The counter is set to the configured cap behind the API's back — reaching it through the route
+/// would mean ten round trips per server — and the *correct* current password is then offered.
+/// Both servers refuse with **401** `api.user.check_user_login_attempts.too_many.app_error`, not
+/// the 400 a wrong password gets, because the claim is checked before the password is looked at.
+/// A port that checked the password first would answer 200 here and unlock the account.
+#[tokio::test]
+async fn a_locked_account_is_refused_before_its_password_is_checked() {
+    if !stack_enabled() {
+        return;
+    }
+    let http = client();
+    let admin = go_minted_token(&http).await;
+    let (team, _channel) = a_team_and_channel_the_user_is_in(&http, &admin).await;
+    let user = create_plain_user(&http, &admin, &team, "lockedout").await;
+    let path = format!("/api/v4/users/{}/password", user.id);
+
+    let Some(pool) = pool().await else {
+        delete_plain_user(&http, &admin, &user.id).await;
+        return;
+    };
+    // `ServiceSettings.MaximumLoginAttempts` is 10 on this stack and in Go's default, and the
+    // predicate is strictly `<`, so a counter *at* the cap admits no further claim.
+    sqlx::query("UPDATE users SET failedattempts = 10 WHERE id = $1")
+        .bind(&user.id)
+        .execute(&pool)
+        .await
+        .expect("locks the account");
+
+    let body = format!(
+        r#"{{"current_password":"{PLAIN_USER_PASSWORD}","new_password":"Mmrs-Locked-1234"}}"#
+    )
+    .into_bytes();
+    let ((go_status, go_body), (rs_status, rs_body)) =
+        put_both(&http, &user.token, &path, &body).await;
+    assert_eq!(go_status, 401, "a locked account is a 401, not a 400");
+    assert_eq!(rs_status, go_status);
+    let go = assert_error_bodies_match_except_known_gaps(&go_body, &rs_body, "a locked account");
+    assert_eq!(
+        go["id"], "api.user.check_user_login_attempts.too_many.app_error",
+        "the lockout id must survive `UpdatePasswordAsUser`'s rewrite of the mismatch id"
+    );
+    assert_eq!(
+        failed_attempts(&user.id).await,
+        10,
+        "a refused claim must not increment past the cap"
     );
 
     delete_plain_user(&http, &admin, &user.id).await;
@@ -731,6 +788,53 @@ async fn verifying_an_email_publishes_user_updated_and_consumes_the_token() {
         "a consumed verification token must be deleted"
     );
 
+    delete_plain_user(&http, &admin, &user.id).await;
+}
+
+/// An aged verification token is `link_expired` inside the app layer and **`bad_link` on the
+/// wire**, because `verifyUserEmail` wraps every error it gets. The window is the
+/// password-recovery one (24h), not the 48-hour default a reader would assume from
+/// `MaxTokenExipryTime` — so a token aged 25 hours separates the two.
+#[tokio::test]
+async fn an_expired_verification_token_is_refused_identically() {
+    if !stack_enabled() {
+        return;
+    }
+    let http = client();
+    let admin = go_minted_token(&http).await;
+    let (team, _channel) = a_team_and_channel_the_user_is_in(&http, &admin).await;
+    let user = create_plain_user(&http, &admin, &team, "verifyold").await;
+    let email = format!("{}@mmrs.invalid", plain_username("verifyold"));
+
+    let token = mint_token(&http, "email/verify", &email, "verify_email").await;
+    let Some(pool) = pool().await else {
+        delete_plain_user(&http, &admin, &user.id).await;
+        return;
+    };
+    sqlx::query("UPDATE tokens SET createat = createat - $1 WHERE token = $2")
+        .bind(25_i64 * 60 * 60 * 1000)
+        .bind(&token)
+        .execute(&pool)
+        .await
+        .expect("ages the token");
+
+    let body = format!(r#"{{"token":"{token}"}}"#).into_bytes();
+    let ((go_status, go_body), (rs_status, rs_body)) =
+        post_both_raw(&http, &admin, "/api/v4/users/email/verify", &body).await;
+    assert_eq!(go_status, 400);
+    assert_eq!(rs_status, go_status);
+    let go =
+        assert_error_bodies_match_except_known_gaps(&go_body, &rs_body, "an expired verify token");
+    assert_eq!(go["id"], "api.user.verify_email.bad_link.app_error");
+    assert!(
+        !email_verified(&user.id).await,
+        "an expired token must not verify the address"
+    );
+
+    let _ = sqlx::query("DELETE FROM tokens WHERE token = $1")
+        .bind(&token)
+        .execute(&pool)
+        .await;
     delete_plain_user(&http, &admin, &user.id).await;
 }
 
