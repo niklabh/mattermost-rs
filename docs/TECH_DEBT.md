@@ -6871,3 +6871,36 @@ has to mask both columns — `parity::team_member_writes::adding_a_member_agrees
 does, and says so. And the config field itself is **not** read by this port: when the post write
 lands, `Config` needs `experimental_enable_default_channel_leave_join_messages` adding alongside
 the other `ServiceSettings` fields, because both arms of that branch then matter.
+
+## D-250 · The two thread read-state writes are blocked on `countThreadMentions`
+
+**Status** OPEN · **Severity** unported route · **Raised** 2026-09-11 (phase 2, thread writes)
+
+```text
+PUT  /api/v4/users/{user_id}/teams/{team_id}/threads/{thread_id}/read/{timestamp}
+POST /api/v4/users/{user_id}/teams/{team_id}/threads/{thread_id}/set_unread/{post_id}
+```
+
+Both reach `App.UpdateThreadReadForUser` (app/user.go:3234), whose second statement is
+`a.countThreadMentions(rctx, user, post, teamID, timestamp)` (app/post.go:2505). That function
+**writes its result to `ThreadMemberships.UnreadMentions`** — a column the Go server reads on
+every threads-list request — so a partial or approximate port corrupts state shared with the
+still-running Go server rather than merely answering wrongly. It is not a candidate for a
+best-effort stub.
+
+What it needs, none of which exists here:
+
+| Go | where it would land | owner this round |
+|---|---|---|
+| `Group().GetGroups`, `GetGroupsByChannel`, `GetGroupsByTeam` | `crates/mm-store/src/group_store.rs` | not this worktree |
+| `MentionKeywords` / `makeStandardMentionParser` | `crates/mm-app` (~370 lines across four Go files) | unported |
+| `getExplicitMentions` + a Markdown `Inspect` walker | `crates/mm-app` | unported, and the Markdown walker has no crate yet |
+| `Post().GetPostsByThread` | `crates/mm-store/src/post_store.rs` | not this worktree |
+
+`clearPushNotification` (the `UnreadReplies == 0` arm) and the six-key `thread_read_changed`
+event are straightforward once the count exists; the count is the whole blocker.
+
+Both routes stay forwarded to Go. The *other* three routes of the family are served — see
+`crates/mm-api/src/thread_writes.rs` — so `PUT …/threads/read` and both `/following` methods are
+local while these two are not, which is visible as `x-mmrs-served-by` on an otherwise uniform
+path family.
