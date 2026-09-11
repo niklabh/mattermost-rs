@@ -17,6 +17,7 @@ pub mod channel_write;
 pub mod command;
 pub mod common_teams;
 pub mod config;
+pub mod custom_profile_attributes;
 pub mod draft;
 pub mod emoji;
 /// Port of the file-backend half of `app/export.go`.
