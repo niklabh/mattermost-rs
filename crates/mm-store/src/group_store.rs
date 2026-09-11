@@ -30,6 +30,18 @@ pub trait GroupStore {
         user_id: &str,
         channel_id: &str,
     ) -> impl std::future::Future<Output = Result<Vec<String>, StoreError>> + Send;
+
+    /// Port of `SqlGroupStore.AdminRoleGroupsForSyncableMember` (group_store.go:1805) for
+    /// `model.GroupSyncableTypeTeam` — the `GroupTeams`/`TeamId` arm of the same switch.
+    ///
+    /// `TeamService.JoinUserToTeam` (app/teams/teams.go:186) asks this to decide a brand-new
+    /// member's `SchemeAdmin` flag, and it asks it **only for a non-guest**. A guest keeps
+    /// `SchemeAdmin` false whatever their groups say.
+    fn admin_role_groups_for_team_member(
+        &self,
+        user_id: &str,
+        team_id: &str,
+    ) -> impl std::future::Future<Output = Result<Vec<String>, StoreError>> + Send;
 }
 
 /// Postgres-backed implementation.
@@ -79,6 +91,40 @@ impl GroupStore for SqlGroupStore {
             context: format!(
                 "failed to find Group ids for userId={user_id} channelId={channel_id}"
             ),
+            source,
+        })?;
+
+        tracing::Span::current().record("groups", ids.len());
+        Ok(ids)
+    }
+
+    #[tracing::instrument(skip(self), fields(user_id = %user_id, team_id = %team_id, groups))]
+    async fn admin_role_groups_for_team_member(
+        &self,
+        user_id: &str,
+        team_id: &str,
+    ) -> Result<Vec<String>, StoreError> {
+        // The channel arm's four predicates with `GroupTeams`/`TeamId` substituted, and each one
+        // carries the same weight: without `jg.schemeadmin = TRUE` every synced group member
+        // would join their team as a team admin.
+        let ids = sqlx::query_scalar!(
+            r#"
+            SELECT gm.groupid AS "groupid!"
+              FROM groupmembers gm
+              INNER JOIN groupteams jg ON jg.groupid = gm.groupid
+             WHERE gm.userid = $1
+               AND gm.deleteat = 0
+               AND jg.teamid = $2
+               AND jg.deleteat = 0
+               AND jg.schemeadmin = TRUE
+            "#,
+            user_id,
+            team_id
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to find Group ids for userId={user_id} teamId={team_id}"),
             source,
         })?;
 

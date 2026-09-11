@@ -585,6 +585,9 @@ var registry = map[string]any{
 
 	// websocket_request.go
 	"web_socket_request": &model.WebSocketRequest{},
+
+	// team_member.go's batch-add wire type, needed by `POST /teams/{id}/members/batch`.
+	"team_member_with_error": &model.TeamMemberWithError{},
 }
 
 // overrides pins specific fields to semantically valid values, keyed by the

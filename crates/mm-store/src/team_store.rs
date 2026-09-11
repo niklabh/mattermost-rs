@@ -301,6 +301,13 @@ pub trait TeamStore {
         &self,
         member: &TeamMember,
     ) -> impl std::future::Future<Output = Result<TeamMember, StoreError>> + Send;
+
+    /// Port of `SqlTeamStore.SaveMember` (team_store.go:942) — see [`save_member`].
+    fn save_member(
+        &self,
+        member: &TeamMember,
+        max_users_per_team: i64,
+    ) -> impl std::future::Future<Output = Result<TeamMember, StoreError>> + Send;
 }
 
 /// Postgres-backed implementation.
@@ -499,6 +506,15 @@ impl TeamStore for SqlTeamStore {
     #[tracing::instrument(skip_all, fields(team_id = %member.team_id, user_id = %member.user_id))]
     async fn update_member(&self, member: &TeamMember) -> Result<TeamMember, StoreError> {
         update_member(&self.pool, member).await
+    }
+
+    #[tracing::instrument(skip_all, fields(team_id = %member.team_id, user_id = %member.user_id))]
+    async fn save_member(
+        &self,
+        member: &TeamMember,
+        max_users_per_team: i64,
+    ) -> Result<TeamMember, StoreError> {
+        save_member(&self.pool, member, max_users_per_team).await
     }
 }
 
@@ -1896,6 +1912,150 @@ pub async fn update_member(pool: &PgPool, member: &TeamMember) -> Result<TeamMem
         ),
         None => (String::new(), String::new(), String::new()),
     };
+
+    let roles_result = get_team_roles(
+        member.scheme_guest,
+        member.scheme_user,
+        member.scheme_admin,
+        &guest_role,
+        &user_role,
+        &admin_role,
+        &member.explicit_roles,
+    );
+
+    Ok(TeamMember {
+        team_id: member.team_id.clone(),
+        user_id: member.user_id.clone(),
+        roles: roles_result.roles.join(" "),
+        delete_at: member.delete_at,
+        scheme_guest: roles_result.scheme_guest,
+        scheme_user: roles_result.scheme_user,
+        scheme_admin: roles_result.scheme_admin,
+        explicit_roles: roles_result.explicit_roles.join(" "),
+        create_at: member.create_at,
+    })
+}
+
+/// Port of `SqlTeamStore.SaveMember` (team_store.go:942), which is
+/// `SaveMultipleMembers([]{member}, max)` (team_store.go:801) with the slice unwrapped.
+///
+/// Four steps, in Go's order, and the order is observable:
+///
+/// 1. **`IsValid`** — before any query, so a malformed member never consumes a seat.
+/// 2. **The team's scheme defaults**, read for the three role names.
+/// 3. **The seat count, guarded by `maxUsersPerTeam >= 0`.** `COUNT(0)` over `TeamMembers` joined
+///    to `Users`, with `TeamMembers.DeleteAt = 0` **and** `Users.DeleteAt = 0` — so a departed
+///    member and a deactivated user both free a seat. `existing + 1 > max` is
+///    [`StoreError::LimitExceeded`], which the app layer answers **400** to.
+/// 4. **The insert.** Eight columns, and the `Roles` column takes `ExplicitRoles`
+///    (`teamMemberToSlice`, team_store.go:75) — the effective roles are derived on read and never
+///    stored. A unique violation on `(TeamId, UserId)` is [`StoreError::Conflict`], which becomes
+///    `app.team.join_user_to_team.save_member.conflict.app_error` at 400.
+///
+/// As in [`update_member`], the returned member's roles are computed from the **in-memory**
+/// struct plus the scheme defaults; Go never re-selects the row it just wrote.
+#[tracing::instrument(skip(pool, member), fields(team_id = %member.team_id, user_id = %member.user_id))]
+pub async fn save_member(
+    pool: &PgPool,
+    member: &TeamMember,
+    max_users_per_team: i64,
+) -> Result<TeamMember, StoreError> {
+    member.is_valid().map_err(|app_error| StoreError::Invalid {
+        entity: "TeamMember",
+        app_error,
+    })?;
+
+    let defaults = sqlx::query!(
+        r#"
+        SELECT ts.defaultteamguestrole,
+               ts.defaultteamuserrole,
+               ts.defaultteamadminrole
+          FROM teams t
+          LEFT JOIN schemes ts ON t.schemeid = ts.id
+         WHERE t.id = $1
+        "#,
+        member.team_id,
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: "default_team_roles_select".to_owned(),
+        source,
+    })?;
+
+    let (guest_role, user_role, admin_role) = match defaults {
+        Some(row) => (
+            row.defaultteamguestrole.unwrap_or_default(),
+            row.defaultteamuserrole.unwrap_or_default(),
+            row.defaultteamadminrole.unwrap_or_default(),
+        ),
+        None => (String::new(), String::new(), String::new()),
+    };
+
+    if max_users_per_team >= 0 {
+        // Go's `GROUP BY TeamMembers.TeamId` over a one-team `IN` list, with a missing group
+        // meaning zero. `COALESCE` on an aggregate that always returns one row is the same thing.
+        let existing = sqlx::query_scalar!(
+            r#"
+            SELECT COUNT(0) AS "count!"
+              FROM teammembers tm
+              INNER JOIN users u ON tm.userid = u.id
+             WHERE tm.teamid = $1
+               AND tm.deleteat = 0
+               AND u.deleteat = 0
+            "#,
+            member.team_id,
+        )
+        .fetch_one(pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to count users in the teams of the memberships".to_owned(),
+            source,
+        })?;
+
+        // One new member, so Go's `existingMembers + newMembers` is `existing + 1`. Strictly
+        // greater than: a team at exactly the limit still accepts nobody new, and a team one
+        // below accepts one.
+        if existing + 1 > max_users_per_team {
+            return Err(StoreError::LimitExceeded {
+                entity: "TeamMember",
+                size: existing + 1,
+            });
+        }
+    }
+
+    if let Err(source) = sqlx::query!(
+        r#"
+        INSERT INTO teammembers
+            (teamid, userid, roles, deleteat, schemeuser, schemeadmin, schemeguest, createat)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        "#,
+        member.team_id,
+        member.user_id,
+        member.explicit_roles,
+        member.delete_at,
+        member.scheme_user,
+        member.scheme_admin,
+        member.scheme_guest,
+        member.create_at,
+    )
+    .execute(pool)
+    .await
+    {
+        if source
+            .as_database_error()
+            .is_some_and(|db| db.is_unique_violation())
+        {
+            return Err(StoreError::Conflict {
+                resource: "TeamMember",
+                source,
+            });
+        }
+        return Err(StoreError::Db {
+            context: "unable_to_save_team_member".to_owned(),
+            source,
+        });
+    }
 
     let roles_result = get_team_roles(
         member.scheme_guest,

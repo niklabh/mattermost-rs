@@ -30,14 +30,23 @@ use common::{
     login_plain_user, plant_scheme, set_team_scheme, stack_enabled,
 };
 
-/// The one field two otherwise-identical answers must differ in.
+/// The one field two otherwise-identical answers must differ in — plus the `message` of any
+/// **nested** `AppError`, which the top-level comparison helper already excuses.
+///
+/// The graceful batch body embeds an `AppError` per failed user, and this port has no i18n
+/// catalogue: Go answers `"Unable to find the user."` where we answer the id. That is the
+/// standing divergence recorded as D-092; it is masked here rather than skipped, so the `id`,
+/// `status_code` and `detailed_error` of every nested error are still compared.
 fn normalise(value: &serde_json::Value) -> serde_json::Value {
     match value {
         serde_json::Value::Object(map) => {
+            let is_app_error = map.contains_key("id") && map.contains_key("status_code");
             let mut out = serde_json::Map::new();
             for (key, inner) in map {
                 if key == "team_id" {
                     out.insert(key.clone(), serde_json::json!("<team>"));
+                } else if key == "message" && is_app_error {
+                    out.insert(key.clone(), serde_json::json!("<untranslated, D-092>"));
                 } else {
                     out.insert(key.clone(), normalise(inner));
                 }
@@ -926,4 +935,943 @@ async fn the_role_writes_publish_memberrole_updated() {
 /// Every `memberrole_updated` the probe saw, in arrival order.
 fn memberrole_events(probe: &SocketProbe) -> Vec<serde_json::Value> {
     probe.events_named("memberrole_updated")
+}
+
+/// Two teams nobody has joined yet, plus a plain user parked on a third.
+///
+/// The add routes need a user who is **not** a member, and `create_plain_user` always joins the
+/// team it is given — hence the third "home" team, which nothing else in the test touches.
+struct AddPair {
+    go_team: String,
+    rust_team: String,
+    user: String,
+    user_token: String,
+}
+
+async fn add_pair(http: &reqwest::Client, token: &str, tag: &str) -> AddPair {
+    let home = create_team(http, token, &format!("{tag}h")).await;
+    let go_team = create_team(http, token, &format!("{tag}g")).await;
+    let rust_team = create_team(http, token, &format!("{tag}r")).await;
+    let user = create_plain_user(http, token, &home, tag).await;
+    AddPair {
+        go_team,
+        rust_team,
+        user: user.id,
+        user_token: user.token,
+    }
+}
+
+async fn add_cleanup(http: &reqwest::Client, token: &str, fixture: &AddPair) {
+    common::delete_plain_user(http, token, &fixture.user).await;
+}
+
+/// The channel named `name` on `team`, read through `base`.
+async fn channel_named(
+    http: &reqwest::Client,
+    base: &str,
+    token: &str,
+    team: &str,
+    name: &str,
+) -> serde_json::Value {
+    let (status, body) = call(
+        http,
+        base,
+        reqwest::Method::GET,
+        &format!("/api/v4/teams/{team}/channels/name/{name}"),
+        token,
+        None,
+    )
+    .await;
+    assert_eq!(status, 200, "{base} has no {name} on {team}: {body}");
+    serde_json::from_str(body.trim()).expect("a channel")
+}
+
+#[tokio::test]
+async fn adding_a_member_agrees_and_joins_the_default_channels() {
+    if !stack_enabled() {
+        return;
+    }
+    let http = client();
+    let token = go_minted_token(&http).await;
+    let fixture = add_pair(&http, &token, "tmwadd").await;
+    let user = &fixture.user;
+
+    let go = format!("/api/v4/teams/{}/members", fixture.go_team);
+    let rust = format!("/api/v4/teams/{}/members", fixture.rust_team);
+
+    // The body carries the team id and it has to match the path's.
+    let (go_status, go_raw) = call(
+        &http,
+        GO,
+        reqwest::Method::POST,
+        &go,
+        &token,
+        Some(&serde_json::json!({"team_id": fixture.go_team, "user_id": user})),
+    )
+    .await;
+    let (rust_status, rust_raw) = call(
+        &http,
+        RUST,
+        reqwest::Method::POST,
+        &rust,
+        &token,
+        Some(&serde_json::json!({"team_id": fixture.rust_team, "user_id": user})),
+    )
+    .await;
+    assert_eq!(go_status, 201, "Go added the member: {go_raw}");
+    assert_eq!(rust_status, go_status, "the add status differs: {rust_raw}");
+    assert_eq!(
+        go_raw.ends_with('\n'),
+        rust_raw.ends_with('\n'),
+        "`json.NewEncoder(w).Encode` frames with a newline\n go: {go_raw:?}\nrust: {rust_raw:?}"
+    );
+    assert!(
+        rust_raw.ends_with('\n'),
+        "and the framing is the newline one"
+    );
+    let go_member: serde_json::Value = serde_json::from_str(go_raw.trim()).expect("a member");
+    let rust_member: serde_json::Value = serde_json::from_str(rust_raw.trim()).expect("a member");
+    assert_eq!(
+        normalise(&go_member),
+        normalise(&rust_member),
+        "the created member differs\n go: {go_raw}\nrust: {rust_raw}"
+    );
+    // The caller holds `manage_team_roles` on a team it created, so nothing is sanitised and the
+    // roles are the real ones.
+    assert_eq!(rust_member["roles"], "team_user");
+    assert_eq!(rust_member["scheme_user"], true);
+    assert_eq!(rust_member["scheme_admin"], false);
+    assert_eq!(rust_member["delete_at"], 0);
+    assert!(
+        rust_member.get("create_at").is_none(),
+        "`CreateAt` is `json:\"-\"`: {rust_raw}"
+    );
+
+    // **A second add is idempotent** — 201 with the stored member, no write and no event.
+    let (go_status, go_again) = call(
+        &http,
+        GO,
+        reqwest::Method::POST,
+        &go,
+        &token,
+        Some(&serde_json::json!({"team_id": fixture.go_team, "user_id": user})),
+    )
+    .await;
+    let (rust_status, rust_again) = call(
+        &http,
+        RUST,
+        reqwest::Method::POST,
+        &rust,
+        &token,
+        Some(&serde_json::json!({"team_id": fixture.rust_team, "user_id": user})),
+    )
+    .await;
+    assert_eq!(go_status, 201, "a re-add is still Created: {go_again}");
+    assert_eq!(rust_status, go_status, "the re-add status differs");
+    assert_eq!(
+        normalise(&serde_json::from_str(go_again.trim()).expect("a member")),
+        normalise(&serde_json::from_str(rust_again.trim()).expect("a member")),
+        "the re-add answer differs\n go: {go_again}\nrust: {rust_again}"
+    );
+
+    // **The membership landed**, read back through the server that wrote it.
+    let go_stored = member_on(&http, GO, &token, &fixture.go_team, user).await;
+    let rust_stored = member_on(&http, RUST, &token, &fixture.rust_team, user).await;
+    assert_eq!(go_stored, rust_stored, "the stored membership differs");
+
+    // **And so did the default channels.** `JoinDefaultChannels` is a soft error inside the join,
+    // so nothing in the response body would show this going wrong.
+    for name in ["town-square", "off-topic"] {
+        let go_channel = channel_named(&http, GO, &token, &fixture.go_team, name).await;
+        let rust_channel = channel_named(&http, RUST, &token, &fixture.rust_team, name).await;
+        let go_id = go_channel["id"].as_str().expect("an id");
+        let rust_id = rust_channel["id"].as_str().expect("an id");
+
+        let (go_status, go_body) = call(
+            &http,
+            GO,
+            reqwest::Method::GET,
+            &format!("/api/v4/channels/{go_id}/members/{user}"),
+            &token,
+            None,
+        )
+        .await;
+        let (rust_status, rust_body) = call(
+            &http,
+            RUST,
+            reqwest::Method::GET,
+            &format!("/api/v4/channels/{rust_id}/members/{user}"),
+            &token,
+            None,
+        )
+        .await;
+        assert_eq!(go_status, 200, "Go put the user in {name}: {go_body}");
+        assert_eq!(
+            rust_status, go_status,
+            "this server did not put the user in {name}: {rust_body}"
+        );
+        let strip = |raw: &str, channel: &str| -> serde_json::Value {
+            let mut value: serde_json::Value =
+                serde_json::from_str(raw.trim()).expect("a channel member");
+            if let Some(object) = value.as_object_mut() {
+                object.insert("channel_id".to_owned(), serde_json::json!("<channel>"));
+                // `LastUpdateAt` is `GetMillis()` at save time and the two saves are seconds
+                // apart; `MsgCount` follows the channel's own post count, which Go's join system
+                // post moves and this port's does not (D-234).
+                for key in ["last_update_at", "msg_count", "msg_count_root"] {
+                    object.insert(key.to_owned(), serde_json::json!("<moves>"));
+                }
+            }
+            let _ = channel;
+            value
+        };
+        assert_eq!(
+            strip(&go_body, go_id),
+            strip(&rust_body, rust_id),
+            "the {name} membership differs\n go: {go_body}\nrust: {rust_body}"
+        );
+    }
+
+    // **The initial sidebar categories were created**, with Go's deterministic ids.
+    for (base, team) in [(GO, &fixture.go_team), (RUST, &fixture.rust_team)] {
+        let (status, body) = call(
+            &http,
+            base,
+            reqwest::Method::GET,
+            &format!("/api/v4/users/{user}/teams/{team}/channels/categories"),
+            &token,
+            None,
+        )
+        .await;
+        assert_eq!(status, 200, "{base} has no categories: {body}");
+        let categories: serde_json::Value = serde_json::from_str(body.trim()).expect("categories");
+        let order = categories["order"]
+            .as_array()
+            .expect("an order")
+            .iter()
+            .map(|id| id.as_str().unwrap_or_default().to_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            order,
+            vec![
+                format!("favorites_{user}_{team}"),
+                format!("channels_{user}_{team}"),
+                format!("direct_messages_{user}_{team}"),
+            ],
+            "{base} built the wrong initial categories: {body}"
+        );
+    }
+
+    add_cleanup(&http, &token, &fixture).await;
+}
+
+#[tokio::test]
+async fn the_add_bodys_refusals_agree() {
+    if !stack_enabled() {
+        return;
+    }
+    let http = client();
+    let token = go_minted_token(&http).await;
+    let fixture = add_pair(&http, &token, "tmwaddbad").await;
+
+    let go = format!("/api/v4/teams/{}/members", fixture.go_team);
+    let rust = format!("/api/v4/teams/{}/members", fixture.rust_team);
+
+    // A body that is not a `TeamMember` at all: the route's **own** id, not the shared
+    // `invalid_body_param` one.
+    let (go_status, go_raw) = call_raw(&http, GO, reqwest::Method::POST, &go, &token, "[]").await;
+    let (rust_status, rust_raw) =
+        call_raw(&http, RUST, reqwest::Method::POST, &rust, &token, "[]").await;
+    assert_eq!(go_status, 400, "Go refuses a list here: {go_raw}");
+    assert_eq!(rust_status, go_status, "the malformed-body status differs");
+    let go_json: serde_json::Value = serde_json::from_str(&go_raw).expect("an error");
+    assert_eq!(
+        go_json["id"], "api.team.add_team_member.invalid_body.app_error",
+        "the route has its own id: {go_raw}"
+    );
+    common::assert_error_bodies_match_except_known_gaps(
+        go_raw.as_bytes(),
+        rust_raw.as_bytes(),
+        "a malformed add body",
+    );
+
+    // A `team_id` that does not match the path: `invalid_body_param` naming `team_id`, which is
+    // a *different* id from the malformed path segment's `invalid_url_param`.
+    let mismatched = serde_json::json!({
+        "team_id": "y9i4er48tt8bukijy7i3u5y9ar", "user_id": fixture.user
+    });
+    let (go_status, go_raw) = call(
+        &http,
+        GO,
+        reqwest::Method::POST,
+        &go,
+        &token,
+        Some(&mismatched),
+    )
+    .await;
+    assert_eq!(go_status, 400, "Go refuses a mismatched team_id: {go_raw}");
+    let go_json: serde_json::Value = serde_json::from_str(&go_raw).expect("an error");
+    assert_eq!(go_json["id"], "api.context.invalid_body_param.app_error");
+    both(
+        &http,
+        &token,
+        &go,
+        &rust,
+        reqwest::Method::POST,
+        Some(&mismatched),
+        "a team_id that does not match the path",
+    )
+    .await;
+
+    // A `user_id` that is not an id.
+    for bad in ["", "me", "short"] {
+        let go_body = serde_json::json!({"team_id": fixture.go_team, "user_id": bad});
+        let rust_body = serde_json::json!({"team_id": fixture.rust_team, "user_id": bad});
+        let (go_status, go_raw) = call(
+            &http,
+            GO,
+            reqwest::Method::POST,
+            &go,
+            &token,
+            Some(&go_body),
+        )
+        .await;
+        let (rust_status, rust_raw) = call(
+            &http,
+            RUST,
+            reqwest::Method::POST,
+            &rust,
+            &token,
+            Some(&rust_body),
+        )
+        .await;
+        assert_eq!(go_status, 400, "Go refuses user_id={bad:?}: {go_raw}");
+        assert_eq!(rust_status, go_status, "user_id={bad:?} differs");
+        common::assert_error_bodies_match_except_known_gaps(
+            go_raw.as_bytes(),
+            rust_raw.as_bytes(),
+            "an invalid user_id",
+        );
+    }
+
+    // A well-formed user id that names nobody: the *store* misses, and the id is the
+    // `MissingAccountError` constant rather than a translation key.
+    let ghost =
+        serde_json::json!({"team_id": fixture.go_team, "user_id": "y9i4er48tt8bukijy7i3u5y9ar"});
+    let ghost_rust =
+        serde_json::json!({"team_id": fixture.rust_team, "user_id": "y9i4er48tt8bukijy7i3u5y9ar"});
+    let (go_status, go_raw) =
+        call(&http, GO, reqwest::Method::POST, &go, &token, Some(&ghost)).await;
+    let (rust_status, rust_raw) = call(
+        &http,
+        RUST,
+        reqwest::Method::POST,
+        &rust,
+        &token,
+        Some(&ghost_rust),
+    )
+    .await;
+    assert_eq!(
+        go_status, 404,
+        "Go cannot add a user that is not there: {go_raw}"
+    );
+    assert_eq!(rust_status, go_status, "a missing user differs: {rust_raw}");
+    common::assert_error_bodies_match_except_known_gaps(
+        go_raw.as_bytes(),
+        rust_raw.as_bytes(),
+        "a user that does not exist",
+    );
+
+    // A team that does not exist: the *path* is valid, so this is the app layer's 404.
+    let missing_team = "y9i4er48tt8bukijy7i3u5y9ar";
+    let body = serde_json::json!({"team_id": missing_team, "user_id": fixture.user});
+    both(
+        &http,
+        &token,
+        &format!("/api/v4/teams/{missing_team}/members"),
+        &format!("/api/v4/teams/{missing_team}/members"),
+        reqwest::Method::POST,
+        Some(&body),
+        "a team that does not exist",
+    )
+    .await;
+
+    add_cleanup(&http, &token, &fixture).await;
+}
+
+#[tokio::test]
+async fn the_batch_route_agrees_in_both_framings() {
+    if !stack_enabled() {
+        return;
+    }
+    let http = client();
+    let token = go_minted_token(&http).await;
+    let fixture = add_pair(&http, &token, "tmwbatch").await;
+    let user = &fixture.user;
+
+    let go = format!("/api/v4/teams/{}/members/batch", fixture.go_team);
+    let rust = format!("/api/v4/teams/{}/members/batch", fixture.rust_team);
+
+    // An empty list and an oversized one, both refused before anything is read.
+    for (body, what) in [
+        (serde_json::json!([]), "an empty batch"),
+        (
+            serde_json::Value::Array(
+                (0..257)
+                    .map(|_| serde_json::json!({"team_id": fixture.go_team, "user_id": user}))
+                    .collect(),
+            ),
+            "an oversized batch",
+        ),
+    ] {
+        let (go_status, go_raw) =
+            call(&http, GO, reqwest::Method::POST, &go, &token, Some(&body)).await;
+        let (rust_status, rust_raw) = call(
+            &http,
+            RUST,
+            reqwest::Method::POST,
+            &rust,
+            &token,
+            Some(&body),
+        )
+        .await;
+        assert_eq!(go_status, 400, "Go refuses {what}: {go_raw}");
+        assert_eq!(rust_status, go_status, "{what} differs: {rust_raw}");
+        common::assert_error_bodies_match_except_known_gaps(
+            go_raw.as_bytes(),
+            rust_raw.as_bytes(),
+            what,
+        );
+    }
+
+    // The plain (non-graceful) form: a bare list of members, **written not encoded** so there is
+    // no trailing newline.
+    let (go_status, go_raw) = call(
+        &http,
+        GO,
+        reqwest::Method::POST,
+        &go,
+        &token,
+        Some(&serde_json::json!([{"team_id": fixture.go_team, "user_id": user}])),
+    )
+    .await;
+    let (rust_status, rust_raw) = call(
+        &http,
+        RUST,
+        reqwest::Method::POST,
+        &rust,
+        &token,
+        Some(&serde_json::json!([{"team_id": fixture.rust_team, "user_id": user}])),
+    )
+    .await;
+    assert_eq!(go_status, 201, "Go added the batch: {go_raw}");
+    assert_eq!(
+        rust_status, go_status,
+        "the batch status differs: {rust_raw}"
+    );
+    assert!(
+        !go_raw.ends_with('\n'),
+        "`w.Write(js)` leaves no newline: {go_raw:?}"
+    );
+    assert_eq!(
+        go_raw.ends_with('\n'),
+        rust_raw.ends_with('\n'),
+        "the batch framing differs\n go: {go_raw:?}\nrust: {rust_raw:?}"
+    );
+    let go_list: serde_json::Value = serde_json::from_str(&go_raw).expect("a list");
+    let rust_list: serde_json::Value = serde_json::from_str(&rust_raw).expect("a list");
+    assert!(
+        go_list.is_array(),
+        "the plain form is a bare array: {go_raw}"
+    );
+    assert_eq!(
+        normalise(&go_list),
+        normalise(&rust_list),
+        "the batch body differs\n go: {go_raw}\nrust: {rust_raw}"
+    );
+    assert!(
+        go_list[0].get("user_id").is_some() && go_list[0].get("member").is_none(),
+        "the plain form holds members, not wrappers: {go_raw}"
+    );
+
+    // The **graceful** form: a list of `{user_id, member, error}`, with `error: null` on success.
+    // Any non-empty value turns it on, `0` included.
+    let (go_status, go_raw) = call(
+        &http,
+        GO,
+        reqwest::Method::POST,
+        &format!("{go}?graceful=0"),
+        &token,
+        Some(&serde_json::json!([{"team_id": fixture.go_team, "user_id": user}])),
+    )
+    .await;
+    let (rust_status, rust_raw) = call(
+        &http,
+        RUST,
+        reqwest::Method::POST,
+        &format!("{rust}?graceful=0"),
+        &token,
+        Some(&serde_json::json!([{"team_id": fixture.rust_team, "user_id": user}])),
+    )
+    .await;
+    assert_eq!(go_status, 201, "Go answered the graceful batch: {go_raw}");
+    assert_eq!(
+        rust_status, go_status,
+        "the graceful status differs: {rust_raw}"
+    );
+    let go_list: serde_json::Value = serde_json::from_str(&go_raw).expect("a list");
+    let rust_list: serde_json::Value = serde_json::from_str(&rust_raw).expect("a list");
+    assert_eq!(
+        normalise(&go_list),
+        normalise(&rust_list),
+        "the graceful body differs\n go: {go_raw}\nrust: {rust_raw}"
+    );
+    assert!(
+        go_list[0]["error"].is_null(),
+        "a success carries `error: null`, not an absent key: {go_raw}"
+    );
+    assert!(
+        go_list[0].get("error").is_some(),
+        "and the key is present: {go_raw}"
+    );
+    assert_eq!(go_list[0]["user_id"], user.as_str());
+    assert_eq!(go_list[0]["member"]["roles"], "team_user");
+
+    // A **partly refused** graceful batch: one real user and one that does not exist. The good
+    // one is added and the bad one carries an error, in the order submitted.
+    let ghost = "y9i4er48tt8bukijy7i3u5y9ar";
+    let (go_status, go_raw) = call(
+        &http,
+        GO,
+        reqwest::Method::POST,
+        &format!("{go}?graceful=1"),
+        &token,
+        Some(&serde_json::json!([
+            {"team_id": fixture.go_team, "user_id": user},
+            {"team_id": fixture.go_team, "user_id": ghost},
+        ])),
+    )
+    .await;
+    let (rust_status, rust_raw) = call(
+        &http,
+        RUST,
+        reqwest::Method::POST,
+        &format!("{rust}?graceful=1"),
+        &token,
+        Some(&serde_json::json!([
+            {"team_id": fixture.rust_team, "user_id": user},
+            {"team_id": fixture.rust_team, "user_id": ghost},
+        ])),
+    )
+    .await;
+    assert_eq!(
+        rust_status, go_status,
+        "the partly-refused status differs\n go: {go_raw}\nrust: {rust_raw}"
+    );
+    let go_list: serde_json::Value = serde_json::from_str(&go_raw).expect("a list");
+    let rust_list: serde_json::Value = serde_json::from_str(&rust_raw).expect("a list");
+    assert_eq!(
+        normalise(&go_list),
+        normalise(&rust_list),
+        "the partly-refused body differs\n go: {go_raw}\nrust: {rust_raw}"
+    );
+
+    // And the same pair **without** `graceful`: the whole request is the first error, and the
+    // users before it stay added.
+    let (go_status, go_raw) = call(
+        &http,
+        GO,
+        reqwest::Method::POST,
+        &go,
+        &token,
+        Some(&serde_json::json!([
+            {"team_id": fixture.go_team, "user_id": ghost},
+            {"team_id": fixture.go_team, "user_id": user},
+        ])),
+    )
+    .await;
+    let (rust_status, rust_raw) = call(
+        &http,
+        RUST,
+        reqwest::Method::POST,
+        &rust,
+        &token,
+        Some(&serde_json::json!([
+            {"team_id": fixture.rust_team, "user_id": ghost},
+            {"team_id": fixture.rust_team, "user_id": user},
+        ])),
+    )
+    .await;
+    assert!(go_status >= 400, "Go fails the whole batch: {go_raw}");
+    assert_eq!(
+        rust_status, go_status,
+        "the non-graceful failure differs\n go: {go_raw}\nrust: {rust_raw}"
+    );
+    common::assert_error_bodies_match_except_known_gaps(
+        go_raw.as_bytes(),
+        rust_raw.as_bytes(),
+        "a non-graceful batch with a bad id",
+    );
+
+    // A member whose `team_id` names another team: refused with the *user id* in the parameter
+    // name, which is the least guessable error string on either add route.
+    let wrong_team =
+        serde_json::json!([{"team_id": "y9i4er48tt8bukijy7i3u5y9ar", "user_id": user}]);
+    let (go_status, go_raw) = call(
+        &http,
+        GO,
+        reqwest::Method::POST,
+        &go,
+        &token,
+        Some(&wrong_team),
+    )
+    .await;
+    assert_eq!(go_status, 400, "Go refuses a foreign team_id: {go_raw}");
+    both(
+        &http,
+        &token,
+        &go,
+        &rust,
+        reqwest::Method::POST,
+        Some(&wrong_team),
+        "a batch member naming another team",
+    )
+    .await;
+
+    add_cleanup(&http, &token, &fixture).await;
+}
+
+#[tokio::test]
+async fn the_add_permission_matrix_turns_on_who_is_added() {
+    if !stack_enabled() {
+        return;
+    }
+    let http = client();
+    let token = go_minted_token(&http).await;
+    let fixture = add_pair(&http, &token, "tmwaddperm").await;
+    let plain = login_plain_user(&http, "tmwaddperm").await;
+
+    // **A self-join to a team with `AllowOpenInvite` off** needs the *system* permission
+    // `join_private_teams`, which a plain user does not have. Teams are created with
+    // `allow_open_invite` false.
+    let self_body_go = serde_json::json!({"team_id": fixture.go_team, "user_id": fixture.user});
+    let self_body_rust = serde_json::json!({"team_id": fixture.rust_team, "user_id": fixture.user});
+    let (go_status, go_raw) = call(
+        &http,
+        GO,
+        reqwest::Method::POST,
+        &format!("/api/v4/teams/{}/members", fixture.go_team),
+        &plain,
+        Some(&self_body_go),
+    )
+    .await;
+    let (rust_status, rust_raw) = call(
+        &http,
+        RUST,
+        reqwest::Method::POST,
+        &format!("/api/v4/teams/{}/members", fixture.rust_team),
+        &plain,
+        Some(&self_body_rust),
+    )
+    .await;
+    assert_eq!(go_status, 403, "Go refuses a private self-join: {go_raw}");
+    assert_eq!(
+        rust_status, go_status,
+        "the self-join refusal differs: {rust_raw}"
+    );
+    common::assert_error_bodies_match_except_known_gaps(
+        go_raw.as_bytes(),
+        rust_raw.as_bytes(),
+        "a private self-join",
+    );
+
+    // **Open the teams up** and the same request succeeds — `join_public_teams` is in the default
+    // `system_user` role, and the branch is keyed on `AllowOpenInvite` alone.
+    // `PUT /teams/{id}/privacy` is not served here, so both changes go through **Go**: it is the
+    // server with a team cache to keep warm, and this one reads the row fresh every time.
+    for team in [&fixture.go_team, &fixture.rust_team] {
+        let (status, body) = call(
+            &http,
+            GO,
+            reqwest::Method::PUT,
+            &format!("/api/v4/teams/{team}/privacy"),
+            &token,
+            Some(&serde_json::json!({"privacy": "O"})),
+        )
+        .await;
+        assert_eq!(status, 200, "the team could not be opened: {body}");
+    }
+    let (go_status, go_raw) = call(
+        &http,
+        GO,
+        reqwest::Method::POST,
+        &format!("/api/v4/teams/{}/members", fixture.go_team),
+        &plain,
+        Some(&self_body_go),
+    )
+    .await;
+    let (rust_status, rust_raw) = call(
+        &http,
+        RUST,
+        reqwest::Method::POST,
+        &format!("/api/v4/teams/{}/members", fixture.rust_team),
+        &plain,
+        Some(&self_body_rust),
+    )
+    .await;
+    assert_eq!(go_status, 201, "Go allows an open self-join: {go_raw}");
+    assert_eq!(
+        rust_status, go_status,
+        "the open self-join differs: {rust_raw}"
+    );
+    assert_eq!(
+        normalise(&serde_json::from_str(go_raw.trim()).expect("a member")),
+        normalise(&serde_json::from_str(rust_raw.trim()).expect("a member")),
+        "the self-joined member differs\n go: {go_raw}\nrust: {rust_raw}"
+    );
+
+    // **Adding somebody else** needs `add_user_to_team` on the team — which the stock
+    // `team_user` role *does* hold on this deployment, so the plain member succeeds. Measured:
+    // this test asserted a 403 first and Go answered 201.
+    //
+    // What the plain member does **not** hold is `manage_team_roles`, so the answer is run
+    // through `SanitizeRoleData` — and that is the branch worth pinning, because it puts
+    // `delete_at: -1` on the wire for a membership that was just created with `delete_at = 0`.
+    let other = create_plain_user(&http, &token, &fixture.go_team, "tmwaddperm2").await;
+    let mut sanitised = Vec::new();
+    for (base, team) in [(GO, &fixture.go_team), (RUST, &fixture.rust_team)] {
+        let (status, body) = call(
+            &http,
+            base,
+            reqwest::Method::POST,
+            &format!("/api/v4/teams/{team}/members"),
+            &plain,
+            Some(&serde_json::json!({"team_id": team, "user_id": other.id})),
+        )
+        .await;
+        sanitised.push((status, body));
+        let _ = base;
+    }
+    let (go_status, go_raw) = &sanitised[0];
+    let (rust_status, rust_raw) = &sanitised[1];
+    assert_eq!(
+        rust_status, go_status,
+        "adding a third party as a plain member differs
+ go: {go_raw}
+rust: {rust_raw}"
+    );
+    assert_eq!(*go_status, 201, "Go allows it: {go_raw}");
+    assert_eq!(
+        normalise(&serde_json::from_str(go_raw.trim()).expect("a member")),
+        normalise(&serde_json::from_str(rust_raw.trim()).expect("a member")),
+        "the sanitised member differs
+ go: {go_raw}
+rust: {rust_raw}"
+    );
+    let member: serde_json::Value = serde_json::from_str(rust_raw.trim()).expect("a member");
+    assert_eq!(
+        member["delete_at"], -1,
+        "SanitizeRoleData's sentinel is -1, not 0: {rust_raw}"
+    );
+    assert_eq!(member["roles"], "");
+    assert_eq!(member["scheme_user"], false);
+
+    // The batch route sanitises the same way, and its permission check sits **after** the team
+    // read rather than before it.
+    let third = create_plain_user(&http, &token, &fixture.go_team, "tmwaddperm3").await;
+    let mut batched = Vec::new();
+    for (base, team) in [(GO, &fixture.go_team), (RUST, &fixture.rust_team)] {
+        let (status, body) = call(
+            &http,
+            base,
+            reqwest::Method::POST,
+            &format!("/api/v4/teams/{team}/members/batch"),
+            &plain,
+            Some(&serde_json::json!([{"team_id": team, "user_id": third.id}])),
+        )
+        .await;
+        batched.push((status, body));
+        let _ = base;
+    }
+    assert_eq!(
+        batched[1].0, batched[0].0,
+        "the batch add differs
+ go: {}
+rust: {}",
+        batched[0].1, batched[1].1
+    );
+    assert_eq!(
+        normalise(&serde_json::from_str(batched[0].1.trim()).expect("a list")),
+        normalise(&serde_json::from_str(batched[1].1.trim()).expect("a list")),
+        "the batch body differs
+ go: {}
+rust: {}",
+        batched[0].1,
+        batched[1].1
+    );
+    let list: serde_json::Value = serde_json::from_str(batched[1].1.trim()).expect("a list");
+    assert_eq!(
+        list[0]["delete_at"], -1,
+        "the batch sanitises each member too: {}",
+        batched[1].1
+    );
+
+    common::delete_plain_user(&http, &token, &third.id).await;
+    common::delete_plain_user(&http, &token, &other.id).await;
+    add_cleanup(&http, &token, &fixture).await;
+}
+
+#[tokio::test]
+async fn the_add_publishes_added_to_team_twice_and_user_added_per_channel() {
+    if !stack_enabled() {
+        return;
+    }
+    let http = client();
+    let token = go_minted_token(&http).await;
+    let fixture = add_pair(&http, &token, "tmwaddevt").await;
+    let user = &fixture.user;
+
+    // Two probes, because the two events are addressed differently and only one of them is
+    // deterministic on the joining user's own socket.
+    //
+    // `added_to_team` is user-addressed: it reaches that user's connections whatever the hub
+    // thinks about channels. `user_added` is **channel**-addressed, and whether the brand-new
+    // member's own socket is counted as being in the channel yet depends on when each hub last
+    // refreshed its membership view — so it is probed on the **admin's** socket instead, which
+    // has been in `town-square` and `off-topic` since it created the teams.
+    let mut go_socket = SocketProbe::connect(GO, &fixture.user_token).await;
+    let mut rust_socket = SocketProbe::connect(RUST, &fixture.user_token).await;
+    let mut go_admin = SocketProbe::connect(GO, &token).await;
+    let mut rust_admin = SocketProbe::connect(RUST, &token).await;
+
+    for (base, team) in [(GO, &fixture.go_team), (RUST, &fixture.rust_team)] {
+        let (status, body) = call(
+            &http,
+            base,
+            reqwest::Method::POST,
+            &format!("/api/v4/teams/{team}/members"),
+            &token,
+            Some(&serde_json::json!({"team_id": team, "user_id": user})),
+        )
+        .await;
+        assert_eq!(status, 201, "{base} added the member: {body}");
+    }
+    go_socket.collect_for(Duration::from_millis(1200)).await;
+    rust_socket.collect_for(Duration::from_millis(1200)).await;
+    go_admin.collect_for(Duration::from_millis(300)).await;
+    rust_admin.collect_for(Duration::from_millis(300)).await;
+
+    let go_added = go_socket.events_named("added_to_team");
+    let rust_added = rust_socket.events_named("added_to_team");
+    // **Two**: `JoinUserToTeam` publishes one and `AddTeamMember` publishes another on top.
+    assert_eq!(
+        go_added.len(),
+        2,
+        "Go publishes added_to_team twice for one add: {:?}",
+        go_socket.raw
+    );
+    assert_eq!(
+        rust_added.len(),
+        go_added.len(),
+        "the added_to_team count differs: {:?}",
+        rust_socket.raw
+    );
+    assert_eq!(rust_added[0]["broadcast"]["user_id"], user.as_str());
+    assert_eq!(rust_added[0]["broadcast"]["team_id"], "");
+    assert_eq!(rust_added[0]["data"]["user_id"], user.as_str());
+    assert_eq!(
+        rust_added[0]["data"]["team_id"],
+        fixture.rust_team.as_str(),
+        "the payload names the team even though the broadcast does not"
+    );
+    assert_eq!(
+        go_added[0]["broadcast"], rust_added[0]["broadcast"],
+        "the added_to_team broadcast differs"
+    );
+
+    // `JoinDefaultChannels` publishes one channel-addressed `user_added` per default channel —
+    // **without** `omit_users`, so the joining user's own socket sees it. That is the opposite of
+    // `AddChannelMember`, which omits them.
+    let go_user_added = go_admin.events_named("user_added");
+    let rust_user_added = rust_admin.events_named("user_added");
+    assert_eq!(
+        go_user_added.len(),
+        2,
+        "one per default channel: {:?}",
+        go_admin.raw
+    );
+    assert_eq!(
+        rust_user_added.len(),
+        go_user_added.len(),
+        "the user_added count differs: {:?}",
+        rust_admin.raw
+    );
+    assert_eq!(rust_user_added[0]["data"]["user_id"], user.as_str());
+    assert_eq!(
+        rust_user_added[0]["data"]["team_id"],
+        fixture.rust_team.as_str()
+    );
+    assert!(
+        rust_user_added[0]["broadcast"]["omit_users"].is_null(),
+        "the team-join user_added omits nobody: {}",
+        rust_user_added[0]
+    );
+    assert_eq!(
+        rust_user_added[0]["broadcast"]["user_id"], "",
+        "it is addressed to the channel, not the user"
+    );
+    assert!(
+        !rust_user_added[0]["broadcast"]["channel_id"]
+            .as_str()
+            .unwrap_or_default()
+            .is_empty(),
+        "…and the channel id is on the broadcast: {}",
+        rust_user_added[0]
+    );
+
+    // A **re-add publishes nothing from the join** — `alreadyAdded` short-circuits — but
+    // `AddTeamMember`'s own publish still fires, so exactly one more event arrives.
+    for (base, team) in [(GO, &fixture.go_team), (RUST, &fixture.rust_team)] {
+        let (status, _) = call(
+            &http,
+            base,
+            reqwest::Method::POST,
+            &format!("/api/v4/teams/{team}/members"),
+            &token,
+            Some(&serde_json::json!({"team_id": team, "user_id": user})),
+        )
+        .await;
+        assert_eq!(status, 201, "{base} re-added the member");
+    }
+    go_socket.collect_for(Duration::from_millis(1200)).await;
+    rust_socket.collect_for(Duration::from_millis(1200)).await;
+
+    assert_eq!(
+        go_socket.events_named("added_to_team").len(),
+        3,
+        "the re-add published exactly one more: {:?}",
+        go_socket.raw
+    );
+    assert_eq!(
+        rust_socket.events_named("added_to_team").len(),
+        go_socket.events_named("added_to_team").len(),
+        "the re-add event count differs: {:?}",
+        rust_socket.raw
+    );
+    go_admin.collect_for(Duration::from_millis(300)).await;
+    rust_admin.collect_for(Duration::from_millis(300)).await;
+    assert_eq!(
+        go_admin.events_named("user_added").len(),
+        2,
+        "Go published no further user_added for a re-add: {:?}",
+        go_admin.raw
+    );
+    assert_eq!(
+        rust_admin.events_named("user_added").len(),
+        go_admin.events_named("user_added").len(),
+        "a re-add must not re-join the default channels: {:?}",
+        rust_admin.raw
+    );
+
+    add_cleanup(&http, &token, &fixture).await;
 }

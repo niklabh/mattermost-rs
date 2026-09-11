@@ -91,6 +91,17 @@ pub enum StoreError {
         value: String,
     },
 
+    /// Port of `store.NewErrLimitExceeded(what, count, meta)` (store/errors.go).
+    ///
+    /// A write refused because it would take a bounded collection past its limit —
+    /// `SqlTeamStore.SaveMultipleMembers` against `TeamSettings.MaxUsersPerTeam` is the first
+    /// caller. Typed rather than folded into [`StoreError::Argument`] because `JoinUserToTeam`
+    /// branches on it: `errors.As(err, &limitExceededErr)` answers **400**
+    /// `app.team.join_user_to_team.save_member.max_accounts.app_error`, where an untyped store
+    /// failure on the same path is a 500.
+    #[error("{entity} limit exceeded: {size}")]
+    LimitExceeded { entity: &'static str, size: i64 },
+
     /// A `jsonb` column held something the model type cannot represent.
     ///
     /// Go decodes these columns into `model.StringMap` with `encoding/json` and surfaces a
@@ -119,6 +130,11 @@ impl StoreError {
             StoreError::Conflict { resource, .. } => Some(resource),
             _ => None,
         }
+    }
+
+    /// True when a bounded collection refused the write, which the app layer answers 400 to.
+    pub fn is_limit_exceeded(&self) -> bool {
+        matches!(self, StoreError::LimitExceeded { .. })
     }
 
     /// True when a store function refused its input, which the app layer answers 400 to.
