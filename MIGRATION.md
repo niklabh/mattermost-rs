@@ -9765,3 +9765,95 @@ the mutation.
 One caution for the next parallel session: `unreferenced-action-registry-kept` SURVIVED in the
 worktree and is CAUGHT against merged `main`. A per-branch mutation verdict is a verdict against
 that branch's test binary, which is smaller than the one that ships.
+
+## The authentication writes, and the counter that is the lockout (2026-09-11)
+
+`POST /api/v4/users/logout`, `PUT /api/v4/users/{user_id}/password`,
+`POST /api/v4/users/password/reset`, `POST /api/v4/users/email/verify` and
+`POST /api/v4/users/{user_id}/reset_failed_attempts`. 314 → **319 of 764** from this worktree's
+branch point. Two new store surfaces underneath: `mm_store::token_store` — the `Tokens` table,
+which is **not** `user_access_token_store` — and five auth writes appended to `SqlUserStore`.
+
+`POST /api/v4/users/login` is **not** here, and the reason is not effort: `DoLogin` writes
+`Session.Props` from `uasurfer.Parse(r.UserAgent())` — platform, OS and browser strings that
+`GET /users/{id}/sessions` returns verbatim — so byte parity needs a port of a user-agent parser,
+which is the "measurable only by reimplementing the package" case the standing decision says to
+forward. Everything else login needs now exists.
+
+### A password change writes six columns and only one of them was asked for
+
+`SqlUserStore.UpdatePassword` is
+
+```sql
+UPDATE Users SET Password = ?, LastPasswordUpdate = ?, UpdateAt = ?,
+                 AuthData = NULL, AuthService = '', FailedAttempts = 0 WHERE Id = ?
+```
+
+so setting a password **converts the account to e-mail auth and clears the lockout**. That is what
+makes `resetPassword` unlock an account that failed its way to the cap, and what lets an admin move
+a SAML user back to a password. Every route above it answers `{"status":"OK"}` either way, which is
+why the assertions live in `crates/mm-store/tests/db_auth_writes.rs` rather than the parity suite —
+`AuthData` goes to SQL `NULL` and `AuthService` to `''`, two different spellings of "none" in two
+columns, and a port that wrote only `Password` is invisible on the wire.
+
+### The claim is taken before the password is read, and refunded selectively
+
+`DoubleCheckPassword` increments `FailedAttempts` **conditionally on it being below
+`MaximumLoginAttempts`**, refuses if the claim failed, *then* checks the password, and refunds the
+slot for every failure except a credential mismatch. Two consequences a reader would lose by
+reordering: a correct password cannot unlock an account already at the cap (a 401 with the lockout
+id, not the 400 a wrong password gets), and a backend fault or an over-long password cannot lock
+anybody out. `mm_app::App::double_check_password` has the order; the parity suite has both
+consequences.
+
+The store predicate is strictly `<`, so `MaximumLoginAttempts` is the number of attempts
+*allowed*, and `DecrementFailedPasswordAttempts` floors at zero in the `WHERE` clause rather than
+in arithmetic — a `-1` would silently grant an extra attempt and nothing reports the column.
+
+### Three of the five routes require no session at all
+
+`logout`, `resetPassword` and `verifyUserEmail` are `APIHandler`, not `APISessionRequired`:
+somebody following a reset link cannot log in by definition. `auth_writes::OptionalSession` ports
+the `RequireSession: false` path — no token is not an error, a bad token is not either, a **500**
+from the session store still is, and a valid non-OAuth session presented in `?access_token=` is a
+401. `logout` therefore answers 200 to a caller holding nothing, and clears the cookie
+unconditionally, before the revoke and on the error path too.
+
+An **OAuth** session at logout is forwarded: Go's `RevokeAccessToken` also deletes the
+`OAuthAccessData` row, and removing only the session would leave a replayable token behind.
+
+### The error ids are uniform on purpose
+
+An unknown account and a wrong password are one id. A token that never existed and a token of the
+wrong type are one id. **Every** error out of `VerifyEmailFromToken` — including a 500 from the
+store — leaves as one 400 `api.user.verify_email.bad_link.app_error`, because the handler wraps
+rather than returns. Each is an enumeration oracle if split, and `mm_app::auth`'s module docs say
+so at the top so that the next reader does not "improve" one.
+
+Two that are *not* uniform and look like they should be: `already_hashed=true` without the
+permission is a **401** for yourself and a **403** for anybody else, and `resetPasswordFailedAttempts`
+raises a hand-built 403 with its own id for the first permission check and the generic
+`SetPermissionError` for the second.
+
+### `Token.Extra` is Go-cased JSON
+
+`{"UserId":"…","Email":"…"}` — an anonymous struct with no tags, so `encoding/json` uses the field
+identifiers. A port that used the wire casing would parse every live token to the zero value and
+404 them all. Confirmed against a row Go minted rather than read off the source.
+
+Tokens are consumed **only on success**, and the delete's failure is logged and swallowed: the
+password has already committed by then. A refused reset leaves the row, so the link stays
+retryable — asserted for both the expired case and the wrong-type case.
+
+### What the parity suite had to be taught about Go's caches
+
+Five of its fifteen tests failed on the first run, all for the same reason and none of them a port
+bug: Go answers `login`, `GetUser` and `GetSession` from in-process caches that this server's
+writes do not reach. Three tests now call `invalidate_go_caches` explicitly, one reads
+`Users.EmailVerified` out of the table because `SanitizeProfile` strips it from every API response,
+and one asserts the staleness **on purpose** — a session revoked here is still accepted by Go, which
+is [D-237] and is the first time [D-190]'s class has had a credential consequence.
+
+Three more, recorded rather than fixed: [D-235] (no e-mail service, so four send-only routes stay
+with Go and two writes lose a notification), [D-236] (CSRF is checked on no migrated route, which
+predates this work and is written down here for the first time), and [D-237] above.

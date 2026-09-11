@@ -24,7 +24,7 @@
 //! Login, MFA, LDAP, SAML and the e-mails. `App.UpdatePasswordSendEmail` and
 //! `App.SendPasswordReset` both end in `EmailService`, which this tree does not have; the routes
 //! that exist *only* to send an e-mail are forwarded to Go rather than answered, and the ones
-//! that send one as a side effect of a write do the write and log. See [D-219].
+//! that send one as a side effect of a write do the write and log. See [D-235].
 
 use mm_model::session::Session;
 use mm_model::token::{TOKEN_TYPE_PASSWORD_RECOVERY, TOKEN_TYPE_VERIFY_EMAIL, Token};
@@ -387,7 +387,7 @@ impl App {
     ///
     /// The e-mail is a `Srv().Go(...)` goroutine whose failure Go only logs, so it is not part of
     /// the response either way — but it *is* part of what a user experiences, and it is not sent
-    /// here. See [D-219]. The `method` string Go passes is the translated body of that e-mail and
+    /// here. See [D-235]. The `method` string Go passes is the translated body of that e-mail and
     /// has no other reader, so it is not a parameter of this function.
     pub async fn update_password_send_email(
         &self,
@@ -399,7 +399,7 @@ impl App {
             .await?;
         tracing::warn!(
             user_id = %user.id,
-            "password changed; the password-change e-mail Go sends here is not ported (D-219)"
+            "password changed; the password-change e-mail Go sends here is not ported (D-235)"
         );
         Ok(())
     }
@@ -782,10 +782,10 @@ impl App {
         self.verify_user_email(&data.user_id, &email).await?;
 
         if user.email != email {
-            // Go's `SendEmailChangeEmail` goroutine. Not ported — see [D-219].
+            // Go's `SendEmailChangeEmail` goroutine. Not ported — see [D-235].
             tracing::warn!(
                 user_id = %user.id,
-                "email changed by verification; the change notification Go sends is not ported (D-219)"
+                "email changed by verification; the change notification Go sends is not ported (D-235)"
             );
         }
 

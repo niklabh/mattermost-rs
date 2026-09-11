@@ -30,7 +30,7 @@
 //!
 //! Go's `checkCSRFToken` (handlers.go:295) rejects a **cookie**-authenticated non-GET request
 //! that carries neither `X-CSRF-Token` nor `X-Requested-With: XMLHttpRequest`. Nothing in this
-//! port implements it, on these routes or on any migrated write. Recorded as [D-235]; it is a
+//! port implements it, on these routes or on any migrated write. Recorded as [D-236]; it is a
 //! pre-existing gap that these routes inherit rather than introduce, but they are the first where
 //! it is a *credential* change rather than a content one.
 

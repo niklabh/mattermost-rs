@@ -15,7 +15,7 @@
 //! # Tokens are minted by Go and read out of the table
 //!
 //! `POST /users/password/reset/send` and `/users/email/verify/send` are forwarded, not ported
-//! ([D-219]) — they exist only to send an e-mail. They still **save the token before trying to
+//! ([D-235]) — they exist only to send an e-mail. They still **save the token before trying to
 //! send**, so calling Go's route and then reading `Tokens` gives a token minted by the oracle, in
 //! the oracle's own `Extra` encoding, rather than one this suite invented. The password-reset
 //! route answers 500 on a stack with no SMTP and the verification route answers 200; both leave
@@ -206,7 +206,7 @@ async fn logout_answers_two_hundred_to_a_caller_with_no_usable_session() {
 /// `PlatformService` memoises sessions by token, our `DELETE` does not reach that map, and a user
 /// who logs out through mm-api stays authenticated against the Go server for the life of the
 /// cache entry. It is [D-190]'s class with a credential consequence, recorded separately as
-/// [D-236]. The test pins both halves so that neither can change without somebody noticing.
+/// [D-237]. The test pins both halves so that neither can change without somebody noticing.
 #[tokio::test]
 async fn a_session_revoked_here_is_gone_here_but_lingers_in_gos_cache() {
     if !stack_enabled() {
@@ -254,7 +254,7 @@ async fn a_session_revoked_here_is_gone_here_but_lingers_in_gos_cache() {
     assert_eq!(
         me(GO).await,
         200,
-        "D-236: Go's session cache still holds the revoked session — if this ever becomes 401, \
+        "D-237: Go's session cache still holds the revoked session — if this ever becomes 401, \
          the cache is being invalidated and the entry can be closed"
     );
 

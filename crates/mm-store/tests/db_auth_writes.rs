@@ -23,7 +23,7 @@
 //!   invisible until it silently grants an extra attempt.
 //!
 //! The token round trip is here rather than in the parity suite for a different reason: `Save` has
-//! no route behind it (the minting routes stay with Go, [D-219]), so this is its only caller.
+//! no route behind it (the minting routes stay with Go, [D-235]), so this is its only caller.
 
 use mm_model::token::{TOKEN_TYPE_PASSWORD_RECOVERY, Token};
 use mm_store::{TokenStore, UserStore, token_store::SqlTokenStore, user_store::SqlUserStore};

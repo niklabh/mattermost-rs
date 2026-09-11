@@ -28,7 +28,7 @@ use crate::error::StoreError;
 /// `ConsumeOnce`, `Cleanup`, `GetAllTokensByType`, `RemoveAllTokensByType` and
 /// `GetTokenByTypeAndEmail` are not here: the first is the magic-link/SSO path, the second is a
 /// scheduled job, and the rest serve the invitation and password-reset-*send* routes, which stay
-/// with Go for want of an e-mail service ([D-219]). None is reachable from a route this server
+/// with Go for want of an e-mail service ([D-235]). None is reachable from a route this server
 /// answers.
 pub trait TokenStore {
     /// Port of `SqlTokenStore.Save` (tokens_store.go:36).
