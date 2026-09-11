@@ -10492,3 +10492,29 @@ not: `App.UpdateUserRoles`, reached only when `?set_system_admin=true` and the u
 an admin, and `BotStore::permanent_delete` — one `DELETE FROM Bots`, which is the step that makes
 the conversion irreversible. `App.update_password` exists in `mm_app::auth` but under a different
 name from Go's `UpdatePassword`; check which of the four variants matches before calling one.
+
+## A second flake pass, and an assertion that was wrong about Go (2026-09-11)
+
+Twelve full runs on the merge stack, deliberately under load, hunting [D-284]. It never
+reproduced — but three *other* failures did, none of them port bugs, and one of them was a test
+asserting something untrue of the Go server.
+
+`user_get`'s etag pair read the **shared admin**, whose `Users.UpdateAt` a sibling suite bumps;
+when that lands between the unconditional GET and the `If-None-Match` GET the etag has genuinely
+changed and **200 is correct**. The pair retries now, as `fetch_both_stable` does for bytes.
+
+The one worth reading: `bot_writes` asserted `Users.DeleteAt == Users.UpdateAt` exactly, under the
+comment "UpdateActive reads the clock once". It reads it **twice** — `UpdateActive` stamps both
+columns, then `SqlUserStore.Update` calls `PreUpdate`, which re-stamps `UpdateAt` unconditionally
+(`model/user.go:563`). The columns are equal only when two `GetMillis()` calls share a
+millisecond; measured at `470` vs `471`. Our port makes the same two reads in the same order, so
+the parity was exact and only the assertion was false.
+
+Its sibling `bots` failure was the *same* fault: panicking at that assertion skipped the disable
+test's `unplant_bot` cleanup, leaving two disabled bots, which broke a `with.len() == without.len()
++ 1` count elsewhere. One bug, two red tests, and a lock that could not have helped — residue
+outlives it. That count is a subset assertion now.
+
+[D-284] itself now carries the negative result and the one environmental difference worth
+checking: two worktrees shared stack 1 during the round that produced all three reports.
+`scripts/worktree.sh` refuses that configuration as of this session.
