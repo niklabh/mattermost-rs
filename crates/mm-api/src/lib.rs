@@ -2030,10 +2030,34 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/commands/{command_id}",
             partially_migrated_with_ids(&state, get(commands::get_command)),
         )
-        .route("/api/v4/bots", partially_migrated(get(bots::get_bots)))
+        .route(
+            "/api/v4/bots",
+            partially_migrated(get(bots::get_bots).post(bots::create_bot)),
+        )
+        // `BaseRoutes.Bot.Handle("")` carries **three** methods in Go (`GET`, `PUT`, and a
+        // `DELETE` that does not exist), so the `get` and the `put` are one `MethodRouter` here.
+        // Registering them as two `.route` calls on the same path panics at startup.
         .route(
             "/api/v4/bots/{bot_user_id}",
-            partially_migrated_with_ids(&state, get(bots::get_bot)),
+            partially_migrated_with_ids(&state, get(bots::get_bot).put(bots::patch_bot)),
+        )
+        // One segment deeper than `{bot_user_id}`, so there is no precedence question with the
+        // route above — axum matches on the number of segments first.
+        .route(
+            "/api/v4/bots/{bot_user_id}/disable",
+            partially_migrated_with_ids(&state, post(bots::disable_bot)),
+        )
+        .route(
+            "/api/v4/bots/{bot_user_id}/enable",
+            partially_migrated_with_ids(&state, post(bots::enable_bot)),
+        )
+        // `{user_id:[A-Za-z0-9]+}` is the **only** id in this family Go spells with an explicit
+        // charset in `InitBot`; the other two inherit it from `BaseRoutes`. Both are id-shaped, so
+        // `partially_migrated_with_ids` applies the same rule to each — including to the literal
+        // `me`, which is alphanumeric and therefore routed rather than forwarded.
+        .route(
+            "/api/v4/bots/{bot_user_id}/assign/{user_id}",
+            partially_migrated_with_ids(&state, post(bots::assign_bot)),
         )
         .route("/api/v4/jobs", partially_migrated(get(jobs::get_jobs)))
         // `BaseRoutes.Jobs.Handle("/type/{job_type:[A-Za-z0-9_-]+}")` (api4/job.go:28). Two

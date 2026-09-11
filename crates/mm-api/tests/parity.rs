@@ -29,6 +29,7 @@ mod common;
 mod parity {
     pub mod auth_writes;
     pub mod authorized_oauth_apps;
+    pub mod bot_writes;
     pub mod bots;
     pub mod by_ids_lists;
     pub mod channel_autocomplete;
