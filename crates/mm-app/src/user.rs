@@ -648,7 +648,7 @@ impl App {
     ///
     /// All three omit the subject from the broadcast, which is why the third exists at all: the
     /// user who made the change would otherwise learn nothing.
-    async fn send_updated_user_event(&self, user: &mm_model::user::User) {
+    pub(crate) async fn send_updated_user_event(&self, user: &mm_model::user::User) {
         let omit: std::collections::BTreeMap<String, bool> =
             std::iter::once((user.id.clone(), true)).collect();
 
