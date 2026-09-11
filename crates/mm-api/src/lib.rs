@@ -2050,11 +2050,28 @@ pub fn router(state: AppState) -> Router {
         )
         .route(
             "/api/v4/commands",
-            partially_migrated(get(commands::list_commands)),
+            partially_migrated(get(commands::list_commands).post(commands::create_command)),
         )
+        // `POST` is **not** registered here, and that is load-bearing: `/api/v4/commands/execute`
+        // is a static sibling this router does not carry, so a `POST` to it matches this pattern
+        // and reaches the method fallback, which forwards it to Go. Registering `create_command`
+        // on `{command_id}` as well would swallow `executeCommand` instead.
         .route(
             "/api/v4/commands/{command_id}",
-            partially_migrated_with_ids(&state, get(commands::get_command)),
+            partially_migrated_with_ids(
+                &state,
+                get(commands::get_command)
+                    .put(commands::update_command)
+                    .delete(commands::delete_command),
+            ),
+        )
+        .route(
+            "/api/v4/commands/{command_id}/move",
+            partially_migrated_with_ids(&state, put(commands::move_command)),
+        )
+        .route(
+            "/api/v4/commands/{command_id}/regen_token",
+            partially_migrated_with_ids(&state, put(commands::regen_command_token)),
         )
         .route("/api/v4/bots", partially_migrated(get(bots::get_bots)))
         .route(

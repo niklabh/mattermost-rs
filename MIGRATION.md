@@ -10221,3 +10221,74 @@ Plan committed at `scripts/mutations/thread-writes.plan`. Its header records why
 depend on the fixture *planting* non-zero, mutually distinct `LastViewed`, `LastUpdated` and
 `UnreadMentions`: with three zeroes, "left alone", "rewritten to the same value" and "zeroed" are
 the same observation and most of the plan would survive while proving nothing.
+## The slash-command writes (2026-09-11)
+
+`POST /api/v4/commands`, `PUT|DELETE /api/v4/commands/{command_id}`, and the two sub-routes
+`PUT …/move` and `PUT …/regen_token` — five routes, closing the write half of `api4/command.go`.
+`executeCommand` and the two autocomplete routes remain forwarded. New:
+`crates/mm-api/tests/parity/command_writes.rs`, `scripts/mutations/command-writes.plan`; the rest
+extends `command_store.rs`, `mm-app/src/command.rs` and `mm-api/src/commands.rs`.
+
+### The built-in registry is 33 strings, and the parity suite is its oracle
+
+`validateCommandTriggerUniqueness` asks ~35 provider objects for a `*model.Command` and reads
+`.Trigger` and nothing else, so the whole of what the check needs is a list. Two providers return
+`nil` on a stock server, which *frees* their trigger: `/test` needs `EnableTesting` and
+`/exportlink` a feature flag this port does not model ([D-260]). Because a transcribed list is
+exactly the thing that is quietly wrong, `parity::command_writes` posts every entry to both
+servers and demands the same refusal, and posts the two free ones and demands the same
+acceptance. See `BUILT_IN_COMMAND_TRIGGERS` in `crates/mm-app/src/command.rs`.
+
+### The 404-for-a-403 rule is not uniform across the family
+
+Rung one of the ownership ladder — no `manage_own_slash_commands` on the command's team — is a
+404 in all five writes and in `getCommand`. Rung two — not the creator and no `manage_others` —
+is a plain **403** in the writes and a 404 in `getCommand`. So `PUT /commands/{id}` tells two
+refusals apart that `GET /commands/{id}` deliberately does not. `moveCommand` is further out
+still: its `manage_own` check is on the *destination* team and runs before the command is
+fetched, so a caller who fails rung one is refused there with a 403. Measured — the ladder test
+expected 404 and Go answered 403.
+
+### `UpdateAt` is stamped in the store, and that is load-bearing
+
+`App.MoveCommand` and `App.RegenCommandToken` never mention the field; `SqlCommandStore.Update`
+assigns it before validating. Moving that assignment up a layer — the shape the webhook store
+uses — leaves both routes writing a stale `UpdateAt`. `command_store.rs` says so at the trait.
+
+### Go's `SqlCommandStore.Delete` cannot fail
+
+`if err != nil { errors.Wrapf(err, …) }` with the result discarded, so it returns `nil`
+unconditionally and `app.command.deletecommand.internal_error` is dead code. This port returns
+the driver error, which diverges only on a database that is already down. Recorded in the doc
+comment on `CommandStore::delete`, not as debt.
+
+### Every JSON body in this module was missing Go's HTML escaping
+
+`encoding/json` escapes `&`, `<` and `>`; `serde_json::to_string` does not, and a slash command's
+`url` is the field that makes that reachable — `?a=1&b=2` is an ordinary callback. `encoded` now
+goes through `go_json_marshal`, which also fixes the already-shipped `getCommand` and
+`listCommands`. `regenCommandToken` is the one body here written with `w.Write` rather than the
+encoder, so it alone carries no trailing newline and only the token.
+
+### `POST` is deliberately unregistered on `/commands/{command_id}`
+
+`/api/v4/commands/execute` matches that pattern and this router does not carry it, so the method
+fallback is the only thing still forwarding it. `create_command` lives on `/api/v4/commands`;
+registering it on the parameterised path as well would swallow `executeCommand` silently.
+`parity::command_writes::the_execute_route_is_still_forwarded` is the guard.
+
+### Mutation testing, and the survivor that was a bug in the test
+
+**39 run, 36 caught, 3 survived, 0 harness faults** (`scripts/mutations/command-writes.plan`).
+Two survivors are the required no-op controls. The third, `app-update-takes-the-bodys-team`, is a
+documented equivalent mutant: `updateCommand` refuses unless the body's `team_id` already equals
+the old command's, so the copy below it cannot be observed through any request. `plugin_id` — the
+same assignment with no handler guard in front of it — is mutated in its place and is caught.
+
+Two more survived the first run and were **findings about the test**, not equivalents: the move
+test searched for trigger `mmrscolg` while writing `mmrscol{tag}` with `tag` already `colg`, so
+`occupied()` found nothing, took its `else { return; }` meant for a machine with no database, and
+the test passed having run none of its move assertions — including the `team_id` read-back — and
+never reaching its own `sweep` (227 rows had leaked). `occupied` now **panics** on a missing row
+and returns `None` only for a missing `DATABASE_URL`, and the trigger is one binding used both to
+create and to look up. Both mutations are caught since.
