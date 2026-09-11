@@ -1723,6 +1723,31 @@ pub async fn create_direct_channel(
 /// Requires a system-admin token. Panics if Go refuses, because a silently skipped invalidation
 /// would turn this into a flake rather than a failure.
 pub async fn invalidate_go_caches(client: &reqwest::Client, admin_token: &str) {
+    let _go_cache = GO_CACHE.lock().await;
+    invalidate_go_caches_locked(client, admin_token).await;
+}
+
+/// Serialises the tests that make Go **fresh** against the one that asserts Go is **stale**.
+///
+/// [`invalidate_go_caches`]'s "safe for the rest of the suite" argument — invalidation can only
+/// make Go fresher, and every staleness assertion in this suite is one-sided in that direction —
+/// has exactly one counterexample, and it is a credential one.
+/// `auth_writes::a_session_revoked_here_is_gone_here_but_lingers_in_gos_cache` asserts that Go
+/// *still accepts* a session mm-api revoked, which is the tripwire on [D-237]. A concurrent
+/// invalidation from `system_usage` or `channel_creates` purges the very entry that test is
+/// pinning: Go answers 401, and the failure reads as "D-237 can be closed and the cache is being
+/// invalidated" when nothing about D-237 has changed.
+///
+/// Measured on a full-suite run on 2026-09-11, on unchanged code: left `401`, right `200`.
+///
+/// The lock is taken by [`invalidate_go_caches`] itself rather than at its call sites, so a
+/// future caller participates without having to know any of this. A test that must *hold* the
+/// lock across its own assertions takes it and then calls [`invalidate_go_caches_locked`], which
+/// is the same request without the re-acquire that would deadlock it.
+pub static GO_CACHE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// [`invalidate_go_caches`] for a caller already holding [`GO_CACHE`].
+pub async fn invalidate_go_caches_locked(client: &reqwest::Client, admin_token: &str) {
     let response = client
         .post(format!("{GO}/api/v4/caches/invalidate"))
         .header("Authorization", format!("Bearer {admin_token}"))
