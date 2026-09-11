@@ -1,0 +1,60 @@
+# Mutation plan for the three channel-creation routes.
+#
+#   MUTATE_STORE_TARGETS='--test db_channel_creates' \
+#     scripts/mutate-batch.sh scripts/mutations/channel-creates.plan
+#
+# `MUTATE_STORE_TARGETS` narrows the `store` lines to the one binary that covers them; without it
+# `--tests` builds every mm-store test binary per mutation and lets an unrelated one decide the
+# verdict.
+#
+# The decisions worth mutating here are the ones a reader would get backwards:
+#
+#   * the creator's `scheme_admin: true`, which no create response can show;
+#   * the `PublicChannels` upsert, which decides whether a new channel is findable at all;
+#   * the two *different* per-team counts, one in the store and one in the app layer;
+#   * the conflict lookup's missing `DeleteAt` filter, which is why an archived channel keeps
+#     its name;
+#   * the self-DM's single membership row;
+#   * which of `userIds[0]` and the session's user becomes `direct_added`'s `creator_id`;
+#   * the addressing of all three events — user, channel, per-member — where getting it wrong
+#     leaks a channel's existence or delivers to nobody.
+#
+# The last two lines are the no-op controls and must SURVIVE.
+save-skips-the-public-channels-upsert	crates/mm-store/src/channel_store.rs	    upsert_public_channel(&mut tx, channel).await?;\n\n    tx.commit().await.map_err(|source| StoreError::Db {\n        context: "commit_transaction".to_owned(),\n        source,\n    })?;\n\n    Ok(ChannelSave::Saved)	    let _ = &channel;\n\n    tx.commit().await.map_err(|source| StoreError::Db {\n        context: "commit_transaction".to_owned(),\n        source,\n    })?;\n\n    Ok(ChannelSave::Saved)	store	save_propagates_a_public_channel
+save-limit-is-strictly-greater	crates/mm-store/src/channel_store.rs	        if count >= max_channels_per_team {	        if count > max_channels_per_team {	store	the_store_limit_counts_live
+save-limit-counts-archived-channels	crates/mm-store/src/channel_store.rs	             WHERE teamid = $1\n               AND deleteat = 0\n               AND (type = 'O' OR type = 'P')	             WHERE teamid = $1\n               AND deleteat >= 0\n               AND (type = 'O' OR type = 'P')	store	the_store_limit_counts_live
+save-limit-counts-private-channels-only	crates/mm-store/src/channel_store.rs	               AND (type = 'O' OR type = 'P')	               AND (type = 'P' OR type = 'P')	store	the_store_limit_counts_live
+save-conflict-lookup-ignores-archived-holders	crates/mm-store/src/channel_store.rs	         WHERE c.teamid = $1\n           AND c.name = $2	         WHERE c.teamid = $1\n           AND c.name = $2\n           AND c.deleteat = 0	store	save_returns_the_existing_channel
+save-refuses-group-channels-as-well-as-direct	crates/mm-store/src/channel_store.rs	    if channel.channel_type == CHANNEL_TYPE_DIRECT || channel.is_board() {	    if channel.is_group_or_direct() || channel.is_board() {	store	save_refuses_an_archived
+save-validates-before-pre-save	crates/mm-store/src/channel_store.rs	    channel.pre_save();\n    channel\n        .is_valid()	    channel\n        .is_valid()	store	save_propagates_a_public_channel
+save-accepts-a-caller-assigned-id	crates/mm-store/src/channel_store.rs	    if !channel.id.is_empty() && !channel.is_shared() {	    if false {	store	save_refuses_an_archived
+save-direct-keeps-the-callers-team-id	crates/mm-store/src/channel_store.rs	    channel.team_id = String::new();	    channel.team_id = channel.team_id.trim().to_owned();	store	save_direct_channel_writes_both
+save-direct-writes-two-rows-for-a-self-dm	crates/mm-store/src/channel_store.rs	    if member1.user_id != member2.user_id {	    if true {	store	save_direct_channel_writes_both
+save-direct-writes-one-row-for-a-pair	crates/mm-store/src/channel_store.rs	        save_member_on(&mut tx, member1).await?;\n        save_member_on(&mut tx, member2).await?;	        save_member_on(&mut tx, member2).await?;	store	save_direct_channel_writes_both
+save-direct-accepts-any-channel-type	crates/mm-store/src/channel_store.rs	    if channel.channel_type != CHANNEL_TYPE_DIRECT {	    if false {	store	save_direct_channel_writes_both
+count-team-channels-excludes-archived	crates/mm-store/src/channel_store.rs	         WHERE teamid = $1\n           AND type IN ('O', 'P', 'G')	         WHERE teamid = $1\n           AND deleteat = 0\n           AND type IN ('O', 'P', 'G')	store	count_team_channels_includes_archived
+create-channel-does-not-make-the-creator-an-admin	crates/mm-app/src/channel_create.rs	                scheme_admin: true,	                scheme_admin: false,	api	channel_creates
+create-channel-answers-200	crates/mm-api/src/channel_creates.rs	        StatusCode::CREATED,	        StatusCode::OK,	api	channel_creates
+create-response-is-not-newline-framed	crates/mm-api/src/channel_creates.rs	    body.push(b'\\n');	    body.truncate(body.len());	api	channel_creates
+create-channel-skips-the-display-name-check	crates/mm-api/src/channel_creates.rs	    if channel.display_name.is_empty() {\n        return Err(ApiError::invalid_param("display_name"));	    if false {\n        return Err(ApiError::invalid_param("display_name"));	api	channel_creates
+create-channel-accepts-board-and-space-types	crates/mm-api/src/channel_creates.rs	    if channel.is_board() || channel.is_space() {	    if false {	api	channel_creates
+create-channel-private-gate-is-the-public-permission	crates/mm-api/src/channel_creates.rs	        CHANNEL_TYPE_PRIVATE => Some(&PERMISSION_CREATE_PRIVATE_CHANNEL),	        CHANNEL_TYPE_PRIVATE => Some(&PERMISSION_CREATE_PUBLIC_CHANNEL),	api	channel_creates
+discoverable-feature-flag-is-inverted	crates/mm-api/src/channel_creates.rs	        if !FEATURE_FLAG_DISCOVERABLE_CHANNELS {	        if FEATURE_FLAG_DISCOVERABLE_CHANNELS {	api	channel_creates
+create-channel-does-not-trim-the-display-name	crates/mm-app/src/channel_create.rs	        channel.display_name = channel.display_name.trim().to_owned();	        channel.display_name = channel.display_name.to_owned();	api	channel_creates
+create-channel-keeps-the-managed-category-name	crates/mm-app/src/channel_create.rs	            channel.managed_category_name = String::new();	            channel.managed_category_name = channel.managed_category_name.trim().to_owned();	api	channel_creates
+channel-created-is-addressed-to-the-channel	crates/mm-app/src/channel_create.rs	WebSocketEvent::new(WEBSOCKET_EVENT_CHANNEL_CREATED, "", "", user_id, None, "");	WebSocketEvent::new(WEBSOCKET_EVENT_CHANNEL_CREATED, "", user_id, "", None, "");	api	channel_creates
+channel-created-is-not-published	crates/mm-app/src/channel_create.rs	        self.publish(message).await;\n\n        Ok(())\n    }\n\n    /// Port of `app.App.GetNumberOfChannelsOnTeam`	        drop(message);\n\n        Ok(())\n    }\n\n    /// Port of `app.App.GetNumberOfChannelsOnTeam`	api	channel_creates
+direct-added-names-the-teammate-as-creator	crates/mm-app/src/channel_create.rs	        message.add("creator_id", serde_json::Value::String(user_id.to_owned()));	        message.add(\n            "creator_id",\n            serde_json::Value::String(other_user_id.to_owned()),\n        );	api	channel_creates
+direct-added-is-addressed-to-the-creator	crates/mm-app/src/channel_create.rs	            WebSocketEvent::new(WEBSOCKET_EVENT_DIRECT_ADDED, "", &channel.id, "", None, "");	            WebSocketEvent::new(WEBSOCKET_EVENT_DIRECT_ADDED, "", "", user_id, None, "");	api	channel_creates
+direct-handler-parses-the-id-list-sorted	crates/mm-api/src/channel_creates.rs	    let mut user_ids = match non_sorted_array_from_json(&bytes) {	    let mut user_ids = match sorted_array_from_json(&bytes) {	api	channel_creates
+direct-handler-does-not-duplicate-a-lone-self-id	crates/mm-api/src/channel_creates.rs	    if user_ids.len() == 1 && user_ids[0] == session.0.user_id {	    if user_ids.len() == 1 && false {	api	channel_creates
+direct-handler-duplicates-any-lone-id	crates/mm-api/src/channel_creates.rs	    if user_ids.len() == 1 && user_ids[0] == session.0.user_id {	    if user_ids.len() == 1 {	api	channel_creates
+group-added-ids-are-sorted-descending	crates/mm-app/src/channel_create.rs	        sorted.sort_unstable();\n        let json_ids =	        sorted.sort_unstable_by(|a, b| b.cmp(a));\n        let json_ids =	api	channel_creates
+group-added-is-addressed-to-the-channel-only	crates/mm-app/src/channel_create.rs	                WEBSOCKET_EVENT_GROUP_ADDED,\n                "",\n                &channel.id,\n                user_id,	                WEBSOCKET_EVENT_GROUP_ADDED,\n                "",\n                &channel.id,\n                "",	api	channel_creates
+group-channel-shared-is-null-not-false	crates/mm-app/src/channel_create.rs	            shared: Some(false),\n            ..Channel::default()\n        };	            shared: None,\n            ..Channel::default()\n        };	api	channel_creates
+group-minimum-size-is-two	crates/mm-app/src/channel_create.rs	        if user_ids.len() > CHANNEL_GROUP_MAX_USERS || user_ids.len() < CHANNEL_GROUP_MIN_USERS {	        if user_ids.len() > CHANNEL_GROUP_MAX_USERS || user_ids.len() < 2 {	api	channel_creates
+group-maximum-size-is-nine	crates/mm-app/src/channel_create.rs	        if user_ids.len() > CHANNEL_GROUP_MAX_USERS ||	        if user_ids.len() > 9 ||	api	channel_creates
+group-handler-does-not-append-the-caller	crates/mm-api/src/channel_creates.rs	    if !found {\n        user_ids.push(session.0.user_id.clone());\n    }	    if found {\n        user_ids.push(session.0.user_id.clone());\n    }	api	channel_creates
+direct-channel-creator-is-the-other-user	crates/mm-app/src/channel_create.rs	            creator_id: user.id.clone(),	            creator_id: other_user.id.clone(),	api	channel_creates
+control-rename-the-max-channels-binding	crates/mm-app/src/channel_create.rs	        let max = self.config().max_channels_per_team;\n        match self.store().channel().save(channel, max).await {	        let per_team_limit = self.config().max_channels_per_team;\n        match self.store().channel().save(channel, per_team_limit).await {	api	channel_creates
+control-reorder-independent-count-predicates	crates/mm-store/src/channel_store.rs	         WHERE teamid = $1\n           AND type IN ('O', 'P', 'G')	         WHERE type IN ('O', 'P', 'G')\n           AND teamid = $1	store	count_team_channels_includes_archived

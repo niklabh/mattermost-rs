@@ -6599,6 +6599,12 @@ session was a sibling worktree's this session. Nothing else is missing — the m
 `ChannelMemberHistory` row, the two websocket events and the response body are all ported and
 tested.
 
+**`POST /api/v4/channels` owes the same post.** `CreateChannelWithUser` (app/channel.go:193) ends
+in the same `postJoinChannelMessage`, so a channel created through this server has no "joined the
+channel" post. It is invisible in the create response — Go marshals the channel it read before the
+post exists — and visible in that channel's `total_msg_count` and `last_post_at` from the next read
+onward. `parity/channel_creates.rs` never re-reads a created channel's row for that reason.
+
 **Two of the four are not fire-and-forget**, so their absence also removes an error branch: a
 self-add whose join post fails is a failed `POST /members` in Go (`return nil, err`, app/channel.go
 :2044) and a self-removal whose leave post fails is a failed `DELETE` (:3132). Both are unreachable
@@ -6775,3 +6781,48 @@ shape as the feature-flag run that [D-213] describes. Until then the branch is t
 the Go source and not measured, and the one thing a reader should know is that the pin routes check
 it **after** their no-op short circuit, so pinning an already-pinned ancient post is a 200 on both
 servers and only a *change* can hit the 400.
+
+---
+
+## D-235 · `POST /channels/direct` forwards a team-restricted installation
+
+**Status** OPEN · **Severity** coverage gap · **Raised** 2026-09-11 (phase 2, channel creation)
+
+`GetOrCreateDirectChannel` (app/channel.go:361) has a branch for
+`TeamSettings.RestrictDirectMessage == "team"`: unless the caller holds `manage_system`, the two
+users must share a team, *except* when one of them is a bot that a plugin has exempted
+(`IsBotExemptFromDMRestrictions`). `mm_app::App::get_or_create_direct_channel` returns
+`ChannelCreate::Forward` for the whole setting rather than reproducing half of it.
+
+Two things are missing and only one of them is ours to fix:
+
+- `Team().GetCommonTeamIDsForTwoUsers` — a store method this port does not have. It is **not**
+  `get_common_team_ids_for_multiple_users`, which is already ported: the two-user variant filters
+  deleted teams out and the multi-user one does not, so reusing it would allow DMs Go refuses.
+- the bot exemption, which needs the plugin environment — the same wall
+  [`RestrictedDm::Undecidable`] already documents for `CheckIfChannelIsRestrictedDM`.
+
+The setting defaults to `"any"` (config.go:2620), so the forward is unreachable on this stack and
+on a stock server. Paying it off means the store method plus a parity run with the setting changed
+on **both** servers, which is the shape [D-213] describes.
+
+---
+
+## D-236 · A view-restricted caller is forwarded on both message-channel creates
+
+**Status** OPEN · **Severity** coverage gap · **Raised** 2026-09-11 (phase 2, channel creation)
+
+`createDirectChannel` and `createGroupChannel` both call `UserCanSeeOtherUser` (app/user.go:2710),
+which consults `GetViewUsersRestrictions` and — when the caller *is* restricted — asks
+`Team().UserBelongsToTeams` and `Channel().UserBelongsToChannels`. Neither store method is ported,
+so `mm_app::App::user_can_see_other_user` answers `PrepareError::Unreproducible` and both handlers
+forward.
+
+This is the same forward `GET /users/by_auth_data` already takes, and the same reason: the
+restricted branch is reachable only for a guest account or a deployment that has edited
+`system_user`'s permissions. What is new is that it now gates a **write**, so the forward has to be
+returned before anything is created — it is, in `serve_create_direct_channel` and
+`serve_create_group_channel`, both of which decide it before the app layer is called at all.
+
+Paying it off is two store methods and a fixture with a guest account; until then no test on this
+stack can distinguish the refusal from the forward, because nobody here is restricted.

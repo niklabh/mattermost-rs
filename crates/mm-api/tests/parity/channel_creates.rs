@@ -1269,3 +1269,102 @@ async fn the_create_trims_the_display_name_and_blanks_the_managed_category() {
         common::delete_channel(&http, &token, created["id"].as_str().expect("an id")).await;
     }
 }
+
+/// A team whose members may create a **public** channel and not a private one, which is the only
+/// fixture that can tell `create_public_channel` from `create_private_channel`.
+///
+/// # Why this needs a whole team scheme
+///
+/// `SessionHasPermissionToTeam` consults the team membership's roles first and falls back to the
+/// session's *system* roles. On a stock installation `team_user` grants **both** create
+/// permissions and `system_user` grants neither, so every ordinary member passes either check and
+/// swapping the two permissions in the handler is invisible. Measured against the roles table, not
+/// assumed. Narrowing the system roles would change a row every other suite reads; narrowing the
+/// *team* role through a scheme attached to a throwaway team changes nothing outside it.
+///
+/// The mutation this exists for — `create-channel-private-gate-is-the-public-permission` —
+/// SURVIVED the first run of `scripts/mutations/channel-creates.plan` for exactly that reason.
+#[tokio::test]
+async fn the_private_create_is_gated_on_its_own_permission() {
+    if !stack_enabled() {
+        return;
+    }
+    let http = client();
+    let admin = go_minted_token(&http).await;
+
+    let Some(role) = common::plant_role("cpubonly", "create_public_channel").await else {
+        return; // no DATABASE_URL — the planted fixtures cannot be built
+    };
+    let Some(scheme) = common::plant_scheme("team", "cpubonly").await else {
+        return;
+    };
+    let Some(pool) = common::fixture_pool().await else {
+        return;
+    };
+    // `plant_scheme` writes every default role as the empty string; this is the one that decides
+    // what an ordinary member of the team may do.
+    sqlx::query("UPDATE schemes SET defaultteamuserrole = $2 WHERE id = $1")
+        .bind(&scheme)
+        .bind(&role)
+        .execute(&pool)
+        .await
+        .expect("the scheme's team-user role is written");
+
+    let team = create_team(&http, &admin, "cpubonly").await;
+    common::set_team_scheme(&team, Some(&scheme)).await;
+    // The rows were planted underneath Go, whose role and scheme caches predate them. The user is
+    // created *after* the invalidation so its login hydrates the membership through the scheme.
+    common::invalidate_go_caches(&http, &admin).await;
+    let member = create_plain_user(&http, &admin, &team, "cpubonly").await;
+
+    let tag = std::process::id();
+    for (channel_type, expected) in [("O", 201), ("P", 403)] {
+        let go_body = serde_json::json!({
+            "team_id": team,
+            "name": format!("mmrs-gate-go-{}-{tag}", channel_type.to_lowercase()),
+            "display_name": "mmrs gate",
+            "type": channel_type,
+        });
+        let rust_body = serde_json::json!({
+            "team_id": team,
+            "name": format!("mmrs-gate-rs-{}-{tag}", channel_type.to_lowercase()),
+            "display_name": "mmrs gate",
+            "type": channel_type,
+        });
+        let (go_status, go_text, _) =
+            post(&http, GO, &member.token, "/api/v4/channels", &go_body).await;
+        let (rust_status, rust_text, by_rust) =
+            post(&http, RUST, &member.token, "/api/v4/channels", &rust_body).await;
+
+        assert!(by_rust, "{channel_type}: this server must answer it");
+        assert_eq!(
+            go_status, expected,
+            "{channel_type}: Go answers {expected} for a create_public_channel-only member — \
+             {go_text}"
+        );
+        assert_eq!(
+            rust_status, go_status,
+            "{channel_type}: status differs\n  go: {go_text}\n  rs: {rust_text}"
+        );
+        if expected == 201 {
+            assert_eq!(normalise(&body(&go_text)), normalise(&body(&rust_text)));
+            common::delete_channel(&http, &admin, body(&go_text)["id"].as_str().expect("an id"))
+                .await;
+            common::delete_channel(
+                &http,
+                &admin,
+                body(&rust_text)["id"].as_str().expect("an id"),
+            )
+            .await;
+        } else {
+            assert_error_bodies_match_except_known_gaps(
+                go_text.as_bytes(),
+                rust_text.as_bytes(),
+                channel_type,
+            );
+        }
+    }
+
+    common::set_team_scheme(&team, None).await;
+    delete_plain_user(&http, &admin, &member.id).await;
+}
