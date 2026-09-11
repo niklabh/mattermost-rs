@@ -202,6 +202,21 @@ async fn plant_command(tag: &str, team_id: &str, creator_id: &str) -> Option<Str
     Some(id)
 }
 
+/// The id of the live command a team holds under `trigger`, if any — the only way to name a
+/// command created through the *other* server without parsing its response again.
+async fn occupied(team: &str, trigger: &str) -> Option<String> {
+    let pool = common::fixture_pool().await?;
+    let row: Option<(String,)> = sqlx::query_as(
+        r#"SELECT id FROM commands WHERE teamid = $1 AND "trigger" = $2 AND deleteat = 0"#,
+    )
+    .bind(team)
+    .bind(trigger)
+    .fetch_optional(&pool)
+    .await
+    .expect("the lookup runs");
+    row.map(|row| row.0)
+}
+
 /// Remove everything this module wrote — the planted rows *and* the ones the servers created, by
 /// team, since those carry server-minted ids.
 async fn sweep(teams: &[&str]) {
@@ -1095,6 +1110,55 @@ async fn a_move_checks_the_destination_the_caller_and_the_creator() {
         body["id"],
         "api.command.move_command.creator_no_permission.app_error"
     );
+
+    // **The uniqueness check runs against the destination team, not the source.** A command
+    // whose trigger is free where it lives and taken where it is going is refused — and a port
+    // that checked the source team instead would allow every move in this test's happy path and
+    // fail only here.
+    for (base, dest, tag) in [(GO, &go_dest, "colg"), (RUST, &rs_dest, "colr")] {
+        let trigger = format!("mmrscol{tag}");
+        for team in [&source, dest] {
+            let (status, raw) = post(
+                &http,
+                base,
+                &admin,
+                "/api/v4/commands",
+                &create_body(team, &trigger),
+            )
+            .await;
+            assert_eq!(status, 201, "{base}/{trigger} in {team}: {raw}");
+        }
+    }
+    let Some(go_col) = occupied(&source, "mmrscolg").await else {
+        return;
+    };
+    let Some(rs_col) = occupied(&source, "mmrscolr").await else {
+        return;
+    };
+    let (go_status, go_raw) = put(
+        &http,
+        GO,
+        &admin,
+        &format!("/api/v4/commands/{go_col}/move"),
+        &serde_json::json!({ "team_id": go_dest }),
+    )
+    .await;
+    let (rs_status, rs_raw) = put(
+        &http,
+        RUST,
+        &admin,
+        &format!("/api/v4/commands/{rs_col}/move"),
+        &serde_json::json!({ "team_id": rs_dest }),
+    )
+    .await;
+    assert_eq!(go_status, 400, "the destination already has it: {go_raw}");
+    assert_eq!(rs_status, go_status, "{rs_raw}");
+    let body = assert_error_bodies_match_except_known_gaps(
+        go_raw.as_bytes(),
+        rs_raw.as_bytes(),
+        "move onto a taken trigger",
+    );
+    assert_eq!(body["id"], "api.command.duplicate_trigger.app_error");
 
     // The happy path: `{"status":"OK"}`, and the row's `team_id` really moved.
     let (go_status, go_raw) = put(
