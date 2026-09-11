@@ -292,6 +292,20 @@ async fn the_roles_update_agrees_across_every_refusal() {
         "the flags are set from the submitted string, not patched"
     );
 
+    // **The bystander.** The caller is the team's creator and therefore its admin; the write
+    // above must not have touched their row. Without `AND userid = $2` the UPDATE rewrites every
+    // member of the team, and the *target's* read-back looks perfectly correct while the admin
+    // has silently lost `team_admin` and gained `team_post_all`.
+    let me = common::logged_in_user_id();
+    for (base, team) in [(GO, &fixture.go_team), (RUST, &fixture.rust_team)] {
+        let admin = member_on(&http, base, &token, team, me).await;
+        assert_eq!(
+            admin["roles"], "team_user team_admin",
+            "{base} rewrote a bystander's roles: {admin}"
+        );
+        assert_eq!(admin["explicit_roles"], "", "{base} rewrote a bystander");
+    }
+
     // A **system** role is refused by `IsValidUserRoles`… no: `system_admin` *is* a valid role
     // name, so it passes the handler and is refused by `GetRoleByName`'s scheme screen instead —
     // `system_admin` is scheme-managed and is not one of this team's three.
@@ -932,6 +946,21 @@ async fn the_role_writes_publish_memberrole_updated() {
     cleanup(&http, &token, &fixture).await;
 }
 
+/// Every event of one type whose **payload** names this test's team, in arrival order.
+///
+/// The admin's socket belongs to a user who is in many channels on many teams, so it sees the
+/// `user_added` traffic of every other suite running in the same binary. Counting all of them made
+/// this test fail under `--workspace` and pass alone — the documented flake class, and here it was
+/// the test's fault rather than the harness's. Both events carry `team_id` in `data`, which is the
+/// one field that separates this fixture's traffic from everybody else's.
+fn events_for_team(probe: &SocketProbe, event_type: &str, team_id: &str) -> Vec<serde_json::Value> {
+    probe
+        .events_named(event_type)
+        .into_iter()
+        .filter(|frame| frame["data"]["team_id"] == team_id)
+        .collect()
+}
+
 /// Every `memberrole_updated` the probe saw, in arrival order.
 fn memberrole_events(probe: &SocketProbe) -> Vec<serde_json::Value> {
     probe.events_named("memberrole_updated")
@@ -1117,7 +1146,7 @@ async fn adding_a_member_agrees_and_joins_the_default_channels() {
                 object.insert("channel_id".to_owned(), serde_json::json!("<channel>"));
                 // `LastUpdateAt` is `GetMillis()` at save time and the two saves are seconds
                 // apart; `MsgCount` follows the channel's own post count, which Go's join system
-                // post moves and this port's does not (D-234).
+                // post moves and this port's does not (D-241).
                 for key in ["last_update_at", "msg_count", "msg_count_root"] {
                     object.insert(key.to_owned(), serde_json::json!("<moves>"));
                 }
@@ -1129,6 +1158,52 @@ async fn adding_a_member_agrees_and_joins_the_default_channels() {
             strip(&go_body, go_id),
             strip(&rust_body, rust_id),
             "the {name} membership differs\n go: {go_body}\nrust: {rust_body}"
+        );
+    }
+
+    // **The join history rows.** `LogJoinEvent(userID, channelID, ...)` is invisible in every
+    // response body, and its two id arguments are adjacent strings — swapping them writes a row
+    // nothing will ever match. Read straight from the table, which is the only place it shows.
+    for (team, name) in [
+        (&fixture.go_team, "town-square"),
+        (&fixture.rust_team, "town-square"),
+    ] {
+        let base = if team == &fixture.go_team { GO } else { RUST };
+        let channel = channel_named(&http, base, &token, team, name).await;
+        let channel_id = channel["id"].as_str().expect("an id");
+        let rows = common::channel_member_history(channel_id, user)
+            .await
+            .expect("the history table is readable");
+        assert_eq!(
+            rows.len(),
+            1,
+            "{base} wrote {} join rows for {name}",
+            rows.len()
+        );
+        assert!(rows[0].0 > 0, "{base} wrote a zero join time");
+        assert!(rows[0].1.is_none(), "{base} closed the stay immediately");
+    }
+
+    // **The initial sidebar categories were created for the right pair of ids.** The read below
+    // cannot prove this on its own — `GET …/channels/categories` creates them itself when it
+    // finds none, so it self-heals a join that wrote them under swapped ids. The table is the
+    // only place the difference shows, and the *absence* of rows for the swapped pair is the
+    // assertion that catches it.
+    for (base, team) in [(GO, &fixture.go_team), (RUST, &fixture.rust_team)] {
+        let owned = common::sidebar_category_ids(user, team)
+            .await
+            .expect("the sidebar table is readable");
+        assert_eq!(
+            owned.len(),
+            3,
+            "{base} did not create the three initial categories: {owned:?}"
+        );
+        let swapped = common::sidebar_category_ids(team, user)
+            .await
+            .expect("the sidebar table is readable");
+        assert!(
+            swapped.is_empty(),
+            "{base} created categories under swapped ids: {swapped:?}"
         );
     }
 
@@ -1761,8 +1836,8 @@ async fn the_add_publishes_added_to_team_twice_and_user_added_per_channel() {
     go_admin.collect_for(Duration::from_millis(300)).await;
     rust_admin.collect_for(Duration::from_millis(300)).await;
 
-    let go_added = go_socket.events_named("added_to_team");
-    let rust_added = rust_socket.events_named("added_to_team");
+    let go_added = events_for_team(&go_socket, "added_to_team", &fixture.go_team);
+    let rust_added = events_for_team(&rust_socket, "added_to_team", &fixture.rust_team);
     // **Two**: `JoinUserToTeam` publishes one and `AddTeamMember` publishes another on top.
     assert_eq!(
         go_added.len(),
@@ -1792,8 +1867,8 @@ async fn the_add_publishes_added_to_team_twice_and_user_added_per_channel() {
     // `JoinDefaultChannels` publishes one channel-addressed `user_added` per default channel —
     // **without** `omit_users`, so the joining user's own socket sees it. That is the opposite of
     // `AddChannelMember`, which omits them.
-    let go_user_added = go_admin.events_named("user_added");
-    let rust_user_added = rust_admin.events_named("user_added");
+    let go_user_added = events_for_team(&go_admin, "user_added", &fixture.go_team);
+    let rust_user_added = events_for_team(&rust_admin, "user_added", &fixture.rust_team);
     assert_eq!(
         go_user_added.len(),
         2,
@@ -1847,28 +1922,28 @@ async fn the_add_publishes_added_to_team_twice_and_user_added_per_channel() {
     rust_socket.collect_for(Duration::from_millis(1200)).await;
 
     assert_eq!(
-        go_socket.events_named("added_to_team").len(),
+        events_for_team(&go_socket, "added_to_team", &fixture.go_team).len(),
         3,
         "the re-add published exactly one more: {:?}",
         go_socket.raw
     );
     assert_eq!(
-        rust_socket.events_named("added_to_team").len(),
-        go_socket.events_named("added_to_team").len(),
+        events_for_team(&rust_socket, "added_to_team", &fixture.rust_team).len(),
+        events_for_team(&go_socket, "added_to_team", &fixture.go_team).len(),
         "the re-add event count differs: {:?}",
         rust_socket.raw
     );
     go_admin.collect_for(Duration::from_millis(300)).await;
     rust_admin.collect_for(Duration::from_millis(300)).await;
     assert_eq!(
-        go_admin.events_named("user_added").len(),
+        events_for_team(&go_admin, "user_added", &fixture.go_team).len(),
         2,
         "Go published no further user_added for a re-add: {:?}",
         go_admin.raw
     );
     assert_eq!(
-        rust_admin.events_named("user_added").len(),
-        go_admin.events_named("user_added").len(),
+        events_for_team(&rust_admin, "user_added", &fixture.rust_team).len(),
+        events_for_team(&go_admin, "user_added", &fixture.go_team).len(),
         "a re-add must not re-join the default channels: {:?}",
         rust_admin.raw
     );

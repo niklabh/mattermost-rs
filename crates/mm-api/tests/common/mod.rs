@@ -2466,3 +2466,25 @@ pub async fn channel_member_history(
     .ok()?;
     Some(rows)
 }
+
+/// The `SidebarCategories` ids owned by `(user_id, team_id)`, in `SortOrder`.
+///
+/// Read straight from the table because the **route cannot see this**: `GET
+/// …/channels/categories` creates the three initial categories itself when it finds none, so a
+/// join that created them for the wrong pair of ids is indistinguishable from a join that created
+/// them correctly by the time any read happens. Asserting that the *swapped* pair owns no rows is
+/// the only way to pin `create_initial_sidebar_categories(user, team)`'s argument order — and a
+/// mutation swapping them SURVIVED the route-level assertion, which is how this helper came to
+/// exist.
+pub async fn sidebar_category_ids(user_id: &str, team_id: &str) -> Option<Vec<String>> {
+    let pool = fixture_pool().await?;
+    let ids: Vec<String> = sqlx::query_scalar(
+        "SELECT id FROM sidebarcategories WHERE userid = $1 AND teamid = $2 ORDER BY sortorder",
+    )
+    .bind(user_id)
+    .bind(team_id)
+    .fetch_all(&pool)
+    .await
+    .ok()?;
+    Some(ids)
+}

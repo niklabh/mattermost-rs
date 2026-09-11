@@ -495,10 +495,10 @@ impl App {
     /// - **`Users.UpdateAt` is not bumped.** Go's `UpdateUpdateAt` sits between the membership
     ///   write and the sidebar categories, and `update_update_at` does not exist on this port's
     ///   `UserStore`. The consequence is on the wire: `GET /users/{id}` reports the old
-    ///   `update_at` after a join this server served. Recorded as **D-233**.
+    ///   `update_at` after a join this server served. Recorded as **D-240**.
     /// - **The join system post.** `ExperimentalEnableDefaultChannelLeaveJoinMessages` defaults
     ///   to **`true`** (config.go:874), so a stock Go server *does* post "user joined the team"
-    ///   in `town-square`. This port writes no `Posts` rows — **D-231/D-234**.
+    ///   in `town-square`. This port writes no `Posts` rows — **D-231/D-241**.
     /// - **Plugin hooks** (`TeamMemberWillBeAdded`, `UserHasJoinedTeam`) — D-183.
     /// - **ABAC**: the private-team branch is gated on
     ///   [`App::team_membership_access_control_enabled`], a constant `false` on this deployment.
@@ -600,7 +600,7 @@ impl App {
             return Ok(member);
         }
 
-        // `UpdateUpdateAt` would go here — see the note above (D-233).
+        // `UpdateUpdateAt` would go here — see the note above (D-240).
 
         if let Err(err) = self
             .create_initial_sidebar_categories(&user.id, &team.id)
@@ -653,7 +653,7 @@ impl App {
     ///
     /// And it runs only when `userRequestorId != ""` — which is the single-add route's `""`
     /// versus the batch route's session id. Its only *use* in Go is the join system post, which
-    /// this port does not write (D-234), but the lookup and its error branch are on the path
+    /// this port does not write (D-241), but the lookup and its error branch are on the path
     /// regardless and are kept.
     ///
     /// # The `user_added` event here is not `AddChannelMember`'s
@@ -750,7 +750,7 @@ impl App {
                     )
                 })?;
 
-            // The join system post would go here — D-234.
+            // The join system post would go here — D-241.
 
             let mut event =
                 WebSocketEvent::new(WEBSOCKET_EVENT_USER_ADDED, "", &channel.id, "", None, "");

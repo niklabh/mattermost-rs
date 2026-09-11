@@ -13,7 +13,7 @@
 //!   store's syncable-membership query, and Go's refusal names every denied user id in the error
 //!   params — not a thing to guess at.
 //! - **No join system post, and no `Users.UpdateAt` bump.** See
-//!   [`mm_app::App::join_user_to_team`]; recorded as **D-233** and **D-234**.
+//!   [`mm_app::App::join_user_to_team`]; recorded as **D-240** and **D-241**.
 //!
 //! # The two role routes answer `{"status":"OK"}`, not the member
 //!
@@ -539,9 +539,10 @@ pub async fn add_team_members(
 /// Go's shared guest screen on both add routes: a caller **without** `invite_guest` on the team
 /// has to read the target user, and a guest is refused.
 ///
-/// Two things ride on it. The permission read happens whether or not it is needed, once per
-/// *route* on the batch path (hoisted out of the loop in Go) — so a caller holding `invite_guest`
-/// never reads a single user. And the user lookup's 404 id is
+/// Two things ride on it. A caller holding `invite_guest` never reads a single user — Go hoists
+/// that permission read out of the batch loop and this port repeats it per member instead, which
+/// costs a role lookup per member and cannot change the answer, since neither the session nor the
+/// team moves inside the loop. And the user lookup's 404 id is
 /// **`api.team.user.missing_account`**, with `addTeamMembers` as the `where` on *both* routes:
 /// the single-add handler names its sibling there (api4/team.go:1037).
 async fn guest_screen(
