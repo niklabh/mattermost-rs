@@ -6182,7 +6182,7 @@ plausible-looking 400 rather than a compile error. Two options, and the first is
 A `#[derive(Deserialize)]` on a wire type without `#[serde(default)]` should be treated as a
 review error in this project, the same way a missing `rename` is.
 
-## D-169 · `listCommands`'s built-in half needs the slash-command registry
+## D-241 · `listCommands`'s built-in half needs the slash-command registry
 
 **Status** OPEN · **Severity** incomplete · **Raised** 2026-09-08 (phase 2, command reads)
 

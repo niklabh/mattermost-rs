@@ -88,6 +88,19 @@ for b in "$@"; do
     echo "Remember: two .route() calls for one path compile and panic at boot — chain the methods."
     exit 1
   fi
+  # Duplicate ledger numbers. Parallel worktrees cannot see each other's allocations, both
+  # sides append to different parts of the file, and the merge is clean — so nothing catches this
+  # but a check like this one. It happened three times across two entries in one round, and the
+  # citations are load-bearing: a parity suite masks fields with the literal string `<D-235>`.
+  dupes=$(grep -oE '^## D-[0-9]+ ' docs/TECH_DEBT.md | sort | uniq -d)
+  if [ -n "$dupes" ]; then
+    echo "\n  DUPLICATE TECH_DEBT numbers after merging $b:"
+    echo "$dupes" | sed 's/^/    /'
+    echo "  Renumber the newer entry and every citation of it before continuing:"
+    echo "    grep -rn 'D-<n>' --include='*.rs' --include='*.md' . | grep -v ./target"
+    exit 1
+  fi
+
   echo "\n---- suite on stack 0 after $b ----"
   if ! MMRS_STACK=0 "$ROOT/scripts/parity.sh" > /tmp/mmrs-merge-$(echo "$b" | tr / -).log 2>&1; then
     echo "SUITE FAILED after merging $b — see /tmp/mmrs-merge-$(echo "$b" | tr / -).log"

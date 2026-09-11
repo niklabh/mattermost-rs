@@ -21,7 +21,7 @@
 //! plugin-registered ones. Neither is ported, and neither can be synthesised from the database, so
 //! that branch is forwarded. Everything before it is served: the missing `team_id`, the
 //! `view_team` gate, and the `manage_own_slash_commands` gate that `custom_only` adds. See
-//! [D-169].
+//! [D-241].
 
 use axum::extract::{Path, Request, State};
 use axum::http::StatusCode;

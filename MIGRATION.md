@@ -8777,7 +8777,7 @@ Same gate, same error id, and a completely different response: the public route'
 Mutations: **28 run, 25 caught, 2 controls survived**, after one survivor that was a missing entry
 in the licence-boundary list rather than a gap in the code.
 
-Also recorded this session: [D-169] (the built-in slash-command registry, three routes) and
+Also recorded this session: [D-241] (the built-in slash-command registry, three routes) and
 [D-171] (five routes that read in-process state this server does not share).
 
 ## `getInviteInfo` — the only unauthenticated route that returns data (2026-09-09)
@@ -8918,7 +8918,7 @@ route, and `POST /api/v4/file/test` ([D-209]).
 plugin environment; `view.go` (3) and `channel_join_request.go` (4) are behind the
 `IntegratedBoards` and `DiscoverableChannels` feature flags, and turning either on changes routes
 already served ([D-153]); `command.go`'s two autocomplete routes need the built-in slash-command
-registry ([D-169]).
+registry ([D-241]).
 
 **Recorded as not-portable (~7).** [D-171]'s five — `server_busy`, `logs`, `logs/download`,
 `latest_version` and the agents trio's shared cause — plus `/files/{id}/public` ([D-170]), whose
