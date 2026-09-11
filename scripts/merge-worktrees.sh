@@ -43,6 +43,13 @@
 # If both sides end mid-item, the first side needs its own copy of the shared tail. `cargo check`
 # catches it, but it reports the error at the end of the file rather than at the merge.
 #
+# **A third class git does not flag at all**: two agents independently inventing the *same item*
+# in a shared file. Round 2 produced `StoreError::LimitExceeded` twice, with different fields —
+# git conflicted on the variant (one name cannot have two shapes; the richer one wins, and the
+# other side's construction sites need adapting) but **silently kept both copies** of the
+# `is_limit_exceeded()` helper they each added, because the two landed at different offsets. Only
+# `cargo check` caught it: "duplicate definitions with name". A clean merge is not a compiling one.
+#
 # **The other conflict class that is NOT keep-both**: axum panics at startup on a duplicate route path,
 # so two agents adding different methods to the same path must end up as ONE `.route()` call
 # chaining them (`get(a).put(b).delete(c)`), never two calls for the same path. Taking both sides
