@@ -41,6 +41,23 @@ case "${1:-}" in
     NAME="${2:?worktree name}"; STACK="${3:?stack number}"
     DEST="$TREES/$NAME"
     mkdir -p "$TREES"
+
+    # **One stack, one worktree.** Two worktrees pinned to the same stack share a Postgres, a Go
+    # server and — the part that actually bites — one `purge_api_fixtures`, so each run deletes
+    # the other's fixtures mid-test. That configuration existed unnoticed for a whole round
+    # (`probe` and `threads` both on stack 1) and is the leading suspect for [D-284], a websocket
+    # flake three worktrees reported and the merge stack could never reproduce.
+    # Written without zsh glob qualifiers on purpose: the shebang says zsh but this script gets
+    # invoked with `bash scripts/worktree.sh` often enough that a zsh-only `(N)` is a syntax error
+    # half the time it matters.
+    for existing in "$TREES"/*/.mmrs-stack; do
+      [ -f "$existing" ] || continue
+      if [ "$(cat "$existing")" = "$STACK" ]; then
+        echo "stack $STACK is already claimed by $(basename "$(dirname "$existing")")" >&2
+        echo "pick another, or 'scripts/worktree.sh rm' the one that has it." >&2
+        exit 1
+      fi
+    done
     git worktree add -b "wt/$NAME" "$DEST" HEAD
     ln -sfn "$ROOT/reference/mattermost" "$DEST/reference/mattermost"
     ln -sfn "$ROOT/reference/.build"     "$DEST/reference/.build"
