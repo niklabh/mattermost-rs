@@ -341,6 +341,63 @@ pub trait PostStore {
         &self,
         post_id: &str,
     ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlPostPersistentNotificationStore.DeleteByChannel`
+    /// (post_persistent_notification_store.go:124) for the single channel its only reachable
+    /// caller passes — `App.DeleteChannel`, which archives a channel.
+    ///
+    /// Go's `len(channelIds) == 0` early return is not reachable from one id, so it is not here.
+    ///
+    /// The `DeleteAt` is this statement's own `GetMillis()`, **not** the channel's — Go takes a
+    /// fresh clock read inside the store, so the retired notification is stamped later than the
+    /// archive it followed.
+    ///
+    /// Unlike every other cleanup on the archive path, its failure is **not** swallowed: Go
+    /// answers 500 `app.post_persistent_notification.delete_by_channel.app_error`. See
+    /// [`mm_app::App::delete_channel`].
+    fn delete_persistent_notifications_by_channel(
+        &self,
+        channel_id: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlPostStore.Save` (post_store.go:341) and the `SaveMultiple` (:159) it delegates
+    /// to, narrowed to **one root post that is not burn-on-read, prioritised or persistent**.
+    ///
+    /// # `LastPostAt` moves even when the message count does not
+    ///
+    /// The post-commit `UPDATE Channels` sets `LastPostAt`/`LastRootPostAt` with `GREATEST` and
+    /// adds `count` to `TotalMsgCount`/`TotalMsgCountRoot` — and `count` is **zero** for a post
+    /// whose [`Post::excludes_from_channel_message_count`] is true. A join or leave post
+    /// therefore reorders every member's sidebar without making the channel unread, which is the
+    /// single easiest thing to get wrong here: dropping the guard makes every join unread, and
+    /// dropping the `UPDATE` entirely leaves the channel sorted where it was.
+    ///
+    /// `system_guest_join_channel` and `system_add_guest_to_chan` are **not** in
+    /// `IsJoinLeaveMessage`, so a guest's join *does* count. That asymmetry is Go's.
+    ///
+    /// # It is one `GREATEST`, not a `WHERE … <` guard
+    ///
+    /// [`PostStore::update`] moves `LastPostAt` with `WHERE LastPostAt < $1`; this one uses
+    /// `GREATEST` in the `SET`. The two agree on the value and differ on whether a row is
+    /// touched, which matters only to a trigger — but they are different statements and a reader
+    /// copying one into the other would be writing a third thing.
+    ///
+    /// # Go logs and swallows the counter update
+    ///
+    /// `mlog.Warn("Error updating Channel LastPostAt.")` — the post is already committed, so a
+    /// failure here leaves a saved post in a channel whose counters did not move. Reproduced: the
+    /// error is logged and `Ok` is returned.
+    ///
+    /// # What is refused rather than half-done
+    ///
+    /// A non-empty `root_id` (`updateThreadsFromPosts`), a `PostPriority`, a persistent
+    /// notification and `burn_on_read` are each a [`StoreError::Argument`]. None is reachable
+    /// from a system post; a caller that grew one would otherwise get a post with no thread row,
+    /// no priority row and no notification row, silently.
+    fn save(
+        &self,
+        post: &Post,
+    ) -> impl std::future::Future<Output = Result<Post, StoreError>> + Send;
 }
 
 /// Port of `model.GetPostsOptions` (post.go:456), narrowed to the fields the page branch of
@@ -2830,6 +2887,111 @@ impl PostStore for SqlPostStore {
             context: format!("failed to delete notifications for posts [{post_id}]"),
             source,
         })
+    }
+
+    #[tracing::instrument(skip(self), fields(channel_id = %channel_id))]
+    async fn delete_persistent_notifications_by_channel(
+        &self,
+        channel_id: &str,
+    ) -> Result<(), StoreError> {
+        sqlx::query!(
+            r#"
+            UPDATE persistentnotifications
+               SET deleteat = $1
+              FROM posts
+             WHERE posts.id = persistentnotifications.postid
+               AND posts.channelid = $2
+            "#,
+            get_millis(),
+            channel_id,
+        )
+        .execute(&self.pool)
+        .await
+        .map(|_| ())
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to delete notifications for channels [{channel_id}]"),
+            source,
+        })
+    }
+
+    #[tracing::instrument(skip(self, post), fields(post_id, channel_id = %post.channel_id, post_type = %post.post_type))]
+    async fn save(&self, post: &Post) -> Result<Post, StoreError> {
+        // Owned, because `PreSave` mutates the post Go was handed and the caller reads the id
+        // back off it.
+        let mut post = post.clone();
+
+        if !post.id.is_empty() && !post.is_remote() {
+            return Err(StoreError::Argument {
+                entity: "Post",
+                detail: "a post that already carries an id is an ErrInvalidInput on Save",
+            });
+        }
+        if !post.root_id.is_empty() {
+            return Err(StoreError::Argument {
+                entity: "Post",
+                detail: "a reply needs updateThreadsFromPosts, which has no caller here",
+            });
+        }
+        if post.post_type == mm_model::post::POST_TYPE_BURN_ON_READ {
+            return Err(StoreError::Argument {
+                entity: "Post",
+                detail: "a burn-on-read post is a TemporaryPost write",
+            });
+        }
+        if post.get_priority().is_some() {
+            return Err(StoreError::Argument {
+                entity: "Post",
+                detail: "savePostsPriority writes PostsPriority, which has no port",
+            });
+        }
+        if post.get_persistent_notification() == Some(true) {
+            return Err(StoreError::Argument {
+                entity: "Post",
+                detail: "savePostsPersistentNotifications writes PersistentNotifications",
+            });
+        }
+
+        post.pre_save();
+
+        let max_post_size = self.max_post_size().await?;
+        post.is_valid(max_post_size)
+            .map_err(|app_error| StoreError::Invalid {
+                entity: "Post",
+                app_error,
+            })?;
+        // `ValidateProps` would run here. It only logs — see the trait docs on `update`.
+
+        insert_post(&self.pool, &post)
+            .await
+            .map_err(|source| StoreError::Db {
+                context: "failed to save Post".to_owned(),
+                source,
+            })?;
+
+        // Go accumulates this per channel across the batch; with one post the count is the
+        // post's own contribution and the two dates are its `CreateAt`.
+        let count = i64::from(!post.excludes_from_channel_message_count());
+        if let Err(source) = sqlx::query!(
+            r#"
+            UPDATE channels
+               SET lastpostat        = GREATEST($1, lastpostat),
+                   lastrootpostat    = GREATEST($1, lastrootpostat),
+                   totalmsgcount     = totalmsgcount + $2,
+                   totalmsgcountroot = totalmsgcountroot + $2
+             WHERE id = $3
+            "#,
+            post.create_at,
+            count,
+            post.channel_id,
+        )
+        .execute(&self.pool)
+        .await
+        {
+            tracing::warn!(error = %source, "Error updating Channel LastPostAt.");
+        }
+
+        tracing::Span::current().record("post_id", post.id.as_str());
+        Ok(post)
     }
 }
 
