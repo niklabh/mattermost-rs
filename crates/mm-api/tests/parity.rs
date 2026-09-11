@@ -126,6 +126,7 @@ mod parity {
     pub mod terms_of_service;
     pub mod thread_for_user;
     pub mod threads_for_user;
+    pub mod token_writes;
     pub mod user_access_tokens;
     pub mod user_audits;
     pub mod user_by_email;

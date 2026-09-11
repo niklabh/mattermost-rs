@@ -1,4 +1,7 @@
-//! Cross-server parity for the four personal-access-token reads.
+//! Cross-server parity for the four personal-access-token reads. The **writes** are next door in
+//! [`crate::parity::token_writes`], which shares this module's [`TOKENS`] lock and its fixture
+//! helpers — both suites plant into one table that `GET /users/tokens` lists whole, so there is no
+//! per-test scope for either of them to hide behind.
 //!
 //! ```sh
 //! scripts/parity.sh -p mm-api --test parity user_access_tokens
@@ -32,19 +35,24 @@ const NOWHERE: &str = "zzzzzzzzzzzzzzzzzzzzzzzzzz";
 /// **Every test here holds this**, because they all plant into and sweep the same table: one
 /// test's `unplant_tokens` would otherwise delete another's fixture mid-assertion, and
 /// `GET /users/tokens` lists the whole installation so there is no per-test scope to hide behind.
-static TOKENS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+pub(crate) static TOKENS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// The planted secret for a tag. **Distinct per tag**: `UserAccessTokens.Token` is uniquely
 /// indexed, so a shared constant makes the second plant a constraint violation.
 ///
 /// The secret is what this suite is about, so it is recognisable: a body carrying it anywhere is a
 /// leak, and searching for the literal is a stronger assertion than checking a key's absence.
-fn secret_for(tag: &str) -> String {
+pub(crate) fn secret_for(tag: &str) -> String {
     format!("mmrssecret{tag:0>16}")
 }
 
 /// A `UserAccessTokens` row, written directly. Returns the token's id.
-async fn plant_token(tag: &str, user_id: &str, is_active: bool, expires_at: i64) -> Option<String> {
+pub(crate) async fn plant_token(
+    tag: &str,
+    user_id: &str,
+    is_active: bool,
+    expires_at: i64,
+) -> Option<String> {
     let pool = common::fixture_pool().await?;
     let id = format!("mmrstok{tag:0>19}");
     sqlx::query(
@@ -67,7 +75,7 @@ async fn plant_token(tag: &str, user_id: &str, is_active: bool, expires_at: i64)
     Some(id)
 }
 
-async fn unplant_tokens() {
+pub(crate) async fn unplant_tokens() {
     let Some(pool) = common::fixture_pool().await else {
         return;
     };
