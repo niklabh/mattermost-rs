@@ -7011,3 +7011,37 @@ second already exists.
 The function also lives in the wrong file. It is not bot-specific and belongs beside the other
 session code; it is in `mm_app::bot` because the session store was another agent's file in the
 round it was written. Move it when session revocation gets a route of its own.
+
+---
+
+## D-284 · `channel_writes::a_public_channels_archive_is_addressed_to_the_team` misses its event under load
+
+**Status** OPEN · **Severity** test-harness · **Raised** 2026-09-11 (parallel route round)
+
+Three independent worktrees reported this failing on a full run and passing in isolation; it has
+**not** been reproduced on `main`, which is why this is an entry and not a fix.
+
+```
+panicked at crates/mm-api/tests/parity/channel_writes.rs:2105:5:
+no channel_deleted arrived: [ ...48 events... ]
+```
+
+The test holds `common::BROADCAST_STREAM`, connects a `SocketProbe`, archives a public channel and
+waits 5s for a `channel_deleted` addressed to the team. What it collects instead is 48 frames
+belonging to *other* suites — `user_updated` for the `mmrsplaincs*` custom-status users,
+`draft_created`/`draft_deleted`, `preferences_changed`, `sidebar_category_updated`. So the socket
+is alive and receiving; the one frame under test is the only one missing.
+
+**That rules out the obvious reading.** It is not a connect-then-act race (the connection is
+plainly registered) and not the 5s window being too short for traffic in general. The lock does
+not help here: it excludes the other tests that *count* frames, not the many that merely write and
+broadcast.
+
+**What is owed:** reproduce it before changing anything. The hypothesis worth testing first is
+that a team-addressed broadcast is filtered against team membership the hub cached when the
+connection opened, and that a sibling suite removing the shared admin from a team (there are
+several: `teams_for_user.rs:66`, `users_list.rs:76`, `team_name_members.rs:82`) makes the hub drop
+it. If that is it, the fix is a dedicated user for this test rather than the shared admin — not a
+longer timeout, which would only make the flake rarer.
+
+**Where the pin lives:** the doc comment on the test.
