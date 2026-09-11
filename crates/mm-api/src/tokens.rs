@@ -523,15 +523,32 @@ async fn token_lifecycle(
 
 /// Read the whole body, answering Go's invalid-param error if the stream breaks.
 ///
-/// The parameter name is the handler's own: `user_access_token_search` for the search route,
-/// `rotate_user_access_token` for rotate, and for the `MapFromJSON` routes there is no such
-/// branch in Go at all — an unreadable body there is simply an empty map.
+/// For the **typed-decode** routes only. `json.NewDecoder(r.Body).Decode` reads the stream itself,
+/// so a truncated body is the same 400 there as a malformed one, under the same parameter name:
+/// `user_access_token` for create, `rotate_user_access_token` for rotate,
+/// `user_access_token_search` for search.
 async fn read_body(request: axum::extract::Request, parameter: &str) -> Result<Vec<u8>, ApiError> {
     match axum::body::to_bytes(request.into_body(), usize::MAX).await {
         Ok(bytes) => Ok(bytes.to_vec()),
         Err(err) => {
             tracing::warn!(error = %err, "could not read the request body");
             Err(ApiError::invalid_param(parameter))
+        }
+    }
+}
+
+/// The `MapFromJSON` routes' body read, which **cannot fail**.
+///
+/// Go hands `r.Body` to `MapFromJSON`, which discards the decoder's error and returns an allocated
+/// empty map — so a truncated stream there is not a 400, it is an empty `token_id`, and therefore
+/// the family's 404. [`read_body`]'s 400 would be a divergence on revoke, disable and enable, so
+/// they do not use it.
+async fn body_or_empty(request: axum::extract::Request) -> Vec<u8> {
+    match axum::body::to_bytes(request.into_body(), usize::MAX).await {
+        Ok(bytes) => bytes.to_vec(),
+        Err(err) => {
+            tracing::warn!(error = %err, "could not read the request body; Go reads it as `{{}}`");
+            Vec::new()
         }
     }
 }
@@ -547,10 +564,7 @@ pub async fn revoke_user_access_token(
     session: AuthenticatedSession,
     request: axum::extract::Request,
 ) -> Response {
-    let bytes = match read_body(request, "token_id").await {
-        Ok(bytes) => bytes,
-        Err(err) => return err.into_response(),
-    };
+    let bytes = body_or_empty(request).await;
     let token = match token_lifecycle(
         &state,
         &session,
@@ -579,10 +593,7 @@ pub async fn disable_user_access_token(
     session: AuthenticatedSession,
     request: axum::extract::Request,
 ) -> Response {
-    let bytes = match read_body(request, "token_id").await {
-        Ok(bytes) => bytes,
-        Err(err) => return err.into_response(),
-    };
+    let bytes = body_or_empty(request).await;
     let token = match token_lifecycle(
         &state,
         &session,
@@ -613,10 +624,7 @@ pub async fn enable_user_access_token(
     session: AuthenticatedSession,
     request: axum::extract::Request,
 ) -> Response {
-    let bytes = match read_body(request, "token_id").await {
-        Ok(bytes) => bytes,
-        Err(err) => return err.into_response(),
-    };
+    let bytes = body_or_empty(request).await;
     let token = match token_lifecycle(
         &state,
         &session,
