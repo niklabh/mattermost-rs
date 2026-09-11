@@ -19,6 +19,7 @@ pub mod commands;
 pub mod common_teams;
 pub mod compliance;
 pub mod connected_workspaces;
+pub mod custom_profile_attributes;
 pub mod data_retention;
 pub mod drafts;
 pub mod emoji;
@@ -75,7 +76,7 @@ use axum::Router;
 use axum::extract::{RawPathParams, Request, State};
 use axum::middleware::Next;
 use axum::response::Response;
-use axum::routing::{MethodRouter, get, post, put};
+use axum::routing::{MethodRouter, get, patch, post, put};
 use mm_app::App;
 
 /// Shared state. Cloned per request, so every field is cheap to clone — `reqwest::Client` and
@@ -1979,6 +1980,36 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/custom_profile_attributes/group",
             partially_migrated(get(gated_reads::get_cpa_group)),
+        )
+        // The other seven routes of `api4/custom_profile_attributes.go`. Registered beside the
+        // `/group` read they share a licence contract with, and served only while this
+        // installation is unlicensed — see `crate::custom_profile_attributes`.
+        .route(
+            "/api/v4/custom_profile_attributes/fields",
+            partially_migrated(
+                get(custom_profile_attributes::list_cpa_fields)
+                    .post(custom_profile_attributes::create_cpa_field),
+            ),
+        )
+        .route(
+            "/api/v4/custom_profile_attributes/fields/{field_id}",
+            partially_migrated_with_ids(
+                &state,
+                patch(custom_profile_attributes::patch_cpa_field)
+                    .delete(custom_profile_attributes::delete_cpa_field),
+            ),
+        )
+        .route(
+            "/api/v4/custom_profile_attributes/values",
+            partially_migrated(patch(custom_profile_attributes::patch_cpa_values)),
+        )
+        .route(
+            "/api/v4/users/{user_id}/custom_profile_attributes",
+            partially_migrated_with_ids(
+                &state,
+                get(custom_profile_attributes::list_cpa_values)
+                    .patch(custom_profile_attributes::patch_cpa_values_for_user),
+            ),
         )
         // Four segments under `/users`, so it shadows none of the `{user_id}` routes; `APIHandler`
         // again, so no session extractor.
