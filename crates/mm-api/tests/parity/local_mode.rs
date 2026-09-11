@@ -60,6 +60,34 @@ fn sockets_enabled() -> bool {
     }
 }
 
+/// One request over one socket, with a JSON body.
+async fn post_over_socket(
+    socket: &std::path::Path,
+    path: &str,
+    body: &'static str,
+) -> (u16, axum::http::HeaderMap, Vec<u8>) {
+    let request = axum::http::Request::builder()
+        .method("POST")
+        .uri(path)
+        .header("Host", "localhost")
+        .header("Content-Type", "application/json")
+        .header("Content-Length", body.len().to_string())
+        .body(axum::body::Body::from(body))
+        .expect("request builds");
+
+    let response = mm_api::local::send_over_unix(socket, request)
+        .await
+        .unwrap_or_else(|e| panic!("POST {path} over {}: {e}", socket.display()));
+
+    let status = response.status().as_u16();
+    let headers = response.headers().clone();
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("body reads")
+        .to_vec();
+    (status, headers, body)
+}
+
 /// One request over one socket, returning `(status, headers, body)`.
 async fn over_socket(
     socket: &std::path::Path,
@@ -205,6 +233,26 @@ async fn the_socket_carries_gos_security_headers() {
             "{method} {path}: and Go agrees"
         );
     }
+}
+
+/// `clearServerBusy`'s body is `{"status":"OK"}`, with no trailing newline, on both sockets.
+///
+/// A `DELETE` on an idle server is a no-op on either side, so this is safe to run beside
+/// everything else — and it is the only comparison that sees `web.ReturnStatusOK` on the local
+/// router at all. A body assertion, not a status one: an encoder instead of a bare write adds a
+/// newline that nothing else here would notice.
+#[tokio::test]
+async fn the_clear_body_is_status_ok_on_both_sockets() {
+    if !sockets_enabled() {
+        return;
+    }
+    let _guard = BUSY_STATE.lock().await;
+    let ((go_status, go_body), (rust_status, rust_body)) =
+        both("DELETE", "/api/v4/server_busy").await;
+
+    assert_eq!((go_status, rust_status), (200, 200));
+    assert_eq!(String::from_utf8_lossy(&rust_body), r#"{"status":"OK"}"#);
+    assert_eq!(go_body, rust_body, "no trailing newline on either side");
 }
 
 /// `getAppliedSchemaMigrations` over the socket, where the permission check is satisfied by the
@@ -377,6 +425,38 @@ async fn an_unmigrated_local_route_is_forwarded_to_go() {
     assert_forwarded_body_is_gos(&go_body, &rust_body, "/api/v4/users/me");
 }
 
+/// A forwarded **POST with a body** reaches Go intact.
+///
+/// Every other forward in this file is a bodyless `GET`, under which the hop-by-hop filter is
+/// indistinguishable from no filter at all: there is no inbound `Content-Length` to carry, so
+/// carrying it changes nothing. A mutation that stopped dropping it survived the whole suite
+/// until this existed.
+///
+/// `cel/check` is chosen because it is an enterprise route on an unlicensed server: it reads the
+/// body, refuses with a deterministic 501 and touches nothing. A forwarded write that *worked*
+/// would be a fixture this suite has to clean up.
+#[tokio::test]
+async fn a_forwarded_post_carries_its_body() {
+    if !sockets_enabled() {
+        return;
+    }
+    const PATH: &str = "/api/v4/access_control_policies/cel/check";
+    const BODY: &str = r#"{"expression":"1 == 1"}"#;
+
+    let (go_status, _, go_body) =
+        post_over_socket(&go_socket().expect("present"), PATH, BODY).await;
+    let (rust_status, rust_headers, rust_body) =
+        post_over_socket(&rust_socket().expect("present"), PATH, BODY).await;
+
+    assert_eq!(go_status, 501, "unlicensed, so the policy engine refuses");
+    assert_eq!(rust_status, go_status);
+    assert!(
+        rust_headers.get("x-mmrs-served-by").is_none(),
+        "this route is not migrated; it must arrive as Go's own answer"
+    );
+    assert_forwarded_body_is_gos(&go_body, &rust_body, PATH);
+}
+
 /// A path neither router registers reaches Go's own 404 through the forward leg.
 #[tokio::test]
 async fn an_unknown_local_path_gets_gos_404() {
@@ -444,6 +524,21 @@ async fn a_plain_user_is_refused_the_busy_routes_over_tcp() {
             response.status().as_u16(),
             403,
             "{base}: manage_system is not granted to an ordinary user"
+        );
+
+        // And the *order* of the two checks: a request that is both unauthorised and malformed
+        // is refused for the permission, not for the parameter. Checking `?seconds=` first would
+        // tell an unauthorised caller whether their value would have been accepted.
+        let response = client
+            .post(format!("{base}/api/v4/server_busy?seconds=0"))
+            .header("Authorization", format!("Bearer {}", user.token))
+            .send()
+            .await
+            .expect("reachable");
+        assert_eq!(
+            response.status().as_u16(),
+            403,
+            "{base}: the permission check runs before the parameter is read"
         );
     }
 

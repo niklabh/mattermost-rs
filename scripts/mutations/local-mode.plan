@@ -1,0 +1,51 @@
+# Mutation plan for the local-mode (unix socket) API: the transport, the session, and the
+# six route+method pairs it lands.
+#
+#   scripts/mutate-batch.sh scripts/mutations/local-mode.plan
+#
+# The decisions a reader could plausibly get wrong, in three groups.
+#
+# **The session.** `APILocal` installs `model.Session{Local: true}` and nothing else, and
+# `IsUnrestricted()` is that one field — so `local: false` silently refuses everything and a
+# fabricated `user_id` silently becomes an identity in audit records. Both are caught by
+# `local::tests`, which is the only place either can be seen.
+#
+# **The socket.** Skipping `os.RemoveAll` means a crashed server never restarts; a mode wider
+# than 0600 hands an unauthenticated, unrestricted API to every account on the host. Those two
+# lines are the whole access-control story of this router.
+#
+# **`server_busy`.** Its parameter has four rejections that produce one indistinguishable body,
+# its idle answer is a zero `time.Time` rendered two different ways, and its permission check runs
+# **before** the parameter is read — an order that leaks to an unauthorised caller whether their
+# value would have been accepted.
+#
+# The last two lines are the no-op controls and must SURVIVE.
+
+local-session-not-local	crates/mm-api/src/local.rs	    AuthenticatedSession(Session {\n        local: true,	    AuthenticatedSession(Session {\n        local: false,	unit	local::tests
+local-session-invents-a-user	crates/mm-api/src/local.rs	    AuthenticatedSession(Session {\n        local: true,\n        ..Session::default()	    AuthenticatedSession(Session {\n        local: true,\n        user_id: "me".to_owned(),\n        ..Session::default()	unit	local::tests
+bind-keeps-the-stale-socket	crates/mm-api/src/local.rs	    match tokio::fs::remove_file(socket).await {	    match std::io::Result::<()>::Err(io::Error::from(io::ErrorKind::NotFound)) {	unit	local::tests
+bind-mode-is-world-readable	crates/mm-api/src/local.rs	from_mode(0o600)	from_mode(0o666)	unit	local::tests
+bind-mode-is-group-readable	crates/mm-api/src/local.rs	from_mode(0o600)	from_mode(0o640)	unit	local::tests
+forward-strips-accept-encoding	crates/mm-api/src/local.rs	        // Set by the client library from the body actually sent; carrying the inbound value risks\n        // contradicting it.\n        "content-length",	        // Set by the client library from the body actually sent; carrying the inbound value risks\n        // contradicting it.\n        "content-length",\n        "accept-encoding",	unit	local::tests
+forward-keeps-content-length	crates/mm-api/src/local.rs	        "upgrade",\n        // Set by the client library from the body actually sent; carrying the inbound value risks\n        // contradicting it.\n        "content-length",	        "upgrade",	api	local_mode
+local-fallback-404s-instead-of-forwarding	crates/mm-api/src/local.rs	        .fallback(forward_to_go_local)\n        // The same security headers	        .fallback(|| async { (StatusCode::NOT_FOUND, "nope") })\n        // The same security headers	api	local_mode
+local-router-drops-gos-headers	crates/mm-api/src/local.rs	        .layer(axum::middleware::from_fn_with_state(\n            state.clone(),\n            crate::go_global_headers,\n        ))	        .layer(Extension(0u8))	api	local_mode
+local-licence-format-order-swapped	crates/mm-api/src/local.rs	    if format.is_empty() {\n        return ApiError::from(AppError::new(\n            "localGetClientLicense",\n            "api.license.client.old_format.app_error",\n            None,\n            String::new(),\n            400,\n        ))\n        .into_response();\n    }\n    if format != "old" {\n        return ApiError::invalid_param("format").into_response();\n    }	    if format != "old" && !format.is_empty() {\n        return ApiError::invalid_param("format").into_response();\n    }\n    if format.is_empty() {\n        return ApiError::invalid_param("format").into_response();\n    }	api	local_mode
+local-licence-format-case-insensitive	crates/mm-api/src/local.rs	    if format != "old" {	    if !format.eq_ignore_ascii_case("old") {	api	local_mode
+busy-seconds-zero-accepted	crates/mm-api/src/system.rs	    if parsed <= 0 || parsed > MAX_SERVER_BUSY_SECONDS {	    if parsed < 0 || parsed > MAX_SERVER_BUSY_SECONDS {	unit	system::tests
+busy-seconds-upper-bound-exclusive	crates/mm-api/src/system.rs	    if parsed <= 0 || parsed > MAX_SERVER_BUSY_SECONDS {	    if parsed <= 0 || parsed >= MAX_SERVER_BUSY_SECONDS {	unit	system::tests
+busy-seconds-default-is-zero	crates/mm-api/src/system.rs	        DEFAULT_SERVER_BUSY_SECONDS.to_string()	        0.to_string()	unit	system::tests
+busy-seconds-rejection-names-only-the-parameter	crates/mm-api/src/system.rs	    ApiError::invalid_url_param(&format!("seconds must be 1 - {MAX_SERVER_BUSY_SECONDS}"))	    ApiError::invalid_url_param("seconds")	api	local_mode
+busy-seconds-rejection-is-a-body-param	crates/mm-api/src/system.rs	    ApiError::invalid_url_param(&format!("seconds must be 1 - {MAX_SERVER_BUSY_SECONDS}"))	    ApiError::invalid_param(&format!("seconds must be 1 - {MAX_SERVER_BUSY_SECONDS}"))	api	local_mode
+busy-expiry-instant-still-busy	crates/mm-api/src/system.rs	            .filter(|expires| now < *expires);	            .filter(|expires| now <= *expires);	unit	system::tests
+busy-floor-dropped	crates/mm-api/src/system.rs	        let seconds = seconds.max(1);	        let seconds = seconds;	unit	system::tests
+busy-zero-time-is-the-epoch	crates/mm-api/src/system.rs	const GO_ZERO_TIME_UNIX: i64 = -62135596800;	const GO_ZERO_TIME_UNIX: i64 = 0;	api	local_mode
+busy-zero-timestamp-is-empty	crates/mm-api/src/system.rs	const GO_ZERO_TIME_TS: &str = "Mon Jan 1 00:00:00 +0000 UTC 0001";	const GO_ZERO_TIME_TS: &str = "";	api	local_mode
+busy-day-is-zero-padded	crates/mm-api/src/system.rs	    at.format("%a %b %-d %H:%M:%S +0000 UTC %Y").to_string()	    at.format("%a %b %d %H:%M:%S +0000 UTC %Y").to_string()	unit	system::tests
+busy-status-ok-gains-a-newline	crates/mm-api/src/system.rs	    json_body(br#"{"status":"OK"}"#.to_vec())	    json_body(b"{\\"status\\":\\"OK\\"}\\n".to_vec())	api	local_mode
+busy-read-gate-dropped	crates/mm-api/src/system.rs	        .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)\n        .await\n    {\n        return Err(ApiError::from(make_permission_error(\n            &session.0,\n            &[&PERMISSION_MANAGE_SYSTEM],\n        )));\n    }\n\n    let busy = SERVER_BUSY.state(Utc::now());	        .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)\n        .await\n        || true\n    {\n        return Err(ApiError::from(make_permission_error(\n            &session.0,\n            &[&PERMISSION_MANAGE_SYSTEM],\n        )));\n    }\n\n    let busy = SERVER_BUSY.state(Utc::now());	api	local_mode
+busy-set-checks-the-parameter-first	crates/mm-api/src/system.rs	    if !state\n        .app\n        .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)\n        .await\n    {\n        return Err(ApiError::from(make_permission_error(\n            &session.0,\n            &[&PERMISSION_MANAGE_SYSTEM],\n        )));\n    }\n\n    let raw = crate::channels::query_first(request.uri().query(), "seconds").unwrap_or_default();\n    let seconds = parse_busy_seconds(&raw).ok_or_else(invalid_seconds)?;	    let raw = crate::channels::query_first(request.uri().query(), "seconds").unwrap_or_default();\n    let seconds = parse_busy_seconds(&raw).ok_or_else(invalid_seconds)?;\n    if !state\n        .app\n        .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)\n        .await\n    {\n        return Err(ApiError::from(make_permission_error(\n            &session.0,\n            &[&PERMISSION_MANAGE_SYSTEM],\n        )));\n    }	api	local_mode
+#
+# --- no-op controls: these must SURVIVE ---
+control-rename-binding	crates/mm-api/src/system.rs	    let busy = SERVER_BUSY.state(Utc::now());\n    tracing::Span::current().record("busy", busy.busy);	    let current = SERVER_BUSY.state(Utc::now());\n    let busy = current;\n    tracing::Span::current().record("busy", busy.busy);	api	local_mode
+control-reorder-independent-hop-by-hop	crates/mm-api/src/local.rs	        "te",\n        "trailer",	        "trailer",\n        "te",	unit	local::tests

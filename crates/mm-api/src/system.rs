@@ -846,6 +846,24 @@ mod tests {
         assert!(!busy.state(now).busy, "Clear zeroes the expiry");
     }
 
+    /// A **single-digit** day, which is the only input that separates Go's `2` from a padded one.
+    ///
+    /// Every plausible test date is two-digit for two-thirds of the month, so `%d` and `%-d` agree
+    /// and a mutation between them survives. This is the third of the month on purpose.
+    #[test]
+    fn the_day_of_the_month_is_not_zero_padded() {
+        let now = DateTime::parse_from_rfc3339("2026-03-03T04:05:06Z")
+            .expect("valid")
+            .with_timezone(&Utc);
+        let busy = ServerBusy::new();
+        busy.set(1, now);
+        assert_eq!(
+            busy.state(now).expires_ts,
+            "Tue Mar 3 04:05:07 +0000 UTC 2026",
+            "`Jan 2` is stdDay — unpadded — while `15:04:05` is padded"
+        );
+    }
+
     /// The deadline instant is **not** busy: Go's timer fires at it and clears the flag.
     ///
     /// One second either side of the boundary, because `<` and `<=` are otherwise
