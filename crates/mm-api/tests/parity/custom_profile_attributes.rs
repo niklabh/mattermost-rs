@@ -46,6 +46,10 @@ const NOWHERE: &str = "zzzzzzzzzzzzzzzzzzzzzzzzzz";
 const PLANTED_FIELD: &str = "mmrscpafieldparity00000001";
 /// The planted value's id.
 const PLANTED_VALUE: &str = "mmrscpavalueparity00000001";
+/// A soft-deleted `user` field, which the search must skip.
+const DELETED_FIELD: &str = "mmrscpadeletedparity000001";
+/// A live `channel` field, which the search must skip and the by-id reads must not.
+const CHANNEL_FIELD: &str = "mmrscpachannelparity000001";
 
 const LICENCE_REFUSAL: &str = "app.property.license_error";
 
@@ -84,6 +88,60 @@ async fn plant_field() -> bool {
     .expect("the planted property field is written");
 
     true
+}
+
+/// Plant two fields the field search must **not** return: a soft-deleted `user` field and a live
+/// `channel` field, both in the same group.
+///
+/// They are the only evidence that `DeleteAt = 0` and `ObjectType = 'user'` are real predicates
+/// rather than decoration — with an empty group, dropping either changes nothing.
+async fn plant_ignored_fields() -> bool {
+    let Some(pool) = common::fixture_pool().await else {
+        return false;
+    };
+    let Ok(group) = sqlx::query_scalar::<_, String>(
+        "SELECT id FROM propertygroups WHERE name = 'access_control'",
+    )
+    .fetch_one(&pool)
+    .await
+    else {
+        return false;
+    };
+
+    sqlx::query(
+        "INSERT INTO propertyfields
+            (id, groupid, name, type, attrs, targetid, targettype, objecttype, protected,
+             createat, updateat, deleteat)
+         VALUES ($1, $3, 'mmrsdeleted', 'text', '{}'::jsonb, '', 'system', 'user', false,
+                 1788600000000, 1788600000000, 1788600000001),
+                ($2, $3, 'mmrschannel', 'text', '{}'::jsonb, '', 'system', 'channel', false,
+                 1788600000000, 1788600000000, 0)
+         ON CONFLICT (id) DO NOTHING",
+    )
+    .bind(DELETED_FIELD)
+    .bind(CHANNEL_FIELD)
+    .bind(&group)
+    .execute(&pool)
+    .await
+    .expect("the ignored property fields are written");
+
+    true
+}
+
+/// A field id from a **different** property group — `session_attributes`, which the seed
+/// populates with nineteen. Nothing in `access_control` may find it.
+async fn a_field_in_another_group() -> Option<String> {
+    let pool = common::fixture_pool().await?;
+    sqlx::query_scalar::<_, String>(
+        "SELECT id FROM propertyfields
+          WHERE groupid = (SELECT id FROM propertygroups WHERE name = 'session_attributes')
+          ORDER BY id
+          LIMIT 1",
+    )
+    .fetch_optional(&pool)
+    .await
+    .ok()
+    .flatten()
 }
 
 /// Plant one value on the planted field for `user_id`.
@@ -127,8 +185,7 @@ async fn unplant() {
         .bind(PLANTED_VALUE)
         .execute(&pool)
         .await;
-    let _ = sqlx::query("DELETE FROM propertyfields WHERE id = $1")
-        .bind(PLANTED_FIELD)
+    let _ = sqlx::query("DELETE FROM propertyfields WHERE id LIKE 'mmrscpa%'")
         .execute(&pool)
         .await;
 }
@@ -245,6 +302,15 @@ async fn a_planted_row_flips_each_read_on_its_own_table() {
         &format!("/api/v4/users/{me}/custom_profile_attributes"),
     )
     .await;
+    // **The target filter is real.** Another user's values are still `{}` while this one's are a
+    // refusal, so the search is scoped to the target rather than sweeping the group. Go does not
+    // look the target up, so an id that names nobody is a perfectly good empty read.
+    let someone_else = fetch_both_raw(
+        &client,
+        &token,
+        &format!("/api/v4/users/{NOWHERE}/custom_profile_attributes"),
+    )
+    .await;
     unplant().await;
 
     same_error(
@@ -265,6 +331,127 @@ async fn a_planted_row_flips_each_read_on_its_own_table() {
         403,
         LICENCE_REFUSAL,
         "a value makes the value list a refusal",
+    );
+    assert_eq!(
+        (someone_else.0.0, someone_else.1.0),
+        (200, 200),
+        "another target's values are unaffected"
+    );
+    assert_eq!(someone_else.0.1, someone_else.1.1, "and the same body");
+}
+
+/// The field search's two silent predicates, which an empty group cannot test.
+///
+/// A soft-deleted `user` field and a live `channel` field are both in the group and neither may
+/// reach the list — so it is still `200 []`. But **neither is hidden from the by-id reads**:
+/// `PropertyFieldStore.Get` carries no `DeleteAt` filter and `GetMany` no object-type filter, and
+/// both handlers' own `ObjectType != user` check sits *after* the licence hook. So the same two
+/// rows the list ignores are a 403 through `PATCH /fields/{id}` and through a value batch.
+#[tokio::test]
+async fn the_field_search_skips_what_the_by_id_reads_still_find() {
+    if !stack_enabled() {
+        return;
+    }
+    let _unlicensed = ACTIVE_LICENCE_ROW.read().await;
+    let _rows = CPA_ROWS.lock().await;
+    let client = client();
+    let token = go_minted_token(&client).await;
+    unplant().await;
+    if !plant_ignored_fields().await {
+        return;
+    }
+
+    let list = fetch_both_raw(&client, &token, "/api/v4/custom_profile_attributes/fields").await;
+    let deleted_by_id = both_raw(
+        &client,
+        &token,
+        reqwest::Method::PATCH,
+        &format!("/api/v4/custom_profile_attributes/fields/{DELETED_FIELD}"),
+        Some(br#"{"name":"x"}"#),
+    )
+    .await;
+    let channel_in_batch = both_raw(
+        &client,
+        &token,
+        reqwest::Method::PATCH,
+        "/api/v4/custom_profile_attributes/values",
+        Some(format!(r#"{{"{CHANNEL_FIELD}":"x"}}"#).as_bytes()),
+    )
+    .await;
+    unplant().await;
+
+    assert_eq!(
+        (list.0.0, list.1.0),
+        (200, 200),
+        "neither planted field reaches the list"
+    );
+    assert_eq!(list.0.1, list.1.1, "the list body");
+    assert_eq!(String::from_utf8_lossy(&list.1.1), "[]\n");
+    same_error(
+        &deleted_by_id.0,
+        &deleted_by_id.1,
+        403,
+        LICENCE_REFUSAL,
+        "a soft-deleted field is still found by id",
+    );
+    same_error(
+        &channel_in_batch.0,
+        &channel_in_batch.1,
+        403,
+        LICENCE_REFUSAL,
+        "a channel-object field is still found by a value batch",
+    );
+}
+
+/// A field that exists, in **another group**, is a not-found on both by-id reads.
+///
+/// Every property read is scoped by group id, and dropping that scope is invisible while
+/// `access_control` is the only group anything looks at. The seed populates `session_attributes`
+/// with nineteen fields, which is the fixture that makes the scope observable.
+#[tokio::test]
+async fn a_field_in_another_group_is_a_not_found() {
+    if !stack_enabled() {
+        return;
+    }
+    let _unlicensed = ACTIVE_LICENCE_ROW.read().await;
+    let _rows = CPA_ROWS.lock().await;
+    let client = client();
+    let token = go_minted_token(&client).await;
+    unplant().await;
+    let Some(foreign) = a_field_in_another_group().await else {
+        return;
+    };
+
+    let by_id = both_raw(
+        &client,
+        &token,
+        reqwest::Method::PATCH,
+        &format!("/api/v4/custom_profile_attributes/fields/{foreign}"),
+        Some(br#"{"name":"x"}"#),
+    )
+    .await;
+    let in_batch = both_raw(
+        &client,
+        &token,
+        reqwest::Method::PATCH,
+        "/api/v4/custom_profile_attributes/values",
+        Some(format!(r#"{{"{foreign}":"x"}}"#).as_bytes()),
+    )
+    .await;
+
+    same_error(
+        &by_id.0,
+        &by_id.1,
+        404,
+        "app.property.not_found.app_error",
+        "PATCH a field from another group",
+    );
+    same_error(
+        &in_batch.0,
+        &in_batch.1,
+        404,
+        "app.property_field.not_found.app_error",
+        "a batch naming a field from another group",
     );
 }
 
@@ -327,6 +514,16 @@ async fn creating_a_field_needs_manage_system() {
         Some(br#"{"name":"mmrsparity","type":"text"}"#),
     )
     .await;
+    // **The body is decoded first.** A plain user sending nonsense gets the body error, not the
+    // permission one — so the permission check cannot be hoisted above the decode.
+    let (bad_go, bad_rs) = both_raw(
+        &client,
+        &plain.token,
+        reqwest::Method::POST,
+        "/api/v4/custom_profile_attributes/fields",
+        Some(b"[]"),
+    )
+    .await;
     delete_plain_user(&client, &admin, &plain.id).await;
 
     same_error(
@@ -335,6 +532,13 @@ async fn creating_a_field_needs_manage_system() {
         403,
         "api.context.permissions.app_error",
         "a plain user creating a CPA field",
+    );
+    same_error(
+        &bad_go,
+        &bad_rs,
+        400,
+        "api.context.invalid_body_param.app_error",
+        "a plain user sending a body that will not decode",
     );
 }
 
@@ -466,6 +670,41 @@ async fn the_field_patch_refusals_come_in_order() {
         );
     }
 
+    // A 300-character name fails the length check; a 300-character **target_id** does not,
+    // because `patch.TargetID = nil` runs before `IsValid` and there is nothing left to measure.
+    // Same body shape, same length, two different answers — which is what pins the clearing.
+    let long = "z".repeat(300);
+    let (go, rs) = both_raw(
+        &client,
+        &token,
+        reqwest::Method::PATCH,
+        &path,
+        Some(format!(r#"{{"name":"{long}"}}"#).as_bytes()),
+    )
+    .await;
+    same_error(
+        &go,
+        &rs,
+        400,
+        "model.property_field.is_valid.app_error",
+        "a name of three hundred characters",
+    );
+    let (go, rs) = both_raw(
+        &client,
+        &token,
+        reqwest::Method::PATCH,
+        &path,
+        Some(format!(r#"{{"target_id":"{long}"}}"#).as_bytes()),
+    )
+    .await;
+    same_error(
+        &go,
+        &rs,
+        404,
+        "app.property.not_found.app_error",
+        "a target_id of three hundred characters is cleared, not measured",
+    );
+
     // `{}` is a valid patch that changes nothing, so it gets past validation to the read — which
     // is the 404 above. That is what proves the three refusals are ordered and not a catch-all.
     let (go, rs) = both_raw(&client, &token, reqwest::Method::PATCH, &path, Some(b"{}")).await;
@@ -537,6 +776,30 @@ async fn the_value_patch_refusals_come_in_order() {
                 &format!("PATCH {path} with {}", String::from_utf8_lossy(body)),
             );
         }
+
+        // Fifty is **accepted** — the cap is `>`, not `>=` — so a batch of exactly fifty
+        // unknown ids gets past it and reports the miss instead.
+        let fifty: String = {
+            let entries: Vec<String> = (0..50)
+                .map(|i| format!(r#""mmrscpabulk{i:015}":"x""#))
+                .collect();
+            format!("{{{}}}", entries.join(","))
+        };
+        let (go, rs) = both_raw(
+            &client,
+            &token,
+            reqwest::Method::PATCH,
+            &path,
+            Some(fifty.as_bytes()),
+        )
+        .await;
+        same_error(
+            &go,
+            &rs,
+            404,
+            "app.property_field.not_found.app_error",
+            &format!("PATCH {path} with exactly fifty items"),
+        );
 
         // The cap is checked before any id is looked at, so fifty-one *unknown* ids report the
         // size and not the miss.
