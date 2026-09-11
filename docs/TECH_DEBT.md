@@ -7104,3 +7104,32 @@ scope shape, which is what Go's `switch` already is) or `QueryBuilder`, which th
 use anywhere yet and would be the first.
 
 **Where the pin lives:** the module doc comment on `crates/mm-store/src/property_store.rs`.
+
+---
+
+## D-330 · `views::include_total_count_and_pagination_agree` is unstable, and it voids a whole mutation plan
+
+**Status** OPEN · **Severity** test-harness · **Raised** 2026-09-12
+
+`scripts/mutations/view-routes.plan` has been run twice on the merge stack with the boards oracle
+up. Both times **both no-op controls came back CAUGHT**, and both times the test that decided them
+was `parity::views::include_total_count_and_pagination_agree` (the second control also named
+`the_list_is_byte_identical_including_the_props_key_order`).
+
+Per CLAUDE.md a run whose controls fail has no verdicts at all, so the plan's apparent 32-of-33 is
+**not a score** and must not be quoted as one. The one non-control survivor it reported,
+`store-list-drops-the-createat-tiebreak`, is equally unproven.
+
+Ruled out already: the `Views` table accumulating across runs. It was doing that — 754 rows after
+33 sequential runs, because `purge_api_fixtures` did not sweep it — and the purge now does. The
+controls still failed afterwards, so that was a real bug but not this one.
+
+**What is owed:** stabilise that test, then re-run the plan and replace the tally. The shape to
+look at first is a whole-installation count read twice: `include_total_count` returns a total over
+the `Views` table, tests in this binary run concurrently, and `parity_views` creates views — so the
+count can move between the Go call and the Rust call. That is the same family as the
+`teams_all`/`users_stats` counts, and the established remedy is `common::fetch_both_stable` or
+scoping the assertion to rows the test owns. Confirm against the test before assuming it.
+
+**Where the pin lives:** the doc comment on `start_boards` in `crates/mm-api/tests/parity/views.rs`
+records the oracle half of this story; this entry is the instability half.
