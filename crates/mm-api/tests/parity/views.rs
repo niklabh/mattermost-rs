@@ -235,8 +235,23 @@ async fn start_boards() -> Option<Boards> {
         .await
         .is_ok_and(|r| r.status().is_success())
     {
-        eprintln!("views: skipping — no boards oracle at {go}; run `scripts/go-boards.sh start`");
-        return None;
+        // **Panic rather than skip.** `stack_enabled()` is already true here, so the caller asked
+        // for a stack-backed run and every test below is about to pass while asserting nothing.
+        //
+        // This was not theoretical for even one day: the first mutation run of this plan on the
+        // merge stack, where nothing starts the oracle, scored **5 caught out of 33** — 26 real
+        // survivors across the store, the app and the handlers, which reads as "these tests are
+        // worthless". With the oracle up the same plan scores 33 of 33. The tests were fine; the
+        // silent skip meant the whole suite was inert, and an `eprintln!` cannot say so because
+        // cargo hides the output of a passing test.
+        //
+        // `scripts/stack.sh up` starts the oracle now, so reaching this line means it died or was
+        // stopped by hand — both worth failing over.
+        panic!(
+            "views: no boards oracle at {go}. Every test in this file would pass without \
+             asserting anything. Run `scripts/go-boards.sh start`, or `scripts/stack.sh up <n>` \
+             which now does it for you."
+        );
     }
 
     let rust_server = SecondServer::start(

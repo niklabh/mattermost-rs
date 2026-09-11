@@ -1054,6 +1054,17 @@ async fn purge_api_fixtures_once() {
         "DELETE FROM publicchannels WHERE name LIKE 'mmrs-parity-%'",
         "DELETE FROM sidebarchannels WHERE channelid IN (SELECT id FROM channels WHERE name LIKE 'mmrs-parity-%')",
         "DELETE FROM channelmemberhistory WHERE channelid IN (SELECT id FROM channels WHERE name LIKE 'mmrs-parity-%')",
+        // `Views` is keyed on `ChannelId` and carries no name of its own, so like the other
+        // channel-scoped tables it has to go before the channels do. It is swept by the **orphan**
+        // rule as well, further down, because `parity_views` archives channels through the boards
+        // server and a view whose channel is gone is unreachable through any API on either side.
+        //
+        // Added after the fact, and the cost of its absence is on record: 33 sequential mutation
+        // runs of `view-routes.plan` left **754** rows here, at which point the suite's own
+        // byte-identical list and pagination comparisons started disagreeing between runs — so
+        // both no-op controls came back CAUGHT and the whole tally was void. A new table that the
+        // purge does not know about is [D-155]'s class, and this is its second instance.
+        "DELETE FROM views WHERE channelid IN (SELECT id FROM channels WHERE name LIKE 'mmrs-parity-%')",
         "DELETE FROM channels WHERE name LIKE 'mmrs-parity-%'",
         // Teams created by tests: Go's `DELETE /teams/{id}` archives like the channel one, and
         // an archived team keeps its name, so the next run's create fails without this.
