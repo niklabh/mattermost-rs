@@ -54,6 +54,16 @@ pub trait DraftStore {
     ///
     /// Go memoises it in a `sync.Once`; the caching is left to the caller here.
     fn max_draft_size(&self) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
+
+    /// Port of `SqlDraftStore.DeleteDraftsAssociatedWithPost` (draft_store.go:206).
+    ///
+    /// A **hard** delete keyed on `(ChannelId, RootId)` — so deleting a root post removes every
+    /// user's half-written reply to it, not only the deleter's. There is no `UserId` predicate.
+    fn delete_drafts_associated_with_post(
+        &self,
+        channel_id: &str,
+        root_id: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 }
 
 #[derive(Debug, Clone)]
@@ -184,6 +194,26 @@ impl DraftStore for SqlDraftStore {
         })?;
 
         Ok(())
+    }
+
+    #[tracing::instrument(skip(self), fields(channel_id = %channel_id, root_id = %root_id))]
+    async fn delete_drafts_associated_with_post(
+        &self,
+        channel_id: &str,
+        root_id: &str,
+    ) -> Result<(), StoreError> {
+        sqlx::query!(
+            "DELETE FROM drafts WHERE channelid = $1 AND rootid = $2",
+            channel_id,
+            root_id,
+        )
+        .execute(&self.pool)
+        .await
+        .map(|_| ())
+        .map_err(|source| StoreError::Db {
+            context: "failed to delete Draft".to_owned(),
+            source,
+        })
     }
 
     /// **A hard DELETE.** `Drafts.DeleteAt` still exists and the read path still filters on it,

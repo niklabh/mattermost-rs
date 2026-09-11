@@ -10,11 +10,13 @@
 //! Three separate things are asserted here, each of which has a plausible way of being silently
 //! wrong:
 //!
-//! 1. **The five writes are still forwarded.** Registering *any* method on a path takes that
-//!    path out of `Router::fallback`, so a `POST` to a path we serve a `GET` on returns **405
-//!    from our router** unless [`crate::partially_migrated`] is used — which is exactly how the
-//!    first write route in this project broke a working proxied `GET`. "Still forwarded" is a
-//!    claim about the router and is checked by reading `x-mmrs-served-by`.
+//! 1. **A method gorilla never registered here is still forwarded.** All eight registered methods
+//!    are ours now (see `parity/sidebar_category_writes.rs`), but registering methods on a path
+//!    takes that path out of `Router::fallback`, so a `POST /order` — which Go does not route —
+//!    would get **405 from our router** rather than Go's own answer unless
+//!    [`crate::partially_migrated`] is used. That is exactly how the first write route in this
+//!    project broke a working proxied `GET`, and it is a claim about the router, checked by
+//!    reading `x-mmrs-served-by`.
 //!
 //! 2. **`order` beats `{category}`.** gorilla decides that by registration order
 //!    (`api4/channel.go:80` before `:82`) and axum by specificity. Both land on
@@ -105,13 +107,16 @@ fn assert_forwarded_bodies_match(go: &[u8], rust: &[u8], context: &str) {
     );
 }
 
-/// Every write on the three paths this file's sibling serves `GET`s on.
+/// The methods gorilla does **not** register on these three paths, which must still fall through.
 ///
-/// Each body is deliberately one Go rejects — an id that names nothing, or a payload that fails
-/// `RequireCategoryId`/`SetInvalidParam` — so that a run of this test creates and deletes
+/// `POST` on `/order` and on `/{category_id}`, and `DELETE` on the collection and on `/order`:
+/// four requests Go's mux answers with its own 405, and which our router would answer with a bare
+/// axum 405 if the `partially_migrated` fallback were dropped from any of the three routes.
+///
+/// Every path names a team id that exists nowhere, so a run of this test creates and deletes
 /// nothing even though the requests really do reach Go.
 #[tokio::test]
-async fn every_write_on_these_paths_is_still_forwarded() {
+async fn an_unregistered_method_on_these_paths_is_still_forwarded() {
     if !stack_enabled() {
         return;
     }
@@ -121,32 +126,18 @@ async fn every_write_on_these_paths_is_still_forwarded() {
     let base = format!("/api/v4/users/{user_id}/teams/{NOWHERE}/channels/categories");
 
     let cases: Vec<(reqwest::Method, String, Option<serde_json::Value>)> = vec![
-        // createCategoryForTeamForUser
         (
             reqwest::Method::POST,
-            base.clone(),
-            Some(serde_json::json!({ "display_name": "never created" })),
-        ),
-        // updateCategoriesForTeamForUser
-        (
-            reqwest::Method::PUT,
-            base.clone(),
+            format!("{base}/order"),
             Some(serde_json::json!([])),
         ),
-        // updateCategoryOrderForTeamForUser
         (
-            reqwest::Method::PUT,
-            format!("{base}/order"),
-            Some(serde_json::json!([NOWHERE])),
-        ),
-        // updateCategoryForTeamForUser
-        (
-            reqwest::Method::PUT,
+            reqwest::Method::POST,
             format!("{base}/{NOWHERE}"),
-            Some(serde_json::json!({ "id": NOWHERE })),
+            Some(serde_json::json!({})),
         ),
-        // deleteCategoryForTeamForUser
-        (reqwest::Method::DELETE, format!("{base}/{NOWHERE}"), None),
+        (reqwest::Method::DELETE, base.clone(), None),
+        (reqwest::Method::DELETE, format!("{base}/order"), None),
     ];
 
     for (method, path, body) in cases {
@@ -155,7 +146,7 @@ async fn every_write_on_these_paths_is_still_forwarded() {
 
         assert_eq!(
             served_by, "go",
-            "{method} {path} must still be forwarded, not answered by our router"
+            "{method} {path} is not a Go route, so it must be forwarded for Go's own answer"
         );
         assert_ne!(
             rust_status, 405,
@@ -171,7 +162,8 @@ async fn every_write_on_these_paths_is_still_forwarded() {
 }
 
 /// The `GET`s that *are* migrated are served locally — the other half of the same claim, and the
-/// guard against a route silently failing to register.
+/// guard against a route silently failing to register. The five writes get the same treatment in
+/// `parity/sidebar_category_writes.rs`, where a fixture exists to make their answers meaningful.
 #[tokio::test]
 async fn the_three_migrated_gets_are_served_locally() {
     if !stack_enabled() {

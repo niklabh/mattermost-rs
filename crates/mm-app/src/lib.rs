@@ -4,11 +4,16 @@
 //! which is what keeps the API layer free of SQL and the store layer free of request semantics.
 
 pub mod audit;
+pub mod auth;
 pub mod authorization;
 pub mod bot;
 /// Port of `app/brand.go` — the brand image read and delete.
 pub mod brand;
 pub mod channel;
+pub mod channel_create;
+pub mod channel_member;
+pub mod channel_view;
+pub mod channel_write;
 pub mod command;
 pub mod common_teams;
 pub mod config;
@@ -32,6 +37,7 @@ pub mod limits;
 pub mod oauth;
 pub mod password;
 pub mod post;
+pub mod post_write;
 pub mod preference;
 pub mod reaction;
 pub mod report;
@@ -43,6 +49,7 @@ pub mod sidebar;
 pub mod status;
 pub mod system;
 pub mod team;
+pub mod team_member;
 pub mod terms_of_service;
 pub mod thread;
 /// Port of the two read functions in `app/upload.go`.

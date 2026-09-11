@@ -27,25 +27,31 @@
 mod common;
 
 mod parity {
+    pub mod auth_writes;
     pub mod authorized_oauth_apps;
     pub mod bots;
     pub mod by_ids_lists;
     pub mod channel_autocomplete;
     pub mod channel_by_name;
     pub mod channel_by_name_for_team_name;
+    pub mod channel_creates;
     pub mod channel_get;
     pub mod channel_member;
+    pub mod channel_member_writes;
     pub mod channel_members_for_team_for_user;
     pub mod channel_members_for_user;
     pub mod channel_members_list;
     pub mod channel_pinned;
     pub mod channel_posts;
     pub mod channel_posts_unread;
+    pub mod channel_read_all;
     pub mod channel_search;
     pub mod channel_search_autocomplete;
     pub mod channel_stats;
     pub mod channel_timezones;
     pub mod channel_unread;
+    pub mod channel_view;
+    pub mod channel_writes;
     pub mod channels_for_team_for_user;
     pub mod channels_for_user;
     pub mod channels_member_count;
@@ -84,6 +90,7 @@ mod parity {
     pub mod post_get;
     pub mod post_reactions;
     pub mod post_thread;
+    pub mod post_writes;
     pub mod posts_by_ids;
     pub mod preference_reads;
     pub mod preferences;
@@ -97,14 +104,17 @@ mod parity {
     pub mod session_team_members;
     pub mod sessions_for_user;
     pub mod sidebar_categories;
+    pub mod sidebar_category_writes;
     pub mod sidebar_router;
     pub mod single_hooks;
     pub mod status;
     pub mod status_writes;
+    pub mod system_posts;
     pub mod system_usage;
     pub mod team_channel_lists;
     pub mod team_exists;
     pub mod team_get;
+    pub mod team_member_writes;
     pub mod team_members_route;
     pub mod team_name_members;
     pub mod team_stats;

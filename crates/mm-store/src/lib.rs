@@ -15,6 +15,7 @@
 
 pub mod audit_store;
 pub mod bot_store;
+pub mod channel_member_history_store;
 pub mod channel_store;
 pub mod command_store;
 pub mod config_store;
@@ -22,6 +23,8 @@ pub mod draft_store;
 pub mod emoji_store;
 pub mod error;
 pub mod file_info_store;
+/// The one `GroupStore` read the channel-member add path needs.
+pub mod group_store;
 pub mod job_store;
 pub mod oauth_store;
 pub mod post_store;
@@ -37,6 +40,7 @@ pub mod system_store;
 pub mod team_store;
 pub mod terms_of_service_store;
 pub mod thread_store;
+pub mod token_store;
 /// Port of `SqlUploadSessionStore` — the two reads.
 pub mod upload_session_store;
 pub mod user_access_token_store;
@@ -46,13 +50,15 @@ pub mod webhook_store;
 
 pub use audit_store::{AUDIT_LIMIT_MAXIMUM, AuditStore, SqlAuditStore};
 pub use bot_store::{BotStore, SqlBotStore};
-pub use channel_store::{ChannelStore, SqlChannelStore};
+pub use channel_member_history_store::{ChannelMemberHistoryStore, SqlChannelMemberHistoryStore};
+pub use channel_store::{ChannelSave, ChannelStore, SqlChannelStore, UnreadsAndMentions};
 pub use command_store::{CommandStore, SqlCommandStore};
 pub use config_store::{ConfigStore, SqlConfigStore};
 pub use draft_store::{DraftStore, SqlDraftStore};
 pub use emoji_store::{EmojiStore, SqlEmojiStore};
 pub use error::StoreError;
 pub use file_info_store::{FileInfoStore, SqlFileInfoStore};
+pub use group_store::{GroupStore, SqlGroupStore};
 pub use job_store::{JobStore, SqlJobStore};
 pub use oauth_store::{OAuthStore, SqlOAuthStore};
 pub use post_store::{PostStore, SqlPostStore};
@@ -61,12 +67,15 @@ pub use reaction_store::{ReactionStore, SqlReactionStore};
 pub use role_store::{RoleStore, SqlRoleStore};
 pub use scheme_store::{SchemeStore, SqlSchemeStore};
 pub use session_store::{SessionStore, SqlSessionStore};
-pub use sidebar_category_store::{SidebarCategoryStore, SqlSidebarCategoryStore};
+pub use sidebar_category_store::{
+    SidebarCategoryStore, SidebarCategoryUpdate, SqlSidebarCategoryStore,
+};
 pub use status_store::{SqlStatusStore, StatusStore};
 pub use system_store::{SYSTEM_ACTIVE_LICENSE_ID, SqlSystemStore, SystemStore};
 pub use team_store::{SqlTeamStore, TeamStore};
 pub use terms_of_service_store::{SqlTermsOfServiceStore, TermsOfServiceStore};
 pub use thread_store::{SqlThreadStore, ThreadStore};
+pub use token_store::{SqlTokenStore, TokenStore};
 pub use upload_session_store::{SqlUploadSessionStore, UploadSessionStore};
 pub use user_access_token_store::{SqlUserAccessTokenStore, UserAccessTokenStore};
 pub use user_store::{SqlUserStore, UserStore};
@@ -107,10 +116,13 @@ pub struct SqlStore {
     status: SqlStatusStore,
     system: SqlSystemStore,
     team: SqlTeamStore,
+    token: SqlTokenStore,
     user: SqlUserStore,
     user_access_token: SqlUserAccessTokenStore,
     user_terms_of_service: SqlUserTermsOfServiceStore,
     webhook: SqlWebhookStore,
+    channel_member_history: SqlChannelMemberHistoryStore,
+    group: SqlGroupStore,
     /// Go's `SqlStore` owns the connections and hands them to each sub-store; a handful of its
     /// methods — [`SqlStore::get_applied_migrations`] is the first ported — query directly rather
     /// than through a sub-store, which is why the pool is held here too. `PgPool` is a handle over
@@ -163,10 +175,13 @@ impl SqlStore {
             status: SqlStatusStore::new(pool.clone()),
             system: SqlSystemStore::new(pool.clone()),
             team: SqlTeamStore::new(pool.clone()),
+            token: SqlTokenStore::new(pool.clone()),
             user_terms_of_service: SqlUserTermsOfServiceStore::new(pool.clone()),
             webhook: SqlWebhookStore::new(pool.clone()),
             user: SqlUserStore::new(pool.clone()),
             user_access_token: SqlUserAccessTokenStore::new(pool.clone()),
+            channel_member_history: SqlChannelMemberHistoryStore::new(pool.clone()),
+            group: SqlGroupStore::new(pool.clone()),
             pool,
         }
     }
@@ -219,6 +234,16 @@ impl SqlStore {
     /// Port of `store.Store.Channel()`.
     pub fn channel(&self) -> &SqlChannelStore {
         &self.channel
+    }
+
+    /// Port of `store.Store.ChannelMemberHistory()`.
+    pub fn channel_member_history(&self) -> &SqlChannelMemberHistoryStore {
+        &self.channel_member_history
+    }
+
+    /// Port of `store.Store.Group()`.
+    pub fn group(&self) -> &SqlGroupStore {
+        &self.group
     }
 
     /// The configuration document store.
@@ -323,6 +348,11 @@ impl SqlStore {
     /// Port of `store.Store.Team()`.
     pub fn team(&self) -> &SqlTeamStore {
         &self.team
+    }
+
+    /// Port of `store.Store.Token()` — the one-shot `Tokens` table, not `UserAccessTokens`.
+    pub fn token(&self) -> &SqlTokenStore {
+        &self.token
     }
 
     /// Port of `store.Store.User()`.

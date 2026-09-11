@@ -154,6 +154,33 @@ Every response carries `x-mmrs-served-by: rust` or `: go`, so you can see the cu
 curl -si localhost:8066/api/v4/system/ping | grep -i served-by     # -> go
 ```
 
+## Several stacks at once
+
+A *stack* is one Postgres, one pinned Go server and one `mm-api`, sharing nothing with any other
+stack:
+
+```
+stack k    postgres  5432 + k      go  8065 + 100k      mm-api  8066 + 100k
+```
+
+Stack **0 is the layout above**, container names and volume included, so everything in this README
+keeps working with no flags. Additional stacks exist so several worktrees can run the parity and
+mutation suites *at the same time* — `scripts/stack-lock.sh` is per stack, and it used to be one
+lock for the machine, which made a twenty-minute mutation batch block every other checkout.
+
+```sh
+scripts/stack.sh up 1 2 3        # three more, each seeded with the fixture user and team
+scripts/stack.sh status
+scripts/worktree.sh add members 1   # a worktree pinned to stack 1, pre-building in the background
+scripts/stack.sh down 1
+```
+
+A worktree pins itself with a `.mmrs-stack` file, so `scripts/parity.sh` and `scripts/mutate.sh`
+inside it need no arguments. The test harness's `common::GO` and `common::RUST` are baked in at
+compile time from `MMRS_GO_BASE`/`MMRS_RUST_BASE` (`crates/mm-api/build.rs` registers the
+`rerun-if-env-changed`), because they are `&'static str` consts used in about thirteen hundred
+inline format captures — a runtime lookup would mean rewriting every one.
+
 The cross-server parity test is the oracle for anything migrated. It needs the stack up and a
 user to log in as, and it is skipped unless explicitly enabled, so `cargo test` stays green on a
 machine with no Docker:

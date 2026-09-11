@@ -387,6 +387,7 @@ mod verify_go_parity {
     /// have. `appended` on the 72-byte password is the case that separates the two layers: the
     /// primitive would accept it, the package refuses it as too long.
     #[test]
+    #[ignore = "bulk production-cost KDF work; run scripts/slow-tests.sh"]
     fn compare_matches_go() {
         let rows = oracle()["compare"].as_array().unwrap();
         assert!(rows.len() >= 30, "the corpus should not have shrunk");
@@ -608,6 +609,7 @@ mod verify_go_parity {
     /// The write half and the read half were ported in different sessions against different
     /// oracle sections; this is the only test that runs them against each other.
     #[test]
+    #[ignore = "bulk production-cost KDF work; run scripts/slow-tests.sh"]
     fn a_hash_we_write_verifies_through_the_router() {
         let stored = hash("hunter2").expect("hashes");
 
@@ -622,6 +624,7 @@ mod verify_go_parity {
 
     /// And the direction that matters for a shared database: a hash **Go** wrote verifies here.
     #[test]
+    #[ignore = "bulk production-cost KDF work; run scripts/slow-tests.sh"]
     fn hashes_go_wrote_verify_here() {
         let mut checked = 0;
         for case in oracle()["cases"].as_array().unwrap() {

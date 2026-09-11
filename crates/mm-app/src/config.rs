@@ -208,8 +208,73 @@ pub struct Config {
     /// than a 403.
     pub allow_synced_drafts: bool,
 
+    /// `ServiceSettings.EnableAPIChannelDeletion` (config.go:476). Go default **`false`**.
+    ///
+    /// Gates `DELETE /api/v4/channels/{id}?permanent=true`. When it is off the request is refused
+    /// with **401** — not 403 — and the id depends on who asked: a system admin gets
+    /// `api.user.delete_channel.not_enabled.for_admin.app_error`, everybody else
+    /// `api.user.delete_channel.not_enabled.app_error`. See
+    /// [`crate::channel_write`]'s delete path.
+    pub enable_api_channel_deletion: bool,
+
+    /// `TeamSettings.EnableChannelCategorySorting` (config.go:2558). Go default **`true`**.
+    ///
+    /// Read only as the second half of `addChannelToDefaultCategory`'s gate
+    /// (app/channel.go:4708), which `PatchChannel` calls after the channel is written. The first
+    /// half is `channel.DefaultCategoryName != ""`, so on a stock server a patch that leaves that
+    /// field empty never reaches the sidebar at all — which is what makes the common patch
+    /// serviceable here while a `default_category_name` patch is forwarded.
+    pub enable_channel_category_sorting: bool,
+
+    /// `TeamSettings.MaxChannelsPerTeam` (config.go:2557), Go default **2000**
+    /// (config.go:2629).
+    ///
+    /// Read twice on the create path and with two *different* predicates, which is why the port
+    /// keeps both: `CreateChannelWithUser` (app/channel.go:180) compares it against
+    /// `GetNumberOfChannelsOnTeam`, which counts `O`, `P` and `G` including archived ones, while
+    /// `saveChannelT` (channel_store.go:813) compares it against a count of live `O` and `P`
+    /// only. A team can therefore be refused by the first check and accepted by the second.
+    ///
+    /// A **negative** value switches the store's check off entirely (`maxChannelsPerTeam >= 0`);
+    /// the app-layer check has no such escape and would still refuse.
+    pub max_channels_per_team: i64,
+    /// `TeamSettings.MaxUsersPerTeam` (config.go:2543). Go default **`50`**
+    /// (`TeamSettingsDefaultMaxUsersPerTeam`, config.go:144).
+    ///
+    /// Passed straight into `TeamStore::save_member`, which refuses the write with
+    /// `ErrLimitExceeded` when `existing + new > max`. Two things a reader gets wrong:
+    /// the count excludes **deleted memberships and deleted users** (both `DeleteAt = 0`
+    /// predicates), and the guard on the whole check is `maxUsersPerTeam >= 0` — so a document
+    /// holding `0` caps a team at zero members rather than disabling the limit.
+    pub max_users_per_team: i64,
+
+    /// `TeamSettings.ExperimentalDefaultChannels` (config.go:2568). Go default **`[]`**.
+    ///
+    /// When empty, `DefaultChannelNames` is `["town-square", "off-topic"]`; when set, the list
+    /// **replaces `off-topic` only** — `town-square` is always first and is de-duplicated out of
+    /// the configured list if it names itself. Read on the team-join path to decide which
+    /// channels a new member is put in.
+    pub experimental_default_channels: Vec<String>,
+
     /// `ServiceSettings.EnableBurnOnRead` (config.go:472). Go default **`true`**.
     pub enable_burn_on_read: bool,
+
+    /// `ServiceSettings.PostEditTimeLimit` (config.go:437). Go default **`-1`**, which means
+    /// "no limit" and is checked for explicitly rather than compared.
+    ///
+    /// Read by [`crate::App::post_edit_time_limit_expired`], which every write that changes a
+    /// stored post consults: `updatePost`, `patchPost` and both pin routes. Seconds, not
+    /// milliseconds — `post.CreateAt + int64(limit)*1000` is the deadline, so a limit of `0` is
+    /// not "no limit" but "expired the moment the post was created".
+    pub post_edit_time_limit: i64,
+
+    /// `ServiceSettings.ExperimentalEnableHardenedMode` (config.go:458). Go default **`false`**.
+    ///
+    /// When on, a non-integration session may not set the props reserved for integrations
+    /// (`Post::contains_integrations_reserved_props`) — a **400**
+    /// `api.context.invalid_body_param.app_error` naming `props`. Off, the check is a no-op, which
+    /// is why being wrong about the default would be silent: every post would be accepted.
+    pub experimental_enable_hardened_mode: bool,
 
     /// `FeatureFlags.BurnOnRead` (feature_flags.go:90). Go default **`true`**.
     ///
@@ -391,6 +456,44 @@ pub struct Config {
     /// is no database source to read and giving it one would be inventing a value.
     pub feature_flag_session_attributes: bool,
 
+    /// `ServiceSettings.CollapsedThreads` (config.go:485, defaulted **`"always_on"`** at :982).
+    ///
+    /// **The default short-circuits the preference lookup entirely.**
+    /// `App.IsCRTEnabledForUser` (app/channel.go:3183) reads the user's
+    /// `display_settings/collapsed_reply_threads` preference only for `default_on` and
+    /// `default_off`; `disabled` is always false and `always_on` — the shipped default — is
+    /// always true, with no query. Treating this as a plain "CRT on/off" boolean would send a
+    /// per-user query the server never makes.
+    pub collapsed_threads: String,
+
+    /// `ServiceSettings.ThreadAutoFollow` (config.go:484, defaulted **`true`** at :978).
+    ///
+    /// In `MarkChannelsAsViewed` this gates the *thread* half of marking a channel read:
+    /// `ThreadAutoFollow && (!collapsedThreadsSupported || !isCRTEnabled)`. With the shipped
+    /// defaults `isCRTEnabled` is true, so the whole expression reduces to
+    /// `!collapsedThreadsSupported` — a client that says it renders threads itself gets no
+    /// thread write, and a client that does not gets one.
+    pub thread_auto_follow: bool,
+
+    /// `ServiceSettings.EnableChannelViewedMessages` (config.go:444, defaulted **`true`** at
+    /// :707).
+    ///
+    /// Gates only the `multiple_channels_viewed` websocket event, never the write — so with it
+    /// off a channel is still marked read and the client is simply not told. Nothing on the HTTP
+    /// response body changes either way.
+    pub enable_channel_viewed_messages: bool,
+
+    /// `FeatureFlags.EnableShiftEscapeToMarkAllRead` (feature_flags.go:77, defaulted **`false`**
+    /// at :181).
+    ///
+    /// Gates `PUT /channels/members/{user_id}/direct/read` and
+    /// `PUT /users/{user_id}/teams/{team_id}/read`, both of which answer **501**
+    /// `api.mark_all_as_read.disabled.app_error` when it is off — and the check is the *first*
+    /// line of each handler, ahead of `RequireUserId`, so a malformed id gets the 501 too.
+    ///
+    /// Environment-or-default only, like [`Config::feature_flag_burn_on_read`].
+    pub feature_flag_enable_shift_escape_to_mark_all_read: bool,
+
     /// `ServiceSettings.EnableDynamicClientRegistration` (config.go:386, defaulted **`false`** at
     /// :599).
     ///
@@ -433,6 +536,49 @@ pub struct Config {
     /// is why the default's *value* matters here in a way the boolean settings' does not — a port
     /// that guessed `0` would never revoke anything and would accept every session Go rejects.
     pub session_idle_timeout_in_minutes: i64,
+
+    /// `ServiceSettings.MaximumLoginAttempts` (config.go:383, defaulted **`10`** at :671).
+    ///
+    /// The lockout cap, and the predicate is strictly `<` in
+    /// [`mm_store::UserStore::try_increment_failed_password_attempts`] — so this is the number of
+    /// failures *allowed*, and the `maxAttempts`-th one is refused. Read by every password check,
+    /// including `DoubleCheckPassword` behind `PUT /users/{id}/password`: an already-logged-in
+    /// user who keeps mistyping their current password locks themselves out of *login* too,
+    /// because both paths share one counter column.
+    ///
+    /// `LdapSettings.MaximumLoginAttempts` is a **different** setting with its own default of 10;
+    /// only the LDAP path reads it, and that path is forwarded.
+    pub maximum_login_attempts: i64,
+
+    /// `ServiceSettings.TerminateSessionsOnPasswordChange` (config.go:416, defaulted
+    /// **`!isUpdate`** at :733).
+    ///
+    /// Computed, not constant — like [`Config::extend_session_length_with_activity`]. Every
+    /// document a running server persists carries a `SiteURL`, so `isUpdate` is true there and
+    /// this is **off** on any upgraded install and **on** on a fresh one.
+    ///
+    /// When on, `App.UpdatePassword` revokes every session of the user except the caller's own.
+    pub terminate_sessions_on_password_change: bool,
+
+    /// `PasswordSettings.MinimumLength` (config.go:1778). Go default **`8`** — or
+    /// `PasswordFIPSMinimumLength` under a FIPS build, which this port does not model.
+    ///
+    /// Counted in **bytes** (`len(password)`), not runes, so a four-character emoji password is
+    /// sixteen and passes a minimum of eight.
+    pub password_minimum_length: i64,
+
+    /// `PasswordSettings.Lowercase` (config.go:1786). Go default **`false`**.
+    pub password_lowercase: bool,
+
+    /// `PasswordSettings.Number` (config.go:1790). Go default **`false`**.
+    pub password_number: bool,
+
+    /// `PasswordSettings.Uppercase` (config.go:1794). Go default **`false`**.
+    pub password_uppercase: bool,
+
+    /// `PasswordSettings.Symbol` (config.go:1798). Go default **`false`**. The symbol set is
+    /// [`mm_model::utils::SYMBOLS`], which **includes a space**.
+    pub password_symbol: bool,
 
     /// `ServiceSettings.ExtendSessionLengthWithActivity` (config.go:415, defaulted at :728).
     ///
@@ -633,7 +779,19 @@ impl Default for Config {
             require_email_verification: false,
             guest_restrict_creation_to_domains: String::new(),
             allow_synced_drafts: true,
+            enable_api_channel_deletion: false,
+            enable_channel_category_sorting: true,
+            // config.go:2629 — `new(int64(2000))`.
+            max_channels_per_team: 2000,
+            // config.go:2577 — `TeamSettingsDefaultMaxUsersPerTeam`.
+            max_users_per_team: 50,
+            // config.go:2653 — `[]string{}`.
+            experimental_default_channels: Vec::new(),
             enable_burn_on_read: true,
+            // config.go:870 — `new(-1)`.
+            post_edit_time_limit: -1,
+            // config.go:906 — `new(false)`.
+            experimental_enable_hardened_mode: false,
             feature_flag_burn_on_read: true,
             file_driver_name: "local".to_owned(),
             // config.go:1904 — `FileSettingsDefaultDirectory`.
@@ -656,6 +814,14 @@ impl Default for Config {
             maximum_personal_access_token_lifetime_days: 0,
             message_export_download_export_results: false,
             feature_flag_session_attributes: false,
+            // config.go:982 — `new(CollapsedThreadsAlwaysOn)`.
+            collapsed_threads: mm_model::config::COLLAPSED_THREADS_ALWAYS_ON.to_owned(),
+            // config.go:978 — `new(true)`.
+            thread_auto_follow: true,
+            // config.go:708 — `new(true)`.
+            enable_channel_viewed_messages: true,
+            // feature_flags.go:181 — `false`.
+            feature_flag_enable_shift_escape_to_mark_all_read: false,
             show_full_name: true,
             show_email_address: true,
             // Absent, not empty: `SetDefaults` never fills `SiteURL`, and this constructor
@@ -663,6 +829,15 @@ impl Default for Config {
             // that plants the `""`.
             site_url: None,
             session_idle_timeout_in_minutes: 43200,
+            maximum_login_attempts: 10,
+            // `new(!isUpdate)` with `isUpdate == false`, the same reasoning as
+            // `extend_session_length_with_activity` below: an empty config is a fresh install.
+            terminate_sessions_on_password_change: true,
+            password_minimum_length: 8,
+            password_lowercase: false,
+            password_number: false,
+            password_uppercase: false,
+            password_symbol: false,
             // `new(!isUpdate)` with `isUpdate == false`: this constructor models `SetDefaults` on
             // an **empty** config, which has no `SiteURL` and is therefore a fresh install. Every
             // document a running Go server persists takes the other branch — see
@@ -815,10 +990,45 @@ impl Config {
                 "MM_SERVICESETTINGS_ALLOWSYNCEDDRAFTS",
                 default.allow_synced_drafts,
             ),
+            enable_api_channel_deletion: lookup_bool(
+                lookup,
+                "MM_SERVICESETTINGS_ENABLEAPICHANNELDELETION",
+                default.enable_api_channel_deletion,
+            ),
+            enable_channel_category_sorting: lookup_bool(
+                lookup,
+                "MM_TEAMSETTINGS_ENABLECHANNELCATEGORYSORTING",
+                default.enable_channel_category_sorting,
+            ),
+            max_channels_per_team: lookup("MM_TEAMSETTINGS_MAXCHANNELSPERTEAM")
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(default.max_channels_per_team),
+            max_users_per_team: lookup_int(
+                lookup,
+                "MM_TEAMSETTINGS_MAXUSERSPERTEAM",
+                default.max_users_per_team,
+            ),
+            // Go's env decoder splits a `[]string` setting on commas, so the environment form of
+            // this is `town-square,welcome`. An unset variable and an empty one are different:
+            // unset keeps the default, and `""` is an empty list — which is also the default, so
+            // the distinction is invisible here and would not be for a non-empty default.
+            experimental_default_channels: lookup("MM_TEAMSETTINGS_EXPERIMENTALDEFAULTCHANNELS")
+                .map(|raw| split_list(&raw))
+                .unwrap_or(default.experimental_default_channels),
             enable_burn_on_read: lookup_bool(
                 lookup,
                 "MM_SERVICESETTINGS_ENABLEBURNONREAD",
                 default.enable_burn_on_read,
+            ),
+            post_edit_time_limit: lookup_int(
+                lookup,
+                "MM_SERVICESETTINGS_POSTEDITTIMELIMIT",
+                default.post_edit_time_limit,
+            ),
+            experimental_enable_hardened_mode: lookup_bool(
+                lookup,
+                "MM_SERVICESETTINGS_EXPERIMENTALENABLEHARDENEDMODE",
+                default.experimental_enable_hardened_mode,
             ),
             feature_flag_burn_on_read: lookup_bool(
                 lookup,
@@ -942,6 +1152,23 @@ impl Config {
                 "MM_FEATUREFLAGS_SESSIONATTRIBUTES",
                 default.feature_flag_session_attributes,
             ),
+            collapsed_threads: lookup("MM_SERVICESETTINGS_COLLAPSEDTHREADS")
+                .unwrap_or(default.collapsed_threads),
+            thread_auto_follow: lookup_bool(
+                lookup,
+                "MM_SERVICESETTINGS_THREADAUTOFOLLOW",
+                default.thread_auto_follow,
+            ),
+            enable_channel_viewed_messages: lookup_bool(
+                lookup,
+                "MM_SERVICESETTINGS_ENABLECHANNELVIEWEDMESSAGES",
+                default.enable_channel_viewed_messages,
+            ),
+            feature_flag_enable_shift_escape_to_mark_all_read: lookup_bool(
+                lookup,
+                "MM_FEATUREFLAGS_ENABLESHIFTESCAPETOMARKALLREAD",
+                default.feature_flag_enable_shift_escape_to_mark_all_read,
+            ),
             show_full_name: lookup_bool(
                 lookup,
                 "MM_PRIVACYSETTINGS_SHOWFULLNAME",
@@ -962,6 +1189,41 @@ impl Config {
                 lookup,
                 "MM_SERVICESETTINGS_SESSIONIDLETIMEOUTINMINUTES",
                 default.session_idle_timeout_in_minutes,
+            ),
+            maximum_login_attempts: lookup_int(
+                lookup,
+                "MM_SERVICESETTINGS_MAXIMUMLOGINATTEMPTS",
+                default.maximum_login_attempts,
+            ),
+            terminate_sessions_on_password_change: lookup_bool(
+                lookup,
+                "MM_SERVICESETTINGS_TERMINATESESSIONSONPASSWORDCHANGE",
+                default.terminate_sessions_on_password_change,
+            ),
+            password_minimum_length: lookup_int(
+                lookup,
+                "MM_PASSWORDSETTINGS_MINIMUMLENGTH",
+                default.password_minimum_length,
+            ),
+            password_lowercase: lookup_bool(
+                lookup,
+                "MM_PASSWORDSETTINGS_LOWERCASE",
+                default.password_lowercase,
+            ),
+            password_number: lookup_bool(
+                lookup,
+                "MM_PASSWORDSETTINGS_NUMBER",
+                default.password_number,
+            ),
+            password_uppercase: lookup_bool(
+                lookup,
+                "MM_PASSWORDSETTINGS_UPPERCASE",
+                default.password_uppercase,
+            ),
+            password_symbol: lookup_bool(
+                lookup,
+                "MM_PASSWORDSETTINGS_SYMBOL",
+                default.password_symbol,
             ),
             extend_session_length_with_activity: lookup_bool(
                 lookup,
@@ -1008,6 +1270,7 @@ impl Config {
         let email_settings = parsed.email_settings.unwrap_or_default();
         let guest_accounts = parsed.guest_accounts_settings.unwrap_or_default();
         let file_settings = parsed.file_settings.unwrap_or_default();
+        let password_settings = parsed.password_settings.unwrap_or_default();
         Ok(Self {
             // Moved, not cloned: `is_update` above already took the only other thing anything
             // wants from this field, and the remaining `service` reads are all `Option<bool>`.
@@ -1057,6 +1320,18 @@ impl Config {
             // The same rule as `feature_flag_burn_on_read` above: `FeatureFlags` never reaches the
             // persisted document, so there is nothing here to read.
             feature_flag_session_attributes: default.feature_flag_session_attributes,
+            collapsed_threads: service
+                .collapsed_threads
+                .unwrap_or(default.collapsed_threads),
+            thread_auto_follow: service
+                .thread_auto_follow
+                .unwrap_or(default.thread_auto_follow),
+            enable_channel_viewed_messages: service
+                .enable_channel_viewed_messages
+                .unwrap_or(default.enable_channel_viewed_messages),
+            // `FeatureFlags` is stripped before the document is persisted; see the field docs.
+            feature_flag_enable_shift_escape_to_mark_all_read: default
+                .feature_flag_enable_shift_escape_to_mark_all_read,
             enable_post_username_override: service
                 .enable_post_username_override
                 .unwrap_or(default.enable_post_username_override),
@@ -1103,9 +1378,30 @@ impl Config {
             allow_synced_drafts: service
                 .allow_synced_drafts
                 .unwrap_or(default.allow_synced_drafts),
+            enable_api_channel_deletion: service
+                .enable_api_channel_deletion
+                .unwrap_or(default.enable_api_channel_deletion),
+            enable_channel_category_sorting: team_settings
+                .enable_channel_category_sorting
+                .unwrap_or(default.enable_channel_category_sorting),
+            max_channels_per_team: team_settings
+                .max_channels_per_team
+                .unwrap_or(default.max_channels_per_team),
+            max_users_per_team: team_settings
+                .max_users_per_team
+                .unwrap_or(default.max_users_per_team),
+            experimental_default_channels: team_settings
+                .experimental_default_channels
+                .unwrap_or(default.experimental_default_channels),
             enable_burn_on_read: service
                 .enable_burn_on_read
                 .unwrap_or(default.enable_burn_on_read),
+            post_edit_time_limit: service
+                .post_edit_time_limit
+                .unwrap_or(default.post_edit_time_limit),
+            experimental_enable_hardened_mode: service
+                .experimental_enable_hardened_mode
+                .unwrap_or(default.experimental_enable_hardened_mode),
             // Deliberately NOT read from the document: Go clears `FeatureFlags` before persisting
             // (store.go:306-310), so the section is absent from every row it writes. Sourcing it
             // here would read an absence as a deliberate `false` on the next `readOnlyFF` change.
@@ -1170,6 +1466,26 @@ impl Config {
             extend_session_length_with_activity: service
                 .extend_session_length_with_activity
                 .unwrap_or(!is_update),
+            maximum_login_attempts: service
+                .maximum_login_attempts
+                .unwrap_or(default.maximum_login_attempts),
+            // The second `!isUpdate` default (config.go:733), and the one that matters more: a
+            // resolved-from-`default` `true` would log every other device out on a password
+            // change that Go leaves alone.
+            terminate_sessions_on_password_change: service
+                .terminate_sessions_on_password_change
+                .unwrap_or(!is_update),
+            password_minimum_length: password_settings
+                .minimum_length
+                .unwrap_or(default.password_minimum_length),
+            password_lowercase: password_settings
+                .lowercase
+                .unwrap_or(default.password_lowercase),
+            password_number: password_settings.number.unwrap_or(default.password_number),
+            password_uppercase: password_settings
+                .uppercase
+                .unwrap_or(default.password_uppercase),
+            password_symbol: password_settings.symbol.unwrap_or(default.password_symbol),
             goroutine_health_threshold: service
                 .goroutine_health_threshold
                 .unwrap_or(default.goroutine_health_threshold),
@@ -1277,6 +1593,8 @@ struct Document {
     image_proxy_settings: Option<EnableOnlyDocument>,
     #[serde(rename = "FileSettings")]
     file_settings: Option<FileSettingsDocument>,
+    #[serde(rename = "PasswordSettings")]
+    password_settings: Option<PasswordSettingsDocument>,
     #[serde(rename = "ExportSettings")]
     export_settings: Option<ExportSettingsDocument>,
     #[serde(rename = "ImportSettings")]
@@ -1301,6 +1619,24 @@ struct Document {
     message_export_settings: Option<MessageExportSettingsDocument>,
     #[serde(rename = "CloudSettings")]
     cloud_settings: Option<CloudSettingsDocument>,
+}
+
+/// The four rule flags and the minimum length `IsPasswordValidWithSettings` reads.
+///
+/// `EnableForgotLink` is absent: it gates a *link in the webapp*, not a server check, and no
+/// ported route consults it.
+#[derive(Debug, Default, serde::Deserialize)]
+struct PasswordSettingsDocument {
+    #[serde(rename = "MinimumLength")]
+    minimum_length: Option<i64>,
+    #[serde(rename = "Lowercase")]
+    lowercase: Option<bool>,
+    #[serde(rename = "Number")]
+    number: Option<bool>,
+    #[serde(rename = "Uppercase")]
+    uppercase: Option<bool>,
+    #[serde(rename = "Symbol")]
+    symbol: Option<bool>,
 }
 
 /// The one field of `CloudSettings` a migrated route reads.
@@ -1330,6 +1666,14 @@ struct TeamSettingsDocument {
     user_status_away_timeout: Option<i64>,
     #[serde(rename = "EnableCustomUserStatuses")]
     enable_custom_user_statuses: Option<bool>,
+    #[serde(rename = "EnableChannelCategorySorting")]
+    enable_channel_category_sorting: Option<bool>,
+    #[serde(rename = "MaxChannelsPerTeam")]
+    max_channels_per_team: Option<i64>,
+    #[serde(rename = "MaxUsersPerTeam")]
+    max_users_per_team: Option<i64>,
+    #[serde(rename = "ExperimentalDefaultChannels")]
+    experimental_default_channels: Option<Vec<String>>,
 }
 
 /// The one field of `EmailSettings` a migrated route reads.
@@ -1395,6 +1739,10 @@ struct ServiceSettingsDocument {
     webserver_mode: Option<String>,
     #[serde(rename = "SessionIdleTimeoutInMinutes")]
     session_idle_timeout_in_minutes: Option<i64>,
+    #[serde(rename = "MaximumLoginAttempts")]
+    maximum_login_attempts: Option<i64>,
+    #[serde(rename = "TerminateSessionsOnPasswordChange")]
+    terminate_sessions_on_password_change: Option<bool>,
     #[serde(rename = "ExtendSessionLengthWithActivity")]
     extend_session_length_with_activity: Option<bool>,
     #[serde(rename = "GoroutineHealthThreshold")]
@@ -1407,6 +1755,12 @@ struct ServiceSettingsDocument {
     enable_post_icon_override: Option<bool>,
     #[serde(rename = "EnableUserStatuses")]
     enable_user_statuses: Option<bool>,
+    #[serde(rename = "CollapsedThreads")]
+    collapsed_threads: Option<String>,
+    #[serde(rename = "ThreadAutoFollow")]
+    thread_auto_follow: Option<bool>,
+    #[serde(rename = "EnableChannelViewedMessages")]
+    enable_channel_viewed_messages: Option<bool>,
     #[serde(rename = "EnableDynamicClientRegistration")]
     enable_dynamic_client_registration: Option<bool>,
     #[serde(rename = "EnableOutgoingOAuthConnections")]
@@ -1427,8 +1781,14 @@ struct ServiceSettingsDocument {
     unique_emoji_reaction_limit_per_post: Option<i64>,
     #[serde(rename = "AllowSyncedDrafts")]
     allow_synced_drafts: Option<bool>,
+    #[serde(rename = "EnableAPIChannelDeletion")]
+    enable_api_channel_deletion: Option<bool>,
     #[serde(rename = "EnableBurnOnRead")]
     enable_burn_on_read: Option<bool>,
+    #[serde(rename = "PostEditTimeLimit")]
+    post_edit_time_limit: Option<i64>,
+    #[serde(rename = "ExperimentalEnableHardenedMode")]
+    experimental_enable_hardened_mode: Option<bool>,
     #[serde(rename = "EnableIncomingWebhooks")]
     enable_incoming_webhooks: Option<bool>,
     #[serde(rename = "EnableOutgoingWebhooks")]
@@ -1574,6 +1934,16 @@ fn lookup_int(lookup: &impl Fn(&str) -> Option<String>, key: &str, default: i64)
     lookup(key)
         .and_then(|raw| raw.parse::<i64>().ok())
         .unwrap_or(default)
+}
+
+/// Go's environment decoder for a `[]string` setting: split on commas, keep the pieces as
+/// written. Whitespace is **not** trimmed — `"a, b"` is `["a", " b"]` in Go too — and an empty
+/// string yields an empty list rather than one empty element.
+fn split_list(raw: &str) -> Vec<String> {
+    if raw.is_empty() {
+        return Vec::new();
+    }
+    raw.split(',').map(str::to_owned).collect()
 }
 
 #[cfg(test)]
@@ -1881,7 +2251,15 @@ mod go_parity {
     /// is an `Option` at all. Adjusted here rather than changed in [`Config::default`], because
     /// the default is modelling the pre-`Load` config correctly.
     ///
-    /// All three are correct for their input, which is why this compares against the adjusted
+    /// The fourth is `ExtendSessionLengthWithActivity`'s twin.
+    /// `TerminateSessionsOnPasswordChange` also defaults to `!isUpdate` (config.go:733), so it too
+    /// is `true` on a config that has never been through `Load` and `false` on every document a
+    /// running server persists. Note the fixture does not carry the key **at all** where it does
+    /// carry `ExtendSessionLengthWithActivity: false` — an absent key and an explicit `false` reach
+    /// the same place through `SetDefaults`, which is exactly why the resolution has to happen in
+    /// [`Config::from_document`] rather than against [`Config::default`].
+    ///
+    /// All four are correct for their input, which is why this compares against the adjusted
     /// default rather than widening the assertion to let a genuine drift through.
     #[test]
     fn every_default_matches_what_go_actually_wrote() {
@@ -1889,6 +2267,7 @@ mod go_parity {
         let transcribed = Config {
             site_url: Some(String::new()),
             extend_session_length_with_activity: false,
+            terminate_sessions_on_password_change: false,
             ai_recap_settings_enable: Some(true),
             ..Config::default()
         };
@@ -2069,8 +2448,8 @@ mod go_parity {
             .sum();
 
         assert_eq!(
-            keys, 44,
-            "the fixture covers {keys} settings and Config reads 44 from the document. \
+            keys, 46,
+            "the fixture covers {keys} settings and Config reads 46 from the document. \
              Add the new key to scripts/dump-config-fixture.sh and re-run it — a modelled \
              setting the fixture does not carry is a setting Go's own output never checked"
         );
@@ -2243,8 +2622,9 @@ mod go_parity {
     /// what makes growing the struct one reader at a time safe.
     ///
     /// `SiteURL` stopped being an unknown key when the `isUpdate` rule landed, which is why the
-    /// expectation carries the one field it moves — see
-    /// [`the_extend_session_default_follows_is_update`].
+    /// expectation carries the **two** fields it moves — see
+    /// [`the_extend_session_default_follows_is_update`]. Both default to `!isUpdate`, so naming
+    /// one and not the other is how this test failed when the second landed.
     #[test]
     fn unknown_sections_and_keys_are_ignored() {
         let config = Config::from_document(
@@ -2256,6 +2636,7 @@ mod go_parity {
             Config {
                 site_url: Some("x".to_owned()),
                 extend_session_length_with_activity: false,
+                terminate_sessions_on_password_change: false,
                 ..Config::default()
             }
         );

@@ -1252,7 +1252,7 @@ impl App {
 /// Go tests key **presence** (`if _, ok := props[...]; ok`), not the value, so a prop explicitly
 /// set to `null` still takes the branch. The refusal carries the prop name, which is what a log
 /// reader needs to know which branch stopped us.
-fn refuse_on_props(post: &Post) -> Result<(), PrepareError> {
+pub(crate) fn refuse_on_props(post: &Post) -> Result<(), PrepareError> {
     let Some(props) = post.props.as_ref() else {
         return Ok(());
     };

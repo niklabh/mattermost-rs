@@ -46,7 +46,12 @@ static FIXTURES: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 
-const GO: &str = "http://localhost:8065";
+/// The Go server of the stack this checkout is pinned to, baked in at compile time — see
+/// `crates/mm-api/tests/common/mod.rs` for why it is compile-time rather than a runtime lookup.
+const GO: &str = match option_env!("MMRS_GO_BASE") {
+    Some(base) => base,
+    None => "http://localhost:8065",
+};
 
 /// Ids must be exactly 26 characters or `RequireUserId` rejects the request with a 400 before the
 /// permission check runs — which looks like a denial and is not one.

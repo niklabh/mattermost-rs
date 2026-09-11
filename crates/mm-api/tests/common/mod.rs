@@ -8,8 +8,23 @@
 
 use std::time::Duration;
 
-pub const GO: &str = "http://localhost:8065";
-pub const RUST: &str = "http://127.0.0.1:8066";
+/// The two servers under comparison, **baked in at compile time** from the stack this checkout
+/// is pinned to (`scripts/stack-env.sh`), defaulting to stack 0's historical ports.
+///
+/// Compile-time, not runtime, for one reason: these are `&'static str` consts used inside inline
+/// format captures — `format!("{GO}/api/v4/x")` — in about thirteen hundred places across this
+/// suite. A runtime lookup would mean rewriting all of them. `crates/mm-api/build.rs` registers
+/// the `rerun-if-env-changed` lines that keep a stale binary from comparing the wrong two
+/// servers, and each worktree has its own `target/`, so a worktree pinned to a stack pays one
+/// rebuild.
+pub const GO: &str = match option_env!("MMRS_GO_BASE") {
+    Some(base) => base,
+    None => "http://localhost:8065",
+};
+pub const RUST: &str = match option_env!("MMRS_RUST_BASE") {
+    Some(base) => base,
+    None => "http://127.0.0.1:8066",
+};
 pub const LOGIN_ID: &str = "slice@example.com";
 pub const PASSWORD: &str = "Slice-Test-1234";
 
@@ -740,16 +755,31 @@ pub async fn fetch_both_stable(
     token: &str,
     path: &str,
 ) -> (Vec<u8>, Vec<u8>) {
-    fetch_both_stable_within(client, token, path, 24).await
+    fetch_both_stable_within(client, token, path, 44).await
 }
 
 /// [`fetch_both_stable`] with the retry budget spelled out.
 ///
-/// The default is **24**, raised from twelve when the schemes suite landed: it creates four users,
-/// five teams and two channels in one fixture, and every one of those is a row in the user list
-/// and two rows in the admin's audit page. Two long-standing tests started failing on churn alone
-/// — `users_list::the_unfiltered_list_matches_go` and `user_audits::me_resolves_to_the_caller` —
-/// neither of which had anything to do with the routes being added.
+/// The default is **44**, and it has been raised twice for the same reason. Twelve → 24 when the
+/// schemes suite landed: it creates four users, five teams and two channels in one fixture, and
+/// every one of those is a row in the user list and two rows in the admin's audit page. Two
+/// long-standing tests started failing on churn alone — `users_list::the_unfiltered_list_matches_go`
+/// and `user_audits::me_resolves_to_the_caller` — neither of which had anything to do with the
+/// routes being added.
+///
+/// 24 → 44 when the four write suites of 2026-09-10 landed (membership, channel lifecycle, post
+/// writes, sidebar categories). Those create and *delete* users and channels continuously rather
+/// than once per fixture, so the quiescent window this function waits for stopped occurring
+/// within 24 attempts. Three separate whole-database aggregates flaked in one session
+/// — `users_stats::the_stats_body_is_byte_identical`,
+/// `users_stats::the_count_matches_the_database_including_bots` and `system_usage`'s rounded post
+/// count — each passing alone and failing in the concurrent run.
+///
+/// **This raises the budget; it does not remove the race.** The backoff caps at 400ms, so the
+/// cost is bounded at roughly 20s for a global-count route that genuinely diverges, against 10s
+/// before, and nothing at all for a route that agrees on the first attempt. A test that still
+/// exhausts 44 attempts is reporting churn, not a port bug — check it in isolation before
+/// believing it.
 ///
 /// The backoff is capped so a *real* divergence still fails quickly: without a cap, doubling the
 /// attempts would have quadrupled the time a genuinely broken route takes to report itself.
@@ -890,6 +920,31 @@ async fn make_every_user_scannable_by_go(pool: &sqlx::PgPool) {
              OR position IS NULL
              OR lastpictureupdate IS NULL
              OR mfausedtimestamps IS NULL",
+    )
+    .execute(pool)
+    .await;
+
+    make_every_team_scannable_by_go(pool).await;
+}
+
+/// The same repair for `Teams`, and it was found the same way.
+///
+/// `GET /api/v4/usage/teams` goes through `GetAllTeams`, whose scan takes
+/// `Teams.LastTeamIconUpdate` into a plain `int64` — so one NULL anywhere in the table is a **500
+/// for the whole route**, and `teams_all`'s eight tests go with it. A dozen `mm-store` and
+/// `mm-app` suites `INSERT INTO teams` without that column, and `cargo test --workspace` runs
+/// their binaries before or after the parity one depending on nothing in particular. On a
+/// months-old stack the rows had long since been swept; on a stack created an hour ago they had
+/// not, which is the whole difference.
+///
+/// Normalised rather than deleted, and `UpdateAt` is untouched so no etag moves — the same
+/// reasoning as the `Users` repair above. Fixing the dozen inserting suites instead would be
+/// twelve places to keep right rather than one.
+async fn make_every_team_scannable_by_go(pool: &sqlx::PgPool) {
+    let _ = sqlx::query(
+        "UPDATE teams
+            SET lastteamiconupdate = COALESCE(lastteamiconupdate, 0)
+          WHERE lastteamiconupdate IS NULL",
     )
     .execute(pool)
     .await;
@@ -2162,7 +2217,16 @@ impl SecondServer {
     ///
     /// Returns [`None`] when the binary is not where `parity.sh` leaves it — a `cargo test` run
     /// outside the harness — so a caller can skip rather than fail for the wrong reason.
+    /// `port` is the stack-0 port the caller names; `MMRS_PORT_OFFSET` shifts it onto this
+    /// stack. Read at **runtime**, unlike [`GO`] and [`RUST`], because there are only a handful of
+    /// callers and each names a literal — so two stacks never race for :8071 while the call sites
+    /// keep saying one number.
     pub async fn start(port: u16, env: &[(&str, &str)]) -> Option<Self> {
+        let port = port
+            + std::env::var("MMRS_PORT_OFFSET")
+                .ok()
+                .and_then(|v| v.parse::<u16>().ok())
+                .unwrap_or(0);
         let binary =
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/debug/mm-api");
         if !binary.exists() {
@@ -2375,4 +2439,52 @@ impl SocketProbe {
             .filter(|(_, frame)| frame.get("seq_reply").is_some() || frame.get("status").is_some())
             .collect()
     }
+}
+
+/// The `ChannelMemberHistory` rows for one membership, oldest first, as `(join_time, leave_time)`.
+///
+/// **No REST route reads this table.** It is the compliance-export audit trail, written on every
+/// join and closed on every leave by `addUserToChannel`/`removeUserFromChannel` — and it appears in
+/// no response body, so a parity suite comparing HTTP answers passes with both writes deleted.
+/// `parity/channel_member_writes.rs` reads it directly for that reason; the store-level behaviour of
+/// the two writes is covered by `mm-store/tests/db_channel_member_writes.rs`.
+///
+/// `None` when there is no `DATABASE_URL`, so a caller degrades to skipping rather than failing.
+pub async fn channel_member_history(
+    channel_id: &str,
+    user_id: &str,
+) -> Option<Vec<(i64, Option<i64>)>> {
+    let pool = fixture_pool().await?;
+    let rows: Vec<(i64, Option<i64>)> = sqlx::query_as(
+        "SELECT jointime, leavetime FROM channelmemberhistory \
+         WHERE channelid = $1 AND userid = $2 ORDER BY jointime",
+    )
+    .bind(channel_id)
+    .bind(user_id)
+    .fetch_all(&pool)
+    .await
+    .ok()?;
+    Some(rows)
+}
+
+/// The `SidebarCategories` ids owned by `(user_id, team_id)`, in `SortOrder`.
+///
+/// Read straight from the table because the **route cannot see this**: `GET
+/// …/channels/categories` creates the three initial categories itself when it finds none, so a
+/// join that created them for the wrong pair of ids is indistinguishable from a join that created
+/// them correctly by the time any read happens. Asserting that the *swapped* pair owns no rows is
+/// the only way to pin `create_initial_sidebar_categories(user, team)`'s argument order — and a
+/// mutation swapping them SURVIVED the route-level assertion, which is how this helper came to
+/// exist.
+pub async fn sidebar_category_ids(user_id: &str, team_id: &str) -> Option<Vec<String>> {
+    let pool = fixture_pool().await?;
+    let ids: Vec<String> = sqlx::query_scalar(
+        "SELECT id FROM sidebarcategories WHERE userid = $1 AND teamid = $2 ORDER BY sortorder",
+    )
+    .bind(user_id)
+    .bind(team_id)
+    .fetch_all(&pool)
+    .await
+    .ok()?;
+    Some(ids)
 }

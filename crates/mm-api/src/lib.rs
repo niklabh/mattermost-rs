@@ -7,8 +7,12 @@
 
 pub mod audits;
 pub mod auth;
+pub mod auth_writes;
 /// The two bot reads. `getBot` and `getBots`.
 pub mod bots;
+pub mod channel_creates;
+pub mod channel_member_writes;
+pub mod channel_writes;
 pub mod channels;
 pub mod cloud;
 pub mod commands;
@@ -37,6 +41,7 @@ pub mod licensed_features;
 pub mod limits;
 pub mod oauth;
 pub mod permissions;
+pub mod post_writes;
 pub mod posts;
 pub mod preferences;
 pub mod proxy;
@@ -51,6 +56,7 @@ pub mod sessions;
 pub mod sidebar;
 pub mod status;
 pub mod system;
+pub mod team_member_writes;
 pub mod teams;
 pub mod terms_of_service;
 /// The four personal-access-token reads.
@@ -380,6 +386,63 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/users/{user_id}/sessions",
             partially_migrated_with_ids(&state, get(sessions::get_sessions)),
         )
+        // `BaseRoutes.Users.Handle("/logout", APIHandler(logout))` (api4/user.go:75) — a literal
+        // sibling of `{user_id}`, so axum's static-first preference lands `POST /users/logout`
+        // here while the `{user_id}` route keeps every other method and every other segment. The
+        // handler needs no session, which is why it takes `OptionalSession` rather than being
+        // registered behind the extractor that 401s.
+        .route(
+            "/api/v4/users/logout",
+            partially_migrated(post(auth_writes::logout)),
+        )
+        // `BaseRoutes.Users.Handle("/password/reset", APIHandler(resetPassword))`
+        // (api4/user.go:55). Two segments under `/users/`, so it is a sibling of
+        // `/users/{user_id}/{anything}` and the literal `password` wins over the parameter.
+        //
+        // Its neighbour `/password/reset/send` (user.go:56) is **not** registered: it exists only
+        // to send an e-mail, and there is no e-mail service here. Leaving it unregistered is what
+        // keeps it forwarded — adding it as a 405-only path would break it. See [D-238].
+        .route(
+            "/api/v4/users/password/reset",
+            partially_migrated(post(auth_writes::reset_password)),
+        )
+        // `BaseRoutes.Users.Handle("/email/verify", APIHandler(verifyUserEmail))`
+        // (api4/user.go:57), and the one registration on this list with a real routing subtlety.
+        //
+        // `/api/v4/users/email/{*email}` is already registered above as a **catch-all** — Go's
+        // `PathPrefix("/email/{email:.+}")`, whose `.+` matches slashes. matchit prefers a static
+        // segment to a catch-all, so `POST /users/email/verify` lands here rather than being read
+        // as an e-mail address of `verify`. That is also Go's outcome, reached differently: there
+        // the literal route is registered *first* and gorilla matches in order.
+        //
+        // `GET /users/email/verify` falls to this route's `partially_migrated` fallback and is
+        // forwarded, so Go still answers it as a lookup for the address `verify` — unchanged.
+        //
+        // `/email/verify/send` (user.go:58) is unregistered for the same reason as
+        // `/password/reset/send`: it is an e-mail and nothing else.
+        //
+        // `GET` on this path is **not** forwarded: matchit has no method dimension in its path
+        // preference, so the static route wins for every method, and Go's gorilla *does* fall
+        // through to the catch-all for a GET. `get_user_by_email_verify` hands it to the handler
+        // Go would have reached, with `verify` as the address.
+        .route(
+            "/api/v4/users/email/verify",
+            partially_migrated(
+                post(auth_writes::verify_user_email).get(auth_writes::get_user_by_email_verify),
+            ),
+        )
+        // `BaseRoutes.User.Handle("/password", APISessionRequired(updatePassword))`
+        // (api4/user.go:51), PUT only — a sibling of `/users/{user_id}/status` and one segment
+        // deeper than `/users/{user_id}`, so it shadows nothing.
+        .route(
+            "/api/v4/users/{user_id}/password",
+            partially_migrated_with_ids(&state, put(auth_writes::update_password)),
+        )
+        // `BaseRoutes.User.Handle("/reset_failed_attempts", ...)` (api4/user.go:62), POST only.
+        .route(
+            "/api/v4/users/{user_id}/reset_failed_attempts",
+            partially_migrated_with_ids(&state, post(auth_writes::reset_password_failed_attempts)),
+        )
         .route(
             "/api/v4/users/{user_id}/status",
             partially_migrated_with_ids(
@@ -518,9 +581,22 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/teams/name/{team_name}/channels/name/{channel_name}",
             partially_migrated(get(channels::get_channel_by_name_for_team_name)),
         )
+        // gorilla registers the GET and the POST separately on `BaseRoutes.TeamMembers`
+        // (api4/team.go:56, :59) and picks by method; chaining onto one `MethodRouter`
+        // reproduces that, and axum panics on a second `.route()` for the same path.
         .route(
             "/api/v4/teams/{team_id}/members",
-            partially_migrated_with_ids(&state, get(teams::get_team_members)),
+            partially_migrated_with_ids(
+                &state,
+                get(teams::get_team_members).post(team_member_writes::add_team_member),
+            ),
+        )
+        // `BaseRoutes.TeamMembers.Handle("/batch")` (api4/team.go:61). The literal wins over the
+        // `{user_id}` pattern below in both routers, so `/members/batch` never reaches
+        // `getTeamMember` — the same shape as `/members/ids`.
+        .route(
+            "/api/v4/teams/{team_id}/members/batch",
+            partially_migrated_with_ids(&state, post(team_member_writes::add_team_members)),
         )
         // `BaseRoutes.TeamMembers.Handle("/ids")` (api4/team.go:57) — the same literal-in-the-
         // parameter-slot shape as `/channels/{id}/members/ids` above, with the same answer in
@@ -533,6 +609,20 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/teams/{team_id}/members/{user_id}",
             partially_migrated_with_ids(&state, get(teams::get_team_member)),
+        )
+        // `BaseRoutes.TeamMember.Handle("/roles")` and `.Handle("/schemeRoles")`
+        // (api4/team.go:69-70). **`schemeRoles` is camelCase**, matched literally by gorilla and
+        // by axum alike, so `/schemeroles` reaches neither and forwards to Go's own 404.
+        .route(
+            "/api/v4/teams/{team_id}/members/{user_id}/roles",
+            partially_migrated_with_ids(&state, put(team_member_writes::update_team_member_roles)),
+        )
+        .route(
+            "/api/v4/teams/{team_id}/members/{user_id}/schemeRoles",
+            partially_migrated_with_ids(
+                &state,
+                put(team_member_writes::update_team_member_scheme_roles),
+            ),
         )
         // `team_id` gets the id-charset middleware; `channel_name` is not id-shaped and Go's
         // class for it is `[A-Za-z0-9_-]+`, so the handler carries its own mux forward. Go's
@@ -564,20 +654,94 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/users/{user_id}/teams/{team_id}/unread",
             partially_migrated_with_ids(&state, get(teams::get_team_unread)),
         )
+        // `BaseRoutes.TeamForUser` once more (api4/channel.go:76) — the whole team marked read.
+        // A `PUT` on a static leaf beside `/unread` and `/channels`, gated on the
+        // `EnableShiftEscapeToMarkAllRead` feature flag, which both servers now turn on through
+        // the environment (`scripts/go-server.sh`, `scripts/mm-api-env.sh`).
+        .route(
+            "/api/v4/users/{user_id}/teams/{team_id}/read",
+            partially_migrated_with_ids(&state, put(channels::read_all_in_team)),
+        )
         // Sibling literal segments (`/channels/direct`, `/channels/search`, …) are all POST-only
         // in Go, and all alphanumeric. A GET to one of them matches `{channel_id}` here exactly
         // as it matches gorilla's `{channel_id:[A-Za-z0-9]+}` there, and 400s identically; a POST
         // falls to `partially_migrated`'s method fallback and is forwarded. A literal segment
         // with a hyphen would land on `mux_segments_or_forward` and be forwarded too.
+        // `BaseRoutes.Channels.Handle("")` (api4/channel.go:41) — the only method on the bare
+        // `/channels` collection that this server answers. `getAllChannels` is a `GET` on the
+        // same path and is not migrated, so there is no method to combine with here yet; a `GET`
+        // falls to `partially_migrated`'s method fallback and is forwarded.
+        .route(
+            "/api/v4/channels",
+            partially_migrated(post(channel_creates::create_channel)),
+        )
+        // `BaseRoutes.Channels.Handle("/direct")` and `("/group")` (api4/channel.go:42, :43).
+        // Two literal segments in the `{channel_id}` slot of `/channels/{channel_id}` below,
+        // which matchit resolves to the static route and gorilla resolves to whichever was
+        // registered first — the same one. Both are POST-only in Go.
+        .route(
+            "/api/v4/channels/direct",
+            partially_migrated(post(channel_creates::create_direct_channel)),
+        )
+        .route(
+            "/api/v4/channels/group",
+            partially_migrated(post(channel_creates::create_group_channel)),
+        )
         // `BaseRoutes.Channels.Handle("/stats/member_count")` (api4/channel.go:47) — posted
         // with the sidebar's channel ids. A literal two segments deep, so it shadows nothing.
         .route(
             "/api/v4/channels/stats/member_count",
             partially_migrated(post(channels::get_channels_member_count)),
         )
+        // `BaseRoutes.Channels.Handle("/members/{user_id}/view")` and its two siblings
+        // (api4/channel.go:53-55). The literal `members` sits in the `{channel_id}` slot of the
+        // routes below, exactly as `stats` does above — matchit prefers the static segment, and
+        // gorilla's ordered matcher picks the same registration, so both routers send
+        // `/channels/members/<id>/view` here and `/channels/<id>/members/<id>` to
+        // `getChannelMember`.
+        //
+        // `/direct/read` is a **`PUT`**, and one segment deeper than its two siblings.
+        .route(
+            "/api/v4/channels/members/{user_id}/view",
+            partially_migrated_with_ids(&state, post(channels::view_channel)),
+        )
+        .route(
+            "/api/v4/channels/members/{user_id}/mark_read",
+            partially_migrated_with_ids(&state, post(channels::read_multiple_channels)),
+        )
+        .route(
+            "/api/v4/channels/members/{user_id}/direct/read",
+            partially_migrated_with_ids(&state, put(channels::read_all_messages)),
+        )
+        // Three methods on one path, because **axum panics on a duplicate route path** and Go
+        // registers three separate `BaseRoutes.Channel.Handle("")` calls (api4/channel.go:85, :86,
+        // :91) that gorilla's method matcher then splits. `MethodRouter::get(...).put(...)
+        // .delete(...)` is the same split: a fourth method still falls to
+        // `partially_migrated`'s method fallback and is forwarded, exactly as gorilla's 405 path
+        // would be.
         .route(
             "/api/v4/channels/{channel_id}",
-            partially_migrated_with_ids(&state, get(channels::get_channel)),
+            partially_migrated_with_ids(
+                &state,
+                get(channels::get_channel)
+                    .put(channel_writes::update_channel)
+                    .delete(channel_writes::delete_channel),
+            ),
+        )
+        // `BaseRoutes.Channel.Handle("/patch")` and `/privacy` are both **PUT**, and `/restore` is
+        // a **POST** — not the DELETE/PUT symmetry the names suggest. Registered method-exactly so
+        // that a wrong verb reaches Go and gets its 405 rather than ours.
+        .route(
+            "/api/v4/channels/{channel_id}/patch",
+            partially_migrated_with_ids(&state, put(channel_writes::patch_channel)),
+        )
+        .route(
+            "/api/v4/channels/{channel_id}/privacy",
+            partially_migrated_with_ids(&state, put(channel_writes::update_channel_privacy)),
+        )
+        .route(
+            "/api/v4/channels/{channel_id}/restore",
+            partially_migrated_with_ids(&state, post(channel_writes::restore_channel)),
         )
         // Go's sibling `POST /channels/stats/member_count` (api.go:60) never lands here: its
         // last segment is `member_count`, not `stats`, so it falls to `Router::fallback` and is
@@ -586,9 +750,18 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/channels/{channel_id}/stats",
             partially_migrated_with_ids(&state, get(channels::get_channel_stats)),
         )
+        // Three methods on one path. **axum panics on a duplicate route path**, so the POST and
+        // PUT are chained onto the GET's `MethodRouter` rather than added as a second `.route`.
+        // gorilla registers all three separately on `BaseRoutes.ChannelMembers`
+        // (api4/channel.go:107-110) and picks by method, which is what chaining reproduces.
         .route(
             "/api/v4/channels/{channel_id}/members",
-            partially_migrated_with_ids(&state, get(channels::get_channel_members)),
+            partially_migrated_with_ids(
+                &state,
+                get(channels::get_channel_members)
+                    .post(channel_member_writes::add_channel_member)
+                    .put(channel_member_writes::set_channel_members),
+            ),
         )
         // The first migrated path with parameters. axum's `{name}` segments bind by position in
         // the handler's `Path` tuple, so the order here is the order there.
@@ -604,7 +777,40 @@ pub fn router(state: AppState) -> Router {
         )
         .route(
             "/api/v4/channels/{channel_id}/members/{user_id}",
-            partially_migrated_with_ids(&state, get(channels::get_channel_member)),
+            partially_migrated_with_ids(
+                &state,
+                get(channels::get_channel_member)
+                    .delete(channel_member_writes::remove_channel_member),
+            ),
+        )
+        // The three `PUT`s one segment deeper. `BaseRoutes.ChannelMember` (api4/channel.go:113-116)
+        // registers `/roles`, `/schemeRoles` and `/notify_props` as literals under the `{user_id}`
+        // parameter, so neither router has a precedence puzzle here — and `/autotranslation`, the
+        // fourth literal, is deliberately unregistered (it needs the AutoTranslation store) and
+        // falls to `Router::fallback` whole.
+        //
+        // **`schemeRoles` is camelCase**, alone among these paths. gorilla matches it literally and
+        // so does axum, so `/schemeroles` reaches neither and is forwarded.
+        .route(
+            "/api/v4/channels/{channel_id}/members/{user_id}/roles",
+            partially_migrated_with_ids(
+                &state,
+                put(channel_member_writes::update_channel_member_roles),
+            ),
+        )
+        .route(
+            "/api/v4/channels/{channel_id}/members/{user_id}/schemeRoles",
+            partially_migrated_with_ids(
+                &state,
+                put(channel_member_writes::update_channel_member_scheme_roles),
+            ),
+        )
+        .route(
+            "/api/v4/channels/{channel_id}/members/{user_id}/notify_props",
+            partially_migrated_with_ids(
+                &state,
+                put(channel_member_writes::update_channel_member_notify_props),
+            ),
         )
         // `BaseRoutes.PostsForChannel` (api.go:240) — a `PathPrefix("/posts")` subrouter with a
         // single `GET` at `""`. gorilla's prefix router 404s anything deeper (`/posts/unread`
@@ -901,15 +1107,25 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/roles/{role_id}",
             partially_migrated_with_ids(&state, get(roles::get_role)),
         )
-        // `BaseRoutes.Post` (api4/api.go:239) — `/posts/{post_id:[A-Za-z0-9]+}` with a single
-        // GET at "". Every other `/posts/...` path Go registers is either one segment deeper
-        // (`/patch`, `/thread`, `/files/info`, …) or a literal sibling of `{post_id}`
-        // (`/posts/ids`, `/posts/ephemeral`) that this router does not register at all, so both
-        // fall to `Router::fallback` and stay forwarded. `partially_migrated` keeps `PUT` and
-        // `DELETE` on this exact path going to Go.
+        // `BaseRoutes.Post` (api4/api.go:239) — `/posts/{post_id:[A-Za-z0-9]+}`, which Go gives a
+        // GET, a PUT and a DELETE. All three are served here now. Every other `/posts/...` path Go
+        // registers is either one segment deeper (`/patch`, `/thread`, `/files/info`, …) or a
+        // literal sibling of `{post_id}` (`/posts/ids`, `/posts/ephemeral`); the ones not
+        // registered below fall to `Router::fallback` and stay forwarded.
         .route(
             "/api/v4/posts/{post_id}",
-            partially_migrated_with_ids(&state, get(posts::get_post)),
+            partially_migrated_with_ids(
+                &state,
+                get(posts::get_post)
+                    .put(post_writes::update_post)
+                    .delete(post_writes::delete_post),
+            ),
+        )
+        // `BaseRoutes.Post.Handle("/patch")` (api4/post.go:44) — one segment deeper than the route
+        // above, PUT-only in Go.
+        .route(
+            "/api/v4/posts/{post_id}/patch",
+            partially_migrated_with_ids(&state, axum::routing::put(post_writes::patch_post)),
         )
         // `BaseRoutes.Posts.Handle("/ids")` (api4/post.go:28). The literal `ids` sits where
         // `{post_id}` sits above; axum prefers the literal. Nothing that used to be answered
@@ -984,6 +1200,18 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/posts/{post_id}/edit_history",
             partially_migrated_with_ids(&state, get(posts::get_edit_history_for_post)),
+        )
+        // `BaseRoutes.Post.Handle("/pin")` and `.Handle("/unpin")` (api4/post.go:47-48) — two more
+        // siblings of `/thread` under `{post_id}`, POST-only in Go. They are one handler there
+        // (`saveIsPinnedPost`) reached through two registrations, which is why they are two
+        // `.route` calls here and not one path with two methods.
+        .route(
+            "/api/v4/posts/{post_id}/pin",
+            partially_migrated_with_ids(&state, post(post_writes::pin_post)),
+        )
+        .route(
+            "/api/v4/posts/{post_id}/unpin",
+            partially_migrated_with_ids(&state, post(post_writes::unpin_post)),
         )
         // `BaseRoutes.Post.Handle("/files/info")` (api4/post.go:33) — two segments deeper than
         // `/posts/{post_id}`, so it shadows nothing and nothing shadows it. `POST /files` and
@@ -1145,23 +1373,35 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/users/{user_id}/uploads",
             partially_migrated_with_ids(&state, get(uploads::get_uploads_for_user)),
         )
-        // `BaseRoutes.ChannelCategories` (api.go:231), the three GETs. The five writes on
-        // these same paths fall to `partially_migrated`'s method fallback and stay forwarded —
-        // asserted over HTTP in `tests/parity_sidebar_router.rs`.
+        // `BaseRoutes.ChannelCategories` (api.go:231) — **all eight**, three GETs and five
+        // writes, on three paths. `partially_migrated_with_ids` still wraps each one: the
+        // fallback now catches only methods gorilla never registered here (a `POST` to
+        // `/order`, say), and the id-charset layer is what forwards a malformed `user_id` or
+        // `team_id` for Go's own mux 404.
         //
         // One segment deeper than `/users/{user_id}/teams/{team_id}/channels` above and a
         // sibling of `…/channels/members`; all three are static at that position, so there is
         // nothing for either router to prefer.
         .route(
             "/api/v4/users/{user_id}/teams/{team_id}/channels/categories",
-            partially_migrated_with_ids(&state, get(sidebar::get_categories_for_team_for_user)),
+            partially_migrated_with_ids(
+                &state,
+                get(sidebar::get_categories_for_team_for_user)
+                    .post(sidebar::create_category_for_team_for_user)
+                    .put(sidebar::update_categories_for_team_for_user),
+            ),
         )
         // The literal `order` beside `{category}` below. gorilla registers it first
         // (api4/channel.go:80 against :82) and axum prefers a static segment outright, so both
         // routers serve `getCategoryOrderForTeamForUser` here — same answer, different reason.
+        // The `PUT` sits on the same route for the same reason.
         .route(
             "/api/v4/users/{user_id}/teams/{team_id}/channels/categories/order",
-            partially_migrated_with_ids(&state, get(sidebar::get_category_order_for_team_for_user)),
+            partially_migrated_with_ids(
+                &state,
+                get(sidebar::get_category_order_for_team_for_user)
+                    .put(sidebar::update_category_order_for_team_for_user),
+            ),
         )
         // Deliberately `{category}` and not `{category_id}`: Go's mux class here is
         // `[A-Za-z0-9_-]+`, and a default category's id is `{type}_{userId}_{teamId}`. Naming it
@@ -1170,7 +1410,12 @@ pub fn router(state: AppState) -> Router {
         // Go's own charset instead, like `username`, `role_name` and `channel_name` do.
         .route(
             "/api/v4/users/{user_id}/teams/{team_id}/channels/categories/{category}",
-            partially_migrated_with_ids(&state, get(sidebar::get_category_for_team_for_user)),
+            partially_migrated_with_ids(
+                &state,
+                get(sidebar::get_category_for_team_for_user)
+                    .put(sidebar::update_category_for_team_for_user)
+                    .delete(sidebar::delete_category_for_team_for_user),
+            ),
         )
         // ---- compliance, IP filtering, the AI-bridge test helper and scheduled posts ----
         //

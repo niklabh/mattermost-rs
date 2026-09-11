@@ -4061,9 +4061,9 @@ Also worth knowing:
 | Go file | Rust file | Status | Tests | Notes |
 |---|---|---|---|---|
 | model/channel_sidebar.go | `mm-model/src/sidebar_category.rs` | DONE | 10 pass | `SidebarCategory`, `SidebarCategoryWithChannels` (Go embeds, so `#[serde(flatten)]` — nine inlined keys then `channel_ids`), `OrderedSidebarCategories`, `SidebarChannel` (`SortOrder` is `json:"-"`). **`IsValidCategoryId`'s regexp is unanchored** and its two halves are `[a-z0-9]` where `IsValidId` accepts upper case, so the two branches disagree about case and `zzfavorites_<26>_<26>!!` is valid; corpus in `fixtures/behaviour_sidebar_category.json`. The three arrays carry no `omitempty`, so nil is `null` and empty is `[]` — modelled `Option<Vec<_>>`. |
-| store/sqlstore/channel_store_categories.go (the three reads) | `mm-store/src/sidebar_category_store.rs` | PARTIAL | 2 pass + 23 parity | **The answer is not what is in `SidebarChannels`.** Every read appends *orphans* — channels the user is a member of that appear in no category of theirs — to the Channels or DMs category, so on a normal server most of a user's sidebar is rows the join never returns. Orphans come last, in `DisplayName` order, after the explicit channels' `SortOrder` order. Ported in its own module rather than into `channel_store.rs`; Go hangs them off `ChannelStore`. |
-| app/channel_category.go (the three reads) + app/authorization.go (`SessionHasPermissionToCategory`) | `mm-app/src/sidebar.rs` | PARTIAL | 3 pass | One error id (`app.channel.sidebar_categories.app_error`) for every branch of all four; only the status code moves. `SessionHasPermissionToCategory` is **not** `SessionHasPermissionToUser` — no unrestricted branch, no `manage_system`, no self shortcut, and it compares `category.UserId` against *both* the session and the path's `user_id`. The create-on-empty branch is a write and is not ported; it is reported as `SidebarCategoriesResult::NeedsInitialCategories` and the API forwards. |
-| api4/channel_category.go (`getCategoriesForTeamForUser`, `getCategoryOrderForTeamForUser`, `getCategoryForTeamForUser`) | `mm-api/src/sidebar.rs` | PARTIAL | 7 pass + 23 parity | The three GETs served; the five writes on the same paths still forwarded (asserted over HTTP). **The path parameter is `{category}`, not `{category_id}`** — Go's mux class is `[A-Za-z0-9_-]+` and a default category id is `{type}_{userId}_{teamId}`, so the `_id` suffix would have enrolled it in the shared `[A-Za-z0-9]+` middleware and forwarded the common case. Two framings in one Go file: `/order` carries a trailing newline, the other two do not. Mutations: 21 run, 21 caught, 2 controls survived. |
+| store/sqlstore/channel_store_categories.go (the three reads; the five writes landed 2026-09-10, see below) | `mm-store/src/sidebar_category_store.rs` | PARTIAL | 14 pass + 40 parity | **The answer is not what is in `SidebarChannels`.** Every read appends *orphans* — channels the user is a member of that appear in no category of theirs — to the Channels or DMs category, so on a normal server most of a user's sidebar is rows the join never returns. Orphans come last, in `DisplayName` order, after the explicit channels' `SortOrder` order. Ported in its own module rather than into `channel_store.rs`; Go hangs them off `ChannelStore`. |
+| app/channel_category.go (the three reads; the four writes landed 2026-09-10, see below) + app/authorization.go (`SessionHasPermissionToCategory`) | `mm-app/src/sidebar.rs` | PARTIAL | 16 pass | One error id (`app.channel.sidebar_categories.app_error`) for every branch of all four; only the status code moves. `SessionHasPermissionToCategory` is **not** `SessionHasPermissionToUser` — no unrestricted branch, no `manage_system`, no self shortcut, and it compares `category.UserId` against *both* the session and the path's `user_id`. The create-on-empty branch **is** ported now (2026-09-10) and nothing is forwarded. |
+| api4/channel_category.go (`getCategoriesForTeamForUser`, `getCategoryOrderForTeamForUser`, `getCategoryForTeamForUser`; the five writes landed 2026-09-10, see below) | `mm-api/src/sidebar.rs` | DONE | 7 pass + 40 parity | All eight methods on the three paths served. **The path parameter is `{category}`, not `{category_id}`** — Go's mux class is `[A-Za-z0-9_-]+` and a default category id is `{type}_{userId}_{teamId}`, so the `_id` suffix would have enrolled it in the shared `[A-Za-z0-9]+` middleware and forwarded the common case. Two framings in one Go file: `/order` carries a trailing newline, the other two do not. Mutations: 21 run, 21 caught, 2 controls survived. |
 
 ## Notes — api4/channel_category.go (the read side)
 
@@ -8777,7 +8777,7 @@ Same gate, same error id, and a completely different response: the public route'
 Mutations: **28 run, 25 caught, 2 controls survived**, after one survivor that was a missing entry
 in the licence-boundary list rather than a gap in the code.
 
-Also recorded this session: [D-169] (the built-in slash-command registry, three routes) and
+Also recorded this session: [D-241] (the built-in slash-command registry, three routes) and
 [D-171] (five routes that read in-process state this server does not share).
 
 ## `getInviteInfo` — the only unauthenticated route that returns data (2026-09-09)
@@ -8918,7 +8918,7 @@ route, and `POST /api/v4/file/test` ([D-209]).
 plugin environment; `view.go` (3) and `channel_join_request.go` (4) are behind the
 `IntegratedBoards` and `DiscoverableChannels` feature flags, and turning either on changes routes
 already served ([D-153]); `command.go`'s two autocomplete routes need the built-in slash-command
-registry ([D-169]).
+registry ([D-241]).
 
 **Recorded as not-portable (~7).** [D-171]'s five — `server_busy`, `logs`, `logs/download`,
 `latest_version` and the agents trio's shared cause — plus `/files/{id}/public` ([D-170]), whose
@@ -9120,3 +9120,1024 @@ the other two are not — they are branches no route reaches, which no amount of
 suite would have covered. `scripts/mutations/user-lookups.plan` runs across four suites for that
 reason: `store` for the SQL, `app` for the status mapping, `unit` for the configuration, `api` for
 the handlers.
+
+## The channel a client says it is looking at (2026-09-10)
+
+`POST /api/v4/channels/members/{user_id}/view` and
+`POST /api/v4/channels/members/{user_id}/mark_read` — the first **channel writes** in the port,
+and the first route a real client calls on every single channel switch. 289 → **291 of 764**.
+Store, app and handlers: `mm_store::channel_store::{get_channels_with_unreads_and_with_mentions,
+update_last_viewed_at, get_board_channel}`, `mm_store::ThreadStore::mark_all_as_read_by_channels`,
+`mm_app::channel_view` (a new module), and two handlers in `mm_api::channels`.
+
+### The deny-list is one type wide, and it is not the allow-list next to it
+
+`GetChannelsWithUnreadsAndWithMentions` filters `Channels.Type NOT IN ('S')`
+(`nonMessageBackingChannelTypes`, channel_store.go:52). Every neighbouring channel query — `Get`,
+`GetMany`, `GetChannelUnread` — uses the `IN (O, P, D, G)` **allow-list** instead. So a board
+(`BO`/`BP`) the caller is a member of **is** marked read by this route while `SqlChannelStore.Get`
+would call the same channel missing. Narrowing it to the allow-list is invisible over HTTP (a
+board id is refused by the handler before the query runs) and silently strands board read-state;
+`db_channel_view_reads` is where that is pinned.
+
+### `readMultipleChannels` never answers the 400 it raises
+
+The handler calls `c.RequireUserId()` and then **does not return** (channel.go:2067). Go's `c.Err`
+is one slot, so the malformed-id 400 is overwritten by whatever refuses next: an unparseable body
+is `api.payload.parse.error`, an empty list is `invalid_body_param`, a caller without
+`edit_other_users` is a 403, and a caller *with* it reaches `MarkChannelsAsViewed`, whose user
+lookup fails on the malformed id and gives a 500. Its sibling `viewChannel`, one `if` away,
+returns early and answers the 400. Both are asserted against Go
+(`a_malformed_path_user_id_answers_differently_on_the_two_routes`).
+
+The one path that would let the 400 survive — the app call succeeding for a malformed id — cannot
+happen, and if it could, Go would write the success body and then **append the error JSON to it**.
+Recorded in the handler rather than reproduced.
+
+### The write answers from `Channels` and the timestamps come from the old row
+
+`UpdateLastViewedAt` is one CTE: a `WITH c AS (SELECT … FROM Channels …)`, an `UPDATE` in a second
+CTE, and `SELECT Id, LastPostAt FROM c`. Two things follow that `UPDATE … RETURNING` would get
+wrong — a channel the user is **not a member of** is in the answer, and "empty" means no
+*channel* matched, not that no membership was updated. That is the only thing that raises
+`ErrInvalidInput`, which the app layer turns into a 400.
+
+Inside the statement, `LastViewedAt` and `LastUpdateAt` are both
+`greatest(cm.LastViewedAt, c.LastPostAt)` — evaluated against the **pre-update** row, so the two
+columns end up equal and neither is a clock reading. And the map the store returns is discarded:
+the routes answer with `max(LastPostAt, LastViewedAt)` from the *read*, computed before the write.
+
+### `collapsed_threads_supported` is the only half of the thread decision a client can move
+
+`updateThreads` is `ThreadAutoFollow && (!collapsedThreadsSupported || !isCRTEnabled)`. The shipped
+`ServiceSettings.CollapsedThreads` is `always_on`, which makes `IsCRTEnabledForUser` return true
+**without reading the user's preference at all** — so the expression reduces to
+`!collapsedThreadsSupported`. A client that renders threads itself gets no thread write and no
+`thread_read_changed`; one that says nothing gets both. `mark_read` passes the literal `true`, so
+it never publishes a thread event where `view` with the same body would. All three are asserted on
+the socket.
+
+### The two routes disagree about which refusal comes first
+
+`view` gates on `edit_other_users` **before** it reads the body; `mark_read` parses the body
+first. The same request — another user's id, `not json` — is a 403 on one and a 400 on the other.
+
+### Three things this port does not do on these routes
+
+* **`ExtendSessionExpiryIfNeeded`** ([D-214]). Off on every persisted configuration document, so
+  both servers do nothing here today; it is a `Set-Cookie` when it is on.
+* **`clearPushNotification`** ([D-215]). There is no hub. The channel list it would consume is
+  computed in full anyway, because its notify-prop fall-through is three branches deep and would
+  be invisible until there *is* a hub.
+* **Reading the status cache back** ([D-216]). `SetActiveChannel` writes only to it, and
+  `get_user_statuses_by_ids` reads the table — so the one mutation with no catcher is the one that
+  deletes that call.
+
+### Mutation testing: 31 run, 29 caught, 2 controls survived
+
+Three real survivors on the first run, and none of them was a fixture where the right and wrong
+answers coincided:
+
+* `app-view-drops-the-prev-channel` — no test sent a `prev_channel_id` naming a real channel, so
+  the field every client fills on every switch was untested. Now
+  `the_previous_channel_is_marked_read_as_well`.
+* `app-invalid-input-is-a-500` — the 400/500 split is **unreachable through the route**: the ids
+  handed to `UpdateLastViewedAt` came out of a join against `Channels`, so no request can produce
+  the empty result that raises `ErrInvalidInput`. Go has the same dead branch. Extracted as
+  `update_last_viewed_at_error` so the reproduction has an oracle a unit test can reach.
+* `api-view-checks-the-body-before-the-gate` — the mutation was wrong, not the tests: it moved
+  `read_body`, which only fails on a transport error, rather than the decode. Moving the decode is
+  caught.
+
+One harness fault on the first run, from a control that did not compile; the tally above is the
+re-run.
+
+## Marking everything read, and a feature flag turned on deliberately (2026-09-10)
+
+`PUT /api/v4/channels/members/{user_id}/direct/read` and
+`PUT /api/v4/users/{user_id}/teams/{team_id}/read` — shift-escape in the webapp. 291 →
+**293 of 764**. Two more store queries
+(`get_team_channels_with_unread_and_mentions`, `get_direct_messages_with_unread_and_mentions`),
+two more app functions in `mm_app::channel_view`, and two handlers.
+
+### The flag is on now, on both servers
+
+`FeatureFlags.EnableShiftEscapeToMarkAllRead` defaults to **false**, and with it off both routes
+are a 501 with no comparable 200 anywhere. `FeatureFlags` is stripped before the configuration
+document is persisted (config/store.go:306), so the environment is the only place either server
+can read it from: `scripts/go-server.sh` and `scripts/mm-api-env.sh` both set it now, and
+`go-server.sh`'s standing note — "turning one on is a deliberate act with its own parity run" — is
+what this is. Unlike `IntegratedBoards` and `DiscoverableChannels` ([D-153]) this flag is read in
+exactly two places in the whole Go tree and changes no route already served.
+
+The **501** therefore has no cross-server oracle: it is asserted against a `SecondServer` started
+with the flag off, which is our answer only. Same shape as [D-213], and the gate is the *first*
+line of each handler — ahead of `RequireUserId`, so a malformed id gets the 501 too.
+
+### These two are not `MarkChannelsAsViewed` with a different WHERE
+
+Three differences, and the first is the one a port would get wrong:
+
+* **The thread store is handed every channel, not the unread ones.** A thread reply does not bump
+  `Channels.TotalMsgCount`, so a channel whose counters are caught up can still hold unread thread
+  replies; Go passes the whole membership set for exactly that reason (its comment is at
+  app/channel.go:3566) and lets the thread statement's own `LastReplyAt > LastViewed` clause bound
+  the write. `the_team_route_marks_threads_read_in_channels_that_were_already_read` is the test
+  that can tell the two apart — it views the channel first, saying it supports collapsed threads,
+  which leaves the channel read and the thread unread.
+* **The thread write is unconditional and comes before the early return.** Only the channel write
+  and its `multiple_channels_viewed` are behind "something was unread", so a second press is
+  silent except for the thread event.
+* **There is no `ThreadAutoFollow` gate and no `collapsedThreadsSupported`** on either route.
+
+### The two thread events are scoped differently, and that is the whole difference at the end
+
+The team route publishes **one** `thread_read_changed` with a `team_id` — the client turns it into
+a single `ALL_TEAM_THREADS_READ`. The direct route has no team to broadcast on, so it publishes
+one **per channel**, channel-scoped, sharing a single timestamp, and the client turns each into
+`ALL_THREADS_IN_CHANNEL_READ`. Both are gated on CRT being on for the user, which the shipped
+`always_on` default makes unconditional.
+
+### `MarkAllDirectAndGroupMessagesViewed` reuses the team query's error id
+
+Its store failure is reported as
+`app.channel.get_channels_by_team_with_unreads_and_with_mentions.app_error` (channel.go:3624) —
+the *team* id, on the route that has no team. Reproduced rather than corrected: the id is what a
+translated message keys off.
+
+### `readAllInTeam`'s two gates, and what a non-member gets
+
+`SessionHasPermissionToUser` first, then `SessionHasPermissionToTeam(view_team)`. A caller acting
+on their own account who is not in the team gets the **`view_team` 403**, not a 404 — there is no
+`GetTeamMember` on this path to produce one, unlike its neighbours in the same file.
+
+### Mutation testing: 20 run, 18 caught, 2 controls survived
+
+No real survivors. One harness fault on the first run and it was a mutation, not the code: a
+predicate rewritten to `AND ($3 = $3)` left the bind parameter untyped, so `sqlx::query!` could not
+infer `&[String]` and `mm-store` failed to compile. Rewritten as
+`AND (threads.channelid = ANY($3) OR TRUE)`, which keeps the parameter used and still deletes the
+scope.
+
+## Numbered stacks, and what a fresh one found (2026-09-10)
+
+No routes. The stack-backed suites talked to one Postgres, one Go server on :8065 and one mm-api
+on :8066, so `stack-lock.sh` serialised every checkout on the machine — which made a twenty-minute
+mutation batch block every other worktree and left the documented parallel-worktree pattern unable
+to run in parallel. A stack is now a numbered triple (`postgres 5432+k`, `go 8065+100k`,
+`mm-api 8066+100k`), the lock is per stack, and stack 0 is the historical layout byte for byte.
+**Two full workspace suites on two stacks: 150s wall, 3141 tests each.**
+
+The base URLs follow the stack through `option_env!` at **compile** time, with a `build.rs` per
+crate for `rerun-if-env-changed`, because `common::GO` and `common::RUST` are `&'static str`
+consts inside roughly thirteen hundred inline format captures; a runtime value would mean
+rewriting all of them. `SecondServer::start` shifts its literal port at runtime instead.
+
+### The first run against a fresh stack failed fifteen tests, and none of them was a flake
+
+That is the finding, and it is worth more than the parallelism. Every one had been passing for
+months on a database old enough to have accumulated the shape it assumed:
+
+* **A genuine port bug.** Go renders a SQL `NULL` `jsonb` column as `{}` and a JSON `null` as
+  `null`; `JobRow::into_job` collapsed both to `None`, and its doc comment asserted they were the
+  same. No Mattermost worker writes a SQL NULL — every null-ish `Jobs` row on a real deployment is
+  the product-notices worker's JSON null — so the assertion could only ever see one of the two
+  shapes. `scripts/stack.sh seed` plants both now.
+* **One NULL is a 500 for eleven tests.** A dozen `mm-store` and `mm-app` suites `INSERT INTO
+  teams` without `LastTeamIconUpdate`, which `GetAllTeams` scans into a plain `int64` — so
+  `GET /usage/teams` 500s and `teams_all`'s eight tests go with it, depending on which binary
+  `cargo test --workspace` happened to run first. Normalised in the purge, exactly as the `Users`
+  repair beside it already was, and for the reason that one already gives.
+* **Three tests that proved nothing.** `bots` needs a bot with a description, `jobs` needs both
+  null shapes, and both say so in their own assertion message. A fresh database has neither.
+  `config_source` asserted the literal `:8065`.
+
+The lesson is not about ports. **A suite that has only ever run against one long-lived database
+has untested dependencies on that database**, and the cheapest way to find them is to stand up a
+new one.
+
+## The five sidebar-category writes, and a `GET` that writes (2026-09-10)
+
+`POST`/`PUT` on `…/channels/categories`, `PUT` on `…/categories/order`, `PUT`/`DELETE` on
+`…/categories/{category_id}`. All eight methods on the three paths are served now; the family is
+complete apart from `getManagedCategories`, which is licensed and feature-flagged and was not
+started.
+
+| Go source | Rust | Status | Tests | Notes |
+|---|---|---|---|---|
+| store/sqlstore/channel_store_categories.go — `CreateInitialSidebarCategories`, `CreateSidebarCategory`, `UpdateSidebarCategoryOrder`, `UpdateSidebarCategories`, `DeleteSidebarCategory` | `mm-store/src/sidebar_category_store.rs` | DONE | 12 pass (`tests/db_sidebar_category_writes.rs`) | Each one transaction, with Go's statement order inside it — categories before channels, and the category updates in **id** order, both for deadlock avoidance against a concurrent transaction. `UpdateSidebarCategories` also writes `favorite_channel` **`Preferences`** rows, and its two branches are asymmetrical: Favorites deletes the *original* channel list and re-adds the new one, every other type deletes the *request's*. |
+| app/channel_category.go — `createInitialSidebarCategories` and the four writes | `mm-app/src/sidebar.rs` | DONE | 16 pass | Four websocket events with **two payload conventions**: `order` is a JSON array, `updatedCategories` a marshalled string. None of the four omits the originating connection (Go passes `""`), unlike the draft and preference writes. `muteChannelsForUpdatedCategories` is ported as far as the decision only — see [D-224]. |
+| api4/channel_category.go — the five writes | `mm-api/src/sidebar.rs` | DONE | 40 parity | The per-category refusal on the collection route is a **400** naming `category`, not the 403 its singular sibling answers from the same gate. `/order` is the one route whose decode failure is `api.payload.parse.error` with no `Name`, and `null` is not a decode failure there at all. Mutations: see the tally below. |
+
+Four things a reader would otherwise get wrong, each of them a test:
+
+1. **`validateSidebarCategory` validates nothing.** It silently *drops* every channel the caller is
+   not a member of, logs it, and de-duplicates the rest — so a request naming somebody else's
+   private channel succeeds and simply does not contain it. Its one error branch is a 400 with
+   `api.invalid_channel`, reached when `GetChannelsForTeamForUser` answers its **404** for a user
+   who is in no channel on the team. And because `RemoveDuplicateStringsNonSort` returns a non-nil
+   `[]string{}`, `channel_ids` is never `null` on any create or update answer.
+2. **`GET .../categories` writes.** Go creates the Favorites/Channels/DirectMessages triple inside
+   the read when the user has none, migrating their `favorite_channel` preferences into
+   `SidebarChannels` as it goes. That case used to be forwarded to Go on the grounds that two
+   servers would race to insert the same ids; it is not forwarded any more, because the
+   deterministic `{type}_{userId}_{teamId}` ids and the primary key on `SidebarCategories.Id` are
+   Go's own mechanism for making that race converge. Only the *missing* types are inserted, so a
+   user who has Favorites and lost Channels gains Channels alone.
+3. **Go's `json.Marshal` escapes `<`, `>` and `&`; `serde_json` does not.** `display_name` is
+   arbitrary user text, so a category called `Q&A` differed by nine bytes. All five writes and —
+   this was the latent half — **all three reads** now go through `mm_model::utils::go_json_marshal`.
+   The same applies inside the `sidebar_category_updated` event, whose payload is a marshalled
+   string.
+4. **Five fields are read-only, per field and per category type.** `UserId`, `TeamId`, `SortOrder`
+   and `Type` come back from the row; `DisplayName` is read-only unless the category is `custom`;
+   `Muted` is read-only for **Direct Messages** alone. Two loops later, Go branches on the
+   *request's* `Type` rather than the row's — so a Channels category mislabelled `direct_messages`
+   has its channels deleted and not reinserted. Reproduced, and pinned by
+   `db_sidebar_category_writes::a_category_mislabelled_direct_messages_has_its_channels_deleted_and_not_restored`.
+
+Two branches are **unreachable through HTTP** and are therefore covered only in `mm-store`:
+`UpdateSidebarCategoryOrder`'s store-level `ErrInvalidInput` → 400 (the handler's own per-id
+permission loop refuses first, and a duplicate id becomes a length mismatch → 500 before it), and
+`UpdateSidebarCategories`' 500-for-everything mapping (the same gate turns an unknown id into a
+400). Both are stated in the doc comments on the functions that carry them.
+
+The parity suite runs **two subject users on one team**, so channel ids appear identically in both
+servers' answers and only the user id and the minted category id need substituting out. Two teams
+would have made the channel ids differ too, leaving nothing to compare. Fixtures are prefixed
+`mmrssbwrite`, cleared by the suite's own purge, for the reason `mmrssidebar` gives.
+## Channel membership, written (2026-09-10)
+
+All six member-write routes on `/api/v4/channels/{channel_id}/members…`: `addChannelMember`,
+`setChannelMembers`, `removeChannelMember`, and the `/roles`, `/schemeRoles` and `/notify_props`
+updates. 298 → **304 of 764**. `Channel.SaveMember` was the single most-shared unported store
+method in the tree — `scripts/deps.py` counted **18** unserved routes waiting on it — which is why
+this group went first; `POST /api/v4/channels` is the next of the eighteen and needs nothing new.
+
+New: `mm_store::channel_member_history_store`, `mm_store::group_store` (one query),
+`mm_app::channel_member`, `mm_api::channel_member_writes`. Appended to `ChannelStore`:
+`save_member`, `update_member`, `update_member_notify_props`, `remove_member`,
+`get_all_channel_member_ids_by_channel_id`, `get_channel_of_type`. Also
+`ThreadStore::delete_memberships_for_channel`.
+
+### The join and leave system posts are not written, and one of them shows in a body
+
+Four `Posts` writes were missing when this group landed; they were written the next session — see
+*The system posts twelve served routes owed*. What remains is that `PostAddToChannelMessage`'s
+mention is Go's **notification pass**, not the post: a **re-add** of an existing member still
+answers Go's `mention_count: 1` against our `0` ([D-235]). Masked in the parity suite with Go's
+value asserted, so the exclusion cannot widen.
+
+### `ReturnStatusOK` is the one success body here that is not encoder-framed
+
+`w.Write([]byte(MapToJSON(m)))`, not `json.NewEncoder(w).Encode` (web/web.go:127) — so no trailing
+newline, where `addChannelMember`'s body and every NDJSON line have one. Four tests caught the
+first version. See `mm_api::channel_member_writes::status_ok`.
+
+### `MapFromJSON` never returns nil, which kills a branch and softens two routes
+
+`json.NewDecoder(...).Decode(&map[string]string)`'s error is **discarded** and a nil map replaced
+with an empty one (utils.go:507). So `updateChannelMemberNotifyProps`' `if props == nil {
+SetInvalidParam }` is unreachable, and `PUT …/notify_props` with a body of `[]` is a **200**. On
+`/roles`, `{"roles": 5}` is not a 400 either: the value is dropped and the request fails four layers
+down with `unset_user_scheme`. Both measured, both asserted.
+
+### Nothing validates a notify-prop *value* on the update path
+
+`UpdateChannelMemberNotifyProps` (app/channel.go:1519) copies out ten known keys and drops the rest,
+and neither it nor the store calls `IsChannelMemberNotifyPropsValid`. `{"desktop": "banana"}` is a
+200 that stores `banana` — while the *same* value reaching `ChannelMember::IsValid` through the add
+path is a 400. The existing `mm_model::channel_member::is_channel_member_notify_props_valid` is
+correct and simply not on this path.
+
+### The write is a merge, and that is why the route is usable
+
+`notifyprops = notifyprops || $1::jsonb` (channel_store.go:2075). A client saving only `desktop`
+keeps its `mark_unread` — i.e. keeps its mute. `SET notifyprops = $1::jsonb` is one character away
+and would clear it.
+
+### `/roles` and `/schemeRoles` write disjoint halves of the same row
+
+`/roles` **sets** the three scheme flags from the submitted names and writes `ExplicitRoles`;
+`/schemeRoles` sets the flags from three booleans and (on a migrated server) leaves `ExplicitRoles`
+alone. So `channel_admin` alone on `/roles` is a 400 — the flags are set, not patched — and neither
+route can move a member in or out of guest: `prevSchemeGuestValue != member.SchemeGuest` is
+`changing_guest_role`, and `scheme_guest: true` is `user_and_guest`. Every id in both families is
+spelled `api.channel.update_channel_member_roles.*`, including the ones raised from
+`UpdateChannelMemberSchemeRoles`.
+
+Note the inverted gate in `UpdateChannelMemberSchemeRoles`: `if err = IsPhase2MigrationCompleted();
+err != nil` strips the built-in channel roles when the migration has **not** finished, and discards
+the error. Reading it the other way round drops a member's explicit roles on every call.
+
+### `addChannelMember` takes three body shapes and the answer's shape follows a *key*
+
+`user_ids` wins when it is an array; anything else falls through to `user_id`, which is why
+`{"user_ids": "x"}` reports `user_id or user_ids`. The answer is a bare object when the body carried
+a `user_id` **key**, exactly one member resulted, and it is that user — so `{"user_ids":["x"]}`
+answers `[{…}]` and a body with both keys answers `{…}`. `{"user_ids": []}` is a `201` with
+**`null`**: the member slice is never appended to and Go encodes a nil slice as `null`.
+
+### A partly-refused multi-add answers two JSON documents
+
+The per-id loop's `SetPermissionError` sets `c.Err`, a later success does not clear it, and
+`handleContextError` runs after the handler — on top of a `201` that is already committed. So adding
+`[self, someone-else]` as a user who may only add themselves yields the member array **and then the
+403 envelope**, concatenated. Reproduced via `ApiError::into_wire`, the same split
+`getChannelsForUser`'s streaming error uses.
+
+### Two `user_added` events and two `user_removed`, with different payloads
+
+`AddUserToChannel` publishes one addressed to the **channel** (with the added user in `omit_users`)
+and one addressed to the **added user**; Go's comment says why — a cluster node that has not seen
+the new membership yet would filter the first one out for that user. The two `user_removed` events
+carry **different keys**: `user_id`+`remover_id` on the channel-addressed one, `channel_id`+
+`remover_id` on the user-addressed one, which has no channel in its broadcast and nothing else to
+tell the client which channel it just left. `channel_member_updated` is addressed to the member's
+user id and to **no channel**, with the member as a JSON *string* under `channelMember`.
+
+### `ChannelMemberHistory` is written on both paths and shows in no response
+
+Asserted twice — at the store level in `mm-store/tests/db_channel_member_writes.rs` and through the
+route via `common::channel_member_history`, because without the second the app layer could stop
+calling it and every HTTP assertion would still pass. `LogLeaveEvent`'s `LeaveTime IS NULL` is what
+keeps a closed stay closed; dropping it rewrites the whole audit trail for that membership, and it
+is best-effort by design (no open stay is a warning, not an error).
+
+### `setChannelMembers` is NDJSON, and its diff order is a Go map iteration
+
+Four phases in order — removals, additions, promotions, demotions — each a batch, each one line.
+`added` and `removed` are forced from nil to `[]` **in the handler's callback**, so both keys are
+always arrays while `promoted`/`demoted`/`errors` are `omitempty`; a no-op still emits exactly one
+`{"added":[],"removed":[]}`. Go builds `toAdd`/`toRemove` by ranging over a `map`, so **which ids
+land in which batch is not stable across runs on the Go side** — anything asserting on these lines
+has to sort. Two divergences, both deliberate: this port **buffers** rather than streaming (same
+bytes, no per-batch flush) and `errors[].error` is `where: <id>` where Go has `where: <translated
+message>, <detail>` ([D-092]).
+
+### Three of the six reject board and space channels; three do not
+
+The guards are on the three `PUT …/{user_id}/…` handlers only (api4/channel.go:2147-2159 and
+siblings). `addChannelMember`, `setChannelMembers` and `removeChannelMember` have neither, so a
+board id there reaches `GetChannel` and gets its **404** rather than the guards' 400. The two guards
+are also asymmetric: `rejectBoardChannelByID` tests `err == nil`, so a database failure reads as
+"not a board", while `rejectSpaceChannelByID` fails **closed** and returns anything that is not a
+404.
+
+### What is forwarded, and why each one
+
+Group-constrained channels (`FilterNonGroupChannelMembers`), attribute-based access control, shared
+channels, guest sessions (`UserCanSeeOtherUser`'s restricted branch), a `post_root_id` (a
+`ThreadMemberships` write), a discoverable private channel (the join-request queue), and a channel
+carrying a `default_category_name` (`addChannelToDefaultCategory` writes `SidebarChannels`).
+`set_channel_members` resolves all of them **before its first write**, because a half-applied
+reconcile handed to Go would be applied twice.
+
+### Mutation testing: 56 run, 54 caught, 2 controls survived
+
+`scripts/mutations/channel-member-writes.plan`. Five mutations survived the first pass and each was
+a finding about a **fixture**, not a shrug:
+
+* **Two `LastUpdateAt` writes were untestable against themselves.** `PreSave` and `PreUpdate` both
+  stamp `model.GetMillis()`, and the save and the update in one test land in the same millisecond —
+  so `last_update_at >= first_update_at` is true whether the call ran or not. Deleting
+  `pre_update()` and replacing `SET lastupdateat = $2` with `LEAST(lastupdateat, $2)` both survived.
+  The fix is to **backdate the column to `1` and the struct with it**, so only the code under test
+  can raise it.
+* **`promoted` is a list, not a claim.** Flipping the third positional boolean of
+  `UpdateChannelMemberSchemeRoles(channelID, userID, false, true, true)` still reports the user as
+  promoted and leaves them a plain member. The reconcile test now reads the member back on both
+  servers.
+* **The `batch_delay_ms` bounds were mutated at a call site the unit test does not use.** The unit
+  test exercises `bounded_query_int` with bounds of its own, so raising the *handler's* minimum from
+  0 to 1 was invisible to it. That plan line moved to the `api` suite, where every reconcile request
+  carries `batch_delay_ms=0`.
+* **A duplicate of an existing member is not a test of deduplication.** `{"members": [me, u, u]}`
+  where `u` is already a member diffs to nothing either way. It has to be a duplicate of a
+  **non-member**: undeduplicated, the add loop runs twice and the second pass — which finds the
+  member already there — appends the id to `added` a second time.
+
+One mutation was also **destructive to the shared fixture**: `town-square-is-leavable-by-a-non-guest`
+makes the removal succeed, so the run that catches it leaves the caller out of `town-square` and
+every later run of that test fails on an unrelated 404. The test now re-joins on both servers first,
+which is idempotent because a self-add to a public channel is a `201` either way.
+
+### And one bug the mutation plan did not find
+
+`add_user_to_channel` forwarded a **shared** channel and a channel with a `default_category_name`
+*after* `add_user_to_channel_row` had already committed the membership and its history row. Go then
+finds the member present, returns it, and publishes nothing — so the body was right and no
+`user_added` event went out from either server. Both checks moved above the write. No test could see
+it: this deployment has no shared channel and no channel with a default category, which is exactly
+why the two branches forward in the first place.
+---
+
+## The channel lifecycle, minus creation (2026-09-10)
+
+Five routes, all served: `PUT /api/v4/channels/{channel_id}`, `/patch`, `/privacy`,
+`DELETE /api/v4/channels/{channel_id}`, `POST /api/v4/channels/{channel_id}/restore`.
+`POST /api/v4/channels` is *not* among them — it adds the creator as a member, and every
+`ChannelMembers` write belongs to another session.
+
+| what | where | status |
+|---|---|---|
+| `Channel().Update`, `Delete`, `Restore`, `SetDeleteAt`, `upsertPublicChannelT` | `crates/mm-store/src/channel_store.rs` (end of both blocks) | done; `Update` takes `&mut Channel` because Go's `PreUpdate` mutates in place |
+| `GetIncomingByChannel`, `GetOutgoingByChannel` | `crates/mm-store/src/webhook_store.rs` | done; their own statements, because Go omits `LIMIT`/`OFFSET` when either is negative and `DeleteChannel` passes `-1` |
+| `App.UpdateChannel`, `PatchChannel`, `UpdateChannelPrivacy`, `DeleteChannel`, `RestoreChannel` | `crates/mm-app/src/channel_write.rs` | done; the six system posts and the persistent-notification cleanup landed the next session |
+| the five handlers | `crates/mm-api/src/channel_writes.rs` | done; a licensed installation and two patch branches forward ([D-234]) |
+| 26 cross-server tests and 13 unit tests | `crates/mm-api/tests/parity/channel_writes.rs`, and `#[cfg(test)]` in both new modules | — |
+
+### `updateChannel` and `patchChannel` differ in five ways, and every one is on the wire
+
+Measured field by field against the running server rather than read off the source, because four of
+the five are the sort of thing a happy-path test agrees with either way:
+
+| | `PUT /channels/{id}` | `PUT /channels/{id}/patch` |
+|---|---|---|
+| fields honoured | `header`, `purpose`, `display_name`, `name`, `group_constrained` and **nothing else** — a submitted `create_at`, `total_msg_count`, `scheme_id`, `discoverable`, `autotranslation` or `default_category_name` is silently discarded | everything `Channel::patch` applies |
+| an empty string | `header: ""` clears, `display_name: ""` **leaves the old value** | `null` leaves, `""` clears, for all four |
+| archived channel | 400 `api.channel.update_channel.deleted.app_error`, from the handler | 400 `app.channel.update.bad_id`, from the **store** — `patchChannel` has no guard of its own |
+| `props` in the answer | absent | `FillInChannelProps` runs, so a `~mention` in the header comes back as `channel_mentions` |
+| a type change | 400 `typechange` — `/privacy` is the only way to convert a channel | not expressible |
+
+The third row is the one worth remembering: the archived-channel guard for `/patch` is
+`updateChannelT`'s `DeleteAt != 0` becoming a `store.ErrInvalidInput`, which is why the two routes
+answer different ids for the same request.
+
+### Only `town-square` is special
+
+`off-topic` is created by the same team bootstrap and has **no** guard anywhere: it renames,
+archives and converts to private, all measured. Four guards mention `model.DefaultChannelName` and
+all four test that one name.
+
+### The websocket addressing is team-for-public and channel-for-private on two of the four events
+
+`channel_updated` goes to the channel, `channel_converted` to the team, and `channel_deleted` and
+`channel_restored` to the **team for a public channel and the channel for a private one**.
+Inverting that last branch broadcasts a private channel's archive to everyone on the team, which no
+assertion about a response body can see. None of the five routes carries an `omit_connection_id`:
+Go passes an empty string, so unlike `upsertDraft` the client's `Connection-Id` header does not stop
+its own tab being told. `mm_app::channel_write`'s module docs carry the table; the parity suite
+asserts each event with `common::SocketProbe`.
+
+### Four fields `patchChannel` accepts and refuses, and one it accepts and ignores
+
+On this unlicensed deployment, measured: `autotranslation` → 403
+`api.channel.patch_update_channel.feature_not_available.app_error`; `discoverable` → 400
+`api.channel.discoverable_join_request.feature_disabled.app_error`; `banner_info` → 403
+`license_error.feature_unavailable.specific`. `managed_category_name` is the silent one — it counts
+towards "is this patch empty", gets past the gate, and then does nothing at all, so a patch of
+nothing but that field is a 200 whose body differs only in `update_at`.
+
+`canEditChannelBanner` has a shape worth naming: its licence branch sets `c.Err` and **does not
+return**, falling into a type switch that can overwrite it. So an admin sees the licence error and a
+caller without the banner permission sees the permission error, both 403. A port that returned
+early would answer the same thing to both.
+
+### The `WebConn` membership cache excludes an archived channel, and it broke a test
+
+A channel-addressed event reaches a connection only if the channel is in that connection's
+`allChannelMembers` snapshot, taken from `get_all_channel_members_for_user(user, include_deleted =
+false)` and cached for thirty minutes — Go's `WebConn` the same way. That snapshot **omits a
+member's archived channels**, so a socket whose snapshot happens to be taken while the channel is
+archived never hears its restore, however correct the publish is. A probe opened after the archive
+did exactly that and passed in isolation, where the restore's own event populated the snapshot with
+`DeleteAt` already zero. The fix is a warm-up event on the live channel, not a longer window: see
+the note on `a_private_channels_archive_and_restore_are_addressed_to_the_channel`.
+
+The same suite also found that one probe held open across five sequential exchanges is dropped
+under whole-suite load — a `WebConn` whose send queue fills is *disconnected*, not throttled. Four
+short tests, each with its own probe, replaced one long one.
+
+### `json.Decoder.Decode` reads one value and stops, and three handlers were stricter than Go
+
+`{"id":"…","header":"h"} trailing` and two concatenated objects are both a **200** on Go, taking
+the first value — `json.Decoder` never looks past it. `serde_json::from_slice` rejects the trailing
+bytes and would have answered 400. Measured on `PUT /channels/{id}`, `/patch` and `/privacy`; all
+three now go through `mm_model::utils::decode_one_from_json`, which the project already had for
+exactly this and which also handles the lone-surrogate escape serde refuses.
+
+### The first mutation run's controls were CAUGHT, and the wreckage was why
+
+Both no-op controls failed, which by the standing rule voids a tally. The cause was not a noisy
+harness: **every request in the town-square and off-topic tests is expected to fail, and the only
+thing stopping it is the guard under test.** So the mutation that removes the archive guard made
+the request *succeed* — archiving the shared fixture team's `town-square` for good — and the
+rename mutation left its `off-topic` renamed and private. Every later test in the batch then failed
+on the wreckage, the controls among them.
+
+Two lessons, and the second is the general one:
+
+* A test whose subject is a **guard** must own a disposable fixture, because a mutation run is
+  precisely the case where the guard is gone. Both tests now create their own team.
+* **Cleanup that runs only when the test passes is not cleanup.** The off-topic test used to rename
+  the shared channel and put it back at the end; the "put it back" never ran on the runs that
+  needed it. It now leaves its own team's channel however it likes.
+
+### Mutation testing: 42 run, 40 caught, 2 controls survived
+
+Plan at `scripts/mutations/channel-writes.plan`. The first run reached 40 CAUGHT and then **both
+controls CAUGHT**, which voids it — see above for the cause and the fix. The clean re-run landed
+after the session that wrote this was cut off by a rate limit: **42 run, 40 caught, both controls
+SURVIVED**, so every real mutation in the plan is caught and the harness's verdicts are
+trustworthy.
+
+Three mutations had nothing to catch them on the first pass and each named a missing fixture
+rather than a shrug: a duplicate channel name, an archived channel's absence from the public
+listing, and the banner licence-versus-permission ordering. All three are now asserted, which is
+why the re-run caught 40 of 40.
+
+## The post writes, and what a pin actually costs (2026-09-10)
+
+> **On the four counts above.** The sidebar, membership, lifecycle and post-write sections were
+> written in parallel worktrees that each branched at **293 of 764**, so each originally counted
+> from 293 and the four could not be added up. They are restated here in merge order — sidebar
+> 293 → 298, membership 298 → 304, lifecycle 304 → 309, posts 309 → **314** — which is what
+> `scripts/routes.py` reports on the merged tree. 21 route+method pairs in one session.
+
+`POST /api/v4/posts/{post_id}/pin`, `.../unpin`, `PUT /api/v4/posts/{post_id}`,
+`PUT /api/v4/posts/{post_id}/patch` and `DELETE /api/v4/posts/{post_id}`. 309 → **314 of 764**.
+One store primitive, `SqlPostStore.Update`, is behind the first four; `SqlPostStore.Delete` is
+behind the fifth. `POST /api/v4/posts` is **not** here — see [D-221], which names what it is
+waiting on.
+
+### A pin is an edit, and an edit is two rows
+
+`saveIsPinnedPost` builds a one-field `PostPatch` and goes through `PatchPost` → `UpdatePost` →
+`SqlPostStore.Update`, which rewrites the live post **and inserts the old version as a new row**
+carrying `OriginalId` and a stamped `DeleteAt`. So pinning a post bumps its `UpdateAt`, drags the
+channel's `LastPostAt` to now, and adds an entry to `GET /posts/{id}/edit_history` — four side
+effects for a boolean, and the response body is `{"status":"OK"}` either way. The parity suite
+asserts all four, because the body asserts almost nothing.
+`mm_store::post_store::PostStore::update` says why each of its four statements is where it is, and
+that they are deliberately **not** in a transaction.
+
+The two pin routes are not symmetric with each other: `post.IsPinned == isPinned` short-circuits to
+a 200 that writes nothing, *before* the edit-time-limit check, so pinning an already-pinned post
+cannot 400 on age while pinning an unpinned one can.
+
+### `ParseHashtags` is four ASCII regexes wearing Unicode clothes
+
+`model.ParseHashtags` derives the `Posts.Hashtags` column from the message on every edit that
+changes it, and all four of its patterns are transcription hazards: **RE2's `\d` is `[0-9]` and its
+`\s` is `[\t\n\f\r ]`, where the `regex` crate's are Unicode.** The 51-case corpus in
+`fixtures/behaviour_utils.json` under `parse_hashtags` records `#tag١` — an Arabic-Indic digit that
+Go strips as trailing punctuation and a copied pattern would have accepted. Also recorded: `#` is
+the one character `puncStart` will not strip and `puncEnd` will, there is no de-duplication
+(`#tag #tag` is stored twice), and the 1000-byte cap is measured in **bytes**, cut at 999 and
+rolled back to the last space — which is what keeps a split multi-byte rune out of the answer and
+what makes a single over-long hashtag come back as the empty string.
+
+### What these routes refuse is a shape, never a route
+
+`mm_app::post_write` has the table. Each entry is a forward, gated on something the request
+carries: a `~channel` mention (`FillInPostProps` resolves channels and teams into a prop), an `@`
+mention on a licensed installation (the group-mention prop needs the licence's `LDAPGroups` bit), a
+change to the file-id set (`processPostFileChanges` attaches and detaches `FileInfo` rows),
+`ai_generated_by`, interactive content (`mm_blocks_actions` has to be pruned to the actions the
+content still references), a card post, and `ImageProxySettings.Enable`. A parity test asserts that
+a `~town-square` in an edited message forwards and the same edit without it does not, so the
+refusal is measured rather than assumed.
+
+### Three things the edit path does that a reader would tidy away
+
+* **`null` file ids and `null` props mean "leave them alone"**, and an empty array does not: a
+  `PUT` carrying only `id` and `message` keeps a post's attachments, while `"file_ids": []`
+  detaches every one of them.
+* **The age-limit gate compares file ids *ordered* (`slices.Equal`) and the permission check three
+  lines later compares them as a multiset (`SliceEqualUnordered`).** Reordering a post's file ids
+  is therefore a change for one and not for the other.
+* **An empty patch is a 200 that still writes.** `postPatchChecks` skips the age limit for it and
+  `UpdatePost` runs anyway, so `{}` moves `UpdateAt` and adds an edit-history row while changing
+  nothing a reader can see.
+
+`props` are replaced wholesale and then the five integration identity markers are re-applied from
+the old post, so an edit cannot strip a webhook's `from_webhook` — and `mm_blocks_actions` is
+deleted outright on any post without interactive content. All three are asserted in one exchange.
+
+### `deletePost` serves a root and forwards a reply
+
+`SqlPostStore.Delete` is `WHERE Id = $4 OR RootId = $4`: deleting a root soft-deletes the whole
+thread, stamps `props.deleteBy` with `jsonb_set`, marks `Threads.ThreadDeleteAt` and soft-deletes
+the **replies'** file infos. The root's own file infos, the flagged-post preferences and the thread
+drafts are three more cascades Go runs from goroutines; they are inline here, which closes a window
+rather than opening one.
+
+Deleting a *reply* is forwarded, because `App.DeletePost` runs `RemoveNotifications` for one and
+that is the mention engine — see [D-221]. `?permanent=true` is forwarded too: it selects
+`PermanentDeletePost`, a hard delete across seven tables, and Go's own 501 gate answers it.
+
+The route's refusals differ from its neighbours': a post that does not exist is a **404** here,
+where the pin and edit routes turn the same lookup failure into a 403.
+
+### The two `post_deleted` events go to two different halves of the channel
+
+`CleanUpAfterPostDeletion` publishes the event **twice**: once tagged `ContainsSanitizedData` and
+once tagged `ContainsSensitiveData` with a `delete_by`. `ShouldSendEvent` delivers the first only to
+a connection *without* `manage_system` and the second only to one *with* it, so who deleted the post
+reaches an admin's client and nobody else's. Two sockets in one parity test, because a port that
+published one event would either leak that or lose it. Both payloads carry the post as it was
+**before** the delete — `delete_at: 0`, no `deleteBy` — so a client learns the post is gone from the
+event type, not from the post in it.
+
+### Mutation testing: 52 run, 50 caught, 2 controls survived
+
+Plan at `scripts/mutations/post-writes.plan`. The session that wrote it was cut off by a rate
+limit partway through, and its partial run is not the tally above — that one reported a harness
+fault, which voids a run. Re-run from scratch against the **merged** tree.
+
+Two things came out of the void run that the tally would have hidden.
+
+**`store-delete-does-not-mark-the-thread` did not compile.** It mutated the SQL to
+`... WHERE postid = $2 AND $1 < 0`, and sqlx types a bind parameter from how the statement uses
+it — `$1` as both `SET threaddeleteat = $1` and a comparison operand is E0308. The harness
+reported HARNESS FAULT, which reads as though the mutation ran and the server merely failed to
+come up. `AND FALSE` says the same thing and compiles.
+
+**Rewritten, it then SURVIVED — and that was a real gap.** Deleting a root post stamps
+`Threads.ThreadDeleteAt`, and nothing asserted it. The reason is structural rather than an
+oversight: nothing about that stamp reaches the delete response, and every other test here
+asserts on the response or on the posts themselves, so the one write that is invisible from the
+route performing it was the one nothing checked. It is observable one route over —
+`getThreadsForUser` is served — and
+`post_writes::deleting_a_root_post_takes_its_thread_out_of_the_list` now asserts it and catches
+the mutation.
+
+One caution for the next parallel session: `unreferenced-action-registry-kept` SURVIVED in the
+worktree and is CAUGHT against merged `main`. A per-branch mutation verdict is a verdict against
+that branch's test binary, which is smaller than the one that ships.
+
+---
+
+## The system posts twelve served routes owed (2026-09-11)
+
+No new routes. Twelve route+method pairs already served — the six on
+`/channels/{id}/members…` and the five channel-lifecycle writes, plus `updateChannel`'s
+display-name notice — each ended in a `Posts` write Go makes and this server did not. **D-231,
+D-232 and D-233 are paid off and deleted**; what is still owed is the narrower [D-235].
+
+| what | where | status |
+|---|---|---|
+| `SqlPostStore.Save`/`SaveMultiple` for one root post, and `PostPersistentNotification.DeleteByChannel` | `crates/mm-store/src/post_store.rs` (end of both blocks) | done; the insert itself reuses the existing `insert_post` |
+| the slice of `App.CreatePost` a server-constructed post reaches, plus the `posted` event | `crates/mm-app/src/post_write.rs` | `create_system_post` propagates, `post_system_message` swallows — Go has both |
+| the four membership posts | `crates/mm-app/src/channel_member.rs` | done |
+| the six lifecycle posts and the privacy rollback | `crates/mm-app/src/channel_write.rs` | done |
+| `updateChannel`'s display-name notice | `crates/mm-api/src/channel_writes.rs` | it lives in Go's handler, not in `App.UpdateChannel` |
+| 5 cross-server tests, 7 unit tests | `crates/mm-api/tests/parity/system_posts.rs`, and `#[cfg(test)]` in both app modules | — |
+
+### The message text is English here, and that is a deliberate exception to [D-092]
+
+Every other string this server emits for an `i18n.T` id is the **id**. A post body is not an error
+`message` a client ignores — it is stored, and it is what an old client renders — so the twelve
+sentences are English literals beside their call sites. This is not an i18n bundle and must not
+grow into one. The cost is stated in [D-235]: `DeleteChannel` and `RestoreChannel` interpolate the
+**acting user's** locale in Go, so a non-English admin's archive message differs from ours.
+
+### A join post moves the channel without making it unread
+
+`SaveMultiple`'s post-commit `UPDATE Channels` sets `LastPostAt` with `GREATEST` unconditionally
+and adds `count` to `TotalMsgCount`, where `count` is zero when
+`Post.ExcludesFromChannelMessageCount()`. So a join reorders every member's sidebar and leaves the
+unread count alone. **`system_guest_join_channel` and `system_add_guest_to_chan` are not in
+`IsJoinLeaveMessage`**, so a guest's join *does* count — the asymmetry is Go's, and it is the one
+line here a reader is most likely to "fix".
+
+### Which of the four membership posts is written is decided by who asked
+
+`POST /members` with your own `user_id` writes `system_join_channel`; with somebody else's, it
+writes `system_add_to_channel` with four props instead of one. Two of the four are inline in Go and
+two run on `a.Srv().Go`, so **a failed join post fails `POST /members`** and a failed add post does
+not. `ServiceSettings.ExperimentalEnableDefaultChannelLeaveJoinMessages` does not reach any of
+these six routes: it gates `JoinDefaultChannels` and `App.LeaveChannel`, which api4's member routes
+do not call.
+
+### The privacy post makes a rollback reachable that never was
+
+`UpdateChannelPrivacy` flips the type back, restores the `discoverable` flag and re-updates when
+its post fails, then answers the post's error. Nothing could fail while there was no post, so the
+branch was recorded as unreachable; it is ported now. It is also the only one of the six lifecycle
+posts whose error id can reach a response body.
+
+### `updateChannel` posts against the body, not against what it wrote
+
+Go's condition is `oldChannelDisplayName != channel.DisplayName` where `channel` is the **submitted**
+body. A body that omits `display_name` changes nothing and still posts, with an empty new value.
+Pinned by `system_posts::update_channel_posts_the_display_name_it_was_sent`.
+
+### Two things the parity fixtures taught on the first run
+
+**Creating a channel already writes a system post.** `CreateChannelWithUser` runs
+`postJoinChannelMessage` for the creator, so a fresh fixture channel's timeline is not empty; every
+test counts the baseline and slices it off rather than assuming zero.
+
+**Posting as a user whose membership mm-api wrote is a 403 from Go** — [D-190] arriving on
+schedule, in a helper that posts to Go by construction.
+## The authentication writes, and the counter that is the lockout (2026-09-11)
+
+`POST /api/v4/users/logout`, `PUT /api/v4/users/{user_id}/password`,
+`POST /api/v4/users/password/reset`, `POST /api/v4/users/email/verify` and
+`POST /api/v4/users/{user_id}/reset_failed_attempts`. 314 → **319 of 764** from this worktree's
+branch point. Two new store surfaces underneath: `mm_store::token_store` — the `Tokens` table,
+which is **not** `user_access_token_store` — and five auth writes appended to `SqlUserStore`.
+
+`POST /api/v4/users/login` is **not** here, and the reason is not effort: `DoLogin` writes
+`Session.Props` from `uasurfer.Parse(r.UserAgent())` — platform, OS and browser strings that
+`GET /users/{id}/sessions` returns verbatim — so byte parity needs a port of a user-agent parser,
+which is the "measurable only by reimplementing the package" case the standing decision says to
+forward. Everything else login needs now exists.
+
+### A password change writes six columns and only one of them was asked for
+
+`SqlUserStore.UpdatePassword` is
+
+```sql
+UPDATE Users SET Password = ?, LastPasswordUpdate = ?, UpdateAt = ?,
+                 AuthData = NULL, AuthService = '', FailedAttempts = 0 WHERE Id = ?
+```
+
+so setting a password **converts the account to e-mail auth and clears the lockout**. That is what
+makes `resetPassword` unlock an account that failed its way to the cap, and what lets an admin move
+a SAML user back to a password. Every route above it answers `{"status":"OK"}` either way, which is
+why the assertions live in `crates/mm-store/tests/db_auth_writes.rs` rather than the parity suite —
+`AuthData` goes to SQL `NULL` and `AuthService` to `''`, two different spellings of "none" in two
+columns, and a port that wrote only `Password` is invisible on the wire.
+
+### The claim is taken before the password is read, and refunded selectively
+
+`DoubleCheckPassword` increments `FailedAttempts` **conditionally on it being below
+`MaximumLoginAttempts`**, refuses if the claim failed, *then* checks the password, and refunds the
+slot for every failure except a credential mismatch. Two consequences a reader would lose by
+reordering: a correct password cannot unlock an account already at the cap (a 401 with the lockout
+id, not the 400 a wrong password gets), and a backend fault or an over-long password cannot lock
+anybody out. `mm_app::App::double_check_password` has the order; the parity suite has both
+consequences.
+
+The store predicate is strictly `<`, so `MaximumLoginAttempts` is the number of attempts
+*allowed*, and `DecrementFailedPasswordAttempts` floors at zero in the `WHERE` clause rather than
+in arithmetic — a `-1` would silently grant an extra attempt and nothing reports the column.
+
+### Three of the five routes require no session at all
+
+`logout`, `resetPassword` and `verifyUserEmail` are `APIHandler`, not `APISessionRequired`:
+somebody following a reset link cannot log in by definition. `auth_writes::OptionalSession` ports
+the `RequireSession: false` path — no token is not an error, a bad token is not either, a **500**
+from the session store still is, and a valid non-OAuth session presented in `?access_token=` is a
+401. `logout` therefore answers 200 to a caller holding nothing, and clears the cookie
+unconditionally, before the revoke and on the error path too.
+
+An **OAuth** session at logout is forwarded: Go's `RevokeAccessToken` also deletes the
+`OAuthAccessData` row, and removing only the session would leave a replayable token behind.
+
+### The error ids are uniform on purpose
+
+An unknown account and a wrong password are one id. A token that never existed and a token of the
+wrong type are one id. **Every** error out of `VerifyEmailFromToken` — including a 500 from the
+store — leaves as one 400 `api.user.verify_email.bad_link.app_error`, because the handler wraps
+rather than returns. Each is an enumeration oracle if split, and `mm_app::auth`'s module docs say
+so at the top so that the next reader does not "improve" one.
+
+Two that are *not* uniform and look like they should be: `already_hashed=true` without the
+permission is a **401** for yourself and a **403** for anybody else, and `resetPasswordFailedAttempts`
+raises a hand-built 403 with its own id for the first permission check and the generic
+`SetPermissionError` for the second.
+
+### `Token.Extra` is Go-cased JSON
+
+`{"UserId":"…","Email":"…"}` — an anonymous struct with no tags, so `encoding/json` uses the field
+identifiers. A port that used the wire casing would parse every live token to the zero value and
+404 them all. Confirmed against a row Go minted rather than read off the source.
+
+Tokens are consumed **only on success**, and the delete's failure is logged and swallowed: the
+password has already committed by then. A refused reset leaves the row, so the link stays
+retryable — asserted for both the expired case and the wrong-type case.
+
+### What the parity suite had to be taught about Go's caches
+
+Five of its fifteen tests failed on the first run, all for the same reason and none of them a port
+bug: Go answers `login`, `GetUser` and `GetSession` from in-process caches that this server's
+writes do not reach. Three tests now call `invalidate_go_caches` explicitly, one reads
+`Users.EmailVerified` out of the table because `SanitizeProfile` strips it from every API response,
+and one asserts the staleness **on purpose** — a session revoked here is still accepted by Go, which
+is [D-237] and is the first time [D-190]'s class has had a credential consequence.
+
+Three more, recorded rather than fixed: [D-238] (no e-mail service, so four send-only routes stay
+with Go and two writes lose a notification), [D-236] (CSRF is checked on no migrated route, which
+predates this work and is written down here for the first time), and [D-237] above.
+---
+
+## Channel creation (2026-09-11)
+
+Three routes, all served: `POST /api/v4/channels`, `POST /api/v4/channels/direct`,
+`POST /api/v4/channels/group`. `POST /channels` was deferred from the lifecycle session because it
+adds the creator as a member; `Channel().SaveMember` landed there, and this is the first of the
+routes it unblocks.
+
+| what | where | status |
+|---|---|---|
+| `Channel().Save`, `SaveDirectChannel`, `saveChannelT`, `GetTeamChannels`' count | `crates/mm-store/src/channel_store.rs` (end of both blocks) | done; `Save` mutates the channel it is handed, because `PreSave` mints the id and the timestamps in place |
+| `StoreError::LimitExceeded` | `crates/mm-store/src/error.rs` | done; a store-enforced quota the app layer answers **400** to, where every other write failure is a 500 |
+| `App.CreateChannelWithUser`, `CreateChannel`, `GetOrCreateDirectChannel`, `createDirectChannel`, `CreateGroupChannel`, `addChannelToDefaultCategory` | `crates/mm-app/src/channel_create.rs` | done, minus the join system post ([D-231]) |
+| `TeamSettings.MaxChannelsPerTeam` | `crates/mm-app/src/config.rs` | done; Go default 2000, and a negative value disables the store's half of the check only |
+| `model.NonSortedArrayFromJSON` | `crates/mm-model/src/utils.rs`, corpus in `reference/dump/behaviour.go` | done; the DM route reads its list positionally, so the order is wire surface |
+| the three handlers | `crates/mm-api/src/channel_creates.rs` | done; a licensed installation forwards `POST /channels` only ([D-234]'s reading), and two branches of the message routes forward ([D-235], [D-236]) |
+| 16 cross-server tests, 6 store tests, 1 corpus test | `crates/mm-api/tests/parity/channel_creates.rs`, `crates/mm-store/tests/db_channel_creates.rs`, `mm_model::utils::go_parity` | — |
+
+### The same store outcome is a 400 on one route and a 201 on the other two
+
+`saveChannelT`'s insert is `ON CONFLICT (TeamId, Name) DO NOTHING`, and on a miss it re-selects the
+row that holds the name and returns it **alongside** `ErrConflict`. Three callers read that pair
+differently: `CreateChannel` reports `store.sql_channel.save_channel.exists.app_error` at 400 and
+throws the channel away, while `GetOrCreateDirectChannel` and `CreateGroupChannel` swallow the error
+and answer the existing channel with a **201**. A `Result` cannot carry a meaningful value on its
+error arm, so the conflict is a value here — `ChannelSave::Existing` — and the branch stays where Go
+put it, above the store.
+
+The re-select has **no `DeleteAt` filter**, which is why an archived channel still holds its name:
+archive `town-square-clone` and re-create it and you get the 400, not a fresh channel. Measured on
+both servers.
+
+### The per-team limit is checked twice against two different counts
+
+`CreateChannelWithUser` compares `GetNumberOfChannelsOnTeam() + 1` to `MaxChannelsPerTeam`, and
+`saveChannelT` then compares a second count to the same setting. They do not count the same rows:
+
+| | types | archived |
+|---|---|---|
+| `GetNumberOfChannelsOnTeam` (app) | `O`, `P`, `G` | **counted** |
+| `saveChannelT` (store) | `O`, `P` | not counted |
+
+So a team can be refused by the first with `api.channel.create_channel.max_channel_limit.app_error`
+and accepted by the second with no error at all. Both are ported. Go's app-layer count also comes
+from a **list** method that answers `ErrNotFound` for zero rows, so an entirely empty team is a
+**404** rather than a count of zero; `count_team_channels` returns the number and
+`get_number_of_channels_on_team` raises the 404, so the status stays where the status belongs.
+
+### Three creates, three different event addressings
+
+| route | event | addressed to | published |
+|---|---|---|---|
+| `POST /channels` | `channel_created` | the **user** (`channel_id` and `team_id` on the broadcast are empty) | once |
+| `/channels/direct` | `direct_added` | the **channel** | once, and only when the DM did not already exist |
+| `/channels/group` | `group_added` | each **member** individually | once per member |
+
+Getting the first one wrong announces a new private channel to everyone; getting the third wrong
+sends one frame where Go sends N. Both are asserted with `SocketProbe`.
+
+`direct_added`'s `creator_id` is `userIds[0]` **from the request body**, not the session's user —
+the handler passes the two ids positionally. The parity test sends the pair largest-id-first so that
+a sorted parse and a body-ordered parse give different answers; without that the assertion would
+pass half the time by luck.
+
+`group_added`'s `teammate_ids` is sorted, and the sort is not obvious from the Rust: Go's
+`GetGroupNameFromUserIds` sorts the caller's slice **in place**, and `CreateGroupChannel` then
+marshals that same slice into every event. The Rust helper does not mutate its argument, so the sort
+is explicit at the publish site — without it the field would carry the request's order.
+
+### `addChannelToDefaultCategory` is ported for a new channel only
+
+Go's function also *moves* a channel out of the category it is already in. That half is dead for a
+create — nothing can reference an id the database learned about a millisecond ago — so only
+find-or-create is ported, and the doc comment on `App::add_channel_to_default_category` is the
+record of why. The match is case-insensitive and against `custom` categories only, so a
+`default_category_name` of `"channels"` makes a *second* category rather than filing into the
+built-in one. The whole thing is fire-and-forget: Go logs every failure and returns nothing.
+
+### What forwards, and why each one
+
+* **A licensed installation, on `POST /channels` only.** `PrivacySettings.UseAnonymousURLs` behind
+  `MinimumEnterpriseAdvancedLicense` would *replace the client's channel name with a fresh id*, and
+  managed channel categories read the licence again. Neither message route consults the licence, so
+  neither is gated.
+* **`RestrictDirectMessage = "team"`** — [D-239]. Needs a store method this port does not have and a
+  plugin decision it cannot make.
+* **A view-restricted caller** — [D-240], the same wall `GET /users/by_auth_data` already hits. Both
+  forwards are returned *before* anything is written.
+
+### Two fixture-generator diffs that are not mine
+
+`TZ=Asia/Kolkata go run .` in `reference/dump` also rewrites `behaviour_filestore.json` (a random
+multipart boundary) and `behaviour_scheduled_post{,_recurrence}.json` (this machine's tzdata rejects
+`america/new_york` in lower case where the committed fixture accepted it). Both are environmental
+rather than caused by any change here, and both were reverted — only `behaviour_utils.json` is
+committed, and only as an addition. Worth knowing before the next session reads a dirty `git status`
+as a signal.
+
+### Mutation testing: 38 run, 36 caught, 2 controls survived
+
+Plan at `scripts/mutations/channel-creates.plan`. Run it with
+`MUTATE_STORE_TARGETS='--test db_channel_creates'` — without it the `store` lines build every
+mm-store test binary per mutation and let an unrelated one decide the verdict.
+
+Every one of the 38 was compiled before the batch ran. That is a step this project has paid for
+twice now: a plan line that does not compile is reported as a HARNESS FAULT that reads as though
+the mutation ran, and a fault voids the whole run. Applying each mutation, running
+`cargo check --workspace`, and reverting takes about nine seconds a line against the batch's
+fifty, and it caught nothing this time — which is the point of a cheap pre-flight.
+
+**One mutation survived, and the fixture was the reason.** `create-channel-private-gate-is-the-\
+public-permission` swaps `create_private_channel` for `create_public_channel` in the handler's type
+switch. It survived because on a stock installation `team_user` grants **both** and `system_user`
+grants **neither**, so every ordinary member passes either check and the two ids are
+indistinguishable from outside. `the_private_create_is_gated_on_its_own_permission` now plants a
+role with only `create_public_channel`, hangs it off a throwaway team's scheme as
+`DefaultTeamUserRole`, and asserts that a member of that team gets a 201 for `O` and a 403 for `P`
+on both servers. Re-run: CAUGHT.
+
+The two controls — a renamed binding in `mm_app::channel_create` and two reordered independent
+predicates in `count_team_channels` — both SURVIVED, so the verdicts above mean what they say.
+
+Three mutations were considered and **not** written because they are genuinely unobservable rather
+than untested, and it is cheaper to say so than to rediscover it:
+
+* **Swapping the `team_id` and `display_name` emptiness checks.** Both answer
+  `api.context.invalid_body_param.app_error`, and `AppError`'s `params` map is not serialised — so
+  the two 400s are byte-identical and only the (wiped) `detailed_error` differs.
+* **Inverting `createChannel`'s discoverable *type* check.** The feature flag is false and fires
+  first, so nothing downstream of it is reachable.
+* **`sorted_array_from_json` in place of the non-sorted one on the GM route.** The GM name is a
+  hash of the sorted ids, `teammate_ids` is re-sorted at the publish site, and both parsers
+  de-duplicate — so the two are observationally identical *there*. They are not on the DM route,
+  which is why that mutation is in the plan and is caught.
+## The team membership writes (2026-09-11)
+
+`POST /api/v4/teams/{team_id}/members`, `POST …/members/batch`,
+`PUT …/members/{user_id}/roles` and `PUT …/members/{user_id}/schemeRoles`. **314 → 318 of 764**
+(counted on this branch; the four parallel worktrees this round each branched at 314, so the
+merged number is the one `scripts/routes.py` reports on `main`). Behind them:
+`TeamStore::update_member` and `TeamStore::save_member`,
+`GroupStore::admin_role_groups_for_team_member`, and `mm_app::team_member` — the whole of
+`JoinUserToTeam` bar two writes. `DELETE …/members/{user_id}` is **not** here; see the dependency
+note at the end.
+
+### Two of the four error ids say `api.channel.` while describing a team
+
+`changing_guest_role` and `scheme_role` (app/team.go:432 and :467) sit in the
+`api.channel.update_team_member_roles.*` family; their three siblings on the same function say
+`api.team.`. Go's copy-paste, on the wire, and asserted against the running server rather than
+inferred. `mm_app::App::update_team_member_roles` carries the note.
+
+### `serde` deserializes a struct from a sequence, and Go does not
+
+`from_slice::<TeamMember>(b"[]")` succeeds — a derived `Deserialize` accepts the sequence form and
+`#[serde(default)]` fills the missing tail — so the first version of `addTeamMember` answered
+`api.context.invalid_body_param.app_error` where Go answers the route's own
+`api.team.add_team_member.invalid_body.app_error`. Both add routes now screen the `serde_json::Value`
+before converting; see `decode_team_member`. This is a whole class, not one route: any handler that
+decodes a Go struct straight from the body has it.
+
+### One add publishes `added_to_team` twice
+
+`App.JoinUserToTeam` publishes it (team.go:891) and `App.AddTeamMember` publishes it again on top
+(team.go:1158). `AddTeamMembers` does the same per successful user. A port that sent one event
+passes every response-body test and every count assertion a reader would think to write.
+
+### The add path's two framings, and its two response *types*
+
+`addTeamMember` is `json.NewEncoder(w).Encode` (trailing newline); `addTeamMembers` is
+`w.Write(json.Marshal(...))` (none). And `?graceful=` — any **non-empty first value**, `0`
+included — swaps a bare list of `TeamMember` for a list of `{user_id, member, error}` in which the
+unset half is `null` rather than absent.
+
+### The check order differs between the two add routes
+
+`addTeamMember` checks the permission and *then* reads the team for the group-constrained branch;
+`addTeamMembers` reads the team and takes that branch **before** the permission check. So on a
+group-constrained team a caller holding nothing gets the group refusal from one route and a 403
+from the other.
+
+### `IsTeamEmailAllowed` is an AND across two restriction lists
+
+`[team.AllowedDomains, TeamSettings.RestrictCreationToDomains]`, every non-empty entry of which
+must accept the address — so a team allowing `example.com` on a server restricted to
+`corp.example.com` admits nobody. An empty entry is skipped rather than matched, which is why the
+stock configuration admits everybody. 29 cases in `fixtures/behaviour_team_email.json`, generated
+from the Go function.
+
+### The stock `team_user` role holds `add_user_to_team`
+
+A plain member can add a third party. What they lack is `manage_team_roles`, so the answer runs
+through `SanitizeRoleData` and reaches the client with `delete_at: **-1**` on a membership that
+was just created with `delete_at = 0`. Measured: this suite asserted a 403 first and Go answered
+201.
+
+### `UpdateMember` reports no miss, so a vanished membership is a 200
+
+Go `Exec`s the UPDATE and never looks at the rows affected, then computes the answer from the
+**in-memory** member. `PUT …/roles` for a user who is not on the team therefore answers 200 having
+written nothing — unlike the channel twin, whose re-select turns that into a 404.
+
+### Mutation testing: see the tally in the session report
+
+Plan committed at `scripts/mutations/team-member-writes.plan`, which also records the four
+branches it deliberately does **not** mutate and why each is unreachable from this stack
+(`MaxUsersPerTeam`, the phase-2 migration gate, the group-constrained forward, and any guest
+member).
+
+### What `DELETE …/members/{user_id}` is waiting on
+
+`RemoveUserFromTeam` → `LeaveTeam` needs three store methods this session did not own:
+`ChannelStore::GetTeamSpaceChannelsForUser` and `ChannelStore::ClearSidebarOnTeamLeave`
+(`channel_store.rs`, a sibling worktree's this round) and `UserStore::UpdateUpdateAt`
+(`user_store.rs`, likewise). The websocket events, the soft-delete of the membership and the
+preference cleanup are all straightforward once those exist. See [D-242] for the `UpdateUpdateAt`
+gap, which the *add* path shares.

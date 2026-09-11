@@ -1,0 +1,52 @@
+# Mutation plan for the two channel-view writes — `POST /channels/members/{user_id}/view` and
+#   `POST /channels/members/{user_id}/mark_read`.
+#
+#   scripts/mutate-batch.sh scripts/mutations/channel-view.plan
+#
+# Three suites, and the split is forced by where each decision is observable:
+#
+#   store  the SQL. The `Type <> 'S'` deny-list, the `greatest()`es and the `ErrInvalidInput`
+#          branch have no cross-server comparison: a space cannot be created over REST, a board
+#          id is refused by the handler before the query runs, and the update's return value is
+#          discarded by the app layer.
+#   unit   the classification's `mention` arm and its fall-through, which reach the wire only
+#          through a push-notification clear this port does not have.
+#   api    everything a client can see: the two orders of refusal, the two websocket events and
+#          their gates, and the read state left behind.
+#
+# One decision has **no** catcher and is not in this plan: deleting the `set_active_channel`
+# call from `App::view_channel`. It writes only to the status cache, and `get_user_statuses_by_ids`
+# reads the table — so nothing we serve can read it back. Recorded in the parity suite's own
+# comment rather than dressed up as a covered branch.
+
+view-deny-list-becomes-the-allow-list	crates/mm-store/src/channel_store.rs	           AND channels.type <> 'S'	           AND channels.type IN ('O', 'P', 'D', 'G')	store	store_channel_view
+view-read-times-is-last-post-at	crates/mm-store/src/channel_store.rs	.insert(row.id, row.last_post_at.max(row.last_viewed_at));	.insert(row.id, row.last_post_at);	store	store_channel_view
+view-read-times-is-last-viewed-at	crates/mm-store/src/channel_store.rs	.insert(row.id, row.last_post_at.max(row.last_viewed_at));	.insert(row.id, row.last_viewed_at);	store	store_channel_view
+view-lastviewedat-is-assigned-not-advanced	crates/mm-store/src/channel_store.rs	                   lastviewedat = greatest(cm.lastviewedat, c.lastpostat),	                   lastviewedat = c.lastpostat,	store	store_channel_view
+view-msgcount-is-assigned-not-advanced	crates/mm-store/src/channel_store.rs	                   msgcountroot = greatest(cm.msgcountroot, c.totalmsgcountroot),	                   msgcountroot = c.totalmsgcountroot - 1,	store	store_channel_view
+view-lastupdateat-is-left-alone	crates/mm-store/src/channel_store.rs	                   lastupdateat = greatest(cm.lastviewedat, c.lastpostat)	                   lastupdateat = cm.lastupdateat	store	store_channel_view
+view-mention-counters-are-not-zeroed	crates/mm-store/src/channel_store.rs	               SET mentioncount = 0,	               SET mentioncount = cm.mentioncount,	store	store_channel_view
+view-urgent-counter-is-not-zeroed	crates/mm-store/src/channel_store.rs	                   urgentmentioncount = 0,	                   urgentmentioncount = cm.urgentmentioncount,	store	store_channel_view
+view-update-answers-the-memberships-not-the-channels	crates/mm-store/src/channel_store.rs	SELECT id AS "id!", lastpostat AS "lastpostat!" FROM c	SELECT c.id AS "id!", c.lastpostat AS "lastpostat!" FROM c JOIN channelmembers cm2 ON cm2.channelid = c.id AND cm2.userid = $2	store	store_channel_view
+view-empty-id-list-reaches-the-query	crates/mm-store/src/channel_store.rs	    if channel_ids.is_empty() {\n        return Ok(BTreeMap::new());\n    }	    if false {\n        return Ok(BTreeMap::new());\n    }	store	store_channel_view
+view-direct-override-is-group	crates/mm-store/src/channel_store.rs	if notify == USER_NOTIFY_ALL || row.channel_type == CHANNEL_TYPE_DIRECT {	if notify == USER_NOTIFY_ALL || row.channel_type == mm_model::channel::CHANNEL_TYPE_GROUP {	store	store_channel_view
+view-default-fallback-is-inverted	crates/mm-store/src/channel_store.rs	        let notify = if channel_push == CHANNEL_NOTIFY_DEFAULT {	        let notify = if channel_push != CHANNEL_NOTIFY_DEFAULT {	unit	channel_store::tests
+view-unread-ignores-mentions	crates/mm-store/src/channel_store.rs	        let has_unreads = (row.total_msg_count - row.msg_count) > 0 || has_mentions;	        let has_unreads = (row.total_msg_count - row.msg_count) > 0;	unit	channel_store::tests
+view-mention-arm-takes-any-unread	crates/mm-store/src/channel_store.rs	        } else if notify == USER_NOTIFY_MENTION && has_mentions {	        } else if notify == USER_NOTIFY_MENTION && has_unreads {	unit	channel_store::tests
+app-early-return-is-skipped	crates/mm-app/src/channel_view.rs	        if unreads.with_unreads.is_empty() {\n            return Ok(unreads.read_times);\n        }	        if false {\n            return Ok(unreads.read_times);\n        }	api	channel_view
+app-update-threads-ignores-the-client-flag	crates/mm-app/src/channel_view.rs	            self.config().thread_auto_follow && (!collapsed_threads_supported || !is_crt_enabled);	            self.config().thread_auto_follow && (true || !is_crt_enabled);	api	channel_view
+app-crt-always-on-is-off	crates/mm-app/src/channel_view.rs	        if app_crt == COLLAPSED_THREADS_ALWAYS_ON {\n            return true;\n        }	        if app_crt == COLLAPSED_THREADS_ALWAYS_ON {\n            return false;\n        }	api	channel_view
+app-viewed-event-gate-is-inverted	crates/mm-app/src/channel_view.rs	        if self.config().enable_channel_viewed_messages {	        if !self.config().enable_channel_viewed_messages {	api	channel_view
+app-viewed-event-carries-only-the-changed-channels	crates/mm-app/src/channel_view.rs	                serde_json::to_value(&unreads.read_times).unwrap_or(serde_json::Value::Null),	                serde_json::to_value(&unreads.with_unreads).unwrap_or(serde_json::Value::Null),	api	channel_view
+app-view-drops-the-prev-channel	crates/mm-app/src/channel_view.rs	        if !view.prev_channel_id.is_empty() {\n            channel_ids.push(view.prev_channel_id.clone());\n        }	        if false {\n            channel_ids.push(view.prev_channel_id.clone());\n        }	api	channel_view
+app-invalid-input-is-a-500	crates/mm-app/src/channel_view.rs	    let status = if matches!(err, mm_store::StoreError::InvalidInput { .. }) {\n        400	    let status = if matches!(err, mm_store::StoreError::InvalidInput { .. }) {\n        500	unit	channel_view::tests
+api-view-validates-a-blank-channel-id	crates/mm-api/src/channels.rs	    if !view.channel_id.is_empty() && !is_valid_id(&view.channel_id) {	    if !is_valid_id(&view.channel_id) {	api	channel_view
+api-view-skips-the-prev-channel-id-check	crates/mm-api/src/channels.rs	    if !view.prev_channel_id.is_empty() && !is_valid_id(&view.prev_channel_id) {\n        return Err(ApiError::invalid_param("channel_view.prev_channel_id"));\n    }	    if false {\n        return Err(ApiError::invalid_param("channel_view.prev_channel_id"));\n    }	api	channel_view
+api-view-skips-the-prev-channel-board-check	crates/mm-api/src/channels.rs	    if !view.prev_channel_id.is_empty()\n        && let Some(err) = reject_board_channel_by_id(state, &view.prev_channel_id).await\n    {\n        return Err(err);\n    }	    if false\n        && let Some(err) = reject_board_channel_by_id(state, &view.prev_channel_id).await\n    {\n        return Err(err);\n    }	api	channel_view
+api-board-rejection-is-inverted	crates/mm-api/src/channels.rs	state.app.get_board_channel(channel_id).await.ok().map(|_| {	state.app.get_board_channel(channel_id).await.err().map(|_| {	api	channel_view
+api-mark-read-returns-early-on-a-bad-user-id	crates/mm-api/src/channels.rs	    let malformed_user_id = require_id(&user_id, "user_id").err();	    require_id(&user_id, "user_id")?;\n    let malformed_user_id: Option<ApiError> = None;	api	channel_view
+api-mark-read-passes-the-clients-thread-flag	crates/mm-api/src/channels.rs	        .mark_channels_as_viewed(&channel_ids, &user_id, true, is_crt_enabled)	        .mark_channels_as_viewed(&channel_ids, &user_id, false, is_crt_enabled)	api	channel_view
+api-view-checks-the-body-before-the-gate	crates/mm-api/src/channels.rs	    if !state\n        .app\n        .session_has_permission_to_user(&session.0, &user_id)\n        .await\n    {\n        return Err(ApiError::from(make_permission_error(\n            &session.0,\n            &[&PERMISSION_EDIT_OTHER_USERS],\n        )));\n    }\n\n    let bytes = read_body(request, "viewChannel").await?;	    let bytes = read_body(request, "viewChannel").await?;\n    let _early: Option<mm_model::channel_view::ChannelView> =\n        mm_model::utils::decode_one_from_json(&bytes)\n            .map_err(|_| ApiError::invalid_param("channel_view"))?;\n    if !state\n        .app\n        .session_has_permission_to_user(&session.0, &user_id)\n        .await\n    {\n        return Err(ApiError::from(make_permission_error(\n            &session.0,\n            &[&PERMISSION_EDIT_OTHER_USERS],\n        )));\n    }\n	api	channel_view
+api-view-response-is-marshalled-not-encoded	crates/mm-api/src/channels.rs	    body.push(b'\\n');\n\n    Ok((\n        StatusCode::OK,\n        [\n            ("Content-Type", "application/json"),\n            ("x-mmrs-served-by", "rust"),\n        ],\n        body,\n    )\n        .into_response())\n}\n\n/// Port of `viewChannel`	\n    Ok((\n        StatusCode::OK,\n        [\n            ("Content-Type", "application/json"),\n            ("x-mmrs-served-by", "rust"),\n        ],\n        body,\n    )\n        .into_response())\n}\n\n/// Port of `viewChannel`	api	channel_view
+control-rename-a-binding	crates/mm-store/src/channel_store.rs	        let has_mentions = row.mention_count > 0;	        let mentioned = row.mention_count > 0;\n        let has_mentions = mentioned;	unit	channel_store::tests
+control-reorder-two-select-columns	crates/mm-store/src/channel_store.rs	               channelmembers.msgcount AS "msgcount!",\n               channelmembers.mentioncount AS "mentioncount!",	               channelmembers.mentioncount AS "mentioncount!",\n               channelmembers.msgcount AS "msgcount!",	store	store_channel_view

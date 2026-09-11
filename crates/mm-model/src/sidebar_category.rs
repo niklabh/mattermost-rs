@@ -13,10 +13,13 @@
 //! `ChannelsWithCount.channels`. `fixtures/behaviour_sidebar_category.json` § `nil_shapes`
 //! records both marshallings side by side.
 //!
-//! The three ported read routes never produce a `null`: Go's store builds `make([]string, 0)`
-//! and `make(SidebarCategoriesWithChannels, 0)` before it fills them, so `[]` is what
-//! `mm-store`'s port emits too. Modelling it as `Vec` would have been correct for those routes
-//! and silently wrong for the write routes that are still forwarded.
+//! **No route this server serves produces a `null` for any of the three.** Go's store builds
+//! `make([]string, 0)` and `make(SidebarCategoriesWithChannels, 0)` before filling them, and the
+//! write routes go one further: `validateSidebarCategoryChannels` passes every list through
+//! `RemoveDuplicateStringsNonSort`, which returns `list := []string{}` even for a nil input. So
+//! `Option<Vec<_>>` is modelling a value that is reachable from Go's *types* rather than from Go's
+//! *routes* — kept because `null` is on the wire and a client can see it, and because the local-mode
+//! and plugin APIs construct these structs directly.
 
 use std::sync::LazyLock;
 

@@ -113,6 +113,8 @@ func writeBehaviourFixture(outDir string) error {
 		"redact_device_id":                              redactAll(),
 		"session_is_mobile":                             sessionBoolAll(),
 		"sorted_array_from_json":                        sortedArrayFromJSONAll(),
+		"non_sorted_array_from_json":                    nonSortedArrayFromJSONAll(),
+		"parse_hashtags":                               parseHashtagsAll(),
 	}
 
 	blob, err := json.MarshalIndent(out, "", "    ")
@@ -205,6 +207,58 @@ func sortedArrayFromJSONAll() map[string]map[string]any {
 	res := map[string]map[string]any{}
 	for _, body := range bodies {
 		out, err := model.SortedArrayFromJSON(strings.NewReader(body))
+		res[body] = map[string]any{"ok": err == nil, "out": out}
+	}
+	return res
+}
+
+// nonSortedArrayFromJSONAll runs the same corpus through NonSortedArrayFromJSON, whose
+// de-duplicator keeps first-seen order. `POST /channels/direct` reads userIds positionally, so
+// the order is wire surface there.
+func nonSortedArrayFromJSONAll() map[string]map[string]any {
+	bodies := []string{
+		`["b","a","b"]`,
+		`["a"]`,
+		`[]`,
+		` [ ] `,
+		`null`,
+		``,
+		` `,
+		`{`,
+		`{}`,
+		`"abc"`,
+		`true`,
+		`123`,
+		`[1]`,
+		`["a",1]`,
+		`[{}]`,
+		`[["a"]]`,
+		`[null]`,
+		`["a", null]`,
+		`["a"] garbage`,
+		`["a"]["b"]`,
+		`["a"]]`,
+		`  ["x"]`,
+		`["a",]`,
+		`["a" "b"]`,
+		`["\u0041","A"]`,
+		`["é","e","E","1"," ","","Z","z","aa","a"]`,
+		`["\ud83d\ude00","\u00e9"]`,
+		`["\ud800"]`,
+		`["\udc00"]`,
+		`["\ud83dA"]`,
+		`["😀"]`,
+		`["\\ud800"]`,
+		`["\uD800"]`,
+		"\ufeff[\"a\"]",
+		"[\"a\\u0000b\"]",
+		"[\"tab\there\"]",
+		`["z","y","x"]`,
+		`["c","a","b","a","c"]`,
+	}
+	res := map[string]map[string]any{}
+	for _, body := range bodies {
+		out, err := model.NonSortedArrayFromJSON(strings.NewReader(body))
 		res[body] = map[string]any{"ok": err == nil, "out": out}
 	}
 	return res

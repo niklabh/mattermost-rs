@@ -331,6 +331,11 @@ async fn malformed_ids_refuse_identically() {
 
 /// Unmigrated methods on this path still reach Go. `partially_migrated` is what makes that true,
 /// and forgetting it turns a working proxied route into a 405 from our own router ([D-093]).
+///
+/// **`DELETE` used to be the probe here and is now ours** — `removeChannelMember` landed with the
+/// channel-membership writes — so the probe moved to `POST`, which gorilla registers nowhere on
+/// this path. The assertion that matters is unchanged: an unregistered method must reach Go rather
+/// than our router's 405.
 #[tokio::test]
 async fn other_methods_on_this_path_are_still_forwarded() {
     if !stack_enabled() {
@@ -344,7 +349,7 @@ async fn other_methods_on_this_path_are_still_forwarded() {
     let channel_id = own_channel(&client, &token, "forward").await;
 
     let response = client
-        .delete(format!(
+        .post(format!(
             "{}/api/v4/channels/{channel_id}/members/{}",
             common::RUST,
             logged_in_user_id()
@@ -360,6 +365,32 @@ async fn other_methods_on_this_path_are_still_forwarded() {
         .and_then(|v| v.to_str().ok())
         .map(str::to_owned);
 
+    // And the two methods this path *does* serve locally still do.
+    let mut served_locally = Vec::new();
+    for (method, suffix) in [(reqwest::Method::GET, ""), (reqwest::Method::DELETE, "")] {
+        let response = client
+            .request(
+                method.clone(),
+                format!(
+                    "{}/api/v4/channels/{channel_id}/members/{}{suffix}",
+                    common::RUST,
+                    logged_in_user_id()
+                ),
+            )
+            .header("Authorization", format!("Bearer {token}"))
+            .send()
+            .await
+            .expect("the Rust server is reachable");
+        served_locally.push((
+            method,
+            response
+                .headers()
+                .get("x-mmrs-served-by")
+                .and_then(|v| v.to_str().ok())
+                .map(str::to_owned),
+        ));
+    }
+
     delete_channel(&client, &token, &channel_id).await;
 
     assert_ne!(
@@ -369,6 +400,13 @@ async fn other_methods_on_this_path_are_still_forwarded() {
     assert_eq!(
         served_by.as_deref(),
         Some("go"),
-        "DELETE is unmigrated and must be forwarded"
+        "POST is unregistered on this path and must be forwarded"
     );
+    for (method, served) in served_locally {
+        assert_eq!(
+            served.as_deref(),
+            Some("rust"),
+            "{method} on this path is migrated and must not be forwarded"
+        );
+    }
 }

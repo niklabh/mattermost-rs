@@ -123,7 +123,7 @@ impl App {
     }
 
     /// Port of `PlatformService.AddStatusCache` (platform/status.go), minus the cluster send.
-    fn add_status_cache(&self, status: &Status) {
+    pub(crate) fn add_status_cache(&self, status: &Status) {
         self.status_cache
             .write()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -190,7 +190,7 @@ impl App {
     /// Addressed to the **user**, and carrying only `status` and `user_id` — not the `Status`
     /// object. Go skips it entirely when the server is busy, which this port has no equivalent of
     /// and which only ever *suppresses* an event.
-    async fn broadcast_status(&self, status: &Status) {
+    pub(crate) async fn broadcast_status(&self, status: &Status) {
         let mut event = mm_model::websocket_message::WebSocketEvent::new(
             mm_model::websocket_message::WEBSOCKET_EVENT_STATUS_CHANGE,
             "",

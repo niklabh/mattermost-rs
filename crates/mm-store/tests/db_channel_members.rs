@@ -30,7 +30,12 @@ use mm_store::channel_store::get_member;
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 
-const GO: &str = "http://localhost:8065";
+/// The Go server of the stack this checkout is pinned to, baked in at compile time — see
+/// `crates/mm-api/tests/common/mod.rs` for why it is compile-time rather than a runtime lookup.
+const GO: &str = match option_env!("MMRS_GO_BASE") {
+    Some(base) => base,
+    None => "http://localhost:8065",
+};
 const LOGIN_ID: &str = "slice@example.com";
 const PASSWORD: &str = "Slice-Test-1234";
 

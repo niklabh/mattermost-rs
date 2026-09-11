@@ -32,3 +32,6 @@ __pycache__/
 # The Go server built from the pinned SHA, plus its runtime root. Rebuilt by
 # scripts/go-server.sh; never committed.
 /reference/.build/
+
+# A worktree pins itself to a stack with this file; see scripts/worktree.sh.
+.mmrs-stack

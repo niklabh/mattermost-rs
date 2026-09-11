@@ -1,0 +1,42 @@
+# Mutation plan for the twelve routes' system posts (D-231, D-232, D-233).
+#
+#   scripts/mutate-batch.sh scripts/mutations/system-posts.plan
+#
+# Every line here targets a decision that is invisible to the route that makes it. None of the
+# twelve routes shows a system post in its response body, so each of these mutations leaves every
+# status code and every byte of every body exactly as it was; only `parity/system_posts.rs`, which
+# reads the timeline back, can tell.
+#
+# The four groups:
+#
+#   * the store's counter update — whether a join counts as a message, and which way `GREATEST`
+#     goes. Getting the first wrong makes every join unread; getting the second wrong stops the
+#     channel moving in the sidebar at all.
+#   * which of the four membership posts is written, which is decided by *who asked* and not by
+#     what changed.
+#   * the props keys and the author, which are the whole wire contract — a client renders its own
+#     sentence from `props` and ignores `message`.
+#   * the `posted` event's six data fields.
+#
+# The last two lines are the no-op controls and must SURVIVE.
+system-post-always-counts-as-a-message	crates/mm-store/src/post_store.rs	let count = i64::from(!post.excludes_from_channel_message_count());	let count = i64::from(true);	api	a_join_post_moves_last_post_at
+system-post-never-counts-as-a-message	crates/mm-store/src/post_store.rs	let count = i64::from(!post.excludes_from_channel_message_count());	let count = i64::from(false);	api	a_join_post_moves_last_post_at
+last-post-at-takes-the-least-not-the-greatest	crates/mm-store/src/post_store.rs	SET lastpostat        = GREATEST($1, lastpostat),	SET lastpostat        = LEAST($1, lastpostat),	api	a_join_post_moves_last_post_at
+the-channel-counter-update-matches-no-row	crates/mm-store/src/post_store.rs	WHERE id = $3\n            "#,	WHERE id = $3 AND 1 = 0\n            "#,	api	a_join_post_moves_last_post_at
+a-self-add-posts-the-add-message	crates/mm-app/src/channel_member.rs	Some(requestor) if requestor.id != user.id => {	Some(requestor) if requestor.id == user.id => {	api	the_four_membership_writes_post_what_go_posts
+the-join-post-uses-the-guest-type-for-everyone	crates/mm-app/src/channel_member.rs	    let (message, post_type) = if user.is_guest() {	    let (message, post_type) = if !user.is_guest() {	api	the_four_membership_writes_post_what_go_posts
+the-leave-message-drops-the-at-sign	crates/mm-app/src/channel_member.rs	message: format!("@{} left the channel.", user.username),	message: format!("{} left the channel.", user.username),	api	the_four_membership_writes_post_what_go_posts
+the-added-user-prop-is-snake-case	crates/mm-app/src/channel_member.rs	(POST_PROPS_ADDED_USER_ID, added_user.id.as_str()),	("added_user_id", added_user.id.as_str()),	api	the_four_membership_writes_post_what_go_posts
+the-removal-post-is-authored-by-the-removed	crates/mm-app/src/channel_member.rs	        user_id: remover_user_id.to_owned(),	        user_id: removed_user.id.clone(),	api	the_four_membership_writes_post_what_go_posts
+the-removal-props-name-the-remover	crates/mm-app/src/channel_member.rs	("removedUsername", removed_user.username.as_str()),	("removedUsername", remover_user_id),	api	the_four_membership_writes_post_what_go_posts
+patch-posts-no-display-name-notice	crates/mm-app/src/channel_write.rs	        if old_display_name != channel.display_name {	        if old_display_name == channel.display_name {	api	the_channel_lifecycle_writes_post_what_go_posts
+the-purpose-notice-branches-on-the-new-value	crates/mm-app/src/channel_write.rs	        let message = if old_purpose.is_empty() {	        let message = if new_purpose.is_empty() {	api	the_channel_lifecycle_writes_post_what_go_posts
+the-privacy-sentence-follows-the-old-type	crates/mm-app/src/channel_write.rs	    let message = if channel.channel_type == CHANNEL_TYPE_OPEN {	    let message = if channel.channel_type != CHANNEL_TYPE_OPEN {	api	the_channel_lifecycle_writes_post_what_go_posts
+the-archive-post-uses-the-restore-type	crates/mm-app/src/channel_write.rs	        post_type: POST_TYPE_CHANNEL_DELETED.to_owned(),	        post_type: POST_TYPE_CHANNEL_RESTORED.to_owned(),	api	the_channel_lifecycle_writes_post_what_go_posts
+update-channel-compares-the-written-display-name	crates/mm-api/src/channel_writes.rs	    if old_display_name != submitted.display_name {	    if old_display_name != channel.display_name {	api	update_channel_posts_the_display_name_it_was_sent
+the-system-post-event-is-post-edited	crates/mm-app/src/post_write.rs	WebSocketEvent::new(WEBSOCKET_EVENT_POSTED, "", &post.channel_id, "", None, "");	WebSocketEvent::new(WEBSOCKET_EVENT_POST_EDITED, "", &post.channel_id, "", None, "");	api	a_membership_system_post_publishes_a_posted_event
+set-online-is-false	crates/mm-app/src/post_write.rs	message.add("set_online", serde_json::Value::Bool(true));	message.add("set_online", serde_json::Value::Bool(false));	api	a_membership_system_post_publishes_a_posted_event
+the-sender-name-is-the-untranslated-id	crates/mm-app/src/post_write.rs	pub const SYSTEM_MESSAGE_SENDER_NAME: &str = "System";	pub const SYSTEM_MESSAGE_SENDER_NAME: &str = "system.message.name";	api	a_membership_system_post_publishes_a_posted_event
+the-posted-event-carries-no-team	crates/mm-app/src/post_write.rs	            "team_id",\n            serde_json::Value::String(channel.team_id.clone()),	            "team_id",\n            serde_json::Value::String(String::new()),	api	a_membership_system_post_publishes_a_posted_event
+control-rename-the-hashtag-binding	crates/mm-app/src/post_write.rs	let (hashtags, _) = parse_hashtags(&post.message);\n        post.hashtags = hashtags;	let (parsed, _) = parse_hashtags(&post.message);\n        post.hashtags = parsed;	api	the_four_membership_writes_post_what_go_posts
+control-reorder-two-posted-event-fields	crates/mm-app/src/post_write.rs	        message.add(\n            "channel_name",\n            serde_json::Value::String(channel.name.clone()),\n        );\n        message.add(\n            "sender_name",\n            serde_json::Value::String(SYSTEM_MESSAGE_SENDER_NAME.to_owned()),\n        );	        message.add(\n            "sender_name",\n            serde_json::Value::String(SYSTEM_MESSAGE_SENDER_NAME.to_owned()),\n        );\n        message.add(\n            "channel_name",\n            serde_json::Value::String(channel.name.clone()),\n        );	api	a_membership_system_post_publishes_a_posted_event

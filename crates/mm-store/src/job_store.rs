@@ -121,13 +121,25 @@ struct JobRow {
 
 impl JobRow {
     /// `Data` is `jsonb` and nullable, and **a JSON `null` in the column is not the same document
-    /// as an absent column** — except here, where both become Go's nil map and marshal back as
-    /// `null`. Rows written by the product-notices worker hold a literal JSON `null`, so this is
-    /// the common case and not a corner.
+    /// as a SQL `NULL`** — Go renders the first as `null` and the second as `{}`, on both the list
+    /// and the single-job route.
+    ///
+    /// Measured 2026-09-10 against the pinned server, after an earlier version of this comment
+    /// claimed both became Go's nil map. They do not: `StringMap.Scan` returns early on a nil
+    /// value and leaves the map as the destination struct had it, which marshals as `{}`, while
+    /// `json.Unmarshal("null", &m)` sets it nil, which marshals as `null`.
+    ///
+    /// Which shape a row has depends on who wrote it, and **no Mattermost worker writes a SQL
+    /// NULL** — every null-ish `Jobs` row on a months-old database holds a literal JSON `null`
+    /// from the product-notices worker. That is why this divergence survived until a *freshly
+    /// created* stack was seeded with the other shape by hand. It is reproduced rather than left,
+    /// because reproducing it costs one line and the next reader has no way to know it was
+    /// unreachable.
     fn into_job(self) -> Result<Job, StoreError> {
         let data =
             match self.data {
-                None | Some(serde_json::Value::Null) => None,
+                None => Some(StringMap::new()),
+                Some(serde_json::Value::Null) => None,
                 Some(value) => Some(serde_json::from_value::<StringMap>(value).map_err(
                     |source| StoreError::Decode {
                         entity: "Job",
@@ -368,10 +380,15 @@ impl JobStore for SqlJobStore {
 mod tests {
     use super::*;
 
-    /// A NULL column and a JSON `null` are the same answer, and it is `None` — which serialises
-    /// back as `"data":null`, the value the running server returns for every product-notices job.
+    /// **The two null-ish forms are different answers**, and the difference is on the wire:
+    /// a SQL `NULL` column serialises back as `"data":{}` and a JSON `null` as `"data":null`.
+    ///
+    /// This test asserted they were the same until 2026-09-10, when a freshly seeded stack put a
+    /// SQL NULL row in front of both servers for the first time and Go answered `{}`. Every
+    /// null-ish row a real deployment accumulates is the JSON-null kind, written by the
+    /// product-notices worker — which is exactly why the wrong half went unnoticed.
     #[test]
-    fn null_data_in_either_form_is_none() {
+    fn the_two_null_forms_are_not_the_same_answer() {
         let row = |data| JobRow {
             id: "fmuj6jho4jd65j54dpg83m7eyh".to_owned(),
             job_type: "product_notices".to_owned(),
@@ -384,13 +401,18 @@ mod tests {
             data,
         };
 
-        assert_eq!(row(None).into_job().expect("maps").data, None);
+        assert_eq!(
+            row(None).into_job().expect("maps").data,
+            Some(StringMap::new()),
+            "an absent column is an empty map, which marshals as {{}}"
+        );
         assert_eq!(
             row(Some(serde_json::Value::Null))
                 .into_job()
                 .expect("maps")
                 .data,
-            None
+            None,
+            "a JSON null is a nil map, which marshals as null"
         );
     }
 

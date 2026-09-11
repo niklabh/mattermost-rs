@@ -6182,7 +6182,7 @@ plausible-looking 400 rather than a compile error. Two options, and the first is
 A `#[derive(Deserialize)]` on a wire type without `#[serde(default)]` should be treated as a
 review error in this project, the same way a missing `rename` is.
 
-## D-169 · `listCommands`'s built-in half needs the slash-command registry
+## D-241 · `listCommands`'s built-in half needs the slash-command registry
 
 **Status** OPEN · **Severity** incomplete · **Raised** 2026-09-08 (phase 2, command reads)
 
@@ -6443,3 +6443,431 @@ a second `reference/.build` instance on another port, which the harness has no n
 Until then: the shape of the response, the five store predicates and the paging are all tested, and
 the *bytes* of a successful body are not. If a field of `model.User` were serialised differently on
 this route than on the ones that are compared, nothing here would catch it.
+
+---
+
+## D-214 · `ExtendSessionExpiryIfNeeded` is not ported on any route
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-10 (phase 2, channel view)
+
+Go calls `c.ExtendSessionExpiryIfNeeded(w, r)` at the end of `viewChannel` (api4/channel.go:2052)
+— the request every client makes on every channel switch, and therefore the one that keeps a long
+session alive. It rewrites `Sessions.ExpiresAt` to `now + sessionLength` and re-attaches the
+session cookies with the new max-age (web/context.go:174, app/session.go:421).
+
+Nothing in this port does either. The route was migrated anyway because the whole thing is behind
+`ServiceSettings.ExtendSessionLengthWithActivity`, which Go defaults to `!isUpdate` — **false for
+every persisted configuration document**, since `Store.Load` plants a `SiteURL` before calling
+`SetDefaults` ([D-088] measured this). On this stack it is off, so both servers do nothing.
+
+What is owed, when the setting is on:
+
+* the 1%-of-session-length-or-one-day threshold, floored at five minutes, so a session's expiry is
+  not rewritten on every request;
+* `platform.ExtendSessionExpiry`, which updates the row **and** the session cache;
+* `AttachSessionCookies`, which is a `Set-Cookie` on the response — the only piece of this that is
+  wire-visible, and the reason it cannot be quietly skipped for ever.
+
+Until then a client talking to the Rust server on a stack with the setting enabled would have its
+session expire on schedule while the same client talking to Go would not.
+
+---
+
+## D-215 · No push-notification hub, so `clearPushNotification` does nothing
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-10 (phase 2, channel view)
+
+`MarkChannelsAsViewed` ends by queueing a `notificationTypeClear` on
+`Srv().PushNotificationsHub` for every channel in `channelsToClearPushNotifications`
+(app/channel.go:3722, notification_push.go:406) — the badge-clearing message a mobile device gets
+when the user reads a channel somewhere else.
+
+This port has no hub and no device registry, so the list is computed and dropped.
+`mm_store::channel_store::classify_unreads_and_mentions` produces it in full deliberately: its
+notify-prop fall-through is three branches deep and getting it wrong would be invisible until
+there *is* a hub, at which point the bug would look like a hub bug. `db_channel_view_reads` and
+the `channel_store::tests` module assert it today; nothing on the wire does.
+
+What is owed is the hub itself — `app/notification_push.go`, the `Sessions.DeviceId` fan-out and
+the Mattermost Push Proxy protocol — which is a session of its own and blocks nothing. Every route
+that clears or sends a push notification inherits this entry.
+
+---
+
+## D-216 · A view's status-cache write cannot be read back through any route we serve
+
+**Status** OPEN · **Severity** untested · **Raised** 2026-09-10 (phase 2, channel view)
+
+`App::set_active_channel` runs on every `POST /channels/members/{user_id}/view`. It puts the
+user's status — with the new `ActiveChannel` and a fresh `LastActivityAt` — into
+`mm-app`'s status cache, and broadcasts `status_change` when the status *string* changed. It
+writes no row, which is Go's behaviour and is asserted
+(`channel_view::a_view_writes_no_status_row_on_either_server`).
+
+The cache entry itself is unreadable: `App::get_user_statuses_by_ids` — which both status routes
+go through — reads the `Status` **table** only, as its own doc comment records, and Go reads its
+cache first. So a mutation that deletes the `set_active_channel` call from `App::view_channel`
+survives the whole suite, and is listed as such in `scripts/mutations/channel-view.plan`.
+
+Two things are owed and they are the same work: make `get_user_statuses_by_ids` consult the cache
+before the table, which is what Go does and would close both this and the `active_channel`/
+`last_activity_at` staleness the status module already documents. It was not done here because it
+changes an already-migrated route's answers and belongs in a session that can re-verify the status
+parity suite against Go rather than one that would be changing it in passing.
+
+---
+
+## D-224 · Muting a sidebar category does not mute its channels
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-10 (phase 2, sidebar category writes)
+**Blocked on** a `ChannelMembers` write in `mm-store/src/channel_store.rs`.
+
+`UpdateSidebarCategories` ends in `muteChannelsForUpdatedCategories` (app/channel_category.go:164),
+which reconciles the category's `muted` flag with its channels' `ChannelMembers.NotifyProps
+["mark_unread"]` through `setChannelsMuted` (app/channel.go:4032) → `Channel().UpdateMultipleMembers`.
+That store write is not ported, so on this server:
+
+- muting a category sets `SidebarCategories.Muted` and leaves every channel in it unmuted;
+- **no `channel_member_updated` event is published**, one of which Go sends per affected channel, so
+  a connected client's membership state goes stale with no TTL to recover it;
+- the same applies to a channel *moved* between categories of differing `muted`.
+
+The **decision** is ported and has thirteen unit tests
+(`mm-app/src/sidebar.rs::mute_reconciliation`): the index pairing between the updated and original
+lists, both mute directions, the move-between-categories diff, the "moved outside these categories"
+case Go declines to handle, and the fact that the two sources of mutes are not de-duplicated against
+each other. `App::mute_channels_for_updated_categories` computes it on every update and logs a
+`warn!` naming the channels a Go server would have touched, so the gap is visible in a running
+server rather than only here.
+
+What is owed is `setChannelsMuted` on top of a ported `UpdateMultipleMembers`, plus a parity test
+that mutes a category and reads the channel member back. Not done in this session because
+`channel_store.rs` belonged to two other agents; the reconciliation is deliberately a free function
+so the write can be dropped in behind it without touching the tested part.
+
+## D-225 · `system_usage`'s post counter asserts a whole-database number three times in one run
+
+**Status** OPEN · **Severity** unverified · **Raised** 2026-09-10 (phase 2, sidebar category writes —
+found by the full suite, not by the route)
+
+`parity::system_usage::a_custom_typed_post_is_not_counted` reads
+`GET /api/v4/usage/posts` three times and asserts the number does not move. That number is
+`RoundOffToZeroesResolution(count, 3)` (app/usage.go:21) over **every** row of `Posts` with
+`Type = ''`, so it is a global counter, and the three reads are ~40 seconds apart while 996 other
+tests run.
+
+Measured on a stack whose count had reached **466**: the reads answered `300`, then `400`, and the
+third assertion failed. The suites that create posts add roughly a hundred user posts per full run
+and do not all purge them, so the count walks upward and eventually sits near a bucket boundary —
+at which point the test fails in the concurrent run and passes in isolation, indefinitely.
+
+`the_usage_counters_need_no_permission`, in the same module, compares an admin's numbers against a
+plain user's and fails the same way — two consecutive full runs failed a *different* one of the two,
+which is what rules out a fixed bug in either. Both pass with `--test parity system_usage`, 16
+passed in 0.88s.
+
+**Not caused by the sidebar routes**: zero of those 466 posts belong to any `mmrssbwrite%` fixture,
+and none of the eight category routes writes a post. Recorded rather than fixed because it is not
+this session's route, and left as a `divergence`-free `unverified` because nothing about Go's answer
+is in doubt — only the two tests' assumption that a global counter holds still for 44 seconds.
+
+Note also that `cargo test --workspace` **fail-fasts**: this one failure stopped 45 of the 48 test
+binaries from running at all, and the run still exited 0 through a pipe. Use `--no-fail-fast` when
+reading a full-suite number.
+
+What is owed is to make the assertion local: count the planted posts' contribution against a
+*delta* the test controls, or seed the count to a bucket midpoint before reading. Note that
+lowering the resolution is not available — the rounding is Go's, and asserting the raw count would
+stop testing the route.
+## D-235 · What the system posts still do not do
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-11 (phase 2, system posts)
+**Supersedes** D-231, D-232 and D-233, which are paid off.
+
+The twelve routes that owed a system post now write one, byte-compatible in `type`, `props`,
+`message` and the `posted` event — `crates/mm-api/tests/parity/system_posts.rs` reads each one
+back off the timeline. Four things `App.CreatePost` does that [`App::create_system_post`] does not:
+
+- **The notification pass.** `SendNotifications` adds an implicit mention for
+  `props["addedUserId"]` on a `system_add_to_channel` post (notification.go:1115) and then
+  `IncrementMentionCount`s it. So a **re-add** of an existing member still answers Go's
+  `mention_count: 1` against our `0`, which is the one place this is visible in a response body;
+  `parity/channel_member_writes.rs` masks the two mention counters and asserts Go's value, so the
+  exclusion cannot widen. `getExplicitMentions` over the message text is absent with it — with
+  default keywords it finds nothing in these twelve sentences, but a user whose custom mention key
+  matches one would be mentioned by Go and not by us.
+- **`channel_mentions`.** `FillInPostProps` resolves a `~channel` mention into a prop. The header,
+  purpose and display-name notices quote text a user wrote, so a header naming a channel gets a
+  post with the prop missing and the client renders the raw `~name`.
+- **A group channel's `channel_display_name`** in the `posted` event is Go's sorted member list
+  (`PostNotification.GetChannelName`) and the stored display name here. Reachable only through a
+  header or purpose patch on a GM, which is the one lifecycle route a GM allows.
+- **`GetSystemBot`.** Go posts as the system bot when a removal has no remover and when an archive
+  has no acting user, creating the bot account on first use. No api4 route reaches either — every
+  caller carries a session — so both are logged and skipped.
+
+One more, which is not a gap in the posts but in their translation: `DeleteChannel` and
+`RestoreChannel` build their message with `i18n.GetUserTranslations(user.Locale)`, the **acting
+user's** locale, where the other ten use the server's. Ours are English throughout ([D-092]).
+
+---
+
+
+**`POST /api/v4/channels` posts no join message.** Found by the agent that ported channel
+creation, in the same session that paid off D-231's membership posts — the create path is a
+route that did not exist when those were written, so it was never in their scope. Go's
+`CreateChannelWithUser` calls `postJoinChannelMessage` for the creator. It is invisible in the
+201, because Go marshals the channel before the post exists, and visible from the next read of
+that channel onward in `total_msg_count` and `last_post_at`. No test re-reads a created
+channel's row, so this suite cannot currently detect the gap widening.
+## D-234 · Two channel-patch branches are forwarded because they write what this file does not own
+
+**Status** OPEN · **Severity** forwarded route · **Raised** 2026-09-10 (phase 2, channel
+lifecycle)
+
+`PUT /api/v4/channels/{channel_id}/patch` is served here except for two bodies, both decided
+before anything is written (`mm_api::channel_writes::patch_needs_go`):
+
+- **`group_constrained` going from off to on.** Go then runs
+  `DeleteGroupConstrainedChannelMemberships` in a goroutine, which removes every member who is not
+  in one of the channel's groups. That is a `ChannelMembers` write. Setting the flag to `false`, or
+  to `true` on a channel that already has it, writes no memberships and is served here — Go's
+  condition is `*patch.GroupConstrained && (old == nil || !*old)` and both halves matter.
+- **A non-empty `default_category_name` after the patch.** `addChannelToDefaultCategory` creates a
+  custom sidebar category, or moves the channel into an existing one, and updates the category
+  order. That is three `SidebarCategories`/`SidebarChannels` writes; the store is read-only today.
+  Gated on `TeamSettings.EnableChannelCategorySorting`, whose Go default is `true`.
+
+Both are pinned by unit tests and by a parity test asserting the answer comes back **without**
+`x-mmrs-served-by: rust` and still took effect. What is owed is the two write groups, at which
+point both conditions come out of `patch_needs_go` — the member half belongs with the rest of the
+`ChannelMembers` writes, and the sidebar half with the sidebar category writes.
+---
+
+## D-221 · `createPost` needs the notification pipeline, not the post write
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-10 (phase 2, post writes)
+
+`POST /api/v4/posts` is the one route of the post-write group this session did not take, and the
+reason is not the row. `SqlPostStore.SaveMultiple` is a day's work — an insert, a `Channels`
+counter update, a `Threads` upsert, `PostsPriority` and `PersistentNotifications` — and its
+response body is `PreparePostForClient`, which is already ported for the read routes.
+
+What is missing is everything `App.CreatePost` (app/post.go:173) does **after** the insert, and
+each item is observable to a client:
+
+* **`SendNotifications`** — mention parsing over the channel's members and their notify-prop
+  keywords, which produces the `mentions` and `followers` fields on the `posted` event, the
+  per-member `MentionCount`/`UrgentMentionCount` increments, the push and email fan-out, and the
+  auto-responder. Nothing of this exists in the Rust tree.
+* **`attachFilesToPost`** — binds `FileInfo` rows to the new post and *overwrites* the post when
+  not all of them could be attached.
+* **`followThreadIfNeeded` / `ThreadAutoFollow`** — a reply makes its author a thread follower,
+  which is what `GET /users/{id}/teams/{id}/threads` reads.
+* **post priority, persistent notifications and the acknowledgement rows**, all written inside the
+  same store call.
+* **the preview/permalink path** (`addPostPreviewProp`, `SanitizePostMetadataForUser`) and the
+  plugin `MessageWillBePosted` / `MessageHasBeenPosted` hooks.
+
+A `createPost` that returned the right JSON and dropped the notification pass would be wrong in
+the way this project exists to avoid: no test of the response body would notice, and a connected
+client would silently stop being told it had been mentioned. So the route stays forwarded, and the
+work it is waiting on is the **notification engine** rather than anything about posts.
+
+The same engine is what forwards **deleting a reply**: `App.DeletePost` on a reply runs
+`RemoveNotifications` (notification.go:914), which re-derives the reply's mentions to decrement
+`ThreadMemberships.UnreadMentions`. Deleting a *root* post does not — the whole function is behind
+`post.RootId != ""` — so `DELETE /posts/{id}` is served for a root and forwarded for a reply. See
+`mm_app::App::delete_post`.
+
+---
+
+## D-222 · The `PostEditTimeLimit` branch is ported and untested
+
+**Status** OPEN · **Severity** unverified · **Raised** 2026-09-10 (phase 2, post writes)
+
+`ServiceSettings.PostEditTimeLimit` is `-1` on a default-configured server, and
+`postEditTimeLimitExpired` (api4/post.go:1052) returns `false` on that value before it looks at
+anything else. So the **400** `api.post.update_post.permissions_time_limit.app_error` that three
+of the four write routes raise has no cross-server oracle on this stack, and no mutation of that
+branch can be caught — every one of them is unreachable rather than uncovered.
+
+Two things are covered without it: the value's *sign* convention, which is not obvious (`-1` is
+"no limit" and `0` means every post is already past its window — the opposite), and the unit
+(seconds, multiplied by 1000 against `CreateAt`). Both are unit-tested in
+`mm_app::post_write::tests`.
+
+What is owed is a parity run with the setting changed on **both** servers, which needs
+`scripts/go-server.sh` to set `MM_SERVICESETTINGS_POSTEDITTIMELIMIT` and a Go restart — the same
+shape as the feature-flag run that [D-213] describes. Until then the branch is transcribed from
+the Go source and not measured, and the one thing a reader should know is that the pin routes check
+it **after** their no-op short circuit, so pinning an already-pinned ancient post is a 200 on both
+servers and only a *change* can hit the 400.
+
+---
+
+## D-238 · There is no e-mail service, so four routes stay with Go and two writes are silent
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-11 (phase 2, auth writes)
+
+`Srv().EmailService` has no counterpart in this tree. Two consequences, of different kinds.
+
+**Four routes are forwarded** because sending is all they do: `POST /users/password/reset/send`,
+`POST /users/email/verify/send`, `POST /users/{id}/email/verify/member`'s sibling and
+`POST /email/test`. They are deliberately *not* registered in `mm-api`'s router — registering a
+path with only some methods makes axum answer 405 to the rest, so an unregistered path is what
+keeps them working. Their token-minting half is ported anyway (`mm_store::TokenStore::save`,
+`mm_model::Token::new`), so whoever lands an e-mail service has the store underneath already.
+
+**Two writes lose a side effect.** `App.UpdatePasswordSendEmail` sends a password-change notice
+and `App.VerifyEmailFromToken` sends an address-change notice, both in `Srv().Go(...)` goroutines
+whose failure Go only logs. The write commits either way and no response byte differs, so the
+parity suite cannot see it — `mm_app::auth` logs a warning at each site instead. A user whose
+password is changed through mm-api is not told about it, which is a security notification rather
+than a courtesy.
+
+The dependency is measurable only by reimplementing it (SMTP, templates, i18n), which the standing
+decision at the head of this file says to forward rather than port.
+
+---
+
+## D-236 · CSRF is not checked on any migrated route
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-11 (phase 2, auth writes)
+
+`web.Handler.ServeHTTP` calls `checkCSRFToken` (handlers.go:295) for every request whose token came
+from the **cookie**: a non-GET request must then carry `X-CSRF-Token` matching the session's, or
+`X-Requested-With: XMLHttpRequest`, or it is answered 401 with the session cookie cleared. Nothing
+in `mm-api` implements it. `crate::auth::AuthenticatedSession` reads the cookie and asks no further
+questions, and neither does `auth_writes::OptionalSession`.
+
+This predates the auth vertical — every migrated write has had the gap since the first one — but
+it was never written down, and the auth routes are where it stops being abstract: a cross-origin
+form post can now change a password or log a user out through this server where it could not
+through Go.
+
+What is owed is the check itself in the two extractors, keyed on the token's `TokenLocation`
+(already modelled) and the session's `props.csrf` (already stored and already read by
+`Session::get_csrf`). The pieces are all present; the wiring is not. A parity test needs a
+cookie-authenticated request, which the suite does not currently make — `go_minted_token` returns
+a bearer token — so the fixture is the other half of the work.
+
+---
+
+## D-237 · A session revoked by mm-api is still accepted by Go until its cache is invalidated
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-11 (phase 2, auth writes)
+
+[D-190] with a credential consequence, and measured rather than reasoned about:
+`POST /api/v4/users/logout` served by mm-api deletes the `Sessions` row, and the *Go* server keeps
+answering 200 to `GET /users/me` with that token until `POST /caches/invalidate` is called.
+`PlatformService` memoises sessions by token and our `DELETE` does not reach that map. The window
+is the cache entry's lifetime, not a request or two.
+
+Pinned by `parity::auth_writes::a_session_revoked_here_is_gone_here_but_lingers_in_gos_cache`,
+which asserts **both** halves: 401 from mm-api immediately, 200 from Go, then 401 from Go after an
+invalidation. If that middle assertion ever fails, the cache is being invalidated somehow and this
+entry can be closed.
+
+The same shape applies to the password writes — a password changed through mm-api does not stop the
+old one working against Go until the user cache is cleared — and three tests in that suite
+invalidate explicitly for exactly that reason. Unlike the reaction cache in [D-190],
+`/caches/invalidate` *does* clear both of these, so the cluster-message half of the fix would be
+enough. It ends when the Go server does.
+## D-239 · `POST /channels/direct` forwards a team-restricted installation
+
+**Status** OPEN · **Severity** coverage gap · **Raised** 2026-09-11 (phase 2, channel creation)
+
+`GetOrCreateDirectChannel` (app/channel.go:361) has a branch for
+`TeamSettings.RestrictDirectMessage == "team"`: unless the caller holds `manage_system`, the two
+users must share a team, *except* when one of them is a bot that a plugin has exempted
+(`IsBotExemptFromDMRestrictions`). `mm_app::App::get_or_create_direct_channel` returns
+`ChannelCreate::Forward` for the whole setting rather than reproducing half of it.
+
+Two things are missing and only one of them is ours to fix:
+
+- `Team().GetCommonTeamIDsForTwoUsers` — a store method this port does not have. It is **not**
+  `get_common_team_ids_for_multiple_users`, which is already ported: the two-user variant filters
+  deleted teams out and the multi-user one does not, so reusing it would allow DMs Go refuses.
+- the bot exemption, which needs the plugin environment — the same wall
+  [`RestrictedDm::Undecidable`] already documents for `CheckIfChannelIsRestrictedDM`.
+
+The setting defaults to `"any"` (config.go:2620), so the forward is unreachable on this stack and
+on a stock server. Paying it off means the store method plus a parity run with the setting changed
+on **both** servers, which is the shape [D-213] describes.
+
+---
+
+## D-240 · A view-restricted caller is forwarded on both message-channel creates
+
+**Status** OPEN · **Severity** coverage gap · **Raised** 2026-09-11 (phase 2, channel creation)
+
+`createDirectChannel` and `createGroupChannel` both call `UserCanSeeOtherUser` (app/user.go:2710),
+which consults `GetViewUsersRestrictions` and — when the caller *is* restricted — asks
+`Team().UserBelongsToTeams` and `Channel().UserBelongsToChannels`. Neither store method is ported,
+so `mm_app::App::user_can_see_other_user` answers `PrepareError::Unreproducible` and both handlers
+forward.
+
+This is the same forward `GET /users/by_auth_data` already takes, and the same reason: the
+restricted branch is reachable only for a guest account or a deployment that has edited
+`system_user`'s permissions. What is new is that it now gates a **write**, so the forward has to be
+returned before anything is created — it is, in `serve_create_direct_channel` and
+`serve_create_group_channel`, both of which decide it before the app layer is called at all.
+
+Paying it off is two store methods and a fixture with a guest account; until then no test on this
+stack can distinguish the refusal from the forward, because nobody here is restricted.
+## D-242 · A team join does not bump `Users.UpdateAt`
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-11 (phase 2, team-member writes)
+
+`App.JoinUserToTeam` (app/team.go:851) calls `Store().User().UpdateUpdateAt(user.Id)` between the
+membership write and the sidebar categories, and treats its failure as a **hard** error —
+`app.user.update_update.app_error`, 500. This port does not make that write: `UserStore` has no
+`update_update_at`, and `crates/mm-store/src/user_store.rs` belonged to a sibling worktree for
+the session that ported these routes.
+
+It is on the wire. `Users.UpdateAt` is the `update_at` field of every user object and the input to
+the profile etag, so after a join served by **this** server a client's `GET /users/{id}` reports
+the old timestamp and a cached profile is not invalidated. `POST /teams/{id}/members` and
+`POST …/members/batch` both have it; `addUserToTeamFromInvite` will inherit it.
+
+What is owed: one method — `UPDATE Users SET UpdateAt = $2 WHERE Id = $1`, returning the value
+written — appended to `UserStore`, called from `mm_app::App::join_user_to_team` where the comment
+marking its absence sits, and a parity assertion comparing `GET /users/{id}`'s `update_at` across
+the two servers after a join. The error branch comes with it: Go fails the whole join if the
+update fails, which is a branch this port currently does not have.
+
+The same method is one of the three things `DELETE /api/v4/teams/{team_id}/members/{user_id}`
+is blocked on — `postProcessTeamMemberLeave` (app/team.go:1312) calls it too.
+
+---
+
+## D-243 · The team join and leave system posts are missing
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-11 (phase 2, team-member writes)
+
+The channel-membership twin of this is [D-231]; this is the team half, and it is **larger**
+because the setting that gates it defaults to `true`.
+
+| Go function | Go site | when |
+|---|---|---|
+| `postJoinMessageForDefaultChannel` | app/channel.go:132 | every default channel a team join puts the user in |
+| `postLeaveTeamMessage` | app/team.go:1440 | a self-removal from a team |
+| `postRemoveFromTeamMessage` | app/team.go:1458 | somebody else did the removing |
+
+All three sit behind `ServiceSettings.ExperimentalEnableDefaultChannelLeaveJoinMessages`, which
+`SetDefaults` sets to **`true`** (config.go:874) — unlike most `Experimental*` settings, and
+unlike what the name suggests. So a stock Go server posts "user joined the team" into
+`town-square` on every join and this port does not, and the divergence is the *default* rather
+than a configuration nobody runs.
+
+Blocked on post writes in the store: `mm_store::post_store` is read-only. The rest of the join is
+ported and tested — the membership row, the sidebar categories, the default-channel memberships,
+the `ChannelMemberHistory` rows and all three websocket events.
+
+Two visible consequences beyond the missing message. The post moves `Channels.LastPostAt` and the
+new member's `ChannelMembers.MsgCount`, so a parity test comparing a fresh member's channel row
+has to mask both columns — `parity::team_member_writes::adding_a_member_agrees_and_joins_the_default_channels`
+does, and says so. And the config field itself is **not** read by this port: when the post write
+lands, `Config` needs `experimental_enable_default_channel_leave_join_messages` adding alongside
+the other `ServiceSettings` fields, because both arms of that branch then matter.
