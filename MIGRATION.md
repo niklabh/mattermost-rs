@@ -10141,3 +10141,24 @@ member).
 (`user_store.rs`, likewise). The websocket events, the soft-delete of the membership and the
 preference cleanup are all straightforward once those exist. See [D-242] for the `UpdateUpdateAt`
 gap, which the *add* path shares.
+
+## Two cross-test races, and a safety argument with one counterexample (2026-09-11)
+
+A baseline run of the full suite on the merge stack, on unchanged code, failed one test per run
+and a *different* test each run. Neither was a port bug; both are now fixed and the suite is
+green at 3373 across 56 targets. No route changed.
+
+The first: `user_by_email::a_plain_caller_reads_an_admin_address` is the only byte comparison in
+that file whose subject is the **shared admin** rather than a plain fixture user, and
+`custom_status_writes` writes that row. `fetch_both_raw` reads Go then Rust, so a concurrent
+`Users.UpdateAt` bump lands between them — 39ms, `update_at` alone. It uses `fetch_both_stable`
+now; the test's doc comment says why its siblings must not.
+
+The second is the more interesting one, because the harness asserted its own safety.
+`common::invalidate_go_caches` carried a written argument that it could not break anything:
+invalidation only makes Go **fresher**, and every staleness assertion in the suite is one-sided
+in that direction. That is true of all of them but one —
+`auth_writes::a_session_revoked_here_is_gone_here_but_lingers_in_gos_cache` asserts Go is
+**stale**, and it is the tripwire on [D-237]. `POST /caches/invalidate` is global with six
+concurrent callers, so a firing from `system_usage` turns that tripwire into a false "D-237 can
+be closed". See `common::GO_CACHE`, which the helper takes itself so a future caller inherits it.
