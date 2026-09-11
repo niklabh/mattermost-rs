@@ -107,6 +107,16 @@ pub struct Config {
     /// without touching the store when this is off.
     pub enable_custom_emoji: bool,
 
+    /// `ServiceSettings.EnableBotAccountCreation` (config.go:462, defaulted **`false`** at
+    /// :917).
+    ///
+    /// The whole of `POST /api/v4/bots` on a stock server: closed, `createBot` answers
+    /// `api.bot.create_disabled` at **403** — and it does so *after* the `create_bot` permission
+    /// check, so a caller without rights still gets the 403 naming the permission instead. This
+    /// deployment leaves it at the default, which is why `scripts/stack.sh` writes its seeded
+    /// bots straight to the tables. Read by `mm_api::bots::create_bot`.
+    pub enable_bot_account_creation: bool,
+
     /// `ServiceSettings.PostPriority` (config.go:992). Go default **`true`**.
     ///
     /// Gates `metadata.priority` *and* `metadata.acknowledgements`. `IsPostPriorityEnabled`
@@ -759,6 +769,8 @@ impl Default for Config {
             image_proxy_enable: false,
             enable_post_icon_override: false,
             enable_custom_emoji: true,
+            // config.go:918 — `new(false)`.
+            enable_bot_account_creation: false,
             // config.go:599 — `new(false)`.
             enable_dynamic_client_registration: false,
             enable_post_username_override: false,
@@ -936,6 +948,11 @@ impl Config {
                 lookup,
                 "MM_SERVICESETTINGS_ENABLECUSTOMEMOJI",
                 default.enable_custom_emoji,
+            ),
+            enable_bot_account_creation: lookup_bool(
+                lookup,
+                "MM_SERVICESETTINGS_ENABLEBOTACCOUNTCREATION",
+                default.enable_bot_account_creation,
             ),
             allow_persistent_notifications: lookup_bool(
                 lookup,
@@ -1338,6 +1355,9 @@ impl Config {
             enable_custom_emoji: service
                 .enable_custom_emoji
                 .unwrap_or(default.enable_custom_emoji),
+            enable_bot_account_creation: service
+                .enable_bot_account_creation
+                .unwrap_or(default.enable_bot_account_creation),
             post_priority: service.post_priority.unwrap_or(default.post_priority),
             allow_persistent_notifications: service
                 .allow_persistent_notifications
@@ -1773,6 +1793,8 @@ struct ServiceSettingsDocument {
     enable_post_username_override: Option<bool>,
     #[serde(rename = "EnableCustomEmoji")]
     enable_custom_emoji: Option<bool>,
+    #[serde(rename = "EnableBotAccountCreation")]
+    enable_bot_account_creation: Option<bool>,
     #[serde(rename = "PostPriority")]
     post_priority: Option<bool>,
     #[serde(rename = "AllowPersistentNotifications")]
