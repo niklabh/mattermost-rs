@@ -54,6 +54,7 @@ pub mod sessions;
 pub mod sidebar;
 pub mod status;
 pub mod system;
+pub mod team_member_writes;
 pub mod teams;
 pub mod terms_of_service;
 /// The four personal-access-token reads.
@@ -536,6 +537,20 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/teams/{team_id}/members/{user_id}",
             partially_migrated_with_ids(&state, get(teams::get_team_member)),
+        )
+        // `BaseRoutes.TeamMember.Handle("/roles")` and `.Handle("/schemeRoles")`
+        // (api4/team.go:69-70). **`schemeRoles` is camelCase**, matched literally by gorilla and
+        // by axum alike, so `/schemeroles` reaches neither and forwards to Go's own 404.
+        .route(
+            "/api/v4/teams/{team_id}/members/{user_id}/roles",
+            partially_migrated_with_ids(&state, put(team_member_writes::update_team_member_roles)),
+        )
+        .route(
+            "/api/v4/teams/{team_id}/members/{user_id}/schemeRoles",
+            partially_migrated_with_ids(
+                &state,
+                put(team_member_writes::update_team_member_scheme_roles),
+            ),
         )
         // `team_id` gets the id-charset middleware; `channel_name` is not id-shaped and Go's
         // class for it is `[A-Za-z0-9_-]+`, so the handler carries its own mux forward. Go's

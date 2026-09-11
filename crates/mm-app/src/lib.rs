@@ -47,6 +47,7 @@ pub mod sidebar;
 pub mod status;
 pub mod system;
 pub mod team;
+pub mod team_member;
 pub mod terms_of_service;
 pub mod thread;
 /// Port of the two read functions in `app/upload.go`.
