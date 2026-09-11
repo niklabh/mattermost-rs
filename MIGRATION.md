@@ -10292,3 +10292,105 @@ the test passed having run none of its move assertions — including the `team_i
 never reaching its own `sweep` (227 rows had leaked). `occupied` now **panics** on a missing row
 and returns `None` only for a missing `DATABASE_URL`, and the trigger is one binding used both to
 create and to look up. Both mutations are caught since.
+## The personal-access-token writes (2026-09-11)
+
+`POST /api/v4/users/{user_id}/tokens` and `/users/tokens/{revoke,disable,enable,rotate,search}`
+and `/users/tokens/non_compliant/revoke` — seven route+method pairs, the whole write half of the
+family whose reads landed on 2026-09-08. Touched: `crates/mm-store/src/user_access_token_store.rs`,
+`crates/mm-app/src/user_access_token.rs`, `crates/mm-api/src/tokens.rs`, the router and one
+config field (`enable_user_access_tokens`). New: `crates/mm-api/tests/parity/token_writes.rs`,
+`scripts/mutations/token-writes.plan`. No new model type: `UserAccessTokenSearch` was already
+ported into `mm-model/src/search_requests.rs`, where Go's own separate file put it — this session
+wrote a second copy beside `UserAccessToken` before noticing, which is exactly the silent fork of
+a wire type that grouping was meant to prevent.
+
+### The secret is on the wire exactly twice
+
+Creation and rotation return the token with `Token` populated; every other route blanks it, and
+`omitempty` turns the cleared string into an absent key. A port that sanitised these two for
+symmetry would hand clients a credential they can never learn. See
+[`App::create_user_access_token`](crates/mm-app/src/user_access_token.rs).
+
+### Revoke, disable and rotate delete the session the token minted — in the store
+
+The join is `Sessions.Token = UserAccessTokens.Token`, on the **secret**, so on rotate the DELETE
+must precede the UPDATE or every session the old secret minted is orphaned: still valid, still
+authenticating, no longer reachable from the row that would revoke it. `delete_sessions_for_token`
+in the store is the one copy of that statement.
+
+### The search term is an equality, not a pattern
+
+`sanitizeSearchTerm` escapes `%` and `_` and nothing wraps the term, so `seed` does not find
+`seed-bot` and `%` finds nothing at all. Measured against the running server before it was
+written; a port that "fixed" it into `%…%` returns rows Go does not.
+
+### An empty `token_id` is a 404, not the 400 the code appears to set
+
+Revoke, disable and enable all do `if tokenId == "" { c.SetInvalidParam("token_id") }` **without
+returning**, so that error is overwritten by the 404 from looking up the empty id. Rotate's
+identical-looking three lines *do* return, so its 400 is real. Both confirmed against Go.
+
+### `json.Decoder.Decode` is not `serde_json::from_slice`
+
+An array is an error in Go and is not in serde (which fills a struct positionally); a `null` is
+*not* an error in Go (the struct keeps its zero value); trailing bytes after the first value are
+ignored. Each difference changes which parameter the 400 names, so
+[`decode_go_struct`](crates/mm-api/src/tokens.rs) ports all three.
+
+### `Store.Delete` reports success when its transaction failed
+
+Go guards the commit with `if err := …; err == nil` and then returns `nil` regardless, so a failed
+revoke answers `{"status":"OK"}` having deleted nothing. Reproduced — it is on the wire — and
+logged at error level, because nothing else would record it. `UpdateTokenDisable`, in the same
+file, propagates instead.
+
+### `enable` is gated on *create*, `disable` on *revoke*
+
+Not a symmetry: if enable took the revoke permission, a caller whose only power is to withdraw
+credentials could re-arm every one they had disabled. An admin holds both, so
+`parity::token_writes::enable_and_disable_are_gated_on_opposite_permissions` plants a role holding
+exactly one.
+
+### Our 400s cannot be told apart, because the parameter name is message-only
+
+`NewInvalidParamError` puts the parameter in the AppError's **params**, which Go never serialises;
+a client learns whether it was `token_id` or `rotate_user_access_token` only from the translated
+`message`, and ours is the raw id until i18n lands ([D-092]). So over HTTP those two 400s are the
+same document, and no parity assertion on **our** body can separate them. A mutation run proved
+it: making `decode_go_struct` reject a JSON `null` changed which branch every route took and the
+suite did not notice, because the assertion pinned *Go's* message, which the mutation cannot move.
+The null branch is now asserted in `mm_api::tokens`'s unit tests, where it is visible; the array
+branch stayed in the parity suite because it has an observable form — serde fills a struct from a
+sequence **positionally**, so a six-element array would mint a real token (200) where Go answers
+400.
+
+### `detailed_error` is empty on every error body here, and everywhere else
+
+`MakePermissionError` fills it with `userId=…, permission=…` and `handleContextError` then wipes it
+unless `ServiceSettings.EnableDeveloper` (web/handlers.go:436). So the appended
+", attempted access by oauth app" the five OAuth refusals build is reproduced for the log and for
+developer mode, and reaches no client on a stock server.
+
+### What the writes are still missing
+
+The `Audits` rows every one of these handlers writes ([D-270], the first entry for a gap every
+migrated write shares), and the create/rotate notification e-mails ([D-238], whose "two writes are
+silent" is now four). Neither changes a response byte.
+
+### A fixture sweep keyed on a column a mutation can change is not a sweep
+
+`token_writes::sweep` deleted by the `mmrs-write` description every body here posts — and the
+`store-save-token-and-description-swapped` mutation writes the *secret* into that column, so two
+rows outlived it and the **reads** suite's `an_empty_page_is_an_empty_array` failed hours later on
+debris from next door. It sweeps by owner now (`TOKEN_BOT` owns nothing else).
+
+### Mutation testing: 35 run, 33 caught, 2 controls survived
+
+Two passes. The first was 30 caught, 2 real survivors and one harness fault (a replacement whose
+`$2 = $2` sqlx could not type-check); the second re-ran those three after the fixes above and
+caught all three, with both no-op controls surviving as they must.
+
+Plan at `scripts/mutations/token-writes.plan`, which also records the three things it deliberately
+does **not** mutate — the session join (dropping either predicate wipes every session on the
+installation), `DeleteNonCompliantExpiry` (unreachable while no lifetime policy is set) and the
+remote-user and system-admin-target gates (no reachable false side on this stack).

@@ -6895,3 +6895,30 @@ Closing it needs the feature-flag block in `Config`, which nothing else reads ye
 property of a backend this server does not construct. The sibling `/test`, gated only on
 `ServiceSettings.EnableTesting`, **is** handled: the field already exists and the list is
 conditional on it.
+---
+
+## D-270 · The migrated writes do not append to `Audits`, and one served route reads that table
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-11 (phase 2, token writes)
+
+`Context.LogAudit` (web/context.go:95) builds a `model.Audit` and calls `Store().Audit().Save`
+**unconditionally** — no config gate, no feature flag. Five of the seven personal-access-token
+writes call it, once on entry and again on success, so a token revoked through Go leaves two
+`Audits` rows and the same revoke through `mm-api` leaves none.
+
+That is observable through the API, which is what makes this an entry rather than a note:
+`GET /api/v4/users/{user_id}/audits` is already served from Rust (`mm_api::audits`) and reads the
+same table. So the two servers disagree about a user's audit history in proportion to how much of
+their traffic each one answered.
+
+It is **not** specific to this family. Every migrated write has the gap — the channel-member
+writes, the team-member writes, the auth writes, the post writes — and it had not been written
+down. Raised here because this is the first family whose Go handlers call `LogAudit` on *every*
+route rather than on some of them, and because the reading route is already ported, so the
+divergence can be measured rather than argued about.
+
+What is needed: `AuditStore::save` (`mm-store/src/audit_store.rs` is read-only today) and a
+`Context`-equivalent hook in `mm-api` that has the session, the request path and the client IP —
+`mm_model::audit_record` is already ported in full. `LogAuditRec`/`MakeAuditRecord` are a
+**separate** and much smaller question: those write to the audit *log* (mlog) rather than to the
+database, so nothing over the API can see them and they need no entry.
