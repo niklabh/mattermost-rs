@@ -10126,6 +10126,15 @@ Go `Exec`s the UPDATE and never looks at the rows affected, then computes the an
 **in-memory** member. `PUT …/roles` for a user who is not on the team therefore answers 200 having
 written nothing — unlike the channel twin, whose re-select turns that into a 404.
 
+### The `/following` validator order has no wire-visible oracle
+
+`RequireUserId().RequireThreadId().RequireTeamId()` — **thread before team**, the opposite of the
+read route on the same prefix. Which parameter Go names reaches a client only through the
+translated `message`, and we send the raw error id there ([D-092]), so every ordering of the
+three produces byte-identical output from us and a mutation swapping two of them survived the
+parity suite. `mm_api::thread_writes::first_invalid_following_param` is that branch extracted so
+a unit test can be the oracle; the mutation is caught there instead.
+
 ### Mutation testing: see the tally in the session report
 
 Plan committed at `scripts/mutations/team-member-writes.plan`, which also records the four
@@ -10162,3 +10171,53 @@ in that direction. That is true of all of them but one —
 **stale**, and it is the tripwire on [D-237]. `POST /caches/invalidate` is global with six
 concurrent callers, so a firing from `system_usage` turns that tripwire into a false "D-237 can
 be closed". See `common::GO_CACHE`, which the helper takes itself so a future caller inherits it.
+## Three of the five thread writes (2026-09-11)
+
+`PUT /users/{user_id}/teams/{team_id}/threads/read`, and `PUT`/`DELETE` on
+`…/threads/{thread_id}/following`. Handlers in `crates/mm-api/src/thread_writes.rs`, app layer in
+`crates/mm-app/src/thread.rs`, store in `crates/mm-store/src/thread_store.rs`
+(`mark_all_as_read_by_team`, `maintain_membership`, `get`). Suite:
+`crates/mm-api/tests/parity/thread_writes.rs`, 13 tests.
+
+The other two — `PUT …/read/{timestamp}` and `POST …/set_unread/{post_id}` — are **deferred**,
+not skipped: both write `ThreadMemberships.UnreadMentions` from `countThreadMentions`, which needs
+three `GroupStore` methods, `PostStore::GetPostsByThread` and the Markdown mention parser. See
+[D-250].
+
+### `UpdateViewedTimestamp` is `state`, not `true`
+
+The one line in `UpdateThreadFollowForUser`'s options a reader reconstructs wrongly: a **follow**
+also marks the thread read — `LastViewed` to now, `UnreadMentions` to zero — and an unfollow
+touches neither while still moving `LastUpdated`. Consequences documented on
+`mm_app::App::update_thread_follow_for_user`: a redundant follow is not idempotent, and any
+fixture that follows a thread loses the read mark it planted.
+
+### `MarkAllAsReadByTeam` carries four predicates fewer than the threads list
+
+No `Following`, no channel-membership `EXISTS`, no `ThreadDeleteAt = 0`, no
+`LastReplyAt > LastViewed` — so it marks read what the list would never show, and it compares
+`ThreadTeamId` **without** `COALESCE`, unlike every read query in the same file. Both facts are on
+`mm_store::thread_store::SqlThreadStore::mark_all_as_read_by_team`.
+
+### Unfollowing a thread you have no row for creates one
+
+The insert branch of `maintainMembershipTx` is unguarded and takes `Following` from
+`opts.Following` regardless of `UpdateFollowing`. The row it leaves behind changes which 404 the
+read route answers, from `app.user.get_thread_membership_for_user.not_found` to
+`app.user.get_threads_for_user.not_found` — asserted in the suite rather than inferred.
+
+### `/threads/read` is a static sibling of `{thread_id}`, and matchit has no method dimension
+
+So the static route wins for **every** method, including the `GET` gorilla falls through to
+`getThreadForUser` with `read` as the thread id. The method-router fallback forwards it and Go
+answers its own 400; `parity::thread_writes::a_get_on_the_read_path_is_still_gos_404_shaped_400`
+is what would notice if that stopped being true. Note that test compares the two bodies directly
+rather than through `assert_error_bodies_match_except_known_gaps`, whose "our message is the raw
+id" pin is false of a proxied answer.
+
+### Mutation testing: see the tally in the session report
+
+Plan committed at `scripts/mutations/thread-writes.plan`. Its header records why the verdicts
+depend on the fixture *planting* non-zero, mutually distinct `LastViewed`, `LastUpdated` and
+`UnreadMentions`: with three zeroes, "left alone", "rewritten to the same value" and "zeroed" are
+the same observation and most of the plan would survive while proving nothing.
