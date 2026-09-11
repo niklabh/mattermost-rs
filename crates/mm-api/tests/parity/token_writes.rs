@@ -102,6 +102,11 @@ async fn sweep() {
         .execute(&pool)
         .await
         .expect("the created tokens are removed");
+    // The planted sessions, including the bystander no write is supposed to touch.
+    sqlx::query("DELETE FROM sessions WHERE id LIKE 'mmrssess%'")
+        .execute(&pool)
+        .await
+        .expect("the planted sessions are removed");
 }
 
 /// One token row as the database holds it — the oracle for "did the write land".
@@ -151,6 +156,40 @@ async fn plant_session_for(tag: &str, user_id: &str) -> bool {
     .await
     .expect("the session row is written");
     true
+}
+
+/// [`plant_session_for`] against an arbitrary secret rather than a planted tag's — needed for a
+/// token the *route* created, whose secret we learn from the response.
+async fn plant_session_on_secret(tag: &str, secret: &str) -> bool {
+    let Some(pool) = common::fixture_pool().await else {
+        return false;
+    };
+    sqlx::query(
+        "INSERT INTO sessions (id, token, createat, expiresat, lastactivityat, userid, deviceid,
+                               roles, isoauth, props, expirednotify)
+         VALUES ($1, $2, 1788600000000, 0, 1788600000000, $3, '', 'system_user', false,
+                 '{}'::jsonb, false)
+         ON CONFLICT (id) DO UPDATE SET token = EXCLUDED.token",
+    )
+    .bind(format!("mmrssess{tag:0>18}"))
+    .bind(secret)
+    .bind(TOKEN_BOT)
+    .execute(&pool)
+    .await
+    .expect("the session row is written");
+    true
+}
+
+async fn session_exists_with_secret(secret: &str) -> bool {
+    let Some(pool) = common::fixture_pool().await else {
+        return false;
+    };
+    sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM sessions WHERE token = $1")
+        .bind(secret)
+        .fetch_one(&pool)
+        .await
+        .expect("the count reads")
+        > 0
 }
 
 async fn session_exists(tag: &str) -> bool {
@@ -239,24 +278,34 @@ async fn a_malformed_create_body_names_the_parameter_go_names() {
     let me = logged_in_user_id();
     let path = format!("/api/v4/users/{me}/tokens");
 
-    for (body, status, id) in [
-        (&b"[]"[..], 400, "api.context.invalid_body_param.app_error"),
-        (b"null", 400, "api.context.invalid_body_param.app_error"),
-        (b"", 400, "api.context.invalid_body_param.app_error"),
-        (b"{}", 400, "api.context.invalid_body_param.app_error"),
-        (b"\"x\"", 400, "api.context.invalid_body_param.app_error"),
-        (
-            br#"{"description":""}"#,
-            400,
-            "api.context.invalid_body_param.app_error",
-        ),
+    for (body, name) in [
+        (&b"[]"[..], "user_access_token"),
+        (b"", "user_access_token"),
+        (b"\"x\"", "user_access_token"),
+        (b"null", "description"),
+        (b"{}", "description"),
+        (br#"{"description":""}"#, "description"),
     ] {
         let context = format!("{path} <- {}", String::from_utf8_lossy(body));
         let ((go_status, go), (rs_status, rs)) = post_both_raw(&client, &token, &path, body).await;
-        assert_eq!(go_status, status, "{context}");
+        assert_eq!(go_status, 400, "{context}");
         assert_eq!(rs_status, go_status, "{context}");
         let go_body = assert_error_bodies_match_except_known_gaps(&go, &rs, &context);
-        assert_eq!(go_body["id"], id, "{context}");
+        assert_eq!(
+            go_body["id"], "api.context.invalid_body_param.app_error",
+            "{context}"
+        );
+        // **The parameter name is the only thing separating these two branches**, and it is the
+        // one the shared-body helper is allowed to skip: it lives in `message`, which differs
+        // between the servers for i18n reasons. So assert it against **Go's** message, which is
+        // the oracle for which branch Go took.
+        assert!(
+            go_body["message"]
+                .as_str()
+                .is_some_and(|m| m.contains(name)),
+            "{context}: Go's message must name `{name}`, got {}",
+            go_body["message"]
+        );
     }
 
     // The decode never runs for a user that does not exist.
@@ -505,6 +554,7 @@ async fn revoking_a_token_takes_its_session_with_it() {
         .expect("the second fixture");
     assert!(plant_session_for("revgo", me).await);
     assert!(plant_session_for("revrs", me).await);
+    assert!(plant_session_for("bystander", me).await);
 
     let go = post_token_id(common::GO, &token, path, &go_token).await;
     let rs = post_token_id(common::RUST, &token, path, &rs_token).await;
@@ -515,6 +565,13 @@ async fn revoking_a_token_takes_its_session_with_it() {
     assert!(row(&rs_token).await.is_none(), "we deleted ours");
     assert!(!session_exists("revgo").await, "and Go's session with it");
     assert!(!session_exists("revrs").await, "and ours");
+    // **And nothing else.** The join is `o.Token = s.Token AND o.Id = ?`; losing either predicate
+    // deletes every session on the installation, which is not a mutation this plan dares run — so
+    // the bystander is asserted here instead. It belongs to no token at all.
+    assert!(
+        session_exists("bystander").await,
+        "a session that no revoked token minted must survive"
+    );
 
     // The row is gone, so the same call is now the family's 404.
     let ((go_status, _), (rs_status, _)) = post_both_raw(
@@ -565,6 +622,12 @@ async fn rotate_replaces_the_secret_and_refuses_a_disabled_token() {
     let before = row(&rs_id).await.expect("our token exists");
     assert_eq!(before.expires_at, 0, "created without an expiry");
 
+    // A session minted by the **old** secret. The store's DELETE joins on that value, so it must
+    // run before the UPDATE replaces it — reversing the two orphans this row: still valid, still
+    // authenticating, and no longer reachable from the token that would revoke it.
+    let orphan = plant_session_on_secret("rotrs", &before.token).await;
+    assert!(orphan, "the session fixture is written");
+
     let expires_at = 1_988_600_000_000i64;
     let body = |id: &str| format!(r#"{{"token_id":"{id}","expires_at":{expires_at}}}"#);
     let go = post_one(common::GO, &token, path, &body(&go_id)).await;
@@ -583,6 +646,10 @@ async fn rotate_replaces_the_secret_and_refuses_a_disabled_token() {
 
     let after = row(&rs_id).await.expect("our token survives a rotation");
     assert_ne!(after.token, before.token, "the secret really changed");
+    assert!(
+        !session_exists_with_secret(&before.token).await,
+        "the session the old secret minted is gone, not orphaned"
+    );
     assert_eq!(after.expires_at, expires_at, "and so did the expiry");
     let returned: serde_json::Value = serde_json::from_slice(&rs.1).expect("json");
     assert_eq!(
@@ -642,6 +709,7 @@ async fn the_search_term_matches_exactly_and_never_wildcards() {
     let second = plant_token("srchb", me, false, 1788600000000)
         .await
         .expect("the second fixture");
+    let owner_username = common::username_of(&client, &token, me).await;
 
     let ids = |body: &[u8]| -> std::collections::BTreeSet<String> {
         serde_json::from_slice::<Vec<serde_json::Value>>(body)
@@ -660,6 +728,12 @@ async fn the_search_term_matches_exactly_and_never_wildcards() {
         // The owner's id matches **both** of their tokens.
         (
             me.to_owned(),
+            std::collections::BTreeSet::from([first.clone(), second.clone()]),
+        ),
+        // And so does the owner's **username**, through the `INNER JOIN Users`. This is the third
+        // `LIKE` and the only one a token id or user id cannot also satisfy.
+        (
+            owner_username.clone(),
             std::collections::BTreeSet::from([first.clone(), second.clone()]),
         ),
         // A prefix of a matching id finds nothing: there is no trailing `%`.
@@ -768,5 +842,65 @@ async fn search_and_the_non_compliant_sweep_need_manage_system() {
     }
 
     common::delete_plain_user(&client, &admin, &plain.id).await;
+    sweep().await;
+}
+
+/// **Enable is gated on `create_user_access_token`, its mirror `disable` on
+/// `revoke_user_access_token`.** An admin holds both, so nothing above can tell the two apart;
+/// this plants a role holding exactly one and checks each direction.
+///
+/// The property is not cosmetic: if enable took the revoke permission, a caller whose only power
+/// is to *withdraw* credentials could re-arm every one they had disabled.
+///
+/// The token belongs to the caller, so `SessionHasPermissionToUserOrBot` passes on the owner arm
+/// and the gating permission is the only variable.
+#[tokio::test]
+async fn enable_and_disable_are_gated_on_opposite_permissions() {
+    if !stack_enabled() {
+        return;
+    }
+    let _tokens = TOKENS.lock().await;
+    let _unlicensed = ACTIVE_LICENCE_ROW.read().await;
+    let client = client();
+    let admin = go_minted_token(&client).await;
+    let team = common::a_team_and_channel_the_user_is_in(&client, &admin)
+        .await
+        .0;
+
+    for (tag, permission, allowed, refused) in [
+        ("patrev", "revoke_user_access_token", "disable", "enable"),
+        ("patcre", "create_user_access_token", "enable", "disable"),
+    ] {
+        let Some(role) = common::plant_role(tag, permission).await else {
+            return; // no DATABASE_URL
+        };
+        let user = common::create_plain_user(&client, &admin, &team, tag).await;
+        common::set_user_roles(&user.id, &format!("system_user {role}")).await;
+        let token = common::login_plain_user(&client, tag).await;
+
+        let go_token = plant_token(&format!("{tag}g"), &user.id, true, 0)
+            .await
+            .expect("Go's fixture");
+        let rs_token = plant_token(&format!("{tag}r"), &user.id, true, 0)
+            .await
+            .expect("our fixture");
+
+        let path = format!("/api/v4/users/tokens/{allowed}");
+        let go = post_token_id(common::GO, &token, &path, &go_token).await;
+        let rs = post_token_id(common::RUST, &token, &path, &rs_token).await;
+        assert_eq!(go.0, 200, "{permission} may {allowed}: {:?}", go.1);
+        assert_eq!(rs.0, go.0, "{path}: {}", String::from_utf8_lossy(&rs.1));
+
+        let path = format!("/api/v4/users/tokens/{refused}");
+        let go = post_token_id(common::GO, &token, &path, &go_token).await;
+        let rs = post_token_id(common::RUST, &token, &path, &rs_token).await;
+        assert_eq!(go.0, 403, "{permission} may not {refused}");
+        assert_eq!(rs.0, go.0, "{path}: {}", String::from_utf8_lossy(&rs.1));
+        let go_body = assert_error_bodies_match_except_known_gaps(&go.1, &rs.1, &path);
+        assert_eq!(go_body["id"], "api.context.permissions.app_error", "{path}");
+
+        common::delete_plain_user(&client, &admin, &user.id).await;
+    }
+
     sweep().await;
 }
