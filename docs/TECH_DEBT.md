@@ -6871,3 +6871,26 @@ has to mask both columns — `parity::team_member_writes::adding_a_member_agrees
 does, and says so. And the config field itself is **not** read by this port: when the post write
 lands, `Config` needs `experimental_enable_default_channel_leave_join_messages` adding alongside
 the other `ServiceSettings` fields, because both arms of that branch then matter.
+
+## D-260 · `/exportlink` is never reserved as a built-in trigger
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-11 (phase 2, command writes)
+
+`ExportLinkProvider.GetCommand` (app/slashcommands/command_exportlink.go:32) returns `nil` — and
+so frees the trigger `exportlink` for a custom slash command — unless all three of:
+
+1. `FeatureFlags.EnableExportDirectDownload`, defaulted **`false`** (model/feature_flags.go:168);
+2. `FileSettings.DedicatedExportStore`, already modelled as `Config::dedicated_export_store`;
+3. the export file backend implementing `filestore.FileBackendWithLinkGenerator`.
+
+`built_in_command_triggers` (crates/mm-app/src/command.rs) therefore never reserves it. On a
+stock server that is exact and the parity suite asserts it — `POST /api/v4/commands` with trigger
+`exportlink` is a 201 from both servers. With the flag on and a dedicated export store
+configured, an operator could create a custom `/exportlink` here that Go refuses with
+`api.command.duplicate_trigger.app_error`.
+
+Closing it needs the feature-flag block in `Config`, which nothing else reads yet — no
+`FeatureFlags.*` field is modelled at all — plus a decision about condition 3, which is a
+property of a backend this server does not construct. The sibling `/test`, gated only on
+`ServiceSettings.EnableTesting`, **is** handled: the field already exists and the list is
+conditional on it.
