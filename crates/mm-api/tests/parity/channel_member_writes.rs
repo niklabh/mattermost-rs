@@ -141,9 +141,10 @@ async fn both(
 
 /// [`both`] with named fields blanked on **both** sides before the comparison.
 ///
-/// The only use is the pair of mention counters, which Go's deferred join/add system post moves and
-/// this server's does not — D-231. Masking is preferred to skipping the comparison outright: every
-/// other field on the row is still asserted byte for byte.
+/// The only use is the pair of mention counters. The add-to-channel post itself is written now,
+/// but Go's notification pass turns its `addedUserId` prop into a mention and ours does not run —
+/// D-235. Masking is preferred to skipping the comparison outright: every other field on the row
+/// is still asserted byte for byte.
 #[allow(clippy::too_many_arguments)] // `both` plus the mask; splitting it would hide the mask.
 async fn both_masked(
     http: &reqwest::Client,
@@ -258,11 +259,11 @@ async fn adding_a_member_agrees_and_the_body_shape_follows_the_user_id_key() {
     // A second add of the same member is still a `201`, with the *stored* member — no write, no
     // event, no history row.
     //
-    // **The mention counters cannot match here, and the reason is D-231.** Go's first add posted an
-    // `add_to_channel` system message that @-mentions the added user, so by the time the stored
-    // member is read back Go's `mention_count` is 1 and ours is 0. That is the deferred join/leave
-    // post leaking into a *response body*, which is the one place it was expected not to. Everything
-    // else on the row is compared.
+    // **The mention counters cannot match here, and the reason is D-235.** Both servers post an
+    // `add_to_channel` system message now, but Go's notification pass reads that post's
+    // `addedUserId` prop as an implicit mention and raises the added user's `mention_count`. Ours
+    // writes the post and does not run the notification pass, so by the time the stored member is
+    // read back Go's `mention_count` is 1 and ours is 0. Everything else on the row is compared.
     let (go_status, go_raw) = call(
         &http,
         GO,
@@ -289,7 +290,7 @@ async fn adding_a_member_agrees_and_the_body_shape_follows_the_user_id_key() {
     for value in [&mut go_again, &mut rust_again] {
         let object = value.as_object_mut().expect("a member object");
         for key in ["mention_count", "mention_count_root"] {
-            object.insert(key.to_owned(), serde_json::json!("<D-231>"));
+            object.insert(key.to_owned(), serde_json::json!("<D-235>"));
         }
     }
     assert_eq!(
@@ -297,7 +298,7 @@ async fn adding_a_member_agrees_and_the_body_shape_follows_the_user_id_key() {
         normalise(&rust_again),
         "the re-add answer differs beyond the mention counters\n go: {go_raw}\nrust: {rust_raw}"
     );
-    // And Go's counter really is the one D-231 predicts, so the exclusion above is not hiding
+    // And Go's counter really is the one D-235 predicts, so the exclusion above is not hiding
     // something else.
     let go_mentions: serde_json::Value = serde_json::from_str(go_raw.trim()).expect("a member");
     assert_eq!(
@@ -305,7 +306,7 @@ async fn adding_a_member_agrees_and_the_body_shape_follows_the_user_id_key() {
         "Go's add-to-channel system post is what raises this: {go_raw}"
     );
 
-    // `{"user_ids": [...]}` ⇒ an **array**, even for one id. Masked for the same D-231 reason as
+    // `{"user_ids": [...]}` ⇒ an **array**, even for one id. Masked for the same D-235 reason as
     // the re-add above: this too returns the stored member.
     let rust_raw = both_masked(
         &http,

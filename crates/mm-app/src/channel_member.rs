@@ -11,19 +11,24 @@
 //! | `PUT    /channels/{id}/members/{user}/roles` | [`App::update_channel_member_roles`] |
 //! | `PUT    /channels/{id}/members/{user}/schemeRoles` | [`App::update_channel_member_scheme_roles`] |
 //!
-//! # The join and leave system posts are **not** written here
+//! # Four system posts, and two of them can fail the route
 //!
-//! `AddChannelMember` ends in `postJoinChannelMessage`/`PostAddToChannelMessage` and
-//! `RemoveUserFromChannel` in `postLeaveChannelMessage`/`postRemoveFromChannelMessage`. Those are
-//! writes to `Posts`, which this port does not have yet — see **D-231**. Every one of them is
-//! outside the response body, so no test of these six routes' HTTP answers can see the gap; what a
-//! client sees is a channel whose membership changed with no system message in the timeline.
+//! `AddChannelMember` ends in [`App::post_join_channel_message`] or
+//! [`App::post_add_to_channel_message`], and `RemoveUserFromChannel` in
+//! [`App::post_leave_channel_message`] or [`App::post_remove_from_channel_message`]. Which of
+//! each pair runs is decided by **who asked**, not by what changed: a self-add joins and an
+//! add-by-someone-else is an add, so `POST /members` with your own `user_id` and with somebody
+//! else's write different post types with different props.
 //!
-//! Two of the four are *not* fire-and-forget in Go and their absence therefore also removes an
-//! error branch: a self-add whose join post fails is a failed `POST /members` in Go
-//! (`return nil, err`), and a self-removal whose leave post fails is a failed `DELETE`. Both are
-//! unreachable in practice — the post write would have to fail on a channel the caller just
-//! joined — but they are branches this file does not have.
+//! Go runs the two "somebody else did it" posts on `a.Srv().Go` and logs their failures; the two
+//! self-service ones are inline and `return nil, err`, so **a failed join post is a failed
+//! `POST /members`** and a failed leave post is a failed `DELETE`. That asymmetry is reproduced,
+//! which is why only two of the four go through [`App::post_system_message`].
+//!
+//! `ServiceSettings.ExperimentalEnableDefaultChannelLeaveJoinMessages` does **not** reach these
+//! six routes. It gates `JoinDefaultChannels` and `App.LeaveChannel`, and api4's member routes
+//! call `AddChannelMember`/`RemoveUserFromChannel` instead — so a port that consulted it here
+//! would suppress posts Go writes.
 //!
 //! # What is forwarded rather than answered
 //!
@@ -36,6 +41,11 @@
 
 use mm_model::channel::Channel;
 use mm_model::channel_member::{ChannelMember, get_default_channel_notify_props};
+use mm_model::post::{
+    POST_PROPS_ADDED_USER_ID, POST_TYPE_ADD_GUEST_TO_CHANNEL, POST_TYPE_ADD_TO_CHANNEL,
+    POST_TYPE_GUEST_JOIN_CHANNEL, POST_TYPE_JOIN_CHANNEL, POST_TYPE_LEAVE_CHANNEL,
+    POST_TYPE_REMOVE_FROM_CHANNEL, Post,
+};
 use mm_model::role::{
     CHANNEL_ADMIN_ROLE_ID, CHANNEL_GUEST_ROLE_ID, CHANNEL_USER_ROLE_ID, is_built_in_role,
     is_channel_scoped_built_in_role,
@@ -513,9 +523,11 @@ impl App {
 
         // Go loads the requestor only to hand it to the plugin hook and the add-to-channel post;
         // the lookup itself can fail the request, so it is not optional.
-        if !opts.user_requestor_id.is_empty() {
-            self.get_user(&opts.user_requestor_id).await?;
-        }
+        let requestor = if opts.user_requestor_id.is_empty() {
+            None
+        } else {
+            Some(self.get_user(&opts.user_requestor_id).await?)
+        };
 
         let member = match self
             .add_user_to_channel(&user, channel, opts.skip_team_member_integrity_check)
@@ -527,8 +539,22 @@ impl App {
 
         // `UserHasJoinedChannel` is a plugin hook run on `a.Srv().Go` — with no plugin
         // environment it is a no-op, and it cannot fail the request either way.
-        //
-        // The join/add system post is D-231; see the module docs.
+
+        // `if channel.IsSpace() { return cm, nil }` sits above the hook and the post, so a space's
+        // backing channel gets neither.
+        if channel.is_space() {
+            return Ok(MemberWrite::Done(member));
+        }
+
+        match requestor {
+            // `opts.UserRequestorID == "" || userID == opts.UserRequestorID` — a self-add, and
+            // **its post failure is the route's failure**.
+            Some(requestor) if requestor.id != user.id => {
+                self.post_add_to_channel_message(&requestor, &user, channel)
+                    .await;
+            }
+            _ => self.post_join_channel_message(&user, channel).await?,
+        }
 
         Ok(MemberWrite::Done(member))
     }
@@ -911,7 +937,18 @@ impl App {
         );
         self.publish(user_event).await;
 
-        // The leave/remove system post is D-231; see the module docs.
+        // `if channel.IsSpace() { return nil }` guards both posts in Go.
+        if channel.is_space() {
+            return Ok(MemberWrite::Done(()));
+        }
+
+        if user_id_to_remove == remover_user_id {
+            // A self-removal. Inline in Go, so its failure is the `DELETE`'s failure.
+            self.post_leave_channel_message(&user, channel).await?;
+        } else {
+            self.post_remove_from_channel_message(remover_user_id, &user, channel)
+                .await;
+        }
 
         Ok(MemberWrite::Done(()))
     }
@@ -1343,9 +1380,359 @@ fn scheme_roles_error(suffix: &str) -> Box<AppError> {
     )
 }
 
+/// The four `post*Message` helpers of `app/channel.go` that a membership change writes.
+///
+/// Each is a `model.Post` literal, a `CreatePost` and an error wrap. The parts a reader can get
+/// wrong are the **type** and the **props keys**: a client renders its own sentence from the props
+/// and ignores `message` entirely, so a props key that is nearly right renders as a broken system
+/// message while every byte of the response body still matches.
+///
+/// The message strings are the English `i18n.T` values; see [`App::create_system_post`] for why
+/// they are literals here.
+impl App {
+    /// Port of `app.App.postJoinChannelMessage` (app/channel.go:2776).
+    ///
+    /// A **guest** gets a different type *and* a different sentence:
+    /// `system_guest_join_channel`, which — unlike `system_join_channel` — is not in
+    /// `IsJoinLeaveMessage`, so a guest's join moves the channel's `TotalMsgCount` and an ordinary
+    /// user's does not. See [`mm_store::post_store::PostStore::save`].
+    ///
+    /// Inline in Go at both call sites, so its error fails the route.
+    #[tracing::instrument(skip_all, fields(channel_id = %channel.id, user_id = %user.id))]
+    pub async fn post_join_channel_message(
+        &self,
+        user: &User,
+        channel: &Channel,
+    ) -> Result<(), Box<AppError>> {
+        self.create_system_post(join_channel_post(user, &channel.id), channel)
+            .await
+            .map(|_| ())
+            .map_err(|err| add_remove_message_error("postJoinChannelMessage", &err))
+    }
+
+    /// Port of `app.App.PostAddToChannelMessage` (app/channel.go:2903).
+    ///
+    /// # Four props, and `addedUserId` is the one that does something
+    ///
+    /// `SendNotifications` adds an **implicit mention** for `post.Props["addedUserId"]` on a
+    /// `system_add_to_channel` post, whatever the added user's own mention settings say
+    /// (notification.go:1115). That is why re-adding a user Go has already added shows a
+    /// `mention_count` of 1 — see D-235 for the half of that this port does not yet do.
+    ///
+    /// `postRootId` is a parameter Go accepts and never reads: the post has no `root_id`, so an
+    /// add made with a `post_root_id` still writes a root post.
+    ///
+    /// Run on `a.Srv().Go` in Go, so its failure is logged and the route succeeds.
+    #[tracing::instrument(skip_all, fields(channel_id = %channel.id, user_id = %added_user.id))]
+    pub async fn post_add_to_channel_message(
+        &self,
+        user: &User,
+        added_user: &User,
+        channel: &Channel,
+    ) {
+        self.post_system_message(add_to_channel_post(user, added_user, &channel.id), channel)
+            .await;
+    }
+
+    /// Port of `app.App.postLeaveChannelMessage` (app/channel.go:2882).
+    ///
+    /// # The message embeds `@username` and the prop does not
+    ///
+    /// Go's comment says why: the mention engine has to treat it as a username mention even
+    /// though the user has left, so `message` gets the `@` and `props["username"]` stays bare.
+    /// Putting the `@` in the prop, or leaving it out of the message, are both one character and
+    /// both wrong.
+    ///
+    /// Inline in Go, so its error fails the `DELETE`.
+    #[tracing::instrument(skip_all, fields(channel_id = %channel.id, user_id = %user.id))]
+    pub async fn post_leave_channel_message(
+        &self,
+        user: &User,
+        channel: &Channel,
+    ) -> Result<(), Box<AppError>> {
+        self.create_system_post(leave_channel_post(user, &channel.id), channel)
+            .await
+            .map(|_| ())
+            .map_err(|err| add_remove_message_error("postLeaveChannelMessage", &err))
+    }
+
+    /// Port of `app.App.postRemoveFromChannelMessage` (app/channel.go:2954).
+    ///
+    /// # Its props are the only pair that name the **removed** user
+    ///
+    /// `removedUserId` and `removedUsername`, and **no `username` key at all** — unlike its three
+    /// siblings, which all carry one. The author is the remover; the props describe the removed.
+    ///
+    /// An empty `removerUserId` makes Go post as the system bot. No route reaches that (every
+    /// caller passes the session's user), and `GetSystemBot` creates a bot account on first use,
+    /// so it is refused rather than guessed at — the failure is logged like every other on this
+    /// path.
+    #[tracing::instrument(skip_all, fields(channel_id = %channel.id, user_id = %removed_user.id))]
+    pub async fn post_remove_from_channel_message(
+        &self,
+        remover_user_id: &str,
+        removed_user: &User,
+        channel: &Channel,
+    ) {
+        if remover_user_id.is_empty() {
+            tracing::warn!(
+                channel_id = %channel.id,
+                "Failed to post user removal message: GetSystemBot is not ported",
+            );
+            return;
+        }
+
+        self.post_system_message(
+            remove_from_channel_post(remover_user_id, removed_user, &channel.id),
+            channel,
+        )
+        .await;
+    }
+}
+
+/// The `model.Post` literal of `postJoinChannelMessage` (app/channel.go:2783).
+fn join_channel_post(user: &User, channel_id: &str) -> Post {
+    let (message, post_type) = if user.is_guest() {
+        (
+            format!("{} joined the channel as guest.", user.username),
+            POST_TYPE_GUEST_JOIN_CHANNEL,
+        )
+    } else {
+        (
+            format!("{} joined the channel.", user.username),
+            POST_TYPE_JOIN_CHANNEL,
+        )
+    };
+
+    Post {
+        channel_id: channel_id.to_owned(),
+        message,
+        post_type: post_type.to_owned(),
+        user_id: user.id.clone(),
+        props: Some(system_props([("username", user.username.as_str())])),
+        ..Post::default()
+    }
+}
+
+/// The `model.Post` literal of `PostAddToChannelMessage` (app/channel.go:2912).
+fn add_to_channel_post(user: &User, added_user: &User, channel_id: &str) -> Post {
+    let (message, post_type) = if added_user.is_guest() {
+        (
+            format!(
+                "{} added to the channel as guest by {}.",
+                added_user.username, user.username
+            ),
+            POST_TYPE_ADD_GUEST_TO_CHANNEL,
+        )
+    } else {
+        (
+            format!(
+                "{} added to the channel by {}.",
+                added_user.username, user.username
+            ),
+            POST_TYPE_ADD_TO_CHANNEL,
+        )
+    };
+
+    Post {
+        channel_id: channel_id.to_owned(),
+        message,
+        post_type: post_type.to_owned(),
+        user_id: user.id.clone(),
+        props: Some(system_props([
+            ("userId", user.id.as_str()),
+            ("username", user.username.as_str()),
+            (POST_PROPS_ADDED_USER_ID, added_user.id.as_str()),
+            ("addedUsername", added_user.username.as_str()),
+        ])),
+        ..Post::default()
+    }
+}
+
+/// The `model.Post` literal of `postLeaveChannelMessage` (app/channel.go:2883).
+fn leave_channel_post(user: &User, channel_id: &str) -> Post {
+    Post {
+        channel_id: channel_id.to_owned(),
+        message: format!("@{} left the channel.", user.username),
+        post_type: POST_TYPE_LEAVE_CHANNEL.to_owned(),
+        user_id: user.id.clone(),
+        props: Some(system_props([("username", user.username.as_str())])),
+        ..Post::default()
+    }
+}
+
+/// The `model.Post` literal of `postRemoveFromChannelMessage` (app/channel.go:2965).
+fn remove_from_channel_post(remover_user_id: &str, removed_user: &User, channel_id: &str) -> Post {
+    Post {
+        channel_id: channel_id.to_owned(),
+        message: format!("@{} removed from the channel.", removed_user.username),
+        post_type: POST_TYPE_REMOVE_FROM_CHANNEL.to_owned(),
+        user_id: remover_user_id.to_owned(),
+        props: Some(system_props([
+            ("removedUserId", removed_user.id.as_str()),
+            ("removedUsername", removed_user.username.as_str()),
+        ])),
+        ..Post::default()
+    }
+}
+
+/// `model.StringInterface{...}` of string values, which is every system post's props map.
+pub(crate) fn system_props<'a, const N: usize>(
+    pairs: [(&'a str, &'a str); N],
+) -> mm_model::utils::StringInterface {
+    pairs
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), serde_json::Value::String(v.to_owned())))
+        .collect()
+}
+
+/// `NewAppError(where, "api.channel.post_user_add_remove_message_and_forget.error", nil, "", 500)`
+/// — the one id all four membership posts wrap their `CreatePost` failure in.
+///
+/// It **replaces** the underlying error's id, so a message that failed `IsValid` reaches the
+/// client as this 500 rather than as the model's own 400. Only the two inline posts can be
+/// observed doing it.
+fn add_remove_message_error(where_: &'static str, cause: &AppError) -> Box<AppError> {
+    tracing::error!(error = %cause, "system post failed");
+    AppError::boxed(
+        where_,
+        "api.channel.post_user_add_remove_message_and_forget.error",
+        None,
+        String::new(),
+        500,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn named(id: &str, username: &str, roles: &str) -> User {
+        User {
+            id: id.to_owned(),
+            username: username.to_owned(),
+            roles: roles.to_owned(),
+            ..User::default()
+        }
+    }
+
+    fn props_of(post: &Post) -> Vec<(String, String)> {
+        post.get_props()
+            .into_iter()
+            .flatten()
+            .map(|(k, v)| (k.clone(), v.as_str().unwrap_or("<not a string>").to_owned()))
+            .collect()
+    }
+
+    /// Every prop key on the four membership posts, spelled out. They are `camelCase` where the
+    /// rest of the wire is `snake_case`, and `addedUserId` is `addedUserId` and not `added_user_id`
+    /// — a client reads these keys directly to render the sentence.
+    #[test]
+    fn the_four_membership_posts_carry_gos_props_and_types() {
+        let alice = named("uuuuuuuuuuuuuuuuuuuuuuuua", "alice", "system_user");
+        let bob = named("uuuuuuuuuuuuuuuuuuuuuuuub", "bob", "system_user");
+
+        let join = join_channel_post(&bob, "c1");
+        assert_eq!(join.post_type, "system_join_channel");
+        assert_eq!(join.message, "bob joined the channel.");
+        assert_eq!(join.user_id, bob.id);
+        assert_eq!(
+            props_of(&join),
+            vec![("username".to_owned(), "bob".to_owned())]
+        );
+
+        let add = add_to_channel_post(&alice, &bob, "c1");
+        assert_eq!(add.post_type, "system_add_to_channel");
+        assert_eq!(add.message, "bob added to the channel by alice.");
+        // The **adder** is the author.
+        assert_eq!(add.user_id, alice.id);
+        assert_eq!(
+            props_of(&add),
+            vec![
+                ("addedUserId".to_owned(), bob.id.clone()),
+                ("addedUsername".to_owned(), "bob".to_owned()),
+                ("userId".to_owned(), alice.id.clone()),
+                ("username".to_owned(), "alice".to_owned()),
+            ]
+        );
+
+        let leave = leave_channel_post(&bob, "c1");
+        assert_eq!(leave.post_type, "system_leave_channel");
+        // `@` in the message, bare in the prop.
+        assert_eq!(leave.message, "@bob left the channel.");
+        assert_eq!(
+            props_of(&leave),
+            vec![("username".to_owned(), "bob".to_owned())]
+        );
+
+        let removed = remove_from_channel_post(&alice.id, &bob, "c1");
+        assert_eq!(removed.post_type, "system_remove_from_channel");
+        assert_eq!(removed.message, "@bob removed from the channel.");
+        // The **remover** is the author, and there is no `username` key at all.
+        assert_eq!(removed.user_id, alice.id);
+        assert_eq!(
+            props_of(&removed),
+            vec![
+                ("removedUserId".to_owned(), bob.id.clone()),
+                ("removedUsername".to_owned(), "bob".to_owned()),
+            ]
+        );
+    }
+
+    /// A guest changes the post **type**, which decides whether the channel's message count
+    /// moves: `system_guest_join_channel` and `system_add_guest_to_chan` are absent from
+    /// `IsJoinLeaveMessage`, so a guest joining makes the channel unread and a member joining
+    /// does not.
+    #[test]
+    fn a_guests_join_and_add_use_the_counted_post_types() {
+        let alice = named("uuuuuuuuuuuuuuuuuuuuuuuua", "alice", "system_user");
+        let guest = named("uuuuuuuuuuuuuuuuuuuuuuuug", "guest1", "system_guest");
+        assert!(guest.is_guest());
+
+        let join = join_channel_post(&guest, "c1");
+        assert_eq!(join.post_type, "system_guest_join_channel");
+        assert_eq!(join.message, "guest1 joined the channel as guest.");
+        assert!(!join.is_join_leave_message());
+        assert!(!join.excludes_from_channel_message_count());
+
+        let add = add_to_channel_post(&alice, &guest, "c1");
+        assert_eq!(add.post_type, "system_add_guest_to_chan");
+        assert_eq!(
+            add.message,
+            "guest1 added to the channel as guest by alice."
+        );
+        assert!(!add.excludes_from_channel_message_count());
+
+        // The non-guest siblings are excluded, which is the whole asymmetry.
+        let member = named("uuuuuuuuuuuuuuuuuuuuuuuum", "bob", "system_user");
+        assert!(join_channel_post(&member, "c1").excludes_from_channel_message_count());
+        assert!(add_to_channel_post(&alice, &member, "c1").excludes_from_channel_message_count());
+        assert!(leave_channel_post(&member, "c1").excludes_from_channel_message_count());
+        assert!(
+            remove_from_channel_post(&alice.id, &member, "c1")
+                .excludes_from_channel_message_count()
+        );
+    }
+
+    /// The wrap replaces the cause's id, so nothing about *why* the post failed reaches the
+    /// client — only that it did, as a 500.
+    #[test]
+    fn the_post_failure_wrap_keeps_gos_id_and_status() {
+        let cause = AppError::new(
+            "Post.IsValid",
+            "model.post.is_valid.msg.app_error",
+            None,
+            String::new(),
+            400,
+        );
+        let wrapped = add_remove_message_error("postJoinChannelMessage", &cause);
+        assert_eq!(
+            wrapped.id,
+            "api.channel.post_user_add_remove_message_and_forget.error"
+        );
+        assert_eq!(wrapped.status_code, 500);
+        assert_eq!(wrapped.where_, "postJoinChannelMessage");
+    }
 
     #[test]
     fn remove_roles_drops_only_the_named_ones_and_rejoins_with_one_space() {

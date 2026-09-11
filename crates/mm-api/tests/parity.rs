@@ -107,6 +107,7 @@ mod parity {
     pub mod single_hooks;
     pub mod status;
     pub mod status_writes;
+    pub mod system_posts;
     pub mod system_usage;
     pub mod team_channel_lists;
     pub mod team_exists;

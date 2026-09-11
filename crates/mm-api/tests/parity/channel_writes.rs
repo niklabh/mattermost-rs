@@ -27,10 +27,12 @@ use common::{
 /// The channel-shaped keys that cannot agree across two different channels, blanked so the rest of
 /// the body can be compared byte for byte.
 ///
-/// `total_msg_count`, `last_post_at` and `last_root_post_at` are in the list for a reason worth
-/// stating: Go's write paths create system posts and ours do not ([D-232]), so those three move on
-/// Go's channel and stand still on ours. Everything *not* in this list is compared exactly, which
-/// is where a wrong field name or a dropped column would show up.
+/// `total_msg_count`, `last_post_at` and `last_root_post_at` are in the list because both servers
+/// now write a system post on these paths and each one moves them — and the answer is marshalled
+/// from the channel that was read *before* the post, so the two would agree anyway. They are
+/// collapsed to zero/nonzero rather than compared, because the two channels are written a few
+/// milliseconds apart. Everything *not* in this list is compared exactly, which is where a wrong
+/// field name or a dropped column would show up.
 fn normalise(channel: &serde_json::Value) -> serde_json::Value {
     let mut out = channel.clone();
     let object = out.as_object_mut().expect("a channel object");

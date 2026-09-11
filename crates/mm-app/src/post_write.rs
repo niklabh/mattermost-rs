@@ -37,6 +37,7 @@
 //! does not read. On an unlicensed installation the whole block is dead, which is the only reason
 //! this is a note and not a refusal.
 
+use mm_model::channel::CHANNEL_TYPE_DIRECT;
 use mm_model::channel::Channel;
 use mm_model::permission::PERMISSION_USE_CHANNEL_MENTIONS;
 use mm_model::post::{
@@ -45,9 +46,11 @@ use mm_model::post::{
     POST_PROPS_MM_BLOCKS_ACTIONS, POST_TYPE_BURN_ON_READ, POST_TYPE_CARD, Post, PostPatch,
 };
 use mm_model::session::Session;
+use mm_model::user::User;
 use mm_model::utils::{AppError, get_millis, parse_hashtags};
 use mm_model::websocket_message::{
-    WEBSOCKET_EVENT_POST_DELETED, WEBSOCKET_EVENT_POST_EDITED, WebSocketEvent,
+    WEBSOCKET_EVENT_POST_DELETED, WEBSOCKET_EVENT_POST_EDITED, WEBSOCKET_EVENT_POSTED,
+    WebSocketEvent,
 };
 use mm_store::{DraftStore, FileInfoStore, PostStore, PreferenceStore};
 
@@ -771,7 +774,188 @@ impl App {
         }
         self.publish(message).await;
     }
+
+    /// The slice of `app.App.CreatePost` (app/post.go:173) that a **system post** reaches, plus
+    /// the `posted` event `handlePostEvents` → `SendNotifications` (notification.go:699) ends in.
+    ///
+    /// Every caller is one of the twelve `post*Message` helpers in `app/channel.go`, so the post
+    /// is always server-constructed: it has no id, no `root_id`, no files, no priority, no
+    /// pending id, no attachments and a `type` that is never empty. That is what makes a narrow
+    /// port possible — most of `CreatePost` is branches on shapes a system post cannot have.
+    ///
+    /// # What of `CreatePost` runs, in Go's order
+    ///
+    /// `SanitizeProps`; the author lookup (whose 404 is `MissingAccountError`); the `from_bot`
+    /// prop for a bot author; `ParseHashtags` over the message; `CreateAt`; `Post().Save`. The
+    /// `post.Type == ""` guard means the mention-highlight ephemeral post is skipped outright,
+    /// and `FillInPostProps` reduces to the channel-mention branch — see the refusal below.
+    ///
+    /// # The message text is English, and that is a deliberate exception to [D-092]
+    ///
+    /// Go builds these with `i18n.T(...)` and the **post body is the wire format**, not an error
+    /// id a client ignores. So the literals live beside their call sites rather than being
+    /// emitted as untranslated ids, which is what every other string on this server does. Two
+    /// consequences: this is not an i18n bundle and must not grow into one, and
+    /// `DeleteChannel`/`RestoreChannel` use `i18n.GetUserTranslations(user.Locale)` — the
+    /// *acting user's* locale — so a non-English user's archive message differs from ours.
+    ///
+    /// # Errors are the caller's to swallow
+    ///
+    /// Go logs and discards all but two of these (see [`App::post_system_message`]), so this
+    /// returns the error and lets each call site decide. The two that do not swallow are a
+    /// self-add's join post and a self-removal's leave post.
+    #[tracing::instrument(skip_all, fields(channel_id = %channel.id, post_type = %post.post_type))]
+    pub async fn create_system_post(
+        &self,
+        mut post: Post,
+        channel: &Channel,
+    ) -> Result<Post, Box<AppError>> {
+        post.sanitize_props();
+
+        let user = self.get_user(&post.user_id).await.map_err(|mut err| {
+            err.where_ = "CreatePost".to_owned();
+            err
+        })?;
+
+        if user.is_bot {
+            post.add_prop(
+                mm_model::post::POST_PROPS_FROM_BOT,
+                serde_json::Value::String("true".to_owned()),
+            );
+        }
+
+        // `FillInPostProps` would resolve a `~channel` mention in the message into a
+        // `channel_mentions` prop. None of the twelve system messages names a channel except the
+        // header, purpose and display-name notices, which quote text a user wrote — so a header
+        // containing `~town-square` gets a post here with the prop missing, and the client
+        // renders the raw text instead of a link. Recorded as D-235; the post's absence would be
+        // the worse divergence.
+        let (hashtags, _) = parse_hashtags(&post.message);
+        post.hashtags = hashtags;
+
+        if post.create_at == 0 {
+            post.create_at = get_millis();
+        }
+
+        let saved = self.store().post().save(&post).await.map_err(|err| {
+            if let mm_store::StoreError::Invalid { app_error, .. } = err {
+                // `errors.As(nErr, &appErr)` — `IsValid`'s own error reaches the client, which is
+                // why a system message over the post-size limit is
+                // `model.post.is_valid.message_length.app_error` and not `app.post.save.app_error`.
+                return app_error;
+            }
+            tracing::error!(error = %err, "system post save failed");
+            AppError::boxed(
+                "CreatePost",
+                "app.post.save.app_error",
+                None,
+                String::new(),
+                500,
+            )
+        })?;
+
+        self.publish_posted_event(&saved, channel, &user).await;
+
+        Ok(saved)
+    }
+
+    /// `a.Srv().Go(func(){ … })` around a `post*Message` whose error Go only logs.
+    ///
+    /// Ten of the twelve system posts are written this way. Keeping the swallow in one place is
+    /// what stops a future call site turning an invisible failure into a failed route: the two
+    /// that *do* fail their route (a self-add's join post, a self-removal's leave post) call
+    /// [`App::create_system_post`] directly and propagate.
+    #[tracing::instrument(skip_all, fields(channel_id = %channel.id, post_type = %post.post_type))]
+    pub async fn post_system_message(&self, post: Post, channel: &Channel) {
+        let post_type = post.post_type.clone();
+        if let Err(err) = self.create_system_post(post, channel).await {
+            tracing::warn!(
+                error = %err,
+                channel_id = %channel.id,
+                post_type = %post_type,
+                "Failed to post system message",
+            );
+        }
+    }
+
+    /// The `posted` event, built in `SendNotifications` (notification.go:699) and sent by
+    /// `publishWebsocketEventForPost` (post.go:1097).
+    ///
+    /// # Six data fields besides the post, and each is a plain string but one
+    ///
+    /// `set_online` is a **bool** — `CreatePostFlags{SetOnline: true}` on every system post — and
+    /// the other five are strings. `team_id` is the channel's, and the empty string for a DM.
+    ///
+    /// # `sender_name` is not the sender
+    ///
+    /// `PostNotification.GetSenderName` short-circuits on `IsSystemMessage()` and returns
+    /// `i18n.T("system.message.name")`, so every post this function sends carries the literal
+    /// `System` regardless of who the author is.
+    ///
+    /// # What is absent
+    ///
+    /// The three broadcast hooks (`add_mentions`, `add_followers`, `posted_ack`) — the hub does
+    /// not run hooks, [D-183] — and the `otherFile`/`image` keys, which need a file id set a
+    /// system post never has. A **group** channel's `channel_display_name` is Go's sorted member
+    /// list and falls back to the stored display name here; see D-235.
+    async fn publish_posted_event(&self, post: &Post, channel: &Channel, sender: &User) {
+        // `SendNotifications` opens with `if channel.DeleteAt > 0 { return }` (notification.go:55),
+        // so a post written into an archived channel publishes nothing.
+        //
+        // **The archive notice itself is not caught by this.** `DeleteChannel` stamps `DeleteAt`
+        // in the database and leaves the struct it hands `CreatePost` at zero, so that post does
+        // publish. What this guards is a membership change on an already-archived channel.
+        if channel.delete_at > 0 {
+            return;
+        }
+
+        let mut message =
+            WebSocketEvent::new(WEBSOCKET_EVENT_POSTED, "", &post.channel_id, "", None, "");
+
+        let channel_display_name = if channel.channel_type == CHANNEL_TYPE_DIRECT {
+            format!("@{}", sender.username)
+        } else {
+            channel.display_name.clone()
+        };
+
+        message.add(
+            "channel_type",
+            serde_json::Value::String(channel.channel_type.clone()),
+        );
+        message.add(
+            "channel_display_name",
+            serde_json::Value::String(channel_display_name),
+        );
+        message.add(
+            "channel_name",
+            serde_json::Value::String(channel.name.clone()),
+        );
+        message.add(
+            "sender_name",
+            serde_json::Value::String(SYSTEM_MESSAGE_SENDER_NAME.to_owned()),
+        );
+        message.add(
+            "team_id",
+            serde_json::Value::String(channel.team_id.clone()),
+        );
+        message.add("set_online", serde_json::Value::Bool(true));
+
+        match post.to_json() {
+            Ok(json) => message.add("post", serde_json::Value::String(json)),
+            Err(err) => {
+                tracing::error!(error = %err, post_id = %post.id, "Error in marshalling post to JSON");
+                return;
+            }
+        }
+
+        self.publish(message).await;
+    }
 }
+
+/// `i18n.T("system.message.name")` — the `sender_name` every system post's `posted` event
+/// carries, in place of the author's username. English, for the reason
+/// [`App::create_system_post`] gives.
+pub const SYSTEM_MESSAGE_SENDER_NAME: &str = "System";
 
 /// `RemoveDuplicateStrings` over an optional list, for the set comparison
 /// `utils.FindExclusives` makes.
