@@ -370,6 +370,54 @@ pub trait UserStore {
         user_id: &str,
         email: &str,
     ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlUserStore.Save` (user_store.go:175), ported for `createBot`.
+    ///
+    /// # The hasher is a parameter because it cannot be a dependency
+    ///
+    /// Go calls `hashers.GetLatestHasher()` inside the store. Here the hashers live in `mm-app`
+    /// for licensing reasons (see `mm_app::password`), so the caller supplies one. A bot's
+    /// password is empty and `PreSave` only hashes a non-empty one, so `createBot` never
+    /// actually reaches it — but the parameter keeps the error branches real for the next caller.
+    ///
+    /// # A non-empty `Id` is refused
+    ///
+    /// `if user.Id != "" && !user.IsRemote()` → `ErrInvalidInput("User", "id", …)`. `UserFromBot`
+    /// copies `Bot.UserId` into it, so a create whose patch somehow carried a user id fails here
+    /// rather than silently overwriting a row.
+    ///
+    /// # Its unique violations are `InvalidInput`, not `Conflict`
+    ///
+    /// [`UserStore::update`] raises [`StoreError::Conflict`] for the same constraints. `Save`
+    /// raises `ErrInvalidInput` with the *field* — and `App.CreateBot` branches on that field to
+    /// pick between `email_exists`, `username_exists` and `existing`. Folding the two shapes
+    /// together would change which of those three ids a client sees.
+    ///
+    /// # The database picks the field, not Go's order of checks
+    ///
+    /// A bot's email is derived from its username, so a duplicate username violates **both**
+    /// unique indexes — and Go tests its email list first, which reads as "email wins". It does
+    /// not: `IsUniqueConstraintError` is `strings.Contains(err.Error(), …)` over the pq error
+    /// text, and Postgres reports exactly one constraint per error, whichever index it checked.
+    /// So the answer is `username`, on both servers, and matching on the constraint name here is
+    /// the same rule rather than a simplification. Go's capitalised `"Email"`/`"Username"`
+    /// entries are dead on Postgres, where every index name is lower case. Measured in
+    /// `db_bot_store.rs`, which asserted the intuitive reading and failed.
+    fn save(
+        &self,
+        user: &User,
+        hasher: &(dyn mm_model::user::UserPasswordHasher + Sync),
+    ) -> impl std::future::Future<Output = Result<User, StoreError>> + Send;
+
+    /// Port of `SqlUserStore.PermanentDelete` (user_store.go:1464).
+    ///
+    /// One `DELETE`, and **no error for a row that was not there** — Go does not look at
+    /// `RowsAffected`. `App.CreateBot` calls it to undo its own user insert when the bot insert
+    /// fails, and only logs what comes back.
+    fn permanent_delete(
+        &self,
+        user_id: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 }
 
 /// `model.UserSearchDefaultLimit` (model/user_search.go:7).
@@ -2735,6 +2783,154 @@ impl UserStore for SqlUserStore {
         })?;
 
         tracing::Span::current().record("updated", result.rows_affected());
+        Ok(())
+    }
+
+    #[tracing::instrument(skip_all, fields(username = %user.username))]
+    async fn save(
+        &self,
+        user: &User,
+        hasher: &(dyn mm_model::user::UserPasswordHasher + Sync),
+    ) -> Result<User, StoreError> {
+        if !user.id.is_empty() && !user.is_remote() {
+            return Err(StoreError::InvalidInput {
+                entity: "User",
+                field: "id",
+                value: user.id.clone(),
+            });
+        }
+
+        // Go mutates the caller's `*model.User` in place and returns the same pointer; the caller
+        // then reads `user.Id` off it. A clone plus returning the clone gives the caller the same
+        // value without the shared mutation.
+        let mut user = user.clone();
+        if let Err(app_error) = user.pre_save(hasher) {
+            return Err(StoreError::Invalid {
+                entity: "User",
+                app_error,
+            });
+        }
+        if let Err(app_error) = user.is_valid() {
+            return Err(StoreError::Invalid {
+                entity: "User",
+                app_error,
+            });
+        }
+
+        // `validateAutoResponderMessageSize`, the same guard `update` applies, and it runs inside
+        // `insert` — i.e. **after** `IsValid`, so an over-long auto-responder on an otherwise
+        // invalid user reports the other failure first.
+        if let Some(notify_props) = user.notify_props.as_ref() {
+            let max = self.max_post_size().await?;
+            let message = notify_props
+                .get(mm_model::user::AUTO_RESPONDER_MESSAGE_NOTIFY_PROP)
+                .map(String::as_str)
+                .unwrap_or_default();
+            if message.chars().count() as i64 > max {
+                return Err(StoreError::InvalidInput {
+                    entity: "User",
+                    field: "auto_responder_message",
+                    value: "Auto responder message size can't be more than the allowed Post size"
+                        .to_owned(),
+                });
+            }
+        }
+
+        let props = json_or_null(user.props.as_ref(), "props")?;
+        let notify_props = json_or_null(user.notify_props.as_ref(), "notifyprops")?;
+        let timezone = json_or_null(user.timezone.as_ref(), "timezone")?;
+        let mfa_used_timestamps = match user.mfa_used_timestamps.as_ref() {
+            None => None,
+            Some(value) => {
+                Some(
+                    serde_json::to_value(value).map_err(|source| StoreError::Decode {
+                        entity: "User",
+                        column: "mfausedtimestamps",
+                        source,
+                    })?,
+                )
+            }
+        };
+
+        // Twenty-seven columns, Go's order. **`LastLogin` is not among them** — `update` writes
+        // it and `insert` does not, so a freshly saved user carries the column default rather
+        // than the struct's value.
+        sqlx::query!(
+            r#"
+            INSERT INTO users
+                (id, createat, updateat, deleteat, username, password, authdata, authservice,
+                 email, emailverified, nickname, firstname, lastname, position, roles,
+                 allowmarketing, props, notifyprops, lastpasswordupdate, lastpictureupdate,
+                 failedattempts, locale, timezone, mfaactive, mfasecret, remoteid,
+                 mfausedtimestamps)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
+                    $18, $19, $20, $21, $22, $23, $24, $25, $26, $27)
+            "#,
+            user.id,
+            user.create_at,
+            user.update_at,
+            user.delete_at,
+            user.username,
+            user.password,
+            user.auth_data,
+            user.auth_service,
+            user.email,
+            user.email_verified,
+            user.nickname,
+            user.first_name,
+            user.last_name,
+            user.position,
+            user.roles,
+            user.allow_marketing,
+            props,
+            notify_props,
+            user.last_password_update,
+            user.last_picture_update,
+            user.failed_attempts as i32,
+            user.locale,
+            timezone,
+            user.mfa_active,
+            user.mfa_secret,
+            user.remote_id,
+            mfa_used_timestamps,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| match unique_constraint(&source) {
+            // Go's two `IsUniqueConstraintError` calls, in its order: email first, username
+            // second. The *field* is what `App.CreateBot` reads, and it is lower case there
+            // while `Conflict`'s resource is capitalised — two spellings of the same constraint,
+            // because two Go call sites spell it differently.
+            Some("Email") => StoreError::InvalidInput {
+                entity: "User",
+                field: "email",
+                value: user.email.clone(),
+            },
+            Some("Username") => StoreError::InvalidInput {
+                entity: "User",
+                field: "username",
+                value: user.username.clone(),
+            },
+            _ => StoreError::Db {
+                context: format!("failed to save User with userId={}", user.id),
+                source,
+            },
+        })?;
+
+        Ok(user)
+    }
+
+    #[tracing::instrument(skip_all, fields(user_id = %user_id, deleted))]
+    async fn permanent_delete(&self, user_id: &str) -> Result<(), StoreError> {
+        let result = sqlx::query!("DELETE FROM users WHERE id = $1", user_id)
+            .execute(&self.pool)
+            .await
+            .map_err(|source| StoreError::Db {
+                context: format!("failed to delete User with userId={user_id}"),
+                source,
+            })?;
+
+        tracing::Span::current().record("deleted", result.rows_affected());
         Ok(())
     }
 }

@@ -389,6 +389,8 @@ async fn read_bots_alone_admits_only_the_callers_own_bots() {
         return;
     }
     let _unlicensed = ACTIVE_LICENCE_ROW.read().await;
+    // `unplant_bots` sweeps every `mmrsbot%` row, including the writes suite's. See the lock.
+    let _bots = common::BOT_FIXTURES.lock().await;
     let client = client();
     let admin = go_minted_token(&client).await;
     let team = create_team(&client, &admin, "botsown").await;
@@ -474,6 +476,8 @@ async fn include_deleted_reveals_a_deleted_bot_on_both_servers() {
         return;
     }
     let _unlicensed = ACTIVE_LICENCE_ROW.read().await;
+    // `unplant_bots` sweeps every `mmrsbot%` row, including the writes suite's. See the lock.
+    let _bots = common::BOT_FIXTURES.lock().await;
     let client = client();
     let token = go_minted_token(&client).await;
     let me = common::logged_in_user_id();

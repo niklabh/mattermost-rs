@@ -2513,3 +2513,112 @@ pub async fn sidebar_category_ids(user_id: &str, team_id: &str) -> Option<Vec<St
     .ok()?;
     Some(ids)
 }
+
+/// The `Users` and `Bots` rows behind one bot, as the database holds them.
+///
+/// The bot write routes answer with a `model.Bot`, which shows neither the email a rename
+/// rewrites nor the `Users.DeleteAt` a disable sets — and those are half of what the routes do.
+/// Returns [`None`] when there is no `DATABASE_URL` to read, so a caller can skip.
+pub async fn bot_and_user_rows(bot_user_id: &str) -> Option<serde_json::Value> {
+    let pool = fixture_pool().await?;
+    let row: (String, String, String, i64, i64, String, String, i64, i64) = sqlx::query_as(
+        "SELECT u.username, u.email, u.firstname, u.deleteat, u.updateat,
+                b.ownerid, b.description, b.deleteat, b.updateat
+           FROM users u JOIN bots b ON b.userid = u.id
+          WHERE u.id = $1",
+    )
+    .bind(bot_user_id)
+    .fetch_one(&pool)
+    .await
+    .expect("the bot's two rows are readable");
+    Some(serde_json::json!({
+        "username": row.0,
+        "email": row.1,
+        "firstname": row.2,
+        "user_delete_at": row.3,
+        "user_update_at": row.4,
+        "owner_id": row.5,
+        "description": row.6,
+        "bot_delete_at": row.7,
+        "bot_update_at": row.8,
+    }))
+}
+
+/// Serialises every suite that plants or sweeps `mmrsbot%` rows.
+///
+/// [`plant_bot`] writes ids under one fixed prefix and [`unplant_bots`] deletes **all** of them,
+/// so two bot suites running concurrently delete each other's fixtures mid-assertion. The reads
+/// suite and the writes suite both do it; the lock is what keeps the second from emptying the
+/// table the first is paging through.
+pub static BOT_FIXTURES: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// Remove **one** planted bot, by id.
+///
+/// [`unplant_bots`] sweeps the whole `mmrsbot%` prefix, which is the wrong tool for a suite whose
+/// tests plant a pair each: the sweep deletes a sibling test's fixtures as readily as its own.
+pub async fn unplant_bot(bot_user_id: &str) {
+    let Some(pool) = fixture_pool().await else {
+        return;
+    };
+    for statement in [
+        "DELETE FROM bots WHERE userid = $1",
+        "DELETE FROM users WHERE id = $1",
+    ] {
+        sqlx::query(statement)
+            .bind(bot_user_id)
+            .execute(&pool)
+            .await
+            .expect("the planted bot is removed");
+    }
+}
+
+/// Delete every `Users` row (and any `Bots` row behind it) carrying this exact username, and
+/// return how many there were — the assertion that a *refused* write wrote nothing.
+///
+/// **It removes rather than counts, and the caller asserts on the return value.** A test that
+/// only counted left the row in place when the count was wrong, which is precisely the case where
+/// something *did* get written: a mutation inverting `EnableBotAccountCreation` made the create
+/// succeed once, and the leftover row then decided the verdict of every later mutation in the
+/// batch — twenty-three of them, including both no-op controls. Cleaning up unconditionally is
+/// what makes the assertion safe to fail.
+///
+/// Returns [`None`] when there is no `DATABASE_URL`.
+pub async fn remove_users_named(username: &str) -> Option<i64> {
+    let pool = fixture_pool().await?;
+    let bots =
+        sqlx::query("DELETE FROM bots WHERE userid IN (SELECT id FROM users WHERE username = $1)")
+            .bind(username)
+            .execute(&pool)
+            .await
+            .expect("any bot row is removed");
+    let _ = bots;
+    let removed = sqlx::query("DELETE FROM users WHERE username = $1")
+        .bind(username)
+        .execute(&pool)
+        .await
+        .expect("the user rows are removed");
+    Some(removed.rows_affected() as i64)
+}
+
+/// Give a planted bot a chosen description and display name.
+///
+/// [`plant_bot`] derives both from the tag, so two bots planted for a two-server comparison
+/// differ in exactly the fields the comparison is about. This makes the pair identical in
+/// everything but the id, the username and the clocks.
+pub async fn set_bot_fixture_text(bot_user_id: &str, description: &str, display_name: &str) {
+    let Some(pool) = fixture_pool().await else {
+        return;
+    };
+    sqlx::query("UPDATE bots SET description = $2 WHERE userid = $1")
+        .bind(bot_user_id)
+        .bind(description)
+        .execute(&pool)
+        .await
+        .expect("the bot description is set");
+    sqlx::query("UPDATE users SET firstname = $2 WHERE id = $1")
+        .bind(bot_user_id)
+        .bind(display_name)
+        .execute(&pool)
+        .await
+        .expect("the bot display name is set");
+}

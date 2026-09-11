@@ -10394,3 +10394,101 @@ Plan at `scripts/mutations/token-writes.plan`, which also records the three thin
 does **not** mutate — the session join (dropping either predicate wipes every session on the
 installation), `DeleteNonCompliantExpiry` (unreachable while no lifetime policy is set) and the
 remote-user and system-admin-target gates (no reachable false side on this stack).
+## The bot writes (2026-09-11)
+
+Five of the six writes in `channels/api4/bot.go`: `POST /bots`, `PUT /bots/{bot_user_id}`,
+`POST /bots/{bot_user_id}/{disable,enable}` and `POST /bots/{bot_user_id}/assign/{user_id}`.
+`convertBotToUser` is deliberately left in Go. Behind them: `SqlBotStore::Save`/`Update`,
+`UserStore::save`/`permanent_delete`, and `App.CreateBot`/`PatchBot`/`UpdateBotActive`/
+`UpdateBotOwner`. `SessionHasPermissionToManageBot` was already ported for
+`SessionHasPermissionToUserOrBot` and is reused unchanged.
+
+Tests: 7 parity (`parity::bot_writes`), 12 store DB (`db_bot_store`), 5 unit. Full workspace run
+56 targets, 3392 passed. Mutations: 35 run, 30 caught, 2 controls survived; the three non-control
+survivors are the two below and `assignBot`'s id-check order, all three invisible to a client.
+
+### There is no `enabled` column, and only one of the two rows it writes is idempotent
+
+Disabling a bot soft-deletes `Users` *and* `Bots`. `UpdateBotActive` guards the `Bots` write with
+Go's `changed` flag while `UpdateActive` above it runs unconditionally — so a second
+`POST /disable` answers with the **first** disable's `update_at` while still bumping
+`Users.UpdateAt`. Measured against the running server. See `mm_app::App::update_bot_active`.
+
+### `Bot().Update` answers with the row it re-read, which is why `PatchBot` writes `Users` first
+
+The store copies five fields onto the stored join and returns *that*, so `username` and
+`display_name` in the answer come from `Users` rather than from the caller's bot. `App.PatchBot`
+writes the user row first for exactly that reason; reversing the two answers with the old username
+while having stored the new one. See `mm_store::bot_store::BotStore::update`.
+
+### Renaming a bot rewrites its email, and nothing on the wire says so
+
+`UserFromBot` regenerates the address as `<username>@localhost`, and `PatchBot` copies it onto the
+user row along with `Id`, `Username` and `FirstName`. A `model.Bot` shows none of that, so the
+parity suite reads both tables — `common::bot_and_user_rows`.
+
+### The database picks the field a duplicate username is reported under, not Go's order of checks
+
+A bot's email derives from its username, so a clash violates both unique indexes, and Go tests its
+email list first — which reads as "email wins". It does not: Postgres names one constraint per
+error and `IsUniqueConstraintError` is a substring test over that text. The answer is `username`
+on both servers. `db_bot_store.rs` asserted the intuitive reading and failed; the finding is on
+`mm_store::user_store::UserStore::save`.
+
+### Three orderings, each invisible to a single-gate test
+
+`createBot` decodes the body before checking the permission and checks the permission before the
+feature flag, so three callers get three different answers and only an admin ever learns bot
+creation is disabled. `patchBot` likewise decodes before the manage gate, so a caller who may not
+know the id is a bot still gets a 400 for a malformed body. `assignBot` validates `user_id` before
+`bot_user_id`. All three are in `parity::bot_writes`; the third is **not** catchable, below.
+
+### What a client cannot see, and therefore no parity test can pin
+
+`model.AppError`'s parameter map and `MakePermissionError`'s detail both carry `json:"-"`. So
+*which* parameter a 400 named and *which* permission a 403 named are absent from the wire —
+`detailed_error` is empty on both servers. Two mutations exercise this and are expected to survive;
+`scripts/mutations/bot-writes.plan` lists them under their own heading rather than among the
+controls.
+
+### `POST /bots` answers 403 on this deployment and always will
+
+`ServiceSettings.EnableBotAccountCreation` defaults false and the stack leaves it there on purpose.
+The refusal is what the parity suite compares; the success path is covered by `db_bot_store.rs` and
+a unit test, and the gap is [D-280]. Three more divergences on that path and the one below it are
+[D-281] (no owner DM), [D-282] (`userDeactivated`'s cascade) and [D-283] (the OAuth arm of session
+revocation).
+
+### One survivor nothing can catch: `DeleteAt = UpdateAt` is one clock read
+
+Reading the clock twice instead would put the two columns a millisecond apart on an unlucky run,
+and both servers would drift the same way — so the right answer and the wrong answer coincide, and
+a test that could tell them apart would fail intermittently on correct code. Recorded on
+`mm_app::App::update_active_for_bot` and in the plan's "invisible on the wire" section rather than
+papered over.
+
+### A mutation that makes a write *succeed* needs a fixture that can undo it
+
+`api-create-flag-is-inverted` inverts the `EnableBotAccountCreation` guard, so the mutated server
+actually created the bot — and `the_create_gates_fire_in_gos_order` asserted that row's absence
+**without removing it**. Every later api mutation in the batch then failed that test for a reason
+that had nothing to do with it, both no-op controls included: 23 void verdicts. `count_users_named`
+became `common::remove_users_named`, which deletes what it counts so a failing assertion cleans up
+after itself, and the api half was re-run. The rule generalises past this route.
+
+### `db_bot_store.rs` stopped sweeping `mmrsbot%`
+
+The parity binary plants under that prefix from a **different process**, which no mutex in either
+can serialise; this file now sweeps only `mmrsbotstore%`/`mmrsbotowner%` plus the usernames its own
+creates mint. Within the parity binary, `common::BOT_FIXTURES` serialises the reads suite against
+the writes suite for the same reason.
+
+### The next route in this family
+
+`convertBotToUser` (`POST /bots/{bot_user_id}/convert_to_user`). Its gate is the simplest in the
+file — a bare `manage_system` — and three of the five things `App.ConvertBotToUser`
+(app/user.go:2942) does are already here: `User().Get`, `User::patch` and `App.UpdateUser`. Two are
+not: `App.UpdateUserRoles`, reached only when `?set_system_admin=true` and the user is not already
+an admin, and `BotStore::permanent_delete` — one `DELETE FROM Bots`, which is the step that makes
+the conversion irreversible. `App.update_password` exists in `mm_app::auth` but under a different
+name from Go's `UpdatePassword`; check which of the four variants matches before calling one.
