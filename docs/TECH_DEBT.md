@@ -6871,3 +6871,93 @@ has to mask both columns — `parity::team_member_writes::adding_a_member_agrees
 does, and says so. And the config field itself is **not** read by this port: when the post write
 lands, `Config` needs `experimental_enable_default_channel_leave_join_messages` adding alongside
 the other `ServiceSettings` fields, because both arms of that branch then matter.
+
+---
+
+## D-280 · `POST /api/v4/bots` cannot be compared with Go on this deployment
+
+**Status** OPEN · **Severity** unverified · **Raised** 2026-09-11 (phase 2, bot writes)
+
+`ServiceSettings.EnableBotAccountCreation` defaults to **`false`** (config.go:917) and the stack
+leaves it there deliberately — `scripts/stack.sh`'s seeded bots are written straight to the tables
+for exactly this reason, and turning it on changes what other routes answer. So every
+`POST /api/v4/bots` against stack N is a 403 `api.bot.create_disabled`, and the route's success
+path — the 201, the `Users` insert, the `Bots` insert, the rollback between them — has **no
+cross-server test**.
+
+What exists instead: `db_bot_store.rs` drives the two inserts and the rollback against the real
+database, and `mm_api::bots`'s unit test pins the 201 and its trailing newline. What is missing is
+the one thing only Go can supply — that the bot it creates for a given `BotPatch` is byte-identical
+to the bot we create for the same patch.
+
+What is owed, in the order it would be done: flip the row in `Configurations`, `POST /config/reload`
+on the Go server so it re-reads, start a second mm-api with
+`MM_SERVICESETTINGS_ENABLEBOTACCOUNTCREATION=true` (`common::SecondServer` already does this), create
+one bot through each, and compare. The reload half is the risk: the configuration row is global and
+`parity::config_source` compares the document, so the flip needs a lock of its own rather than the
+`ACTIVE_LICENCE_ROW` pattern, which is a read/write lock over a different row.
+
+---
+
+## D-281 · A bot created through this server sends its owner no direct message
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-11 (phase 2, bot writes)
+
+`App.CreateBot` (app/bot.go:139-158) finishes by opening a direct channel with the bot's owner and
+posting `api.bot.teams_channels.add_message_mobile` — "Please add me to teams and channels you want
+me to interact in." — into it **as the bot**, through `CreatePostAsUser`. That function is not
+ported: it is the whole of `POST /api/v4/posts`, which checks the channel is not archived, refuses a
+`system_`-prefixed type, applies the restricted-DM rule, runs `CreatePost` with webhooks enabled and
+then marks the channel viewed. `mm_app::App::create_system_post` is **not** a substitute — it is a
+different Go function with different side effects, and `add_bot_teams_channels` is not a system type.
+
+The owner lookup *is* ported, because its non-`NotFound` branch is a wire-visible 500 and because it
+is where the divergence begins. Two consequences: no DM, and Go's create can fail *after* both rows
+are written (the DM or the post can error and Go returns that error) where ours cannot.
+
+Blocked behind `CreatePostAsUser`. Unreachable today in any case — see [D-280].
+
+---
+
+## D-282 · Disabling a bot does not run `userDeactivated`
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-11 (phase 2, bot writes)
+
+`App.UpdateActive` calls `userDeactivated` (app/user.go:1172) for every deactivation, and
+`mm_app::App::update_active_for_bot` does not. Four things it does:
+
+| Go call | consequence of omitting it |
+|---|---|
+| `SetStatusOffline` | the disabled bot keeps whatever `Status` row it had |
+| `notifySysadminsBotOwnerDeactivated` | skipped for a bot anyway (`if !user.IsBot`), so no gap here |
+| `disableUserBots` | **a bot that owns bots leaves them enabled** when `DisableBotsWhenOwnerIsDeactivated` is on, which is its default |
+| `OAuth().RemoveAuthDataByUserId` / `PermanentDeleteAuthDataByUser` | the bot's OAuth grants survive its deactivation |
+
+The cascade is the one with teeth, and it is also the one that will matter when
+`PUT /users/{id}/active` lands: that route deactivates *people*, whose bots the setting exists to
+disable. `disableUserBots` pages `GetBots` with `OwnerId` set and calls `UpdateBotActive` on each,
+so the store side is already here; what it needs is the app function and an owner whose
+deactivation is reachable.
+
+The plugin hook `UserHasBeenDeactivated` is not in scope — there is no plugin host.
+
+---
+
+## D-283 · Session revocation does not handle an OAuth session
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-11 (phase 2, bot writes)
+
+`PlatformService.RevokeAllSessions` (app/platform/session.go:329) branches on `session.IsOAuth`:
+an OAuth session goes through `RevokeAccessToken`, which deletes the `OAuthAccessData` row as well
+as the session. `mm_app::App::revoke_all_sessions_for_bot` removes every session the same way, so an
+OAuth session is revoked but its access data survives — a row that can then never be cleaned up
+through any route.
+
+Unreachable from the bot routes: a bot's sessions are personal access tokens, never OAuth grants.
+It becomes reachable the moment user deactivation lands. What is owed is `RevokeAccessToken`
+(app/oauth.go), which needs `OAuthStore::remove_access_data` and `SessionStore::remove` — the
+second already exists.
+
+The function also lives in the wrong file. It is not bot-specific and belongs beside the other
+session code; it is in `mm_app::bot` because the session store was another agent's file in the
+round it was written. Move it when session revocation gets a route of its own.

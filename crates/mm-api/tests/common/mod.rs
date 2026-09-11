@@ -2547,16 +2547,32 @@ pub async fn unplant_bot(bot_user_id: &str) {
     }
 }
 
-/// How many `Users` rows carry this exact username — the assertion that a *refused* write wrote
-/// nothing. Returns [`None`] when there is no `DATABASE_URL`.
-pub async fn count_users_named(username: &str) -> Option<i64> {
+/// Delete every `Users` row (and any `Bots` row behind it) carrying this exact username, and
+/// return how many there were — the assertion that a *refused* write wrote nothing.
+///
+/// **It removes rather than counts, and the caller asserts on the return value.** A test that
+/// only counted left the row in place when the count was wrong, which is precisely the case where
+/// something *did* get written: a mutation inverting `EnableBotAccountCreation` made the create
+/// succeed once, and the leftover row then decided the verdict of every later mutation in the
+/// batch — twenty-three of them, including both no-op controls. Cleaning up unconditionally is
+/// what makes the assertion safe to fail.
+///
+/// Returns [`None`] when there is no `DATABASE_URL`.
+pub async fn remove_users_named(username: &str) -> Option<i64> {
     let pool = fixture_pool().await?;
-    let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM users WHERE username = $1")
+    let bots =
+        sqlx::query("DELETE FROM bots WHERE userid IN (SELECT id FROM users WHERE username = $1)")
+            .bind(username)
+            .execute(&pool)
+            .await
+            .expect("any bot row is removed");
+    let _ = bots;
+    let removed = sqlx::query("DELETE FROM users WHERE username = $1")
         .bind(username)
-        .fetch_one(&pool)
+        .execute(&pool)
         .await
-        .expect("the count is readable");
-    Some(count.0)
+        .expect("the user rows are removed");
+    Some(removed.rows_affected() as i64)
 }
 
 /// Give a planted bot a chosen description and display name.

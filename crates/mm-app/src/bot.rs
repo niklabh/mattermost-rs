@@ -119,6 +119,9 @@ impl App {
         // `PreSave` further down and must not be checked yet.
         bot.is_valid_create()?;
 
+        // Go mutates the caller's `*model.Bot` in place (`bot.UserId = user.Id`) and hands the
+        // same pointer to the store. Taking `&Bot` and cloning gives the caller the same result
+        // without the shared mutation — not a borrow-checker workaround.
         let mut bot = bot.clone();
         let user = self
             .store()
@@ -401,8 +404,10 @@ impl App {
     /// # `DeleteAt` is `UpdateAt`, not a second call to the clock
     ///
     /// `user.UpdateAt = GetMillis()` then `user.DeleteAt = user.UpdateAt`. Reading the clock
-    /// twice would leave the two columns a millisecond apart on an unlucky run, which is the kind
-    /// of difference only a byte comparison catches.
+    /// twice would leave the two columns a millisecond apart on an unlucky run — and **no test
+    /// can see that**: the mutation doing it survives the suite, because the two readings fall in
+    /// the same millisecond on all but the unluckiest run and Go would drift the same way. Kept
+    /// faithful because it is free to be faithful, not because anything checks.
     ///
     /// # Not reproduced
     ///
@@ -435,6 +440,8 @@ impl App {
             }
         }
 
+        // Go writes `UpdateAt` and `DeleteAt` onto the caller's `*model.User`, which
+        // `UpdateBotActive` then stops using. Cloning keeps that mutation local.
         let mut user = user.clone();
         user.update_at = get_millis();
         user.delete_at = if active { 0 } else { user.update_at };

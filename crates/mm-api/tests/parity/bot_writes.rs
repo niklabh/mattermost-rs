@@ -202,9 +202,11 @@ async fn the_create_gates_fire_in_gos_order() {
         go_message_names(&go, "bot");
     }
 
-    // Six refused creates, and not a row between them.
+    // Six refused creates, and not a row between them. `remove_users_named` deletes what it
+    // counts, so a *failure* here also cleans up after itself — see its doc comment for the
+    // mutation batch that needed that.
     assert_eq!(
-        common::count_users_named("mmrsbotnever").await,
+        common::remove_users_named("mmrsbotnever").await,
         Some(0),
         "a refused create must write nothing"
     );
@@ -432,6 +434,20 @@ async fn disable_and_enable_flip_both_rows_and_only_one_is_idempotent() {
             rows["user_delete_at"], rows["user_update_at"],
             "UpdateActive reads the clock once: DeleteAt *is* UpdateAt"
         );
+        // A real clock reading, not a marker. `normalise` can only see that `delete_at` is
+        // non-zero, so without this a port that wrote `1` — or the planted `CreateAt` — would
+        // compare equal to Go's timestamp. The two stamps are separate `GetMillis()` calls
+        // (`UpdateBotActive`'s, then `PreUpdate`'s), so they are close rather than equal.
+        let deleted_at = rows["bot_delete_at"].as_i64().unwrap_or(0);
+        let updated_at = rows["bot_update_at"].as_i64().unwrap_or(0);
+        assert!(
+            deleted_at > 1788600000000,
+            "the Bots DeleteAt is a fresh timestamp, not a marker: {deleted_at}"
+        );
+        assert!(
+            (deleted_at - updated_at).abs() < 5_000,
+            "DeleteAt and UpdateAt are set microseconds apart: {deleted_at} vs {updated_at}"
+        );
     }
 
     // --- disable again: the bot row must not move -------------------------------------------
@@ -624,6 +640,23 @@ async fn the_manage_gate_hides_what_it_refuses_unless_the_caller_may_read() {
             "{path}"
         );
     }
+
+    // **The body is decoded before the permission is checked**, so a caller who is not even
+    // allowed to know this is a bot gets a 400 for a malformed body rather than the 404. Go's
+    // ordering, and the one place on this family where the hiding rule does not apply.
+    let path = format!("/api/v4/bots/{bot}");
+    let ((go_status, go), (rs_status, rs)) = both(
+        &http,
+        reqwest::Method::PUT,
+        &plain.token,
+        &path,
+        Some(b"null"),
+    )
+    .await;
+    assert_eq!(rs_status, go_status, "{path}");
+    assert_eq!(go_status, 400, "the body gate precedes the manage gate");
+    let parsed = common::assert_error_bodies_match_except_known_gaps(&go, &rs, &path);
+    assert_eq!(parsed["id"], "api.context.invalid_body_param.app_error");
 
     // --- `read_others_bots` without `manage_others_bots`: a real 403 --------------------------
     let Some(role) = common::plant_role("botgate", "read_others_bots").await else {
