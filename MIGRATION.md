@@ -10595,3 +10595,39 @@ anything else. **They are registered behind a five-way feature-flag `if` (proper
 PostAttributes`. Establish which of those five are on at the pinned SHA before writing a handler —
 if all five are false the routes are 404s from the mux and that, not the licence, is the contract
 to port.
+
+## Four families, a rate limit, and what the mutation runs were worth (2026-09-12)
+
+**346 → 372 of 764.** `view.go` entire, seven custom-profile-attribute routes, the three config
+reads, and the **first local-mode routes this project has ever served** — the unix socket, its
+unrestricted session, and six pairs, against a denominator that had been 171-to-0.
+
+All four sessions were terminated mid-work by a session rate limit. Their branches were preserved
+as labelled WIP commits, then verified here rather than trusted: all four compiled, passed clippy
+and fmt, and went green on their own stacks before merging. `wt/config` had reached **zero**
+commits when it died — its ~2,800 lines existed only in a working tree — and it merged green.
+
+### The merge that was green for the wrong reason
+
+`wt/view` failed 36 tests across `token_writes`, `command_writes`, `bot_writes`, `file_bytes` and
+`emoji_get` — every one a route that branch predated, all reporting "was forwarded to Go". None of
+it was the branch. A process's command line is fixed at `exec` time and does **not** follow a
+`git worktree move`, so renaming worktrees between rounds left an mm-api whose cmdline still named
+`…/threads/…` holding stack 1's port, and `parity.sh`'s path-scoped `pkill` could not match it.
+The suite ran against the previous round's server. `parity.sh` frees the port now — the port is the
+owner key, the path is not — and the same shape could as easily have produced a false *pass*.
+
+### The mutation tallies, and the one that is void
+
+| plan | run | caught | controls | verdict |
+|---|---|---|---|---|
+| `cpa-routes` | 35 | 33 | both survived | valid, no real survivors |
+| `local-mode` | 26 | 22 | both survived | valid, two real survivors |
+| `view-routes` | 33 | — | **both CAUGHT** | **void** |
+
+The view plan first scored 5 of 33 because nothing on the merge stack starts `go-boards.sh` and
+`start_boards` skipped with an `eprintln!` cargo hides — twelve tests passing while asserting
+nothing. That is fixed three ways (`stack.sh` starts the oracle, the skip is now a panic, and the
+purge sweeps the `Views` table it had never heard of, 754 leaked rows). It still scores nothing:
+both controls fail, naming `include_total_count_and_pagination_agree`. See [D-330]. A run whose
+controls fail has no verdicts, so no number from that plan is quoted here.
