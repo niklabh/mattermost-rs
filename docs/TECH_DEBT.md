@@ -7045,3 +7045,54 @@ it. If that is it, the fix is a dedicated user for this test rather than the sha
 longer timeout, which would only make the flake rarer.
 
 **Where the pin lives:** the doc comment on the test.
+
+---
+
+## D-300 · The licensed half of the seven CPA routes is forwarded, not served
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-11 (custom profile attributes)
+
+`crate::custom_profile_attributes` serves the **unlicensed** contract of all seven routes and
+forwards to Go the moment `LicenseState::Licensed` comes back. That is not a stopgap for these
+routes' error paths — those are fully ported and compared — but it does mean the success path of
+`POST`/`PATCH`/`DELETE /fields`, `PATCH …/values` and the two non-empty reads has never run here.
+
+What a licensed server reaches that this side does not have, in the order it reaches them:
+
+| behind the gate | Go |
+|---|---|
+| `AccessControlHook` — read filtering, owners, sync lock, access modes | `app/properties/access_control.go` |
+| the attribute-validation hook — visibility, sort order, option and user-id checks, managed-flag authorisation | `app/properties/access_control_attribute_validation.go` |
+| `TypeChangeValueCleanupHook` — clears dependent values on a type change | `app/properties/type_change_value_cleanup.go` |
+| the group field limit | `app/properties/field_limit.go` |
+| four websocket events | `custom_profile_attributes_field_{created,updated,deleted}`, `custom_profile_attributes_values_updated` |
+| `App.UpsertPropertyValues`' value audit and broadcast | `app/property_value.go:169` |
+
+**What is owed:** the write half of `mm_store::property_store` and the three hooks, behind whichever
+route needs them first. Nothing here is blocked on the licence — a licence is not obtainable and is
+not a reason to skip the work, only a reason nothing on this stack can *compare* it. When it lands
+the comparison oracle has to be something other than the Go server beside it.
+
+---
+
+## D-301 · `property_store`'s two searches implement a subset of the predicates
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-11 (custom profile attributes)
+
+`SqlPropertyStore::search_fields` and `search_values` implement the predicates the CPA routes set —
+group, object type, target type, target ids, the implicit `DeleteAt = 0`, `PerPage` — and return
+`StoreError::Argument` for any option that is set and unimplemented: cursors, delta mode
+(`SinceUpdateAt`), `IncludeDeleted`, `ObjectTypes`, `LinkedFieldID`, the team/channel hierarchy and
+the `Value` filter.
+
+That is deliberate — a partially implemented predicate returns *wrong rows* silently, where a
+refusal is loud — but it is still unfinished work, because `api4/properties.go`'s nine routes need
+most of it. `searchPropertyFields` and `getPropertyValues` both take a cursor and a `since`, and
+`getPropertyFields` scopes by team and channel.
+
+**What is owed:** the missing predicates, which sqlx's compile-time checking cannot assemble from
+an options struct the way squirrel does. Either a small set of purpose-shaped queries (one per
+scope shape, which is what Go's `switch` already is) or `QueryBuilder`, which this crate does not
+use anywhere yet and would be the first.
+
+**Where the pin lives:** the module doc comment on `crates/mm-store/src/property_store.rs`.
