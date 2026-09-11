@@ -226,6 +226,19 @@ pub struct Config {
     /// serviceable here while a `default_category_name` patch is forwarded.
     pub enable_channel_category_sorting: bool,
 
+    /// `TeamSettings.MaxChannelsPerTeam` (config.go:2557), Go default **2000**
+    /// (config.go:2629).
+    ///
+    /// Read twice on the create path and with two *different* predicates, which is why the port
+    /// keeps both: `CreateChannelWithUser` (app/channel.go:180) compares it against
+    /// `GetNumberOfChannelsOnTeam`, which counts `O`, `P` and `G` including archived ones, while
+    /// `saveChannelT` (channel_store.go:813) compares it against a count of live `O` and `P`
+    /// only. A team can therefore be refused by the first check and accepted by the second.
+    ///
+    /// A **negative** value switches the store's check off entirely (`maxChannelsPerTeam >= 0`);
+    /// the app-layer check has no such escape and would still refuse.
+    pub max_channels_per_team: i64,
+
     /// `ServiceSettings.EnableBurnOnRead` (config.go:472). Go default **`true`**.
     pub enable_burn_on_read: bool,
 
@@ -708,6 +721,8 @@ impl Default for Config {
             allow_synced_drafts: true,
             enable_api_channel_deletion: false,
             enable_channel_category_sorting: true,
+            // config.go:2629 — `new(int64(2000))`.
+            max_channels_per_team: 2000,
             enable_burn_on_read: true,
             // config.go:870 — `new(-1)`.
             post_edit_time_limit: -1,
@@ -912,6 +927,9 @@ impl Config {
                 "MM_TEAMSETTINGS_ENABLECHANNELCATEGORYSORTING",
                 default.enable_channel_category_sorting,
             ),
+            max_channels_per_team: lookup("MM_TEAMSETTINGS_MAXCHANNELSPERTEAM")
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(default.max_channels_per_team),
             enable_burn_on_read: lookup_bool(
                 lookup,
                 "MM_SERVICESETTINGS_ENABLEBURNONREAD",
@@ -1245,6 +1263,9 @@ impl Config {
             enable_channel_category_sorting: team_settings
                 .enable_channel_category_sorting
                 .unwrap_or(default.enable_channel_category_sorting),
+            max_channels_per_team: team_settings
+                .max_channels_per_team
+                .unwrap_or(default.max_channels_per_team),
             enable_burn_on_read: service
                 .enable_burn_on_read
                 .unwrap_or(default.enable_burn_on_read),
@@ -1480,6 +1501,8 @@ struct TeamSettingsDocument {
     enable_custom_user_statuses: Option<bool>,
     #[serde(rename = "EnableChannelCategorySorting")]
     enable_channel_category_sorting: Option<bool>,
+    #[serde(rename = "MaxChannelsPerTeam")]
+    max_channels_per_team: Option<i64>,
 }
 
 /// The one field of `EmailSettings` a migrated route reads.
