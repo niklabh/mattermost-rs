@@ -10,14 +10,17 @@
 //! session and returns no 401. Every other handler here is admin-gated.
 
 use std::collections::BTreeMap;
+use std::sync::Mutex;
 
 use axum::extract::{Query, Request, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
+use chrono::{DateTime, TimeDelta, Utc};
 use mm_model::permission::{
     PERMISSION_MANAGE_SYSTEM, PERMISSION_SYSCONSOLE_READ_ENVIRONMENT_HIGH_AVAILABILITY,
     SYSCONSOLE_READ_PERMISSIONS, make_permission_error,
 };
+use mm_model::system::ServerBusyState;
 use mm_model::utils::AppError;
 use serde_json::Value;
 
@@ -104,12 +107,29 @@ pub async fn get_system_ping(
     Query(params): Query<PingParams>,
     request: Request,
 ) -> Response {
+    match ping_answer(&state, &params).await {
+        Ok(Some(response)) => response,
+        Ok(None) => proxy::forward_to_go(State(state), request).await,
+        Err(err) => err.into_response(),
+    }
+}
+
+/// The ping's answer, or [`None`] when this ping belongs to Go.
+///
+/// Split out of [`get_system_ping`] because the **local-mode** router registers the same Go
+/// handler (`system_local.go:15`) and must forward over the unix socket rather than over TCP —
+/// see [`crate::local`]. Returning the decision instead of acting on it is what lets one body of
+/// logic serve two transports; the alternative was a second copy of the five boundaries, which is
+/// exactly the duplication that drifts.
+///
+/// Records `forwarded` on the **caller's** span, so it is deliberately not instrumented itself.
+pub(crate) async fn ping_answer(
+    state: &AppState,
+    params: &PingParams,
+) -> Result<Option<Response>, ApiError> {
     let config = state.app.config();
 
-    let licensed = match state.app.license_state().await {
-        Ok(licence) => licence == mm_app::license::LicenseState::Licensed,
-        Err(err) => return ApiError::from(err).into_response(),
-    };
+    let licensed = state.app.license_state().await? == mm_app::license::LicenseState::Licensed;
 
     if let Some(reason) = ping_is_not_ours_to_answer(
         params.get_server_status.as_deref(),
@@ -119,7 +139,7 @@ pub async fn get_system_ping(
         config.elasticsearch_enable_searching,
     ) {
         tracing::Span::current().record("forwarded", reason);
-        return proxy::forward_to_go(State(state), request).await;
+        return Ok(None);
     }
     tracing::Span::current().record("forwarded", "");
 
@@ -155,27 +175,36 @@ pub async fn get_system_ping(
     match serde_json::to_vec(&body) {
         // `model.ToJSON` is a bare `json.Marshal` — **no** trailing newline, unlike the
         // `json.NewEncoder(w).Encode` every neighbouring route uses.
-        Ok(body) => (
-            StatusCode::OK,
-            [
-                ("Content-Type", "application/json"),
-                ("x-mmrs-served-by", "rust"),
-            ],
-            body,
-        )
-            .into_response(),
+        Ok(body) => Ok(Some(json_body(body))),
         Err(err) => {
             tracing::error!(error = %err, "failed to serialise the ping");
-            ApiError::from(AppError::new(
+            Err(ApiError::from(AppError::new(
                 "getSystemPing",
                 "api.marshal_error",
                 None,
                 String::new(),
                 500,
-            ))
-            .into_response()
+            )))
         }
     }
+}
+
+/// A 200 carrying `body` verbatim, with the two headers every locally-served response needs.
+///
+/// `Content-Type: application/json` is set by `web.Handler.ServeHTTP` for every non-static API
+/// response (handlers.go:259), **before** the handler runs — so it is not the handler's choice and
+/// not conditional on the body. `x-mmrs-served-by` is this project's cutover marker; the parity
+/// suite fails a comparison that silently measured Go twice without it.
+fn json_body(body: Vec<u8>) -> Response {
+    (
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
+    )
+        .into_response()
 }
 
 /// Why this ping belongs to Go, or [`None`] when it does not.
@@ -446,9 +475,428 @@ pub async fn get_cluster_status(
     }
 }
 
+/// `DefaultServerBusySeconds` (api4/system.go:33).
+const DEFAULT_SERVER_BUSY_SECONDS: i64 = 3600;
+/// `MaxServerBusySeconds` (api4/system.go:34).
+const MAX_SERVER_BUSY_SECONDS: i64 = 86400;
+
+/// `time.Time{}.Unix()` — the zero `time.Time` is 0001-01-01T00:00:00Z, which is this many
+/// seconds *before* the epoch.
+///
+/// It reaches the wire because `Busy.ToJSON` (platform/busy.go:137) reads `b.expires`
+/// unconditionally, and a server that has never been marked busy holds the zero time there. So
+/// the ordinary, overwhelmingly common answer to `GET /api/v4/server_busy` carries a negative
+/// nine-hundred-billion. Measured against the running Go server over its own socket, not derived.
+const GO_ZERO_TIME_UNIX: i64 = -62135596800;
+
+/// The same instant through `TimestampFormat` (platform/busy.go:18).
+///
+/// Go's reference layout is `Mon Jan 2 15:04:05 -0700 MST 2006`. Two details a port gets wrong:
+/// the **day is not zero-padded** (`2` is `stdDay`) while the **year is** (`2006` is
+/// `stdLongYear`, `appendInt(…, 4)`), so year 1 renders as `0001` beside a bare `1` for the day.
+/// Measured, like [`GO_ZERO_TIME_UNIX`].
+const GO_ZERO_TIME_TS: &str = "Mon Jan 1 00:00:00 +0000 UTC 0001";
+
+/// Port of `platform.Busy` (channels/app/platform/busy.go:23) — the server's busy flag.
+///
+/// # Why this is a process global and not a field on [`AppState`]
+///
+/// Because that is what it is in Go: one `Busy` on the `Server`, reached as `Srv().Platform()
+/// .Busy`. It is deliberately *not* persisted — no row, no cache entry — which is the whole of
+/// [D-320]: a busy state set through this server is invisible to the Go process beside it, and
+/// vice versa. Putting it on `AppState` would imply a per-request or per-connection scope it does
+/// not have.
+///
+/// # One field where Go has three
+///
+/// Go keeps an atomic flag, an expiry and a `time.AfterFunc` timer that clears both. Here the
+/// expiry is the whole state and "busy" is derived from it, because the timer exists only to make
+/// the flag agree with the clock — and a reader that compares against the clock already agrees.
+/// The observable difference is nil: Go's `ToJSON` runs under the same mutex the timer takes, so
+/// no caller can see a fired deadline with the flag still set.
+#[derive(Debug)]
+pub struct ServerBusy {
+    /// When the busy state lapses, or [`None`] when the server has never been marked busy or has
+    /// been cleared. Never a past instant *observably* — [`ServerBusy::state`] reads an elapsed
+    /// deadline as cleared.
+    expires: Mutex<Option<DateTime<Utc>>>,
+}
+
+impl ServerBusy {
+    const fn new() -> Self {
+        Self {
+            expires: Mutex::new(None),
+        }
+    }
+
+    /// Port of `Busy.Set` (busy.go:46).
+    ///
+    /// Go floors the duration at one second. The handler already rejects anything below 1, so the
+    /// floor is unreachable from the REST API — it is ported because `Set` is also called from
+    /// `ClusterEventChanged`, and because a mutation that dropped it would otherwise survive.
+    ///
+    /// **Not ported: the cluster notification.** Go sends a `CLUSTER_EVENT_BUSY_STATE_CHANGED`
+    /// message when a cluster interface is registered; Team Edition registers none, so the branch
+    /// is dead there too.
+    fn set(&self, seconds: i64, now: DateTime<Utc>) {
+        let seconds = seconds.max(1);
+        let Some(delta) = TimeDelta::try_seconds(seconds) else {
+            // `try_seconds` is `None` only past ~292 billion years. The handler caps at 86400.
+            tracing::error!(seconds, "busy duration out of range; ignoring");
+            return;
+        };
+        if let Ok(mut expires) = self.expires.lock() {
+            *expires = Some(now + delta);
+        }
+    }
+
+    /// Port of `Busy.Clear` (busy.go:76).
+    fn clear(&self) {
+        if let Ok(mut expires) = self.expires.lock() {
+            *expires = None;
+        }
+    }
+
+    /// Port of `Busy.ToJSON`'s state half (busy.go:137).
+    ///
+    /// The comparison is `now < expires`, not `<=`: Go's timer fires *at* the deadline and clears
+    /// the flag, so the deadline instant itself is already not busy.
+    fn state(&self, now: DateTime<Utc>) -> ServerBusyState {
+        let expires = self
+            .expires
+            .lock()
+            .ok()
+            .and_then(|guard| *guard)
+            .filter(|expires| now < *expires);
+
+        match expires {
+            Some(expires) => ServerBusyState {
+                busy: true,
+                expires: expires.timestamp(),
+                expires_ts: go_timestamp(expires),
+            },
+            None => ServerBusyState {
+                busy: false,
+                expires: GO_ZERO_TIME_UNIX,
+                expires_ts: GO_ZERO_TIME_TS.to_owned(),
+            },
+        }
+    }
+}
+
+/// This process's busy flag. See [`ServerBusy`] for why it is a global.
+static SERVER_BUSY: ServerBusy = ServerBusy::new();
+
+/// `t.UTC().Format(platform.TimestampFormat)`.
+///
+/// The zone is always UTC here — `ToJSON` calls `.UTC()` first — so the offset and the
+/// abbreviation are constants rather than `%z`/`%Z`: Go would render them `+0000` and `UTC`, and
+/// chrono's `%Z` on a `DateTime<Utc>` is not guaranteed to be that string. `%-d` is the
+/// unpadded day Go's `2` means.
+fn go_timestamp(at: DateTime<Utc>) -> String {
+    at.format("%a %b %-d %H:%M:%S +0000 UTC %Y").to_string()
+}
+
+/// Port of `web.ReturnStatusOK` (web/web.go:127) — `{"status":"OK"}`, **no trailing newline**.
+///
+/// A second copy of `auth_writes::status_ok`; the two are in different modules because neither is
+/// the natural home for the other's routes, and the body is fifteen bytes fixed by Go.
+fn status_ok() -> Response {
+    json_body(br#"{"status":"OK"}"#.to_vec())
+}
+
+/// Port of `setServerBusy` (api4/system.go:807).
+///
+/// # The permission check comes first, and the order is load-bearing
+///
+/// Go checks `manage_system` **before** it looks at `?seconds=`, so a caller without rights gets
+/// 403 for a request that is also malformed. Swapping the two leaks to an unauthorised caller
+/// whether their parameter would have been accepted.
+///
+/// # `seconds` is a URL param whose *name*, on the error, is a whole sentence
+///
+/// `c.SetInvalidURLParam(fmt.Sprintf("seconds must be 1 - %d", MaxServerBusySeconds))` — the
+/// format string is passed where every other call site passes a parameter name, so the rendered
+/// message reads "Invalid or missing seconds must be 1 - 86400 parameter in request URL." That is
+/// not a typo to fix: it is the string clients see, and `Name` in the params map carries it.
+///
+/// Absent **and** empty both mean the 3600-second default: Go reads `Query().Get`, which cannot
+/// tell `?seconds=` from no parameter at all.
+#[tracing::instrument(skip_all, fields(seconds))]
+pub async fn set_server_busy(
+    State(state): State<AppState>,
+    session: AuthenticatedSession,
+    request: Request,
+) -> Result<Response, ApiError> {
+    if !state
+        .app
+        .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)
+        .await
+    {
+        return Err(ApiError::from(make_permission_error(
+            &session.0,
+            &[&PERMISSION_MANAGE_SYSTEM],
+        )));
+    }
+
+    let raw = crate::channels::query_first(request.uri().query(), "seconds").unwrap_or_default();
+    let seconds = parse_busy_seconds(&raw).ok_or_else(invalid_seconds)?;
+    tracing::Span::current().record("seconds", seconds);
+
+    SERVER_BUSY.set(seconds, Utc::now());
+    tracing::warn!(
+        seconds,
+        "server busy state activated - non-critical services disabled"
+    );
+
+    Ok(status_ok())
+}
+
+/// The whole of `setServerBusy`'s parameter handling, as a function of the raw query value.
+///
+/// Named, and taking a `&str` rather than living inline, because three of its four rejections are
+/// awkward to reach through a socket-backed parity test and one — the empty-string default — is
+/// indistinguishable from success in the response body. Here they have a truth table.
+fn parse_busy_seconds(raw: &str) -> Option<i64> {
+    let raw = if raw.is_empty() {
+        // `strconv.FormatInt(DefaultServerBusySeconds, 10)`: Go substitutes the default as a
+        // *string* and then parses it, so the default goes through the bounds check like any
+        // other value.
+        DEFAULT_SERVER_BUSY_SECONDS.to_string()
+    } else {
+        raw.to_owned()
+    };
+    // `strconv.ParseInt(secs, 10, 64)`. A leading `+` is accepted by both, `0x10` by neither.
+    let parsed: i64 = raw.parse().ok()?;
+    // `i <= 0 || i > MaxServerBusySeconds` — inclusive at 86400, exclusive at 0.
+    if parsed <= 0 || parsed > MAX_SERVER_BUSY_SECONDS {
+        return None;
+    }
+    Some(parsed)
+}
+
+/// `NewInvalidURLParamError("seconds must be 1 - 86400")`. See [`set_server_busy`].
+fn invalid_seconds() -> ApiError {
+    ApiError::invalid_url_param(&format!("seconds must be 1 - {MAX_SERVER_BUSY_SECONDS}"))
+}
+
+/// Port of `clearServerBusy` (api4/system.go:836).
+#[tracing::instrument(skip_all)]
+pub async fn clear_server_busy(
+    State(state): State<AppState>,
+    session: AuthenticatedSession,
+) -> Result<Response, ApiError> {
+    if !state
+        .app
+        .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)
+        .await
+    {
+        return Err(ApiError::from(make_permission_error(
+            &session.0,
+            &[&PERMISSION_MANAGE_SYSTEM],
+        )));
+    }
+
+    SERVER_BUSY.clear();
+    tracing::info!("server busy state cleared - non-critical services enabled");
+
+    Ok(status_ok())
+}
+
+/// Port of `getServerBusyExpires` (api4/system.go:852).
+///
+/// `w.Write(sbsJSON)` on the bytes `Busy.ToJSON` marshalled — so **no trailing newline**, and the
+/// field order is `model.ServerBusyState`'s declaration order rather than sorted, because it is a
+/// struct and not a map.
+#[tracing::instrument(skip_all, fields(busy))]
+pub async fn get_server_busy_expires(
+    State(state): State<AppState>,
+    session: AuthenticatedSession,
+) -> Result<Response, ApiError> {
+    if !state
+        .app
+        .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)
+        .await
+    {
+        return Err(ApiError::from(make_permission_error(
+            &session.0,
+            &[&PERMISSION_MANAGE_SYSTEM],
+        )));
+    }
+
+    let busy = SERVER_BUSY.state(Utc::now());
+    tracing::Span::current().record("busy", busy.busy);
+
+    let body = serde_json::to_vec(&busy).map_err(|err| {
+        tracing::error!(error = %err, "failed to serialise the busy state");
+        ApiError::from(AppError::new(
+            "getServerBusyExpires",
+            "api.marshal_error",
+            None,
+            String::new(),
+            500,
+        ))
+    })?;
+
+    Ok(json_body(body))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `?seconds=` boundaries, every branch, in Go's order.
+    ///
+    /// Three of the four rejections produce the same 400 with the same body, so a socket-backed
+    /// test cannot tell them apart; a truth table can. `0` and `86401` are the pair that pins the
+    /// comparison operators — `<= 0` rejects zero while `> 86400` accepts 86400.
+    #[test]
+    fn the_seconds_parameter_accepts_exactly_one_to_the_maximum() {
+        assert_eq!(
+            parse_busy_seconds(""),
+            Some(DEFAULT_SERVER_BUSY_SECONDS),
+            "absent and empty both take the 3600-second default"
+        );
+        assert_eq!(
+            parse_busy_seconds("1"),
+            Some(1),
+            "the lower bound is inclusive"
+        );
+        assert_eq!(
+            parse_busy_seconds("86400"),
+            Some(MAX_SERVER_BUSY_SECONDS),
+            "the upper bound is inclusive: `i > MaxServerBusySeconds`, not `>=`"
+        );
+
+        assert_eq!(parse_busy_seconds("0"), None, "`i <= 0` rejects zero");
+        assert_eq!(parse_busy_seconds("-1"), None);
+        assert_eq!(parse_busy_seconds("86401"), None);
+        assert_eq!(parse_busy_seconds("abc"), None, "ParseInt fails");
+        assert_eq!(
+            parse_busy_seconds("1.5"),
+            None,
+            "ParseInt is not a float parser"
+        );
+        assert_eq!(parse_busy_seconds("0x10"), None, "base 10, explicitly");
+        assert_eq!(parse_busy_seconds(" 1"), None, "ParseInt does not trim");
+    }
+
+    /// The rejection's `Name` is a whole sentence, and the id is the **URL** one.
+    ///
+    /// Both halves are wire format: the webapp branches on `id`, and the rendered message
+    /// interpolates `Name`. Measured against the running Go server over its own socket:
+    /// "Invalid or missing seconds must be 1 - 86400 parameter in request URL."
+    #[test]
+    fn the_seconds_rejection_names_the_whole_range() {
+        let err = invalid_seconds();
+        assert_eq!(err.0.id, "api.context.invalid_url_param.app_error");
+        assert_eq!(err.0.status_code, 400);
+        assert_eq!(
+            err.0.params.as_ref().and_then(|p| p.get("Name")),
+            Some(&serde_json::Value::String(
+                "seconds must be 1 - 86400".to_owned()
+            )),
+            "the format string is passed where a parameter name belongs; that is Go's, not a typo"
+        );
+    }
+
+    /// A server that has never been marked busy answers with the zero `time.Time`, twice over.
+    ///
+    /// This is the overwhelmingly common answer and the one a port invents instead of measuring:
+    /// a `0` epoch and an empty `expires_ts` would both round-trip through
+    /// `model.ServerBusyState` and both be wrong. The values are the running Go server's, read
+    /// over its own socket.
+    #[test]
+    fn an_idle_server_reports_the_go_zero_time() {
+        let busy = ServerBusy::new();
+        let state = busy.state(Utc::now());
+
+        assert!(!state.busy);
+        assert_eq!(
+            state.expires, -62135596800,
+            "the zero time.Time, in seconds before the epoch"
+        );
+        assert_eq!(state.expires_ts, "Mon Jan 1 00:00:00 +0000 UTC 0001");
+
+        assert_eq!(
+            serde_json::to_string(&state).expect("serialises"),
+            r#"{"busy":false,"expires":-62135596800,"expires_ts":"Mon Jan 1 00:00:00 +0000 UTC 0001"}"#,
+            "field order is the struct's, not sorted — ServerBusyState is a struct, not a map"
+        );
+    }
+
+    /// Set, read, clear, read — and the expiry arithmetic in between.
+    #[test]
+    fn setting_and_clearing_move_the_expiry() {
+        let now = DateTime::parse_from_rfc3339("2026-09-11T15:03:12Z")
+            .expect("valid")
+            .with_timezone(&Utc);
+        let busy = ServerBusy::new();
+
+        busy.set(1, now);
+        let state = busy.state(now);
+        assert!(state.busy);
+        assert_eq!(state.expires, now.timestamp() + 1);
+        assert_eq!(
+            state.expires_ts, "Fri Sep 11 15:03:13 +0000 UTC 2026",
+            "the day is unpadded and the zone is a literal +0000 UTC"
+        );
+
+        busy.clear();
+        assert!(!busy.state(now).busy, "Clear zeroes the expiry");
+    }
+
+    /// The deadline instant is **not** busy: Go's timer fires at it and clears the flag.
+    ///
+    /// One second either side of the boundary, because `<` and `<=` are otherwise
+    /// indistinguishable from any test that does not sit exactly on it.
+    #[test]
+    fn the_expiry_instant_has_already_lapsed() {
+        let now = DateTime::parse_from_rfc3339("2026-09-11T15:03:12Z")
+            .expect("valid")
+            .with_timezone(&Utc);
+        let busy = ServerBusy::new();
+        busy.set(10, now);
+
+        assert!(
+            busy.state(now + TimeDelta::seconds(9)).busy,
+            "before the deadline"
+        );
+        assert!(
+            !busy.state(now + TimeDelta::seconds(10)).busy,
+            "at the deadline the timer has fired"
+        );
+        assert!(
+            !busy.state(now + TimeDelta::seconds(11)).busy,
+            "and after it"
+        );
+    }
+
+    /// `Busy.Set` floors the duration at one second (busy.go:52).
+    ///
+    /// Unreachable through the REST API — the handler rejects anything below 1 — so this is the
+    /// only place the floor is held down at all.
+    #[test]
+    fn the_duration_is_floored_at_one_second() {
+        let now = DateTime::parse_from_rfc3339("2026-09-11T15:03:12Z")
+            .expect("valid")
+            .with_timezone(&Utc);
+        let busy = ServerBusy::new();
+        busy.set(0, now);
+        assert_eq!(
+            busy.state(now).expires,
+            now.timestamp() + 1,
+            "a zero duration still marks the server busy for a second"
+        );
+    }
+
+    /// `{"status":"OK"}` with no trailing newline, and the cutover marker.
+    #[test]
+    fn the_status_ok_body_is_fifteen_bytes() {
+        let body = br#"{"status":"OK"}"#;
+        assert_eq!(body.len(), 15);
+        assert_ne!(body[body.len() - 1], b'\n', "w.Write, not an encoder");
+    }
 
     /// The default deployment answers, and none of the five boundaries fires.
     #[test]
