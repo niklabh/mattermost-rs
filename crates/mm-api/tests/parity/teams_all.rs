@@ -486,7 +486,10 @@ async fn the_public_only_caller_sees_only_open_invite_teams() {
 
     let (go, rust) = fetch_both_stable(&client, &f.public_only, "/api/v4/teams?per_page=200").await;
     assert_eq!(go, rust);
-    let listed = ids(&go);
+    // Presence and absence both have to be asked of every page, not of page 0. See `all_ids`:
+    // truncation makes a `contains` flake and — worse — makes a `!contains` pass for the wrong
+    // reason.
+    let listed = all_ids(&client, &f.public_only).await;
     assert!(listed.contains(&f.open_team), "the open team is public");
     assert!(!listed.contains(&f.private_team));
     assert!(!listed.contains(&f.archived_team));
@@ -505,7 +508,7 @@ async fn the_private_only_caller_sees_only_the_non_open_teams() {
     let (go, rust) =
         fetch_both_stable(&client, &f.private_only, "/api/v4/teams?per_page=200").await;
     assert_eq!(go, rust);
-    let listed = ids(&go);
+    let listed = all_ids(&client, &f.private_only).await;
     assert!(listed.contains(&f.private_team));
     assert!(listed.contains(&f.archived_team));
     assert!(!listed.contains(&f.open_team));
