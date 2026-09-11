@@ -274,6 +274,62 @@ fn ids(body: &[u8]) -> Vec<String> {
         .collect()
 }
 
+/// Every team id this caller can see, walked page by page, with both servers compared on each
+/// page.
+///
+/// **`per_page=200` is not "all of them", and this suite's fixture is the first thing to notice.**
+/// 200 is Go's `PER_PAGE_MAXIMUM`, so a single request cannot be widened; and
+/// `getAllTeams` orders by `DisplayName` with no tiebreak, while [`build_fixture`] deliberately
+/// prefixes its three display names with `~` so they sort **last** and the paging tests above have
+/// a stable tail to assert on. Those two facts combine badly: the moment the `Teams` table passes
+/// 200 rows, the fixture's own teams are the first to fall off page 0, and a presence assertion
+/// fails while the byte comparison beside it still passes — both servers agree, and both are
+/// right.
+///
+/// That is not hypothetical. Measured on a full-suite run on 2026-09-11: page 0 came back holding
+/// **exactly 200** ids and none of the fixture's three, on a table that held 17 teams by the time
+/// the run finished. Sibling suites create and clean up hundreds of teams while this one reads, so
+/// the peak is transient and invisible afterwards — which is why it reproduces only in the full
+/// concurrent run and never in isolation.
+///
+/// Paging rather than widening also means the presence assertions now exercise paging parity on
+/// every call, which is strictly more than they asserted before.
+async fn teams_paged(client: &reqwest::Client, token: &str) -> Vec<serde_json::Value> {
+    let mut collected = Vec::new();
+    for page in 0..64 {
+        let (go, rust) = fetch_both_stable(
+            client,
+            token,
+            &format!("/api/v4/teams?per_page=200&page={page}"),
+        )
+        .await;
+        assert_eq!(go, rust, "page {page} must agree byte for byte");
+        let value: serde_json::Value = serde_json::from_slice(&go).expect("the body is JSON");
+        let array = match &value {
+            serde_json::Value::Array(a) => a.clone(),
+            serde_json::Value::Object(o) => {
+                o["teams"].as_array().expect("teams is an array").clone()
+            }
+            other => panic!("unexpected body shape: {other}"),
+        };
+        let short = array.len() < 200;
+        collected.extend(array);
+        if short {
+            return collected;
+        }
+    }
+    panic!("more than 64 full pages of teams; the fixture is leaking rather than paging");
+}
+
+/// The ids of [`teams_paged`].
+async fn all_ids(client: &reqwest::Client, token: &str) -> Vec<String> {
+    teams_paged(client, token)
+        .await
+        .iter()
+        .map(|t| t["id"].as_str().expect("an id").to_owned())
+        .collect()
+}
+
 /// The default request, byte for byte. Everything else in this file narrows from here.
 #[tokio::test]
 async fn the_default_listing_matches_go_byte_for_byte() {
@@ -301,7 +357,9 @@ async fn archived_teams_are_listed_and_counted() {
     let (go, rust) = fetch_both_stable(&client, &f.admin_token, "/api/v4/teams?per_page=200").await;
     assert_eq!(go, rust);
     assert!(
-        ids(&go).contains(&f.archived_team),
+        all_ids(&client, &f.admin_token)
+            .await
+            .contains(&f.archived_team),
         "Go itself lists the archived team; a deleteat = 0 predicate would be a divergence"
     );
 
@@ -312,7 +370,12 @@ async fn archived_teams_are_listed_and_counted() {
     )
     .await;
     assert_eq!(go, rust);
-    assert!(ids(&go).contains(&f.archived_team));
+    // The shape above is page 0's; the presence check walks every page. See `all_ids`.
+    assert!(
+        all_ids(&client, &f.admin_token)
+            .await
+            .contains(&f.archived_team)
+    );
 }
 
 /// `include_total_count=true` switches the body from a bare array to an object. Compared as
@@ -460,7 +523,7 @@ async fn both_permissions_see_the_union_of_the_two_halves() {
 
     let (go, rust) = fetch_both_stable(&client, &f.both, "/api/v4/teams?per_page=200").await;
     assert_eq!(go, rust);
-    let listed = ids(&go);
+    let listed = all_ids(&client, &f.both).await;
     for id in [&f.open_team, &f.private_team, &f.archived_team] {
         assert!(
             listed.contains(id),
@@ -581,11 +644,11 @@ async fn sanitize_teams_strips_email_and_invite_id_for_a_non_member() {
 
     let (go, rust) = fetch_both_stable(&client, &f.admin_token, "/api/v4/teams?per_page=200").await;
     assert_eq!(go, rust);
-    let listed: serde_json::Value = serde_json::from_slice(&rust).expect("JSON");
-    let mine = listed
-        .as_array()
-        .expect("an array")
-        .iter()
+    // Page 0 is compared byte for byte above; the team itself may sit on a later page, so find
+    // it by walking. See `all_ids`.
+    let mine = teams_paged(&client, &f.admin_token)
+        .await
+        .into_iter()
         .find(|t| t["id"] == f.open_team.as_str())
         .expect("the admin lists its own team");
     assert_ne!(mine["email"], "", "the team admin keeps the email");
