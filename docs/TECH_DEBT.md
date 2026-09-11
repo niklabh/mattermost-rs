@@ -7107,29 +7107,39 @@ use anywhere yet and would be the first.
 
 ---
 
-## D-330 · `views::include_total_count_and_pagination_agree` is unstable, and it voids a whole mutation plan
+## D-330 · `parity_views`' two list tests disagree with Go on **order**, reliably
 
-**Status** OPEN · **Severity** test-harness · **Raised** 2026-09-12
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-12 · **Revised** same day
 
-`scripts/mutations/view-routes.plan` has been run twice on the merge stack with the boards oracle
-up. Both times **both no-op controls came back CAUGHT**, and both times the test that decided them
-was `parity::views::include_total_count_and_pagination_agree` (the second control also named
-`the_list_is_byte_identical_including_the_props_key_order`).
+`views::include_total_count_and_pagination_agree` and
+`views::the_list_is_byte_identical_including_the_props_key_order` fail on **every** run of the
+views suite in isolation — one or both, three runs out of three. Both are `#[ignore]`d with a
+pointer here so the rest of the suite is green; **un-ignore them as the first step of fixing this.**
 
-Per CLAUDE.md a run whose controls fail has no verdicts at all, so the plan's apparent 32-of-33 is
-**not a score** and must not be quoted as one. The one non-control survivor it reported,
-`store-list-drops-the-createat-tiebreak`, is equally unproven.
+**An earlier version of this entry blamed a concurrent count race. That was wrong and is
+retracted** — `total_count` agrees at 4 on both sides. The disagreement is the *order of the rows*:
 
-Ruled out already: the `Views` table accumulating across runs. It was doing that — 754 rows after
-33 sequential runs, because `purge_api_fixtures` did not sweep it — and the purge now does. The
-controls still failed afterwards, so that was a real bug but not this one.
+    Go    Alpha(create_at 1789157065891), Beta(…896), Gamma(…901)
+    Rust  Beta(…896), Gamma(…901), Alpha(…891)
 
-**What is owed:** stabilise that test, then re-run the plan and replace the tally. The shape to
-look at first is a whole-installation count read twice: `include_total_count` returns a total over
-the `Views` table, tests in this binary run concurrently, and `parity_views` creates views — so the
-count can move between the Go call and the Rust call. That is the same family as the
-`teams_all`/`users_stats` counts, and the established remedy is `common::fetch_both_stable` or
-scoping the assertion to rows the test owns. Confirm against the test before assuming it.
+Every row has `sort_order: 0`, so the tiebreak decides everything, and Go's is `CreateAt` while
+ours behaves as though it were `Id` (Beta `5ccf…` < Gamma < Alpha `q6ts…`). Corroborated
+independently: `store-list-drops-the-createat-tiebreak` is the one non-control mutation in
+`view-routes.plan` that survives — the suite cannot see the `CreateAt` tiebreak being removed
+because it is not in effect.
 
-**Where the pin lives:** the doc comment on `start_boards` in `crates/mm-api/tests/parity/views.rs`
-records the oracle half of this story; this entry is the instability half.
+**What is ruled out.** Both `ORDER BY` clauses are textually identical —
+`sortorder ASC, createat ASC, id ASC` in `view_store.rs:324` and `SortOrder ASC, CreateAt ASC,
+Id ASC` in `view_store.go:108`. Postgres cannot return 896, 901, 891 from that clause, so **the
+response did not come from that query**, and the bug is not in the clause itself. Neither the app
+layer (`get_views_for_channel`) nor the handler re-sorts. Not fixture accumulation either: the
+`Views` purge landed first and the failures are unchanged.
+
+**What is owed:** find which code path actually produces the list body. Worth checking in order —
+whether `ViewQueryOpts`/`clamp_page` routes to a different store method than the one read above,
+whether the `SecondServer` the suite starts is serving these routes at all or forwarding them, and
+whether the Go side is answering from something other than that query. Then re-run
+`scripts/mutations/view-routes.plan`: its tally is void today because **both no-op controls come
+back CAUGHT**, decided by these same two tests, so no number from that plan means anything yet.
+
+**Where the pin lives:** the `#[ignore]` attributes on the two tests.
