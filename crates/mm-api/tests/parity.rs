@@ -33,6 +33,7 @@ mod parity {
     pub mod channel_autocomplete;
     pub mod channel_by_name;
     pub mod channel_by_name_for_team_name;
+    pub mod channel_creates;
     pub mod channel_get;
     pub mod channel_member;
     pub mod channel_member_writes;
