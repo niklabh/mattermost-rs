@@ -202,8 +202,17 @@ async fn plant_command(tag: &str, team_id: &str, creator_id: &str) -> Option<Str
     Some(id)
 }
 
-/// The id of the live command a team holds under `trigger`, if any — the only way to name a
-/// command created through the *other* server without parsing its response again.
+/// The id of the live command a team holds under `trigger` — the only way to name a command
+/// created through the *other* server without parsing its response again.
+///
+/// # `None` means "no database", never "no such row"
+///
+/// Conflating the two cost this suite two surviving mutations. The caller's `else { return; }` is
+/// there for a machine with no `DATABASE_URL`; when a lookup that *should* match returns nothing
+/// it took that exit instead, and `a_move_checks_the_destination_the_caller_and_the_creator`
+/// passed having run none of its move assertions — the trigger was built as `mmrscol{tag}` with
+/// `tag` already `colg`, so it searched for `mmrscolg` and the row said `mmrscolcolg`. A missing
+/// row is therefore a **panic** here, and a silent skip is only ever about the database.
 async fn occupied(team: &str, trigger: &str) -> Option<String> {
     let pool = common::fixture_pool().await?;
     let row: Option<(String,)> = sqlx::query_as(
@@ -214,7 +223,12 @@ async fn occupied(team: &str, trigger: &str) -> Option<String> {
     .fetch_optional(&pool)
     .await
     .expect("the lookup runs");
-    row.map(|row| row.0)
+    Some(
+        row.unwrap_or_else(|| {
+            panic!("no live command with trigger {trigger:?} in team {team} — the fixture is wrong")
+        })
+        .0,
+    )
 }
 
 /// Remove everything this module wrote — the planted rows *and* the ones the servers created, by
@@ -678,11 +692,17 @@ async fn an_update_keeps_the_old_id_token_creator_and_create_at() {
             "auto_complete_hint": "[edited]",
             "username": "someone",
             "icon_url": "https://example.invalid/icon.png",
-            // None of these four may survive.
+            // None of these five may survive.
             "token": "aaaaaaaaaaaaaaaaaaaaaaaaaa",
             "creator_id": "bbbbbbbbbbbbbbbbbbbbbbbbbb",
             "create_at": 1,
             "delete_at": 99,
+            // **The one copied field the handler does not also guard.** `team_id` is checked for
+            // equality before the app layer runs, so its copy is unobservable through this route;
+            // nothing checks `plugin_id`, so if the copy were dropped the command would end up
+            // with both a `creator_id` and a `plugin_id` and `IsValid` would answer 400 instead
+            // of 200. This is what keeps that whole family of assignments under test.
+            "plugin_id": "com.mattermost.mmrs",
         })
     };
 
@@ -731,6 +751,10 @@ async fn an_update_keeps_the_old_id_token_creator_and_create_at() {
             "create_at is copied"
         );
         assert_eq!(updated["delete_at"], 0, "delete_at is copied, not taken");
+        assert_eq!(
+            updated["plugin_id"], "",
+            "plugin_id is copied off the old command; taking the body's would make this a 400"
+        );
         assert_eq!(updated["trigger"], "mmrsupdated", "and lower-cased");
         assert_eq!(updated["method"], "G");
         assert_eq!(updated["display_name"], "renamed");
@@ -1115,26 +1139,28 @@ async fn a_move_checks_the_destination_the_caller_and_the_creator() {
     // whose trigger is free where it lives and taken where it is going is refused — and a port
     // that checked the source team instead would allow every move in this test's happy path and
     // fail only here.
-    for (base, dest, tag) in [(GO, &go_dest, "colg"), (RUST, &rs_dest, "colr")] {
-        let trigger = format!("mmrscol{tag}");
+    //
+    // The trigger is **one binding**, used to create and to look up: spelling it twice is how
+    // this block came to search for a row it had never written.
+    let mut collided = Vec::new();
+    for (base, dest, trigger) in [(GO, &go_dest, "mmrscolg"), (RUST, &rs_dest, "mmrscolr")] {
         for team in [&source, dest] {
             let (status, raw) = post(
                 &http,
                 base,
                 &admin,
                 "/api/v4/commands",
-                &create_body(team, &trigger),
+                &create_body(team, trigger),
             )
             .await;
             assert_eq!(status, 201, "{base}/{trigger} in {team}: {raw}");
         }
+        let Some(id) = occupied(&source, trigger).await else {
+            return; // no DATABASE_URL
+        };
+        collided.push(id);
     }
-    let Some(go_col) = occupied(&source, "mmrscolg").await else {
-        return;
-    };
-    let Some(rs_col) = occupied(&source, "mmrscolr").await else {
-        return;
-    };
+    let (go_col, rs_col) = (&collided[0], &collided[1]);
     let (go_status, go_raw) = put(
         &http,
         GO,
