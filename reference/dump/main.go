@@ -585,6 +585,9 @@ var registry = map[string]any{
 
 	// websocket_request.go
 	"web_socket_request": &model.WebSocketRequest{},
+
+	// team_member.go's batch-add wire type, needed by `POST /teams/{id}/members/batch`.
+	"team_member_with_error": &model.TeamMemberWithError{},
 }
 
 // overrides pins specific fields to semantically valid values, keyed by the
@@ -1216,6 +1219,12 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_sidebar_category.json"))
+
+	if err := writeTeamEmailBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: team email behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_team_email.json"))
 
 	// Not a fixture: a generated Rust source file. See behaviour_emoji.go for why the emoji
 	// table is emitted rather than transcribed.

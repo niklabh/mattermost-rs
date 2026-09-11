@@ -6816,3 +6816,58 @@ returned before anything is created — it is, in `serve_create_direct_channel` 
 
 Paying it off is two store methods and a fixture with a guest account; until then no test on this
 stack can distinguish the refusal from the forward, because nobody here is restricted.
+## D-242 · A team join does not bump `Users.UpdateAt`
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-11 (phase 2, team-member writes)
+
+`App.JoinUserToTeam` (app/team.go:851) calls `Store().User().UpdateUpdateAt(user.Id)` between the
+membership write and the sidebar categories, and treats its failure as a **hard** error —
+`app.user.update_update.app_error`, 500. This port does not make that write: `UserStore` has no
+`update_update_at`, and `crates/mm-store/src/user_store.rs` belonged to a sibling worktree for
+the session that ported these routes.
+
+It is on the wire. `Users.UpdateAt` is the `update_at` field of every user object and the input to
+the profile etag, so after a join served by **this** server a client's `GET /users/{id}` reports
+the old timestamp and a cached profile is not invalidated. `POST /teams/{id}/members` and
+`POST …/members/batch` both have it; `addUserToTeamFromInvite` will inherit it.
+
+What is owed: one method — `UPDATE Users SET UpdateAt = $2 WHERE Id = $1`, returning the value
+written — appended to `UserStore`, called from `mm_app::App::join_user_to_team` where the comment
+marking its absence sits, and a parity assertion comparing `GET /users/{id}`'s `update_at` across
+the two servers after a join. The error branch comes with it: Go fails the whole join if the
+update fails, which is a branch this port currently does not have.
+
+The same method is one of the three things `DELETE /api/v4/teams/{team_id}/members/{user_id}`
+is blocked on — `postProcessTeamMemberLeave` (app/team.go:1312) calls it too.
+
+---
+
+## D-243 · The team join and leave system posts are missing
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-11 (phase 2, team-member writes)
+
+The channel-membership twin of this is [D-231]; this is the team half, and it is **larger**
+because the setting that gates it defaults to `true`.
+
+| Go function | Go site | when |
+|---|---|---|
+| `postJoinMessageForDefaultChannel` | app/channel.go:132 | every default channel a team join puts the user in |
+| `postLeaveTeamMessage` | app/team.go:1440 | a self-removal from a team |
+| `postRemoveFromTeamMessage` | app/team.go:1458 | somebody else did the removing |
+
+All three sit behind `ServiceSettings.ExperimentalEnableDefaultChannelLeaveJoinMessages`, which
+`SetDefaults` sets to **`true`** (config.go:874) — unlike most `Experimental*` settings, and
+unlike what the name suggests. So a stock Go server posts "user joined the team" into
+`town-square` on every join and this port does not, and the divergence is the *default* rather
+than a configuration nobody runs.
+
+Blocked on post writes in the store: `mm_store::post_store` is read-only. The rest of the join is
+ported and tested — the membership row, the sidebar categories, the default-channel memberships,
+the `ChannelMemberHistory` rows and all three websocket events.
+
+Two visible consequences beyond the missing message. The post moves `Channels.LastPostAt` and the
+new member's `ChannelMembers.MsgCount`, so a parity test comparing a fresh member's channel row
+has to mask both columns — `parity::team_member_writes::adding_a_member_agrees_and_joins_the_default_channels`
+does, and says so. And the config field itself is **not** read by this port: when the post write
+lands, `Config` needs `experimental_enable_default_channel_leave_join_messages` adding alongside
+the other `ServiceSettings` fields, because both arms of that branch then matter.

@@ -134,14 +134,14 @@ impl StoreError {
         }
     }
 
+    /// True when a bounded collection refused the write, which the app layer answers 400 to.
+    pub fn is_limit_exceeded(&self) -> bool {
+        matches!(self, StoreError::LimitExceeded { .. })
+    }
+
     /// True when a store function refused its input, which the app layer answers 400 to.
     pub fn is_invalid_input(&self) -> bool {
         matches!(self, StoreError::InvalidInput { .. })
-    }
-
-    /// True when a store-enforced quota refused the write, which the app layer answers 400 to.
-    pub fn is_limit_exceeded(&self) -> bool {
-        matches!(self, StoreError::LimitExceeded { .. })
     }
 
     /// True when a store function refused its page size, which the app layer answers 400 to.

@@ -56,6 +56,7 @@ pub mod sessions;
 pub mod sidebar;
 pub mod status;
 pub mod system;
+pub mod team_member_writes;
 pub mod teams;
 pub mod terms_of_service;
 /// The four personal-access-token reads.
@@ -580,9 +581,22 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/teams/name/{team_name}/channels/name/{channel_name}",
             partially_migrated(get(channels::get_channel_by_name_for_team_name)),
         )
+        // gorilla registers the GET and the POST separately on `BaseRoutes.TeamMembers`
+        // (api4/team.go:56, :59) and picks by method; chaining onto one `MethodRouter`
+        // reproduces that, and axum panics on a second `.route()` for the same path.
         .route(
             "/api/v4/teams/{team_id}/members",
-            partially_migrated_with_ids(&state, get(teams::get_team_members)),
+            partially_migrated_with_ids(
+                &state,
+                get(teams::get_team_members).post(team_member_writes::add_team_member),
+            ),
+        )
+        // `BaseRoutes.TeamMembers.Handle("/batch")` (api4/team.go:61). The literal wins over the
+        // `{user_id}` pattern below in both routers, so `/members/batch` never reaches
+        // `getTeamMember` — the same shape as `/members/ids`.
+        .route(
+            "/api/v4/teams/{team_id}/members/batch",
+            partially_migrated_with_ids(&state, post(team_member_writes::add_team_members)),
         )
         // `BaseRoutes.TeamMembers.Handle("/ids")` (api4/team.go:57) — the same literal-in-the-
         // parameter-slot shape as `/channels/{id}/members/ids` above, with the same answer in
@@ -595,6 +609,20 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/teams/{team_id}/members/{user_id}",
             partially_migrated_with_ids(&state, get(teams::get_team_member)),
+        )
+        // `BaseRoutes.TeamMember.Handle("/roles")` and `.Handle("/schemeRoles")`
+        // (api4/team.go:69-70). **`schemeRoles` is camelCase**, matched literally by gorilla and
+        // by axum alike, so `/schemeroles` reaches neither and forwards to Go's own 404.
+        .route(
+            "/api/v4/teams/{team_id}/members/{user_id}/roles",
+            partially_migrated_with_ids(&state, put(team_member_writes::update_team_member_roles)),
+        )
+        .route(
+            "/api/v4/teams/{team_id}/members/{user_id}/schemeRoles",
+            partially_migrated_with_ids(
+                &state,
+                put(team_member_writes::update_team_member_scheme_roles),
+            ),
         )
         // `team_id` gets the id-charset middleware; `channel_name` is not id-shaped and Go's
         // class for it is `[A-Za-z0-9_-]+`, so the handler carries its own mux forward. Go's

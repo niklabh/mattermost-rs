@@ -1,0 +1,94 @@
+# Mutation plan for the four team-membership write routes.
+#
+#   scripts/mutate-batch.sh scripts/mutations/team-member-writes.plan
+#
+# What is worth mutating on these four, and why:
+#
+#   * **`Roles` versus `ExplicitRoles`.** The column stores the explicit roles and the answer
+#     carries the effective ones; getting it backwards persists scheme-implied roles as explicit
+#     grants and survives a scheme change. Aimed at `update_member`, where the two differ.
+#   * **Predicate scope.** Dropping `AND userid = $2` from the UPDATE rewrites every member of the
+#     team, and the *target's* read-back still looks right — so the suite grew a bystander
+#     assertion on the admin's own row to make that catchable.
+#   * **Positional arguments that are adjacent strings.** `LogJoinEvent(userID, channelID)`,
+#     `create_initial_sidebar_categories(user, team)`, and the three scheme booleans. Each swap
+#     compiles, writes a row nothing will match, and appears in no response body.
+#   * **The two `added_to_team` publishes.** One add puts two identical events on the socket, one
+#     from `JoinUserToTeam` and one from `AddTeamMember`. A port that sent one passes every body
+#     test.
+#   * **The check *order* on `/roles`**: body before permission, so a caller holding nothing gets a
+#     400 rather than a 403.
+#   * **The two framings.** `addTeamMember` encodes (newline) and `addTeamMembers` writes (no
+#     newline). Two sibling routes, and the difference is one byte.
+#   * **`graceful`'s response *type*.** Presence of a non-empty value swaps a list of members for a
+#     list of `{user_id, member, error}` wrappers — the least guessable thing on these routes.
+#   * **The email-domain gate**, which is an AND across two restriction lists and reads naturally
+#     as an OR. Driven against the generated corpus in `fixtures/behaviour_team_email.json`.
+#
+# Not mutated, and why — each is a real gap rather than an omission:
+#
+#   * **`MaxUsersPerTeam`.** The seat check cannot be exercised without restarting the Go server
+#     with a different config, and no test on the running stack reaches a 50-member team. The
+#     off-by-one on `existing + 1 > max` is therefore unpinned.
+#   * **The phase-2 migration gate** in `update_team_member_scheme_roles`. On a migrated server
+#     both arms leave `explicit_roles` alone, and this stack is migrated.
+#   * **The group-constrained forward** on both add routes. Nothing on this stack has a
+#     group-constrained team, so the branch is unreachable from any test.
+#   * **A guest member.** `update_team_member_scheme_roles`' first refusal and `JoinUserToTeam`'s
+#     guest branches need a `system_guest` fixture the suite does not build.
+#
+# One survivor, and what it was a finding about: `sidebar-categories-are-created-for-the-team-not-
+# the-user` SURVIVED the first run because `GET …/channels/categories` **creates** the three
+# initial categories itself when it finds none — so a join that wrote them under swapped ids is
+# indistinguishable from a correct one by the time any route can look. The suite now reads
+# `SidebarCategories` directly and asserts the *swapped* pair owns no rows; the mutation is CAUGHT.
+#
+# The last two lines are the no-op controls and must SURVIVE.
+update-roles-column-takes-effective-roles	crates/mm-store/src/team_store.rs	        member.explicit_roles,\n        member.delete_at,\n        member.create_at,	        member.roles.clone(),\n        member.delete_at,\n        member.create_at,	api	the_roles_update
+update-is-not-scoped-to-the-user	crates/mm-store/src/team_store.rs	         WHERE teamid = $1\n           AND userid = $2\n        "#,\n        member.team_id,	         WHERE teamid = $1\n           AND (userid = $2 OR TRUE)\n        "#,\n        member.team_id,	api	the_roles_update
+update-writes-the-scheme-flags-in-the-wrong-order	crates/mm-store/src/team_store.rs	               schemeguest = $6,\n               schemeuser = $7,\n               schemeadmin = $8	               schemeguest = $6,\n               schemeuser = $8,\n               schemeadmin = $7	api	the_scheme_roles_update
+save-inserts-the-scheme-flags-swapped	crates/mm-store/src/team_store.rs	        member.explicit_roles,\n        member.delete_at,\n        member.scheme_user,\n        member.scheme_admin,	        member.explicit_roles,\n        member.delete_at,\n        member.scheme_admin,\n        member.scheme_user,	api	adding_a_member_agrees
+save-inserts-the-team-id-as-the-user-id	crates/mm-store/src/team_store.rs	        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)\n        "#,\n        member.team_id,\n        member.user_id,	        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)\n        "#,\n        member.team_id,\n        member.team_id,	api	adding_a_member_agrees
+roles-allows-the-guest-flag-to-change	crates/mm-app/src/team_member.rs	        if prev_scheme_guest != member.scheme_guest {	        if false && prev_scheme_guest != member.scheme_guest {	api	the_roles_update
+roles-does-not-require-a-base-scheme-role	crates/mm-app/src/team_member.rs	        if !member.scheme_guest && !member.scheme_user {	        if false && !member.scheme_user {	api	the_roles_update
+roles-does-not-clear-the-scheme-flags-first	crates/mm-app/src/team_member.rs	        member.scheme_guest = false;\n        member.scheme_user = false;\n        member.scheme_admin = false;	        member.scheme_guest = member.scheme_guest;\n        member.scheme_user = member.scheme_user;\n        member.scheme_admin = member.scheme_admin;	api	the_roles_update
+roles-accepts-a-scheme-role-from-another-scheme	crates/mm-app/src/team_member.rs	            } else {\n                return Err(scheme_role_error(role_name));\n            }	            } else {\n                member.scheme_user = true;\n            }	api	a_team_scheme_replaces
+scheme-roles-accepts-a-guest-request	crates/mm-app/src/team_member.rs	        if is_scheme_guest {\n            return Err(roles_error("api.team", "user_and_guest"));	        if false {\n            return Err(roles_error("api.team", "user_and_guest"));	api	the_scheme_roles_update
+scheme-roles-does-not-require-the-user-flag	crates/mm-app/src/team_member.rs	        if !is_scheme_user {\n            return Err(roles_error("api.team", "unset_user_scheme"));	        if is_scheme_user {\n            return Err(roles_error("api.team", "unset_user_scheme"));	api	the_scheme_roles_update
+memberrole-is-broadcast-to-the-team	crates/mm-app/src/team_member.rs	            WEBSOCKET_EVENT_MEMBERROLE_UPDATED,\n            "",\n            "",\n            &member.user_id,	            WEBSOCKET_EVENT_MEMBERROLE_UPDATED,\n            &member.team_id,\n            "",\n            &member.user_id,	api	publish_memberrole_updated
+memberrole-payload-key-is-the-channel-ones	crates/mm-app/src/team_member.rs	            Ok(json) => event.add("member", serde_json::Value::String(json)),	            Ok(json) => event.add("teamMember", serde_json::Value::String(json)),	api	publish_memberrole_updated
+memberrole-is-not-published-at-all	crates/mm-app/src/team_member.rs	        self.send_updated_team_member_event(&updated).await;	        let _ = &updated;	api	publish_memberrole_updated
+add-publishes-added-to-team-only-once	crates/mm-app/src/team_member.rs	        let (_, member) = self.add_user_to_team(team_id, user_id, "").await?;\n        self.publish_added_to_team(team_id, user_id).await;	        let (_, member) = self.add_user_to_team(team_id, user_id, "").await?;\n        let _ = (team_id, user_id);	api	added_to_team_twice
+the-join-itself-publishes-nothing	crates/mm-app/src/team_member.rs	        self.publish_added_to_team(&team.id, &user.id).await;\n\n        Ok(member)	        let _ = (&team.id, &user.id);\n\n        Ok(member)	api	added_to_team_twice
+an-existing-member-does-not-short-circuit	crates/mm-app/src/team_member.rs	        if already_added {\n            return Ok(member);\n        }	        if false {\n            return Ok(member);\n        }	api	added_to_team_twice
+every-new-member-is-made-a-team-admin	crates/mm-app/src/team_member.rs	            candidate.scheme_admin = !groups.is_empty();	            candidate.scheme_admin = groups.is_empty();	api	adding_a_member_agrees
+only-a-guest-joins-the-default-channels	crates/mm-app/src/team_member.rs	        if !is_guest\n            && let Err(err) = self	        if is_guest\n            && let Err(err) = self	api	adding_a_member_agrees
+default-channels-skip-the-open-ones	crates/mm-app/src/team_member.rs	            if channel.channel_type != CHANNEL_TYPE_OPEN {	            if channel.channel_type == CHANNEL_TYPE_OPEN {	api	adding_a_member_agrees
+join-history-is-written-with-the-ids-swapped	crates/mm-app/src/team_member.rs	                .log_join_event(&user.id, &channel.id, get_millis())	                .log_join_event(&channel.id, &user.id, get_millis())	api	adding_a_member_agrees
+sidebar-categories-are-created-for-the-team-not-the-user	crates/mm-app/src/team_member.rs	            .create_initial_sidebar_categories(&user.id, &team.id)	            .create_initial_sidebar_categories(&team.id, &user.id)	api	adding_a_member_agrees
+the-email-domain-gate-is-inverted	crates/mm-app/src/team_member.rs	        if !self.is_team_email_allowed(user, team) {	        if self.is_team_email_allowed(user, team) {	api	adding_a_member_agrees
+a-non-graceful-batch-swallows-its-errors	crates/mm-app/src/team_member.rs	                    if !graceful {\n                        return Err(err);\n                    }	                    if false {\n                        return Err(err);\n                    }	api	the_batch_route_agrees
+default-channel-names-drop-off-topic	crates/mm-app/src/team_member.rs	            return vec!["town-square".to_owned(), "off-topic".to_owned()];	            return vec!["town-square".to_owned()];	unit	default_channel_names_match_gos
+an-empty-domain-restriction-refuses-everything	crates/mm-app/src/team_member.rs	        if domains.is_empty() {\n            continue;\n        }	        if !domains.is_empty() {\n            continue;\n        }	unit	is_email_address_allowed_matches_go
+the-domain-suffix-drops-the-at-sign	crates/mm-app/src/team_member.rs	            .any(|domain| email.ends_with(&format!("@{domain}")))	            .any(|domain| email.ends_with(domain.as_str()))	unit	is_email_address_allowed_matches_go
+the-restrictions-are-an-or-not-an-and	crates/mm-app/src/team_member.rs	            return false;\n        }\n    }\n    true\n}	            return false;\n        }\n        return true;\n    }\n    true\n}	unit	is_email_address_allowed_matches_go
+normalize-domains-keeps-the-at-sign	crates/mm-app/src/team_member.rs	        .replace(['@', ','], " ")	        .replace([','], " ")	unit	is_email_address_allowed_matches_go
+roles-body-check-is-skipped	crates/mm-api/src/team_member_writes.rs	    if !is_valid_user_roles(new_roles) {	    if false && is_valid_user_roles(new_roles) {	api	the_roles_update
+roles-checks-the-permission-before-the-body	crates/mm-api/src/team_member_writes.rs	    if !is_valid_user_roles(new_roles) {\n        return ApiError::invalid_param("team_member_roles").into_response();\n    }\n\n    if !state\n        .app\n        .session_has_permission_to_team(&session.0, &team_id, &PERMISSION_MANAGE_TEAM_ROLES)\n        .await\n    {\n        return ApiError::from(*make_permission_error(\n            &session.0,\n            &[&PERMISSION_MANAGE_TEAM_ROLES],\n        ))\n        .into_response();\n    }	    if !state\n        .app\n        .session_has_permission_to_team(&session.0, &team_id, &PERMISSION_MANAGE_TEAM_ROLES)\n        .await\n    {\n        return ApiError::from(*make_permission_error(\n            &session.0,\n            &[&PERMISSION_MANAGE_TEAM_ROLES],\n        ))\n        .into_response();\n    }\n\n    if !is_valid_user_roles(new_roles) {\n        return ApiError::invalid_param("team_member_roles").into_response();\n    }	api	manage_team_roles_is_refused
+scheme-roles-swallows-a-malformed-body	crates/mm-api/src/team_member_writes.rs	    let scheme_roles: SchemeRoles = match serde_json::from_slice(&bytes) {	    let scheme_roles: SchemeRoles = match serde_json::from_slice(&bytes).or(Ok::<SchemeRoles, serde_json::Error>(SchemeRoles::default())) {	api	the_scheme_roles_update
+the-add-body-accepts-a-json-array	crates/mm-api/src/team_member_writes.rs	        Ok(value @ serde_json::Value::Object(_)) => serde_json::from_value(value).ok(),\n        _ => None,\n    }\n}\n\n/// The list form	        Ok(value) => serde_json::from_value(value).ok(),\n        _ => None,\n    }\n}\n\n/// The list form	unit	only_an_object_or_null_decodes
+the-bodys-team-id-need-not-match-the-path	crates/mm-api/src/team_member_writes.rs	    if member.team_id != team_id {\n        return ApiError::invalid_param("team_id").into_response();	    if member.team_id == team_id {\n        return ApiError::invalid_param("team_id").into_response();	api	the_add_bodys_refusals
+the-batch-members-team-id-need-not-match-the-path	crates/mm-api/src/team_member_writes.rs	        if member.team_id != team_id {	        if member.team_id == team_id {	api	the_batch_route_agrees
+the-self-add-branch-is-inverted	crates/mm-api/src/team_member_writes.rs	    if member.user_id == session.0.user_id {	    if member.user_id != session.0.user_id {	api	add_permission_matrix
+the-open-invite-branch-is-inverted	crates/mm-api/src/team_member_writes.rs	        if team.allow_open_invite {	        if !team.allow_open_invite {	api	add_permission_matrix
+the-add-answer-is-not-sanitised	crates/mm-api/src/team_member_writes.rs	        created.sanitize_role_data(&session.0.user_id);	        let _ = &created;	api	add_permission_matrix
+the-batch-answer-is-not-sanitised	crates/mm-api/src/team_member_writes.rs	                member.sanitize_role_data(&session.0.user_id);	                let _ = &member;	api	add_permission_matrix
+the-add-body-is-not-encoder-framed	crates/mm-api/src/team_member_writes.rs	    body.push(b'\\n');	    let body = body;	api	adding_a_member_agrees
+the-batch-body-is-encoder-framed	crates/mm-api/src/team_member_writes.rs	    // `w.Write(js)` — **not** an encoder, so no trailing newline.\n    (	    let body = { let mut body = body; body.push(b'\\n'); body };\n    (	api	the_batch_route_agrees
+the-batch-always-answers-the-graceful-shape	crates/mm-api/src/team_member_writes.rs	    let body = if graceful {	    let body = if true {	api	the_batch_route_agrees
+graceful-is-mere-presence-of-the-key	crates/mm-api/src/team_member_writes.rs	        .is_some_and(|(_, value)| !value.is_empty())	        .is_some_and(|(_, value)| value.is_empty() || !value.is_empty())	unit	graceful_is_any_non_empty
+the-batch-cap-is-not-read	crates/mm-api/src/team_member_writes.rs	const MAX_ADD_MEMBERS_BATCH: usize = 256;	const MAX_ADD_MEMBERS_BATCH: usize = 1;	api	the_batch_route_agrees
+an-empty-batch-is-accepted	crates/mm-api/src/team_member_writes.rs	    if members.is_empty() {	    if !members.is_empty() {	api	the_batch_route_agrees
+the-guest-screen-runs-for-the-wrong-caller	crates/mm-api/src/team_member_writes.rs	    if state\n        .app\n        .session_has_permission_to_team(&session.0, team_id, &PERMISSION_INVITE_GUEST)\n        .await\n    {\n        return None;\n    }	    if !state\n        .app\n        .session_has_permission_to_team(&session.0, team_id, &PERMISSION_INVITE_GUEST)\n        .await\n    {\n        return None;\n    }	api	the_add_bodys_refusals
+control-rename-a-local-binding	crates/mm-api/src/team_member_writes.rs	    let props = map_from_json(&bytes);\n    let new_roles = props.get("roles").map(String::as_str).unwrap_or_default();	    let decoded = map_from_json(&bytes);\n    let new_roles = decoded.get("roles").map(String::as_str).unwrap_or_default();	unit	an_absent_roles_key
+control-reorder-two-independent-select-columns	crates/mm-store/src/team_store.rs	        SELECT ts.defaultteamguestrole,\n               ts.defaultteamuserrole,\n               ts.defaultteamadminrole\n          FROM teams t\n          LEFT JOIN schemes ts ON t.schemeid = ts.id\n         WHERE t.id = $1\n        "#,\n        member.team_id,\n    )\n    .fetch_optional(pool)\n    .await\n    .map_err(|source| StoreError::Db {\n        context: "default_team_roles_select".to_owned(),	        SELECT ts.defaultteamuserrole,\n               ts.defaultteamguestrole,\n               ts.defaultteamadminrole\n          FROM teams t\n          LEFT JOIN schemes ts ON t.schemeid = ts.id\n         WHERE t.id = $1\n        "#,\n        member.team_id,\n    )\n    .fetch_optional(pool)\n    .await\n    .map_err(|source| StoreError::Db {\n        context: "default_team_roles_select".to_owned(),	api	adding_a_member_agrees

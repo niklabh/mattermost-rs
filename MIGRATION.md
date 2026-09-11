@@ -10058,3 +10058,86 @@ than untested, and it is cheaper to say so than to rediscover it:
   hash of the sorted ids, `teammate_ids` is re-sorted at the publish site, and both parsers
   de-duplicate — so the two are observationally identical *there*. They are not on the DM route,
   which is why that mutation is in the plan and is caught.
+## The team membership writes (2026-09-11)
+
+`POST /api/v4/teams/{team_id}/members`, `POST …/members/batch`,
+`PUT …/members/{user_id}/roles` and `PUT …/members/{user_id}/schemeRoles`. **314 → 318 of 764**
+(counted on this branch; the four parallel worktrees this round each branched at 314, so the
+merged number is the one `scripts/routes.py` reports on `main`). Behind them:
+`TeamStore::update_member` and `TeamStore::save_member`,
+`GroupStore::admin_role_groups_for_team_member`, and `mm_app::team_member` — the whole of
+`JoinUserToTeam` bar two writes. `DELETE …/members/{user_id}` is **not** here; see the dependency
+note at the end.
+
+### Two of the four error ids say `api.channel.` while describing a team
+
+`changing_guest_role` and `scheme_role` (app/team.go:432 and :467) sit in the
+`api.channel.update_team_member_roles.*` family; their three siblings on the same function say
+`api.team.`. Go's copy-paste, on the wire, and asserted against the running server rather than
+inferred. `mm_app::App::update_team_member_roles` carries the note.
+
+### `serde` deserializes a struct from a sequence, and Go does not
+
+`from_slice::<TeamMember>(b"[]")` succeeds — a derived `Deserialize` accepts the sequence form and
+`#[serde(default)]` fills the missing tail — so the first version of `addTeamMember` answered
+`api.context.invalid_body_param.app_error` where Go answers the route's own
+`api.team.add_team_member.invalid_body.app_error`. Both add routes now screen the `serde_json::Value`
+before converting; see `decode_team_member`. This is a whole class, not one route: any handler that
+decodes a Go struct straight from the body has it.
+
+### One add publishes `added_to_team` twice
+
+`App.JoinUserToTeam` publishes it (team.go:891) and `App.AddTeamMember` publishes it again on top
+(team.go:1158). `AddTeamMembers` does the same per successful user. A port that sent one event
+passes every response-body test and every count assertion a reader would think to write.
+
+### The add path's two framings, and its two response *types*
+
+`addTeamMember` is `json.NewEncoder(w).Encode` (trailing newline); `addTeamMembers` is
+`w.Write(json.Marshal(...))` (none). And `?graceful=` — any **non-empty first value**, `0`
+included — swaps a bare list of `TeamMember` for a list of `{user_id, member, error}` in which the
+unset half is `null` rather than absent.
+
+### The check order differs between the two add routes
+
+`addTeamMember` checks the permission and *then* reads the team for the group-constrained branch;
+`addTeamMembers` reads the team and takes that branch **before** the permission check. So on a
+group-constrained team a caller holding nothing gets the group refusal from one route and a 403
+from the other.
+
+### `IsTeamEmailAllowed` is an AND across two restriction lists
+
+`[team.AllowedDomains, TeamSettings.RestrictCreationToDomains]`, every non-empty entry of which
+must accept the address — so a team allowing `example.com` on a server restricted to
+`corp.example.com` admits nobody. An empty entry is skipped rather than matched, which is why the
+stock configuration admits everybody. 29 cases in `fixtures/behaviour_team_email.json`, generated
+from the Go function.
+
+### The stock `team_user` role holds `add_user_to_team`
+
+A plain member can add a third party. What they lack is `manage_team_roles`, so the answer runs
+through `SanitizeRoleData` and reaches the client with `delete_at: **-1**` on a membership that
+was just created with `delete_at = 0`. Measured: this suite asserted a 403 first and Go answered
+201.
+
+### `UpdateMember` reports no miss, so a vanished membership is a 200
+
+Go `Exec`s the UPDATE and never looks at the rows affected, then computes the answer from the
+**in-memory** member. `PUT …/roles` for a user who is not on the team therefore answers 200 having
+written nothing — unlike the channel twin, whose re-select turns that into a 404.
+
+### Mutation testing: see the tally in the session report
+
+Plan committed at `scripts/mutations/team-member-writes.plan`, which also records the four
+branches it deliberately does **not** mutate and why each is unreachable from this stack
+(`MaxUsersPerTeam`, the phase-2 migration gate, the group-constrained forward, and any guest
+member).
+
+### What `DELETE …/members/{user_id}` is waiting on
+
+`RemoveUserFromTeam` → `LeaveTeam` needs three store methods this session did not own:
+`ChannelStore::GetTeamSpaceChannelsForUser` and `ChannelStore::ClearSidebarOnTeamLeave`
+(`channel_store.rs`, a sibling worktree's this round) and `UserStore::UpdateUpdateAt`
+(`user_store.rs`, likewise). The websocket events, the soft-delete of the membership and the
+preference cleanup are all straightforward once those exist. See [D-242] for the `UpdateUpdateAt`
+gap, which the *add* path shares.

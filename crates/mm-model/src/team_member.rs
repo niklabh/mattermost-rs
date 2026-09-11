@@ -5,8 +5,9 @@
 //!
 //! # Deliberately not translated here
 //!
-//! - `TeamMemberWithError` / `EmailInviteWithError` and their helpers embed `*AppError` as a
-//!   wire field. That works, but they are invite-flow plumbing with no consumer yet.
+//! - `EmailInviteWithError` and its helpers embed `*AppError` as a wire field. That works, but it
+//!   is invite-flow plumbing with no consumer yet. `TeamMemberWithError` had the same note until
+//!   `POST /teams/{id}/members/batch` landed and needed it.
 //! - `Auditable` is an audit-log projection; it follows the audit layer.
 //! - `PreUpdate` is empty in Go (team_member.go:139). Not reproduced — an empty method that
 //!   exists only to satisfy an interface is noise until that interface exists.
@@ -87,6 +88,50 @@ pub struct TeamMemberForExport {
     pub team_name: String,
 }
 
+/// Port of `model.TeamMemberWithError` (team_member.go:64) — the element type of
+/// `POST /teams/{team_id}/members/batch?graceful=`'s response.
+///
+/// **No `omitempty` on any of the three**, so `member` and `error` are `null` rather than absent
+/// whenever the other one is set. A client reads `error == null` to mean "this one worked", which
+/// is why skipping the nulls would break the format the `graceful` flag exists for.
+/// `AppError` carries a boxed `dyn Error` and is therefore neither `Clone` nor `PartialEq`; this
+/// type inherits both restrictions.
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TeamMemberWithError {
+    #[serde(rename = "user_id")]
+    pub user_id: String,
+
+    #[serde(rename = "member")]
+    pub member: Option<TeamMember>,
+
+    #[serde(rename = "error")]
+    pub error: Option<Box<AppError>>,
+}
+
+/// Port of `model.TeamMembersWithErrorToTeamMembers` (team_member.go:107) — the members of the
+/// entries that carry **no** error, in order.
+///
+/// Go's accumulator is `var ret []*TeamMember`, so a list in which every entry failed marshals as
+/// **`null`, not `[]`**. Reproduced with an `Option`: the non-graceful handler writes
+/// `json.Marshal` of exactly this value. In practice the non-graceful path returns early on the
+/// first error, so `None` is only reachable through an empty input — which the handler refuses —
+/// but the shape is the contract.
+#[must_use]
+pub fn team_members_with_error_to_team_members(
+    entries: &[TeamMemberWithError],
+) -> Option<Vec<TeamMember>> {
+    let members: Vec<TeamMember> = entries
+        .iter()
+        .filter(|entry| entry.error.is_none())
+        .filter_map(|entry| entry.member.clone())
+        .collect();
+    if members.is_empty() {
+        return None;
+    }
+    Some(members)
+}
+
 impl TeamMember {
     /// Port of `(*TeamMember).IsValid` (team_member.go:122).
     ///
@@ -163,6 +208,89 @@ mod tests {
     /// (`getTeamUnread` encodes, `getTeamsUnreadForUser` marshals), so its field set is pinned
     /// against a generated fixture rather than against either handler. Eight fields, none
     /// `omitempty`, every one distinct and non-zero in the fixture.
+    /// The batch-add element type. The fixture carries both `member` and `error` populated,
+    /// which is a shape the route never produces — Go fills exactly one — so the *null* halves
+    /// are pinned separately below.
+    #[test]
+    fn team_member_with_error_matches_go_serialization() {
+        let go = include_str!("../../../fixtures/team_member_with_error.json");
+        let parsed: TeamMemberWithError = serde_json::from_str(go).unwrap();
+        let round_tripped = serde_json::to_value(&parsed).unwrap();
+        let expected: serde_json::Value = serde_json::from_str(go).unwrap();
+        assert_eq!(round_tripped, expected);
+        assert_eq!(expected.as_object().unwrap().len(), 3);
+    }
+
+    /// Neither pointer field is `omitempty`, so an absent one is `null` and **not** a missing
+    /// key. Both halves, because the graceful format is read by matching on `error`.
+    #[test]
+    fn the_unset_half_is_null_rather_than_absent() {
+        let ok = TeamMemberWithError {
+            user_id: "u".into(),
+            member: Some(valid_member()),
+            error: None,
+        };
+        let encoded = serde_json::to_value(&ok).unwrap();
+        assert!(encoded.get("error").is_some(), "the key must be present");
+        assert!(encoded["error"].is_null());
+
+        let failed = TeamMemberWithError {
+            user_id: "u".into(),
+            member: None,
+            error: Some(AppError::boxed("W", "some.id", None, "", 400)),
+        };
+        let encoded = serde_json::to_value(&failed).unwrap();
+        assert!(encoded.get("member").is_some(), "the key must be present");
+        assert!(encoded["member"].is_null());
+        assert_eq!(encoded["error"]["id"], "some.id");
+    }
+
+    /// `TeamMembersWithErrorToTeamMembers` keeps order, drops the failures, and answers **nil**
+    /// — `null` on the wire — rather than an empty array when nothing survives.
+    #[test]
+    fn the_non_graceful_projection_drops_failures_and_nils_out() {
+        let mut first = valid_member();
+        first.user_id = "a".into();
+        let mut second = valid_member();
+        second.user_id = "b".into();
+        let entries = vec![
+            TeamMemberWithError {
+                user_id: "a".into(),
+                member: Some(first),
+                error: None,
+            },
+            TeamMemberWithError {
+                user_id: "x".into(),
+                member: None,
+                error: Some(AppError::boxed("W", "nope", None, "", 400)),
+            },
+            TeamMemberWithError {
+                user_id: "b".into(),
+                member: Some(second),
+                error: None,
+            },
+        ];
+        let kept = team_members_with_error_to_team_members(&entries).unwrap();
+        assert_eq!(
+            kept.iter().map(|m| m.user_id.as_str()).collect::<Vec<_>>(),
+            vec!["a", "b"]
+        );
+
+        let all_failed = vec![TeamMemberWithError {
+            user_id: "x".into(),
+            member: None,
+            error: Some(AppError::boxed("W", "nope", None, "", 400)),
+        }];
+        assert!(
+            team_members_with_error_to_team_members(&all_failed).is_none(),
+            "Go's nil slice marshals as null, not []"
+        );
+        assert_eq!(
+            serde_json::to_value(team_members_with_error_to_team_members(&all_failed)).unwrap(),
+            serde_json::Value::Null
+        );
+    }
+
     #[test]
     fn team_unread_matches_go_serialization() {
         let go = include_str!("../../../fixtures/team_unread.json");

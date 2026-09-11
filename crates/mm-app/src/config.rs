@@ -238,6 +238,23 @@ pub struct Config {
     /// A **negative** value switches the store's check off entirely (`maxChannelsPerTeam >= 0`);
     /// the app-layer check has no such escape and would still refuse.
     pub max_channels_per_team: i64,
+    /// `TeamSettings.MaxUsersPerTeam` (config.go:2543). Go default **`50`**
+    /// (`TeamSettingsDefaultMaxUsersPerTeam`, config.go:144).
+    ///
+    /// Passed straight into `TeamStore::save_member`, which refuses the write with
+    /// `ErrLimitExceeded` when `existing + new > max`. Two things a reader gets wrong:
+    /// the count excludes **deleted memberships and deleted users** (both `DeleteAt = 0`
+    /// predicates), and the guard on the whole check is `maxUsersPerTeam >= 0` — so a document
+    /// holding `0` caps a team at zero members rather than disabling the limit.
+    pub max_users_per_team: i64,
+
+    /// `TeamSettings.ExperimentalDefaultChannels` (config.go:2568). Go default **`[]`**.
+    ///
+    /// When empty, `DefaultChannelNames` is `["town-square", "off-topic"]`; when set, the list
+    /// **replaces `off-topic` only** — `town-square` is always first and is de-duplicated out of
+    /// the configured list if it names itself. Read on the team-join path to decide which
+    /// channels a new member is put in.
+    pub experimental_default_channels: Vec<String>,
 
     /// `ServiceSettings.EnableBurnOnRead` (config.go:472). Go default **`true`**.
     pub enable_burn_on_read: bool,
@@ -766,6 +783,10 @@ impl Default for Config {
             enable_channel_category_sorting: true,
             // config.go:2629 — `new(int64(2000))`.
             max_channels_per_team: 2000,
+            // config.go:2577 — `TeamSettingsDefaultMaxUsersPerTeam`.
+            max_users_per_team: 50,
+            // config.go:2653 — `[]string{}`.
+            experimental_default_channels: Vec::new(),
             enable_burn_on_read: true,
             // config.go:870 — `new(-1)`.
             post_edit_time_limit: -1,
@@ -982,6 +1003,18 @@ impl Config {
             max_channels_per_team: lookup("MM_TEAMSETTINGS_MAXCHANNELSPERTEAM")
                 .and_then(|value| value.parse().ok())
                 .unwrap_or(default.max_channels_per_team),
+            max_users_per_team: lookup_int(
+                lookup,
+                "MM_TEAMSETTINGS_MAXUSERSPERTEAM",
+                default.max_users_per_team,
+            ),
+            // Go's env decoder splits a `[]string` setting on commas, so the environment form of
+            // this is `town-square,welcome`. An unset variable and an empty one are different:
+            // unset keeps the default, and `""` is an empty list — which is also the default, so
+            // the distinction is invisible here and would not be for a non-empty default.
+            experimental_default_channels: lookup("MM_TEAMSETTINGS_EXPERIMENTALDEFAULTCHANNELS")
+                .map(|raw| split_list(&raw))
+                .unwrap_or(default.experimental_default_channels),
             enable_burn_on_read: lookup_bool(
                 lookup,
                 "MM_SERVICESETTINGS_ENABLEBURNONREAD",
@@ -1354,6 +1387,12 @@ impl Config {
             max_channels_per_team: team_settings
                 .max_channels_per_team
                 .unwrap_or(default.max_channels_per_team),
+            max_users_per_team: team_settings
+                .max_users_per_team
+                .unwrap_or(default.max_users_per_team),
+            experimental_default_channels: team_settings
+                .experimental_default_channels
+                .unwrap_or(default.experimental_default_channels),
             enable_burn_on_read: service
                 .enable_burn_on_read
                 .unwrap_or(default.enable_burn_on_read),
@@ -1631,6 +1670,10 @@ struct TeamSettingsDocument {
     enable_channel_category_sorting: Option<bool>,
     #[serde(rename = "MaxChannelsPerTeam")]
     max_channels_per_team: Option<i64>,
+    #[serde(rename = "MaxUsersPerTeam")]
+    max_users_per_team: Option<i64>,
+    #[serde(rename = "ExperimentalDefaultChannels")]
+    experimental_default_channels: Option<Vec<String>>,
 }
 
 /// The one field of `EmailSettings` a migrated route reads.
@@ -1891,6 +1934,16 @@ fn lookup_int(lookup: &impl Fn(&str) -> Option<String>, key: &str, default: i64)
     lookup(key)
         .and_then(|raw| raw.parse::<i64>().ok())
         .unwrap_or(default)
+}
+
+/// Go's environment decoder for a `[]string` setting: split on commas, keep the pieces as
+/// written. Whitespace is **not** trimmed — `"a, b"` is `["a", " b"]` in Go too — and an empty
+/// string yields an empty list rather than one empty element.
+fn split_list(raw: &str) -> Vec<String> {
+    if raw.is_empty() {
+        return Vec::new();
+    }
+    raw.split(',').map(str::to_owned).collect()
 }
 
 #[cfg(test)]

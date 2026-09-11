@@ -1,0 +1,259 @@
+{
+    "is_email_address_allowed": [
+        {
+            "name": "no_restrictions_at_all",
+            "email": "me@example.com",
+            "restrictions": [
+                "",
+                ""
+            ],
+            "allowed": true
+        },
+        {
+            "name": "empty_list",
+            "email": "me@example.com",
+            "restrictions": [],
+            "allowed": true
+        },
+        {
+            "name": "one_empty_one_set_matching",
+            "email": "me@example.com",
+            "restrictions": [
+                "",
+                "example.com"
+            ],
+            "allowed": true
+        },
+        {
+            "name": "one_empty_one_set_failing",
+            "email": "me@other.com",
+            "restrictions": [
+                "",
+                "example.com"
+            ],
+            "allowed": false
+        },
+        {
+            "name": "whitespace_only_restriction_is_empty",
+            "email": "me@other.com",
+            "restrictions": [
+                "   ",
+                ""
+            ],
+            "allowed": true
+        },
+        {
+            "name": "both_lists_accept",
+            "email": "me@example.com",
+            "restrictions": [
+                "example.com",
+                "example.com"
+            ],
+            "allowed": true
+        },
+        {
+            "name": "first_accepts_second_refuses",
+            "email": "me@example.com",
+            "restrictions": [
+                "example.com",
+                "corp.example.com"
+            ],
+            "allowed": false
+        },
+        {
+            "name": "second_accepts_first_refuses",
+            "email": "me@corp.example.com",
+            "restrictions": [
+                "example.com",
+                "corp.example.com"
+            ],
+            "allowed": false
+        },
+        {
+            "name": "neither_accepts",
+            "email": "me@nope.com",
+            "restrictions": [
+                "example.com",
+                "corp.example.com"
+            ],
+            "allowed": false
+        },
+        {
+            "name": "both_name_it_among_others",
+            "email": "me@example.com",
+            "restrictions": [
+                "a.com example.com",
+                "example.com b.com"
+            ],
+            "allowed": true
+        },
+        {
+            "name": "second_domain_of_one_restriction",
+            "email": "me@b.com",
+            "restrictions": [
+                "a.com b.com c.com",
+                ""
+            ],
+            "allowed": true
+        },
+        {
+            "name": "none_of_one_restriction",
+            "email": "me@d.com",
+            "restrictions": [
+                "a.com b.com c.com",
+                ""
+            ],
+            "allowed": false
+        },
+        {
+            "name": "subdomain_is_not_the_domain",
+            "email": "me@sub.example.com",
+            "restrictions": [
+                "example.com",
+                ""
+            ],
+            "allowed": false
+        },
+        {
+            "name": "suffix_without_at_is_not_a_match",
+            "email": "me@notexample.com",
+            "restrictions": [
+                "example.com",
+                ""
+            ],
+            "allowed": false
+        },
+        {
+            "name": "the_domain_itself_as_the_whole_address",
+            "email": "example.com",
+            "restrictions": [
+                "example.com",
+                ""
+            ],
+            "allowed": false
+        },
+        {
+            "name": "empty_local_part_still_matches",
+            "email": "@example.com",
+            "restrictions": [
+                "example.com",
+                ""
+            ],
+            "allowed": true
+        },
+        {
+            "name": "leading_at_is_stripped",
+            "email": "me@example.com",
+            "restrictions": [
+                "@example.com",
+                ""
+            ],
+            "allowed": true
+        },
+        {
+            "name": "comma_separated",
+            "email": "me@b.com",
+            "restrictions": [
+                "a.com,b.com",
+                ""
+            ],
+            "allowed": true
+        },
+        {
+            "name": "comma_and_space_separated",
+            "email": "me@b.com",
+            "restrictions": [
+                "@a.com, b.com",
+                ""
+            ],
+            "allowed": true
+        },
+        {
+            "name": "runs_of_whitespace",
+            "email": "me@b.com",
+            "restrictions": [
+                "a.com \t\n b.com",
+                ""
+            ],
+            "allowed": true
+        },
+        {
+            "name": "upper_case_restriction",
+            "email": "me@example.com",
+            "restrictions": [
+                "EXAMPLE.COM",
+                ""
+            ],
+            "allowed": true
+        },
+        {
+            "name": "upper_case_email_is_not_lowered_here",
+            "email": "ME@EXAMPLE.COM",
+            "restrictions": [
+                "example.com",
+                ""
+            ],
+            "allowed": false
+        },
+        {
+            "name": "at_inside_a_name_splits_it",
+            "email": "me@b",
+            "restrictions": [
+                "a@b",
+                ""
+            ],
+            "allowed": true
+        },
+        {
+            "name": "at_inside_a_name_splits_it_other_half",
+            "email": "me@a",
+            "restrictions": [
+                "a@b",
+                ""
+            ],
+            "allowed": true
+        },
+        {
+            "name": "only_commas",
+            "email": "me@example.com",
+            "restrictions": [
+                ",,,",
+                ""
+            ],
+            "allowed": true
+        },
+        {
+            "name": "only_at_signs",
+            "email": "me@example.com",
+            "restrictions": [
+                "@@@",
+                ""
+            ],
+            "allowed": true
+        },
+        {
+            "name": "guest_single_empty_restriction",
+            "email": "guest@anywhere.com",
+            "restrictions": [
+                ""
+            ],
+            "allowed": true
+        },
+        {
+            "name": "guest_single_matching",
+            "email": "guest@example.com",
+            "restrictions": [
+                "example.com"
+            ],
+            "allowed": true
+        },
+        {
+            "name": "guest_single_refusing",
+            "email": "guest@other.com",
+            "restrictions": [
+                "example.com"
+            ],
+            "allowed": false
+        }
+    ]
+}
