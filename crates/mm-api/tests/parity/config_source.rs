@@ -28,9 +28,9 @@
 //! Go server is actually *running* on. The `Configurations` row is what it *persisted*. A setting
 //! that differs between the two is an environment override, and finding one proves the exclusion.
 //!
-//! This route is forwarded, not migrated, so both base URLs answer identically by construction —
-//! the comparison here is Go-running against Go-persisted, and `RUST` is used only to confirm the
-//! proxy is in front of it.
+//! The comparison here is Go-running against Go-persisted. `RUST` appears only in the last test,
+//! which since 2026-09-11 confirms that the route is *served* rather than forwarded — it used to
+//! confirm the opposite.
 
 use crate::common;
 
@@ -178,17 +178,29 @@ async fn no_modelled_setting_is_overridden_by_environment_in_this_stack() {
     }
 }
 
-/// The proxy forwards the client-config route unchanged, which is what lets the tests above use
-/// Go's answer as an oracle without caring which server they asked.
+/// Both servers answer the client-config route identically, which is what lets the tests above
+/// use Go's answer as an oracle without caring which server they asked.
+///
+/// **It used to be forwarded and is now served here** (`mm_api::config::get_client_config`), so
+/// this no longer holds by construction and the header is checked: without that, a regression in
+/// the handler would silently be measured against itself. The byte-level comparison lives in the
+/// `config_reads` suite; this one keeps the oracle above honest.
 #[tokio::test]
-async fn the_client_config_route_is_forwarded_unchanged() {
+async fn the_client_config_route_agrees_whichever_server_answers() {
     if !stack_enabled() {
         return;
     }
+
+    let response = client()
+        .get(format!("{RUST}{CLIENT_CONFIG}"))
+        .send()
+        .await
+        .expect("the client config is reachable");
+    common::assert_served_by_rust(response.headers(), CLIENT_CONFIG);
 
     let (go, rust) = (
         running_client_config(GO).await,
         running_client_config(RUST).await,
     );
-    assert_eq!(go, rust, "config/client is forwarded, not served");
+    assert_eq!(go, rust, "config/client must agree on both servers");
 }

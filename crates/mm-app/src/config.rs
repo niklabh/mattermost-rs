@@ -2953,3 +2953,2037 @@ mod go_parity {
         assert_eq!(config.webserver_mode, "gzip");
     }
 }
+
+// =================================================================================================
+// The **whole** `model.Config` document
+//
+// Everything above this line is the narrow projection a permission check reads. The three
+// `/api/v4/config` reads need the document itself, so what follows works on
+// [`mm_model::config::Config`] — the full 53-struct wire port — rather than on [`Config`].
+//
+// The two are deliberately not merged. [`Config`] is loaded **once at boot** and is what a
+// permission gate consults; the functions below re-read the row on **every request**, because the
+// Go server beside us owns `PUT /api/v4/config` and a cached answer would report a configuration
+// that is no longer in force. That is a divergence from Go, which serves `/config` out of memory
+// and refreshes it from a config listener: a client that writes through Go and reads through us
+// sees its own write, where against Go alone it might briefly not. Fresher, not staler — but it
+// is a difference, and it costs one small `SELECT` per request.
+// =================================================================================================
+
+/// Port of `config.GetEnvironment` (config/environment.go:16).
+///
+/// **The prefix is `MM`, not `MM_`.** `MMRS_STACK` is therefore in this map, as is anything else
+/// beginning with those two letters; `applyEnvironmentMap` trims a leading `MM_` and simply finds
+/// no field for what is left. Narrowing the filter to `MM_` would look tidier and would change
+/// which keys [`generate_environment_map`] reports.
+pub fn get_environment() -> std::collections::BTreeMap<String, String> {
+    std::env::vars()
+        .map(|(key, value)| (key.to_uppercase(), value))
+        .filter(|(key, _)| key.starts_with("MM"))
+        .collect()
+}
+
+/// The `map[string]…` fields of `model.Config` (config.go:3609-3610).
+///
+/// `applyEnvKey` switches on `reflect.Kind`, and a Go map and a Go struct are **both** a JSON
+/// object — so a port that walks the decoded document cannot tell them apart from the value
+/// alone. Go treats a map as a leaf and `json.Unmarshal`s the whole variable into it, ignoring
+/// any remaining key parts; it treats a struct as a level to descend into. Getting this backwards
+/// would let `MM_PLUGINSETTINGS_PLUGINS_ANYTHING=…` silently replace the plugin map.
+const MAP_VALUED_PATHS: &[&str] = &["PluginSettings.Plugins", "PluginSettings.PluginStates"];
+
+/// The `json.RawMessage` fields of `model.Config` (config.go:1621 and :1712).
+///
+/// Go's `applyEnvKey` special-cases them *before* its slice arm and assigns the raw bytes
+/// (environment.go:74). They are neither pointers nor structs, so — unlike every other field —
+/// a `null` in the document does **not** stop the overlay from setting them, which is why this is
+/// checked ahead of the nil-pointer arm rather than inside the match.
+const RAW_MESSAGE_PATHS: &[&str] = &[
+    "LogSettings.AdvancedLoggingJSON",
+    "ExperimentalAuditSettings.AdvancedLoggingJSON",
+];
+
+/// Port of `config.applyEnvironmentMap` (config/environment.go:89), over the decoded document.
+///
+/// Go reflects over `*model.Config`; this walks the same shape as JSON, which is equivalent
+/// because `model.Config` carries no `json:` tags — every key *is* the Go field name. See
+/// [`MAP_VALUED_PATHS`] for the one place the two representations genuinely differ.
+pub fn apply_environment_map(
+    config: &mut serde_json::Value,
+    env: &std::collections::BTreeMap<String, String>,
+) {
+    for (key, value) in env {
+        apply_env_key(key.strip_prefix("MM_").unwrap_or(key), value, config, "");
+    }
+}
+
+/// Port of `config.applyEnvKey` (config/environment.go:28).
+///
+/// `path` is the dotted position of `subject` in the document and exists only to recognise the
+/// two field kinds JSON cannot express; it is not part of Go's algorithm.
+fn apply_env_key(key: &str, value: &str, subject: &mut serde_json::Value, path: &str) {
+    // `strings.SplitN(key, "_", 2)`: the first segment names a field, the remainder is whatever
+    // is left for a deeper level. Go's `len(keyParts) < 1` guard is unreachable — SplitN never
+    // returns an empty slice — so there is nothing to port from it.
+    let (head, rest) = match key.split_once('_') {
+        Some((head, rest)) => (head, Some(rest)),
+        None => (key, None),
+    };
+
+    let Some(object) = subject.as_object_mut() else {
+        return;
+    };
+    // `FieldByNameFunc(candidate => strings.ToUpper(candidate) == keyParts[0])`. The environment
+    // key arrived upper-cased from `GetEnvironment`, so this is a case-insensitive match against
+    // the field name and **not** an exact one: `MM_SERVICESETTINGS_SITEURL` finds `SiteURL`.
+    let Some(field) = object
+        .keys()
+        .find(|candidate| candidate.to_uppercase() == head)
+        .cloned()
+    else {
+        return;
+    };
+    let child_path = if path.is_empty() {
+        field.clone()
+    } else {
+        format!("{path}.{field}")
+    };
+    let Some(child) = object.get_mut(&field) else {
+        return;
+    };
+
+    if RAW_MESSAGE_PATHS.contains(&child_path.as_str())
+        || MAP_VALUED_PATHS.contains(&child_path.as_str())
+    {
+        // `json.Unmarshal([]byte(value), target)` for a map; a raw assignment of the bytes for a
+        // `json.RawMessage`. Both are "the variable is the value, parsed as JSON", and both leave
+        // the field alone when it does not parse — Go's map arm by its `if err == nil`, and the
+        // raw-message arm because storing non-JSON bytes there would only produce a document that
+        // cannot be marshalled again.
+        if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(value) {
+            *child = parsed;
+        }
+        return;
+    }
+
+    match child {
+        // `rFieldValue.Elem()` on a nil pointer is invalid and Go returns. **The environment
+        // cannot bring a nil setting to life**, which is why the overlay has to run after
+        // `SetDefaults` rather than instead of it.
+        serde_json::Value::Null => {}
+        serde_json::Value::String(existing) => *existing = value.to_owned(),
+        serde_json::Value::Bool(existing) => {
+            if let Some(parsed) = parse_bool(value) {
+                *existing = parsed;
+            }
+        }
+        serde_json::Value::Number(_) => {
+            if let Ok(parsed) = value.parse::<i64>() {
+                *child = serde_json::Value::from(parsed);
+            }
+        }
+        // `strings.Split(value, " ")` — **spaces, not commas**, and unlike [`split_list`] an
+        // empty variable yields one empty element rather than an empty list, because that is what
+        // `strings.Split("", " ")` returns.
+        serde_json::Value::Array(_) => {
+            *child = serde_json::Value::Array(
+                value
+                    .split(' ')
+                    .map(|piece| serde_json::Value::String(piece.to_owned()))
+                    .collect(),
+            );
+        }
+        serde_json::Value::Object(_) => {
+            // "If we have only one part left, we can't deal with a struct" (environment.go:52).
+            if let Some(rest) = rest {
+                apply_env_key(rest, value, child, &child_path);
+            }
+        }
+    }
+}
+
+/// Port of `config.generateEnvironmentMap` (config/environment.go:99) — the body of
+/// `GET /api/v4/config/environment`.
+///
+/// A nested `map[string]any` mirroring `model.Config`, carrying `true` at each leaf whose
+/// variable is set and **omitting** every section that ends up empty. The shape is taken from a
+/// default [`mm_model::config::Config`] rather than from a type reflection, which agrees with Go
+/// everywhere except a section field that is a *value* struct in Go and an `Option` here: Go
+/// would descend into it, this treats it as a leaf. No such field is settable by a variable any
+/// deployment sets, and the section list is the assertion in the parity suite.
+///
+/// **`FeatureFlags` never appears**, on either server. Go's walk sees `*FeatureFlags`, a pointer,
+/// and pointers are leaves — so it looks for a variable literally named `MM_FEATUREFLAGS` and
+/// never for `MM_FEATUREFLAGS_<FLAG>`. Here the field is skipped when serialising a default
+/// config, which lands in the same place. So `MM_FEATUREFLAGS_ENABLESHIFTESCAPETOMARKALLREAD`
+/// **is** applied by [`apply_environment_map`] and is **not** reported by this — which looks like
+/// an inconsistency and is Go's behaviour exactly.
+pub fn generate_environment_map(
+    env: &std::collections::BTreeMap<String, String>,
+) -> serde_json::Value {
+    let shape = serde_json::to_value(mm_model::config::Config::default())
+        .unwrap_or(serde_json::Value::Null);
+    environment_map_for(env, &shape, "MM")
+        .unwrap_or(serde_json::Value::Object(serde_json::Map::new()))
+}
+
+/// Port of `config.generateEnvironmentMapWithBaseKey` (config/environment.go:104). `None` is
+/// Go's `nil`, which the caller drops rather than storing as an empty object.
+fn environment_map_for(
+    env: &std::collections::BTreeMap<String, String>,
+    shape: &serde_json::Value,
+    base: &str,
+) -> Option<serde_json::Value> {
+    let object = shape.as_object()?;
+    let mut out = serde_json::Map::new();
+    for (field, value) in object {
+        let key = format!("{base}_{field}");
+        if value.is_object() {
+            if let Some(nested) = environment_map_for(env, value, &key) {
+                out.insert(field.clone(), nested);
+            }
+        } else if env.contains_key(&key.to_uppercase()) {
+            out.insert(field.clone(), serde_json::Value::Bool(true));
+        }
+    }
+    if out.is_empty() {
+        return None;
+    }
+    Some(serde_json::Value::Object(out))
+}
+
+/// Load the configuration the Go server is running on, as the whole `model.Config`.
+///
+/// Port of the `Store.Load` sequence (config/store.go:260 → :285 → :292) for a reader:
+/// unmarshal the document, fill `FeatureFlags` — the one section `SetDefaults` has to supply,
+/// because Go strips it before persisting (store.go:306) — then overlay the environment.
+///
+/// `SetDefaults` is otherwise **not** run, and does not need to be: the row Go persists has
+/// already been through it, so every pointer in it is non-nil. A row written by something else
+/// would come back with nulls where Go would have defaults, and this would report them
+/// faithfully rather than inventing values it cannot verify.
+pub async fn load_model_config(
+    store: &impl mm_store::ConfigStore,
+) -> Result<mm_model::config::Config, ConfigError> {
+    load_model_config_with_env(store, &get_environment()).await
+}
+
+/// [`load_model_config`] against an arbitrary environment, so the composition is testable: the
+/// process environment is global and a test that sets one races every other test in the binary.
+pub async fn load_model_config_with_env(
+    store: &impl mm_store::ConfigStore,
+    env: &std::collections::BTreeMap<String, String>,
+) -> Result<mm_model::config::Config, ConfigError> {
+    let document = store.load_active().await?;
+    let mut value: serde_json::Value = match document.as_deref() {
+        Some(raw) => {
+            serde_json::from_str(raw).map_err(|source| ConfigError::Malformed { source })?
+        }
+        None => serde_json::Value::Object(serde_json::Map::new()),
+    };
+
+    if let Some(object) = value.as_object_mut() {
+        // `Config.SetDefaults` (config.go:4297): a nil `FeatureFlags` gets a fresh struct with
+        // `SetDefaults` applied. Absent **and** explicitly null both count, because Go's nil
+        // check cannot tell them apart.
+        if !object
+            .get("FeatureFlags")
+            .is_some_and(|flags| !flags.is_null())
+        {
+            let mut flags = mm_model::feature_flags::FeatureFlags::default();
+            flags.set_defaults();
+            if let Ok(encoded) = serde_json::to_value(&flags) {
+                object.insert("FeatureFlags".to_owned(), encoded);
+            }
+        }
+    }
+
+    apply_environment_map(&mut value, env);
+
+    serde_json::from_value(value).map_err(|source| ConfigError::Malformed { source })
+}
+
+/// Port of `(*model.Config).Sanitize(nil, nil)` (config.go:5346) — what `GET /api/v4/config`
+/// returns instead of the secrets.
+///
+/// **This is the function that keeps the database password out of a response and out of a
+/// fixture.** Every branch below is Go's, in Go's order, including the two distinctions that look
+/// like oversights and are not:
+///
+/// - Most fields are replaced only when **non-empty**, so an unset SMTP password stays `""` and
+///   does not acquire a fake one. Five are replaced unconditionally — `PublicLinkSalt`,
+///   `SqlSettings.DataSource`, `AtRestEncryptKey`, `ElasticsearchSettings.Password` and
+///   `ServiceSettings.SplitKey` — so those read `FakeSetting` even on a server that has none.
+/// - `opts.PartiallyRedactDataSources` is Go's only alternative for the data sources and is
+///   `false` here: `getConfig` passes `nil` options (api4/config.go:62 reaches `Sanitize` through
+///   `App.SanitizedConfig`). So a data source is the full `FakeSetting`, not a redacted URL.
+///
+/// `PluginSettings.Sanitize(manifests)` is the last step in Go and is **not** ported: with no
+/// plugin host there are no manifests, and Go's no-manifest path deletes every plugin that has
+/// stored settings from the map. The live document's `Plugins` is `{}`, so the two agree today;
+/// a server with configured plugin settings would not. See [D-311].
+pub fn sanitize(config: &mut mm_model::config::Config) {
+    use mm_model::utils::FAKE_SETTING;
+
+    /// `if p != nil && *p != "" { *p = FakeSetting }`.
+    fn mask_if_set(field: &mut Option<String>) {
+        if field.as_deref().is_some_and(|value| !value.is_empty()) {
+            *field = Some(FAKE_SETTING.to_owned());
+        }
+    }
+    /// `if p != nil { *p = FakeSetting }` — no emptiness test.
+    fn mask_always(field: &mut Option<String>) {
+        if field.is_some() {
+            *field = Some(FAKE_SETTING.to_owned());
+        }
+    }
+
+    mask_if_set(&mut config.ldap_settings.bind_password);
+    mask_always(&mut config.file_settings.public_link_salt);
+    mask_if_set(&mut config.file_settings.amazon_s3_secret_access_key);
+    mask_if_set(&mut config.file_settings.export_amazon_s3_secret_access_key);
+    mask_if_set(&mut config.file_settings.azure_access_key);
+    mask_if_set(&mut config.file_settings.export_azure_access_key);
+    mask_if_set(&mut config.email_settings.smtp_password);
+    mask_if_set(&mut config.git_lab_settings.secret);
+    mask_if_set(&mut config.google_settings.secret);
+    mask_if_set(&mut config.office365_settings.secret);
+    mask_if_set(&mut config.open_id_settings.secret);
+    mask_always(&mut config.sql_settings.data_source);
+    mask_always(&mut config.sql_settings.at_rest_encrypt_key);
+    mask_always(&mut config.elasticsearch_settings.password);
+
+    for replica in config
+        .sql_settings
+        .data_source_replicas
+        .iter_mut()
+        .flatten()
+    {
+        *replica = FAKE_SETTING.to_owned();
+    }
+    for replica in config
+        .sql_settings
+        .data_source_search_replicas
+        .iter_mut()
+        .flatten()
+    {
+        *replica = FAKE_SETTING.to_owned();
+    }
+    for lag in config
+        .sql_settings
+        .replica_lag_settings
+        .iter_mut()
+        .flatten()
+    {
+        // Go rebuilds the pointer rather than testing it for emptiness: `if p != nil { p = new(…) }`.
+        if lag.data_source.is_some() {
+            lag.data_source = Some(FAKE_SETTING.to_owned());
+        }
+    }
+
+    if let Some(relay) = config
+        .message_export_settings
+        .global_relay_settings
+        .as_mut()
+    {
+        mask_if_set(&mut relay.smtp_password);
+    }
+    mask_always(&mut config.service_settings.split_key);
+    mask_if_set(&mut config.service_settings.google_developer_key);
+    mask_if_set(&mut config.service_settings.giphy_sdk_key);
+    mask_always(&mut config.cache_settings.redis_password);
+    if let Some(libre) = config.auto_translation_settings.libre_translate.as_mut() {
+        mask_if_set(&mut libre.api_key);
+    }
+}
+
+/// Port of `model.GetServiceEnvironment` (service_environment.go:36).
+///
+/// `MM_SERVICEENVIRONMENT` when it holds one of the three known values, and otherwise the
+/// **build**'s default: `production` for a binary built with the `production` tag and `dev`
+/// otherwise (service_environment_dev_default.go:9). This binary has no such tag, so the fallback
+/// is `dev` — which agrees with a Go server built the way this repo builds one and **disagrees**
+/// with an official release. Set `MM_SERVICEENVIRONMENT` explicitly beside a release binary; it
+/// changes `ServiceEnvironment`, `GiphySdkKey` and `CWSURL` in the client configuration. [D-310].
+pub fn service_environment() -> String {
+    match std::env::var("MM_SERVICEENVIRONMENT").as_deref() {
+        Ok(SERVICE_ENVIRONMENT_PRODUCTION) => SERVICE_ENVIRONMENT_PRODUCTION.to_owned(),
+        Ok(SERVICE_ENVIRONMENT_TEST) => SERVICE_ENVIRONMENT_TEST.to_owned(),
+        Ok(SERVICE_ENVIRONMENT_DEV) => SERVICE_ENVIRONMENT_DEV.to_owned(),
+        _ => SERVICE_ENVIRONMENT_DEV.to_owned(),
+    }
+}
+
+/// `model.ServiceEnvironmentProduction` (service_environment.go:15).
+pub const SERVICE_ENVIRONMENT_PRODUCTION: &str = "production";
+/// `model.ServiceEnvironmentTest` (service_environment.go:18).
+pub const SERVICE_ENVIRONMENT_TEST: &str = "test";
+/// `model.ServiceEnvironmentDev` (service_environment.go:22).
+pub const SERVICE_ENVIRONMENT_DEV: &str = "dev";
+/// `model.ServiceSettingsDefaultGiphySdkKeyTest` (config.go:137).
+const GIPHY_SDK_KEY_TEST: &str = "s0glxvzVg9azvPipKxcPLpXV0q1x1fVP";
+/// `model.TeamSettingsLockProfileFieldsNone` (config.go:149).
+const LOCK_PROFILE_FIELDS_NONE: &str = "none";
+/// `model.PluginSettingsDefaultMarketplaceURL` (config.go:271).
+const DEFAULT_MARKETPLACE_URL: &str = "https://api.integrations.mattermost.com";
+/// `model.PluginIdApps` (plugin_constants.go:9).
+const PLUGIN_ID_APPS: &str = "com.mattermost.apps";
+
+/// `strconv.FormatBool(*p)` on a setting `SetDefaults` has filled.
+///
+/// Go dereferences these pointers without a nil check and would panic on one; this crate may not
+/// panic, so a nil reads as Go's zero value. That case is unreachable against a document a Go
+/// server wrote — every pointer in it is non-nil — and reaching it at all would mean the row came
+/// from something else.
+fn flag(value: Option<bool>) -> String {
+    if value.unwrap_or(false) {
+        "true"
+    } else {
+        "false"
+    }
+    .to_owned()
+}
+
+/// `strconv.Itoa(*p)` / `strconv.FormatInt(*p, 10)`. See [`flag`] for the nil case.
+fn number(value: Option<i64>) -> String {
+    value.unwrap_or(0).to_string()
+}
+
+/// `*p` for a `*string`. See [`flag`] for the nil case.
+fn text(value: &Option<String>) -> String {
+    value.clone().unwrap_or_default()
+}
+
+/// Port of `config.getGiphySdkKey` (config/client.go:470).
+fn giphy_sdk_key(settings: &mm_model::config::ServiceSettings) -> String {
+    match service_environment().as_str() {
+        // `model.MattermostGiphySdkKey` is injected with `-ldflags` and is empty in every build
+        // from source, so the production fallback is the empty string here.
+        SERVICE_ENVIRONMENT_PRODUCTION => text(&settings.giphy_sdk_key),
+        SERVICE_ENVIRONMENT_DEV | SERVICE_ENVIRONMENT_TEST => GIPHY_SDK_KEY_TEST.to_owned(),
+        _ => String::new(),
+    }
+}
+
+/// Port of `config.IsAuditLoggingActive` (config/logger.go:118) for an **unlicensed** server.
+///
+/// `allowAdvancedLogging` is `license != nil && *license.Features.AdvancedLogging`, so it is
+/// false here and the function reduces to its first branch. The advanced-logging arm — parse
+/// `AdvancedLoggingJSON` and look for an audit level among the targets — is not ported because
+/// nothing unlicensed can reach it.
+fn audit_logging_active(settings: &mm_model::config::ExperimentalAuditSettings) -> bool {
+    settings.file_enabled.unwrap_or(false)
+}
+
+/// Port of `config.GenerateLimitedClientConfig` (config/client.go:285) for an **unlicensed**
+/// server: the map an *anonymous* caller gets from `GET /api/v4/config/client`.
+///
+/// # What "unlicensed" leaves out
+///
+/// Go's licensed block adds `EnableCustomTermsOfService`, `CustomTermsOfServiceReAcceptancePeriod`,
+/// the GitLab trio, the Intune keys and the enterprise mobile keys, and it *overwrites* the
+/// LDAP/SAML/MFA/Google/Office365 defaults this function leaves at their unlicensed values.
+/// None of that is ported: `mm_api::config` forwards a licensed installation to Go rather than
+/// guessing at a feature matrix it cannot verify, exactly as `getClientLicense` already does.
+///
+/// # `Version` and the four `Build*` keys are properties of the **binary**
+///
+/// `model.CurrentVersion` is a compile-time constant and is ported; `BuildNumber`, `BuildDate`,
+/// `BuildHash`, `BuildHashEnterprise` and `BuildEnterpriseReady` are `-ldflags` variables, empty
+/// in any build from source and non-empty in an official release. This reports the empty strings
+/// a source build reports. [D-310].
+pub fn generate_limited_client_config(
+    config: &mm_model::config::Config,
+    telemetry_id: &str,
+) -> mm_model::utils::StringMap {
+    let c = config;
+    let mut props = mm_model::utils::StringMap::new();
+    let mut put = |key: &str, value: String| {
+        props.insert(key.to_owned(), value);
+    };
+
+    put("Version", mm_model::utils::CURRENT_VERSION.to_owned());
+    put("BuildNumber", String::new());
+    put("BuildDate", String::new());
+    put("BuildHash", String::new());
+    put("BuildHashEnterprise", String::new());
+    put("BuildEnterpriseReady", String::new());
+    put("ServiceEnvironment", service_environment());
+    // `fips.IsEnabled` is a build tag; this binary has no FIPS mode at all.
+    put("IsFipsEnabled", "false".to_owned());
+
+    put(
+        "EnableBotAccountCreation",
+        flag(c.service_settings.enable_bot_account_creation),
+    );
+    put(
+        "EnableDesktopLandingPage",
+        flag(c.service_settings.enable_desktop_landing_page),
+    );
+    put("EnableFile", flag(c.log_settings.enable_file));
+    put("FileLevel", text(&c.log_settings.file_level));
+
+    // `strings.TrimRight(…, "/")` strips **every** trailing slash, not one.
+    put(
+        "SiteURL",
+        text(&c.service_settings.site_url)
+            .trim_end_matches('/')
+            .to_owned(),
+    );
+    put("SiteName", text(&c.team_settings.site_name));
+    put(
+        "WebsocketURL",
+        text(&c.service_settings.websocket_url)
+            .trim_end_matches('/')
+            .to_owned(),
+    );
+    put("WebsocketPort", number(c.service_settings.websocket_port));
+    put(
+        "WebsocketSecurePort",
+        number(c.service_settings.websocket_secure_port),
+    );
+    put(
+        "EnableUserCreation",
+        flag(c.team_settings.enable_user_creation),
+    );
+    put("EnableOpenServer", flag(c.team_settings.enable_open_server));
+    put(
+        "EnableJoinLeaveMessageByDefault",
+        flag(c.team_settings.enable_join_leave_message_by_default),
+    );
+
+    // The four `ClientRequirements` fields are plain `string`s in Go, not pointers.
+    put(
+        "AndroidLatestVersion",
+        c.client_requirements.android_latest_version.clone(),
+    );
+    put(
+        "AndroidMinVersion",
+        c.client_requirements.android_min_version.clone(),
+    );
+    put(
+        "IosLatestVersion",
+        c.client_requirements.ios_latest_version.clone(),
+    );
+    put(
+        "IosMinVersion",
+        c.client_requirements.ios_min_version.clone(),
+    );
+
+    put("EnableDiagnostics", flag(c.log_settings.enable_diagnostics));
+    put(
+        "EnableClientMetrics",
+        flag(c.metrics_settings.enable_client_metrics),
+    );
+
+    put(
+        "EnableComplianceExport",
+        flag(c.message_export_settings.enable_export),
+    );
+
+    put(
+        "EnableSignUpWithEmail",
+        flag(c.email_settings.enable_sign_up_with_email),
+    );
+    put(
+        "EnableSignInWithEmail",
+        flag(c.email_settings.enable_sign_in_with_email),
+    );
+    put(
+        "EnableSignInWithUsername",
+        flag(c.email_settings.enable_sign_in_with_username),
+    );
+
+    put(
+        "EmailLoginButtonColor",
+        text(&c.email_settings.login_button_color),
+    );
+    put(
+        "EmailLoginButtonBorderColor",
+        text(&c.email_settings.login_button_border_color),
+    );
+    put(
+        "EmailLoginButtonTextColor",
+        text(&c.email_settings.login_button_text_color),
+    );
+
+    put(
+        "TermsOfServiceLink",
+        text(&c.support_settings.terms_of_service_link),
+    );
+    put(
+        "PrivacyPolicyLink",
+        text(&c.support_settings.privacy_policy_link),
+    );
+    put("AboutLink", text(&c.support_settings.about_link));
+    put("HelpLink", text(&c.support_settings.help_link));
+    put(
+        "ReportAProblemType",
+        text(&c.support_settings.report_a_problem_type),
+    );
+    put(
+        "ReportAProblemLink",
+        text(&c.support_settings.report_a_problem_link),
+    );
+    put(
+        "ReportAProblemMail",
+        text(&c.support_settings.report_a_problem_mail),
+    );
+    put(
+        "AllowDownloadLogs",
+        flag(c.support_settings.allow_download_logs),
+    );
+    put(
+        "ForgotPasswordLink",
+        text(&c.support_settings.forgot_password_link),
+    );
+    put("SupportEmail", text(&c.support_settings.support_email));
+    put(
+        "EnableAskCommunityLink",
+        flag(c.support_settings.enable_ask_community_link),
+    );
+
+    put(
+        "DefaultClientLocale",
+        text(&c.localization_settings.default_client_locale),
+    );
+
+    put(
+        "EnableCustomEmoji",
+        flag(c.service_settings.enable_custom_emoji),
+    );
+    put(
+        "EnableUserStatuses",
+        flag(c.service_settings.enable_user_statuses),
+    );
+    put(
+        "AppDownloadLink",
+        text(&c.native_app_settings.app_download_link),
+    );
+    put(
+        "AndroidAppDownloadLink",
+        text(&c.native_app_settings.android_app_download_link),
+    );
+    put(
+        "IosAppDownloadLink",
+        text(&c.native_app_settings.ios_app_download_link),
+    );
+    put(
+        "MobileExternalBrowser",
+        flag(c.native_app_settings.mobile_external_browser),
+    );
+
+    put("DiagnosticId", telemetry_id.to_owned());
+    put("TelemetryId", telemetry_id.to_owned());
+    put(
+        "DiagnosticsEnabled",
+        flag(c.log_settings.enable_diagnostics),
+    );
+
+    put("HasImageProxy", flag(c.image_proxy_settings.enable));
+
+    put("PluginsEnabled", flag(c.plugin_settings.enable));
+    // `Enable && PluginStates[PluginIdApps] != nil && PluginStates[PluginIdApps].Enable` — the
+    // absence of the entry is a distinct case from the entry being disabled, and both are false.
+    put(
+        "AppsPluginEnabled",
+        flag(Some(
+            c.plugin_settings.enable.unwrap_or(false)
+                && c.plugin_settings
+                    .plugin_states
+                    .as_ref()
+                    .and_then(|states| states.get(PLUGIN_ID_APPS))
+                    .is_some_and(|state| state.enable),
+        )),
+    );
+
+    put(
+        "PasswordMinimumLength",
+        number(c.password_settings.minimum_length),
+    );
+    put(
+        "PasswordRequireLowercase",
+        flag(c.password_settings.lowercase),
+    );
+    put(
+        "PasswordRequireUppercase",
+        flag(c.password_settings.uppercase),
+    );
+    put("PasswordRequireNumber", flag(c.password_settings.number));
+    put("PasswordRequireSymbol", flag(c.password_settings.symbol));
+    put(
+        "PasswordEnableForgotLink",
+        flag(c.password_settings.enable_forgot_link),
+    );
+
+    // "Set default values for all options that require a license" (client.go:400). Go writes
+    // `EnableCustomBrand`, `CustomBrandText`, `CustomDescriptionText` and `CWSURL` twice — once
+    // as a licence default and again from the config two lines later — so the first write of each
+    // is dead. Only the surviving value is produced here.
+    put("EnableLdap", "false".to_owned());
+    put("LdapLoginFieldName", String::new());
+    put("EnableSaml", "false".to_owned());
+    put("SamlLoginButtonText", String::new());
+    put("EnableSignUpWithGoogle", "false".to_owned());
+    put("EnableSignUpWithOffice365", "false".to_owned());
+    put("EnableSignUpWithOpenId", "false".to_owned());
+    put("OpenIdButtonText", String::new());
+    put("OpenIdButtonColor", String::new());
+    put("CWSURL", String::new());
+    put(
+        "EnableCustomBrand",
+        flag(c.team_settings.enable_custom_brand),
+    );
+    put("CustomBrandText", text(&c.team_settings.custom_brand_text));
+    put(
+        "CustomDescriptionText",
+        text(&c.team_settings.custom_description_text),
+    );
+    put(
+        "EnableMultifactorAuthentication",
+        flag(c.service_settings.enable_multifactor_authentication),
+    );
+    put("EnforceMultifactorAuthentication", "false".to_owned());
+    put(
+        "EnableGuestAccounts",
+        flag(c.guest_accounts_settings.enable),
+    );
+    put("HideGuestTags", flag(c.guest_accounts_settings.hide_tags));
+    put(
+        "GuestAccountsEnforceMultifactorAuthentication",
+        flag(c.guest_accounts_settings.enforce_multifactor_authentication),
+    );
+    put(
+        "EnableGuestMagicLink",
+        flag(c.guest_accounts_settings.enable_guest_magic_link),
+    );
+
+    // `for key, value := range c.FeatureFlags.ToMap() { props["FeatureFlag"+key] = value }`.
+    if let Some(flags) = c.feature_flags.as_ref() {
+        for (key, value) in flags.to_map() {
+            props.insert(format!("FeatureFlag{key}"), value);
+        }
+    }
+
+    props
+}
+
+/// Port of `config.GenerateClientConfig` (config/client.go:16) for an **unlicensed** server: the
+/// map a caller *with a session* gets from `GET /api/v4/config/client`.
+///
+/// Go builds on the limited map and adds to it, so the two share every key the limited one
+/// carries. See [`generate_limited_client_config`] for what a licence would change.
+pub fn generate_client_config(
+    config: &mm_model::config::Config,
+    telemetry_id: &str,
+) -> mm_model::utils::StringMap {
+    let c = config;
+    let mut props = generate_limited_client_config(config, telemetry_id);
+    let mut put = |key: &str, value: String| {
+        props.insert(key.to_owned(), value);
+    };
+
+    put(
+        "EnableCustomUserStatuses",
+        flag(c.team_settings.enable_custom_user_statuses),
+    );
+    put(
+        "EnableLastActiveTime",
+        flag(c.team_settings.enable_last_active_time),
+    );
+    put(
+        "EnableUserDeactivation",
+        flag(c.team_settings.enable_user_deactivation),
+    );
+    put(
+        "RestrictDirectMessage",
+        text(&c.team_settings.restrict_direct_message),
+    );
+    put(
+        "TeammateNameDisplay",
+        text(&c.team_settings.teammate_name_display),
+    );
+    put(
+        "LockTeammateNameDisplay",
+        flag(c.team_settings.lock_teammate_name_display),
+    );
+    // The **constant**, not the setting: Go writes `model.TeamSettingsLockProfileFieldsNone` here
+    // and only an Enterprise licence replaces it with the configured value.
+    put(
+        "LockProfileFieldsForEmailUsers",
+        LOCK_PROFILE_FIELDS_NONE.to_owned(),
+    );
+    put(
+        "ExperimentalPrimaryTeam",
+        text(&c.team_settings.experimental_primary_team),
+    );
+    put(
+        "EnableJoinLeaveMessageByDefault",
+        flag(c.team_settings.enable_join_leave_message_by_default),
+    );
+    put(
+        "EnableChannelCategorySorting",
+        flag(c.team_settings.enable_channel_category_sorting),
+    );
+
+    put(
+        "EnableBotAccountCreation",
+        flag(c.service_settings.enable_bot_account_creation),
+    );
+    put(
+        "EnableDesktopLandingPage",
+        flag(c.service_settings.enable_desktop_landing_page),
+    );
+    put(
+        "EnableOAuthServiceProvider",
+        flag(c.service_settings.enable_o_auth_service_provider),
+    );
+    put(
+        "GoogleDeveloperKey",
+        text(&c.service_settings.google_developer_key),
+    );
+    put(
+        "EnableIncomingWebhooks",
+        flag(c.service_settings.enable_incoming_webhooks),
+    );
+    put(
+        "EnableOutgoingWebhooks",
+        flag(c.service_settings.enable_outgoing_webhooks),
+    );
+    put(
+        "EnableOutgoingOAuthConnections",
+        flag(c.service_settings.enable_outgoing_o_auth_connections),
+    );
+    put("EnableCommands", flag(c.service_settings.enable_commands));
+    put(
+        "EnablePostUsernameOverride",
+        flag(c.service_settings.enable_post_username_override),
+    );
+    put(
+        "EnablePostIconOverride",
+        flag(c.service_settings.enable_post_icon_override),
+    );
+    put(
+        "EnableUserAccessTokens",
+        flag(c.service_settings.enable_user_access_tokens),
+    );
+    put(
+        "MaximumPersonalAccessTokenLifetimeDays",
+        number(
+            c.service_settings
+                .maximum_personal_access_token_lifetime_days,
+        ),
+    );
+    put(
+        "EnableLinkPreviews",
+        flag(c.service_settings.enable_link_previews),
+    );
+    put(
+        "EnablePermalinkPreviews",
+        flag(c.service_settings.enable_permalink_previews),
+    );
+    put("EnableTesting", flag(c.service_settings.enable_testing));
+    put("EnableDeveloper", flag(c.service_settings.enable_developer));
+    put(
+        "EnableClientPerformanceDebugging",
+        flag(c.service_settings.enable_client_performance_debugging),
+    );
+    put(
+        "PostEditTimeLimit",
+        number(c.service_settings.post_edit_time_limit),
+    );
+    put(
+        "MinimumHashtagLength",
+        number(c.service_settings.minimum_hashtag_length),
+    );
+    put("EnableTutorial", flag(c.service_settings.enable_tutorial));
+    put(
+        "EnableOnboardingFlow",
+        flag(c.service_settings.enable_onboarding_flow),
+    );
+    put(
+        "ExperimentalEnableDefaultChannelLeaveJoinMessages",
+        flag(
+            c.service_settings
+                .experimental_enable_default_channel_leave_join_messages,
+        ),
+    );
+    put(
+        "ExperimentalGroupUnreadChannels",
+        text(&c.service_settings.experimental_group_unread_channels),
+    );
+    put("EnableSVGs", flag(c.service_settings.enable_sv_gs));
+    put(
+        "EnableMarketplace",
+        flag(c.plugin_settings.enable_marketplace),
+    );
+    put("EnableLatex", flag(c.service_settings.enable_latex));
+    put(
+        "EnableInlineLatex",
+        flag(c.service_settings.enable_inline_latex),
+    );
+    put(
+        "ExtendSessionLengthWithActivity",
+        flag(c.service_settings.extend_session_length_with_activity),
+    );
+    put(
+        "ManagedResourcePaths",
+        text(&c.service_settings.managed_resource_paths),
+    );
+    put(
+        "DeleteAccountLink",
+        text(&c.service_settings.delete_account_link),
+    );
+
+    // Two keys Go hardcodes rather than reads. The comment on the first is Go's own: the setting
+    // it used to mirror is gone and the name is kept for old mobile and web clients.
+    put("ExperimentalEnablePostMetadata", "true".to_owned());
+    put("ExperimentalTimezone", "true".to_owned());
+
+    put(
+        "DisableAppBar",
+        flag(c.experimental_settings.disable_app_bar),
+    );
+
+    put(
+        "ExperimentalEnableAutomaticReplies",
+        flag(c.team_settings.experimental_enable_automatic_replies),
+    );
+
+    put(
+        "SendEmailNotifications",
+        flag(c.email_settings.send_email_notifications),
+    );
+    put(
+        "SendPushNotifications",
+        flag(c.email_settings.send_push_notifications),
+    );
+    put(
+        "RequireEmailVerification",
+        flag(c.email_settings.require_email_verification),
+    );
+    put(
+        "EnableEmailBatching",
+        flag(c.email_settings.enable_email_batching),
+    );
+    put(
+        "EnablePreviewModeBanner",
+        flag(c.email_settings.enable_preview_mode_banner),
+    );
+    put(
+        "EmailNotificationContentsType",
+        text(&c.email_settings.email_notification_contents_type),
+    );
+
+    put(
+        "ShowEmailAddress",
+        flag(c.privacy_settings.show_email_address),
+    );
+    put("ShowFullName", flag(c.privacy_settings.show_full_name));
+    put(
+        "UseAnonymousURLs",
+        flag(c.privacy_settings.use_anonymous_ur_ls),
+    );
+
+    put(
+        "EnableFileAttachments",
+        flag(c.file_settings.enable_file_attachments),
+    );
+    put("EnablePublicLink", flag(c.file_settings.enable_public_link));
+
+    put(
+        "AvailableLocales",
+        text(&c.localization_settings.available_locales),
+    );
+    put(
+        "EnableExperimentalLocales",
+        flag(c.localization_settings.enable_experimental_locales),
+    );
+
+    put("SQLDriverName", text(&c.sql_settings.driver_name));
+
+    put(
+        "EnableEmojiPicker",
+        flag(c.service_settings.enable_emoji_picker),
+    );
+    put(
+        "EnableGifPicker",
+        flag(c.service_settings.enable_gif_picker),
+    );
+    put("GiphySdkKey", giphy_sdk_key(&c.service_settings));
+    put("MaxFileSize", number(c.file_settings.max_file_size));
+
+    put(
+        "MaxNotificationsPerChannel",
+        number(c.team_settings.max_notifications_per_channel),
+    );
+    put(
+        "EnableConfirmNotificationsToChannel",
+        flag(c.team_settings.enable_confirm_notifications_to_channel),
+    );
+    put(
+        "TimeBetweenUserTypingUpdatesMilliseconds",
+        number(
+            c.service_settings
+                .time_between_user_typing_updates_milliseconds,
+        ),
+    );
+    put(
+        "EnableUserTypingMessages",
+        flag(c.service_settings.enable_user_typing_messages),
+    );
+    put(
+        "EnableChannelViewedMessages",
+        flag(c.service_settings.enable_channel_viewed_messages),
+    );
+
+    put("RunJobs", flag(c.job_settings.run_jobs));
+
+    put(
+        "EnableEmailInvitations",
+        flag(c.service_settings.enable_email_invitations),
+    );
+
+    put("CWSURL", text(&c.cloud_settings.cwsurl));
+    // `model.MockCWS` is an `-ldflags` variable and empty in any build from source.
+    put("CWSMock", String::new());
+
+    put(
+        "DisableRefetchingOnBrowserFocus",
+        flag(c.experimental_settings.disable_refetching_on_browser_focus),
+    );
+    put(
+        "DisableWakeUpReconnectHandler",
+        flag(c.experimental_settings.disable_wake_up_reconnect_handler),
+    );
+    put(
+        "UsersStatusAndProfileFetchingPollIntervalMilliseconds",
+        number(
+            c.experimental_settings
+                .users_status_and_profile_fetching_poll_interval_milliseconds,
+        ),
+    );
+    // One setting under two keys: the second is the name mobile < 2.27 looks for, and it is
+    // written **after** the `FeatureFlag*` block that would otherwise own that prefix — so a real
+    // `ExperimentalCrossTeamSearch` flag would be overwritten here, not the other way round.
+    put(
+        "EnableCrossTeamSearch",
+        flag(c.service_settings.enable_cross_team_search),
+    );
+    put(
+        "FeatureFlagExperimentalCrossTeamSearch",
+        flag(c.service_settings.enable_cross_team_search),
+    );
+
+    // "Set default values for all options that require a license" (client.go:118).
+    put(
+        "ExperimentalEnableAuthenticationTransfer",
+        "true".to_owned(),
+    );
+    put("LdapNicknameAttributeSet", "false".to_owned());
+    put("LdapFirstNameAttributeSet", "false".to_owned());
+    put("LdapLastNameAttributeSet", "false".to_owned());
+    put("LdapPictureAttributeSet", "false".to_owned());
+    put("LdapPositionAttributeSet", "false".to_owned());
+    put("EnableCompliance", "false".to_owned());
+    put("EnableMobileFileDownload", "true".to_owned());
+    put("EnableMobileFileUpload", "true".to_owned());
+    put("SamlFirstNameAttributeSet", "false".to_owned());
+    put("SamlLastNameAttributeSet", "false".to_owned());
+    put("SamlNicknameAttributeSet", "false".to_owned());
+    put("SamlPositionAttributeSet", "false".to_owned());
+    put("EnableCluster", "false".to_owned());
+    put("EnableMetrics", "false".to_owned());
+    put("EnableBanner", "false".to_owned());
+    put("BannerText", String::new());
+    put("BannerColor", String::new());
+    put("BannerTextColor", String::new());
+    put("AllowBannerDismissal", "false".to_owned());
+    put("EnableThemeSelection", "true".to_owned());
+    put("DefaultTheme", String::new());
+    put("AllowCustomThemes", "true".to_owned());
+    put("AllowedThemes", String::new());
+    put("DataRetentionEnableMessageDeletion", "false".to_owned());
+    put("DataRetentionMessageRetentionHours", "0".to_owned());
+    put("DataRetentionEnableFileDeletion", "false".to_owned());
+    put("DataRetentionFileRetentionHours", "0".to_owned());
+
+    put(
+        "CustomUrlSchemes",
+        join_commas(c.display_settings.custom_url_schemes.as_deref()),
+    );
+    put(
+        "MaxMarkdownNodes",
+        number(c.display_settings.max_markdown_nodes),
+    );
+    put(
+        "IsDefaultMarketplace",
+        flag(Some(
+            text(&c.plugin_settings.marketplace_url) == DEFAULT_MARKETPLACE_URL,
+        )),
+    );
+    put("ExperimentalSharedChannels", "false".to_owned());
+    put(
+        "CollapsedThreads",
+        text(&c.service_settings.collapsed_threads),
+    );
+    put("EnableCustomGroups", "false".to_owned());
+    put("PostPriority", flag(c.service_settings.post_priority));
+    put(
+        "AllowPersistentNotifications",
+        flag(c.service_settings.allow_persistent_notifications),
+    );
+    put(
+        "AllowPersistentNotificationsForGuests",
+        flag(c.service_settings.allow_persistent_notifications_for_guests),
+    );
+    put(
+        "PersistentNotificationMaxCount",
+        number(c.service_settings.persistent_notification_max_count),
+    );
+    put(
+        "PersistentNotificationIntervalMinutes",
+        number(c.service_settings.persistent_notification_interval_minutes),
+    );
+    put(
+        "PersistentNotificationMaxRecipients",
+        number(c.service_settings.persistent_notification_max_recipients),
+    );
+    put(
+        "EnableBurnOnRead",
+        flag(c.service_settings.enable_burn_on_read),
+    );
+    put(
+        "BurnOnReadDurationSeconds",
+        number(c.service_settings.burn_on_read_duration_seconds),
+    );
+    put(
+        "BurnOnReadMaximumTimeToLiveSeconds",
+        number(c.service_settings.burn_on_read_maximum_time_to_live_seconds),
+    );
+    put(
+        "AllowSyncedDrafts",
+        flag(c.service_settings.allow_synced_drafts),
+    );
+    put(
+        "DelayChannelAutocomplete",
+        flag(c.experimental_settings.delay_channel_autocomplete),
+    );
+    put(
+        "YoutubeReferrerPolicy",
+        flag(c.experimental_settings.youtube_referrer_policy),
+    );
+    put(
+        "UniqueEmojiReactionLimitPerPost",
+        number(c.service_settings.unique_emoji_reaction_limit_per_post),
+    );
+
+    put(
+        "EnableAttributeBasedAccessControl",
+        flag(
+            c.access_control_settings
+                .enable_attribute_based_access_control,
+        ),
+    );
+    put(
+        "EnableUserManagedAttributes",
+        flag(c.access_control_settings.enable_user_managed_attributes),
+    );
+    put(
+        "EnableAccessControlAuditLogging",
+        flag(
+            c.access_control_settings
+                .enable_access_control_audit_logging,
+        ),
+    );
+    put(
+        "AuditLoggingActive",
+        flag(Some(audit_logging_active(&c.experimental_audit_settings))),
+    );
+    put(
+        "EnableChannelPolicyIndicators",
+        flag(c.access_control_settings.enable_channel_policy_indicators),
+    );
+
+    put(
+        "WranglerPermittedWranglerRoles",
+        join_commas(c.wrangler_settings.permitted_wrangler_roles.as_deref()),
+    );
+    put(
+        "WranglerAllowedEmailDomain",
+        join_commas(c.wrangler_settings.allowed_email_domain.as_deref()),
+    );
+    put(
+        "WranglerMoveThreadMaxCount",
+        number(c.wrangler_settings.move_thread_max_count),
+    );
+    put(
+        "WranglerMoveThreadToAnotherTeamEnable",
+        flag(c.wrangler_settings.move_thread_to_another_team_enable),
+    );
+    put(
+        "WranglerMoveThreadFromPrivateChannelEnable",
+        flag(c.wrangler_settings.move_thread_from_private_channel_enable),
+    );
+    put(
+        "WranglerMoveThreadFromDirectMessageChannelEnable",
+        flag(
+            c.wrangler_settings
+                .move_thread_from_direct_message_channel_enable,
+        ),
+    );
+    put(
+        "WranglerMoveThreadFromGroupMessageChannelEnable",
+        flag(
+            c.wrangler_settings
+                .move_thread_from_group_message_channel_enable,
+        ),
+    );
+
+    props
+}
+
+/// `strings.Join(slice, ",")` on a Go slice that may be nil — which joins to `""`.
+fn join_commas(values: Option<&[String]>) -> String {
+    values.unwrap_or(&[]).join(",")
+}
+
+/// `model.SystemAsymmetricSigningKeyKey` (system.go:16).
+const SYSTEM_ASYMMETRIC_SIGNING_KEY: &str = "AsymmetricSigningKey";
+/// `model.SystemDiagnosticId` (system.go).
+const SYSTEM_DIAGNOSTIC_ID: &str = "DiagnosticId";
+/// `model.SystemInstallationDateKey` (system.go:18).
+const SYSTEM_INSTALLATION_DATE: &str = "InstallationDate";
+/// `model.SystemUpgradedFromTeId` (system.go:24).
+const SYSTEM_UPGRADED_FROM_TE: &str = "UpgradedFromTE";
+
+/// The `Systems` row behind `AsymmetricSigningPublicKey`.
+///
+/// `X` and `Y` are `*big.Int` and land in the row as **bare JSON integers of about 78 digits** —
+/// far outside `f64`, so they are kept as raw text. Decoding them into `serde_json::Number` would
+/// silently round them and produce a public key that is merely plausible.
+#[derive(serde::Deserialize)]
+struct AsymmetricSigningKeyRow {
+    ecdsa_key: Option<EcdsaKeyRow>,
+}
+
+#[derive(serde::Deserialize)]
+struct EcdsaKeyRow {
+    curve: String,
+    x: Box<serde_json::value::RawValue>,
+    y: Box<serde_json::value::RawValue>,
+}
+
+/// Port of the `AsymmetricSigningPublicKey` line of `regenerateClientConfig`
+/// (platform/config.go:234): `x509.MarshalPKIXPublicKey` of the P-256 public half, base64 with
+/// the standard padded alphabet.
+///
+/// The DER is assembled by hand rather than through a crypto crate, because for P-256 it is
+/// **fixed**: a 26-byte SubjectPublicKeyInfo prefix naming `id-ecPublicKey` and `prime256v1`,
+/// then a BIT STRING holding the uncompressed point `0x04 || X || Y`. Every byte of the prefix is
+/// determined by the curve, so there is no key material in it and nothing to get subtly wrong
+/// that a round-trip against the running server would not catch.
+///
+/// `None` — the key row missing, a curve other than P-256, a coordinate that will not fit in 32
+/// bytes — means Go's `if key := ps.AsymmetricSigningKey(); key != nil` did not fire and the
+/// property is **absent** from the map rather than empty.
+fn asymmetric_signing_public_key(row: &str) -> Option<String> {
+    use base64::Engine as _;
+
+    let parsed: AsymmetricSigningKeyRow = serde_json::from_str(row).ok()?;
+    let key = parsed.ecdsa_key?;
+    // `switch key.ECDSAKey.Curve { case "P-256": … default: return fmt.Errorf(…) }`
+    // (platform/config.go:311). An unknown curve is a startup error in Go, so no client config is
+    // generated at all; here it drops the one property, which is the closest thing a reader can do.
+    if key.curve != "P-256" {
+        return None;
+    }
+    let x = decimal_to_fixed_bytes(key.x.get(), 32)?;
+    let y = decimal_to_fixed_bytes(key.y.get(), 32)?;
+
+    /// SEQUENCE { SEQUENCE { OID 1.2.840.10045.2.1, OID 1.2.840.10045.3.1.7 }, BIT STRING …
+    const P256_SPKI_PREFIX: &[u8] = &[
+        0x30, 0x59, 0x30, 0x13, 0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01, 0x06, 0x08,
+        0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07, 0x03, 0x42, 0x00,
+    ];
+    let mut der = Vec::with_capacity(P256_SPKI_PREFIX.len() + 65);
+    der.extend_from_slice(P256_SPKI_PREFIX);
+    // `elliptic.Marshal`'s uncompressed point format.
+    der.push(0x04);
+    der.extend_from_slice(&x);
+    der.extend_from_slice(&y);
+
+    Some(base64::engine::general_purpose::STANDARD.encode(der))
+}
+
+/// A non-negative decimal integer as `width` big-endian bytes, left-padded with zeroes.
+///
+/// Long division by 256 over the decimal digits, because the values are 256-bit and nothing in
+/// the dependency set does bignums. `None` for anything that is not a run of ASCII digits, or
+/// that needs more than `width` bytes — both of which mean the row is not a P-256 key.
+fn decimal_to_fixed_bytes(decimal: &str, width: usize) -> Option<Vec<u8>> {
+    let decimal = decimal.trim();
+    if decimal.is_empty() || !decimal.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    let mut digits: Vec<u8> = decimal.bytes().map(|byte| byte - b'0').collect();
+    let mut little_endian = Vec::with_capacity(width);
+    while digits.iter().any(|digit| *digit != 0) {
+        let mut remainder = 0u32;
+        for digit in &mut digits {
+            let value = remainder * 10 + u32::from(*digit);
+            *digit = u8::try_from(value / 256).ok()?;
+            remainder = value % 256;
+        }
+        little_endian.push(u8::try_from(remainder).ok()?);
+        if little_endian.len() > width {
+            return None;
+        }
+    }
+    little_endian.resize(width, 0);
+    little_endian.reverse();
+    Some(little_endian)
+}
+
+impl crate::App {
+    /// Port of `PlatformService.LimitedClientConfigWithComputed` (platform/config.go:330) for an
+    /// **unlicensed** server — the body of `GET /api/v4/config/client` for a caller with no
+    /// session.
+    pub async fn limited_client_config_with_computed(
+        &self,
+    ) -> Result<mm_model::utils::StringMap, ConfigError> {
+        let config = load_model_config(self.store().config()).await?;
+        let mut props = generate_limited_client_config(&config, &self.telemetry_id().await);
+        self.add_signing_key(&mut props).await;
+        props.insert(
+            "NoAccounts".to_owned(),
+            flag(Some(self.no_accounts().await)),
+        );
+        Ok(props)
+    }
+
+    /// Port of `PlatformService.ClientConfigWithComputed` (platform/config.go:341) for an
+    /// **unlicensed** server — the body of `GET /api/v4/config/client` for a caller with one.
+    ///
+    /// Every computed property here is best-effort in Go, and each failure has its **own**
+    /// fallback rather than a shared one: a broken user count is `NoAccounts=false`, a broken
+    /// install date is `InstallationDate=""` — present and empty — and a broken schema query
+    /// leaves `SchemaVersion` **absent** from the map altogether. Collapsing the three into one
+    /// error would change the key set a client sees on a bad day.
+    pub async fn client_config_with_computed(
+        &self,
+    ) -> Result<mm_model::utils::StringMap, ConfigError> {
+        let config = load_model_config(self.store().config()).await?;
+        let mut props = generate_client_config(&config, &self.telemetry_id().await);
+        self.add_signing_key(&mut props).await;
+
+        props.insert(
+            "NoAccounts".to_owned(),
+            flag(Some(self.no_accounts().await)),
+        );
+        props.insert(
+            "MaxPostSize".to_owned(),
+            match self.max_post_size().await {
+                Ok(size) => size.to_string(),
+                Err(err) => {
+                    tracing::warn!(error = %err, "could not read the maximum post size");
+                    // `GetMaxPostSize` swallows its own error and answers the default, so the key
+                    // is present either way.
+                    mm_model::post::POST_MESSAGE_MAX_RUNES_V2.to_string()
+                }
+            },
+        );
+        props.insert(
+            "UpgradedFromTE".to_owned(),
+            flag(Some(
+                self.system_value(SYSTEM_UPGRADED_FROM_TE).await.as_deref() == Some("true"),
+            )),
+        );
+        // `respCfg["InstallationDate"] = ""` first, then overwritten only when the row parses.
+        props.insert(
+            "InstallationDate".to_owned(),
+            self.system_value(SYSTEM_INSTALLATION_DATE)
+                .await
+                .filter(|raw| raw.parse::<i64>().is_ok())
+                .unwrap_or_default(),
+        );
+        // `GetDBSchemaVersion` — the newest applied migration. On error Go logs and writes
+        // **nothing**, so the key is missing rather than zero.
+        match self.get_applied_schema_migrations().await {
+            Ok(migrations) => {
+                if let Some(latest) = migrations.first() {
+                    props.insert("SchemaVersion".to_owned(), latest.version.to_string());
+                }
+            }
+            Err(err) => tracing::warn!(error = %err, "could not read the schema version"),
+        }
+
+        Ok(props)
+    }
+
+    /// `ps.telemetryId`, which the platform loads from the `DiagnosticId` system row.
+    async fn telemetry_id(&self) -> String {
+        self.system_value(SYSTEM_DIAGNOSTIC_ID)
+            .await
+            .unwrap_or_default()
+    }
+
+    /// One `Systems` row, with a read failure treated as absence — which is what every caller
+    /// here does with it.
+    async fn system_value(&self, name: &str) -> Option<String> {
+        use mm_store::SystemStore as _;
+        match self.store().system().get_by_name(name).await {
+            Ok(value) => value,
+            Err(err) => {
+                tracing::warn!(error = %err, name, "could not read a system row");
+                None
+            }
+        }
+    }
+
+    /// `if key := ps.AsymmetricSigningKey(); key != nil { … }` (platform/config.go:234) — the
+    /// property is added to **both** client maps or to neither.
+    async fn add_signing_key(&self, props: &mut mm_model::utils::StringMap) {
+        let Some(row) = self.system_value(SYSTEM_ASYMMETRIC_SIGNING_KEY).await else {
+            return;
+        };
+        if let Some(encoded) = asymmetric_signing_public_key(&row) {
+            props.insert("AsymmetricSigningPublicKey".to_owned(), encoded);
+        }
+    }
+
+    /// Port of `PlatformService.IsFirstUserAccount` (platform/config.go:364).
+    ///
+    /// Go caches a "no users yet" flag and only queries while it is still set, so the query runs
+    /// at most a handful of times in a server's life; here it runs per request. The **answer** is
+    /// the same — `Count(UserCountOptions{IncludeDeleted: true}) == 0` — and a count that fails
+    /// is `false`, not an error, exactly as Go's `if err != nil { return false }`.
+    async fn no_accounts(&self) -> bool {
+        use mm_store::UserStore as _;
+        let options = mm_model::user_count::UserCountOptions {
+            include_deleted: true,
+            ..Default::default()
+        };
+        match self.store().user().count(&options).await {
+            Ok(count) => count == 0,
+            Err(err) => {
+                tracing::warn!(error = %err, "could not count users for NoAccounts");
+                false
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod document {
+    use super::*;
+    use std::collections::BTreeMap;
+
+    fn env(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
+        pairs
+            .iter()
+            .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
+            .collect()
+    }
+
+    /// A document shaped like the real one for the fields each test touches, with every kind
+    /// `applyEnvKey` switches on present: string, bool, int, slice, map, nested struct, a nil
+    /// pointer and a `json.RawMessage`.
+    fn document() -> serde_json::Value {
+        serde_json::json!({
+            "ServiceSettings": {
+                "SiteURL": "",
+                "EnableTesting": false,
+                "WebsocketPort": 80,
+                "TLSOverwriteCiphers": [],
+                "LicenseFileLocation": null,
+            },
+            "PluginSettings": {
+                "Enable": true,
+                "Plugins": {},
+                "PluginStates": null,
+            },
+            "LogSettings": { "AdvancedLoggingJSON": null },
+            "MessageExportSettings": { "GlobalRelaySettings": null },
+        })
+    }
+
+    #[test]
+    fn a_string_setting_is_replaced_and_the_field_match_ignores_case() {
+        let mut config = document();
+        apply_environment_map(
+            &mut config,
+            &env(&[("MM_SERVICESETTINGS_SITEURL", "http://x/")]),
+        );
+        assert_eq!(config["ServiceSettings"]["SiteURL"], "http://x/");
+    }
+
+    #[test]
+    fn a_bool_parses_with_gos_spellings_and_an_unparseable_value_changes_nothing() {
+        let mut config = document();
+        apply_environment_map(
+            &mut config,
+            &env(&[("MM_SERVICESETTINGS_ENABLETESTING", "T")]),
+        );
+        assert_eq!(config["ServiceSettings"]["EnableTesting"], true);
+
+        let mut config = document();
+        apply_environment_map(
+            &mut config,
+            &env(&[("MM_SERVICESETTINGS_ENABLETESTING", "yes")]),
+        );
+        assert_eq!(
+            config["ServiceSettings"]["EnableTesting"], false,
+            "`if err == nil` — Go never assigns when ParseBool fails"
+        );
+    }
+
+    #[test]
+    fn an_int_parses_base_ten_only() {
+        let mut config = document();
+        apply_environment_map(
+            &mut config,
+            &env(&[("MM_SERVICESETTINGS_WEBSOCKETPORT", "8443")]),
+        );
+        assert_eq!(config["ServiceSettings"]["WebsocketPort"], 8443);
+
+        let mut config = document();
+        apply_environment_map(
+            &mut config,
+            &env(&[("MM_SERVICESETTINGS_WEBSOCKETPORT", "0x10")]),
+        );
+        assert_eq!(config["ServiceSettings"]["WebsocketPort"], 80);
+    }
+
+    /// `strings.Split(value, " ")` — **spaces**, not the commas [`split_list`] uses for the
+    /// settings the narrow `Config` reads. Getting this wrong turns one cipher name into several.
+    #[test]
+    fn a_slice_splits_on_spaces_and_never_on_commas() {
+        let mut config = document();
+        apply_environment_map(
+            &mut config,
+            &env(&[("MM_SERVICESETTINGS_TLSOVERWRITECIPHERS", "a,b c")]),
+        );
+        assert_eq!(
+            config["ServiceSettings"]["TLSOverwriteCiphers"],
+            serde_json::json!(["a,b", "c"])
+        );
+    }
+
+    /// `rFieldValue.Elem()` on a nil pointer is invalid and Go returns without assigning. The
+    /// environment cannot bring an unset setting to life — only `SetDefaults` can.
+    #[test]
+    fn a_nil_pointer_is_not_brought_to_life_by_the_environment() {
+        let mut config = document();
+        apply_environment_map(
+            &mut config,
+            &env(&[("MM_SERVICESETTINGS_LICENSEFILELOCATION", "/etc/mm.lic")]),
+        );
+        assert!(config["ServiceSettings"]["LicenseFileLocation"].is_null());
+    }
+
+    /// A Go **map** is a leaf that swallows the whole variable as JSON, and it does so even
+    /// though a key part is left over. A Go **struct** is a level to descend into and needs one.
+    /// JSON cannot tell the two apart, which is what [`MAP_VALUED_PATHS`] is for.
+    #[test]
+    fn a_map_takes_the_whole_value_as_json_and_a_struct_takes_a_deeper_key() {
+        let mut config = document();
+        apply_environment_map(
+            &mut config,
+            &env(&[("MM_PLUGINSETTINGS_PLUGINS_ANYTHING", r#"{"a":{"b":1}}"#)]),
+        );
+        assert_eq!(
+            config["PluginSettings"]["Plugins"],
+            serde_json::json!({"a": {"b": 1}}),
+            "the leftover key part is ignored, as in Go"
+        );
+
+        let mut config = document();
+        apply_environment_map(&mut config, &env(&[("MM_PLUGINSETTINGS", "true")]));
+        assert_eq!(
+            config["PluginSettings"]["Enable"], true,
+            "a struct with no key part left is untouched, not replaced"
+        );
+    }
+
+    /// A nil map is `null` on the wire but is still a map to `reflect`, so unlike a nil pointer
+    /// the environment **can** set it.
+    #[test]
+    fn a_null_map_is_still_set_by_the_environment() {
+        let mut config = document();
+        apply_environment_map(
+            &mut config,
+            &env(&[("MM_PLUGINSETTINGS_PLUGINSTATES", r#"{"x":{"Enable":true}}"#)]),
+        );
+        assert_eq!(
+            config["PluginSettings"]["PluginStates"],
+            serde_json::json!({"x": {"Enable": true}})
+        );
+    }
+
+    /// `json.RawMessage` is a `[]byte`, so the same applies to it — and it is checked before the
+    /// nil arm for exactly that reason.
+    #[test]
+    fn a_null_raw_message_is_still_set_by_the_environment() {
+        let mut config = document();
+        apply_environment_map(
+            &mut config,
+            &env(&[(
+                "MM_LOGSETTINGS_ADVANCEDLOGGINGJSON",
+                r#"{"c":{"Type":"file"}}"#,
+            )]),
+        );
+        assert_eq!(
+            config["LogSettings"]["AdvancedLoggingJSON"],
+            serde_json::json!({"c": {"Type": "file"}})
+        );
+    }
+
+    #[test]
+    fn an_unknown_field_and_a_variable_that_is_not_a_setting_change_nothing() {
+        let mut config = document();
+        let before = config.clone();
+        apply_environment_map(
+            &mut config,
+            &env(&[
+                ("MM_SERVICESETTINGS_NOSUCHSETTING", "x"),
+                ("MM_NOSUCHSECTION_ANYTHING", "x"),
+                // `GetEnvironment` keeps anything starting with `MM`, not `MM_`; the prefix trim
+                // then leaves `MMRS_STACK`, which names no field.
+                ("MMRS_STACK", "3"),
+                ("MM_API_LISTEN", "127.0.0.1:8066"),
+            ]),
+        );
+        assert_eq!(config, before);
+    }
+
+    #[test]
+    fn the_environment_map_reports_only_what_is_set_and_drops_empty_sections() {
+        let map = generate_environment_map(&env(&[
+            ("MM_SERVICESETTINGS_SITEURL", "http://x"),
+            ("MM_TEAMSETTINGS_ENABLEOPENSERVER", "true"),
+        ]));
+        assert_eq!(
+            map,
+            serde_json::json!({
+                "ServiceSettings": {"SiteURL": true},
+                "TeamSettings": {"EnableOpenServer": true},
+            })
+        );
+    }
+
+    /// Go's walk sees `*FeatureFlags` as a pointer, so it looks for `MM_FEATUREFLAGS` and never
+    /// for a per-flag variable — even though [`apply_environment_map`] happily applies one. The
+    /// asymmetry is Go's, and it is measured against the live pair by the parity suite.
+    #[test]
+    fn the_environment_map_never_reports_a_feature_flag() {
+        let map = generate_environment_map(&env(&[(
+            "MM_FEATUREFLAGS_ENABLESHIFTESCAPETOMARKALLREAD",
+            "true",
+        )]));
+        assert_eq!(map, serde_json::json!({}));
+
+        let mut config =
+            serde_json::json!({"FeatureFlags": {"EnableShiftEscapeToMarkAllRead": false}});
+        apply_environment_map(
+            &mut config,
+            &env(&[("MM_FEATUREFLAGS_ENABLESHIFTESCAPETOMARKALLREAD", "true")]),
+        );
+        assert_eq!(
+            config["FeatureFlags"]["EnableShiftEscapeToMarkAllRead"], true,
+            "the overlay applies it even though the environment map will not report it"
+        );
+    }
+
+    /// `x509.MarshalPKIXPublicKey` of the P-256 key this stack's Go server generated, transcribed
+    /// from `GET /api/v4/config/client`'s own answer — Go's bytes, not a value computed here.
+    ///
+    /// Only the **public** coordinates appear: `d` is the private half and is neither read by
+    /// [`asymmetric_signing_public_key`] nor written down.
+    const SIGNING_KEY_ROW: &str = concat!(
+        r#"{"ecdsa_key":{"curve":"P-256","#,
+        r#""x":10628728706615536606915249921457720916166495303664134344306663176299871581582,"#,
+        r#""y":39914676909083839426969281223075403254422723626260708177174659508446728097973}}"#
+    );
+    const SIGNING_KEY_DER_BASE64: &str = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEF3+lsuz4Qa9zkmXOBEolVGaOCJxpRVU1caUBScPVtY5YPugS8FHmlYpw/KGrvLf+bANnyvWWLTZp6RXWPDEQtQ==";
+
+    #[test]
+    fn the_signing_public_key_matches_gos_own_der() {
+        assert_eq!(
+            asymmetric_signing_public_key(SIGNING_KEY_ROW).as_deref(),
+            Some(SIGNING_KEY_DER_BASE64)
+        );
+    }
+
+    #[test]
+    fn a_key_that_is_not_p256_or_not_there_yields_no_property() {
+        assert!(asymmetric_signing_public_key("{}").is_none());
+        assert!(asymmetric_signing_public_key(r#"{"ecdsa_key":null}"#).is_none());
+        assert!(
+            asymmetric_signing_public_key(
+                &SIGNING_KEY_ROW.replace(r#""curve":"P-256""#, r#""curve":"P-384""#)
+            )
+            .is_none()
+        );
+        assert!(asymmetric_signing_public_key("not json").is_none());
+    }
+
+    #[test]
+    fn a_coordinate_is_left_padded_and_a_too_large_one_is_refused() {
+        assert_eq!(decimal_to_fixed_bytes("0", 4), Some(vec![0, 0, 0, 0]));
+        assert_eq!(decimal_to_fixed_bytes("1", 4), Some(vec![0, 0, 0, 1]));
+        assert_eq!(decimal_to_fixed_bytes("255", 4), Some(vec![0, 0, 0, 255]));
+        assert_eq!(decimal_to_fixed_bytes("256", 4), Some(vec![0, 0, 1, 0]));
+        assert_eq!(
+            decimal_to_fixed_bytes("4294967295", 4),
+            Some(vec![255, 255, 255, 255])
+        );
+        assert_eq!(decimal_to_fixed_bytes("4294967296", 4), None);
+        assert_eq!(decimal_to_fixed_bytes("-1", 4), None);
+        assert_eq!(decimal_to_fixed_bytes("", 4), None);
+    }
+}
+
+#[cfg(test)]
+mod sanitizing {
+    use super::*;
+    use mm_model::config::{
+        Config as ModelConfig, GlobalRelayMessageExportSettings, LibreTranslateProviderSettings,
+        ReplicaLagSettings,
+    };
+    use mm_model::utils::FAKE_SETTING;
+
+    fn configured() -> ModelConfig {
+        let mut config = ModelConfig::default();
+        config.ldap_settings.bind_password = Some("ldap-secret".to_owned());
+        config.file_settings.public_link_salt = Some(String::new());
+        config.file_settings.amazon_s3_secret_access_key = Some("s3".to_owned());
+        config.email_settings.smtp_password = Some("smtp".to_owned());
+        config.git_lab_settings.secret = Some("gitlab".to_owned());
+        config.sql_settings.data_source =
+            Some("postgres://mmuser:hunter2@localhost:5432/mattermost".to_owned());
+        config.sql_settings.at_rest_encrypt_key = Some(String::new());
+        config.sql_settings.data_source_replicas = Some(vec!["postgres://a".to_owned()]);
+        config.sql_settings.data_source_search_replicas = Some(vec!["postgres://b".to_owned()]);
+        config.sql_settings.replica_lag_settings = Some(vec![ReplicaLagSettings {
+            data_source: Some("postgres://c".to_owned()),
+            ..ReplicaLagSettings::default()
+        }]);
+        config.elasticsearch_settings.password = Some(String::new());
+        config.service_settings.split_key = Some(String::new());
+        config.service_settings.google_developer_key = Some(String::new());
+        config.service_settings.giphy_sdk_key = Some("giphy".to_owned());
+        config.cache_settings.redis_password = Some(String::new());
+        config.message_export_settings.global_relay_settings =
+            Some(GlobalRelayMessageExportSettings {
+                smtp_password: Some("relay".to_owned()),
+                ..GlobalRelayMessageExportSettings::default()
+            });
+        config.auto_translation_settings.libre_translate = Some(LibreTranslateProviderSettings {
+            api_key: Some("libre".to_owned()),
+            ..LibreTranslateProviderSettings::default()
+        });
+        config.service_settings.site_url = Some("http://localhost:8065".to_owned());
+        config
+    }
+
+    /// **The test that keeps the database password out of a response.**
+    #[test]
+    fn every_secret_is_replaced_and_the_data_source_is_not_merely_redacted() {
+        let mut config = configured();
+        sanitize(&mut config);
+
+        for value in [
+            &config.ldap_settings.bind_password,
+            &config.file_settings.amazon_s3_secret_access_key,
+            &config.email_settings.smtp_password,
+            &config.git_lab_settings.secret,
+            &config.sql_settings.data_source,
+            &config.service_settings.giphy_sdk_key,
+        ] {
+            assert_eq!(value.as_deref(), Some(FAKE_SETTING));
+        }
+        assert_eq!(
+            config.sql_settings.data_source.as_deref(),
+            Some(FAKE_SETTING),
+            "getConfig passes nil SanitizeOptions, so PartiallyRedactDataSources is off and the \
+             data source is fully masked rather than url-redacted"
+        );
+        assert_eq!(
+            config
+                .message_export_settings
+                .global_relay_settings
+                .as_ref()
+                .and_then(|relay| relay.smtp_password.as_deref()),
+            Some(FAKE_SETTING)
+        );
+        assert_eq!(
+            config
+                .auto_translation_settings
+                .libre_translate
+                .as_ref()
+                .and_then(|libre| libre.api_key.as_deref()),
+            Some(FAKE_SETTING)
+        );
+        assert_eq!(
+            config.sql_settings.data_source_replicas.as_deref(),
+            Some([FAKE_SETTING.to_owned()].as_slice())
+        );
+        assert_eq!(
+            config.sql_settings.data_source_search_replicas.as_deref(),
+            Some([FAKE_SETTING.to_owned()].as_slice())
+        );
+        assert_eq!(
+            config
+                .sql_settings
+                .replica_lag_settings
+                .as_ref()
+                .and_then(|lags| lags.first())
+                .and_then(|lag| lag.data_source.as_deref()),
+            Some(FAKE_SETTING)
+        );
+    }
+
+    /// Five fields are masked **whether or not they hold anything** and the rest only when
+    /// non-empty. Go writes the two forms two lines apart and the distinction is visible on the
+    /// wire: an unconfigured SMTP password reads `""`, an unconfigured salt reads `FakeSetting`.
+    #[test]
+    fn the_unconditional_five_are_masked_even_when_empty_and_the_rest_are_not() {
+        let mut config = configured();
+        config.email_settings.smtp_password = Some(String::new());
+        config.ldap_settings.bind_password = Some(String::new());
+        sanitize(&mut config);
+
+        for value in [
+            &config.file_settings.public_link_salt,
+            &config.sql_settings.at_rest_encrypt_key,
+            &config.elasticsearch_settings.password,
+            &config.service_settings.split_key,
+            &config.cache_settings.redis_password,
+        ] {
+            assert_eq!(
+                value.as_deref(),
+                Some(FAKE_SETTING),
+                "masked with no emptiness test"
+            );
+        }
+        for value in [
+            &config.email_settings.smtp_password,
+            &config.ldap_settings.bind_password,
+            &config.service_settings.google_developer_key,
+        ] {
+            assert_eq!(value.as_deref(), Some(""), "empty stays empty");
+        }
+    }
+
+    #[test]
+    fn a_setting_that_is_not_a_secret_is_untouched_and_an_absent_one_stays_absent() {
+        let mut config = configured();
+        config.ldap_settings.bind_password = None;
+        sanitize(&mut config);
+        assert_eq!(
+            config.service_settings.site_url.as_deref(),
+            Some("http://localhost:8065")
+        );
+        assert_eq!(config.ldap_settings.bind_password, None);
+        assert_eq!(
+            config.file_settings.azure_access_key, None,
+            "a nil pointer is not given a fake value"
+        );
+    }
+}
+
+#[cfg(test)]
+mod client_config {
+    use super::*;
+    use mm_model::config::{Config as ModelConfig, PluginState};
+
+    fn base() -> ModelConfig {
+        let mut config = ModelConfig::default();
+        let mut flags = mm_model::feature_flags::FeatureFlags::default();
+        flags.set_defaults();
+        config.feature_flags = Some(flags);
+        config
+    }
+
+    /// `strings.TrimRight(*SiteURL, "/")` removes **every** trailing slash, not one, and the same
+    /// line runs on `WebsocketURL`.
+    #[test]
+    fn the_site_and_websocket_urls_lose_all_their_trailing_slashes() {
+        let mut config = base();
+        config.service_settings.site_url = Some("https://mm.example.com///".to_owned());
+        config.service_settings.websocket_url = Some("wss://mm.example.com/".to_owned());
+        let props = generate_limited_client_config(&config, "tid");
+        assert_eq!(props["SiteURL"], "https://mm.example.com");
+        assert_eq!(props["WebsocketURL"], "wss://mm.example.com");
+    }
+
+    /// `Enable && PluginStates[apps] != nil && PluginStates[apps].Enable` — three ways to be
+    /// false and one to be true.
+    #[test]
+    fn the_apps_plugin_needs_plugins_on_and_its_own_state_on() {
+        let mut config = base();
+        config.plugin_settings.enable = Some(true);
+        assert_eq!(
+            generate_limited_client_config(&config, "")["AppsPluginEnabled"],
+            "false",
+            "no entry at all"
+        );
+
+        let mut states = std::collections::BTreeMap::new();
+        states.insert(PLUGIN_ID_APPS.to_owned(), PluginState { enable: false });
+        config.plugin_settings.plugin_states = Some(states.clone());
+        assert_eq!(
+            generate_limited_client_config(&config, "")["AppsPluginEnabled"],
+            "false",
+            "entry present but disabled"
+        );
+
+        states.insert(PLUGIN_ID_APPS.to_owned(), PluginState { enable: true });
+        config.plugin_settings.plugin_states = Some(states);
+        assert_eq!(
+            generate_limited_client_config(&config, "")["AppsPluginEnabled"],
+            "true"
+        );
+
+        config.plugin_settings.enable = Some(false);
+        assert_eq!(
+            generate_limited_client_config(&config, "")["AppsPluginEnabled"],
+            "false",
+            "plugins off beats an enabled state"
+        );
+    }
+
+    #[test]
+    fn the_marketplace_is_default_only_at_the_exact_url() {
+        let mut config = base();
+        config.plugin_settings.marketplace_url = Some(DEFAULT_MARKETPLACE_URL.to_owned());
+        assert_eq!(
+            generate_client_config(&config, "")["IsDefaultMarketplace"],
+            "true"
+        );
+        config.plugin_settings.marketplace_url = Some(format!("{DEFAULT_MARKETPLACE_URL}/"));
+        assert_eq!(
+            generate_client_config(&config, "")["IsDefaultMarketplace"],
+            "false"
+        );
+    }
+
+    /// The **constant**, not `TeamSettings.LockProfileFieldsForEmailUsers`: only an Enterprise
+    /// licence lets the configured value through, and this server never has one.
+    #[test]
+    fn lock_profile_fields_is_the_constant_and_not_the_setting() {
+        let mut config = base();
+        config.team_settings.lock_profile_fields_for_email_users = Some("all".to_owned());
+        assert_eq!(
+            generate_client_config(&config, "")["LockProfileFieldsForEmailUsers"],
+            LOCK_PROFILE_FIELDS_NONE
+        );
+    }
+
+    /// A nil `[]string` joins to `""`, and a populated one joins with commas — **not** the spaces
+    /// the environment overlay splits on.
+    #[test]
+    fn string_slices_join_with_commas() {
+        let mut config = base();
+        assert_eq!(generate_client_config(&config, "")["CustomUrlSchemes"], "");
+        config.display_settings.custom_url_schemes =
+            Some(vec!["git".to_owned(), "smtp".to_owned()]);
+        assert_eq!(
+            generate_client_config(&config, "")["CustomUrlSchemes"],
+            "git,smtp"
+        );
+    }
+
+    /// Every flag reaches the client under a `FeatureFlag` prefix, and `TestFeature` is a string
+    /// flag whose value is passed through rather than stringified as a bool.
+    #[test]
+    fn every_feature_flag_is_prefixed_and_string_flags_keep_their_value() {
+        let props = generate_limited_client_config(&base(), "");
+        assert_eq!(props["FeatureFlagTestFeature"], "off");
+        assert_eq!(props["FeatureFlagNotificationMonitoring"], "true");
+        assert_eq!(props["FeatureFlagAppsEnabled"], "false");
+        assert!(!props.contains_key("TestFeature"));
+    }
+
+    /// A config with no `FeatureFlags` at all — which is what the persisted document carries,
+    /// before `load_model_config` fills it — produces no `FeatureFlag*` keys rather than a panic.
+    #[test]
+    fn a_document_without_feature_flags_produces_no_flag_keys() {
+        let mut config = base();
+        config.feature_flags = None;
+        let props = generate_limited_client_config(&config, "");
+        assert!(!props.keys().any(|key| key.starts_with("FeatureFlag")));
+    }
+
+    /// `GenerateClientConfig` *starts* from the limited map, so the authenticated answer is a
+    /// superset — and the keys it overwrites must differ only where Go overwrites them.
+    #[test]
+    fn the_full_map_is_a_superset_of_the_limited_one() {
+        let mut config = base();
+        config.cloud_settings.cwsurl = Some("https://portal.example".to_owned());
+        let limited = generate_limited_client_config(&config, "tid");
+        let full = generate_client_config(&config, "tid");
+
+        for key in limited.keys() {
+            assert!(full.contains_key(key), "{key} is missing from the full map");
+        }
+        assert_eq!(limited["CWSURL"], "", "the limited map's licence default");
+        assert_eq!(
+            full["CWSURL"], "https://portal.example",
+            "the full map overwrites it from CloudSettings"
+        );
+        assert_eq!(limited["DiagnosticId"], "tid");
+        assert_eq!(full["TelemetryId"], "tid");
+    }
+
+    /// The backwards-compatible alias is written **after** the `FeatureFlag*` block, so it is the
+    /// setting that wins and not the flag.
+    #[test]
+    fn the_cross_team_search_alias_mirrors_the_setting() {
+        let mut config = base();
+        config.service_settings.enable_cross_team_search = Some(true);
+        let props = generate_client_config(&config, "");
+        assert_eq!(props["EnableCrossTeamSearch"], "true");
+        assert_eq!(props["FeatureFlagExperimentalCrossTeamSearch"], "true");
+    }
+
+    /// Unlicensed, `IsAuditLoggingActive` reduces to `FileEnabled`; the advanced-logging arm is
+    /// unreachable without `license.Features.AdvancedLogging`.
+    #[test]
+    fn audit_logging_is_active_only_when_the_audit_file_is_enabled() {
+        let mut config = base();
+        assert_eq!(
+            generate_client_config(&config, "")["AuditLoggingActive"],
+            "false"
+        );
+        config.experimental_audit_settings.file_enabled = Some(true);
+        assert_eq!(
+            generate_client_config(&config, "")["AuditLoggingActive"],
+            "true"
+        );
+    }
+
+    /// The licensed keys Go only writes inside `if license != nil` must be absent, not present
+    /// and false — a client tells "the server cannot do this" from "the server did not say".
+    #[test]
+    fn the_licence_only_keys_are_absent_rather_than_false() {
+        let props = generate_client_config(&base(), "");
+        for key in [
+            "PostAcknowledgements",
+            "ScheduledPosts",
+            "MobileEnableBiometrics",
+            "ExperimentalRemoteClusterService",
+            "EnableSignUpWithGitLab",
+            "EnableCustomTermsOfService",
+            "IntuneMAMEnabled",
+            "ContentFlaggingEnabled",
+        ] {
+            assert!(!props.contains_key(key), "{key} needs a licence");
+        }
+        // …while the ones Go *does* write a default for are present.
+        assert_eq!(props["EnableCompliance"], "false");
+        assert_eq!(props["EnableThemeSelection"], "true");
+        assert_eq!(props["ExperimentalEnableAuthenticationTransfer"], "true");
+    }
+}

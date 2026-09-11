@@ -60,6 +60,9 @@ mod parity {
     pub mod command_writes;
     pub mod commands;
     pub mod common_teams;
+    /// Appended out of alphabetical order: this list is shared by every worktree and an
+    /// insertion in the middle of it is a merge conflict for somebody else.
+    pub mod config_reads;
     pub mod config_source;
     pub mod custom_profile_attributes;
     pub mod custom_status_writes;

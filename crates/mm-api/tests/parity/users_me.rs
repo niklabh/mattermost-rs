@@ -254,10 +254,11 @@ async fn rejected_credentials_match_gos_status_exactly() {
 
 /// An unmigrated route must be forwarded, and the answer must be Go's.
 ///
-/// The canary was `GET /api/v4/system/ping` until 2026-09-07, when that route was migrated. It is
-/// now `GET /api/v4/config/client?format=old`, chosen for the same two properties: it is
-/// `api.APIHandler`, so it needs no session and the test needs no fixture, and it is a route this
-/// server has no plans to answer soon — the client config is 200-odd derived fields.
+/// The canary was `GET /api/v4/system/ping` until 2026-09-07 and
+/// `GET /api/v4/config/client?format=old` until 2026-09-11, each moved on the day its route was
+/// migrated. It is now `GET /api/v4/plugins/webapp`, chosen for the same two properties: it is
+/// `api.APIHandler`, so it needs no session and the test needs no fixture, and it is behind the
+/// plugin host, which is not ported at all.
 ///
 /// **When this route is migrated, move the canary rather than deleting the test.** It is the only
 /// assertion in the suite that the fallback still exists at all.
@@ -270,7 +271,7 @@ async fn an_unmigrated_route_is_forwarded_to_go() {
 
     let client = client();
     let response = client
-        .get(format!("{RUST}/api/v4/config/client?format=old"))
+        .get(format!("{RUST}/api/v4/plugins/webapp"))
         .send()
         .await
         .expect("the proxy is reachable");
@@ -282,13 +283,13 @@ async fn an_unmigrated_route_is_forwarded_to_go() {
             .get("x-mmrs-served-by")
             .and_then(|v| v.to_str().ok()),
         Some("go"),
-        "the client config is not migrated, so the proxy should have forwarded it"
+        "the webapp plugin list is not migrated, so the proxy should have forwarded it"
     );
 
-    let body: serde_json::Value = response.json().await.expect("the client config decodes");
+    let body: serde_json::Value = response.json().await.expect("the plugin list decodes");
     assert!(
-        body["Version"].is_string(),
-        "and the body is Go's, not something we synthesised: {body}"
+        body.is_array(),
+        "and the body is Go's `[]*model.Manifest`, not something we synthesised: {body}"
     );
 }
 

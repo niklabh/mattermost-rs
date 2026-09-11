@@ -24,6 +24,22 @@
 # `MM_` variable is set — an export here fails a unit test that has nothing to do with the code
 # it covers.
 #
+# **The last four arrived with the `/api/v4/config` reads.** `GET /config/client` answers with
+# `SiteURL`, and `GET /config` and `GET /config/environment` answer with the whole overlay — so
+# for those three the environment *is* the subject of the response and not merely a setting that
+# colours one. `LISTENADDRESS` is deliberately the **Go** server's port, not this process's: the
+# route reports the configuration the pair shares, and mm-api's own port comes from
+# `MM_API_LISTEN`, which no Mattermost setting is named after.
+#
+# `MM_SQLSETTINGS_DATASOURCE` is set for its **presence**, not its value: `GET /config` masks it
+# to `FakeSetting` on both servers, but `GET /config/environment` reports which settings an
+# operator overrode, and an unset variable there is a visible difference. The value is this
+# process's own `DATABASE_URL`, which is the same database with slightly different parameters.
+#
+# One override still differs and cannot be reconciled by this file: `MM_FILESETTINGS_DIRECTORY` is
+# rooted at whichever checkout launched each server, so `FileSettings.Directory` is exempted by
+# name in the `config_reads` parity suite.
+#
 # Both launch sites source this. They used to differ: `parity.sh` set the file directory and
 # `mutate.sh` did not, so every `api`-suite mutation ran against a server configured unlike the
 # one the tests were written against.
@@ -44,6 +60,10 @@ mmrs_launch_mm_api() {
     MM_FILESETTINGS_DIRECTORY="$root/reference/.build/mmroot$MMRS_RUN_SUFFIX/data/" \
     MM_TEAMSETTINGS_ENABLEOPENSERVER=true \
     MM_FEATUREFLAGS_ENABLESHIFTESCAPETOMARKALLREAD=true \
+    MM_SERVICESETTINGS_SITEURL="$MMRS_GO_BASE" \
+    MM_SERVICESETTINGS_LISTENADDRESS=":$MMRS_GO_PORT" \
+    MM_SQLSETTINGS_DRIVERNAME=postgres \
+    MM_SQLSETTINGS_DATASOURCE="$DATABASE_URL" \
     MM_SERVICESETTINGS_ENABLELOCALMODE=true \
     MM_SERVICESETTINGS_LOCALMODESOCKETLOCATION="$MMRS_GO_LOCAL_SOCKET" \
     MM_API_LOCAL_SOCKET="$MMRS_LOCAL_SOCKET" \
