@@ -9923,3 +9923,138 @@ is [D-237] and is the first time [D-190]'s class has had a credential consequenc
 Three more, recorded rather than fixed: [D-238] (no e-mail service, so four send-only routes stay
 with Go and two writes lose a notification), [D-236] (CSRF is checked on no migrated route, which
 predates this work and is written down here for the first time), and [D-237] above.
+---
+
+## Channel creation (2026-09-11)
+
+Three routes, all served: `POST /api/v4/channels`, `POST /api/v4/channels/direct`,
+`POST /api/v4/channels/group`. `POST /channels` was deferred from the lifecycle session because it
+adds the creator as a member; `Channel().SaveMember` landed there, and this is the first of the
+routes it unblocks.
+
+| what | where | status |
+|---|---|---|
+| `Channel().Save`, `SaveDirectChannel`, `saveChannelT`, `GetTeamChannels`' count | `crates/mm-store/src/channel_store.rs` (end of both blocks) | done; `Save` mutates the channel it is handed, because `PreSave` mints the id and the timestamps in place |
+| `StoreError::LimitExceeded` | `crates/mm-store/src/error.rs` | done; a store-enforced quota the app layer answers **400** to, where every other write failure is a 500 |
+| `App.CreateChannelWithUser`, `CreateChannel`, `GetOrCreateDirectChannel`, `createDirectChannel`, `CreateGroupChannel`, `addChannelToDefaultCategory` | `crates/mm-app/src/channel_create.rs` | done, minus the join system post ([D-231]) |
+| `TeamSettings.MaxChannelsPerTeam` | `crates/mm-app/src/config.rs` | done; Go default 2000, and a negative value disables the store's half of the check only |
+| `model.NonSortedArrayFromJSON` | `crates/mm-model/src/utils.rs`, corpus in `reference/dump/behaviour.go` | done; the DM route reads its list positionally, so the order is wire surface |
+| the three handlers | `crates/mm-api/src/channel_creates.rs` | done; a licensed installation forwards `POST /channels` only ([D-234]'s reading), and two branches of the message routes forward ([D-235], [D-236]) |
+| 16 cross-server tests, 6 store tests, 1 corpus test | `crates/mm-api/tests/parity/channel_creates.rs`, `crates/mm-store/tests/db_channel_creates.rs`, `mm_model::utils::go_parity` | — |
+
+### The same store outcome is a 400 on one route and a 201 on the other two
+
+`saveChannelT`'s insert is `ON CONFLICT (TeamId, Name) DO NOTHING`, and on a miss it re-selects the
+row that holds the name and returns it **alongside** `ErrConflict`. Three callers read that pair
+differently: `CreateChannel` reports `store.sql_channel.save_channel.exists.app_error` at 400 and
+throws the channel away, while `GetOrCreateDirectChannel` and `CreateGroupChannel` swallow the error
+and answer the existing channel with a **201**. A `Result` cannot carry a meaningful value on its
+error arm, so the conflict is a value here — `ChannelSave::Existing` — and the branch stays where Go
+put it, above the store.
+
+The re-select has **no `DeleteAt` filter**, which is why an archived channel still holds its name:
+archive `town-square-clone` and re-create it and you get the 400, not a fresh channel. Measured on
+both servers.
+
+### The per-team limit is checked twice against two different counts
+
+`CreateChannelWithUser` compares `GetNumberOfChannelsOnTeam() + 1` to `MaxChannelsPerTeam`, and
+`saveChannelT` then compares a second count to the same setting. They do not count the same rows:
+
+| | types | archived |
+|---|---|---|
+| `GetNumberOfChannelsOnTeam` (app) | `O`, `P`, `G` | **counted** |
+| `saveChannelT` (store) | `O`, `P` | not counted |
+
+So a team can be refused by the first with `api.channel.create_channel.max_channel_limit.app_error`
+and accepted by the second with no error at all. Both are ported. Go's app-layer count also comes
+from a **list** method that answers `ErrNotFound` for zero rows, so an entirely empty team is a
+**404** rather than a count of zero; `count_team_channels` returns the number and
+`get_number_of_channels_on_team` raises the 404, so the status stays where the status belongs.
+
+### Three creates, three different event addressings
+
+| route | event | addressed to | published |
+|---|---|---|---|
+| `POST /channels` | `channel_created` | the **user** (`channel_id` and `team_id` on the broadcast are empty) | once |
+| `/channels/direct` | `direct_added` | the **channel** | once, and only when the DM did not already exist |
+| `/channels/group` | `group_added` | each **member** individually | once per member |
+
+Getting the first one wrong announces a new private channel to everyone; getting the third wrong
+sends one frame where Go sends N. Both are asserted with `SocketProbe`.
+
+`direct_added`'s `creator_id` is `userIds[0]` **from the request body**, not the session's user —
+the handler passes the two ids positionally. The parity test sends the pair largest-id-first so that
+a sorted parse and a body-ordered parse give different answers; without that the assertion would
+pass half the time by luck.
+
+`group_added`'s `teammate_ids` is sorted, and the sort is not obvious from the Rust: Go's
+`GetGroupNameFromUserIds` sorts the caller's slice **in place**, and `CreateGroupChannel` then
+marshals that same slice into every event. The Rust helper does not mutate its argument, so the sort
+is explicit at the publish site — without it the field would carry the request's order.
+
+### `addChannelToDefaultCategory` is ported for a new channel only
+
+Go's function also *moves* a channel out of the category it is already in. That half is dead for a
+create — nothing can reference an id the database learned about a millisecond ago — so only
+find-or-create is ported, and the doc comment on `App::add_channel_to_default_category` is the
+record of why. The match is case-insensitive and against `custom` categories only, so a
+`default_category_name` of `"channels"` makes a *second* category rather than filing into the
+built-in one. The whole thing is fire-and-forget: Go logs every failure and returns nothing.
+
+### What forwards, and why each one
+
+* **A licensed installation, on `POST /channels` only.** `PrivacySettings.UseAnonymousURLs` behind
+  `MinimumEnterpriseAdvancedLicense` would *replace the client's channel name with a fresh id*, and
+  managed channel categories read the licence again. Neither message route consults the licence, so
+  neither is gated.
+* **`RestrictDirectMessage = "team"`** — [D-239]. Needs a store method this port does not have and a
+  plugin decision it cannot make.
+* **A view-restricted caller** — [D-240], the same wall `GET /users/by_auth_data` already hits. Both
+  forwards are returned *before* anything is written.
+
+### Two fixture-generator diffs that are not mine
+
+`TZ=Asia/Kolkata go run .` in `reference/dump` also rewrites `behaviour_filestore.json` (a random
+multipart boundary) and `behaviour_scheduled_post{,_recurrence}.json` (this machine's tzdata rejects
+`america/new_york` in lower case where the committed fixture accepted it). Both are environmental
+rather than caused by any change here, and both were reverted — only `behaviour_utils.json` is
+committed, and only as an addition. Worth knowing before the next session reads a dirty `git status`
+as a signal.
+
+### Mutation testing: 38 run, 36 caught, 2 controls survived
+
+Plan at `scripts/mutations/channel-creates.plan`. Run it with
+`MUTATE_STORE_TARGETS='--test db_channel_creates'` — without it the `store` lines build every
+mm-store test binary per mutation and let an unrelated one decide the verdict.
+
+Every one of the 38 was compiled before the batch ran. That is a step this project has paid for
+twice now: a plan line that does not compile is reported as a HARNESS FAULT that reads as though
+the mutation ran, and a fault voids the whole run. Applying each mutation, running
+`cargo check --workspace`, and reverting takes about nine seconds a line against the batch's
+fifty, and it caught nothing this time — which is the point of a cheap pre-flight.
+
+**One mutation survived, and the fixture was the reason.** `create-channel-private-gate-is-the-\
+public-permission` swaps `create_private_channel` for `create_public_channel` in the handler's type
+switch. It survived because on a stock installation `team_user` grants **both** and `system_user`
+grants **neither**, so every ordinary member passes either check and the two ids are
+indistinguishable from outside. `the_private_create_is_gated_on_its_own_permission` now plants a
+role with only `create_public_channel`, hangs it off a throwaway team's scheme as
+`DefaultTeamUserRole`, and asserts that a member of that team gets a 201 for `O` and a 403 for `P`
+on both servers. Re-run: CAUGHT.
+
+The two controls — a renamed binding in `mm_app::channel_create` and two reordered independent
+predicates in `count_team_channels` — both SURVIVED, so the verdicts above mean what they say.
+
+Three mutations were considered and **not** written because they are genuinely unobservable rather
+than untested, and it is cheaper to say so than to rediscover it:
+
+* **Swapping the `team_id` and `display_name` emptiness checks.** Both answer
+  `api.context.invalid_body_param.app_error`, and `AppError`'s `params` map is not serialised — so
+  the two 400s are byte-identical and only the (wiped) `detailed_error` differs.
+* **Inverting `createChannel`'s discoverable *type* check.** The feature flag is false and fires
+  first, so nothing downstream of it is reachable.
+* **`sorted_array_from_json` in place of the non-sorted one on the GM route.** The GM name is a
+  hash of the sorted ids, `teammate_ids` is re-sorted at the publish site, and both parsers
+  de-duplicate — so the two are observationally identical *there*. They are not on the DM route,
+  which is why that mutation is in the plan and is caught.

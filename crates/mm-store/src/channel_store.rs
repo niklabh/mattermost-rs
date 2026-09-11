@@ -28,7 +28,10 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use mm_model::channel::{CHANNEL_TYPE_DIRECT, Channel, ChannelBannerInfo, ChannelSearchOpts};
+use mm_model::channel::{
+    CHANNEL_TYPE_DIRECT, CHANNEL_TYPE_GROUP, CHANNEL_TYPE_SPACE, Channel, ChannelBannerInfo,
+    ChannelSearchOpts,
+};
 use mm_model::channel_list::ChannelList;
 use mm_model::channel_member::{
     CHANNEL_MEMBER_NOTIFY_PROPS_MAX_RUNES, CHANNEL_NOTIFY_DEFAULT, ChannelMember,
@@ -588,6 +591,60 @@ pub trait ChannelStore {
         delete_at: i64,
         update_at: i64,
     ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    // -----------------------------------------------------------------------------------------
+    // Channel creation (`POST /channels`, `/channels/direct`, `/channels/group`). Three entry
+    // points onto one `saveChannelT`, and the differences between them are the whole group:
+    // `Save` refuses `D` and boards and enforces the per-team limit, `save_direct_channel`
+    // forces the type to `D` and writes both memberships in the same transaction, and a group
+    // channel goes through `Save` with a hashed name and no team.
+    // -----------------------------------------------------------------------------------------
+
+    /// Port of `SqlChannelStore.Save` (channel_store.go:639).
+    ///
+    /// **Mutates the channel it is handed** — `PreSave` mints the id, the timestamps and the
+    /// unicode-sanitised name — so a successful call leaves the caller holding the row that was
+    /// written, which is exactly what the handler marshals.
+    ///
+    /// `max_channels_per_team` is `*TeamSettings.MaxChannelsPerTeam`; a **negative** value turns
+    /// the limit off entirely (`maxChannelsPerTeam >= 0` guards the count), and `D`, `G` and `S`
+    /// skip it regardless of the number.
+    fn save(
+        &self,
+        channel: &mut Channel,
+        max_channels_per_team: i64,
+    ) -> impl std::future::Future<Output = Result<ChannelSave, StoreError>> + Send;
+
+    /// Port of `SqlChannelStore.SaveDirectChannel` (channel_store.go:712).
+    ///
+    /// One transaction over three writes: the channel row and both memberships. **`team_id` is
+    /// forced to the empty string** before the insert, so a DM is in no team and its uniqueness
+    /// is `(name, '')` across the installation.
+    ///
+    /// When both members are the same user — Go allows a DM with yourself — only *one*
+    /// `ChannelMembers` row is written (`saveMemberT(member2)`), not two. A port that wrote both
+    /// would hit the primary key and turn a legal self-DM into a 500.
+    fn save_direct_channel(
+        &self,
+        channel: &mut Channel,
+        member1: ChannelMember,
+        member2: ChannelMember,
+    ) -> impl std::future::Future<Output = Result<ChannelSave, StoreError>> + Send;
+
+    /// The size of `SqlChannelStore.GetTeamChannels` (channel_store.go:1571) without loading it.
+    ///
+    /// Go's `GetNumberOfChannelsOnTeam` fetches every channel of the team and takes `len`, so
+    /// this counts the same set: `Type IN ('O','P','G')`, **archived channels included**, and
+    /// no `DeleteAt` filter. It is deliberately *not* the count `save` enforces the limit with,
+    /// which is a different predicate on the same table — see [`save`].
+    ///
+    /// **Zero is not an error here**; Go's list method answers `ErrNotFound` for an empty team
+    /// and the app layer turns that into a 404, so that mapping lives in the app layer where the
+    /// status code does.
+    fn count_team_channels(
+        &self,
+        team_id: &str,
+    ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
 }
 
 /// Postgres-backed implementation.
@@ -1063,6 +1120,52 @@ impl ChannelStore for SqlChannelStore {
     ) -> Result<(), StoreError> {
         set_delete_at(&self.pool, channel_id, delete_at, update_at).await
     }
+
+    #[tracing::instrument(skip_all, fields(channel_type = %channel.channel_type, team_id = %channel.team_id))]
+    async fn save(
+        &self,
+        channel: &mut Channel,
+        max_channels_per_team: i64,
+    ) -> Result<ChannelSave, StoreError> {
+        save(&self.pool, channel, max_channels_per_team).await
+    }
+
+    #[tracing::instrument(skip_all, fields(name = %channel.name))]
+    async fn save_direct_channel(
+        &self,
+        channel: &mut Channel,
+        member1: ChannelMember,
+        member2: ChannelMember,
+    ) -> Result<ChannelSave, StoreError> {
+        save_direct_channel(&self.pool, channel, member1, member2).await
+    }
+
+    #[tracing::instrument(skip(self), fields(team_id = %team_id))]
+    async fn count_team_channels(&self, team_id: &str) -> Result<i64, StoreError> {
+        count_team_channels(&self.pool, team_id).await
+    }
+}
+
+/// What [`ChannelStore::save`] and [`ChannelStore::save_direct_channel`] did.
+///
+/// Go returns `(*Channel, error)` and its two values are *both* meaningful on the conflict path:
+/// `saveChannelT` answers the **existing** channel alongside `ErrConflict("Channel")`, and three
+/// callers read it — `CreateChannel` reports a 400 and throws the channel away, while
+/// `GetOrCreateDirectChannel` and `CreateGroupChannel` swallow the error and return the channel
+/// as a success. A bare `Result` cannot carry that, so the conflict is a value here rather than
+/// an error.
+///
+/// `Existing` means **nothing was written**: the insert's `ON CONFLICT … DO NOTHING` matched no
+/// row and the transaction is rolled back, so the memberships a direct channel would have
+/// written are not there either.
+#[derive(Debug)]
+pub enum ChannelSave {
+    /// The row was inserted. The caller's channel now holds what was written.
+    Saved,
+    /// `(Name, TeamId)` was taken. This is the row that already holds it — including, per Go's
+    /// `tableSelectQuery`, an **archived** one, which is why re-creating a channel whose name is
+    /// held by an archived channel is a conflict rather than a fresh insert.
+    Existing(Box<Channel>),
 }
 
 /// One row of Go's `channelMembersForTeamWithSchemeSelectQuery` (channel_store.go:558) — the
@@ -4779,8 +4882,12 @@ struct SchemeDefaultsRow {
     team_admin: Option<String>,
 }
 
+/// Takes a `&mut PgConnection` rather than a `&PgPool` because
+/// [`save_direct_channel`] runs it **inside** a transaction: the second member of a new DM is
+/// saved against a channel row that is not committed yet, so a query on a pooled connection
+/// would see no channel at all and silently resolve every role default to empty.
 async fn scheme_defaults_for_channel(
-    pool: &PgPool,
+    conn: &mut sqlx::PgConnection,
     channel_id: &str,
 ) -> Result<SchemeDefaultsRow, StoreError> {
     let row = sqlx::query_as!(
@@ -4800,7 +4907,7 @@ async fn scheme_defaults_for_channel(
         "#,
         channel_id
     )
-    .fetch_optional(pool)
+    .fetch_optional(&mut *conn)
     .await
     .map_err(|source| StoreError::Db {
         context: format!("default_channel_roles_select channelId={channel_id}"),
@@ -4853,9 +4960,25 @@ fn notify_props_to_jsonb(props: Option<&StringMap>) -> serde_json::Value {
 #[tracing::instrument(skip(pool, member), fields(channel_id = %member.channel_id, user_id = %member.user_id))]
 pub async fn save_member(
     pool: &PgPool,
+    member: ChannelMember,
+) -> Result<ChannelMember, StoreError> {
+    let mut conn = pool.acquire().await.map_err(|source| StoreError::Db {
+        context: "channel_members_save: acquire".to_owned(),
+        source,
+    })?;
+    save_member_on(&mut conn, member).await
+}
+
+/// [`save_member`] against a caller-owned connection, so a transaction can hold it.
+///
+/// `SaveDirectChannel` writes the channel row and both memberships in **one** transaction
+/// (channel_store.go:712), and the scheme-defaults lookup inside reads the channel row the same
+/// transaction has just inserted. Splitting the two across connections would make that read miss.
+pub async fn save_member_on(
+    conn: &mut sqlx::PgConnection,
     mut member: ChannelMember,
 ) -> Result<ChannelMember, StoreError> {
-    let defaults = scheme_defaults_for_channel(pool, &member.channel_id).await?;
+    let defaults = scheme_defaults_for_channel(&mut *conn, &member.channel_id).await?;
 
     member.pre_save();
     member.is_valid().map_err(|app_error| StoreError::Invalid {
@@ -4891,7 +5014,7 @@ pub async fn save_member(
         member.scheme_guest,
         member.auto_translation_disabled,
     )
-    .execute(pool)
+    .execute(&mut *conn)
     .await;
 
     if let Err(source) = inserted {
@@ -5470,6 +5593,329 @@ pub async fn set_delete_at(
 
     tx.commit().await.map_err(|source| StoreError::Db {
         context: "SetDeleteAt: commit_transaction".to_owned(),
+        source,
+    })
+}
+
+// -------------------------------------------------------------------------------------------
+// Channel creation
+// -------------------------------------------------------------------------------------------
+
+/// Port of `SqlChannelStore.Save` (channel_store.go:639) — see the trait for the contract.
+///
+/// # Three refusals before the transaction opens
+///
+/// `DeleteAt != 0`, `Type == 'D'` and a board type are all [`StoreError::InvalidInput`] on
+/// `Channel`, and the app layer tells them apart by the **field** name: `DeleteAt` becomes
+/// `store.sql_channel.save.archived_channel.app_error` and `Type` becomes
+/// `store.sql_channel.save.direct_channel.app_error`. Folding the two into one variant would
+/// swap one 400's id for another's.
+///
+/// A group channel is *not* refused here: `createGroupChannel` (app/channel.go:572) reaches this
+/// same function with `Type == 'G'`, which is why the direct-channel guard names only `D`.
+pub async fn save(
+    pool: &PgPool,
+    channel: &mut Channel,
+    max_channels_per_team: i64,
+) -> Result<ChannelSave, StoreError> {
+    if channel.delete_at != 0 {
+        return Err(StoreError::InvalidInput {
+            entity: "Channel",
+            field: "DeleteAt",
+            value: channel.delete_at.to_string(),
+        });
+    }
+
+    if channel.channel_type == CHANNEL_TYPE_DIRECT || channel.is_board() {
+        return Err(StoreError::InvalidInput {
+            entity: "Channel",
+            field: "Type",
+            value: channel.channel_type.clone(),
+        });
+    }
+
+    let mut tx = pool.begin().await.map_err(|source| StoreError::Db {
+        context: "begin_transaction".to_owned(),
+        source,
+    })?;
+
+    let saved = save_channel_t(&mut tx, channel, max_channels_per_team).await?;
+    if let ChannelSave::Existing(existing) = saved {
+        // Go's `return newChannel, err` leaves `finalizeTransactionX` to roll back. Nothing was
+        // written, so the rollback is a formality — but it is the reason a conflicting create
+        // cannot leave a `PublicChannels` row behind.
+        drop(tx);
+        return Ok(ChannelSave::Existing(existing));
+    }
+
+    upsert_public_channel(&mut tx, channel).await?;
+
+    tx.commit().await.map_err(|source| StoreError::Db {
+        context: "commit_transaction".to_owned(),
+        source,
+    })?;
+
+    Ok(ChannelSave::Saved)
+}
+
+/// Port of `SqlChannelStore.SaveDirectChannel` (channel_store.go:712) — see the trait.
+///
+/// **No `upsertPublicChannelT`.** A `D` channel is not public and Go does not call it here at
+/// all, so unlike [`save`] there is no `PublicChannels` delete either; the row never existed.
+pub async fn save_direct_channel(
+    pool: &PgPool,
+    channel: &mut Channel,
+    mut member1: ChannelMember,
+    mut member2: ChannelMember,
+) -> Result<ChannelSave, StoreError> {
+    if channel.delete_at != 0 {
+        return Err(StoreError::InvalidInput {
+            entity: "Channel",
+            field: "DeleteAt",
+            value: channel.delete_at.to_string(),
+        });
+    }
+
+    if channel.channel_type != CHANNEL_TYPE_DIRECT {
+        return Err(StoreError::InvalidInput {
+            entity: "Channel",
+            field: "Type",
+            value: channel.channel_type.clone(),
+        });
+    }
+
+    let mut tx = pool.begin().await.map_err(|source| StoreError::Db {
+        context: "begin_transaction".to_owned(),
+        source,
+    })?;
+
+    channel.team_id = String::new();
+    let saved = save_channel_t(&mut tx, channel, 0).await?;
+    if let ChannelSave::Existing(existing) = saved {
+        drop(tx);
+        return Ok(ChannelSave::Existing(existing));
+    }
+
+    // "Members need new channel ID" — `PreSave` minted it a moment ago.
+    member1.channel_id.clone_from(&channel.id);
+    member2.channel_id.clone_from(&channel.id);
+
+    if member1.user_id != member2.user_id {
+        save_member_on(&mut tx, member1).await?;
+        save_member_on(&mut tx, member2).await?;
+    } else {
+        // A DM with yourself is one row, and Go saves **member2** — the `otherUser`. Both carry
+        // the same user id here, so which one is chosen is invisible; it is kept literal
+        // because the two differ in `scheme_guest`/`scheme_user` if a caller ever builds them
+        // from two different users.
+        save_member_on(&mut tx, member2).await?;
+    }
+
+    tx.commit().await.map_err(|source| StoreError::Db {
+        context: "commit_transaction".to_owned(),
+        source,
+    })?;
+
+    Ok(ChannelSave::Saved)
+}
+
+/// Port of `SqlChannelStore.saveChannelT` (channel_store.go:789).
+///
+/// # The order is the contract
+///
+/// The pre-existing-id guard, then `PreSave`, then `IsValid`, then the limit count, then the
+/// insert. `PreSave` mints the id, so moving the first guard after it would reject every
+/// channel; `PreSave` also unicode-sanitises the name, so validating first accepts names Go
+/// rejects and vice versa.
+///
+/// # `Id != "" && !IsShared()` is not "the caller must not set an id"
+///
+/// A **shared** channel arrives with an id already assigned by the remote cluster and is
+/// inserted with it. Every local create leaves it empty. So the guard is "a local caller may not
+/// choose an id", and its error is `InvalidInput` on the `Id` field, which the app layer reports
+/// as `store.sql_channel.save_channel.existing.app_error`.
+///
+/// # The limit count is a different query from `GetTeamChannels`
+///
+/// `DeleteAt = 0 AND (Type = 'O' OR Type = 'P')` — archived channels do **not** count against
+/// the limit here, while [`count_team_channels`] (which the app layer's own pre-check uses)
+/// counts them and counts `G` too. The two disagreeing is Go's behaviour, not a mistake.
+async fn save_channel_t(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    channel: &mut Channel,
+    max_channels_per_team: i64,
+) -> Result<ChannelSave, StoreError> {
+    if !channel.id.is_empty() && !channel.is_shared() {
+        return Err(StoreError::InvalidInput {
+            entity: "Channel",
+            field: "Id",
+            value: channel.id.clone(),
+        });
+    }
+
+    channel.pre_save();
+    channel
+        .is_valid()
+        .map_err(|app_error| StoreError::Invalid {
+            entity: "Channel",
+            app_error,
+        })?;
+
+    if channel.channel_type != CHANNEL_TYPE_DIRECT
+        && channel.channel_type != CHANNEL_TYPE_GROUP
+        && channel.channel_type != CHANNEL_TYPE_SPACE
+        && max_channels_per_team >= 0
+    {
+        let count = sqlx::query_scalar!(
+            r#"
+            SELECT COUNT(0) AS "count!"
+              FROM channels
+             WHERE teamid = $1
+               AND deleteat = 0
+               AND (type = 'O' OR type = 'P')
+            "#,
+            channel.team_id,
+        )
+        .fetch_one(&mut **tx)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("save_channel_count: teamId={}", channel.team_id),
+            source,
+        })?;
+
+        if count >= max_channels_per_team {
+            return Err(StoreError::LimitExceeded {
+                what: "channels_per_team",
+                count,
+                details: format!("teamId={}", channel.team_id),
+            });
+        }
+    }
+
+    let banner_info = banner_info_column(channel.banner_info.as_ref())?;
+
+    // `channelSliceColumns(false)` / `channelToSlice` (channel_store.go:152, :198) in order.
+    // `ON CONFLICT (name, teamid) DO NOTHING` is Go's `ON CONFLICT (TeamId, Name)` against the
+    // `channels_name_teamid_key` index; Postgres infers by the column *set*, not their order.
+    let inserted = sqlx::query!(
+        r#"
+        INSERT INTO channels
+            (id, createat, updateat, deleteat, teamid, type, displayname, name, header, purpose,
+             lastpostat, totalmsgcount, extraupdateat, creatorid, schemeid, groupconstrained,
+             autotranslation, shared, totalmsgcountroot, lastrootpostat, bannerinfo,
+             defaultcategoryname, discoverable)
+        VALUES ($1, $2, $3, $4, $5, $6::text::channel_type, $7, $8, $9, $10, $11, $12, $13, $14,
+                $15, $16, $17, $18, $19, $20, $21, $22, $23)
+        ON CONFLICT (name, teamid) DO NOTHING
+        "#,
+        channel.id,
+        channel.create_at,
+        channel.update_at,
+        channel.delete_at,
+        channel.team_id,
+        channel.channel_type,
+        channel.display_name,
+        channel.name,
+        channel.header,
+        channel.purpose,
+        channel.last_post_at,
+        channel.total_msg_count,
+        channel.extra_update_at,
+        channel.creator_id,
+        channel.scheme_id,
+        channel.group_constrained,
+        channel.auto_translation,
+        channel.shared,
+        channel.total_msg_count_root,
+        channel.last_root_post_at,
+        banner_info,
+        channel.default_category_name,
+        channel.discoverable,
+    )
+    .execute(&mut **tx)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: format!("save_channel: id={}", channel.id),
+        source,
+    })?
+    .rows_affected();
+
+    if inserted != 0 {
+        return Ok(ChannelSave::Saved);
+    }
+
+    // Go re-selects with `s.tableSelectQuery`, which carries **no** `Type IN (…)` filter and no
+    // `DeleteAt` filter — so the row that took the name can be archived, or a type `Get` hides.
+    // A failure to find it is *not* wrapped as a conflict on purpose (Go's own comment: "do not
+    // return this as a *store.ErrConflict as it would be treated as a recoverable error"), so a
+    // vanished duplicate is an ordinary 500 rather than a 400.
+    let row = sqlx::query_as!(
+        ChannelRow,
+        r#"
+        SELECT c.id,
+               c.createat,
+               c.updateat,
+               c.deleteat,
+               c.teamid,
+               c.type::text AS "channel_type!",
+               c.displayname,
+               c.name,
+               c.header,
+               c.purpose,
+               c.lastpostat,
+               c.totalmsgcount,
+               c.extraupdateat,
+               c.creatorid,
+               c.schemeid,
+               c.groupconstrained,
+               c.autotranslation,
+               c.shared,
+               c.totalmsgcountroot,
+               c.lastrootpostat,
+               c.bannerinfo,
+               c.defaultcategoryname,
+               c.discoverable,
+               EXISTS (
+                   SELECT 1 FROM accesscontrolpolicies acp
+                    WHERE acp.id = c.id AND acp.type = 'channel'
+               ) AS "policy_enforced!",
+               COALESCE((
+                   SELECT acp.active FROM accesscontrolpolicies acp
+                    WHERE acp.id = c.id AND acp.type = 'channel' AND acp.active = TRUE
+                    LIMIT 1
+               ), false) AS "policy_is_active!"
+          FROM channels c
+         WHERE c.teamid = $1
+           AND c.name = $2
+        "#,
+        channel.team_id,
+        channel.name,
+    )
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: format!("error while retrieving existing channel {}", channel.name),
+        source,
+    })?;
+
+    Ok(ChannelSave::Existing(Box::new(channel_from_row(row)?)))
+}
+
+/// The size of `SqlChannelStore.GetTeamChannels` (channel_store.go:1571) — see the trait.
+pub async fn count_team_channels(pool: &PgPool, team_id: &str) -> Result<i64, StoreError> {
+    sqlx::query_scalar!(
+        r#"
+        SELECT COUNT(0) AS "count!"
+          FROM channels
+         WHERE teamid = $1
+           AND type IN ('O', 'P', 'G')
+        "#,
+        team_id,
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: format!("failed to find Channels with teamId={team_id}"),
         source,
     })
 }

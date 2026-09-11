@@ -6612,6 +6612,14 @@ user's** locale, where the other ten use the server's. Ours are English througho
 
 ---
 
+
+**`POST /api/v4/channels` posts no join message.** Found by the agent that ported channel
+creation, in the same session that paid off D-231's membership posts — the create path is a
+route that did not exist when those were written, so it was never in their scope. Go's
+`CreateChannelWithUser` calls `postJoinChannelMessage` for the creator. It is invisible in the
+201, because Go marshals the channel before the post exists, and visible from the next read of
+that channel onward in `total_msg_count` and `last_post_at`. No test re-reads a created
+channel's row, so this suite cannot currently detect the gap widening.
 ## D-234 · Two channel-patch branches are forwarded because they write what this file does not own
 
 **Status** OPEN · **Severity** forwarded route · **Raised** 2026-09-10 (phase 2, channel
@@ -6766,3 +6774,45 @@ old one working against Go until the user cache is cleared — and three tests i
 invalidate explicitly for exactly that reason. Unlike the reaction cache in [D-190],
 `/caches/invalidate` *does* clear both of these, so the cluster-message half of the fix would be
 enough. It ends when the Go server does.
+## D-239 · `POST /channels/direct` forwards a team-restricted installation
+
+**Status** OPEN · **Severity** coverage gap · **Raised** 2026-09-11 (phase 2, channel creation)
+
+`GetOrCreateDirectChannel` (app/channel.go:361) has a branch for
+`TeamSettings.RestrictDirectMessage == "team"`: unless the caller holds `manage_system`, the two
+users must share a team, *except* when one of them is a bot that a plugin has exempted
+(`IsBotExemptFromDMRestrictions`). `mm_app::App::get_or_create_direct_channel` returns
+`ChannelCreate::Forward` for the whole setting rather than reproducing half of it.
+
+Two things are missing and only one of them is ours to fix:
+
+- `Team().GetCommonTeamIDsForTwoUsers` — a store method this port does not have. It is **not**
+  `get_common_team_ids_for_multiple_users`, which is already ported: the two-user variant filters
+  deleted teams out and the multi-user one does not, so reusing it would allow DMs Go refuses.
+- the bot exemption, which needs the plugin environment — the same wall
+  [`RestrictedDm::Undecidable`] already documents for `CheckIfChannelIsRestrictedDM`.
+
+The setting defaults to `"any"` (config.go:2620), so the forward is unreachable on this stack and
+on a stock server. Paying it off means the store method plus a parity run with the setting changed
+on **both** servers, which is the shape [D-213] describes.
+
+---
+
+## D-240 · A view-restricted caller is forwarded on both message-channel creates
+
+**Status** OPEN · **Severity** coverage gap · **Raised** 2026-09-11 (phase 2, channel creation)
+
+`createDirectChannel` and `createGroupChannel` both call `UserCanSeeOtherUser` (app/user.go:2710),
+which consults `GetViewUsersRestrictions` and — when the caller *is* restricted — asks
+`Team().UserBelongsToTeams` and `Channel().UserBelongsToChannels`. Neither store method is ported,
+so `mm_app::App::user_can_see_other_user` answers `PrepareError::Unreproducible` and both handlers
+forward.
+
+This is the same forward `GET /users/by_auth_data` already takes, and the same reason: the
+restricted branch is reachable only for a guest account or a deployment that has edited
+`system_user`'s permissions. What is new is that it now gates a **write**, so the forward has to be
+returned before anything is created — it is, in `serve_create_direct_channel` and
+`serve_create_group_channel`, both of which decide it before the app layer is called at all.
+
+Paying it off is two store methods and a fixture with a guest account; until then no test on this
+stack can distinguish the refusal from the forward, because nobody here is restricted.

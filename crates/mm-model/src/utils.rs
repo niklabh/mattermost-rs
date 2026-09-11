@@ -932,6 +932,27 @@ pub fn sorted_array_from_json(data: &[u8]) -> Result<Vec<String>, serde_json::Er
     Ok(out)
 }
 
+/// Port of `model.NonSortedArrayFromJSON` (utils.go:557).
+///
+/// [`sorted_array_from_json`] with [`remove_duplicate_strings_non_sort`] in place of the sorting
+/// de-duplicator — every decoder habit documented there applies here unchanged.
+///
+/// **The order is the body's**, first occurrence wins, and one route depends on it:
+/// `createDirectChannel` (api4/channel.go:625) takes `userIds[0]` as the event's `creator_id`
+/// and `userIds[1]` as its `teammate_id`, so sorting here would relabel which participant a
+/// connected client is told opened the conversation.
+pub fn non_sorted_array_from_json(data: &[u8]) -> Result<Vec<String>, serde_json::Error> {
+    let data = replace_lone_surrogates(data);
+    let mut deserializer = serde_json::Deserializer::from_slice(&data);
+    let decoded: Option<Vec<Option<String>>> = Deserialize::deserialize(&mut deserializer)?;
+    let out: Vec<String> = decoded
+        .unwrap_or_default()
+        .into_iter()
+        .map(Option::unwrap_or_default)
+        .collect();
+    Ok(remove_duplicate_strings_non_sort(&out))
+}
+
 /// Rewrite every `\uXXXX` escape that is a surrogate **without its partner** as `�`, which
 /// is what Go's `encoding/json` decodes it to (`unquote`, via `utf8.RuneError`); serde_json
 /// instead fails the whole body with "lone leading surrogate". A proper pair is left alone, and
@@ -2572,6 +2593,45 @@ mod go_parity {
                 Err(err) => assert!(!want_ok, "{body:?}: Go decoded {want_out:?}, we said {err}"),
             }
         }
+    }
+
+    /// `NonSortedArrayFromJSON` over the same corpus. The decode verdicts are identical to
+    /// [`sorted_array_from_json`]'s by construction; what this pins is the **order**, which is
+    /// first-occurrence rather than sorted — `["b","a","b"]` is `["b","a"]` here and `["a","b"]`
+    /// there. Two bodies in the corpus exist only for that difference.
+    #[test]
+    fn non_sorted_array_from_json_matches_go() {
+        let oracle = oracle();
+        let cases = oracle["non_sorted_array_from_json"].as_object().unwrap();
+        assert!(cases.len() >= 30, "corpus is thin: {}", cases.len());
+        let mut ordered_differently = 0;
+        for (body, want) in cases {
+            let want_ok = want["ok"].as_bool().unwrap();
+            let want_out: Vec<String> = match &want["out"] {
+                Value::Null => Vec::new(),
+                other => serde_json::from_value(other.clone()).unwrap(),
+            };
+            match non_sorted_array_from_json(body.as_bytes()) {
+                Ok(got) => {
+                    assert!(
+                        want_ok,
+                        "{body:?}: Go refused this body, we decoded {got:?}"
+                    );
+                    assert_eq!(got, want_out, "{body:?}");
+                    let mut sorted = got.clone();
+                    sorted.sort();
+                    if sorted != got {
+                        ordered_differently += 1;
+                    }
+                }
+                Err(err) => assert!(!want_ok, "{body:?}: Go decoded {want_out:?}, we said {err}"),
+            }
+        }
+        assert!(
+            ordered_differently >= 2,
+            "the corpus has no body whose answer is unsorted, so it cannot tell this apart from \
+             sorted_array_from_json"
+        );
     }
 
     #[test]

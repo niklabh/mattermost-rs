@@ -10,6 +10,7 @@ pub mod auth;
 pub mod auth_writes;
 /// The two bot reads. `getBot` and `getBots`.
 pub mod bots;
+pub mod channel_creates;
 pub mod channel_member_writes;
 pub mod channel_writes;
 pub mod channels;
@@ -638,6 +639,26 @@ pub fn router(state: AppState) -> Router {
         // as it matches gorilla's `{channel_id:[A-Za-z0-9]+}` there, and 400s identically; a POST
         // falls to `partially_migrated`'s method fallback and is forwarded. A literal segment
         // with a hyphen would land on `mux_segments_or_forward` and be forwarded too.
+        // `BaseRoutes.Channels.Handle("")` (api4/channel.go:41) — the only method on the bare
+        // `/channels` collection that this server answers. `getAllChannels` is a `GET` on the
+        // same path and is not migrated, so there is no method to combine with here yet; a `GET`
+        // falls to `partially_migrated`'s method fallback and is forwarded.
+        .route(
+            "/api/v4/channels",
+            partially_migrated(post(channel_creates::create_channel)),
+        )
+        // `BaseRoutes.Channels.Handle("/direct")` and `("/group")` (api4/channel.go:42, :43).
+        // Two literal segments in the `{channel_id}` slot of `/channels/{channel_id}` below,
+        // which matchit resolves to the static route and gorilla resolves to whichever was
+        // registered first — the same one. Both are POST-only in Go.
+        .route(
+            "/api/v4/channels/direct",
+            partially_migrated(post(channel_creates::create_direct_channel)),
+        )
+        .route(
+            "/api/v4/channels/group",
+            partially_migrated(post(channel_creates::create_group_channel)),
+        )
         // `BaseRoutes.Channels.Handle("/stats/member_count")` (api4/channel.go:47) — posted
         // with the sidebar's channel ids. A literal two segments deep, so it shadows nothing.
         .route(

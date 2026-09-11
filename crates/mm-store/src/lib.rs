@@ -51,7 +51,7 @@ pub mod webhook_store;
 pub use audit_store::{AUDIT_LIMIT_MAXIMUM, AuditStore, SqlAuditStore};
 pub use bot_store::{BotStore, SqlBotStore};
 pub use channel_member_history_store::{ChannelMemberHistoryStore, SqlChannelMemberHistoryStore};
-pub use channel_store::{ChannelStore, SqlChannelStore, UnreadsAndMentions};
+pub use channel_store::{ChannelSave, ChannelStore, SqlChannelStore, UnreadsAndMentions};
 pub use command_store::{CommandStore, SqlCommandStore};
 pub use config_store::{ConfigStore, SqlConfigStore};
 pub use draft_store::{DraftStore, SqlDraftStore};
