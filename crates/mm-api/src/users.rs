@@ -814,15 +814,34 @@ async fn serve_users_by_names(
 /// here as the invalid address `verify` rather than as the POST route beside it.
 #[tracing::instrument(skip_all, fields(forwarded))]
 pub async fn get_user_by_email(
-    State(state): State<AppState>,
+    state: State<AppState>,
     Path(email): Path<String>,
+    headers: HeaderMap,
+    session: AuthenticatedSession,
+    request: axum::extract::Request,
+) -> Response {
+    get_user_by_email_at(state, &email, headers, session, request).await
+}
+
+/// [`get_user_by_email`] with the address supplied by the caller rather than extracted from the
+/// path.
+///
+/// It exists for exactly one route: `/api/v4/users/email/verify` is registered as a **static**
+/// path for its `POST` handler ([`crate::auth_writes::verify_user_email`]), and matchit prefers a
+/// static segment to the `{*email}` catch-all for every method — so without this, `GET` on that
+/// path would fall to the proxy. Go reaches `getUserByEmail` there, because gorilla skips a route
+/// whose method does not match and falls through to the `PathPrefix` behind it. This is how the
+/// same request stays served locally.
+pub async fn get_user_by_email_at(
+    State(state): State<AppState>,
+    email: &str,
     headers: HeaderMap,
     session: AuthenticatedSession,
     request: axum::extract::Request,
 ) -> Response {
     // `strings.ToLower` is Go's simple mapping, which is not Rust's `to_lowercase` on every
     // input — see [`go_to_lower`].
-    let email = go_to_lower(&email);
+    let email = go_to_lower(email);
     if !mm_model::utils::is_valid_email(&email) {
         return ApiError::invalid_url_param("email").into_response();
     }

@@ -418,9 +418,16 @@ pub fn router(state: AppState) -> Router {
         //
         // `/email/verify/send` (user.go:58) is unregistered for the same reason as
         // `/password/reset/send`: it is an e-mail and nothing else.
+        //
+        // `GET` on this path is **not** forwarded: matchit has no method dimension in its path
+        // preference, so the static route wins for every method, and Go's gorilla *does* fall
+        // through to the catch-all for a GET. `get_user_by_email_verify` hands it to the handler
+        // Go would have reached, with `verify` as the address.
         .route(
             "/api/v4/users/email/verify",
-            partially_migrated(post(auth_writes::verify_user_email)),
+            partially_migrated(
+                post(auth_writes::verify_user_email).get(auth_writes::get_user_by_email_verify),
+            ),
         )
         // `BaseRoutes.User.Handle("/password", APISessionRequired(updatePassword))`
         // (api4/user.go:51), PUT only — a sibling of `/users/{user_id}/status` and one segment

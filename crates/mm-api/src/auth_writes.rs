@@ -311,6 +311,26 @@ pub async fn update_password(
     }
 }
 
+/// `GET /api/v4/users/email/verify`, which is **not** a route of its own.
+///
+/// Go registers `POST /users/email/verify` before the `PathPrefix("/email/{email:.+}")` behind it,
+/// and gorilla skips a route whose method does not match — so a `GET` on this path reaches
+/// `getUserByEmail` with the address `verify`, which `IsValidEmail` then rejects with a 400. The
+/// parity suite asserts exactly that.
+///
+/// matchit has no method dimension in its path preference: registering the static path for `POST`
+/// makes it win for `GET` too, and the request would fall to the proxy. This hands it back to the
+/// handler Go would have reached. See [`crate::users::get_user_by_email_at`].
+#[tracing::instrument(skip_all)]
+pub async fn get_user_by_email_verify(
+    state: State<AppState>,
+    headers: axum::http::HeaderMap,
+    session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    crate::users::get_user_by_email_at(state, "verify", headers, session, request).await
+}
+
 /// Port of `resetPassword` (api4/user.go:2066), reached as
 /// `POST /api/v4/users/password/reset`.
 ///

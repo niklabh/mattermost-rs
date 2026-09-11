@@ -2175,7 +2175,15 @@ mod go_parity {
     /// is an `Option` at all. Adjusted here rather than changed in [`Config::default`], because
     /// the default is modelling the pre-`Load` config correctly.
     ///
-    /// All three are correct for their input, which is why this compares against the adjusted
+    /// The fourth is `ExtendSessionLengthWithActivity`'s twin.
+    /// `TerminateSessionsOnPasswordChange` also defaults to `!isUpdate` (config.go:733), so it too
+    /// is `true` on a config that has never been through `Load` and `false` on every document a
+    /// running server persists. Note the fixture does not carry the key **at all** where it does
+    /// carry `ExtendSessionLengthWithActivity: false` — an absent key and an explicit `false` reach
+    /// the same place through `SetDefaults`, which is exactly why the resolution has to happen in
+    /// [`Config::from_document`] rather than against [`Config::default`].
+    ///
+    /// All four are correct for their input, which is why this compares against the adjusted
     /// default rather than widening the assertion to let a genuine drift through.
     #[test]
     fn every_default_matches_what_go_actually_wrote() {
@@ -2183,6 +2191,7 @@ mod go_parity {
         let transcribed = Config {
             site_url: Some(String::new()),
             extend_session_length_with_activity: false,
+            terminate_sessions_on_password_change: false,
             ai_recap_settings_enable: Some(true),
             ..Config::default()
         };
@@ -2537,8 +2546,9 @@ mod go_parity {
     /// what makes growing the struct one reader at a time safe.
     ///
     /// `SiteURL` stopped being an unknown key when the `isUpdate` rule landed, which is why the
-    /// expectation carries the one field it moves — see
-    /// [`the_extend_session_default_follows_is_update`].
+    /// expectation carries the **two** fields it moves — see
+    /// [`the_extend_session_default_follows_is_update`]. Both default to `!isUpdate`, so naming
+    /// one and not the other is how this test failed when the second landed.
     #[test]
     fn unknown_sections_and_keys_are_ignored() {
         let config = Config::from_document(
@@ -2550,6 +2560,7 @@ mod go_parity {
             Config {
                 site_url: Some("x".to_owned()),
                 extend_session_length_with_activity: false,
+                terminate_sessions_on_password_change: false,
                 ..Config::default()
             }
         );
