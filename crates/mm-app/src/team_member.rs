@@ -947,6 +947,141 @@ fn save_member_error(err: mm_store::StoreError) -> Box<AppError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::Config;
+    use mm_store::SqlStore;
+    use sqlx::postgres::PgPoolOptions;
+
+    /// An `App` that can answer config questions and nothing else. The 250ms cap is the standing
+    /// one: sqlx's default `acquire_timeout` is 30 seconds and six tests once sat on it.
+    fn app_with(config: Config) -> App {
+        let pool = PgPoolOptions::new()
+            .acquire_timeout(std::time::Duration::from_millis(250))
+            .connect_lazy("postgres://nobody@127.0.0.1:1/nothing")
+            .expect("a lazy pool is built without connecting");
+        App::with_config(SqlStore::from_pool(pool), config)
+    }
+
+    /// `DefaultChannelNames`: `town-square` always, `off-topic` only when the setting is empty,
+    /// and the configured list de-duplicated against a seed that already holds `town-square`.
+    #[tokio::test]
+    async fn default_channel_names_match_gos_three_branches() {
+        assert_eq!(
+            app_with(Config::default()).default_channel_names(),
+            vec!["town-square", "off-topic"],
+            "the stock server joins both"
+        );
+
+        let configured = |names: &[&str]| Config {
+            experimental_default_channels: names.iter().map(|n| (*n).to_owned()).collect(),
+            ..Config::default()
+        };
+
+        assert_eq!(
+            app_with(configured(&["welcome"])).default_channel_names(),
+            vec!["town-square", "welcome"],
+            "a configured list replaces off-topic, it does not extend it"
+        );
+        assert_eq!(
+            app_with(configured(&["town-square", "welcome"])).default_channel_names(),
+            vec!["town-square", "welcome"],
+            "naming town-square does not double it"
+        );
+        assert_eq!(
+            app_with(configured(&["welcome", "welcome"])).default_channel_names(),
+            vec!["town-square", "welcome"],
+            "and the seen-set applies to the configured names too"
+        );
+        assert_eq!(
+            app_with(configured(&["off-topic"])).default_channel_names(),
+            vec!["town-square", "off-topic"],
+            "off-topic survives only by being named"
+        );
+    }
+
+    /// `IsTeamEmailAllowed`'s two short-circuits, which the domain corpus below cannot reach: a
+    /// **bot** is allowed before the address is read, and a **guest** is tested against the guest
+    /// restriction alone rather than against the team's `AllowedDomains`.
+    #[tokio::test]
+    async fn the_team_email_gate_short_circuits_for_bots_and_narrows_for_guests() {
+        let app = app_with(Config {
+            restrict_creation_to_domains: "example.com".to_owned(),
+            guest_restrict_creation_to_domains: "guests.example.com".to_owned(),
+            ..Config::default()
+        });
+        let team = Team {
+            allowed_domains: "example.com".to_owned(),
+            ..Team::default()
+        };
+
+        let outsider = User {
+            email: "me@nope.com".to_owned(),
+            ..User::default()
+        };
+        assert!(!app.is_team_email_allowed(&outsider, &team));
+
+        let bot = User {
+            email: "me@nope.com".to_owned(),
+            is_bot: true,
+            ..User::default()
+        };
+        assert!(app.is_team_email_allowed(&bot, &team), "a bot is exempt");
+
+        // A guest is measured against `GuestAccountsSettings.RestrictCreationToDomains` **only**,
+        // so an address the team would accept is refused and one it would not is admitted.
+        let guest_ok = User {
+            email: "g@guests.example.com".to_owned(),
+            roles: "system_guest".to_owned(),
+            ..User::default()
+        };
+        assert!(guest_ok.is_guest(), "the fixture really is a guest");
+        assert!(app.is_team_email_allowed(&guest_ok, &team));
+
+        let guest_on_the_team_domain = User {
+            email: "g@example.com".to_owned(),
+            roles: "system_guest".to_owned(),
+            ..User::default()
+        };
+        assert!(
+            !app.is_team_email_allowed(&guest_on_the_team_domain, &team),
+            "the team's AllowedDomains is not consulted for a guest"
+        );
+    }
+
+    /// `teams.IsEmailAddressAllowed` against the generated corpus — the AND across restrictions,
+    /// the skip for an empty one, and the `@` inside the suffix.
+    mod go_parity {
+        use super::*;
+
+        #[derive(serde::Deserialize)]
+        struct EmailCase {
+            name: String,
+            email: String,
+            restrictions: Vec<String>,
+            allowed: bool,
+        }
+
+        #[test]
+        fn is_email_address_allowed_matches_go() {
+            let raw = include_str!("../../../fixtures/behaviour_team_email.json");
+            let corpus: serde_json::Value = serde_json::from_str(raw).unwrap();
+            let cases: Vec<EmailCase> =
+                serde_json::from_value(corpus["is_email_address_allowed"].clone()).unwrap();
+            assert!(cases.len() >= 25, "the corpus is the oracle; keep it broad");
+
+            for case in cases {
+                let restrictions: Vec<&str> =
+                    case.restrictions.iter().map(String::as_str).collect();
+                assert_eq!(
+                    is_email_address_allowed(&case.email, &restrictions),
+                    case.allowed,
+                    "{}: {:?} against {:?}",
+                    case.name,
+                    case.email,
+                    case.restrictions
+                );
+            }
+        }
+    }
 
     /// The four ids two routes share, spelled out so a rename has to touch a test. Three say
     /// `api.team`; `changing_guest_role` says `api.channel` and that is deliberate.
