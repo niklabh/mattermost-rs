@@ -399,7 +399,7 @@ pub fn router(state: AppState) -> Router {
         //
         // Its neighbour `/password/reset/send` (user.go:56) is **not** registered: it exists only
         // to send an e-mail, and there is no e-mail service here. Leaving it unregistered is what
-        // keeps it forwarded — adding it as a 405-only path would break it. See [D-235].
+        // keeps it forwarded — adding it as a 405-only path would break it. See [D-238].
         .route(
             "/api/v4/users/password/reset",
             partially_migrated(post(auth_writes::reset_password)),

@@ -9920,6 +9920,6 @@ writes do not reach. Three tests now call `invalidate_go_caches` explicitly, one
 and one asserts the staleness **on purpose** — a session revoked here is still accepted by Go, which
 is [D-237] and is the first time [D-190]'s class has had a credential consequence.
 
-Three more, recorded rather than fixed: [D-235] (no e-mail service, so four send-only routes stay
+Three more, recorded rather than fixed: [D-238] (no e-mail service, so four send-only routes stay
 with Go and two writes lose a notification), [D-236] (CSRF is checked on no migrated route, which
 predates this work and is written down here for the first time), and [D-237] above.

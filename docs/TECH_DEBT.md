@@ -6698,7 +6698,7 @@ servers and only a *change* can hit the 400.
 
 ---
 
-## D-235 · There is no e-mail service, so four routes stay with Go and two writes are silent
+## D-238 · There is no e-mail service, so four routes stay with Go and two writes are silent
 
 **Status** OPEN · **Severity** incomplete · **Raised** 2026-09-11 (phase 2, auth writes)
 

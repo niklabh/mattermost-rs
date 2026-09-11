@@ -15,7 +15,7 @@
 //! # Tokens are minted by Go and read out of the table
 //!
 //! `POST /users/password/reset/send` and `/users/email/verify/send` are forwarded, not ported
-//! ([D-235]) — they exist only to send an e-mail. They still **save the token before trying to
+//! ([D-238]) — they exist only to send an e-mail. They still **save the token before trying to
 //! send**, so calling Go's route and then reading `Tokens` gives a token minted by the oracle, in
 //! the oracle's own `Extra` encoding, rather than one this suite invented. The password-reset
 //! route answers 500 on a stack with no SMTP and the verification route answers 200; both leave
