@@ -125,6 +125,7 @@ mod parity {
     pub mod teams_unread;
     pub mod terms_of_service;
     pub mod thread_for_user;
+    pub mod thread_writes;
     pub mod threads_for_user;
     pub mod user_access_tokens;
     pub mod user_audits;

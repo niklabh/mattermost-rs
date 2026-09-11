@@ -59,6 +59,8 @@ pub mod system;
 pub mod team_member_writes;
 pub mod teams;
 pub mod terms_of_service;
+/// The thread write family: `PUT …/threads/read` and the two `/following` methods.
+pub mod thread_writes;
 /// The four personal-access-token reads.
 pub mod tokens;
 /// The two upload-session reads.
@@ -367,6 +369,30 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/users/{user_id}/teams/{team_id}/threads/{thread_id}",
             partially_migrated_with_ids(&state, get(users::get_thread_for_user)),
+        )
+        // `BaseRoutes.UserThreads.Handle("/read")` (api4/user.go:112), PUT only.
+        //
+        // A **static** sibling of `{thread_id}`, and matchit has no method dimension in its path
+        // preference — so this route wins for every method on `/threads/read`, including the
+        // `GET` that gorilla falls through to `getThreadForUser` with `read` as the thread id.
+        // That is why the fallback matters: an unregistered method here is forwarded, and Go
+        // answers its own 400 from the route it would have reached.
+        .route(
+            "/api/v4/users/{user_id}/teams/{team_id}/threads/read",
+            partially_migrated_with_ids(
+                &state,
+                put(thread_writes::update_read_state_all_threads_by_user),
+            ),
+        )
+        // `BaseRoutes.UserThread.Handle("/following")` (api4/user.go:115-116) — PUT and DELETE
+        // on one path, two handlers in Go and two here.
+        .route(
+            "/api/v4/users/{user_id}/teams/{team_id}/threads/{thread_id}/following",
+            partially_migrated_with_ids(
+                &state,
+                put(thread_writes::follow_thread_by_user)
+                    .delete(thread_writes::unfollow_thread_by_user),
+            ),
         )
         // `BaseRoutes.TeamForUser.Handle("/drafts")` (api4/drafts.go:17) — the threads routes'
         // sibling under the same base, and the one route here whose `{user_id}` is decorative.
