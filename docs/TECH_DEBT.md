@@ -6695,3 +6695,74 @@ shape as the feature-flag run that [D-213] describes. Until then the branch is t
 the Go source and not measured, and the one thing a reader should know is that the pin routes check
 it **after** their no-op short circuit, so pinning an already-pinned ancient post is a 200 on both
 servers and only a *change* can hit the 400.
+
+---
+
+## D-235 · There is no e-mail service, so four routes stay with Go and two writes are silent
+
+**Status** OPEN · **Severity** incomplete · **Raised** 2026-09-11 (phase 2, auth writes)
+
+`Srv().EmailService` has no counterpart in this tree. Two consequences, of different kinds.
+
+**Four routes are forwarded** because sending is all they do: `POST /users/password/reset/send`,
+`POST /users/email/verify/send`, `POST /users/{id}/email/verify/member`'s sibling and
+`POST /email/test`. They are deliberately *not* registered in `mm-api`'s router — registering a
+path with only some methods makes axum answer 405 to the rest, so an unregistered path is what
+keeps them working. Their token-minting half is ported anyway (`mm_store::TokenStore::save`,
+`mm_model::Token::new`), so whoever lands an e-mail service has the store underneath already.
+
+**Two writes lose a side effect.** `App.UpdatePasswordSendEmail` sends a password-change notice
+and `App.VerifyEmailFromToken` sends an address-change notice, both in `Srv().Go(...)` goroutines
+whose failure Go only logs. The write commits either way and no response byte differs, so the
+parity suite cannot see it — `mm_app::auth` logs a warning at each site instead. A user whose
+password is changed through mm-api is not told about it, which is a security notification rather
+than a courtesy.
+
+The dependency is measurable only by reimplementing it (SMTP, templates, i18n), which the standing
+decision at the head of this file says to forward rather than port.
+
+---
+
+## D-236 · CSRF is not checked on any migrated route
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-11 (phase 2, auth writes)
+
+`web.Handler.ServeHTTP` calls `checkCSRFToken` (handlers.go:295) for every request whose token came
+from the **cookie**: a non-GET request must then carry `X-CSRF-Token` matching the session's, or
+`X-Requested-With: XMLHttpRequest`, or it is answered 401 with the session cookie cleared. Nothing
+in `mm-api` implements it. `crate::auth::AuthenticatedSession` reads the cookie and asks no further
+questions, and neither does `auth_writes::OptionalSession`.
+
+This predates the auth vertical — every migrated write has had the gap since the first one — but
+it was never written down, and the auth routes are where it stops being abstract: a cross-origin
+form post can now change a password or log a user out through this server where it could not
+through Go.
+
+What is owed is the check itself in the two extractors, keyed on the token's `TokenLocation`
+(already modelled) and the session's `props.csrf` (already stored and already read by
+`Session::get_csrf`). The pieces are all present; the wiring is not. A parity test needs a
+cookie-authenticated request, which the suite does not currently make — `go_minted_token` returns
+a bearer token — so the fixture is the other half of the work.
+
+---
+
+## D-237 · A session revoked by mm-api is still accepted by Go until its cache is invalidated
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-11 (phase 2, auth writes)
+
+[D-190] with a credential consequence, and measured rather than reasoned about:
+`POST /api/v4/users/logout` served by mm-api deletes the `Sessions` row, and the *Go* server keeps
+answering 200 to `GET /users/me` with that token until `POST /caches/invalidate` is called.
+`PlatformService` memoises sessions by token and our `DELETE` does not reach that map. The window
+is the cache entry's lifetime, not a request or two.
+
+Pinned by `parity::auth_writes::a_session_revoked_here_is_gone_here_but_lingers_in_gos_cache`,
+which asserts **both** halves: 401 from mm-api immediately, 200 from Go, then 401 from Go after an
+invalidation. If that middle assertion ever fails, the cache is being invalidated somehow and this
+entry can be closed.
+
+The same shape applies to the password writes — a password changed through mm-api does not stop the
+old one working against Go until the user cache is cleared — and three tests in that suite
+invalidate explicitly for exactly that reason. Unlike the reaction cache in [D-190],
+`/caches/invalidate` *does* clear both of these, so the cluster-message half of the fix would be
+enough. It ends when the Go server does.

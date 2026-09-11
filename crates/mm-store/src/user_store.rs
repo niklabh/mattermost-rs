@@ -292,6 +292,84 @@ pub trait UserStore {
         per_page: i64,
         restricted_domains: &str,
     ) -> impl std::future::Future<Output = Result<Vec<User>, StoreError>> + Send;
+
+    /// Port of `SqlUserStore.UpdatePassword` (user_store.go:410).
+    ///
+    /// **Six columns, not one.** The statement is
+    ///
+    /// ```sql
+    /// UPDATE Users SET Password = ?, LastPasswordUpdate = ?, UpdateAt = ?,
+    ///                  AuthData = NULL, AuthService = '', FailedAttempts = 0
+    ///  WHERE Id = ?
+    /// ```
+    ///
+    /// so setting a password *converts the account to email auth* and clears the lockout counter
+    /// as a side effect. That is load-bearing rather than incidental: it is how `resetPassword`
+    /// unlocks an account that failed its way to the cap, and how an admin moves a SAML user back
+    /// to a password. `LastPasswordUpdate` and `UpdateAt` are the **same** millisecond, read once.
+    ///
+    /// A miss writes nothing and is **not** an error — Go ignores the affected-row count.
+    fn update_password(
+        &self,
+        user_id: &str,
+        hashed_password: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlUserStore.UpdateFailedPasswordAttempts` (user_store.go:420).
+    ///
+    /// An unconditional `SET FailedAttempts = ?`. Every caller passes `0`, so in practice this is
+    /// "clear the lockout" — but it is a *set*, not a reset, and it does **not** touch `UpdateAt`.
+    /// That last part is why a successful login does not bump `Users.UpdateAt` on its own.
+    fn update_failed_password_attempts(
+        &self,
+        user_id: &str,
+        attempts: i32,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlUserStore.TryIncrementFailedPasswordAttempts` (user_store.go:434).
+    ///
+    /// `UPDATE ... SET FailedAttempts = FailedAttempts + 1 WHERE Id = ? AND FailedAttempts < ?`,
+    /// returning whether one row changed. This is a **claim**, not a count: the caller increments
+    /// *before* checking the password and refunds with
+    /// [`UserStore::decrement_failed_password_attempts`] when the failure turns out not to be a
+    /// credential mismatch. The row lock the UPDATE takes is the whole concurrency story — two
+    /// simultaneous attempts cannot both read `maxAttempts - 1` and both claim.
+    ///
+    /// `false` also means "no such user", which is indistinguishable from "already at the cap"
+    /// and is exactly what makes the lockout error safe to return for an unknown account.
+    ///
+    /// The predicate is strictly `<`, so `maxAttempts` is the number of attempts *allowed*: the
+    /// last claim moves the counter to `maxAttempts` and the next call fails.
+    fn try_increment_failed_password_attempts(
+        &self,
+        user_id: &str,
+        max_attempts: i32,
+    ) -> impl std::future::Future<Output = Result<bool, StoreError>> + Send;
+
+    /// Port of `SqlUserStore.DecrementFailedPasswordAttempts` (user_store.go:456).
+    ///
+    /// The refund half of the claim above, floored at zero by `AND FailedAttempts > 0` rather
+    /// than by arithmetic. Go discards the row count here — a refund that finds nothing to refund
+    /// is success.
+    fn decrement_failed_password_attempts(
+        &self,
+        user_id: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlUserStore.VerifyEmail` (user_store.go:1455).
+    ///
+    /// `SET Email = lower(?), EmailVerified = true, UpdateAt = ?` — the email is **rewritten**,
+    /// not merely flagged, which is how following a verification link is also what commits an
+    /// email *change*. Lower-casing happens in SQL, so a token minted with a mixed-case address
+    /// still lands as lower case.
+    ///
+    /// Go returns the user id it was given; there is nothing to return here that the caller did
+    /// not pass in.
+    fn verify_email(
+        &self,
+        user_id: &str,
+        email: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 }
 
 /// `model.UserSearchDefaultLimit` (model/user_search.go:7).
@@ -2536,6 +2614,128 @@ impl UserStore for SqlUserStore {
                 Ok(user)
             })
             .collect()
+    }
+
+    #[tracing::instrument(skip_all, fields(user_id = %user_id, updated))]
+    async fn update_password(
+        &self,
+        user_id: &str,
+        hashed_password: &str,
+    ) -> Result<(), StoreError> {
+        // One `GetMillis()` feeding both columns, as Go reads it once into `updateAt`.
+        let update_at = mm_model::utils::get_millis();
+
+        let result = sqlx::query!(
+            "UPDATE users
+                SET password = $1,
+                    lastpasswordupdate = $2,
+                    updateat = $2,
+                    authdata = NULL,
+                    authservice = '',
+                    failedattempts = 0
+              WHERE id = $3",
+            hashed_password,
+            update_at,
+            user_id,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to update User with userId={user_id}"),
+            source,
+        })?;
+
+        tracing::Span::current().record("updated", result.rows_affected());
+        Ok(())
+    }
+
+    #[tracing::instrument(skip_all, fields(user_id = %user_id, attempts, updated))]
+    async fn update_failed_password_attempts(
+        &self,
+        user_id: &str,
+        attempts: i32,
+    ) -> Result<(), StoreError> {
+        let result = sqlx::query!(
+            "UPDATE users SET failedattempts = $1 WHERE id = $2",
+            attempts,
+            user_id,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to update User with userId={user_id}"),
+            source,
+        })?;
+
+        tracing::Span::current().record("attempts", attempts);
+        tracing::Span::current().record("updated", result.rows_affected());
+        Ok(())
+    }
+
+    #[tracing::instrument(skip_all, fields(user_id = %user_id, max_attempts, claimed))]
+    async fn try_increment_failed_password_attempts(
+        &self,
+        user_id: &str,
+        max_attempts: i32,
+    ) -> Result<bool, StoreError> {
+        let result = sqlx::query!(
+            "UPDATE users
+                SET failedattempts = failedattempts + 1
+              WHERE id = $1 AND failedattempts < $2",
+            user_id,
+            max_attempts,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to update User with userId={user_id}"),
+            source,
+        })?;
+
+        // Go compares to exactly one. The primary key makes any other count impossible, and
+        // writing `> 0` would quietly accept a future statement that matched more than one row.
+        let claimed = result.rows_affected() == 1;
+        tracing::Span::current().record("max_attempts", max_attempts);
+        tracing::Span::current().record("claimed", claimed);
+        Ok(claimed)
+    }
+
+    #[tracing::instrument(skip_all, fields(user_id = %user_id, refunded))]
+    async fn decrement_failed_password_attempts(&self, user_id: &str) -> Result<(), StoreError> {
+        let result = sqlx::query!(
+            "UPDATE users
+                SET failedattempts = failedattempts - 1
+              WHERE id = $1 AND failedattempts > 0",
+            user_id,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to update User with userId={user_id}"),
+            source,
+        })?;
+
+        tracing::Span::current().record("refunded", result.rows_affected());
+        Ok(())
+    }
+
+    #[tracing::instrument(skip_all, fields(user_id = %user_id, updated))]
+    async fn verify_email(&self, user_id: &str, email: &str) -> Result<(), StoreError> {
+        let result = sqlx::query!(
+            "UPDATE users SET email = lower($1), emailverified = true, updateat = $2 WHERE id = $3",
+            email,
+            mm_model::utils::get_millis(),
+            user_id,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to update Users with userId={user_id}"),
+            source,
+        })?;
+
+        tracing::Span::current().record("updated", result.rows_affected());
+        Ok(())
     }
 }
 

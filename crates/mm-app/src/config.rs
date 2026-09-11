@@ -507,6 +507,49 @@ pub struct Config {
     /// that guessed `0` would never revoke anything and would accept every session Go rejects.
     pub session_idle_timeout_in_minutes: i64,
 
+    /// `ServiceSettings.MaximumLoginAttempts` (config.go:383, defaulted **`10`** at :671).
+    ///
+    /// The lockout cap, and the predicate is strictly `<` in
+    /// [`mm_store::UserStore::try_increment_failed_password_attempts`] — so this is the number of
+    /// failures *allowed*, and the `maxAttempts`-th one is refused. Read by every password check,
+    /// including `DoubleCheckPassword` behind `PUT /users/{id}/password`: an already-logged-in
+    /// user who keeps mistyping their current password locks themselves out of *login* too,
+    /// because both paths share one counter column.
+    ///
+    /// `LdapSettings.MaximumLoginAttempts` is a **different** setting with its own default of 10;
+    /// only the LDAP path reads it, and that path is forwarded.
+    pub maximum_login_attempts: i64,
+
+    /// `ServiceSettings.TerminateSessionsOnPasswordChange` (config.go:416, defaulted
+    /// **`!isUpdate`** at :733).
+    ///
+    /// Computed, not constant — like [`Config::extend_session_length_with_activity`]. Every
+    /// document a running server persists carries a `SiteURL`, so `isUpdate` is true there and
+    /// this is **off** on any upgraded install and **on** on a fresh one.
+    ///
+    /// When on, `App.UpdatePassword` revokes every session of the user except the caller's own.
+    pub terminate_sessions_on_password_change: bool,
+
+    /// `PasswordSettings.MinimumLength` (config.go:1778). Go default **`8`** — or
+    /// `PasswordFIPSMinimumLength` under a FIPS build, which this port does not model.
+    ///
+    /// Counted in **bytes** (`len(password)`), not runes, so a four-character emoji password is
+    /// sixteen and passes a minimum of eight.
+    pub password_minimum_length: i64,
+
+    /// `PasswordSettings.Lowercase` (config.go:1786). Go default **`false`**.
+    pub password_lowercase: bool,
+
+    /// `PasswordSettings.Number` (config.go:1790). Go default **`false`**.
+    pub password_number: bool,
+
+    /// `PasswordSettings.Uppercase` (config.go:1794). Go default **`false`**.
+    pub password_uppercase: bool,
+
+    /// `PasswordSettings.Symbol` (config.go:1798). Go default **`false`**. The symbol set is
+    /// [`mm_model::utils::SYMBOLS`], which **includes a space**.
+    pub password_symbol: bool,
+
     /// `ServiceSettings.ExtendSessionLengthWithActivity` (config.go:415, defaulted at :728).
     ///
     /// **Its default is not a constant.** Go writes `new(!isUpdate)`, and `isUpdate` is
@@ -750,6 +793,15 @@ impl Default for Config {
             // that plants the `""`.
             site_url: None,
             session_idle_timeout_in_minutes: 43200,
+            maximum_login_attempts: 10,
+            // `new(!isUpdate)` with `isUpdate == false`, the same reasoning as
+            // `extend_session_length_with_activity` below: an empty config is a fresh install.
+            terminate_sessions_on_password_change: true,
+            password_minimum_length: 8,
+            password_lowercase: false,
+            password_number: false,
+            password_uppercase: false,
+            password_symbol: false,
             // `new(!isUpdate)` with `isUpdate == false`: this constructor models `SetDefaults` on
             // an **empty** config, which has no `SiteURL` and is therefore a fresh install. Every
             // document a running Go server persists takes the other branch — see
@@ -1087,6 +1139,41 @@ impl Config {
                 "MM_SERVICESETTINGS_SESSIONIDLETIMEOUTINMINUTES",
                 default.session_idle_timeout_in_minutes,
             ),
+            maximum_login_attempts: lookup_int(
+                lookup,
+                "MM_SERVICESETTINGS_MAXIMUMLOGINATTEMPTS",
+                default.maximum_login_attempts,
+            ),
+            terminate_sessions_on_password_change: lookup_bool(
+                lookup,
+                "MM_SERVICESETTINGS_TERMINATESESSIONSONPASSWORDCHANGE",
+                default.terminate_sessions_on_password_change,
+            ),
+            password_minimum_length: lookup_int(
+                lookup,
+                "MM_PASSWORDSETTINGS_MINIMUMLENGTH",
+                default.password_minimum_length,
+            ),
+            password_lowercase: lookup_bool(
+                lookup,
+                "MM_PASSWORDSETTINGS_LOWERCASE",
+                default.password_lowercase,
+            ),
+            password_number: lookup_bool(
+                lookup,
+                "MM_PASSWORDSETTINGS_NUMBER",
+                default.password_number,
+            ),
+            password_uppercase: lookup_bool(
+                lookup,
+                "MM_PASSWORDSETTINGS_UPPERCASE",
+                default.password_uppercase,
+            ),
+            password_symbol: lookup_bool(
+                lookup,
+                "MM_PASSWORDSETTINGS_SYMBOL",
+                default.password_symbol,
+            ),
             extend_session_length_with_activity: lookup_bool(
                 lookup,
                 "MM_SERVICESETTINGS_EXTENDSESSIONLENGTHWITHACTIVITY",
@@ -1132,6 +1219,7 @@ impl Config {
         let email_settings = parsed.email_settings.unwrap_or_default();
         let guest_accounts = parsed.guest_accounts_settings.unwrap_or_default();
         let file_settings = parsed.file_settings.unwrap_or_default();
+        let password_settings = parsed.password_settings.unwrap_or_default();
         Ok(Self {
             // Moved, not cloned: `is_update` above already took the only other thing anything
             // wants from this field, and the remaining `service` reads are all `Option<bool>`.
@@ -1318,6 +1406,26 @@ impl Config {
             extend_session_length_with_activity: service
                 .extend_session_length_with_activity
                 .unwrap_or(!is_update),
+            maximum_login_attempts: service
+                .maximum_login_attempts
+                .unwrap_or(default.maximum_login_attempts),
+            // The second `!isUpdate` default (config.go:733), and the one that matters more: a
+            // resolved-from-`default` `true` would log every other device out on a password
+            // change that Go leaves alone.
+            terminate_sessions_on_password_change: service
+                .terminate_sessions_on_password_change
+                .unwrap_or(!is_update),
+            password_minimum_length: password_settings
+                .minimum_length
+                .unwrap_or(default.password_minimum_length),
+            password_lowercase: password_settings
+                .lowercase
+                .unwrap_or(default.password_lowercase),
+            password_number: password_settings.number.unwrap_or(default.password_number),
+            password_uppercase: password_settings
+                .uppercase
+                .unwrap_or(default.password_uppercase),
+            password_symbol: password_settings.symbol.unwrap_or(default.password_symbol),
             goroutine_health_threshold: service
                 .goroutine_health_threshold
                 .unwrap_or(default.goroutine_health_threshold),
@@ -1425,6 +1533,8 @@ struct Document {
     image_proxy_settings: Option<EnableOnlyDocument>,
     #[serde(rename = "FileSettings")]
     file_settings: Option<FileSettingsDocument>,
+    #[serde(rename = "PasswordSettings")]
+    password_settings: Option<PasswordSettingsDocument>,
     #[serde(rename = "ExportSettings")]
     export_settings: Option<ExportSettingsDocument>,
     #[serde(rename = "ImportSettings")]
@@ -1449,6 +1559,24 @@ struct Document {
     message_export_settings: Option<MessageExportSettingsDocument>,
     #[serde(rename = "CloudSettings")]
     cloud_settings: Option<CloudSettingsDocument>,
+}
+
+/// The four rule flags and the minimum length `IsPasswordValidWithSettings` reads.
+///
+/// `EnableForgotLink` is absent: it gates a *link in the webapp*, not a server check, and no
+/// ported route consults it.
+#[derive(Debug, Default, serde::Deserialize)]
+struct PasswordSettingsDocument {
+    #[serde(rename = "MinimumLength")]
+    minimum_length: Option<i64>,
+    #[serde(rename = "Lowercase")]
+    lowercase: Option<bool>,
+    #[serde(rename = "Number")]
+    number: Option<bool>,
+    #[serde(rename = "Uppercase")]
+    uppercase: Option<bool>,
+    #[serde(rename = "Symbol")]
+    symbol: Option<bool>,
 }
 
 /// The one field of `CloudSettings` a migrated route reads.
@@ -1545,6 +1673,10 @@ struct ServiceSettingsDocument {
     webserver_mode: Option<String>,
     #[serde(rename = "SessionIdleTimeoutInMinutes")]
     session_idle_timeout_in_minutes: Option<i64>,
+    #[serde(rename = "MaximumLoginAttempts")]
+    maximum_login_attempts: Option<i64>,
+    #[serde(rename = "TerminateSessionsOnPasswordChange")]
+    terminate_sessions_on_password_change: Option<bool>,
     #[serde(rename = "ExtendSessionLengthWithActivity")]
     extend_session_length_with_activity: Option<bool>,
     #[serde(rename = "GoroutineHealthThreshold")]
@@ -2043,7 +2175,15 @@ mod go_parity {
     /// is an `Option` at all. Adjusted here rather than changed in [`Config::default`], because
     /// the default is modelling the pre-`Load` config correctly.
     ///
-    /// All three are correct for their input, which is why this compares against the adjusted
+    /// The fourth is `ExtendSessionLengthWithActivity`'s twin.
+    /// `TerminateSessionsOnPasswordChange` also defaults to `!isUpdate` (config.go:733), so it too
+    /// is `true` on a config that has never been through `Load` and `false` on every document a
+    /// running server persists. Note the fixture does not carry the key **at all** where it does
+    /// carry `ExtendSessionLengthWithActivity: false` — an absent key and an explicit `false` reach
+    /// the same place through `SetDefaults`, which is exactly why the resolution has to happen in
+    /// [`Config::from_document`] rather than against [`Config::default`].
+    ///
+    /// All four are correct for their input, which is why this compares against the adjusted
     /// default rather than widening the assertion to let a genuine drift through.
     #[test]
     fn every_default_matches_what_go_actually_wrote() {
@@ -2051,6 +2191,7 @@ mod go_parity {
         let transcribed = Config {
             site_url: Some(String::new()),
             extend_session_length_with_activity: false,
+            terminate_sessions_on_password_change: false,
             ai_recap_settings_enable: Some(true),
             ..Config::default()
         };
@@ -2405,8 +2546,9 @@ mod go_parity {
     /// what makes growing the struct one reader at a time safe.
     ///
     /// `SiteURL` stopped being an unknown key when the `isUpdate` rule landed, which is why the
-    /// expectation carries the one field it moves — see
-    /// [`the_extend_session_default_follows_is_update`].
+    /// expectation carries the **two** fields it moves — see
+    /// [`the_extend_session_default_follows_is_update`]. Both default to `!isUpdate`, so naming
+    /// one and not the other is how this test failed when the second landed.
     #[test]
     fn unknown_sections_and_keys_are_ignored() {
         let config = Config::from_document(
@@ -2418,6 +2560,7 @@ mod go_parity {
             Config {
                 site_url: Some("x".to_owned()),
                 extend_session_length_with_activity: false,
+                terminate_sessions_on_password_change: false,
                 ..Config::default()
             }
         );

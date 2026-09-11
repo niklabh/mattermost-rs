@@ -1,0 +1,48 @@
+# Mutation plan for the authentication write vertical.
+#
+#   scripts/mutate-batch.sh scripts/mutations/auth-writes.plan
+#
+# The decisions worth mutating here are the ones whose wrong answer is invisible:
+#
+#   * the three columns `UpdatePassword` clears that nobody asked it to — the auth fields and the
+#     lockout counter. Every route above it answers `{"status":"OK"}` either way.
+#   * the failed-attempt claim's strict `<`, which *is* the number of attempts an account gets.
+#   * the refund's floor, where a `-1` silently grants an extra attempt.
+#   * the check *order* in `DoubleCheckPassword`: claim, refuse, check, clear. Skipping the
+#     refusal lets a correct password unlock an account that is already locked.
+#   * which expiry window a one-shot token gets — 24h for recovery, not the 48h default.
+#   * which token *type* each route accepts, which is the only thing separating the reset route
+#     from the verification route.
+#   * the two token-length checks, whose `!=` a reader would read as a minimum.
+#   * `already_hashed` for yourself being a 401 rather than a 403.
+#
+# The last two lines are the no-op controls and must SURVIVE.
+store-password-keeps-the-lockout	crates/mm-store/src/user_store.rs	                    failedattempts = 0\n              WHERE id = $3	                    failedattempts = failedattempts\n              WHERE id = $3	store	auth_writes
+store-password-leaves-the-auth-service	crates/mm-store/src/user_store.rs	                    authservice = '',	                    authservice = 'saml',	store	auth_writes
+store-password-empties-authdata-instead-of-nulling	crates/mm-store/src/user_store.rs	                    authdata = NULL,	                    authdata = '',	store	auth_writes
+store-claim-allows-one-attempt-too-many	crates/mm-store/src/user_store.rs	              WHERE id = $1 AND failedattempts < $2	              WHERE id = $1 AND failedattempts <= $2	store	auth_writes
+store-claim-reports-success-for-no-rows	crates/mm-store/src/user_store.rs	        let claimed = result.rows_affected() == 1;	        let claimed = result.rows_affected() >= 0;	store	auth_writes
+store-refund-goes-below-zero	crates/mm-store/src/user_store.rs	              WHERE id = $1 AND failedattempts > 0	              WHERE id = $1 AND failedattempts >= 0	store	auth_writes
+store-verify-email-skips-the-lowercasing	crates/mm-store/src/user_store.rs	            "UPDATE users SET email = lower($1), emailverified = true, updateat = $2 WHERE id = $3",	            "UPDATE users SET email = $1, emailverified = true, updateat = $2 WHERE id = $3",	store	auth_writes
+store-verify-email-does-not-set-the-flag	crates/mm-store/src/user_store.rs	            "UPDATE users SET email = lower($1), emailverified = true, updateat = $2 WHERE id = $3",	            "UPDATE users SET email = lower($1), emailverified = false, updateat = $2 WHERE id = $3",	store	auth_writes
+model-token-size-check-is-an-upper-bound	crates/mm-model/src/token.rs	        if self.token.len() != TOKEN_SIZE {	        if self.token.len() > TOKEN_SIZE {	store	auth_writes
+app-min-length-is-inclusive	crates/mm-app/src/auth.rs	        if (password.len() as i64) < config.password_minimum_length {	        if (password.len() as i64) <= config.password_minimum_length {	unit	auth::tests
+app-password-max-is-seventy-three	crates/mm-app/src/auth.rs	pub const PASSWORD_MAXIMUM_LENGTH: usize = 72;	pub const PASSWORD_MAXIMUM_LENGTH: usize = 73;	unit	auth::tests
+app-length-failure-also-reports-the-rules	crates/mm-app/src/auth.rs	        if !is_min_max_error {	        if true {	unit	auth::tests
+app-rule-suffixes-swap-order	crates/mm-app/src/auth.rs	                id.push_str("_lowercase");	                id.push_str("_uppercase");	unit	auth::tests
+app-lockout-refusal-is-skipped	crates/mm-app/src/auth.rs	        if !claimed {	        if !true {	api	auth_writes
+app-mismatch-is-refunded-instead-of-counted	crates/mm-app/src/auth.rs	            if err.id != CHECK_USER_PASSWORD_INVALID	            if err.id == CHECK_USER_PASSWORD_INVALID	api	auth_writes
+app-success-does-not-clear-the-counter	crates/mm-app/src/auth.rs	            .update_failed_password_attempts(&user.id, 0)\n            .await\n            .map_err(|err| {\n                tracing::error!(error = %err, "clearing the failed-attempt counter failed");\n                attempts_error("DoubleCheckPassword")	            .update_failed_password_attempts(&user.id, 1)\n            .await\n            .map_err(|err| {\n                tracing::error!(error = %err, "clearing the failed-attempt counter failed");\n                attempts_error("DoubleCheckPassword")	api	auth_writes
+app-reset-uses-the-forty-eight-hour-window	crates/mm-app/src/auth.rs	        if now_milli > token.create_at + mm_model::token::PASSWORD_RECOVER_EXPIRY_TIME {	        if now_milli > token.create_at + mm_model::token::MAX_TOKEN_EXPIRY_TIME {	api	auth_writes
+app-recovery-token-type-check-names-the-wrong-type	crates/mm-app/src/auth.rs	        if token.type_ != TOKEN_TYPE_PASSWORD_RECOVERY {	        if token.type_ != TOKEN_TYPE_VERIFY_EMAIL {	api	auth_writes
+app-verify-token-type-check-names-the-wrong-type	crates/mm-app/src/auth.rs	        if token.type_ != TOKEN_TYPE_VERIFY_EMAIL {	        if token.type_ != TOKEN_TYPE_PASSWORD_RECOVERY {	api	auth_writes
+app-verify-email-publishes-nothing	crates/mm-app/src/auth.rs	        let user = self.get_user(user_id).await?;\n        self.send_updated_user_event(&user).await;	        let user = self.get_user(user_id).await?;\n        let _ = &user;	api	auth_writes
+api-logout-revokes-nothing	crates/mm-api/src/auth_writes.rs	        Some(session) if !session.id.is_empty() => {	        Some(session) if session.id.is_empty() => {	api	auth_writes
+api-logout-cookie-max-age-is-minus-one	crates/mm-api/src/auth_writes.rs	    cookie.push_str("; Max-Age=0; HttpOnly");	    cookie.push_str("; Max-Age=-1; HttpOnly");	api	auth_writes
+api-self-branch-is-inverted	crates/mm-api/src/auth_writes.rs	    let is_self = user_id == session.0.user_id;	    let is_self = user_id != session.0.user_id;	api	auth_writes
+api-already-hashed-self-is-a-403	crates/mm-api/src/auth_writes.rs	                "api.user.update_password.user_and_hashed.app_error",\n                None,\n                String::new(),\n                401,	                "api.user.update_password.user_and_hashed.app_error",\n                None,\n                String::new(),\n                403,	api	auth_writes
+api-reset-token-length-is-a-lower-bound	crates/mm-api/src/auth_writes.rs	    if token.len() != TOKEN_SIZE {\n        return ApiError::invalid_param("token").into_response();\n    }\n    let new_password	    if token.len() > TOKEN_SIZE {\n        return ApiError::invalid_param("token").into_response();\n    }\n    let new_password	api	auth_writes
+api-verify-token-length-is-a-lower-bound	crates/mm-api/src/auth_writes.rs	    if token.len() != TOKEN_SIZE {\n        return ApiError::invalid_param("token").into_response();\n    }\n\n    match state.app.verify_email_from_token	    if token.len() > TOKEN_SIZE {\n        return ApiError::invalid_param("token").into_response();\n    }\n\n    match state.app.verify_email_from_token	api	auth_writes
+api-unlock-accepts-the-email-auth-service-instead-of-none	crates/mm-api/src/auth_writes.rs	    user.auth_service == USER_AUTH_SERVICE_LDAP || user.auth_service.is_empty()	    user.auth_service == USER_AUTH_SERVICE_LDAP || user.auth_service == "email"	api	auth_writes
+control-select-columns-reordered	crates/mm-store/src/token_store.rs	            r#"SELECT token AS "token!", createat, type, extra FROM tokens WHERE token = $1"#,	            r#"SELECT token AS "token!", type, createat, extra FROM tokens WHERE token = $1"#,	store	auth_writes
+control-binding-renamed	crates/mm-api/src/auth_writes.rs	    let bytes = axum::body::to_bytes(request.into_body(), usize::MAX)\n        .await\n        .unwrap_or_default();\n    map_from_json(&bytes)	    let raw = axum::body::to_bytes(request.into_body(), usize::MAX)\n        .await\n        .unwrap_or_default();\n    map_from_json(&raw)	api	auth_writes

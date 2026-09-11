@@ -4,6 +4,7 @@
 //! which is what keeps the API layer free of SQL and the store layer free of request semantics.
 
 pub mod audit;
+pub mod auth;
 pub mod authorization;
 pub mod bot;
 /// Port of `app/brand.go` — the brand image read and delete.
