@@ -61,6 +61,7 @@ mod parity {
     pub mod commands;
     pub mod common_teams;
     pub mod config_source;
+    pub mod custom_profile_attributes;
     pub mod custom_status_writes;
     pub mod data_retention;
     pub mod draft_and_preference_writes;

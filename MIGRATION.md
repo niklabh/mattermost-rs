@@ -10518,3 +10518,80 @@ outlives it. That count is a subset assertion now.
 [D-284] itself now carries the negative result and the one environmental difference worth
 checking: two worktrees shared stack 1 during the round that produced all three reports.
 `scripts/worktree.sh` refuses that configuration as of this session.
+## Custom profile attributes: seven routes whose gate is five different answers (2026-09-11)
+
+`listCPAFields`, `createCPAField`, `patchCPAField`, `deleteCPAField`, `patchCPAValues`,
+`listCPAValues` and `patchCPAValuesForUser` — the rest of
+`api4/custom_profile_attributes.go`, whose eighth route (`/group`) was already served in
+`mm_api::gated_reads`. New: `mm_store::property_store`, `mm_app::custom_profile_attributes`,
+`mm_api::custom_profile_attributes`, `parity::custom_profile_attributes` (12 tests).
+`scripts/mutations/cpa-routes.plan`: MUTATION_TALLY_PLACEHOLDER.
+
+**No model work was needed.** `property_field.rs`, `property_value.rs`, `property_group.rs`,
+`property_access.rs`, `property_field_attrs_validation.rs` and `custom_profile_attributes.rs` were
+all already in `mm-model` with generated fixtures, so `reference/dump/main.go` is untouched. This
+is the first session where the breadth-first model port paid for itself outright.
+
+### The licence gate is real, and it is not one answer
+
+The `access_control` property group carries a `LicenseCheckHook` registered first, so it runs
+before access control and attribute validation (app/server.go:322). Unlicensed it gives 403
+`app.property.license_error` — but only from the arms that fire. `PreCreatePropertyField` has no
+escape, so `POST /fields` is always a 403. `PostGetPropertyField` runs after the row is found, so
+an unknown field is a **404** first. `PostGetPropertyFields` and `PostGetPropertyValues` return
+`nil` for an empty slice, so an empty group answers a genuine `200 []` and a user with no values a
+genuine `200 {}`.
+
+So this deployment reaches five distinct answers across the seven routes and *which* one depends on
+a row in `PropertyFields` or `PropertyValues`. A port that refused everything would be wrong on
+five of the seven — which is why these are real database reads and not a constant. The pin is in
+`mm_app::custom_profile_attributes`' module docs.
+
+### What the empty group cannot test, and what planting one row showed
+
+Nothing on this stack can create a CPA field without a licence, so the parity suite writes the rows
+directly. Four findings only visible that way, each verified against the Go server:
+
+- A soft-deleted `user` field and a live `channel` field are both skipped by the list — and both
+  are still **found by id**: `PropertyFieldStore.Get` has no `DeleteAt` filter, `GetMany` no
+  object-type filter, and both handlers' own `ObjectType != user` check sits *after* the licence
+  hook, so it is unreachable while unlicensed.
+- A `session_attributes` field id is a 404 through `/custom_profile_attributes/fields/{id}`, which
+  is the only evidence the group scope on the by-id reads is real.
+- A value planted for one user leaves every other target's read at `200 {}`.
+- The batch cap is `>`, so exactly fifty ids get through to the miss and fifty-one do not.
+
+### Two decode paths, because Go has two
+
+`Decode` into a `*Struct` refuses a JSON array; **serde does not**, because a struct deserialises
+happily from a sequence of its fields — so `PATCH …/fields/{id}` with a body of `[]` would have
+produced an all-default patch and reached a write where Go answers 400. Caught by a unit test while
+writing one, pinned by `an_array_is_not_an_object`. `Decode` into a `map` takes `null` as a nil map
+**without** an error, so the same four bytes give `invalid_body_param` on the field routes and
+`empty_body` on the value routes. Both in `mm_api::custom_profile_attributes::{decode_struct,
+decode_map}`.
+
+### Two orderings a tidier port would lose
+
+`listCPAValues` checks target access **before** reading the group; `cpaPatchValues`, shared by both
+PATCH-values routes, reads the group **first**. And `patchCPAField` trims the name before
+validating it and clears `target_id` before validating it — so `{"name":"   "}` is a 400 and a
+300-character `target_id` is a 404, from the same body shape.
+
+### What is deferred
+
+[D-300] — the licensed half of all seven routes forwards, so three hooks, the group field limit and
+four websocket events have never run here. [D-301] — the two store searches implement the
+predicates these routes set and refuse the rest rather than ignoring them.
+
+### The next route in this family
+
+`api4/properties.go`, nine routes on the same store: `getPropertyFields`, `searchPropertyFields`,
+`getPropertyValues`, `getSystemPropertyValues` and the five writes. The four reads need exactly
+what [D-301] lists — cursors, `since`, `ObjectTypes` and the team/channel scope switch — plus
+`PropertyGroup::is_psav2`, which is already ported, because `getV2Group` refuses a v1 group before
+anything else. **They are registered behind a five-way feature-flag `if` (properties.go:23)**:
+`IntegratedBoards || ManagedChannelCategories || ClassificationMarkings || SessionAttributes ||
+PostAttributes`. Establish which of those five are on at the pinned SHA before writing a handler —
+if all five are false the routes are 404s from the mux and that, not the licence, is the contract
+to port.
