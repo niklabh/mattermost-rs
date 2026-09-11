@@ -424,15 +424,30 @@ async fn disable_and_enable_flip_both_rows_and_only_one_is_idempotent() {
 
     let go_off = common::bot_and_user_rows(&go_bot).await.expect("rows");
     let rs_off = common::bot_and_user_rows(&rs_bot).await.expect("rows");
-    for rows in [&go_off, &rs_off] {
-        assert_ne!(rows["bot_delete_at"], 0, "the Bots row is soft-deleted");
+    for (who, rows) in [("go", &go_off), ("rust", &rs_off)] {
+        assert_ne!(
+            rows["bot_delete_at"], 0,
+            "{who}: the Bots row is soft-deleted"
+        );
         assert_ne!(
             rows["user_delete_at"], 0,
-            "and so is the Users row — there is no `enabled` column"
+            "{who}: and so is the Users row — there is no `enabled` column"
         );
-        assert_eq!(
-            rows["user_delete_at"], rows["user_update_at"],
-            "UpdateActive reads the clock once: DeleteAt *is* UpdateAt"
+        // **Two clock reads, not one.** `UpdateActive` sets `UpdateAt = GetMillis()` and then
+        // `DeleteAt = UpdateAt`, but `SqlUserStore.Update` calls `user.PreUpdate()`, which sets
+        // `UpdateAt = GetMillis()` again unconditionally (`model/user.go:563`) — so the two
+        // columns are equal only when both reads land in the same millisecond. Our port does the
+        // same thing in the same order, `pre_update` included, which is the parity that matters.
+        //
+        // This assertion used to demand exact equality and failed one full run in twelve with
+        // `470` vs `471`. The block just below already had the right idea for the `Bots` row and
+        // called the two stamps "close rather than equal"; the `Users` row is the same shape.
+        let user_delete_at = rows["user_delete_at"].as_i64().unwrap_or(0);
+        let user_update_at = rows["user_update_at"].as_i64().unwrap_or(0);
+        assert!(
+            (user_delete_at - user_update_at).abs() < 5_000,
+            "{who}: DeleteAt and UpdateAt are two GetMillis() calls one statement apart: \
+             {user_delete_at} vs {user_update_at}"
         );
         // A real clock reading, not a marker. `normalise` can only see that `delete_at` is
         // non-zero, so without this a port that wrote `1` — or the planted `CreateAt` — would

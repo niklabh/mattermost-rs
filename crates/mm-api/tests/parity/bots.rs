@@ -509,9 +509,17 @@ async fn include_deleted_reveals_a_deleted_bot_on_both_servers() {
         "a deleted bot is absent by default"
     );
     assert!(with.contains(&gone), "and present with the flag");
+    // The flag **widens**: it does not select only deleted bots. Asserted as a subset rather than
+    // as `with.len() == without.len() + 1`, because that arithmetic quietly assumes this test is
+    // the only source of a deleted bot on the installation — and a *sibling test that panics*
+    // breaks the assumption without any concurrency being involved. Measured: when
+    // `bot_writes::disable_and_enable_flip_both_rows_and_only_one_is_idempotent` failed an
+    // assertion it never reached its `unplant_bot` cleanup, leaving two disabled bots behind, and
+    // this test then failed too — one bug reported as two. `BOT_FIXTURES` does not help here; the
+    // residue outlives the lock.
     assert!(
-        with.len() == without.len() + 1,
-        "the flag **widens** — it does not select only deleted bots: {with:?} vs {without:?}"
+        without.iter().all(|id| with.contains(id)),
+        "every bot listed without the flag must still be listed with it: {with:?} vs {without:?}"
     );
 
     // The single-bot route carries the same flag with the same meaning.
