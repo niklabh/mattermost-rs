@@ -11006,3 +11006,73 @@ was the same answer the tiebreak gives. Planting `mmm` before `zzz` separates th
 third time in this project a mutation has found a fixture where the right answer and the wrong
 answer coincided, and the first where the coincidence was the database's sort stability rather than
 the data.
+
+## The seven group writes, and the corpus that was owed for them (2026-09-12)
+
+**+7 of 764** — `POST /groups`, `POST /groups/names`, `PUT /groups/{id}/patch`,
+`DELETE /groups/{id}`, `POST /groups/{id}/restore`, `POST /groups/{id}/members`,
+`DELETE /groups/{id}/members`. With the ten reads already served, `api4/group.go` is now
+seventeen of its twenty routes; the three left are the syncable link/unlink/patch, which need
+team and channel member writes.
+
+- `crates/mm-api/src/groups.rs` — seven handlers plus two that re-claim `/groups/names`
+- `crates/mm-api/src/lib.rs` — the registrations
+- `crates/mm-api/tests/parity/group_writes.rs` — 7 tests; `parity/groups.rs` — one updated
+- `reference/dump/behaviour_group.go` → `fixtures/behaviour_group.json` — 103 rows
+- `crates/mm-model/src/group.rs`, `group_member.rs` — `go_parity` modules, no logic changed
+- `docs/TECH_DEBT.md` — [D-360]
+- `scripts/mutations/group-writes.plan`
+
+### For a write, "the gate is the first statement" means it precedes the body
+
+`requireLicense` opens all seven exactly as it opens the ten reads, so on an unlicensed server a
+`POST /groups` carrying `{` is the same 501 as one carrying a valid group — **Go never reaches its
+decoder**. A port that parsed first would answer 400 to a request Go does not parse, and would do
+it with four different parameter names across the four routes that take a body. Five malformed
+bodies × five routes are compared for exactly that.
+
+### A static route shadows its parameterised sibling for *every* method
+
+`names` matches `{group_id:[A-Za-z0-9]+}`, so in Go the method picks the handler at
+`/api/v4/groups/names`: `POST` is `getGroupsByNames`, `GET` is `getGroup` and `DELETE` is
+`deleteGroup`, each with `group_id = "names"`. Registering the literal for `POST` alone silently
+un-served the `GET` this server already answered — axum prefers the static segment and does not
+backtrack across method routers, so the literal's fallback swallowed every other method. The wire
+did not move (Go re-derives the same 501), only `x-mmrs-served-by` did, which is why every
+assertion in this suite checks it. `get_group_named_names` and `delete_group_named_names` re-claim
+the two; `PUT` and the rest stay forwarded, where gorilla leaves them too.
+
+### The validators were ported; the oracle for them was not
+
+`model.Group`'s three validators, `Patch`, `IsSyncable` and `GroupMember.IsValid` were already in
+`mm-model` with fixture round-trips and **no behavioural test at all** — the branchy half of the
+file was unpinned. `reference/dump/behaviour_group.go` now drives them from Go across 103 rows,
+including inputs that violate two rules at once so the *order* of each refusal chain is asserted
+rather than read. It passed on the first run, which CLAUDE.md is right to say is not evidence; the
+mutation batch is.
+
+Four facts it pins that a reader gets wrong: name lengths are **bytes** and the length check runs
+**before** the charset check, so 33 two-byte characters is a length error and 10 of the same
+character is a charset error; the reserved-name branch's `where` is `IsValidName` without the
+`Group.` prefix its neighbours carry; `GroupSourceMaxLength` is declared and never enforced, so a
+207-character `plugin_…` source is valid; and the remote-id refusal is one `||` with two halves, so
+a `custom` group that needs no remote id is still refused for an over-long one.
+
+`AppError.params` is **unexported in Go** (utils.go:240), so the three `Group*MaxLength`
+interpolation params cannot be read from outside the model package and are not pinned — transcribed
+from the source, and never on the wire because `Message` is the untranslated id.
+
+### What is not here
+
+Everything behind the gate: the `GroupStore` write surface, the five custom-group permissions,
+`licensedAndConfiguredForGroupBySource` and `patchGroup`'s name derivation. Go loads its licence at
+startup and re-reads it only on a save, so `set_active_licence_id` moves our answer and not Go's
+and the licensed side has no oracle on this stack. [D-360] records what is owed and the three
+branch-level facts no test here can reach — chief among them that **`restoreGroup`'s non-custom
+refusal is a 501 where every sibling's is a 400**.
+
+### The next route in this family
+
+`linkGroupSyncable`, `unlinkGroupSyncable` and `patchGroupSyncable` — the last three of
+`api4/group.go`. They need `Group.TeamMembersToAdd`/`ChannelMembersToAdd` and the team and channel
+member writes, so they sequence behind that family rather than behind this one.
