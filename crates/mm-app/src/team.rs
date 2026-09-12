@@ -642,6 +642,64 @@ mod tests {
         );
     }
 
+    /// Go's own answer for all sixteen combinations of the four inputs to
+    /// [`privacy_change_regenerates_invite_id`].
+    ///
+    /// The corpus is transcribed rather than driven — `UpdateTeamPrivacy` needs a database — so
+    /// what this pins is the *transcription* of app/team.go:237, not a call into it. See the
+    /// header of `reference/dump/behaviour_team_privacy.go`, which says the same thing.
+    #[test]
+    fn go_parity_privacy_change_regenerates_invite_id() {
+        let raw = include_str!("../../../fixtures/behaviour_team_privacy.json");
+        let corpus: serde_json::Value = serde_json::from_str(raw).unwrap();
+        let rows = corpus["regenerates_invite_id"].as_array().unwrap();
+        assert_eq!(rows.len(), 16, "all four booleans crossed");
+
+        let mut regenerating = 0;
+        for row in rows {
+            let got = privacy_change_regenerates_invite_id(
+                row["allow_open_invite"].as_bool().unwrap(),
+                row["team_type"].as_str().unwrap(),
+                row["old_allow_open_invite"].as_bool().unwrap(),
+                row["old_team_type"].as_str().unwrap(),
+            );
+            assert_eq!(
+                got,
+                row["regenerates"].as_bool().unwrap(),
+                "{}",
+                row["name"].as_str().unwrap()
+            );
+            if got {
+                regenerating += 1;
+            }
+        }
+        // Neither all nor none: a predicate stuck at a constant fails here even if every row
+        // above somehow agreed with it.
+        assert!(
+            regenerating > 0 && regenerating < rows.len(),
+            "the corpus must contain both answers, got {regenerating} of {}",
+            rows.len()
+        );
+    }
+
+    /// The two named cases the route can actually produce, spelled out so a reader sees them
+    /// without decoding the corpus: closing a team mints a new invite id, opening one does not.
+    #[test]
+    fn closing_a_team_regenerates_and_opening_one_does_not() {
+        assert!(
+            privacy_change_regenerates_invite_id(false, "I", true, "O"),
+            "O -> I invalidates every invite link already handed out"
+        );
+        assert!(
+            !privacy_change_regenerates_invite_id(true, "O", false, "I"),
+            "I -> O keeps the invite id"
+        );
+        assert!(
+            !privacy_change_regenerates_invite_id(false, "I", false, "I"),
+            "a no-op write changes nothing, so the left half is false"
+        );
+    }
+
     fn team() -> Team {
         Team {
             email: "owner@example.com".to_owned(),
@@ -1197,6 +1255,131 @@ impl App {
         Ok(updated)
     }
 
+    /// Port of `app.App.SearchAllTeams` (app/team.go:1050).
+    ///
+    /// **Two store calls behind one name.** `IsPaginated()` — both `page` *and* `per_page`
+    /// present — routes to `SearchAllPaged`, which runs a second `count(*)` query; otherwise
+    /// `SearchAll` runs alone and the count is `len(results)`, the size of the very page that was
+    /// returned. A caller that sends only `page` therefore gets a count equal to the list length
+    /// rather than the size of the match, and no error saying so.
+    ///
+    /// One error id covers both arms: `app.team.search_all_team.app_error` at 500.
+    #[tracing::instrument(skip_all, fields(paginated = opts.is_paginated(), found))]
+    pub async fn search_all_teams(&self, opts: &TeamSearch) -> AppResult<(Vec<Team>, i64)> {
+        let result = if opts.is_paginated() {
+            self.store().team().search_all_paged(opts).await
+        } else {
+            self.store().team().search_all(opts).await.map(|teams| {
+                let count = teams.len() as i64;
+                (teams, count)
+            })
+        };
+
+        match result {
+            Ok((teams, count)) => {
+                tracing::Span::current().record("found", teams.len());
+                Ok((teams, count))
+            }
+            Err(err) => {
+                tracing::error!(error = %err, "team search failed");
+                Err(AppError::boxed(
+                    "SearchAllTeams",
+                    "app.team.search_all_team.app_error",
+                    None,
+                    String::new(),
+                    500,
+                ))
+            }
+        }
+    }
+
+    /// Port of `app.App.SearchPublicTeams` (app/team.go:1066) — a pass-through to
+    /// `SearchOpen`, whose `Where` is the caller's plus three forced assignments.
+    ///
+    /// No count: the handler refuses a paginated request on this branch with a **501** before
+    /// getting here, so there is nothing to page.
+    #[tracing::instrument(skip_all, fields(found))]
+    pub async fn search_public_teams(&self, opts: &TeamSearch) -> AppResult<Vec<Team>> {
+        self.store().team().search_open(opts).await.map_err(|err| {
+            tracing::error!(error = %err, "public team search failed");
+            AppError::boxed(
+                "SearchPublicTeams",
+                "app.team.search_open_team.app_error",
+                None,
+                String::new(),
+                500,
+            )
+        })
+    }
+
+    /// Port of `app.App.SearchPrivateTeams` (app/team.go:1075).
+    #[tracing::instrument(skip_all, fields(found))]
+    pub async fn search_private_teams(&self, opts: &TeamSearch) -> AppResult<Vec<Team>> {
+        self.store()
+            .team()
+            .search_private(opts)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "private team search failed");
+                AppError::boxed(
+                    "SearchPrivateTeams",
+                    "app.team.search_private_team.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })
+    }
+
+    /// Port of `app.App.UpdateTeamPrivacy` (app/team.go:231).
+    ///
+    /// # The invite id is regenerated on a narrowing, and the condition is two ANDed disjunctions
+    ///
+    /// `(allowOpenInvite != old.AllowOpenInvite || teamType != old.Type) && (!allowOpenInvite ||
+    /// teamType == model.TeamInvite)`. The left half is "something actually changed", the right
+    /// half is "the result is not an open team". So `O` → `I` mints a fresh invite id and every
+    /// link already handed out stops working; `I` → `O` does not, and neither does a no-op
+    /// `I` → `I`, because the left half is false. Dropping either half — or swapping `&&` for
+    /// `||` — silently keeps a live invite link on a team that was just closed.
+    ///
+    /// The second disjunct (`teamType == TeamInvite` with `allowOpenInvite == true`) is
+    /// unreachable from the route: the handler derives both values from one `privacy` string, so
+    /// `I` always arrives with `allow_open_invite = false`. It is kept because Go's is.
+    ///
+    /// Go reads through `GetTeam` here rather than the update-path fetch, so a missing team is
+    /// `GetTeam`'s 404 and not `UpdateTeam`'s.
+    ///
+    /// Returns nothing: the handler answers from a **second** `GetTeam`, "to be consistent with
+    /// UpdateChannelPrivacy", so a concurrent write between the two is visible in the reply.
+    #[tracing::instrument(skip(self), fields(team_id = %team_id, team_type = %team_type))]
+    pub async fn update_team_privacy(
+        &self,
+        team_id: &str,
+        team_type: &str,
+        allow_open_invite: bool,
+    ) -> AppResult<()> {
+        let mut team = self.get_team(team_id).await?;
+
+        if privacy_change_regenerates_invite_id(
+            allow_open_invite,
+            team_type,
+            team.allow_open_invite,
+            &team.team_type,
+        ) {
+            team.invite_id = mm_model::utils::new_id();
+        }
+
+        team.team_type = team_type.to_owned();
+        team.allow_open_invite = allow_open_invite;
+
+        let updated = self.write_team("UpdateTeamPrivacy", team).await?;
+        self.send_team_event(
+            &updated,
+            mm_model::websocket_message::WEBSOCKET_EVENT_UPDATE_TEAM,
+        )
+        .await
+    }
+
     /// The fetch every write does first, with the **update** path's error ids rather than
     /// `GetTeam`'s: a missing team is `app.team.get.find.app_error` at 404 here.
     async fn get_team_for_update(&self, team_id: &str) -> AppResult<Team> {
@@ -1308,6 +1491,23 @@ impl App {
         self.publish(message).await;
         Ok(())
     }
+}
+
+/// The invite-id predicate of `UpdateTeamPrivacy` (team.go:237), lifted out of the two database
+/// reads so all sixteen combinations can be pinned without one — the same lift as
+/// [`apply_team_sanitize`].
+///
+/// `(changed) && (not open)`. A reader who writes `||`, or who drops the second half, leaves a
+/// live invite link on a team that was just closed; a reader who drops the *first* half mints a
+/// new invite id on every no-op `I` → `I` write, invalidating links for no reason.
+pub fn privacy_change_regenerates_invite_id(
+    allow_open_invite: bool,
+    team_type: &str,
+    old_allow_open_invite: bool,
+    old_team_type: &str,
+) -> bool {
+    (allow_open_invite != old_allow_open_invite || team_type != old_team_type)
+        && (!allow_open_invite || team_type == mm_model::team::TEAM_INVITE)
 }
 
 /// Port of `normalizeDomains` (app/teams/utils.go).

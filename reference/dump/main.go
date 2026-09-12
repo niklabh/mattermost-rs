@@ -1237,6 +1237,12 @@ func main() {
 	}
 	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_team_email.json"))
 
+	if err := writeTeamPrivacyBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: team privacy behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_team_privacy.json"))
+
 	// Not a fixture: a generated Rust source file. See behaviour_emoji.go for why the emoji
 	// table is emitted rather than transcribed.
 	if err := writeEmojiTable(*rustOut); err != nil {

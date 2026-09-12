@@ -129,6 +129,7 @@ mod parity {
     pub mod team_name_members;
     pub mod team_stats;
     pub mod team_unread;
+    pub mod team_write_family;
     pub mod team_writes;
     pub mod teams_all;
     pub mod teams_for_user;

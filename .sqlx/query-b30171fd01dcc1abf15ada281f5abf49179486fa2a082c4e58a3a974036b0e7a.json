@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT count(*) AS \"count!\"\n          FROM teams t\n          LEFT JOIN retentionpoliciesteams rpt ON t.id = rpt.teamid\n         WHERE ($1::text IS NULL OR rpt.policyid = $1)\n           AND (NOT $2::boolean OR rpt.teamid IS NULL)\n           AND ($3::text IS NULL OR t.name ILIKE $3 OR t.displayname ILIKE $3)\n           AND (CASE\n                  WHEN $4::boolean AND NOT $5::boolean THEN\n                      EXISTS (SELECT 1 FROM accesscontrolpolicies acp\n                               WHERE acp.id = t.id AND acp.type = 'team')\n                  ELSE\n                      ($4::boolean AND EXISTS (\n                           SELECT 1 FROM accesscontrolpolicies acp\n                            WHERE acp.id = t.id AND acp.type = 'team'))\n                      OR (\n                          ($6::boolean IS NULL\n                           OR ($6 AND t.allowopeninvite = TRUE)\n                           OR (NOT $6\n                               AND t.allowopeninvite IS DISTINCT FROM TRUE\n                               AND t.groupconstrained IS DISTINCT FROM TRUE))\n                          AND ($7::boolean IS NULL\n                               OR ($7 AND t.groupconstrained = TRUE)\n                               OR (NOT $7 AND t.groupconstrained IS DISTINCT FROM TRUE))\n                          AND ($8::text IS NULL OR t.type::text = $8)\n                      )\n                END)\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Bool",
+        "Text",
+        "Bool",
+        "Bool",
+        "Bool",
+        "Bool",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "b30171fd01dcc1abf15ada281f5abf49179486fa2a082c4e58a3a974036b0e7a"
+}

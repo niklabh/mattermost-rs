@@ -639,6 +639,12 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/teams/{team_id}/restore",
             partially_migrated_with_ids(&state, post(teams::restore_team)),
         )
+        // `BaseRoutes.Team.Handle("/privacy")` (api4/team.go:46) — PUT only, one segment deeper
+        // than `{team_id}`.
+        .route(
+            "/api/v4/teams/{team_id}/privacy",
+            partially_migrated_with_ids(&state, axum::routing::put(teams::update_team_privacy)),
+        )
         .route(
             "/api/v4/teams/{team_id}/regenerate_invite_id",
             partially_migrated_with_ids(&state, post(teams::regenerate_team_invite_id)),
@@ -1044,6 +1050,15 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/teams",
             partially_migrated(get(teams::get_all_teams)),
+        )
+        // `BaseRoutes.Teams.Handle("/search")` (api4/team.go:37). A static sibling of
+        // `{team_id}`; gorilla registered `/search` *after* `{team_id:[A-Za-z0-9]+}`, but
+        // `search` is id-shaped and would have matched it — so on Go the literal wins only
+        // because `{team_id}` carries no POST handler, and on axum the literal wins outright.
+        // Same answer either way.
+        .route(
+            "/api/v4/teams/search",
+            partially_migrated(post(teams::search_teams)),
         )
         // `BaseRoutes.Roles` (api4/api.go). The literal `names` sits beside `{role_id}` and
         // gorilla registered `{role_id:[A-Za-z0-9]+}` *first*, so `GET /roles/names` is a

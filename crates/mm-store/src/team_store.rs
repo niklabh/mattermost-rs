@@ -268,6 +268,34 @@ pub trait TeamStore {
         limit: i64,
     ) -> impl std::future::Future<Output = Result<Vec<Team>, StoreError>> + Send;
 
+    /// Port of `SqlTeamStore.SearchAll` (team_store.go:572) — see [`search_all`] for the four
+    /// things a reader gets wrong about its `WHERE`.
+    fn search_all(
+        &self,
+        opts: &TeamSearch,
+    ) -> impl std::future::Future<Output = Result<Vec<Team>, StoreError>> + Send;
+
+    /// Port of `SqlTeamStore.SearchAllPaged` (team_store.go:588) — [`search_all`] plus
+    /// [`search_all_count`], which is the **same** `WHERE` without the `LIMIT`. Two queries, not
+    /// one windowed one, so a concurrent write between them can make the count disagree with the
+    /// page; that race is Go's.
+    fn search_all_paged(
+        &self,
+        opts: &TeamSearch,
+    ) -> impl std::future::Future<Output = Result<(Vec<Team>, i64), StoreError>> + Send;
+
+    /// Port of `SqlTeamStore.SearchOpen` (team_store.go:615) — see [`search_open_opts`].
+    fn search_open(
+        &self,
+        opts: &TeamSearch,
+    ) -> impl std::future::Future<Output = Result<Vec<Team>, StoreError>> + Send;
+
+    /// Port of `SqlTeamStore.SearchPrivate` (team_store.go:627) — see [`search_private_opts`].
+    fn search_private(
+        &self,
+        opts: &TeamSearch,
+    ) -> impl std::future::Future<Output = Result<Vec<Team>, StoreError>> + Send;
+
     /// Port of `SqlTeamStore.GetAll` (team_store.go:637) — every team, deleted ones included.
     ///
     /// `teamsQuery` with nothing but `ORDER BY DisplayName`: no `DeleteAt` predicate, no paging,
@@ -471,6 +499,26 @@ impl TeamStore for SqlTeamStore {
     }
 
     #[tracing::instrument(skip_all)]
+    async fn search_all(&self, opts: &TeamSearch) -> Result<Vec<Team>, StoreError> {
+        search_all(&self.pool, opts).await
+    }
+
+    async fn search_all_paged(&self, opts: &TeamSearch) -> Result<(Vec<Team>, i64), StoreError> {
+        // Go runs the listing first and the count second, and a failure in either aborts the
+        // whole call — so the order is observable only in which error id surfaces.
+        let teams = search_all(&self.pool, opts).await?;
+        let count = search_all_count(&self.pool, opts).await?;
+        Ok((teams, count))
+    }
+
+    async fn search_open(&self, opts: &TeamSearch) -> Result<Vec<Team>, StoreError> {
+        search_all(&self.pool, &search_open_opts(opts)).await
+    }
+
+    async fn search_private(&self, opts: &TeamSearch) -> Result<Vec<Team>, StoreError> {
+        search_all(&self.pool, &search_private_opts(opts)).await
+    }
+
     async fn analytics_team_count(&self, opts: &TeamSearch) -> Result<i64, StoreError> {
         analytics_team_count(&self.pool, opts).await
     }
@@ -1705,6 +1753,250 @@ pub async fn analytics_team_count(pool: &PgPool, opts: &TeamSearch) -> Result<i6
         context: "failed to count Teams".to_owned(),
         source,
     })
+}
+
+/// The `ILIKE` term `teamSearchQuery` builds (team_store.go:487-496), or `None` for no clause.
+///
+/// # The guard reads the **raw** term, not the sanitised one
+///
+/// `if term != ""` runs before `sanitizeSearchTerm`, where the channel search guards on the
+/// sanitised value. So a term of `\` — which sanitises to the empty string, because
+/// [`sanitize_search_term`] strips every occurrence of the escape character first — still
+/// produces a clause, and that clause is `ILIKE '%%'`, which matches every row. The channel
+/// route's equivalent (`?name=*`) drops the clause instead, so the two searches answer a
+/// "nothing but escape characters" term differently. Reproduced rather than harmonised.
+///
+/// The escape character here is `\`, not the channel store's `*`, and there is no `ESCAPE`
+/// clause on the `ILIKE` — Postgres's default escape character *is* backslash, so Go's escaping
+/// lands. Swapping the two would silently turn `%` into a live wildcard.
+fn team_search_like_term(term: &str) -> Option<String> {
+    if term.is_empty() {
+        return None;
+    }
+    let sanitized = crate::user_store::sanitize_search_term(term, '\\');
+    // `wildcardSearchTerm`: `strings.ToLower("%" + term + "%")`. `go_to_lower` is the simple
+    // mapping Go applies; `str::to_lowercase` is the full one and they disagree on two runes.
+    Some(mm_model::utils::go_to_lower(&format!("%{sanitized}%")))
+}
+
+/// Port of `SqlTeamStore.teamSearchQuery` + `SearchAll` (team_store.go:462, 572) — the listing
+/// behind `POST /api/v4/teams/search`.
+///
+/// # Four things a reader gets wrong
+///
+/// 1. **There is no `DeleteAt` predicate.** An archived team matching the term is returned, with
+///    its `delete_at` set. Same as [`get_all_page`], and for the same reason: Go never adds one.
+/// 2. **`allow_open_invite = Some(false)` also excludes group-constrained teams.** Go's
+///    "private" filter is two ANDed pairs, not one — a group-constrained team is not listed as
+///    private even when its `AllowOpenInvite` is false. Dropping the second pair widens the
+///    private-team search to teams an LDAP group owns.
+/// 3. **`NotEq` plus `IS NULL` is `IS DISTINCT FROM`.** `GroupConstrained` is nullable and
+///    `x <> true` is NULL for a NULL row, which is why Go ORs the null check in. A port that
+///    writes `groupconstrained = false` drops every team that has never had the column set.
+/// 4. **Pagination is all-or-nothing.** `IsPaginated()` is `Page != nil && PerPage != nil`, so
+///    `page` alone is not paginated and the whole result set comes back unlimited. `LIMIT NULL
+///    OFFSET NULL` is Postgres for "no clause", which is what the unpaginated arm renders.
+///
+/// `include_policy_enforced` is the ABAC widening and is ORed *outside* the other filters — and
+/// when no other filter is set, Go replaces rather than widens, so the listing narrows to
+/// governed teams alone. Unreachable on this deployment (see
+/// `mm_app::App::team_membership_access_control_enabled`) but written as Go wrote it.
+#[tracing::instrument(skip(pool, opts), fields(found))]
+pub async fn search_all(pool: &PgPool, opts: &TeamSearch) -> Result<Vec<Team>, StoreError> {
+    let include_policy_id = opts.include_policy_id.unwrap_or(false);
+    // Go's `else if` chain: a non-empty `policy_id` wins and the other two branches never run.
+    let policy_id = opts.policy_id.as_deref().filter(|id| !id.is_empty());
+    let exclude_policy_constrained =
+        policy_id.is_none() && opts.exclude_policy_constrained == Some(true);
+    let include_policy_enforced = opts.include_policy_enforced.unwrap_or(false);
+    let like_term = team_search_like_term(&opts.term);
+    let allow_open_invite = opts.allow_open_invite;
+    let group_constrained = opts.group_constrained;
+    let team_type = opts.team_type.as_deref();
+    // Whether `teamFilters` is non-nil before the ABAC widening — the difference between Go's
+    // `Or{teamFilters, governed}` and its `teamFilters = governed`.
+    let has_team_filters =
+        allow_open_invite.is_some() || group_constrained.is_some() || team_type.is_some();
+
+    let (limit, offset) = if opts.is_paginated() {
+        let per_page = opts.per_page.unwrap_or(0);
+        let page = opts.page.unwrap_or(0);
+        (Some(per_page), Some(page.saturating_mul(per_page)))
+    } else {
+        (None, None)
+    };
+
+    let rows = sqlx::query_as!(
+        TeamPageRow,
+        r#"
+        SELECT t.id,
+               t.createat,
+               t.updateat,
+               t.deleteat,
+               t.displayname,
+               t.name,
+               t.description,
+               t.email,
+               t.type::text AS "team_type",
+               t.companyname,
+               t.alloweddomains,
+               t.inviteid,
+               t.allowopeninvite,
+               t.lastteamiconupdate,
+               t.schemeid,
+               t.groupconstrained,
+               t.cloudlimitsarchived,
+               EXISTS (
+                   SELECT 1 FROM accesscontrolpolicies acp
+                    WHERE acp.id = t.id AND acp.type = 'team'
+               ) AS "policy_enforced!",
+               COALESCE((
+                   SELECT acp.active FROM accesscontrolpolicies acp
+                    WHERE acp.id = t.id AND acp.type = 'team' AND acp.active = TRUE
+                    LIMIT 1
+               ), false) AS "policy_is_active!",
+               CASE WHEN $1::boolean THEN rpt.policyid END AS "policyid"
+          FROM teams t
+          LEFT JOIN retentionpoliciesteams rpt ON t.id = rpt.teamid
+         WHERE ($2::text IS NULL OR rpt.policyid = $2)
+           AND (NOT $3::boolean OR rpt.teamid IS NULL)
+           AND ($4::text IS NULL OR t.name ILIKE $4 OR t.displayname ILIKE $4)
+           AND (CASE
+                  WHEN $5::boolean AND NOT $6::boolean THEN
+                      EXISTS (SELECT 1 FROM accesscontrolpolicies acp
+                               WHERE acp.id = t.id AND acp.type = 'team')
+                  ELSE
+                      ($5::boolean AND EXISTS (
+                           SELECT 1 FROM accesscontrolpolicies acp
+                            WHERE acp.id = t.id AND acp.type = 'team'))
+                      OR (
+                          ($7::boolean IS NULL
+                           OR ($7 AND t.allowopeninvite = TRUE)
+                           OR (NOT $7
+                               AND t.allowopeninvite IS DISTINCT FROM TRUE
+                               AND t.groupconstrained IS DISTINCT FROM TRUE))
+                          AND ($8::boolean IS NULL
+                               OR ($8 AND t.groupconstrained = TRUE)
+                               OR (NOT $8 AND t.groupconstrained IS DISTINCT FROM TRUE))
+                          AND ($9::text IS NULL OR t.type::text = $9)
+                      )
+                END)
+         ORDER BY t.displayname
+         LIMIT $10::bigint OFFSET $11::bigint
+        "#,
+        include_policy_id,
+        policy_id,
+        exclude_policy_constrained,
+        like_term,
+        include_policy_enforced,
+        has_team_filters,
+        allow_open_invite,
+        group_constrained,
+        team_type,
+        limit,
+        offset,
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: format!("failed to find Teams with term={}", opts.term),
+        source,
+    })?;
+
+    tracing::Span::current().record("found", rows.len());
+    Ok(rows.into_iter().map(team_from_page_row).collect())
+}
+
+/// Port of `SqlTeamStore.teamSearchQuery(opts, true)` (team_store.go:464) — the `count(*)` half
+/// of `SearchAllPaged`.
+///
+/// **The same `WHERE` as [`search_all`], with `ORDER BY` and `LIMIT` dropped** — so unlike
+/// [`analytics_team_count`], whose filters deliberately disagree with its listing, this count
+/// really does describe the rows the listing would return if it were unpaginated. Two counts in
+/// one store with opposite conventions; the asymmetry is Go's.
+#[tracing::instrument(skip(pool, opts))]
+pub async fn search_all_count(pool: &PgPool, opts: &TeamSearch) -> Result<i64, StoreError> {
+    let policy_id = opts.policy_id.as_deref().filter(|id| !id.is_empty());
+    let exclude_policy_constrained =
+        policy_id.is_none() && opts.exclude_policy_constrained == Some(true);
+    let include_policy_enforced = opts.include_policy_enforced.unwrap_or(false);
+    let like_term = team_search_like_term(&opts.term);
+    let allow_open_invite = opts.allow_open_invite;
+    let group_constrained = opts.group_constrained;
+    let team_type = opts.team_type.as_deref();
+    let has_team_filters =
+        allow_open_invite.is_some() || group_constrained.is_some() || team_type.is_some();
+
+    sqlx::query_scalar!(
+        r#"
+        SELECT count(*) AS "count!"
+          FROM teams t
+          LEFT JOIN retentionpoliciesteams rpt ON t.id = rpt.teamid
+         WHERE ($1::text IS NULL OR rpt.policyid = $1)
+           AND (NOT $2::boolean OR rpt.teamid IS NULL)
+           AND ($3::text IS NULL OR t.name ILIKE $3 OR t.displayname ILIKE $3)
+           AND (CASE
+                  WHEN $4::boolean AND NOT $5::boolean THEN
+                      EXISTS (SELECT 1 FROM accesscontrolpolicies acp
+                               WHERE acp.id = t.id AND acp.type = 'team')
+                  ELSE
+                      ($4::boolean AND EXISTS (
+                           SELECT 1 FROM accesscontrolpolicies acp
+                            WHERE acp.id = t.id AND acp.type = 'team'))
+                      OR (
+                          ($6::boolean IS NULL
+                           OR ($6 AND t.allowopeninvite = TRUE)
+                           OR (NOT $6
+                               AND t.allowopeninvite IS DISTINCT FROM TRUE
+                               AND t.groupconstrained IS DISTINCT FROM TRUE))
+                          AND ($7::boolean IS NULL
+                               OR ($7 AND t.groupconstrained = TRUE)
+                               OR (NOT $7 AND t.groupconstrained IS DISTINCT FROM TRUE))
+                          AND ($8::text IS NULL OR t.type::text = $8)
+                      )
+                END)
+        "#,
+        policy_id,
+        exclude_policy_constrained,
+        like_term,
+        include_policy_enforced,
+        has_team_filters,
+        allow_open_invite,
+        group_constrained,
+        team_type,
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: format!("failed to count Teams with term={}", opts.term),
+        source,
+    })
+}
+
+/// Port of `SqlTeamStore.SearchOpen` (team_store.go:615).
+///
+/// Three assignments before [`search_all`], and the third is the one a reader drops:
+/// `GroupConstrained` is **reset to nil** whatever the caller sent, because a caller-supplied
+/// `group_constrained: false` would otherwise widen this mandatory public-only listing. Go says
+/// so in a comment; keeping the caller's value is a privacy bug, not a behaviour difference.
+pub fn search_open_opts(opts: &TeamSearch) -> TeamSearch {
+    let mut opts = opts.clone();
+    opts.team_type = Some(mm_model::team::TEAM_OPEN.to_owned());
+    opts.allow_open_invite = Some(true);
+    opts.group_constrained = None;
+    opts
+}
+
+/// Port of `SqlTeamStore.SearchPrivate` (team_store.go:627).
+///
+/// `AllowOpenInvite = false` and `GroupConstrained = nil`. **No `Type` filter** — Go's comment
+/// says privacy is keyed on `AllowOpenInvite` alone, so an invite-only team whose `Type` is still
+/// `O` is private here. Adding `Type = 'I'` to match the open case would drop exactly those.
+pub fn search_private_opts(opts: &TeamSearch) -> TeamSearch {
+    let mut opts = opts.clone();
+    opts.allow_open_invite = Some(false);
+    opts.group_constrained = None;
+    opts
 }
 
 /// Port of `SqlTeamStore.GetTeamsByScheme` (team_store.go:1346).
