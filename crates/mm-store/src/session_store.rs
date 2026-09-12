@@ -22,6 +22,47 @@ pub trait SessionStore {
         session_id_or_token: &str,
     ) -> impl std::future::Future<Output = Result<Session, StoreError>> + Send;
 
+    /// Port of `SqlSessionStore.Save` (session_store.go:41).
+    ///
+    /// # `PreSave` runs inside the store, and it overwrites
+    ///
+    /// Go mutates the session it is handed: `Id` and `Token` are filled **only if empty**, but
+    /// `CreateAt` and `LastActivityAt` are assigned unconditionally — so a caller that set
+    /// `CreateAt` has it discarded. `DoLogin` then reads `session.CreateAt` back out to pass to
+    /// `UpdateLastLogin`, which is why the login timestamp is the store's clock and not the
+    /// handler's.
+    ///
+    /// A non-empty `Id` is refused outright (`ErrInvalidInput`), which the app layer turns into
+    /// `app.session.save.existing.app_error` at **400** while every other failure is
+    /// `app.session.save.app_error` at 500.
+    ///
+    /// # The returned session is not the one you passed
+    ///
+    /// `TeamMembers` is populated from `Team().GetTeamsForUser(..., true)` and filtered to
+    /// `DeleteAt == 0` — the same hydration [`SessionStore::get`] does, so a session handed
+    /// straight back to a client carries its teams.
+    fn save(
+        &self,
+        session: Session,
+    ) -> impl std::future::Future<Output = Result<Session, StoreError>> + Send;
+
+    /// Port of `SqlSessionStore.GetLRUSessions` (session_store.go:161).
+    ///
+    /// `ORDER BY LastActivityAt DESC` with a limit **and an offset** — so it returns the
+    /// *least* recently used by skipping the newest `offset`. `limitNumberOfSessions`
+    /// (app/session.go:155) calls it with limit 100 and offset 499 and revokes everything it
+    /// gets back, which is how a user is capped at 500 live sessions.
+    ///
+    /// Unlike [`SessionStore::get_sessions`] this does **not** hydrate `TeamMembers`: Go's
+    /// `GetLRUSessions` skips the loop `GetSessions` runs, and its only caller throws the
+    /// sessions away after reading their ids.
+    fn get_lru_sessions(
+        &self,
+        user_id: &str,
+        limit: i64,
+        offset: i64,
+    ) -> impl std::future::Future<Output = Result<Vec<Session>, StoreError>> + Send;
+
     /// Port of `SqlSessionStore.GetSessions` (session_store.go:126).
     fn get_sessions(
         &self,
@@ -236,6 +277,116 @@ impl SessionStore for SqlSessionStore {
         let mut session = row.into_session()?;
         session.team_members = Some(self.team_members_for_session(&session.user_id).await?);
         Ok(session)
+    }
+
+    #[tracing::instrument(skip_all, fields(session_id, user_id = %session.user_id))]
+    async fn save(&self, mut session: Session) -> Result<Session, StoreError> {
+        if !session.id.is_empty() {
+            return Err(StoreError::InvalidInput {
+                entity: "Session",
+                field: "id",
+                value: session.id,
+            });
+        }
+
+        session.pre_save();
+        session
+            .is_valid()
+            .map_err(|app_error| StoreError::Invalid {
+                entity: "Session",
+                app_error,
+            })?;
+
+        // `json.Marshal(session.Props)`. `pre_save` guarantees a map, so this is never `null`
+        // from here — but the column is nullable and `Get` reads a NULL back as an empty map,
+        // which is the shape [D-331] describes.
+        // `Decode` for a *serialise*, as `update_props` below already does and for the same
+        // reason: the direction is infallible in practice and a second variant for it is noise.
+        let props = serde_json::to_value(&session.props).map_err(|source| StoreError::Decode {
+            entity: "Session",
+            column: "props",
+            source,
+        })?;
+
+        sqlx::query!(
+            r#"
+            INSERT INTO sessions
+                (id, token, createat, expiresat, lastactivityat, userid, deviceid,
+                 voipdeviceid, roles, isoauth, expirednotify, props)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+            "#,
+            session.id,
+            session.token,
+            session.create_at,
+            session.expires_at,
+            session.last_activity_at,
+            session.user_id,
+            session.device_id,
+            session.voip_device_id,
+            session.roles,
+            session.is_oauth,
+            session.expired_notify,
+            props,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to save Session with id={}", session.id),
+            source,
+        })?;
+
+        tracing::Span::current().record("session_id", session.id.as_str());
+        session.team_members = Some(self.team_members_for_session(&session.user_id).await?);
+        Ok(session)
+    }
+
+    #[tracing::instrument(skip_all, fields(user_id = %user_id, limit, offset, count))]
+    async fn get_lru_sessions(
+        &self,
+        user_id: &str,
+        limit: i64,
+        offset: i64,
+    ) -> Result<Vec<Session>, StoreError> {
+        let rows = sqlx::query_as!(
+            SessionRow,
+            r#"
+            SELECT id,
+                   token,
+                   createat,
+                   expiresat,
+                   lastactivityat,
+                   userid,
+                   deviceid,
+                   voipdeviceid,
+                   roles,
+                   isoauth,
+                   props,
+                   expirednotify
+              FROM sessions
+             WHERE userid = $1
+             ORDER BY lastactivityat DESC
+             LIMIT $2 OFFSET $3
+            "#,
+            user_id,
+            limit,
+            offset,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to find Sessions with userId={user_id}"),
+            source,
+        })?;
+
+        let sessions = rows
+            .into_iter()
+            .map(SessionRow::into_session)
+            .collect::<Result<Vec<_>, StoreError>>()?;
+
+        tracing::Span::current().record("limit", limit);
+        tracing::Span::current().record("offset", offset);
+        tracing::Span::current().record("count", sessions.len());
+        Ok(sessions)
     }
 
     #[tracing::instrument(skip_all, fields(user_id = %user_id, count))]

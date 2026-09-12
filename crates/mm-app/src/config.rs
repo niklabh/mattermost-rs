@@ -673,6 +673,95 @@ pub struct Config {
     /// only the LDAP path reads it, and that path is forwarded.
     pub maximum_login_attempts: i64,
 
+    /// `ServiceSettings.SessionLengthWebInHours` (config.go:420, defaulted at :745).
+    ///
+    /// The web twin of [`Config::session_length_mobile_in_hours`] and the **same two-step
+    /// cascade**: `SessionLengthWebInDays` is filled first — `180` on an update, `30` on a fresh
+    /// config — and hours derived as `days * 24`, so the reachable defaults are **4320** and
+    /// **720**. The development stack's document carries 4320, which is the `Max-Age=15552000`
+    /// a real login response shows.
+    ///
+    /// Read twice by `login`: `DoLogin` sets the new session's `ExpiresAt` from it
+    /// (app/login.go:170), and `AttachSessionCookies` uses `hours * 3600` as the `Max-Age` and
+    /// `Expires` of all three cookies (app/login.go:277).
+    pub session_length_web_in_hours: i64,
+
+    /// `ServiceSettings.EnableMultifactorAuthentication` (config.go:406, defaulted **`false`**
+    /// at :571).
+    ///
+    /// `CheckUserMfa` (authentication.go:395) returns immediately when this is off **or** the
+    /// user has no MFA enrolled, so it only ever does work for `MfaActive` users on an
+    /// MFA-enabled server. `mm_api::login` reads the pair to decide whether to hand the request
+    /// to Go — and it does so **before** the failed-attempt counter moves, because Go checks MFA
+    /// *after* claiming a slot and a forward at that point would count the attempt twice.
+    pub enable_multifactor_authentication: bool,
+
+    /// `EmailSettings.EnableSignInWithEmail` (config.go:2141), defaulted at :2177 to whatever
+    /// `EnableSignUpWithEmail` is — which is itself defaulted **`true`** at :2173.
+    ///
+    /// Half of `User.GetForLogin`'s resolution rule and half of the masked-error rule, which is
+    /// why both live here. With email on and username off a failed login is
+    /// `api.user.login.invalid_credentials_email`; the other way round it is
+    /// `…_username`; with both on, `…_email_username`. Clients branch on those ids.
+    pub enable_sign_in_with_email: bool,
+
+    /// `EmailSettings.EnableSignInWithUsername` (config.go:2142, defaulted **`true`** at :2181).
+    ///
+    /// See [`Config::enable_sign_in_with_email`]. Note the store predicate is
+    /// `Username = lower(?)` — it lowercases the *submitted* id, not the column, so a row whose
+    /// `Username` is not already lowercase cannot be logged into by name at all.
+    pub enable_sign_in_with_username: bool,
+
+    /// `LdapSettings.Enable` (config.go, defaulted **`false`** at :2730).
+    ///
+    /// Not a feature this port implements — it is a **forwarding predicate**. Both
+    /// `GetUserForLogin` (app/login.go:118) and `authenticateUser` (authentication.go:454)
+    /// consult the LDAP interface when this is on, so `mm_api::login` hands any login to Go
+    /// while it is set rather than answering from the local rows alone.
+    pub ldap_enable: bool,
+
+    /// `SamlSettings.Enable` (config.go, defaulted **`false`** at :3033).
+    ///
+    /// One of the five flags `login`'s deferred error mask reads (api4/user.go:2163). Any of
+    /// them being on turns **every** masked failure into `api.user.login.invalid_credentials_sso`
+    /// regardless of which sign-in methods are enabled — so these five are wire format, not
+    /// features.
+    pub saml_enable: bool,
+
+    /// `GitLabSettings.Enable` — an `SSOSettings`, defaulted **`false`** at :1334. See
+    /// [`Config::saml_enable`].
+    pub gitlab_enable: bool,
+
+    /// `OpenIdSettings.Enable` — an `SSOSettings`, defaulted **`false`**. See
+    /// [`Config::saml_enable`].
+    pub openid_enable: bool,
+
+    /// `GoogleSettings.Enable` — an `SSOSettings`, defaulted **`false`**. See
+    /// [`Config::saml_enable`].
+    pub google_enable: bool,
+
+    /// `Office365Settings.Enable` (config.go:1393), defaulted **`false`**. Its own struct rather
+    /// than an `SSOSettings`, but the flag reads the same. See [`Config::saml_enable`].
+    pub office365_enable: bool,
+
+    /// `GuestAccountsSettings.Enable` (config.go, defaulted **`false`** at :3953).
+    ///
+    /// Read by `login` only for a user who **is** a guest, and only after the licence check that
+    /// refuses first on an unlicensed server — so on this deployment the flag is unreachable from
+    /// that branch. Its live reader is `getLoginType`, whose 404 gate is the conjunction of this,
+    /// [`Config::enable_guest_magic_link`] and the licence.
+    pub guest_accounts_enable: bool,
+
+    /// `GuestAccountsSettings.EnableGuestMagicLink` (config.go:3949, defaulted **`false`** at
+    /// :3973).
+    ///
+    /// The first term of `getLoginType`'s gate, and the reason that route answers **404 with an
+    /// empty body** on a stock server: the gate is `!magicLink || !guests || !licence` and Go
+    /// evaluates the flag before dereferencing the licence, which is what stops an unlicensed
+    /// server panicking there. Also the reason `login` forwards a body carrying
+    /// `magic_link_token`.
+    pub enable_guest_magic_link: bool,
+
     /// `ServiceSettings.TerminateSessionsOnPasswordChange` (config.go:416, defaulted
     /// **`!isUpdate`** at :733).
     ///
@@ -1024,6 +1113,22 @@ impl Default for Config {
             session_length_mobile_in_hours: 720,
             allow_cookies_for_subdomains: false,
             maximum_login_attempts: 10,
+            // `30 * 24`, the fresh-install arm — the same cascade and the same reasoning as
+            // `session_length_mobile_in_hours` above.
+            session_length_web_in_hours: 720,
+            enable_multifactor_authentication: false,
+            // `new(*s.EnableSignUpWithEmail)`, and that is defaulted `true` immediately above it
+            // (config.go:2173), so an empty config resolves to `true` in two steps.
+            enable_sign_in_with_email: true,
+            enable_sign_in_with_username: true,
+            ldap_enable: false,
+            saml_enable: false,
+            gitlab_enable: false,
+            openid_enable: false,
+            google_enable: false,
+            office365_enable: false,
+            guest_accounts_enable: false,
+            enable_guest_magic_link: false,
             // `new(!isUpdate)` with `isUpdate == false`, the same reasoning as
             // `extend_session_length_with_activity` below: an empty config is a fresh install.
             terminate_sessions_on_password_change: true,
@@ -1460,6 +1565,46 @@ impl Config {
                 "MM_SERVICESETTINGS_MAXIMUMLOGINATTEMPTS",
                 default.maximum_login_attempts,
             ),
+            session_length_web_in_hours: lookup_int(
+                lookup,
+                "MM_SERVICESETTINGS_SESSIONLENGTHWEBINHOURS",
+                default.session_length_web_in_hours,
+            ),
+            enable_multifactor_authentication: lookup_bool(
+                lookup,
+                "MM_SERVICESETTINGS_ENABLEMULTIFACTORAUTHENTICATION",
+                default.enable_multifactor_authentication,
+            ),
+            enable_sign_in_with_email: lookup_bool(
+                lookup,
+                "MM_EMAILSETTINGS_ENABLESIGNINWITHEMAIL",
+                default.enable_sign_in_with_email,
+            ),
+            enable_sign_in_with_username: lookup_bool(
+                lookup,
+                "MM_EMAILSETTINGS_ENABLESIGNINWITHUSERNAME",
+                default.enable_sign_in_with_username,
+            ),
+            ldap_enable: lookup_bool(lookup, "MM_LDAPSETTINGS_ENABLE", default.ldap_enable),
+            saml_enable: lookup_bool(lookup, "MM_SAMLSETTINGS_ENABLE", default.saml_enable),
+            gitlab_enable: lookup_bool(lookup, "MM_GITLABSETTINGS_ENABLE", default.gitlab_enable),
+            openid_enable: lookup_bool(lookup, "MM_OPENIDSETTINGS_ENABLE", default.openid_enable),
+            google_enable: lookup_bool(lookup, "MM_GOOGLESETTINGS_ENABLE", default.google_enable),
+            office365_enable: lookup_bool(
+                lookup,
+                "MM_OFFICE365SETTINGS_ENABLE",
+                default.office365_enable,
+            ),
+            guest_accounts_enable: lookup_bool(
+                lookup,
+                "MM_GUESTACCOUNTSSETTINGS_ENABLE",
+                default.guest_accounts_enable,
+            ),
+            enable_guest_magic_link: lookup_bool(
+                lookup,
+                "MM_GUESTACCOUNTSSETTINGS_ENABLEGUESTMAGICLINK",
+                default.enable_guest_magic_link,
+            ),
             terminate_sessions_on_password_change: lookup_bool(
                 lookup,
                 "MM_SERVICESETTINGS_TERMINATESESSIONSONPASSWORDCHANGE",
@@ -1536,6 +1681,8 @@ impl Config {
         let guest_accounts = parsed.guest_accounts_settings.unwrap_or_default();
         let file_settings = parsed.file_settings.unwrap_or_default();
         let password_settings = parsed.password_settings.unwrap_or_default();
+        let ldap_settings = parsed.ldap_settings.unwrap_or_default();
+        let saml_settings = parsed.saml_settings.unwrap_or_default();
         Ok(Self {
             // Moved, not cloned: `is_update` above already took the only other thing anything
             // wants from this field, and the remaining `service` reads are all `Option<bool>`.
@@ -1699,16 +1846,14 @@ impl Config {
             file_max_file_size: file_settings
                 .max_file_size
                 .unwrap_or(default.file_max_file_size),
-            ldap_picture_attribute: parsed
-                .ldap_settings
-                .unwrap_or_default()
+            ldap_picture_attribute: ldap_settings
                 .picture_attribute
                 .unwrap_or(default.ldap_picture_attribute),
-            saml_enable_sync_with_ldap: parsed
-                .saml_settings
-                .unwrap_or_default()
+            ldap_enable: ldap_settings.enable.unwrap_or(default.ldap_enable),
+            saml_enable_sync_with_ldap: saml_settings
                 .enable_sync_with_ldap
                 .unwrap_or(default.saml_enable_sync_with_ldap),
+            saml_enable: saml_settings.enable.unwrap_or(default.saml_enable),
             lock_profile_fields_for_email_users: team_settings
                 .lock_profile_fields_for_email_users
                 .unwrap_or(default.lock_profile_fields_for_email_users),
@@ -1780,6 +1925,49 @@ impl Config {
             maximum_login_attempts: service
                 .maximum_login_attempts
                 .unwrap_or(default.maximum_login_attempts),
+            // The web half of the cascade at config.go:745, reproduced for the same reason the
+            // mobile one above is: a document carrying only `SessionLengthWebInDays` is the
+            // middle branch, and it decides both the session's `ExpiresAt` and the cookies'
+            // `Max-Age`.
+            session_length_web_in_hours: service
+                .session_length_web_in_hours
+                .or_else(|| service.session_length_web_in_days.map(|days| days * 24))
+                .unwrap_or(if is_update { 180 * 24 } else { 30 * 24 }),
+            enable_multifactor_authentication: service
+                .enable_multifactor_authentication
+                .unwrap_or(default.enable_multifactor_authentication),
+            enable_sign_in_with_email: email_settings
+                .enable_sign_in_with_email
+                .unwrap_or(default.enable_sign_in_with_email),
+            enable_sign_in_with_username: email_settings
+                .enable_sign_in_with_username
+                .unwrap_or(default.enable_sign_in_with_username),
+            guest_accounts_enable: guest_accounts
+                .enable
+                .unwrap_or(default.guest_accounts_enable),
+            enable_guest_magic_link: guest_accounts
+                .enable_guest_magic_link
+                .unwrap_or(default.enable_guest_magic_link),
+            gitlab_enable: parsed
+                .gitlab_settings
+                .unwrap_or_default()
+                .enable
+                .unwrap_or(default.gitlab_enable),
+            google_enable: parsed
+                .google_settings
+                .unwrap_or_default()
+                .enable
+                .unwrap_or(default.google_enable),
+            openid_enable: parsed
+                .openid_settings
+                .unwrap_or_default()
+                .enable
+                .unwrap_or(default.openid_enable),
+            office365_enable: parsed
+                .office365_settings
+                .unwrap_or_default()
+                .enable
+                .unwrap_or(default.office365_enable),
             // The second `!isUpdate` default (config.go:733), and the one that matters more: a
             // resolved-from-`default` `true` would log every other device out on a password
             // change that Go leaves alone.
@@ -1934,21 +2122,45 @@ struct Document {
     ldap_settings: Option<LdapSettingsDocument>,
     #[serde(rename = "SamlSettings")]
     saml_settings: Option<SamlSettingsDocument>,
+    #[serde(rename = "GitLabSettings")]
+    gitlab_settings: Option<EnableOnlySsoDocument>,
+    #[serde(rename = "GoogleSettings")]
+    google_settings: Option<EnableOnlySsoDocument>,
+    #[serde(rename = "OpenIdSettings")]
+    openid_settings: Option<EnableOnlySsoDocument>,
+    #[serde(rename = "Office365Settings")]
+    office365_settings: Option<EnableOnlySsoDocument>,
 }
 
-/// The one field of `LdapSettings` a migrated route reads — `setProfileImage`'s 409.
+/// The two fields of `LdapSettings` a migrated route reads — `setProfileImage`'s 409, and the
+/// flag `login` forwards on.
 #[derive(Debug, Default, serde::Deserialize)]
 struct LdapSettingsDocument {
     #[serde(rename = "PictureAttribute")]
     picture_attribute: Option<String>,
+    #[serde(rename = "Enable")]
+    enable: Option<bool>,
 }
 
-/// The one field of `SamlSettings` a migrated route reads, and it is only ever consulted
-/// alongside `LdapSettings.PictureAttribute`.
+/// The two fields of `SamlSettings` a migrated route reads: `EnableSyncWithLdap` is only ever
+/// consulted alongside `LdapSettings.PictureAttribute`, and `Enable` is one of the five flags
+/// `login`'s error mask reads.
 #[derive(Debug, Default, serde::Deserialize)]
 struct SamlSettingsDocument {
     #[serde(rename = "EnableSyncWithLdap")]
     enable_sync_with_ldap: Option<bool>,
+    #[serde(rename = "Enable")]
+    enable: Option<bool>,
+}
+
+/// `SSOSettings` (config.go:1318) — the shape `GitLabSettings`, `GoogleSettings` and
+/// `OpenIdSettings` all share — plus `Office365Settings`, which is its own struct in Go but
+/// carries an identically-named flag. Only `Enable` is modelled: it is the only field
+/// `login`'s error mask reads.
+#[derive(Debug, Default, serde::Deserialize)]
+struct EnableOnlySsoDocument {
+    #[serde(rename = "Enable")]
+    enable: Option<bool>,
 }
 
 /// The four rule flags and the minimum length `IsPasswordValidWithSettings` reads.
@@ -2008,19 +2220,27 @@ struct TeamSettingsDocument {
     lock_profile_fields_for_email_users: Option<String>,
 }
 
-/// The one field of `EmailSettings` a migrated route reads.
+/// The three fields of `EmailSettings` a migrated route reads.
 #[derive(Debug, Default, serde::Deserialize)]
 struct EmailSettingsDocument {
     #[serde(rename = "RequireEmailVerification")]
     require_email_verification: Option<bool>,
+    #[serde(rename = "EnableSignInWithEmail")]
+    enable_sign_in_with_email: Option<bool>,
+    #[serde(rename = "EnableSignInWithUsername")]
+    enable_sign_in_with_username: Option<bool>,
 }
 
-/// The one field of `GuestAccountsSettings` a migrated route reads. Its name collides with
-/// `TeamSettings.RestrictCreationToDomains`, which is exactly why it needs its own section.
+/// The fields of `GuestAccountsSettings` a migrated route reads. `RestrictCreationToDomains`'s
+/// name collides with `TeamSettings`', which is exactly why this needs its own section.
 #[derive(Debug, Default, serde::Deserialize)]
 struct GuestAccountsSettingsDocument {
     #[serde(rename = "RestrictCreationToDomains")]
     restrict_creation_to_domains: Option<String>,
+    #[serde(rename = "Enable")]
+    enable: Option<bool>,
+    #[serde(rename = "EnableGuestMagicLink")]
+    enable_guest_magic_link: Option<bool>,
 }
 
 /// The one field of `AIRecapSettings` a migrated route reads. `Option<bool>` all the way through:
@@ -2071,6 +2291,13 @@ struct ServiceSettingsDocument {
     webserver_mode: Option<String>,
     #[serde(rename = "SessionIdleTimeoutInMinutes")]
     session_idle_timeout_in_minutes: Option<i64>,
+    #[serde(rename = "SessionLengthWebInHours")]
+    session_length_web_in_hours: Option<i64>,
+    /// Only ever read as the fallback for the field above, exactly as the mobile pair below.
+    #[serde(rename = "SessionLengthWebInDays")]
+    session_length_web_in_days: Option<i64>,
+    #[serde(rename = "EnableMultifactorAuthentication")]
+    enable_multifactor_authentication: Option<bool>,
     #[serde(rename = "SessionLengthMobileInHours")]
     session_length_mobile_in_hours: Option<i64>,
     /// Only ever read as the fallback for the field above — Go derives hours from days when the
@@ -2663,6 +2890,8 @@ mod go_parity {
             // the fixture now carries both that and the `SessionLengthMobileInDays` it was
             // derived from, so this is Go's own number rather than a transcribed one.
             session_length_mobile_in_hours: 4320,
+            // And the web length, which takes the same cascade off its own pair of keys.
+            session_length_web_in_hours: 4320,
             ..Config::default()
         };
 
@@ -2958,8 +3187,8 @@ mod go_parity {
             .sum();
 
         assert_eq!(
-            keys, 53,
-            "the fixture covers {keys} settings and Config reads 53 from the document. \
+            keys, 67,
+            "the fixture covers {keys} settings and Config reads 67 from the document. \
              Add the new key to scripts/dump-config-fixture.sh and re-run it — a modelled \
              setting the fixture does not carry is a setting Go's own output never checked"
         );
@@ -2981,15 +3210,26 @@ mod go_parity {
                 "EnableOutgoingWebhooks": false,
                 "EnableOAuthServiceProvider": false,
                 "SessionIdleTimeoutInMinutes": 17,
-                "ExtendSessionLengthWithActivity": true
+                "ExtendSessionLengthWithActivity": true,
+                "SessionLengthWebInHours": 19,
+                "EnableMultifactorAuthentication": true
             },
             "ComplianceSettings": { "Enable": true },
             "ExperimentalSettings": { "RestrictSystemAdmin": true },
             "ImageProxySettings": { "Enable": true },
             "FileSettings": { "DriverName": "amazons3", "MaxFileSize": 4096 },
             "TeamSettings": { "LockProfileFieldsForEmailUsers": "all" },
-            "LdapSettings": { "PictureAttribute": "thumbnailPhoto" },
-            "SamlSettings": { "EnableSyncWithLdap": true },
+            "LdapSettings": { "PictureAttribute": "thumbnailPhoto", "Enable": true },
+            "SamlSettings": { "EnableSyncWithLdap": true, "Enable": true },
+            "GitLabSettings": { "Enable": true },
+            "GoogleSettings": { "Enable": true },
+            "OpenIdSettings": { "Enable": true },
+            "Office365Settings": { "Enable": true },
+            "GuestAccountsSettings": { "Enable": true, "EnableGuestMagicLink": true },
+            "EmailSettings": {
+                "EnableSignInWithEmail": false,
+                "EnableSignInWithUsername": false
+            },
             "PrivacySettings": { "ShowFullName": false, "ShowEmailAddress": false }
         }"#;
         let config = Config::from_document(inverted).expect("valid document");
@@ -3020,6 +3260,95 @@ mod go_parity {
         // `!isUpdate` is `true` and an unread field would also read `true`. The 17 above is what
         // makes the pair honest — an integer has no default to coincide with.
         assert!(config.extend_session_length_with_activity);
+
+        // The login vertical's settings. `session_length_web_in_hours` carries an integer for
+        // the same reason `session_idle_timeout_in_minutes` above does — no default to coincide
+        // with — and the five SSO flags are each in their **own** section, four of which exist
+        // in `Document` for one key, so a wiring that read one of them for all five would be
+        // invisible on a stock document where all five agree.
+        assert_eq!(config.session_length_web_in_hours, 19);
+        assert!(config.enable_multifactor_authentication);
+        assert!(!config.enable_sign_in_with_email);
+        assert!(!config.enable_sign_in_with_username);
+        assert!(config.ldap_enable);
+        assert!(config.saml_enable);
+        assert!(config.gitlab_enable);
+        assert!(config.google_enable);
+        assert!(config.openid_enable);
+        assert!(config.office365_enable);
+        assert!(config.guest_accounts_enable);
+        assert!(config.enable_guest_magic_link);
+    }
+
+    /// The five SSO flags the error mask reads are five **different** keys.
+    ///
+    /// `every_field_is_actually_read_from_the_document` sets all five to `true` at once, so a
+    /// port that wired `SamlSettings.Enable` into all five would pass it — and would also pass
+    /// every parity test, because the development stack leaves all five at `false`. The only
+    /// thing that separates them is a document where they disagree.
+    #[test]
+    fn the_five_sso_flags_are_five_different_keys() {
+        for (section, pick) in [
+            ("SamlSettings", 0usize),
+            ("GitLabSettings", 1),
+            ("GoogleSettings", 2),
+            ("OpenIdSettings", 3),
+            ("Office365Settings", 4),
+        ] {
+            let config = Config::from_document(&format!(r#"{{"{section}":{{"Enable":true}}}}"#))
+                .expect("valid document");
+            let flags = [
+                config.saml_enable,
+                config.gitlab_enable,
+                config.google_enable,
+                config.openid_enable,
+                config.office365_enable,
+            ];
+            for (index, on) in flags.iter().enumerate() {
+                assert_eq!(
+                    *on,
+                    index == pick,
+                    "{section} should set exactly flag {pick}, not {index}"
+                );
+            }
+        }
+    }
+
+    /// The web and mobile session lengths are **different** keys, and each carries its own
+    /// days→hours cascade.
+    ///
+    /// The live document holds 4320 for both, so nothing on the stack can tell them apart; a
+    /// login that read the mobile length would hand every browser a session of the wrong age and
+    /// cookies with the wrong `Max-Age`.
+    #[test]
+    fn the_web_and_mobile_session_lengths_are_not_the_same_key() {
+        let config = Config::from_document(
+            r#"{"ServiceSettings":{"SessionLengthWebInHours":11,"SessionLengthMobileInHours":22}}"#,
+        )
+        .expect("valid document");
+        assert_eq!(config.session_length_web_in_hours, 11);
+        assert_eq!(config.session_length_mobile_in_hours, 22);
+
+        // The middle branch of the cascade: only the days key, multiplied by 24. A collapsed
+        // port that fell straight through to the isUpdate default would answer 720 here.
+        let days_only = Config::from_document(
+            r#"{"ServiceSettings":{"SessionLengthWebInDays":3,"SessionLengthMobileInDays":5}}"#,
+        )
+        .expect("valid document");
+        assert_eq!(days_only.session_length_web_in_hours, 72);
+        assert_eq!(days_only.session_length_mobile_in_hours, 120);
+
+        // And the hours key wins outright over the days key when both are present.
+        let both = Config::from_document(
+            r#"{"ServiceSettings":{"SessionLengthWebInDays":3,"SessionLengthWebInHours":7}}"#,
+        )
+        .expect("valid document");
+        assert_eq!(both.session_length_web_in_hours, 7);
+
+        // No key at all, and a `SiteURL` present: the update arm, 180 days.
+        let update =
+            Config::from_document(r#"{"ServiceSettings":{"SiteURL":""}}"#).expect("valid document");
+        assert_eq!(update.session_length_web_in_hours, 4320);
     }
 
     /// The two privacy settings are read from **different** keys.
@@ -3160,6 +3489,7 @@ mod go_parity {
                 // Also `!isUpdate`-shaped: a document with a `SiteURL` is an update, so the
                 // mobile session length defaults to 180 days rather than 30.
                 session_length_mobile_in_hours: 4320,
+                session_length_web_in_hours: 4320,
                 ..Config::default()
             }
         );

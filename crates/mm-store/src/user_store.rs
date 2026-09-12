@@ -331,6 +331,55 @@ pub trait UserStore {
         hashed_password: &str,
     ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 
+    /// Port of `SqlUserStore.GetForLogin` (user_store.go:1422).
+    ///
+    /// # The two flags choose the predicate, and neither being set is an error
+    ///
+    /// `username && email` matches `Username = lower($1) OR Email = lower($1)`; either alone
+    /// drops the other side; **neither returns an error before a query is issued**. That last
+    /// branch is reachable — an administrator can switch both sign-in methods off — and it is not
+    /// the same as "no such user": Go's `GetUserForLogin` only calls this at all when one of the
+    /// two is set, so the error arm is dead from `login` and live from nothing else. Reproduced
+    /// because the next caller may not have that guard.
+    ///
+    /// # `lower()` is applied to the parameter, not the column
+    ///
+    /// So the comparison is case-**sensitive on the stored value**. `PreSave` normalises both
+    /// `Username` and `Email` to lower case, so this is equivalent to a case-insensitive lookup
+    /// for any row the server itself wrote — but a row inserted by hand with an uppercase
+    /// username cannot be logged into by name at all, on either server. A port that lowered the
+    /// column instead would let that row in and diverge.
+    ///
+    /// # Zero rows and two rows are **different** errors in Go, and both are refusals
+    ///
+    /// With both flags on, one account may hold another's username as its email address, which
+    /// is the two-row case. Go distinguishes them in the message only; both reach
+    /// `GetUserForLogin`'s single `store.sql_user.get_for_login.app_error`, so both surface as
+    /// [`StoreError::NotFound`] here with different criteria.
+    fn get_for_login(
+        &self,
+        login_id: &str,
+        allow_sign_in_with_username: bool,
+        allow_sign_in_with_email: bool,
+    ) -> impl std::future::Future<Output = Result<User, StoreError>> + Send;
+
+    /// Port of `SqlUserStore.UpdateLastLogin` (user_store.go:498).
+    ///
+    /// `SET LastLogin = $1, UpdateAt = GetMillis()` — **two different instants**. `DoLogin` passes
+    /// the new session's `CreateAt` as the login time, while `UpdateAt` is taken fresh inside the
+    /// store, so the two columns differ by however long the session insert took. Collapsing them
+    /// onto one value would be tidier and would not be Go.
+    ///
+    /// Bumping `UpdateAt` matters beyond bookkeeping: it is the etag input for `GET /users/{id}`,
+    /// so logging in invalidates every cached copy of your own profile.
+    ///
+    /// A miss writes nothing and is not an error — Go discards the row count.
+    fn update_last_login(
+        &self,
+        user_id: &str,
+        last_login: i64,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
     /// Port of `SqlUserStore.UpdateFailedPasswordAttempts` (user_store.go:420).
     ///
     /// An unconditional `SET FailedAttempts = ?`. Every caller passes `0`, so in practice this is
@@ -2722,6 +2771,131 @@ impl UserStore for SqlUserStore {
             source,
         })?;
 
+        tracing::Span::current().record("updated", result.rows_affected());
+        Ok(())
+    }
+
+    #[tracing::instrument(skip_all, fields(by_username, by_email, found))]
+    async fn get_for_login(
+        &self,
+        login_id: &str,
+        allow_sign_in_with_username: bool,
+        allow_sign_in_with_email: bool,
+    ) -> Result<User, StoreError> {
+        tracing::Span::current().record("by_username", allow_sign_in_with_username);
+        tracing::Span::current().record("by_email", allow_sign_in_with_email);
+
+        // Go builds one query with a squirrel `Where` per arm; sqlx's compile-time checking wants
+        // three literal statements. The predicate is the only thing that differs, so the three
+        // are folded into one statement guarded by the flags themselves: `$2`/`$3` carry them
+        // into SQL rather than into Rust. That keeps a single checked query *and* keeps the
+        // three-way choice in one place — a reader changing the `OR` cannot forget a copy.
+        //
+        // `lower($1)` on the **parameter**, as Go writes it.
+        if !allow_sign_in_with_username && !allow_sign_in_with_email {
+            return Err(StoreError::Argument {
+                entity: "User",
+                detail: "sign in with username and email are disabled",
+            });
+        }
+
+        let rows = sqlx::query_as!(
+            UserRow,
+            r#"
+            SELECT u.id,
+                   u.createat,
+                   u.updateat,
+                   u.deleteat,
+                   u.username,
+                   u.password,
+                   u.authdata,
+                   u.authservice,
+                   u.email,
+                   u.emailverified,
+                   u.nickname,
+                   u.firstname,
+                   u.lastname,
+                   u.position,
+                   u.roles,
+                   u.allowmarketing,
+                   u.props,
+                   u.notifyprops,
+                   u.lastpasswordupdate,
+                   u.lastpictureupdate,
+                   u.failedattempts::bigint AS failedattempts,
+                   u.locale,
+                   u.timezone,
+                   u.mfaactive,
+                   u.mfasecret,
+                   u.mfausedtimestamps,
+                   u.remoteid,
+                   u.lastlogin,
+                   (b.userid IS NOT NULL) AS "isbot!",
+                   COALESCE(b.description, '') AS "botdescription!",
+                   COALESCE(b.lasticonupdate, 0) AS "botlasticonupdate!"
+              FROM users u
+              LEFT JOIN bots b ON b.userid = u.id
+             WHERE ($2 AND u.username = lower($1))
+                OR ($3 AND u.email = lower($1))
+            "#,
+            login_id,
+            allow_sign_in_with_username,
+            allow_sign_in_with_email,
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to find Users".to_owned(),
+            source,
+        })?;
+
+        // Go's two refusals, kept apart. The criteria never carries `login_id`: it is a
+        // credential-adjacent value and this error is logged.
+        if rows.is_empty() {
+            tracing::Span::current().record("found", 0);
+            return Err(StoreError::NotFound {
+                entity: "User",
+                criteria: "user not found".to_owned(),
+            });
+        }
+        if rows.len() > 1 {
+            tracing::Span::current().record("found", rows.len());
+            return Err(StoreError::NotFound {
+                entity: "User",
+                criteria: "multiple users found".to_owned(),
+            });
+        }
+        tracing::Span::current().record("found", 1);
+
+        let Some(row) = rows.into_iter().next() else {
+            // Unreachable: `rows` is neither empty nor longer than one here.
+            return Err(StoreError::NotFound {
+                entity: "User",
+                criteria: "user not found".to_owned(),
+            });
+        };
+        user_from_row(row)
+    }
+
+    #[tracing::instrument(skip_all, fields(user_id = %user_id, last_login, updated))]
+    async fn update_last_login(&self, user_id: &str, last_login: i64) -> Result<(), StoreError> {
+        // `Set("UpdateAt", model.GetMillis())` — read here and **not** from `last_login`, so the
+        // two columns legitimately differ. See the trait doc.
+        let now = mm_model::utils::get_millis();
+        let result = sqlx::query!(
+            "UPDATE users SET lastlogin = $1, updateat = $2 WHERE id = $3",
+            last_login,
+            now,
+            user_id,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to update User with userId={user_id}"),
+            source,
+        })?;
+
+        tracing::Span::current().record("last_login", last_login);
         tracing::Span::current().record("updated", result.rows_affected());
         Ok(())
     }

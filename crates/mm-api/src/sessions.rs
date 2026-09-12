@@ -524,11 +524,13 @@ async fn attach_device_ids(
     let expires_at = get_millis() / 1000 + max_age_seconds;
 
     let cookie = render_session_cookie(
+        SESSION_COOKIE_TOKEN,
         &session.token,
         &state.app.config().subpath(),
         &state.app.config().cookie_domain(),
         max_age_seconds,
         expires_at,
+        true,
         secure,
         secure && check_embedded_cookie(headers),
     );
@@ -570,16 +572,23 @@ async fn attach_device_ids(
 /// Every row of `session_cookie` in `fixtures/behaviour_session_write.json` is this cookie
 /// rendered by `net/http`'s own `Cookie.String`, so the assertion is against Go's bytes rather
 /// than against a reading of them.
-fn render_session_cookie(
+//
+// Nine arguments, one per field of the `http.Cookie` literal Go builds. Grouping them into a
+// struct would add a type whose only purpose is to be destructured one line later, and would put
+// a name between the call site and the Go it is transcribed from.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn render_session_cookie(
+    name: &str,
     token: &str,
     subpath: &str,
     domain: &str,
     max_age_seconds: i64,
     expires_unix_seconds: i64,
+    http_only: bool,
     secure: bool,
     same_site_none: bool,
 ) -> String {
-    let mut cookie = format!("{SESSION_COOKIE_TOKEN}={token}");
+    let mut cookie = format!("{name}={token}");
 
     let path = sanitize_cookie_value(subpath);
     if !path.is_empty() {
@@ -607,7 +616,12 @@ fn render_session_cookie(
     } else if max_age_seconds < 0 {
         cookie.push_str("; Max-Age=0");
     }
-    cookie.push_str("; HttpOnly");
+    // `HttpOnly` is **not** universal: `AttachSessionCookies` (app/login.go:283-307) sets it on
+    // `MMAUTHTOKEN` alone. `MMUSERID` and `MMCSRF` are deliberately readable by the webapp's own
+    // JavaScript, which is how it knows who it is and what to put in `X-CSRF-Token`.
+    if http_only {
+        cookie.push_str("; HttpOnly");
+    }
     if secure {
         cookie.push_str("; Secure");
     }
@@ -640,7 +654,7 @@ fn sanitize_cookie_value(value: &str) -> String {
 ///
 /// Go's `r.Cookie` takes the **first** cookie with the name and strips a surrounding pair of
 /// double quotes from the value before comparing, so `MMEMBED="1"` also matches.
-fn check_embedded_cookie(headers: &axum::http::HeaderMap) -> bool {
+pub(crate) fn check_embedded_cookie(headers: &axum::http::HeaderMap) -> bool {
     let Some(header) = headers
         .get(axum::http::header::COOKIE)
         .and_then(|value| value.to_str().ok())
@@ -749,6 +763,7 @@ fn is_semver_identifier_char(c: char) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use mm_model::session::SESSION_COOKIE_TOKEN;
     use mm_model::session::Session;
 
     /// The security property of this endpoint, asserted directly. If `sanitize` stops clearing
@@ -1025,16 +1040,24 @@ mod tests {
         let cases = oracle["session_cookie"]
             .as_array()
             .expect("the section is an array");
-        assert!(cases.len() >= 10, "the corpus shrank");
+        assert!(cases.len() >= 15, "the corpus shrank");
+
+        // Both `HttpOnly` states are in the corpus, so a renderer that hardcoded either one
+        // fails here rather than only on the login route. `MMUSERID` and `MMCSRF` are readable
+        // by the webapp; `MMAUTHTOKEN` is not.
+        assert!(cases.iter().any(|c| c["http_only"] == true));
+        assert!(cases.iter().any(|c| c["http_only"] == false));
 
         for case in cases {
             let name = case["name"].as_str().expect("a name");
             let rendered = render_session_cookie(
+                case["cookie_name"].as_str().expect("a cookie name"),
                 case["token"].as_str().expect("a token"),
                 case["path"].as_str().expect("a path"),
                 case["domain"].as_str().expect("a domain"),
                 case["max_age"].as_i64().expect("a max age"),
                 case["expires_unix"].as_i64().expect("an expiry"),
+                case["http_only"].as_bool().expect("an http-only flag"),
                 case["secure"].as_bool().expect("a secure flag"),
                 case["same_site_none"].as_bool().expect("a same-site flag"),
             );
@@ -1051,8 +1074,19 @@ mod tests {
     /// regression says which of the three broke.
     #[test]
     fn max_age_is_omitted_at_zero_and_zeroed_when_negative() {
-        let render =
-            |max_age| render_session_cookie("tok", "/", "", max_age, 1_788_636_490, false, false);
+        let render = |max_age| {
+            render_session_cookie(
+                SESSION_COOKIE_TOKEN,
+                "tok",
+                "/",
+                "",
+                max_age,
+                1_788_636_490,
+                true,
+                false,
+                false,
+            )
+        };
         assert!(render(0).contains("HttpOnly"));
         assert!(
             !render(0).contains("Max-Age"),
@@ -1069,7 +1103,17 @@ mod tests {
     #[test]
     fn same_site_none_requires_secure() {
         let render = |secure, same_site| {
-            render_session_cookie("tok", "/", "", 3600, 1_788_636_490, secure, same_site)
+            render_session_cookie(
+                SESSION_COOKIE_TOKEN,
+                "tok",
+                "/",
+                "",
+                3600,
+                1_788_636_490,
+                true,
+                secure,
+                same_site,
+            )
         };
         assert!(!render(false, false).contains("Secure"));
         assert!(!render(false, false).contains("SameSite"));
@@ -1087,16 +1131,28 @@ mod tests {
     /// empty subpath is reachable: it is what a `SiteURL` Go cannot parse produces.
     #[test]
     fn an_empty_path_or_domain_is_omitted_entirely() {
-        let cookie = render_session_cookie("tok", "", "", 3600, 1_788_636_490, false, false);
+        let cookie = render_session_cookie(
+            SESSION_COOKIE_TOKEN,
+            "tok",
+            "",
+            "",
+            3600,
+            1_788_636_490,
+            true,
+            false,
+            false,
+        );
         assert!(!cookie.contains("Path"), "{cookie}");
         assert!(!cookie.contains("Domain"), "{cookie}");
 
         let with_domain = render_session_cookie(
+            SESSION_COOKIE_TOKEN,
             "tok",
             "/sub",
             "example.com",
             3600,
             1_788_636_490,
+            true,
             false,
             false,
         );

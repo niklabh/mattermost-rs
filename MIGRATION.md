@@ -11478,3 +11478,78 @@ exists so a unit test can read what a client cannot.
 urgent post exists, `count_urgent_posts_after` is only ever compared at `0`, and both arms of the
 `ServiceSettings.PostPriority` gate answer the same body. The SQL is schema-checked and the
 `'urgent'` literal is pinned to `model.PostPriorityUrgent` by a unit test; the *count* is not.
+
+
+## `POST /api/v4/users/login`, `POST /api/v4/users/login/type` (2026-09-13, branch `wt/login`)
+
+**DONE.** The route every client calls first. `login` is served for the local-password path;
+`login/type` answers its **404 with an empty body**, which is the whole route on any server
+without guest magic links. 14 parity tests, 3 store-backed tests and 32 unit tests across the
+four new modules. Mutation run: **49 run, 46 caught, 1 survived, 2 controls survived**;
+`scripts/mutations/login.plan` carries the five fixture gaps the first pass found and the one
+survivor that stays one.
+
+| File | What |
+|---|---|
+| `crates/mm-api/src/login.rs` | both handlers, the error mask, the three cookies |
+| `crates/mm-app/src/login.rs` | `GetUserForLogin`, `AuthenticateUserForLogin`, `CheckPasswordAndAllCriteria`, `CreateSession`, `DoLogin` |
+| `crates/mm-app/src/user_agent.rs` | `channels/app/user_agent.go` **and** the OS/browser half of `github.com/avct/uasurfer` |
+| `crates/mm-store/src/user_store.rs` | `GetForLogin`, `UpdateLastLogin` |
+| `crates/mm-store/src/session_store.rs` | `Save`, `GetLRUSessions` |
+
+### What a reader would otherwise get wrong
+
+1. **The error id is chosen by the configuration, not by the failure.** A deferred mask
+   (api4/user.go:2127) rewrites all but twelve ids into one of four `invalid_credentials_*`
+   strings picked by five SSO flags and two sign-in toggles, always at 401 — so a 500 from a
+   broken database and a wrong password are the same response. Clients branch on those four.
+   `mm_api::login::mask_login_error`.
+2. **A user-agent parser is on the wire.** `DoLogin` writes `platform`, `os` and `browser` into
+   `Sessions.Props`, which `GET /users/{id}/sessions` echoes — so `uasurfer` had to be ported, not
+   approximated. `fixtures/behaviour_user_agent.json` is the real `uasurfer.Parse` over a
+   46-string corpus; the four Mattermost mapping functions beside it are **transcribed** into the
+   oracle because they are unexported, and the parity test that logs into both servers with three
+   different agents is what covers that seam.
+3. **Everything this port cannot serve is detected before the failed-attempt counter moves.**
+   Go checks MFA *after* claiming a slot, so a forward taken there would have Go claim a second
+   slot for the same attempt. `App::login_needs_mfa` asks the same question one `SELECT` earlier.
+   Forwarded: `magic_link_token` present, `LdapSettings.Enable`, any licence, MFA.
+4. **`UpdateLastLogin` writes two different instants.** `LastLogin` is the *session's* `CreateAt`,
+   minted inside the store's `PreSave`; `UpdateAt` is a fresh clock read in the same statement.
+5. **The cookies take the web session length even for a mobile session**, because
+   `AttachSessionCookies` reads `SessionLengthWebInHours` unconditionally while `DoLogin` may have
+   used the mobile one. And only `MMAUTHTOKEN` is `HttpOnly` — the webapp reads the other two.
+6. **No cookies at all without `X-Requested-With: XMLHttpRequest`**, compared for equality on the
+   whole header value. `curl` gets the `Token` header alone.
+7. **The guest, magic-link and remote refusals run *after* a successful password check**, so an
+   account that is refused for one of them still has its lockout counter cleared.
+
+### What is not here
+
+[D-430] the rate limit Go puts on this route (5/s, burst 10) and nothing in this port implements.
+[D-431] `SessionLengthSSOInHours` and the SSO arm of `DoLogin`, unreachable from this route.
+`/login/sso/code-exchange`, `/login/desktop_token`, `/login/switch` and `/login/cws` are
+deliberately unregistered, which is what keeps them forwarded.
+
+One divergence is in the code and not in the register: Go writes the `Token` header **inside**
+`DoLogin`, before the terms-of-service read, so a 500 from that read still carries a live
+credential. This port returns the error without the header. `mm_api::login::login` says so.
+
+Three things this stack cannot show, and none of them has a live oracle:
+
+1. **MFA end to end.** `EnableMultifactorAuthentication` is off for every suite in the binary and
+   `Users.MfaActive` cannot be set through the API, so the forward is proved by
+   `crates/mm-app/tests/db_login_mfa_probe.rs` — which also asserts the probe writes nothing, the
+   property the ordering depends on — and never compared against Go.
+2. **Three of the four masked ids.** `invalid_credentials_sso`, `…_username` and `…_email` need
+   configurations the shared server cannot have; they are unit-tested against a `Config`, with
+   the arms transcribed from api4/user.go:2163-2185 rather than measured.
+3. **The mobile-versus-web session length in `DoLogin`.** Both are 4320 hours on this stack, so a
+   swapped read is invisible; no mutation for it is in the plan for that reason. What *is*
+   covered is the `isMobile` prop the same branch reads, which is on the wire.
+
+### The next route in this family
+
+`POST /api/v4/users/login/desktop_token` needs `ConsumeTokenOnce` and the OAuth/SAML user check;
+`POST /api/v4/users/login/switch` needs the whole `switchAccountType` matrix. Neither needs
+anything this session did not build except [D-431].

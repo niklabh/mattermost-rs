@@ -2,6 +2,8 @@
     "session_cookie": [
         {
             "name": "plain",
+            "cookie_name": "MMAUTHTOKEN",
+            "http_only": true,
             "token": "cqjc7ec6bpy65jjamstkhpe6fr",
             "path": "/",
             "domain": "",
@@ -13,6 +15,8 @@
         },
         {
             "name": "subpath",
+            "cookie_name": "MMAUTHTOKEN",
+            "http_only": true,
             "token": "tok",
             "path": "/mattermost",
             "domain": "",
@@ -24,6 +28,8 @@
         },
         {
             "name": "empty path",
+            "cookie_name": "MMAUTHTOKEN",
+            "http_only": true,
             "token": "tok",
             "path": "",
             "domain": "",
@@ -35,6 +41,8 @@
         },
         {
             "name": "domain",
+            "cookie_name": "MMAUTHTOKEN",
+            "http_only": true,
             "token": "tok",
             "path": "/",
             "domain": "example.com",
@@ -46,6 +54,8 @@
         },
         {
             "name": "secure",
+            "cookie_name": "MMAUTHTOKEN",
+            "http_only": true,
             "token": "tok",
             "path": "/",
             "domain": "",
@@ -57,6 +67,8 @@
         },
         {
             "name": "secure embedded",
+            "cookie_name": "MMAUTHTOKEN",
+            "http_only": true,
             "token": "tok",
             "path": "/",
             "domain": "",
@@ -68,6 +80,8 @@
         },
         {
             "name": "embedded not secure",
+            "cookie_name": "MMAUTHTOKEN",
+            "http_only": true,
             "token": "tok",
             "path": "/",
             "domain": "",
@@ -79,6 +93,8 @@
         },
         {
             "name": "domain and secure embedded",
+            "cookie_name": "MMAUTHTOKEN",
+            "http_only": true,
             "token": "tok",
             "path": "/sub",
             "domain": "mm.example.com",
@@ -90,6 +106,8 @@
         },
         {
             "name": "zero max age",
+            "cookie_name": "MMAUTHTOKEN",
+            "http_only": true,
             "token": "tok",
             "path": "/",
             "domain": "",
@@ -101,6 +119,8 @@
         },
         {
             "name": "negative max age",
+            "cookie_name": "MMAUTHTOKEN",
+            "http_only": true,
             "token": "tok",
             "path": "/",
             "domain": "",
@@ -109,6 +129,71 @@
             "secure": false,
             "same_site_none": false,
             "set_cookie": "MMAUTHTOKEN=tok; Path=/; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=0; HttpOnly"
+        },
+        {
+            "name": "login token",
+            "cookie_name": "MMAUTHTOKEN",
+            "http_only": true,
+            "token": "mxnmpiimcjbe7ets4qyckj7b3y",
+            "path": "/",
+            "domain": "",
+            "max_age": 15552000,
+            "expires_unix": 1788636490,
+            "secure": false,
+            "same_site_none": false,
+            "set_cookie": "MMAUTHTOKEN=mxnmpiimcjbe7ets4qyckj7b3y; Path=/; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=15552000; HttpOnly"
+        },
+        {
+            "name": "login user id",
+            "cookie_name": "MMUSERID",
+            "http_only": false,
+            "token": "opukwu61f7ft8exssjxf3huyjy",
+            "path": "/",
+            "domain": "",
+            "max_age": 15552000,
+            "expires_unix": 1788636490,
+            "secure": false,
+            "same_site_none": false,
+            "set_cookie": "MMUSERID=opukwu61f7ft8exssjxf3huyjy; Path=/; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=15552000"
+        },
+        {
+            "name": "login csrf",
+            "cookie_name": "MMCSRF",
+            "http_only": false,
+            "token": "f9jnw7z47fbbzmkxt9ba9naene",
+            "path": "/",
+            "domain": "",
+            "max_age": 15552000,
+            "expires_unix": 1788636490,
+            "secure": false,
+            "same_site_none": false,
+            "set_cookie": "MMCSRF=f9jnw7z47fbbzmkxt9ba9naene; Path=/; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=15552000"
+        },
+        {
+            "name": "login user id secure embedded",
+            "cookie_name": "MMUSERID",
+            "http_only": false,
+            "token": "opukwu61f7ft8exssjxf3huyjy",
+            "path": "/sub",
+            "domain": "mm.example.com",
+            "max_age": 3600,
+            "expires_unix": 1788636490,
+            "secure": true,
+            "same_site_none": true,
+            "set_cookie": "MMUSERID=opukwu61f7ft8exssjxf3huyjy; Path=/sub; Domain=mm.example.com; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=3600; Secure; SameSite=None"
+        },
+        {
+            "name": "login csrf subpath",
+            "cookie_name": "MMCSRF",
+            "http_only": false,
+            "token": "f9jnw7z47fbbzmkxt9ba9naene",
+            "path": "/mattermost",
+            "domain": "",
+            "max_age": 3600,
+            "expires_unix": 1788636490,
+            "secure": false,
+            "same_site_none": false,
+            "set_cookie": "MMCSRF=f9jnw7z47fbbzmkxt9ba9naene; Path=/mattermost; Expires=Sat, 05 Sep 2026 19:28:10 GMT; Max-Age=3600"
         }
     ],
     "split_host_port": {

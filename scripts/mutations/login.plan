@@ -1,0 +1,119 @@
+# Mutation plan for the login vertical — `POST /api/v4/users/login` and
+# `POST /api/v4/users/login/type`.
+#
+#   scripts/mutate-batch.sh scripts/mutations/login.plan
+#
+# Five populations, and each is here because a *different* kind of reader error is plausible in
+# it.
+#
+# **The mask** (5). Twelve ids pass and everything else becomes one of four strings chosen by
+# seven booleans. Only one of the four is reachable on a live stack, so three of these run against
+# the unit tests, which build the configurations the stack cannot have. `mask-saml-flag-dropped`
+# and `mask-openid-flag-dropped` are the ends of the five-flag disjunction: on a stock server all
+# five are `false` and agree, so nothing but a per-flag test separates them.
+#
+# **The forwards** (4 + 2 in the app half). Every one of these is an *inversion* rather than a
+# deletion, because deleting a forward this stack never takes is invisible — inverting it makes
+# the forward fire on every request and the whole parity suite go quiet.
+#
+# **The response** (6). Cookies, the trailing newline, the `login/type` gate. The two cookie
+# mutations that are not about values are about `HttpOnly` and the `Max-Age` source, both of which
+# a status-code assertion cannot see.
+#
+# **The app and store layer** (16). Check order in the preflight, the two lockout boundaries, the
+# refund condition, and the two writes `DoLogin` leaves in `Users`.
+#
+# **The user-agent parser** (10). The ported half of `uasurfer`, against its 55-row Go oracle.
+# Two are boundary mutations the corpus could not see until three rows were added for them
+# (`ua-safari-version-bump-boundary`, `ua-windows-10-arm-reads-the-minor`).
+#
+# The two controls are a binding rename in `mask_login_error` and a reorder of two independent
+# SELECT columns in `GetForLogin`. If either comes back CAUGHT the harness is deciding verdicts on
+# something other than the mutation and the whole batch is void.
+#
+# **First run: 49 run, 39 caught, 6 survived, 2 controls survived, 2 harness faults.** Both faults
+# were malformed mutations rather than verdicts — `explicit-id-falls-through-to-the-login-id`
+# spelled the fall-through as a recursive call to the `async fn` it was mutating (E0733), and
+# `update-last-login-does-not-stamp-update-at` wrote arithmetic sqlx could not type. Both are
+# rewritten above and now CAUGHT. After the repairs and a ten-line re-run the tally is
+# **49 run, 46 caught, 1 survived, 2 controls survived, 0 harness faults**.
+#
+# Five of the six survivors were fixture gaps and each is worth keeping written down:
+#
+#   - `cookie-gate-accepts-any-requested-with` survived because no request in the suite had ever
+#     sent `X-Requested-With` with a value **other** than `XMLHttpRequest`. Absent and "fetch"
+#     reach the same place through an equality test *and* through a presence test, so only a
+#     third input separates them. `a_successful_login_answers_the_same_user_and_a_token` now sends
+#     three.
+#   - `body-loses-its-trailing-newline` survived because the success bodies were compared as
+#     parsed JSON, which cannot see a trailing byte at all. [D-086] again, from the other
+#     direction: the newline is now asserted on the raw bytes of both servers.
+#   - `login-type-gate-needs-only-one-flag` survived because both flags are `false` on this stack,
+#     where `&&` and `||` agree. The gate moved into `login_type_is_forwarded` so a unit test can
+#     build the two configurations the stack cannot have.
+#   - `mfa-probe-ignores-mfa-active` survived because `EnableMultifactorAuthentication` is off
+#     here, so the probe returns before the predicate is read. `crates/mm-app/tests/db_login_mfa_probe.rs`
+#     builds a `Config` with it on and a planted `MfaActive` row, and asserts the counter is
+#     untouched on every arm — which is also the test that proves the forward happens *before*
+#     any write.
+#   - `ua-eval-os-index-fixup-dropped` survived because the corpus row it was aimed at
+#     (`)Windows NT 10.0(`) reaches the same answer either way: `evalOS`'s default chain re-reads
+#     the whole string. `)x(Windows Phone 8.0; Trident/5.0` is decided by `agentPlatform` alone
+#     and moves from Windows Phone to a bare Windows without the fix-up.
+#
+# The **one** genuine survivor is `mfa-probe-blank-password-guard-dropped`, and it stays one.
+# Dropping `!password.is_empty() &&` only changes an answer on a server with MFA enabled, where a
+# body with no password would be forwarded instead of answering `blank_pwd`. This stack has MFA
+# off for every suite in the binary and turning it on is a server-wide configuration change. The
+# ordering it protects is covered structurally instead — the probe is a pure read, asserted by
+# `db_login_mfa_probe.rs`, and it is textually before the first write.
+#
+mask-unmasked-list-ignored	crates/mm-api/src/login.rs	    if UNMASKED_ERRORS.contains(&err.0.id.as_str()) {\n        return err;\n    }	    if false {\n        return err;\n    }	api	parity::login
+mask-saml-flag-dropped	crates/mm-api/src/login.rs	    let masked = if config.saml_enable\n        || config.gitlab_enable	    let masked = if config.gitlab_enable	unit	login::tests
+mask-openid-flag-dropped	crates/mm-api/src/login.rs	        || config.office365_enable\n        || config.openid_enable\n    {	        || config.office365_enable\n    {	unit	login::tests
+mask-username-and-email-arms-swapped	crates/mm-api/src/login.rs	    } else if config.enable_sign_in_with_username && !config.enable_sign_in_with_email {\n        "api.user.login.invalid_credentials_username"\n    } else if !config.enable_sign_in_with_username && config.enable_sign_in_with_email {\n        "api.user.login.invalid_credentials_email"	    } else if config.enable_sign_in_with_username && !config.enable_sign_in_with_email {\n        "api.user.login.invalid_credentials_email"\n    } else if !config.enable_sign_in_with_username && config.enable_sign_in_with_email {\n        "api.user.login.invalid_credentials_username"	unit	login::tests
+mask-status-is-400-not-401	crates/mm-api/src/login.rs	ApiError::from(AppError::boxed("login", masked, None, String::new(), 401))	ApiError::from(AppError::boxed("login", masked, None, String::new(), 400))	api	parity::login
+magic-link-forward-inverted	crates/mm-api/src/login.rs	    if !get("magic_link_token").is_empty() {	    if get("magic_link_token").is_empty() {	api	parity::login
+ldap-forward-inverted	crates/mm-api/src/login.rs	    if state.app.config().ldap_enable {	    if !state.app.config().ldap_enable {	api	parity::login
+licensed-forward-fires-when-unlicensed	crates/mm-api/src/login.rs	        Ok(mm_app::license::LicenseState::Licensed) => {	        Ok(mm_app::license::LicenseState::Unlicensed) => {	api	parity::login
+mfa-probe-blank-password-guard-dropped	crates/mm-api/src/login.rs	    if !password.is_empty() && state.app.login_needs_mfa(id, login_id).await {	    if state.app.login_needs_mfa(id, login_id).await {	api	parity::login
+cookie-gate-accepts-any-requested-with	crates/mm-api/src/login.rs	        == Some(HEADER_REQUESTED_WITH_XML)\n    {	        .is_some()\n    {	api	parity::login
+cookie-user-id-is-http-only	crates/mm-api/src/login.rs	            SESSION_COOKIE_USER,\n            &session.user_id,\n            &subpath,\n            &domain,\n            max_age_seconds,\n            expires_at,\n            false,	            SESSION_COOKIE_USER,\n            &session.user_id,\n            &subpath,\n            &domain,\n            max_age_seconds,\n            expires_at,\n            true,	unit	login::tests
+cookie-csrf-carries-the-session-token	crates/mm-api/src/login.rs	            SESSION_COOKIE_CSRF,\n            session.get_csrf(),	            SESSION_COOKIE_CSRF,\n            &session.token,	api	parity::login
+cookies-use-the-mobile-session-length	crates/mm-api/src/login.rs	    let hours = state.app.config().session_length_web_in_hours;\n    let max_age_seconds = hours * 60 * 60;	    let hours = state.app.config().session_length_mobile_in_hours;\n    let max_age_seconds = hours * 60 * 60;	unit	login::tests
+body-loses-its-trailing-newline	crates/mm-api/src/login.rs	    body.push(b'\\n');\n\n    let mut response = (	    body.truncate(body.len());\n\n    let mut response = (	api	parity::login
+login-type-gate-needs-only-one-flag	crates/mm-api/src/login.rs	    config.enable_guest_magic_link && config.guest_accounts_enable\n}	    config.enable_guest_magic_link || config.guest_accounts_enable\n}	unit	login::tests
+mfa-probe-ignores-mfa-active	crates/mm-app/src/login.rs	            self.get_user_for_login(id, login_id).await,\n            Ok(user) if user.mfa_active	            self.get_user_for_login(id, login_id).await,\n            Ok(_user)	app	login_needs_mfa
+preflight-bot-checked-before-deactivation	crates/mm-app/src/login.rs	        check_user_not_disabled(user)?;\n        check_user_not_bot(user)?;	        check_user_not_bot(user)?;\n        check_user_not_disabled(user)?;	unit	login::tests
+preflight-attempts-checked-before-the-bot	crates/mm-app/src/login.rs	        check_user_not_bot(user)?;\n        check_user_login_attempts(user, self.config().maximum_login_attempts)	        check_user_login_attempts(user, self.config().maximum_login_attempts)?;\n        check_user_not_bot(user)	unit	login::tests
+lockout-predicate-is-strictly-greater	crates/mm-app/src/login.rs	    if user.failed_attempts >= max_attempts {	    if user.failed_attempts > max_attempts {	unit	login::tests
+ldap-lockout-id-folded-into-the-plain-one	crates/mm-app/src/login.rs	            "api.user.check_user_login_attempts.too_many_ldap.app_error"\n        } else {	            "api.user.check_user_login_attempts.too_many.app_error"\n        } else {	unit	login::tests
+deactivation-is-non-zero-not-positive	crates/mm-app/src/login.rs	    if user.delete_at > 0 {	    if user.delete_at != 0 {	unit	login::tests
+email-verification-predicate-inverted	crates/mm-app/src/login.rs	        if !user.email_verified && self.config().require_email_verification {	        if user.email_verified && self.config().require_email_verification {	unit	login::tests
+mfa-check-accepts-instead-of-refusing	crates/mm-app/src/login.rs	        Err(AppError::boxed(\n            "CheckUserMfa",\n            "mfa.mfa_disabled.app_error",	        #[allow(unreachable_code)]\n        return Ok(());\n        Err(AppError::boxed(\n            "CheckUserMfa",\n            "mfa.mfa_disabled.app_error",	unit	login::tests
+refund-condition-inverted	crates/mm-app/src/login.rs	            if err.id != CHECK_USER_PASSWORD_INVALID\n                && let Err(refund) = self	            if err.id == CHECK_USER_PASSWORD_INVALID\n                && let Err(refund) = self	api	parity::login
+counter-not-cleared-on-success	crates/mm-app/src/login.rs	            .update_failed_password_attempts(&user.id, 0)	            .update_failed_password_attempts(&user.id, 3)	api	parity::login
+explicit-id-falls-through-to-the-login-id	crates/mm-app/src/login.rs	                        tracing::Span::current().record("found", false);\n                        Err(err)	                        tracing::Span::current().record("found", false);\n                        drop(err);\n                        return self\n                            .store()\n                            .user()\n                            .get_for_login(login_id, enable_username, enable_email)\n                            .await\n                            .map_err(|_| {\n                                AppError::boxed(\n                                    "GetUserForLogin",\n                                    "store.sql_user.get_for_login.app_error",\n                                    None,\n                                    String::new(),\n                                    400,\n                                )\n                            });	api	parity::login
+auth-service-accounts-take-the-password-path	crates/mm-app/src/login.rs	        if !user.auth_service.is_empty() {	        if false {	api	parity::login
+blank-password-check-dropped	crates/mm-app/src/login.rs	        if password.is_empty() {\n            return Err(AppError::boxed(\n                "AuthenticateUserForLogin",	        if false {\n            return Err(AppError::boxed(\n                "AuthenticateUserForLogin",	api	parity::login
+device-id-does-not-force-mobile	crates/mm-app/src/login.rs	        let is_mobile =\n            opts.is_mobile || !opts.device_id.is_empty() || !opts.voip_device_id.is_empty();	        let is_mobile = opts.is_mobile;	api	parity::login
+csrf-not-generated	crates/mm-app/src/login.rs	        session.generate_csrf();	        let _ = &mut session;	api	parity::login
+guest-prop-inverted	crates/mm-app/src/login.rs	            if user.is_guest() { "true" } else { "false" },	            if user.is_guest() { "false" } else { "true" },	api	parity::login
+platform-and-os-props-swapped	crates/mm-app/src/login.rs	        session.add_prop(SESSION_PROP_PLATFORM, agent.platform);\n        session.add_prop(SESSION_PROP_OS, agent.os);	        session.add_prop(SESSION_PROP_PLATFORM, agent.os);\n        session.add_prop(SESSION_PROP_OS, agent.platform);	api	parity::login
+last-login-is-a-fresh-clock-read	crates/mm-app/src/login.rs	            .update_last_login(&user.id, session.create_at)	            .update_last_login(&user.id, mm_model::utils::get_millis())	api	parity::login
+get-for-login-does-not-lower-the-parameter	crates/mm-store/src/user_store.rs	             WHERE ($2 AND u.username = lower($1))\n                OR ($3 AND u.email = lower($1))	             WHERE ($2 AND u.username = $1)\n                OR ($3 AND u.email = $1)	api	parity::login
+update-last-login-does-not-stamp-update-at	crates/mm-store/src/user_store.rs	        // `Set("UpdateAt", model.GetMillis())` — read here and **not** from `last_login`, so the\n        // two columns legitimately differ. See the trait doc.\n        let now = mm_model::utils::get_millis();	        // `Set("UpdateAt", model.GetMillis())` — read here and **not** from `last_login`, so the\n        // two columns legitimately differ. See the trait doc.\n        let now: i64 = 0;	api	parity::login
+ua-windows-10-arm-reads-the-minor	crates/mm-app/src/user_agent.rs	            (10, _) => "Windows 10",	            (10, 0) => "Windows 10",	unit	user_agent
+ua-version-formatter-always-three-components	crates/mm-app/src/user_agent.rs	    if version.patch == 0 {	    if false {	unit	user_agent
+ua-safari-version-bump-boundary	crates/mm-app/src/user_agent.rs	            if dest.browser_version.major <= 3 && dest.browser_version.major >= 1 {	            if dest.browser_version.major < 3 && dest.browser_version.major >= 1 {	unit	user_agent
+ua-edge-rename-boundary	crates/mm-app/src/user_agent.rs	    if ua.browser_name == BrowserName::IE && ua.browser_version.major > 11 {	    if ua.browser_name == BrowserName::IE && ua.browser_version.major >= 11 {	unit	user_agent
+ua-mobile-fallback-last-arm-is-ios	crates/mm-app/src/user_agent.rs	        } else {\n            OsName::Android\n        };	        } else {\n            OsName::IOS\n        };	unit	user_agent
+ua-eval-os-index-fixup-dropped	crates/mm-app/src/user_agent.rs	    if s > e {\n        s = 0;\n        e = bytes.len() as isize;\n    }	    if false {\n        s = 0;\n        e = bytes.len() as isize;\n    }	unit	user_agent
+ua-version-parse-leading-zero-restart	crates/mm-app/src/user_agent.rs	                    rest = &rest[k..];\n                    break;	                    rest = &rest[k + 1..];\n                    break;	unit	user_agent
+ua-electron-desktop-check-dropped	crates/mm-app/src/user_agent.rs	    if raw.contains("Electron")\n        || (raw.contains("Mattermost") && !raw.contains("Mattermost Mobile"))\n    {	    if raw.contains("Mattermost") && !raw.contains("Mattermost Mobile") {	unit	user_agent
+ua-is-mobile-request-case-insensitive	crates/mm-app/src/user_agent.rs	    ["Mobile", "Android", "iOS", "iPhone", "iPad"]\n        .iter()\n        .any(|keyword| raw_user_agent.contains(keyword))	    ["mobile", "android", "ios", "iphone", "ipad"]\n        .iter()\n        .any(|keyword| raw_user_agent.to_lowercase().contains(keyword))	unit	user_agent
+ua-version-prefix-order-swapped	crates/mm-app/src/user_agent.rs	    for prefix in ["Mattermost Mobile/", "Mattermost/", "mmctl/", "Franz/"] {	    for prefix in ["Mattermost/", "Mattermost Mobile/", "mmctl/", "Franz/"] {	unit	user_agent
+route-login-type-registered-as-get	crates/mm-api/src/lib.rs	            "/api/v4/users/login/type",\n            partially_migrated(post(login::get_login_type)),	            "/api/v4/users/login/type",\n            partially_migrated(get(login::get_login_type)),	unit	the_login_routes
+route-login-registered-under-a-parameter	crates/mm-api/src/lib.rs	            "/api/v4/users/login",\n            partially_migrated(post(login::login)),	            "/api/v4/users/{login}",\n            partially_migrated(post(login::login)),	unit	the_login_routes
+CONTROL-mask-binding-renamed	crates/mm-api/src/login.rs	    let config = state.app.config();\n    let masked = if config.saml_enable	    let cfg = state.app.config();\n    let config = cfg;\n    let masked = if config.saml_enable	api	parity::login
+CONTROL-get-for-login-columns-reordered	crates/mm-store/src/user_store.rs	                   u.nickname,\n                   u.firstname,\n                   u.lastname,\n                   u.position,\n                   u.roles,\n                   u.allowmarketing,\n                   u.props,\n                   u.notifyprops,\n                   u.lastpasswordupdate,\n                   u.lastpictureupdate,\n                   u.failedattempts::bigint AS failedattempts,\n                   u.locale,\n                   u.timezone,\n                   u.mfaactive,\n                   u.mfasecret,\n                   u.mfausedtimestamps,\n                   u.remoteid,\n                   u.lastlogin,\n                   (b.userid IS NOT NULL) AS "isbot!",\n                   COALESCE(b.description, '') AS "botdescription!",\n                   COALESCE(b.lasticonupdate, 0) AS "botlasticonupdate!"\n              FROM users u\n              LEFT JOIN bots b ON b.userid = u.id\n             WHERE ($2 AND u.username = lower($1))	                   u.firstname,\n                   u.nickname,\n                   u.lastname,\n                   u.position,\n                   u.roles,\n                   u.allowmarketing,\n                   u.props,\n                   u.notifyprops,\n                   u.lastpasswordupdate,\n                   u.lastpictureupdate,\n                   u.failedattempts::bigint AS failedattempts,\n                   u.locale,\n                   u.timezone,\n                   u.mfaactive,\n                   u.mfasecret,\n                   u.mfausedtimestamps,\n                   u.remoteid,\n                   u.lastlogin,\n                   (b.userid IS NOT NULL) AS "isbot!",\n                   COALESCE(b.description, '') AS "botdescription!",\n                   COALESCE(b.lasticonupdate, 0) AS "botlasticonupdate!"\n              FROM users u\n              LEFT JOIN bots b ON b.userid = u.id\n             WHERE ($2 AND u.username = lower($1))	api	parity::login

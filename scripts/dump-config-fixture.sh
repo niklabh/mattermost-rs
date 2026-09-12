@@ -70,6 +70,10 @@ MODELLED = {
         # because Config derives hours from days when the hours key is absent, and the fixture
         # has to be able to show which branch the live document actually takes.
         "SessionLengthMobileInHours", "SessionLengthMobileInDays",
+        # The web session length, read by `login` for both the session ExpiresAt and the
+        # Max-Age of all three cookies. Both keys for the same reason as the mobile pair.
+        "SessionLengthWebInHours", "SessionLengthWebInDays",
+        "MaximumLoginAttempts", "EnableMultifactorAuthentication",
         "AllowCookiesForSubdomains",
         # Not a setting Config carries — the `isUpdate` discriminator. `Config.isUpdate` is
         # `ServiceSettings.SiteURL != nil` (config.go:4289) and two defaults are `!isUpdate`, so
@@ -92,10 +96,18 @@ MODELLED = {
         "RestrictDirectMessage", "RestrictCreationToDomains", "UserStatusAwayTimeout",
         "EnableCustomUserStatuses", "LockProfileFieldsForEmailUsers",
     ],
-    "LdapSettings": ["PictureAttribute"],
-    "SamlSettings": ["EnableSyncWithLdap"],
-    "EmailSettings": ["RequireEmailVerification"],
-    "GuestAccountsSettings": ["RestrictCreationToDomains"],
+    "LdapSettings": ["PictureAttribute", "Enable"],
+    "SamlSettings": ["EnableSyncWithLdap", "Enable"],
+    "EmailSettings": [
+        "RequireEmailVerification", "EnableSignInWithEmail", "EnableSignInWithUsername",
+    ],
+    "GuestAccountsSettings": ["RestrictCreationToDomains", "Enable", "EnableGuestMagicLink"],
+    # The five flags the deferred error mask in `login` reads. Any one of them being on
+    # replaces every masked failure id with `api.user.login.invalid_credentials_sso`.
+    "GitLabSettings": ["Enable"],
+    "GoogleSettings": ["Enable"],
+    "OpenIdSettings": ["Enable"],
+    "Office365Settings": ["Enable"],
     "MessageExportSettings": ["DownloadExportResults"],
     "CloudSettings": ["PreviewModalBucketURL"],
 }
