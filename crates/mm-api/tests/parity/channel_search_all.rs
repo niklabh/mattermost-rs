@@ -1413,35 +1413,35 @@ async fn the_retention_and_access_control_filters_need_planted_rows() {
             }
         }
 
-        // `getAllChannels`' list is filtered and its count is not — Go's asymmetry, reproduced.
-        let filtered = "/api/v4/channels?per_page=200&include_total_count=true\
-                        &exclude_access_control_policy_enforced=true";
-        let plain = "/api/v4/channels?per_page=200&include_total_count=true";
-        let (go_filtered, rust_filtered) = fetch_both_stable(&client, &token, filtered).await;
-        assert_lists_agree_modulo_ties(&go_filtered, &rust_filtered, filtered);
-        let (_, rust_plain) = fetch_both_stable(&client, &token, plain).await;
+        // **The asymmetry, in one request.** `GetAllChannels` passes
+        // `AccessControlPolicyEnforced` to the store; `GetAllChannelsCount` does not
+        // (app/channel.go:2471-2479). So the list narrows to the single enforced channel while
+        // `total_count` still counts the whole table — two numbers from one response, which is
+        // what makes this churn-proof where comparing two separate requests was not.
+        let path = "/api/v4/channels?per_page=200&include_total_count=true\
+                    &access_control_policy_enforced=true";
+        let (go, rust) = fetch_both_stable(&client, &token, path).await;
+        assert_lists_agree_modulo_ties(&go, &rust, path);
 
-        let listed = |body: &[u8]| rows_of(body).len();
         let counted = |body: &[u8]| {
             serde_json::from_slice::<serde_json::Value>(body).expect("JSON")["total_count"]
                 .as_i64()
                 .expect("a number")
         };
         assert_eq!(
-            listed(&rust_filtered) + 1,
-            listed(&rust_plain),
-            "the filter removes exactly the one enforced channel from the list"
+            display_names(&rust),
+            vec![format!("m{STEM} private")],
+            "the list is narrowed to the one channel an access-control policy enforces"
+        );
+        assert!(
+            counted(&rust) > 1,
+            "…and the count is not, because GetAllChannelsCount never sees the flag: {}",
+            counted(&rust)
         );
         assert_eq!(
-            counted(&rust_filtered),
-            counted(&rust_plain),
-            "…and removes nothing at all from the count, because GetAllChannelsCount never sees \
-             the flag"
-        );
-        assert_eq!(
-            counted(&rust_filtered),
-            counted(&go_filtered),
-            "and Go agrees on that count"
+            counted(&rust),
+            counted(&go),
+            "and Go's unfiltered count is the same unfiltered count"
         );
     }
     .await;
