@@ -282,6 +282,15 @@ pub static BROADCAST_STREAM: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_
 /// re-run and wrong under `--workspace`.
 pub static PROPERTY_ROWS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
+/// **`brand/image.png` is one file for the whole installation**, and two suites care about it:
+/// `image_writes` uploads one through the forwarded `POST /api/v4/brand/image` to see the 201 and
+/// then deletes it again, while `file_bytes` asserts on what `GET /api/v4/brand/image` answers.
+///
+/// Held exclusively by everything that touches the route, for the reason [`ACTIVE_LICENCE_ROW`]
+/// gives: a read taken between the upload and the delete is a 200 where the reader expected a
+/// 404, and the failure names a route the writer never mentioned.
+pub static BRAND_IMAGE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 /// Write `Systems.ActiveLicenseId`, or clear it when `id` is `None`.
 ///
 /// A 26-character value passes `IsValidId`, which is all `LoadLicense` checks before it looks the
@@ -1624,6 +1633,35 @@ pub async fn count_countable_users() -> Option<i64> {
 ///
 /// Per-user by construction, so it cannot disturb a concurrently running suite — unlike editing
 /// the `system_user` role itself, which is global and would.
+/// Write `Users.AuthService` straight into Postgres.
+///
+/// `setProfileImage`'s 409 turns on `user.IsLDAPUser() || (user.IsSAMLUser() && …)`, and there is
+/// no API on either server that makes an email account into an LDAP one — `PUT /users/{id}/auth`
+/// is enterprise-gated and wants an auth service Go can actually talk to. The column is the only
+/// input the branch reads, so it is written directly and put back by the caller.
+///
+/// **Go caches users**, so its own answer for such a row may be stale; every assertion that uses
+/// this looks at what *this* server does, never at a comparison.
+pub async fn set_user_auth_service(user_id: &str, auth_service: &str) -> bool {
+    let Ok(url) = std::env::var("DATABASE_URL") else {
+        return false;
+    };
+    let Ok(pool) = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&url)
+        .await
+    else {
+        return false;
+    };
+    sqlx::query("UPDATE users SET authservice = $2 WHERE id = $1")
+        .bind(user_id)
+        .bind(auth_service)
+        .execute(&pool)
+        .await
+        .expect("the fixture user's auth service is written");
+    true
+}
+
 pub async fn set_user_roles(user_id: &str, roles: &str) -> bool {
     let Ok(url) = std::env::var("DATABASE_URL") else {
         return false;
