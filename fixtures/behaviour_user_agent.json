@@ -1159,6 +1159,26 @@
             "prop_os": "Windows 10",
             "prop_browser": "Chrome/127.0",
             "is_mobile_request": false
+        },
+        {
+            "user_agent": ")x(Windows Phone 8.0; Trident/5.0",
+            "platform_enum": "WindowsPhone",
+            "os_name_enum": "WindowsPhone",
+            "os_version": [
+                8,
+                0,
+                0
+            ],
+            "browser_name_enum": "IE",
+            "browser_version": [
+                9,
+                0,
+                0
+            ],
+            "prop_platform": "Windows Phone",
+            "prop_os": "Windows Phone",
+            "prop_browser": "Internet Explorer/9.0",
+            "is_mobile_request": false
         }
     ]
 }

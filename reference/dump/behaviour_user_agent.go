@@ -123,6 +123,12 @@ var userAgentCorpus = []string{
 	// NT 10.**1**: the Windows name table matches `major == 10` and ignores the minor, so this
 	// is "Windows 10" too. Nothing else in the corpus separates that arm from a `(10, 0)` one.
 	"Mozilla/5.0 (Windows NT 10.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
+	// `evalOS`s index fix-up, with an answer that actually turns on it. `)Windows NT 10.0(`
+	// above takes the same branch and reaches the same place either way, because the default
+	// chain re-reads the *whole* string; this one is decided by `agentPlatform` alone —
+	// `strings.Contains(agentPlatform, "windows phone ")` — so dropping the fix-up moves it from
+	// Windows Phone to a bare Windows. Without this row the fix-up is unfalsifiable.
+	")x(Windows Phone 8.0; Trident/5.0",
 }
 
 // userAgentCase is one corpus string with everything both layers produce for it.

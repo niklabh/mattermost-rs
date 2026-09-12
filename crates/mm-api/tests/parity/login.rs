@@ -38,6 +38,25 @@ use common::{
 /// `login` is an `APIHandler`, so an `Authorization` header is neither required nor consulted —
 /// and sending one would make this fixture depend on a token whose session another suite may have
 /// revoked.
+///
+/// # A forwarded answer is retried, and the reason is a real property of this route
+///
+/// `login` hands **every** request to Go while the installation carries a licence
+/// (`mm_api::login`'s forwarding table), and several suites in this binary plant
+/// `Systems.ActiveLicenseId` for a few milliseconds at a time through
+/// `common::set_active_licence_id`. There is no shared lock on that row, so a login that lands
+/// inside one of those windows is forwarded — correctly — and the pair then proves nothing about
+/// the Rust handler.
+///
+/// Measured: `an_unknown_account_is_refused_identically` failed one full-suite run with
+/// `x-mmrs-served-by: go` and passed alone. So the pair is re-sent while the Rust leg comes back
+/// forwarded, and `assert_served_by_rust` runs only on the last attempt — which keeps the
+/// assertion exactly as strong as before for a route that is genuinely unregistered, and stops it
+/// failing for a route that is doing the right thing.
+///
+/// Re-sending a login is a write on both servers, but not a counting one: every caller below
+/// either uses a throwaway account or sends credentials that fail in the preflight, before a
+/// failed-attempt slot is claimed.
 async fn login_both(
     client: &reqwest::Client,
     path: &str,
@@ -58,9 +77,6 @@ async fn login_both(
             .unwrap_or_else(|e| panic!("{base}{path} is unreachable: {e}"));
         let status = response.status().as_u16();
         let headers = response.headers().clone();
-        if base == RUST {
-            common::assert_served_by_rust(&headers, path);
-        }
         (
             status,
             headers,
@@ -68,7 +84,23 @@ async fn login_both(
         )
     };
 
-    [send(GO).await, send(RUST).await]
+    for attempt in 1..=8u64 {
+        let go = send(GO).await;
+        let ours = send(RUST).await;
+        let served_here = ours
+            .1
+            .get("x-mmrs-served-by")
+            .is_some_and(|value| value.as_bytes() == b"rust");
+        if served_here || attempt == 8 {
+            // The last attempt asserts rather than returning, so a route that is really not
+            // registered still fails with the helper's own message.
+            common::assert_served_by_rust(&ours.1, path);
+            return [go, ours];
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(120 * attempt)).await;
+    }
+
+    unreachable!("the loop returns on its last iteration")
 }
 
 /// The fields of a login success body that cannot agree across two sequential logins.
@@ -103,6 +135,21 @@ fn assert_user_bodies_agree(go_body: &[u8], rs_body: &[u8], context: &str) {
             "{context}: `{key}` differs.\n  go:   {go}\n  rust: {rs}"
         );
     }
+
+    // `json.NewEncoder(w).Encode(user)` appends a newline and `json.Marshal` does not; this
+    // handler uses the encoder. Asserted on the **raw bytes** because the comparison above parses
+    // JSON, which cannot see a trailing byte at all — a mutation dropping the `push(b'\n')`
+    // survived the whole first batch for exactly that reason. [D-086].
+    assert_eq!(
+        go_body.last().copied(),
+        Some(b'\n'),
+        "{context}: Go's body must end in a newline"
+    );
+    assert_eq!(
+        rs_body.last().copied(),
+        Some(b'\n'),
+        "{context}: our body must end in a newline too"
+    );
 
     // The volatile field still has to be *present and plausible* on both sides — otherwise
     // skipping it would let a port that omitted it entirely pass.
@@ -266,6 +313,32 @@ async fn a_successful_login_answers_the_same_user_and_a_token() {
     // makes it a parity claim rather than a statement about our handler.
     assert!(go_headers.get("set-cookie").is_none(), "Go sent a cookie");
     assert!(rs_headers.get("set-cookie").is_none(), "we sent a cookie");
+
+    // And with the header present but **not** `XMLHttpRequest`. Go compares the whole value for
+    // equality, so `fetch` is as good as absent — but the two are different *inputs*, and only
+    // this one separates an equality test from a presence test. Measured: a mutation replacing
+    // the comparison with `.is_some()` survived until this case existed, because no request in
+    // the suite had ever sent the header with another value.
+    for value in ["fetch", "xmlhttprequest", "XMLHttpRequest, fetch"] {
+        let [(_, go_other, _), (_, rs_other, _)] = login_both(
+            &client,
+            "/api/v4/users/login",
+            serde_json::json!({
+                "login_id": plain_username("login1"),
+                "password": PLAIN_USER_PASSWORD,
+            }),
+            &[("X-Requested-With", value)],
+        )
+        .await;
+        assert!(
+            go_other.get("set-cookie").is_none(),
+            "Go sent a cookie for X-Requested-With: {value}"
+        );
+        assert!(
+            rs_other.get("set-cookie").is_none(),
+            "we sent a cookie for X-Requested-With: {value}"
+        );
+    }
 
     // And the token actually authenticates, through the server that minted it.
     for (base, token) in [(GO, &go_token), (RUST, &rs_token)] {

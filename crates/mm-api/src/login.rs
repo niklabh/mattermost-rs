@@ -249,9 +249,15 @@ async fn serve_login(
         .authenticate_user_for_login(id, login_id, password, mfa_token)
         .await?;
 
-    // `user.IsMagicLinkEnabled()` is `AuthService == "magic_link" && IsGuest()`. With the flag
-    // off — the stock server — any such account is refused *after* its password has been
-    // accepted and its counter cleared.
+    // `user.IsMagicLinkEnabled()` is `AuthService == "magic_link" && IsGuest()`.
+    //
+    // **Unreachable from a password login, on both servers.** `authenticateUser` refuses *any*
+    // non-empty `AuthService` (authentication.go:469) before this line is reached, so an account
+    // whose `AuthService` is `magic_link` has already been turned away with
+    // `use_auth_service`. The branch is live only for the `magic_link_token` path, which this
+    // handler forwards. Reproduced rather than dropped because it is Go's control flow and the
+    // next reader should find the same shape here as there — but no test can cover it, and that
+    // is why.
     if user.is_magic_link_enabled() && !state.app.config().enable_guest_magic_link {
         return Err(ApiError::from(AppError::boxed(
             "login",
@@ -474,8 +480,7 @@ fn session_cookies(
 /// eligibility rules — is therefore unreachable here and is not ported.
 #[tracing::instrument(skip_all, fields(forwarded = false))]
 pub async fn get_login_type(State(state): State<AppState>, request: Request) -> Response {
-    let config = state.app.config();
-    if config.enable_guest_magic_link && config.guest_accounts_enable {
+    if login_type_is_forwarded(state.app.config()) {
         tracing::Span::current().record("forwarded", true);
         return proxy::forward_to_go(State(state), request).await;
     }
@@ -491,6 +496,21 @@ pub async fn get_login_type(State(state): State<AppState>, request: Request) -> 
         ],
     )
         .into_response()
+}
+
+/// The first two terms of `getLoginType`'s gate, as a predicate, so all four combinations can be
+/// asserted without a server.
+///
+/// **The conjunction is the whole point and the stack cannot show it.** Both flags are `false` on
+/// a stock server, so `&&` and `||` agree there and a mutation swapping them survives every live
+/// test — measured. Only a configuration where exactly one is set separates them, and that is
+/// what [`tests::the_login_type_gate_is_a_conjunction`] builds.
+///
+/// `true` means hand the request to Go. The third term — `License().Features.GuestAccounts` — is
+/// deliberately not here: Go dereferences a licence it does not null-check, so the branch where
+/// both flags are on is Go's to answer however it answers.
+fn login_type_is_forwarded(config: &mm_app::config::Config) -> bool {
+    config.enable_guest_magic_link && config.guest_accounts_enable
 }
 
 /// `r.UserAgent()` — the first `User-Agent` header, or `""`.
@@ -764,6 +784,41 @@ mod tests {
             assert!(!cookie.contains("Secure"), "{cookie}");
             assert!(!cookie.contains("SameSite"), "{cookie}");
         }
+    }
+
+    /// `getLoginType`'s gate is a **conjunction**, and only a configuration where exactly one of
+    /// the two flags is set can say so.
+    ///
+    /// A stock server has both off, so `&&` and `||` both answer "do not forward" and the whole
+    /// route is a 404 either way. The `||` reading would hand Go every request on a server that
+    /// had guest accounts on and magic links off — an ordinary configuration — and answer the
+    /// 404 on one that had them the other way round.
+    #[test]
+    fn the_login_type_gate_is_a_conjunction() {
+        let with = |magic_link: bool, guests: bool| {
+            login_type_is_forwarded(&Config {
+                enable_guest_magic_link: magic_link,
+                guest_accounts_enable: guests,
+                ..Config::default()
+            })
+        };
+        assert!(
+            !with(false, false),
+            "the stock server answers the 404 itself"
+        );
+        assert!(
+            !with(true, false),
+            "magic links without guest accounts is still a 404"
+        );
+        assert!(
+            !with(false, true),
+            "guest accounts without magic links is still a 404"
+        );
+        assert!(with(true, true), "both on is Go's to answer");
+
+        // And the default really is the 404 arm, so the route is served rather than forwarded on
+        // an unconfigured server.
+        assert!(!login_type_is_forwarded(&Config::default()));
     }
 
     /// `map_from_json` swallows everything, so a malformed login body is a blank password rather

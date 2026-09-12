@@ -11424,7 +11424,10 @@ surface, none of which needs multipart.
 
 **DONE.** The route every client calls first. `login` is served for the local-password path;
 `login/type` answers its **404 with an empty body**, which is the whole route on any server
-without guest magic links. 12 parity tests, 29 unit tests across the four new modules.
+without guest magic links. 14 parity tests, 3 store-backed tests and 32 unit tests across the
+four new modules. Mutation run: **49 run, 46 caught, 1 survived, 2 controls survived**;
+`scripts/mutations/login.plan` carries the five fixture gaps the first pass found and the one
+survivor that stays one.
 
 | File | What |
 |---|---|
@@ -11471,6 +11474,19 @@ deliberately unregistered, which is what keeps them forwarded.
 One divergence is in the code and not in the register: Go writes the `Token` header **inside**
 `DoLogin`, before the terms-of-service read, so a 500 from that read still carries a live
 credential. This port returns the error without the header. `mm_api::login::login` says so.
+
+Three things this stack cannot show, and none of them has a live oracle:
+
+1. **MFA end to end.** `EnableMultifactorAuthentication` is off for every suite in the binary and
+   `Users.MfaActive` cannot be set through the API, so the forward is proved by
+   `crates/mm-app/tests/db_login_mfa_probe.rs` — which also asserts the probe writes nothing, the
+   property the ordering depends on — and never compared against Go.
+2. **Three of the four masked ids.** `invalid_credentials_sso`, `…_username` and `…_email` need
+   configurations the shared server cannot have; they are unit-tested against a `Config`, with
+   the arms transcribed from api4/user.go:2163-2185 rather than measured.
+3. **The mobile-versus-web session length in `DoLogin`.** Both are 4320 hours on this stack, so a
+   swapped read is invisible; no mutation for it is in the plan for that reason. What *is*
+   covered is the `isMobile` prop the same branch reads, which is on the wire.
 
 ### The next route in this family
 
