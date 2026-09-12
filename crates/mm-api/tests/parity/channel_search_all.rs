@@ -1314,7 +1314,12 @@ async fn the_retention_and_access_control_filters_need_planted_rows() {
         &format!("mmrs-parity-{STEM}ppp"),
     )
     .await;
+    // The retention policy goes on **both** fixture channels. `alpha` is what the search tests
+    // filter on; the access-controlled one is what makes `policy_id` readable out of a
+    // single-row `getAllChannels` response, which is the only stable place to assert it — the
+    // unfiltered list is capped at `per_page` and other suites keep it above that cap.
     plant_retention_policy(&pool, policy_id, &f.alpha).await;
+    plant_retention_policy_link(&pool, policy_id, &acp_channel).await;
     plant_access_control_policy(&pool, &acp_channel).await;
 
     let result = async {
@@ -1367,8 +1372,9 @@ async fn the_retention_and_access_control_filters_need_planted_rows() {
             let names = display_names(&rust.1);
             match label {
                 "exclude_policy_constrained" => assert!(
-                    !names.contains(&format!("a{STEM} alpha")),
-                    "{label} must drop the constrained channel: {names:?}"
+                    !names.contains(&format!("a{STEM} alpha"))
+                        && !names.contains(&format!("m{STEM} private")),
+                    "{label} must drop both constrained channels: {names:?}"
                 ),
                 "access_control_policy_enforced" => assert_eq!(
                     names,
@@ -1409,6 +1415,12 @@ async fn the_retention_and_access_control_filters_need_planted_rows() {
                     names,
                     vec![format!("m{STEM} private")],
                     "{label} keeps only the enforced channel, server-wide"
+                );
+                assert_eq!(
+                    rows_of(&rust)[0]["policy_id"],
+                    serde_json::json!(policy_id),
+                    "`getAllChannels` selects `policy_id` too, for a caller holding the \
+                     data-retention read permission"
                 );
             }
         }
@@ -1469,6 +1481,20 @@ async fn channel_id_by_name(
     );
     let channel: serde_json::Value = response.json().await.expect("the channel decodes");
     channel["id"].as_str().expect("an id").to_owned()
+}
+
+async fn plant_retention_policy_link(pool: &sqlx::PgPool, policy_id: &str, channel_id: &str) {
+    sqlx::query("DELETE FROM retentionpolicieschannels WHERE channelid = $1")
+        .bind(channel_id)
+        .execute(pool)
+        .await
+        .expect("the stale link goes");
+    sqlx::query("INSERT INTO retentionpolicieschannels (policyid, channelid) VALUES ($1, $2)")
+        .bind(policy_id)
+        .bind(channel_id)
+        .execute(pool)
+        .await
+        .expect("the link is written");
 }
 
 async fn plant_retention_policy(pool: &sqlx::PgPool, policy_id: &str, channel_id: &str) {

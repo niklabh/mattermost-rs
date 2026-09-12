@@ -7036,7 +7036,7 @@ pub async fn search_all_channels(
                     WHERE acp.id = c.id AND acp.type = 'channel' AND acp.active = TRUE
                     LIMIT 1
                ), false) AS "policy_is_active!",
-               CASE WHEN $3 AND NOT $4 THEN (
+               CASE WHEN $3 THEN (
                    SELECT rpc.policyid FROM retentionpolicieschannels rpc
                     WHERE rpc.channelid = c.id
                ) END AS "policyid",
