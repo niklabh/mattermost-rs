@@ -7194,3 +7194,70 @@ never exercised. One `SQLX_OFFLINE=true cargo check --workspace --all-targets` i
 in whatever runs before a merge — is what turns the README's claim into something the tree
 asserts rather than something a reader has to trust.
 
+
+---
+
+## D-350 · a session this server revokes keeps authenticating against Go
+
+**Status** OPEN · **Severity** divergence (security-relevant) · **Raised** 2026-09-12 (session write family)
+
+The Go server keeps sessions in an in-memory cache and invalidates it only from its own revocation
+paths — `ClearUserSessionCache` (app/platform/session.go:105), which also fans out over the cluster
+bus. This server has no session cache ([D-087]) and no way to reach Go's. So every route in the
+session write family deletes the row and leaves Go serving the dead session until its entry ages
+out.
+
+**Measured, not inferred.** Delete a `Sessions` row by hand and `GET {go}/api/v4/users/me` still
+answers **200** while `GET {rust}/api/v4/users/me` answers **401**.
+
+This is worse than [D-087], which is a bounded staleness window on a *read*. Here a **security
+control** appears to work from the client that issued it: the user sees "session revoked", their
+own server agrees, and the process next door keeps honouring the credential.
+
+What is owed is one of: a cluster message Go would accept (the enterprise bus [D-087] already
+established we cannot reach), a shared cache, or — the cheap one — driving these four routes
+through the proxy to Go for as long as Go is running, which trades the divergence for a forwarded
+route. Not done, because the Go server is scaffolding and the end state is that it is not running
+at all; the entry exists so the choice is made deliberately rather than by omission.
+
+**Where the pin lives:** `parity::session_writes::go_cache_keeps_a_session_we_revoked` asserts the
+divergence **in the direction it currently has**, so closing the gap fails that test and says so.
+
+---
+
+## D-351 · the all-users session revoke has no route-level parity test
+
+**Status** OPEN · **Severity** test-coverage · **Raised** 2026-09-12 (session write family)
+
+`POST /api/v4/users/sessions/revoke/all` is served from Rust and its **403** branch is compared
+against Go. Its **200** branch is not, and cannot be under the current harness: succeeding means
+`DELETE FROM Sessions` with no predicate, which logs out every other test running concurrently in
+the same binary and the admin token they all share.
+
+Covered instead by `mm_app::session::tests::the_all_users_revoke_removes_access_data_first`, which
+pins the thing that actually matters — access data is deleted **before** sessions, so a revoked
+client cannot trade its OAuth token for a fresh login. What is not pinned is the response bytes
+(`{"status":"OK"}`, no trailing newline) against Go's own.
+
+What would close it: a stack the suite owns exclusively for one test, or a serialised
+`#[ignore]`-by-default test run by hand. Neither is worth a flaky suite for a fifteen-byte body
+that `ReturnStatusOK` produces identically on three other routes in the same file.
+
+---
+
+## D-352 · `parity::emoji_list` fails on a different test each run
+
+**Status** OPEN · **Severity** test-harness · **Raised** 2026-09-12 (observed during the session write family)
+
+Not caused by the session work and not in a file it touches; recorded because it was hit three
+times in a row and nothing had it written down.
+
+The suite's tests create and delete `mmrsparity*` emoji concurrently and assert on counts and on
+list membership, so each run fails on whichever test lost the race —
+`an_empty_sort_is_the_unsorted_page` saw a `mmrsparitydoomed…` row another test had not deleted
+yet, and `pagination_clamps_rather_than_refusing` found three emoji where it needs four. Running
+the suite alone does not help, because the race is *within* it.
+
+The shape is [D-284]'s and the memory note's "a failure naming a route you did not touch is usually
+a concurrent write to shared state". What is owed is per-test emoji name prefixes, or a serial
+marker on that one file.
