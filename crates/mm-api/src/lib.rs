@@ -31,6 +31,8 @@ pub mod feature_gates;
 /// Ten reads that refuse before they read anything. One module, eight `api4` files.
 pub mod gated_reads;
 
+/// Port of `api4/view.go` — the seven integrated-boards routes.
+pub mod channel_join_requests;
 pub mod files;
 pub mod groups;
 /// The four routes that answer with a stored image: profile, team icon, emoji, brand.
@@ -71,7 +73,6 @@ pub mod tokens;
 pub mod uploads;
 pub mod usage;
 pub mod users;
-/// Port of `api4/view.go` — the seven integrated-boards routes.
 pub mod views;
 pub mod webhooks;
 /// `GET /api/v4/websocket` — the upgrade, the pumps, and the action router.
@@ -2260,6 +2261,48 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/permissions/ancillary",
             partially_migrated(post(permissions::append_ancillary_permissions_post)),
+        )
+        // `initChannelJoinRequestRoutes` (api4/channel_join_request.go:18), all seven — and
+        // registered here **unconditionally**, unlike Go. The `FeatureFlags.DiscoverableChannels`
+        // gate is the first statement of each handler instead, and forwards when it is off, so a
+        // dark deployment answers Go's own mux 404 rather than one reproduced here. See
+        // [`channel_join_requests`] and [D-153].
+        .route(
+            "/api/v4/channels/{channel_id}/join_request",
+            partially_migrated_with_ids(
+                &state,
+                post(channel_join_requests::request_join_channel)
+                    .get(channel_join_requests::get_my_channel_join_request)
+                    .delete(channel_join_requests::withdraw_my_channel_join_request),
+            ),
+        )
+        .route(
+            "/api/v4/channels/{channel_id}/join_requests",
+            partially_migrated_with_ids(
+                &state,
+                get(channel_join_requests::get_channel_join_requests),
+            ),
+        )
+        .route(
+            "/api/v4/channels/{channel_id}/join_requests/count",
+            partially_migrated_with_ids(
+                &state,
+                get(channel_join_requests::count_pending_channel_join_requests),
+            ),
+        )
+        .route(
+            "/api/v4/channels/{channel_id}/join_requests/{request_id}",
+            partially_migrated_with_ids(
+                &state,
+                patch(channel_join_requests::patch_channel_join_request),
+            ),
+        )
+        .route(
+            "/api/v4/users/{user_id}/channel_join_requests",
+            partially_migrated_with_ids(
+                &state,
+                get(channel_join_requests::get_my_channel_join_requests),
+            ),
         )
         // `api.BaseRoutes.ChannelViews` / `ChannelView` / `ChannelViewPosts` (api4/api.go), all
         // seven registered by `InitView` (api4/view.go:14) — and registered here
