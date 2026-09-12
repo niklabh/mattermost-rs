@@ -1046,6 +1046,44 @@ pub async fn create_ephemeral_post(
     }
 }
 
+/// Port of `c.RequirePostId().RequireUserId()` (web/context.go:411, :296) — **in that order**,
+/// returning the resolved `{user_id}`.
+///
+/// # Why this is a function rather than four lines in the handler
+///
+/// The order is not observable on the wire. Both refusals carry the same id
+/// (`api.context.invalid_url_param.app_error`) and the same 400; the parameter name lives only in
+/// `AppError.params`, which is `json:"-"` ([D-384]), and our `message` is the untranslated id
+/// rather than Go's interpolated sentence ([D-092]). So a request naming two bad segments answers
+/// byte-identically whichever check ran first, and swapping them survives the whole parity suite —
+/// measured, as a mutation survivor. Pulled out so a unit test can read the `params` map that a
+/// client cannot.
+///
+/// # `me` is resolved *after* the post id, not before
+///
+/// `RequireUserId` returns early when `c.Err != nil`, so a request with a bad `{post_id}` never
+/// reaches the substitution. Nothing observable turns on that here — both paths return — but it
+/// is why the two steps cannot simply be reordered for tidiness.
+#[allow(clippy::result_large_err)]
+fn require_post_id_then_user_id(
+    post_id: &str,
+    path_user_id: String,
+    session_user_id: &str,
+) -> Result<String, ApiError> {
+    if !is_valid_id(post_id) {
+        return Err(ApiError::invalid_url_param("post_id"));
+    }
+    let user_id = if path_user_id == mm_model::user::ME {
+        session_user_id.to_owned()
+    } else {
+        path_user_id
+    };
+    if !is_valid_id(&user_id) {
+        return Err(ApiError::invalid_url_param("user_id"));
+    }
+    Ok(user_id)
+}
+
 /// Port of `setPostUnread` (api4/post.go:1295) —
 /// `POST /api/v4/users/{user_id}/posts/{post_id}/set_unread`.
 ///
@@ -1059,9 +1097,9 @@ pub async fn create_ephemeral_post(
 /// `SetInvalidParamWithErr` on a bad body, and it is reproduced: a client sending `{"collapsed_
 /// threads_supported": "yes"}` gets a **200 with the non-collapsed response shape**, not a 400.
 ///
-/// Note that Go's `Decode` fills the map with whatever it managed to read before failing only if
-/// the top-level value decodes; a partial object leaves `objmap` nil and the map empty. Modelled
-/// as all-or-nothing, which is what `encoding/json` does for a `map[string]bool` target.
+/// It is **not** all-or-nothing, though, and that is a separate trap: a *type* error inside a
+/// well-formed object is a `saveError`, so the decoder keeps going and every boolean-valued key
+/// survives. See the comment on the decode itself.
 ///
 /// # Two permission gates, and the first one is not the one it looks like
 ///
@@ -1097,17 +1135,10 @@ pub async fn set_post_unread(
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
-    if !is_valid_id(&post_id) {
-        return ApiError::invalid_url_param("post_id").into_response();
-    }
-    let user_id = if path_user_id == mm_model::user::ME {
-        session.0.user_id.clone()
-    } else {
-        path_user_id
+    let user_id = match require_post_id_then_user_id(&post_id, path_user_id, &session.0.user_id) {
+        Ok(user_id) => user_id,
+        Err(err) => return err.into_response(),
     };
-    if !is_valid_id(&user_id) {
-        return ApiError::invalid_url_param("user_id").into_response();
-    }
 
     let (parts, body) = request.into_parts();
     let bytes = match axum::body::to_bytes(body, usize::MAX).await {
@@ -1119,11 +1150,26 @@ pub async fn set_post_unread(
             axum::body::Bytes::new()
         }
     };
+    // **`serde_json::Value`, not `bool`** — and the difference is on the wire. Decoding straight
+    // into a `HashMap<String, bool>` fails the *whole* object when any one value is not a
+    // boolean, which is not what `encoding/json` does: a wrong-typed value is a `saveError`, so
+    // the decoder records the `UnmarshalTypeError` and **keeps walking**, and every key whose
+    // value really is a boolean is still written to the map. `MapBoolFromJSON` then returns that
+    // map because it is non-nil.
+    //
+    // So `{"collapsed_threads_supported":true,"x":"nope"}` is **true** on Go — measured, in
+    // `parity::post_acks` — and was `false` here. Visible only on a reply, where the two flags
+    // answer different bodies; on a root post they agree, which is why the malformed-body test
+    // built on a root could not see it.
+    //
+    // A key present with a non-boolean value stays `false` on both: Go's `saveError` leaves the
+    // element at its zero value and still sets it, and `as_bool()` answers `None` here. A body
+    // that is not a JSON object at all fails on both, for the same reason — Go's map is left nil.
     let collapsed_threads_supported =
-        serde_json::from_slice::<std::collections::HashMap<String, bool>>(&bytes)
+        serde_json::from_slice::<std::collections::HashMap<String, serde_json::Value>>(&bytes)
             .unwrap_or_default()
             .get("collapsed_threads_supported")
-            .copied()
+            .and_then(serde_json::Value::as_bool)
             .unwrap_or(false);
 
     if session.0.user_id != user_id
@@ -1411,6 +1457,55 @@ fn created_post(mut post: Post) -> Result<Response, PrepareError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const A_VALID_ID: &str = "abcdefghijklmnopqrstuvwxyz";
+    const A_SESSION_USER: &str = "zyxwvutsrqponmlkjihgfedcba";
+
+    /// The parameter name each refusal carries, or `None` for a success.
+    fn refused_param(post_id: &str, path_user_id: &str) -> Option<String> {
+        require_post_id_then_user_id(post_id, path_user_id.to_owned(), A_SESSION_USER)
+            .err()?
+            .0
+            .params?
+            .get("Name")?
+            .as_str()
+            .map(str::to_owned)
+    }
+
+    /// `RequirePostId` runs **before** `RequireUserId`, so a request with two bad segments names
+    /// the post.
+    ///
+    /// This order is invisible to a client — both refusals are a 400 with
+    /// `api.context.invalid_url_param.app_error`, and the parameter name lives only in
+    /// `AppError.params`, which is never serialised ([D-384]). Swapping the two checks therefore
+    /// passes the entire cross-server parity suite; it was a mutation survivor before this test
+    /// existed, and `params` is the only place the difference can be seen.
+    #[test]
+    fn the_post_id_is_required_before_the_user_id() {
+        assert_eq!(
+            refused_param("def", "abc").as_deref(),
+            Some("post_id"),
+            "both invalid: Go's chain refuses the post id first"
+        );
+        assert_eq!(refused_param("def", A_VALID_ID).as_deref(), Some("post_id"));
+        assert_eq!(refused_param(A_VALID_ID, "abc").as_deref(), Some("user_id"));
+        assert_eq!(refused_param(A_VALID_ID, A_VALID_ID), None);
+    }
+
+    /// `me` becomes the session's own id, and only once the post id has passed.
+    #[test]
+    fn me_resolves_to_the_session_user_after_the_post_id_check() {
+        assert_eq!(
+            require_post_id_then_user_id(A_VALID_ID, "me".to_owned(), A_SESSION_USER)
+                .expect("`me` is a valid user id once resolved"),
+            A_SESSION_USER
+        );
+        // A bad post id wins even when the user segment is `me`, which would otherwise always
+        // resolve to something valid.
+        assert_eq!(refused_param("def", "me").as_deref(), Some("post_id"));
+        // And `me` is not treated as an id in its own right: unresolved it is three characters.
+        assert!(!is_valid_id("me"));
+    }
 
     /// A router built against a pool that is never connected and a Go upstream that refuses
     /// every connection.

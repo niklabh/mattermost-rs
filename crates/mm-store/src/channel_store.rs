@@ -761,6 +761,14 @@ impl SqlChannelStore {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
+
+    /// The `'urgent'` written into [`ChannelStore::count_urgent_posts_after`]'s SQL.
+    ///
+    /// `sqlx::query_scalar!` takes a string literal, so the value cannot be interpolated from
+    /// [`mm_model::post::POST_PRIORITY_URGENT`]; this names it so a test can hold the two
+    /// together.
+    #[cfg(test)]
+    const URGENT_PRIORITY_IN_SQL: &'static str = "urgent";
 }
 
 impl ChannelStore for SqlChannelStore {
@@ -954,8 +962,15 @@ impl ChannelStore for SqlChannelStore {
         timestamp: i64,
         excluded_user_id: &str,
     ) -> Result<i64, StoreError> {
-        // `PostsPriority.Priority = 'urgent'` — the model constant, spelled here because there is
-        // no reachable Rust constant for it in the store layer and the string is the query.
+        // `PostsPriority.Priority = 'urgent'` is [`mm_model::post::POST_PRIORITY_URGENT`], inline
+        // rather than bound because it is a constant of the *query*, not of the request. Asserted
+        // against the model constant in the test below, so a rename upstream fails a test rather
+        // than silently counting nothing.
+        //
+        // **Nothing in the parity suite exercises this.** `POST /api/v4/posts` carrying a
+        // `metadata.priority` is a 403 on the development stack, so no urgent post exists, the
+        // count is always 0, and both arms of the `post_priority` config gate in
+        // [`mm_app::App::count_mentions_from_post`] answer the same body. Measured, not assumed.
         let count = sqlx::query_scalar!(
             r#"
             SELECT count(*) AS "count!"
@@ -4172,6 +4187,22 @@ pub async fn get_all_channel_members_for_user(
 /// `NotifyProps` carries `json:"-"`, so it never reaches a client. It is selected because the
 /// **app** layer branches on it: `mark_unread = mention` zeroes the two message counts
 /// (channel.go:2712).
+#[cfg(test)]
+mod urgent_priority_literal {
+    /// The `'urgent'` literal in [`ChannelStore::count_urgent_posts_after`]'s SQL is
+    /// `model.PostPriorityUrgent` (post.go:123). A `query_scalar!` cannot interpolate a constant,
+    /// so the string is written out — and this is the only thing that notices if the model's value
+    /// moves and the query keeps counting a priority that no longer exists.
+    #[test]
+    fn the_urgent_literal_is_the_model_constant() {
+        assert_eq!(mm_model::post::POST_PRIORITY_URGENT, "urgent");
+        assert!(
+            super::SqlChannelStore::URGENT_PRIORITY_IN_SQL == mm_model::post::POST_PRIORITY_URGENT,
+            "the SQL literal and the model constant must agree"
+        );
+    }
+}
+
 /// Port of `SqlChannelStore.CountPostsAfter` (channel_store.go:2922). A free function because
 /// [`ChannelStore::update_last_viewed_at_post`] needs it on the same pool without going back
 /// through the trait.

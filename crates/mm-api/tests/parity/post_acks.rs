@@ -737,6 +737,107 @@ async fn an_absent_collapsed_threads_key_is_false() {
     unwind(&client, &token, fixture).await;
 }
 
+/// A well-formed object holding **one bad value beside a good one** keeps the good one.
+///
+/// `encoding/json` decoding into a `map[string]bool` treats a wrong-typed value as a `saveError`:
+/// it records the `UnmarshalTypeError` and **carries on**, so every key whose value really is a
+/// boolean is still written. `MapBoolFromJSON` returns that map because it is non-nil.
+/// `serde_json::from_slice::<HashMap<String, bool>>` has no such notion — one bad value fails the
+/// whole decode — so this shipped as `false` here and `true` on Go until it was measured.
+///
+/// **Asked of Go directly, not by comparing the two servers**, and that is the point. A reply
+/// with the flag `false` is *forwarded*, so a body comparison passes whichever way Go decodes:
+/// Go answered both halves. The first version of this test did exactly that and was green while
+/// the divergence was live. The oracle is Go's own answer for an explicit `true` against an
+/// explicit `false` — the mixed body must equal one of them, and which one is the finding.
+#[tokio::test]
+async fn a_good_flag_survives_a_bad_value_beside_it() {
+    if !stack_enabled() {
+        return;
+    }
+    let client = client();
+    let token = go_minted_token(&client).await;
+    let fixture = fixture(&client, &token, "pamixed").await;
+
+    let path = format!(
+        "{GO}/api/v4/users/{}/posts/{}/set_unread",
+        fixture.reader.id, fixture.reply_post
+    );
+    let ask = async |body: &'static str| -> serde_json::Value {
+        client
+            .post(&path)
+            .header("Authorization", format!("Bearer {}", fixture.reader.token))
+            .header("Content-Type", "application/json")
+            .body(body)
+            .send()
+            .await
+            .expect("Go answers")
+            .json()
+            .await
+            .expect("the body decodes")
+    };
+
+    let with_true = ask(r#"{"collapsed_threads_supported":true}"#).await;
+    let with_false = ask(r#"{"collapsed_threads_supported":false}"#).await;
+    assert_ne!(
+        with_true["mention_count_root"], with_false["mention_count_root"],
+        "the two flags must answer differently for this test to mean anything"
+    );
+
+    for body in [
+        r#"{"collapsed_threads_supported":true,"x":"nope"}"#,
+        r#"{"x":"nope","collapsed_threads_supported":true}"#,
+        r#"{"collapsed_threads_supported":true,"x":1}"#,
+    ] {
+        let mixed = ask(body).await;
+        assert_eq!(
+            mixed["mention_count_root"], with_true["mention_count_root"],
+            "Go keeps the boolean key in {body} despite the bad value beside it"
+        );
+    }
+
+    // And ours agrees — including on **which server answers**. The flag being `true` puts a reply
+    // on the CRT arm, which this server serves, so a correct port answers here rather than
+    // forwarding. That assertion is what the first version of this test was missing: it compared
+    // the two bodies, we forwarded, and Go supplied both halves of a comparison that was green
+    // while the divergence was live.
+    let ours_path = format!(
+        "/api/v4/users/{}/posts/{}/set_unread",
+        fixture.reader.id, fixture.reply_post
+    );
+    let (go, ours) = post_both_allowing_forward(
+        &client,
+        &fixture.reader.token,
+        &ours_path,
+        br#"{"collapsed_threads_supported":true,"x":"nope"}"#,
+    )
+    .await;
+    assert!(
+        ours.2,
+        "the good flag survives here too, so the reply takes the CRT arm and is answered here"
+    );
+    assert_eq!(
+        (ours.0, String::from_utf8_lossy(&ours.1).into_owned()),
+        (go.0, String::from_utf8_lossy(&go.1).into_owned()),
+    );
+
+    // The mirror: a bad value does not turn an explicit `false` into a `true`, so the reply is
+    // still forwarded.
+    let (_, ours_false) = post_both_allowing_forward(
+        &client,
+        &fixture.reader.token,
+        &ours_path,
+        br#"{"collapsed_threads_supported":false,"x":"nope"}"#,
+    )
+    .await;
+    assert!(
+        !ours_false.2,
+        "a bad value beside an explicit false leaves it false"
+    );
+
+    unwind(&client, &token, fixture).await;
+}
+
 /// The literal `me` in `{user_id}` resolves to the session's own user.
 ///
 /// `RequireUserId` (web/context.go:301) substitutes it, and nothing else in this file sends it —
