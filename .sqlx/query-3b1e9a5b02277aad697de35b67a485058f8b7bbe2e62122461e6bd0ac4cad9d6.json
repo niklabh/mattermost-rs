@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE channelmembers\n               SET mentioncount       = $1,\n                   mentioncountroot   = $2,\n                   urgentmentioncount = $3,\n                   msgcount     = (SELECT totalmsgcount     FROM channels WHERE id = $7) - $4,\n                   msgcountroot = (SELECT totalmsgcountroot FROM channels WHERE id = $7) - $5,\n                   lastviewedat = $6,\n                   lastupdateat = $8\n             WHERE userid = $9\n               AND channelid = $7\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Text",
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3b1e9a5b02277aad697de35b67a485058f8b7bbe2e62122461e6bd0ac4cad9d6"
+}

@@ -7811,3 +7811,91 @@ before any write.
 
 **What is owed:** the SKU tier on `LicenseState`, which the same gap blocks in [D-300], [D-360],
 [D-371] and [D-390]. One port of `LicenseToLicenseTier` closes all five.
+
+---
+
+## D-420 · setPostReminder forwards whole, on its ephemeral confirmation's permalink embed
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-13 (postacks)
+
+`POST /api/v4/users/{user_id}/posts/{post_id}/reminder` is not registered in
+`mm_api::router` and falls to `Router::fallback`. Its HTTP response is `{"status":"OK"}` and its
+database write is two small queries — both of which are **ported and tested**
+(`PostStore::set_post_reminder`, `PostStore::get_post_reminder_metadata`). What is not ported is
+the part between them and the response.
+
+`App.SetPostReminder` (app/post.go:2838) ends by building an ephemeral post and pushing it down
+the requesting user's websocket. Its message is
+
+```
+You will be reminded about {siteURL}/{team}/pl/{postId} by @{author} at {RFC822 target time}
+```
+
+so it **always contains a link**, and `PreparePostForClientWithEmbedsAndImages` therefore always
+reaches `getEmbedForPost` → `getLinkMetadata` → `getLinkMetadataForPermalink`
+(post_metadata.go:902). That path reads the referenced post, its channel and its team, builds a
+`model.Permalink` carrying a `PreviewPost`, and attaches it as a `permalink` embed. None of
+`model.Permalink`, `model.PreviewPost`, the `permalink` `PostEmbed` or the link-metadata cache
+exists in this port, and `mm_app::post::message_may_contain_a_link` refuses every message with a
+`://` in it precisely so that this cannot be shipped half-done.
+
+So the route is not blocked on a decision and not blocked on a licence — it is blocked on the
+permalink-preview subsystem, which [D-401] already owes for `createPost`'s "a message with a link"
+row. Paying that one pays this one; there is nothing reminder-specific left over.
+
+Two facts worth keeping, because they are cheap to get wrong and are already in the code:
+
+- **`PostReminder.TargetTime` is Unix *seconds*.** `time.Unix(targetTime, 0)` at app/post.go:2866
+  and `time.Now().UTC().Unix()` in `CheckPostReminders`. It is the only timestamp in the migrated
+  surface that is not epoch milliseconds, and `PostStore::set_post_reminder` says so.
+- **`PostReminderMetadata.Username` is the post *author's***, not the reminded user's — the
+  sentence "reminded … by @x" names whoever wrote the post.
+
+`parity::post_acks::the_reminder_route_is_forwarded_whole` pins the forward, so registering the
+route without the embed machinery fails a test rather than shipping a websocket event with a
+missing preview. The two store methods are exercised by
+`crates/mm-store/tests/db_post_reminder_store.rs` (4 tests) rather than left for the compiler —
+the upsert, the not-found that must write nothing, and the `COALESCE` a DM needs.
+
+## D-421 · setPostUnread serves a DM or group channel and forwards the rest
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-13 (postacks)
+
+`POST /api/v4/users/{user_id}/posts/{post_id}/set_unread` answers two of Go's three arms and
+forwards the others. `mm_app::post_unread::App::mark_channel_as_unread_from_post` is the list;
+both refusals are decided from reads alone, so a forwarded request reaches Go with nothing
+written.
+
+| forwarded shape | what it needs |
+|---|---|
+| an open or private channel | the mention engine — `MentionKeywords`, `isPostMention`, `GetPostsAfterPost` and `PostPriority().GetForPosts`. `countMentionsFromPost`'s DM/GM short circuit is the only branch that avoids it. |
+| a **reply** when the client did not send `collapsed_threads_supported` | `Thread().MaintainMembership`/`UpdateMembership`/`GetThreadForUser`, `sanitizeThreadResponse`, and `countThreadMentions` — the mention engine again. Half-porting it would write a `ThreadMemberships` row carrying a wrong `UnreadMentions` that no later request corrects. |
+
+The mention engine is the same unlock [D-401] names, and it is now owed by two routes rather than
+one.
+
+One line of `update_last_viewed_at_post` is unreachable from the served path and stays that way:
+the read-back's `c.deleteat = 0` guard. It is reached only for a DM or group channel, and Go has
+no route that archives one; an open channel, which can be archived, is forwarded before the store
+is touched. A mutation dropping the guard therefore survives, and the reason is the route shape
+rather than a missing fixture — recorded here so the next batch does not re-derive it.
+
+`App.UpdateMobileAppBadge` is deliberately absent from both served arms: there is no push
+notifications hub in this port and nothing about it reaches the HTTP response or the websocket.
+Same posture as [D-215].
+
+## D-422 · the acknowledgement pair is a licence refusal and stays one until a licence exists
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-09-13 (postacks)
+
+`POST` and `DELETE /api/v4/users/{user_id}/posts/{post_id}/ack` open with
+`model.MinimumProfessionalLicense` (api4/post.go:1429, :1468), *above*
+`c.RequirePostId().RequireUserId()` and above both permission gates. On an unlicensed server the
+refusal is the whole route, and that is what `mm_api::licensed_features` serves — measured against
+Go, not read off the source. `App.SaveAcknowledgementForPost` and
+`App.DeleteAcknowledgementForPost` are unreachable here and are not ported.
+
+Recorded as ACCEPTED rather than OPEN because there is nothing to *do*: a licensed installation is
+forwarded and Go applies the tier test itself. What a future session must not do is "complete" the
+route by adding the id and permission checks its neighbours in `api4/post.go` have — Go skips all
+of them, and `parity::post_acks::nothing_else_about_an_ack_request_is_ever_consulted` is the proof.

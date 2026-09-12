@@ -11417,3 +11417,64 @@ function returns its own value.
 `GET /api/v4/users/{user_id}/image` already serves its stored-bytes branch; what is unported
 beside these four is `PUT /api/v4/users/{user_id}/patch` and the rest of the `users.go` write
 surface, none of which needs multipart.
+
+
+## Ledger additions — api4/post.go, the four per-user post writes (appended 2026-09-13, branch `wt/postacks`)
+
+| Go source | Rust | Status | Tests | The one thing a reader would otherwise get wrong |
+|---|---|---|---|---|
+| api4/post.go (`acknowledgePost`, `unacknowledgePost`) | `mm-api/src/licensed_features.rs` | DONE | 2 unit + 2 parity | Both are `MinimumProfessionalLicense` refusals taken **before** `RequirePostId` and both permission gates — and the two halves carry **different** error ids four lines apart: `<untranslated>` on the POST, `license_error.feature_unavailable` on the DELETE. See [D-422]. |
+| api4/post.go (`setPostUnread`) | `mm-api/src/post_writes.rs` | PARTIAL | 5 parity | `model.MapBoolFromJSON` **discards its decode error**, so a malformed body is not a 400 here — it is a 200 with `collapsed_threads_supported: false`, unlike every neighbouring route in the file. |
+| app/channel.go (`MarkChannelAsUnreadFromPost`, `markChannelAsUnreadFromPostCRTUnsupported`, `countMentionsFromPost`, `sendWebSocketPostUnreadEvent`) | `mm-app/src/post_unread.rs` | PARTIAL | 3 unit + parity | Three Go arms, and the reply-without-CRT one passes `(mentions, 0, 0, false)` where the other two pass `(mentions, mentionsRoot, urgent, true)` — so the same request answers a different `mention_count_root`, `urgent_mention_count` and `msg_count_root` depending on a flag in the body. Forwarded shapes in [D-421]. |
+| store/sqlstore/channel_store.go (`CountPostsAfter`, `CountUrgentPostsAfter`, `UpdateLastViewedAtPost`) | `mm-store/src/channel_store.rs` | DONE | parity | Two different excluded-user arguments a few lines apart: `update_last_viewed_at_post` passes `""` so the reader's own posts raise the message counts, while `count_mentions_from_post` passes the reader's id so they do not raise the mention counts. |
+| store/sqlstore/post_store.go (`SetPostReminder`, `GetPostReminderMetadata`) | `mm-store/src/post_store.rs` | DONE | offline build; no route reaches them yet | `PostReminders.TargetTime` is Unix **seconds**, the only non-millisecond timestamp in the migrated surface. The route that would call these forwards — [D-420]. |
+| api4/post.go (`setPostReminder`) | — | FORWARDED | 1 parity pinning the forward | Its ephemeral confirmation always contains a permalink, so it always needs the permalink-embed path. [D-420]. |
+
+### Notes
+
+**The fixture oracle for `ChannelUnreadAt` was not discriminating.** `mention_count` and
+`mention_count_root` both generated as `54` — a hash collision mod 100 in `reference/dump` — so
+the round-trip test could not tell the two `serde(rename)`s apart, on precisely the pair the
+collapsed-threads branch changes. `reference/dump/main.go` now pins
+`channelunreadat.mentioncountroot` to `71`, which rewrites one key of
+`fixtures/channel_unread_at.json`; no Rust test asserted the old value.
+`channel_member::tests::the_channel_unread_at_fixture_gives_every_counter_a_different_number` now
+fails if a future regeneration re-collides any two of the five counters.
+
+**A parity fixture tag is a global name.** `create_plain_user(tag)` becomes the username
+`mmrsplain{tag}`, unique across the whole test binary. `parity/post_acks` first used `unreadbody`,
+which `parity/channel_unread` already had: both passed alone and one failed
+`app.user.save.username_exists.app_error` in every concurrent run. Every tag in the new module is
+prefixed `pa`.
+
+**`a_team_and_channel_the_user_is_in` does not return a public channel.** On this stack the
+caller's first channel is a `D`, so a "set_unread in an open channel forwards" test built on it
+was answered by the DM branch and passed for the wrong reason. The module creates its own open
+channel.
+
+### Notes — the second pass (mutation findings)
+
+**A wire-format bug the first pass shipped, and the test that could not see it.**
+`model.MapBoolFromJSON` decodes into a `map[string]bool`, and `encoding/json` treats a wrong-typed
+value as a `saveError` — it records the `UnmarshalTypeError` and **keeps walking** — so every key
+whose value really is a boolean survives and the map comes back non-nil. Decoding straight into a
+`HashMap<String, bool>` fails the whole object, so `{"collapsed_threads_supported":true,"x":"nope"}`
+was `true` on Go and `false` here. Fixed by decoding to `HashMap<String, serde_json::Value>`.
+
+Two things hid it. It is invisible on a **root** post, where both flags answer the same body; and
+a two-server body comparison cannot see it at all, because with the flag `false` we *forward* — Go
+supplies both halves and the comparison is green while the divergence is live. The oracle had to
+be Go's own answer for an explicit `true` against an explicit `false`, plus an assertion about
+which server answered. `parity::post_acks::a_good_flag_survives_a_bad_value_beside_it`.
+
+**The order of the two id validations is not observable on our wire.** `RequirePostId` before
+`RequireUserId` — same error id, same 400, and the parameter name lives only in `AppError.params`,
+which is `json:"-"` ([D-384]); our `message` is the untranslated id rather than Go's interpolated
+sentence ([D-092]). Swapping them survives the whole parity suite. `require_post_id_then_user_id`
+exists so a unit test can read what a client cannot.
+
+**`urgent_mention_count` is not verified against Go.** `POST /api/v4/posts` carrying a
+`metadata.priority` is a **403** on this stack — measured, in a DM and in a public channel — so no
+urgent post exists, `count_urgent_posts_after` is only ever compared at `0`, and both arms of the
+`ServiceSettings.PostPriority` gate answer the same body. The SQL is schema-checked and the
+`'urgent'` literal is pinned to `model.PostPriorityUrgent` by a unit test; the *count* is not.

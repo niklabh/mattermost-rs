@@ -35,8 +35,9 @@ use mm_model::channel::{
 use mm_model::channel_list::ChannelList;
 use mm_model::channel_member::{
     CHANNEL_MEMBER_NOTIFY_PROPS_MAX_RUNES, CHANNEL_NOTIFY_DEFAULT, ChannelMember,
-    ChannelMemberWithTeamData, ChannelMembersWithTeamData, ChannelUnread,
+    ChannelMemberWithTeamData, ChannelMembersWithTeamData, ChannelUnread, ChannelUnreadAt,
 };
+use mm_model::post::Post;
 use mm_model::post_list::PostList;
 use mm_model::role::{CHANNEL_ADMIN_ROLE_ID, CHANNEL_GUEST_ROLE_ID, CHANNEL_USER_ROLE_ID};
 use mm_model::user::{PUSH_NOTIFY_PROP, USER_NOTIFY_ALL, USER_NOTIFY_MENTION};
@@ -204,6 +205,86 @@ pub trait ChannelStore {
         channel_id: &str,
         user_id: &str,
     ) -> impl std::future::Future<Output = Result<ChannelUnread, StoreError>> + Send;
+
+    /// Port of `SqlChannelStore.CountPostsAfter` (channel_store.go:2922) — **two** counts from
+    /// one builder, the second with `RootId = ''` added.
+    ///
+    /// # `Gt`, not `Gte`
+    ///
+    /// "created after but not including the given timestamp", and every caller passes
+    /// `post.CreateAt - 1` so that the post itself falls inside the window. An off-by-one here
+    /// moves the new-messages line by exactly one post.
+    ///
+    /// # The type filter is a `NOT IN`, and it is the join/leave set, not the system set
+    ///
+    /// Ten types, the same ones `Post.IsJoinLeaveMessage` checks — so `system_header_change` and
+    /// every other `system_*` post **is** counted. Reading the list as "system messages" and
+    /// reaching for a `LIKE 'system_%'` would change the count on any channel whose header has
+    /// been edited.
+    ///
+    /// `excluded_user_id` empty means "no filter"; non-empty adds `UserId <> ?`, which is how the
+    /// DM branch of `countMentionsFromPost` counts *the other person's* posts as mentions while
+    /// [`ChannelStore::update_last_viewed_at_post`] counts everybody's.
+    fn count_posts_after(
+        &self,
+        channel_id: &str,
+        timestamp: i64,
+        excluded_user_id: &str,
+    ) -> impl std::future::Future<Output = Result<(i64, i64), StoreError>> + Send;
+
+    /// Port of `SqlChannelStore.CountUrgentPostsAfter` (channel_store.go:2896).
+    ///
+    /// Joins `PostsPriority` to `Posts` and counts the urgent ones in the same window
+    /// [`ChannelStore::count_posts_after`] uses — but **without** the join/leave type filter,
+    /// which is moot: a join/leave post cannot carry a priority row.
+    fn count_urgent_posts_after(
+        &self,
+        channel_id: &str,
+        timestamp: i64,
+        excluded_user_id: &str,
+    ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
+
+    /// Port of `SqlChannelStore.UpdateLastViewedAtPost` (channel_store.go:2976) — the write
+    /// behind `POST /api/v4/users/{user_id}/posts/{post_id}/set_unread`.
+    ///
+    /// # `MsgCount` is written as a subtraction against a live column
+    ///
+    /// `MsgCount = (SELECT TotalMsgCount FROM Channels WHERE Id = …) - unread`, where `unread` is
+    /// what [`ChannelStore::count_posts_after`] just returned for the same window. Go's own
+    /// comment says why it is not `SELECT count(*) FROM Posts`: on an old channel the total is
+    /// large and the unread tail is small. The consequence is that the two reads are **not**
+    /// atomic with the write — a post landing between them moves the result — which is Go's
+    /// behaviour and not something to "fix" with a single statement.
+    ///
+    /// # `set_unread_count_root` zeroes the root count *before* the update, not after
+    ///
+    /// `if !setUnreadCountRoot { unreadRoot = 0 }`, so `MsgCountRoot` is written as
+    /// `TotalMsgCountRoot - 0` — the member is marked **fully caught up on roots** while being
+    /// marked unread on the channel. That is the CRT-unsupported reply branch of
+    /// `markChannelAsUnreadFromPostCRTUnsupported`, and it is the whole reason the flag exists.
+    /// Inverting it is invisible in any channel whose posts are all roots, because then
+    /// `unreadRoot == unread` on one side and the caller passes `0` on the other only when they
+    /// happen to coincide — see the behaviour fixture.
+    ///
+    /// # `LastViewedAt` is the post's `CreateAt - 1`, and `LastUpdateAt` is *now*
+    ///
+    /// Two different timestamps in the same `SET`, one derived from the post and one stamped. A
+    /// reader who used `GetMillis()` for both would make every marked-unread channel look read.
+    ///
+    /// # The read-back is from the **master**, and a deleted channel returns no row
+    ///
+    /// `c.DeleteAt = 0` in the read-back, over a `LEFT JOIN` that the predicate turns into an
+    /// inner one — so marking a post unread in a deleted channel performs the `UPDATE` and then
+    /// fails on the `SELECT`. Reproduced: the write is not conditional on the channel being live.
+    fn update_last_viewed_at_post(
+        &self,
+        unread_post: &Post,
+        user_id: &str,
+        mention_count: i64,
+        mention_count_root: i64,
+        urgent_mention_count: i64,
+        set_unread_count_root: bool,
+    ) -> impl std::future::Future<Output = Result<ChannelUnreadAt, StoreError>> + Send;
 
     /// Port of `SqlChannelStore.GetByNames` (channel_store.go:1634).
     ///
@@ -680,6 +761,14 @@ impl SqlChannelStore {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
+
+    /// The `'urgent'` written into [`ChannelStore::count_urgent_posts_after`]'s SQL.
+    ///
+    /// `sqlx::query_scalar!` takes a string literal, so the value cannot be interpolated from
+    /// [`mm_model::post::POST_PRIORITY_URGENT`]; this names it so a test can hold the two
+    /// together.
+    #[cfg(test)]
+    const URGENT_PRIORITY_IN_SQL: &'static str = "urgent";
 }
 
 impl ChannelStore for SqlChannelStore {
@@ -856,6 +945,170 @@ impl ChannelStore for SqlChannelStore {
         user_id: &str,
     ) -> Result<ChannelUnread, StoreError> {
         get_channel_unread(&self.pool, channel_id, user_id).await
+    }
+
+    async fn count_posts_after(
+        &self,
+        channel_id: &str,
+        timestamp: i64,
+        excluded_user_id: &str,
+    ) -> Result<(i64, i64), StoreError> {
+        count_posts_after(&self.pool, channel_id, timestamp, excluded_user_id).await
+    }
+
+    async fn count_urgent_posts_after(
+        &self,
+        channel_id: &str,
+        timestamp: i64,
+        excluded_user_id: &str,
+    ) -> Result<i64, StoreError> {
+        // `PostsPriority.Priority = 'urgent'` is [`mm_model::post::POST_PRIORITY_URGENT`], inline
+        // rather than bound because it is a constant of the *query*, not of the request. Asserted
+        // against the model constant in the test below, so a rename upstream fails a test rather
+        // than silently counting nothing.
+        //
+        // **Nothing in the parity suite exercises this.** `POST /api/v4/posts` carrying a
+        // `metadata.priority` is a 403 on the development stack, so no urgent post exists, the
+        // count is always 0, and both arms of the `post_priority` config gate in
+        // [`mm_app::App::count_mentions_from_post`] answer the same body. Measured, not assumed.
+        let count = sqlx::query_scalar!(
+            r#"
+            SELECT count(*) AS "count!"
+              FROM postspriority
+              JOIN posts ON posts.id = postspriority.postid
+             WHERE postspriority.priority = 'urgent'
+               AND posts.channelid = $1
+               AND posts.createat > $2
+               AND posts.deleteat = 0
+               AND ($3 = '' OR posts.userid <> $3)
+            "#,
+            channel_id,
+            timestamp,
+            excluded_user_id,
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to count urgent Posts".to_owned(),
+            source,
+        })?;
+        Ok(count)
+    }
+
+    #[tracing::instrument(skip(self, unread_post), fields(channel_id = %unread_post.channel_id, user_id = %user_id, set_unread_count_root))]
+    async fn update_last_viewed_at_post(
+        &self,
+        unread_post: &Post,
+        user_id: &str,
+        mention_count: i64,
+        mention_count_root: i64,
+        urgent_mention_count: i64,
+        set_unread_count_root: bool,
+    ) -> Result<ChannelUnreadAt, StoreError> {
+        let unread_date = unread_post.create_at - 1;
+
+        // The excluded user is the **empty string** here — every author's posts count towards
+        // the channel's unread total, including the caller's own. `countMentionsFromPost` is the
+        // call that excludes a user, and it is a different call.
+        let (unread, unread_root) =
+            count_posts_after(&self.pool, &unread_post.channel_id, unread_date, "").await?;
+
+        let unread_root = if set_unread_count_root {
+            unread_root
+        } else {
+            0
+        };
+        let updated_at = mm_model::utils::get_millis();
+
+        sqlx::query!(
+            r#"
+            UPDATE channelmembers
+               SET mentioncount       = $1,
+                   mentioncountroot   = $2,
+                   urgentmentioncount = $3,
+                   msgcount     = (SELECT totalmsgcount     FROM channels WHERE id = $7) - $4,
+                   msgcountroot = (SELECT totalmsgcountroot FROM channels WHERE id = $7) - $5,
+                   lastviewedat = $6,
+                   lastupdateat = $8
+             WHERE userid = $9
+               AND channelid = $7
+            "#,
+            mention_count,
+            mention_count_root,
+            urgent_mention_count,
+            unread,
+            unread_root,
+            unread_date,
+            unread_post.channel_id,
+            updated_at,
+            user_id,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to update ChannelMembers".to_owned(),
+            source,
+        })?;
+
+        // `UrgentMentionCount` is the one coalesced column, exactly as in [`get_channel_unread`];
+        // the rest scan into plain integers and a NULL there is a 500 on both servers.
+        let row = sqlx::query!(
+            r#"
+            SELECT c.teamid                             AS "team_id!",
+                   cm.userid                            AS "user_id!",
+                   cm.channelid                         AS "channel_id!",
+                   cm.msgcount                          AS "msg_count!",
+                   cm.msgcountroot                      AS "msg_count_root!",
+                   cm.mentioncount                      AS "mention_count!",
+                   cm.mentioncountroot                  AS "mention_count_root!",
+                   COALESCE(cm.urgentmentioncount, 0)   AS "urgent_mention_count!",
+                   cm.lastviewedat                      AS "last_viewed_at!",
+                   cm.notifyprops
+              FROM channelmembers cm
+              LEFT JOIN channels c ON c.id = cm.channelid
+             WHERE cm.userid = $1
+               AND cm.channelid = $2
+               AND c.deleteat = 0
+            "#,
+            user_id,
+            unread_post.channel_id,
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!(
+                "failed to get ChannelMember with channelId={}",
+                unread_post.channel_id
+            ),
+            source,
+        })?;
+
+        // `json:"-"`, so this never reaches a client — carried for the same reason
+        // [`get_channel_unread`] carries it, and split on SQL-NULL-versus-JSON-null the same way.
+        let notify_props =
+            match row.notifyprops {
+                None | Some(serde_json::Value::Null) => None,
+                Some(value) => Some(serde_json::from_value::<StringMap>(value).map_err(
+                    |source| StoreError::Decode {
+                        entity: "ChannelUnreadAt",
+                        column: "notifyprops",
+                        source,
+                    },
+                )?),
+            };
+
+        Ok(ChannelUnreadAt {
+            team_id: row.team_id,
+            user_id: row.user_id,
+            channel_id: row.channel_id,
+            msg_count: row.msg_count,
+            msg_count_root: row.msg_count_root,
+            mention_count: row.mention_count,
+            mention_count_root: row.mention_count_root,
+            urgent_mention_count: row.urgent_mention_count,
+            last_viewed_at: row.last_viewed_at,
+            notify_props,
+        })
     }
 
     async fn get_channels_with_unreads_and_with_mentions(
@@ -3934,6 +4187,100 @@ pub async fn get_all_channel_members_for_user(
 /// `NotifyProps` carries `json:"-"`, so it never reaches a client. It is selected because the
 /// **app** layer branches on it: `mark_unread = mention` zeroes the two message counts
 /// (channel.go:2712).
+#[cfg(test)]
+mod urgent_priority_literal {
+    /// The `'urgent'` literal in [`ChannelStore::count_urgent_posts_after`]'s SQL is
+    /// `model.PostPriorityUrgent` (post.go:123). A `query_scalar!` cannot interpolate a constant,
+    /// so the string is written out — and this is the only thing that notices if the model's value
+    /// moves and the query keeps counting a priority that no longer exists.
+    #[test]
+    fn the_urgent_literal_is_the_model_constant() {
+        assert_eq!(mm_model::post::POST_PRIORITY_URGENT, "urgent");
+        assert!(
+            super::SqlChannelStore::URGENT_PRIORITY_IN_SQL == mm_model::post::POST_PRIORITY_URGENT,
+            "the SQL literal and the model constant must agree"
+        );
+    }
+}
+
+/// Port of `SqlChannelStore.CountPostsAfter` (channel_store.go:2922). A free function because
+/// [`ChannelStore::update_last_viewed_at_post`] needs it on the same pool without going back
+/// through the trait.
+///
+/// The two counts come from **one** builder in Go, the second adding `RootId = ''` — so every
+/// other predicate is shared by construction. Spelled as two queries here; the `WHERE` clauses
+/// must stay in step, which is what the behaviour fixture asserts.
+#[tracing::instrument(skip(pool), fields(channel_id = %channel_id, timestamp))]
+pub async fn count_posts_after(
+    pool: &PgPool,
+    channel_id: &str,
+    timestamp: i64,
+    excluded_user_id: &str,
+) -> Result<(i64, i64), StoreError> {
+    // `Post.IsJoinLeaveMessage`'s ten types (post.go), as `NotEq` over a slice — Postgres
+    // `NOT IN`. Every other `system_*` type is counted.
+    const JOIN_LEAVE_TYPES: [&str; 10] = [
+        mm_model::post::POST_TYPE_JOIN_LEAVE,
+        mm_model::post::POST_TYPE_ADD_REMOVE,
+        mm_model::post::POST_TYPE_JOIN_CHANNEL,
+        mm_model::post::POST_TYPE_LEAVE_CHANNEL,
+        mm_model::post::POST_TYPE_JOIN_TEAM,
+        mm_model::post::POST_TYPE_LEAVE_TEAM,
+        mm_model::post::POST_TYPE_ADD_TO_CHANNEL,
+        mm_model::post::POST_TYPE_REMOVE_FROM_CHANNEL,
+        mm_model::post::POST_TYPE_ADD_TO_TEAM,
+        mm_model::post::POST_TYPE_REMOVE_FROM_TEAM,
+    ];
+    let excluded_types: Vec<String> = JOIN_LEAVE_TYPES.iter().map(|t| (*t).to_owned()).collect();
+
+    let unread = sqlx::query_scalar!(
+        r#"
+        SELECT count(*) AS "count!"
+          FROM posts
+         WHERE channelid = $1
+           AND createat > $2
+           AND NOT (type = ANY($3))
+           AND deleteat = 0
+           AND ($4 = '' OR userid <> $4)
+        "#,
+        channel_id,
+        timestamp,
+        &excluded_types,
+        excluded_user_id,
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: "failed to count Posts".to_owned(),
+        source,
+    })?;
+
+    let unread_root = sqlx::query_scalar!(
+        r#"
+        SELECT count(*) AS "count!"
+          FROM posts
+         WHERE channelid = $1
+           AND createat > $2
+           AND NOT (type = ANY($3))
+           AND deleteat = 0
+           AND ($4 = '' OR userid <> $4)
+           AND rootid = ''
+        "#,
+        channel_id,
+        timestamp,
+        &excluded_types,
+        excluded_user_id,
+    )
+    .fetch_one(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: "failed to count root Posts".to_owned(),
+        source,
+    })?;
+
+    Ok((unread, unread_root))
+}
+
 #[tracing::instrument(skip(pool), fields(channel_id = %channel_id, user_id = %user_id))]
 pub async fn get_channel_unread(
     pool: &PgPool,

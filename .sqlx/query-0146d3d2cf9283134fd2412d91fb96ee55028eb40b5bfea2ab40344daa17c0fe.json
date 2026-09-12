@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT c.id            AS \"channel_id!\",\n                   COALESCE(t.name, '') AS \"team_name!\",\n                   u.locale        AS \"user_locale!\",\n                   u.username      AS \"username!\"\n              FROM posts p\n              JOIN channels c ON p.channelid = c.id\n              LEFT JOIN teams t ON c.teamid = t.id\n              JOIN users u ON p.userid = u.id\n             WHERE p.id = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "channel_id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "team_name!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "user_locale!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "username!",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      true,
+      true
+    ]
+  },
+  "hash": "0146d3d2cf9283134fd2412d91fb96ee55028eb40b5bfea2ab40344daa17c0fe"
+}
