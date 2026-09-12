@@ -41,6 +41,7 @@
     "ShowFullName": true
   },
   "ServiceSettings": {
+    "AllowCookiesForSubdomains": false,
     "AllowPersistentNotifications": true,
     "AllowSyncedDrafts": true,
     "EnableBurnOnRead": true,
@@ -63,6 +64,8 @@
     "PostPriority": true,
     "ScheduledPosts": true,
     "SessionIdleTimeoutInMinutes": 43200,
+    "SessionLengthMobileInDays": 180,
+    "SessionLengthMobileInHours": 4320,
     "SiteURL": "",
     "UniqueEmojiReactionLimitPerPost": 50
   },

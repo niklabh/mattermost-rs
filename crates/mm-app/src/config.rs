@@ -576,6 +576,28 @@ pub struct Config {
     /// that guessed `0` would never revoke anything and would accept every session Go rejects.
     pub session_idle_timeout_in_minutes: i64,
 
+    /// `ServiceSettings.SessionLengthMobileInHours` (config.go:423, defaulted at :767).
+    ///
+    /// **Its default is a two-step cascade, not a constant.** Go fills
+    /// `SessionLengthMobileInDays` first — `180` on an update, `30` on a fresh config — and then
+    /// derives hours as `days * 24`. So the reachable defaults are **4320** and **720**, and
+    /// which one applies turns on the same `isUpdate` discriminator as
+    /// [`Config::extend_session_length_with_activity`]. Reading the hours field alone and
+    /// assuming a single constant is the mistake this comment exists to prevent.
+    ///
+    /// Read only by `attachDeviceIds` (api4/user.go:2787), where it sets both the session's new
+    /// `ExpiresAt` and the `Max-Age` of the session cookie — so a client that registers a device
+    /// id has its session length **replaced**, not extended.
+    pub session_length_mobile_in_hours: i64,
+
+    /// `ServiceSettings.AllowCookiesForSubdomains` (config.go:414, defaulted **`false`** at
+    /// :839).
+    ///
+    /// The whole of `App.GetCookieDomain` (app/config.go:191): when off — the default — the
+    /// cookie carries **no `Domain` attribute at all**, which scopes it to the exact host that
+    /// served it. See [`Config::cookie_domain`].
+    pub allow_cookies_for_subdomains: bool,
+
     /// `ServiceSettings.MaximumLoginAttempts` (config.go:383, defaulted **`10`** at :671).
     ///
     /// The lockout cap, and the predicate is strictly `<` in
@@ -778,6 +800,36 @@ impl Config {
         mm_model::go_path::clean(&String::from_utf8_lossy(&url.path))
     }
 
+    /// Port of `app.App.GetCookieDomain` (app/config.go:191).
+    ///
+    /// Returns the **hostname** of `SiteURL` when `AllowCookiesForSubdomains` is on, and `""`
+    /// otherwise — including when `SiteURL` will not parse, because Go's `if ... err == nil`
+    /// falls through to the same empty return. An empty string means the caller must omit the
+    /// `Domain` attribute entirely rather than send `Domain=`; see
+    /// [`crate::App::attach_device_ids_cookie`].
+    ///
+    /// `url.Hostname()` strips the port **and** the brackets around an IPv6 literal, which is why
+    /// this reaches for [`mm_model::go_url`]'s host splitting rather than taking the authority
+    /// verbatim.
+    pub fn cookie_domain(&self) -> String {
+        if !self.allow_cookies_for_subdomains {
+            return String::new();
+        }
+
+        let Some(site_url) = self.site_url.as_deref() else {
+            // Go dereferences a `*string` here, so a nil `SiteURL` would panic rather than
+            // return — unreachable in practice because `SetDefaults` plants `""`, which parses
+            // to an empty hostname. Empty is that same answer.
+            return String::new();
+        };
+
+        let Ok(url) = mm_model::go_url::go_parse(site_url) else {
+            return String::new();
+        };
+
+        go_hostname(&url.host)
+    }
+
     /// Port of `app.App.isBurnOnReadEnabled` (post_helpers.go:270).
     ///
     /// **Both halves default to true**, so on a stock server this is on — which is why
@@ -891,6 +943,11 @@ impl Default for Config {
             // that plants the `""`.
             site_url: None,
             session_idle_timeout_in_minutes: 43200,
+            // `30 * 24`. The fresh-install arm, for the same reason as
+            // `extend_session_length_with_activity` below: this constructor models `SetDefaults`
+            // over an empty config, which has no `SiteURL`.
+            session_length_mobile_in_hours: 720,
+            allow_cookies_for_subdomains: false,
             maximum_login_attempts: 10,
             // `new(!isUpdate)` with `isUpdate == false`, the same reasoning as
             // `extend_session_length_with_activity` below: an empty config is a fresh install.
@@ -1282,6 +1339,16 @@ impl Config {
                 "MM_SERVICESETTINGS_SESSIONIDLETIMEOUTINMINUTES",
                 default.session_idle_timeout_in_minutes,
             ),
+            session_length_mobile_in_hours: lookup_int(
+                lookup,
+                "MM_SERVICESETTINGS_SESSIONLENGTHMOBILEINHOURS",
+                default.session_length_mobile_in_hours,
+            ),
+            allow_cookies_for_subdomains: lookup_bool(
+                lookup,
+                "MM_SERVICESETTINGS_ALLOWCOOKIESFORSUBDOMAINS",
+                default.allow_cookies_for_subdomains,
+            ),
             maximum_login_attempts: lookup_int(
                 lookup,
                 "MM_SERVICESETTINGS_MAXIMUMLOGINATTEMPTS",
@@ -1561,6 +1628,18 @@ impl Config {
             session_idle_timeout_in_minutes: service
                 .session_idle_timeout_in_minutes
                 .unwrap_or(default.session_idle_timeout_in_minutes),
+            // The two-step cascade of `SetDefaults` (config.go:767), reproduced rather than
+            // collapsed: an explicit `SessionLengthMobileInHours` wins outright; failing that,
+            // an explicit `SessionLengthMobileInDays` is multiplied by 24; failing *that*,
+            // `isUpdate` chooses 180 days or 30. A document carrying only the days field is the
+            // middle branch and is the one a collapsed port would get wrong.
+            session_length_mobile_in_hours: service
+                .session_length_mobile_in_hours
+                .or_else(|| service.session_length_mobile_in_days.map(|days| days * 24))
+                .unwrap_or(if is_update { 180 * 24 } else { 30 * 24 }),
+            allow_cookies_for_subdomains: service
+                .allow_cookies_for_subdomains
+                .unwrap_or(default.allow_cookies_for_subdomains),
             // The one setting here whose default is computed rather than looked up. `new(!isUpdate)`
             // (config.go:729), and the comment above it in the Go source says why: "Must be
             // manually enabled for existing installations." Resolving it against
@@ -1842,6 +1921,15 @@ struct ServiceSettingsDocument {
     webserver_mode: Option<String>,
     #[serde(rename = "SessionIdleTimeoutInMinutes")]
     session_idle_timeout_in_minutes: Option<i64>,
+    #[serde(rename = "SessionLengthMobileInHours")]
+    session_length_mobile_in_hours: Option<i64>,
+    /// Only ever read as the fallback for the field above — Go derives hours from days when the
+    /// hours field is absent, so a document written before the hours setting existed still
+    /// produces the operator's intended length.
+    #[serde(rename = "SessionLengthMobileInDays")]
+    session_length_mobile_in_days: Option<i64>,
+    #[serde(rename = "AllowCookiesForSubdomains")]
+    allow_cookies_for_subdomains: Option<bool>,
     #[serde(rename = "MaximumLoginAttempts")]
     maximum_login_attempts: Option<i64>,
     #[serde(rename = "TerminateSessionsOnPasswordChange")]
@@ -2376,6 +2464,12 @@ mod go_parity {
             extend_session_length_with_activity: false,
             terminate_sessions_on_password_change: false,
             ai_recap_settings_enable: Some(true),
+            // The fifth adjustment, and the same reason as the two `!isUpdate` booleans above:
+            // `Config::default` models a *fresh* config, where the mobile length is 30 days.
+            // The live server's document is an update, so Go wrote 180 days — 4320 hours — and
+            // the fixture now carries both that and the `SessionLengthMobileInDays` it was
+            // derived from, so this is Go's own number rather than a transcribed one.
+            session_length_mobile_in_hours: 4320,
             ..Config::default()
         };
 
@@ -2487,6 +2581,114 @@ mod go_parity {
         );
     }
 
+    /// `SessionLengthMobileInHours` has a **three-step** fallback, and each step is a different
+    /// number a client's session length depends on. Every branch, in the order Go tries them.
+    #[test]
+    fn the_mobile_session_length_falls_back_through_days_then_is_update() {
+        let hours = |document: &str| {
+            Config::from_document(document)
+                .expect("valid document")
+                .session_length_mobile_in_hours
+        };
+
+        // 1. An explicit hours value wins outright, even beside a contradictory days value.
+        assert_eq!(
+            hours(
+                r#"{"ServiceSettings":{"SiteURL":"","SessionLengthMobileInHours":12,"SessionLengthMobileInDays":99}}"#
+            ),
+            12
+        );
+        // 2. Failing that, days * 24 — the branch a port that only read the hours field misses,
+        //    and the one every document written before the hours setting existed takes.
+        assert_eq!(
+            hours(r#"{"ServiceSettings":{"SiteURL":"","SessionLengthMobileInDays":7}}"#),
+            7 * 24
+        );
+        // 3. Failing both, `isUpdate` chooses 180 days or 30 — 4320 hours against 720. A
+        //    persisted document always has a SiteURL and therefore always takes the first.
+        assert_eq!(
+            hours(r#"{"ServiceSettings":{"SiteURL":""}}"#),
+            180 * 24,
+            "a persisted document is an update, so the mobile default is 180 days"
+        );
+        assert_eq!(
+            hours(r#"{"ServiceSettings":{"PostPriority":true}}"#),
+            30 * 24,
+            "no SiteURL is a fresh install, so it is 30 days"
+        );
+        // The four answers must be four distinct numbers, or the assertions above are satisfied
+        // by a function that ignores its input.
+        assert_eq!(
+            [12, 168, 4320, 720]
+                .iter()
+                .collect::<std::collections::HashSet<_>>()
+                .len(),
+            4
+        );
+    }
+
+    /// `GetCookieDomain`'s flag arm, on the one input that matters — the flag is off by default,
+    /// so a stock server sends **no** `Domain` attribute however its SiteURL is spelled. The
+    /// per-URL hostnames are asserted against Go in `mm_api::sessions::cookie_domain_matches_go`.
+    #[test]
+    fn the_cookie_domain_is_empty_unless_subdomains_are_allowed() {
+        let site_url = Some("https://mattermost.example.com:8065/sub".to_owned());
+        assert_eq!(
+            Config {
+                site_url: site_url.clone(),
+                allow_cookies_for_subdomains: false,
+                ..Config::default()
+            }
+            .cookie_domain(),
+            ""
+        );
+        assert_eq!(
+            Config {
+                site_url,
+                allow_cookies_for_subdomains: true,
+                ..Config::default()
+            }
+            .cookie_domain(),
+            "mattermost.example.com"
+        );
+        // Default-off, which is what makes the empty answer the reachable one.
+        assert!(!Config::default().allow_cookies_for_subdomains);
+    }
+
+    /// `url.Hostname()` over Go's own answers for every raw `URL.Host` shape in the corpus.
+    ///
+    /// The two rules a naive split on the last colon gets wrong are both here: the port must be
+    /// **numeric** to be a port (`example.com:https` keeps its whole authority), and the bracket
+    /// strip runs **after** the split, so an unclosed IPv6 literal is cut inside
+    /// (`[::1` is `[:`). The second was asserted here by hand at the wrong value before this
+    /// corpus existed, which is the argument for the corpus.
+    #[test]
+    fn the_hostname_split_matches_go() {
+        let oracle: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../fixtures/behaviour_session_write.json"
+        ))
+        .expect("the generated oracle parses");
+        let cases = oracle["split_host_port"]
+            .as_object()
+            .expect("the section is an object");
+        assert!(cases.len() >= 15, "the corpus shrank");
+
+        for (host, want) in cases {
+            assert_eq!(
+                go_hostname(host.as_bytes()),
+                want.as_str().expect("a string"),
+                "Hostname() for Host={host:?}"
+            );
+        }
+
+        // The corpus must contain at least one row where the input survives whole, one where a
+        // port comes off and one where brackets do — otherwise the loop is satisfied by an
+        // identity function or by a truncation.
+        assert_eq!(cases["example.com"], "example.com");
+        assert_eq!(cases["example.com:8065"], "example.com");
+        assert_eq!(cases["[::1]:8065"], "::1");
+    }
+
     /// Presence decides it, not truthiness. An empty `SiteURL` is a non-nil pointer in Go and it
     /// is exactly what the live row holds, so reading `""` as "unset" would invert the default on
     /// every stock server.
@@ -2555,8 +2757,8 @@ mod go_parity {
             .sum();
 
         assert_eq!(
-            keys, 46,
-            "the fixture covers {keys} settings and Config reads 46 from the document. \
+            keys, 49,
+            "the fixture covers {keys} settings and Config reads 49 from the document. \
              Add the new key to scripts/dump-config-fixture.sh and re-run it — a modelled \
              setting the fixture does not carry is a setting Go's own output never checked"
         );
@@ -2744,6 +2946,9 @@ mod go_parity {
                 site_url: Some("x".to_owned()),
                 extend_session_length_with_activity: false,
                 terminate_sessions_on_password_change: false,
+                // Also `!isUpdate`-shaped: a document with a `SiteURL` is an update, so the
+                // mobile session length defaults to 180 days rather than 30.
+                session_length_mobile_in_hours: 4320,
                 ..Config::default()
             }
         );
@@ -4208,6 +4413,41 @@ pub fn generate_client_config(
 }
 
 /// `strings.Join(slice, ",")` on a Go slice that may be nil — which joins to `""`.
+/// Port of `url.URL.Hostname` over `splitHostPort` (net/url/url.go:1180).
+///
+/// `GoUrl::host` is `host` **or** `host:port`, so the port has to come off before the value can
+/// be used as a cookie `Domain`. Two details a hand-rolled `split(':')` gets wrong:
+///
+/// - **The port must be numeric to be a port.** Go takes the *last* colon and only strips it when
+///   everything after it is a digit — `strings.LastIndexByte` plus `validOptionalPort`. So
+///   `example.com:https` keeps its whole authority as the hostname rather than losing the scheme
+///   name, and an unbracketed IPv6 literal is not silently truncated at its final group.
+/// - **Brackets around an IPv6 literal are stripped**, and only when they are balanced at both
+///   ends. `[::1]:8065` is `::1`; `[::1]` alone is also `::1`.
+///
+/// Splitting first and unbracketing second is Go's order and matters: `[::1]:8065` needs the port
+/// gone before the trailing `]` is at the end of the string.
+fn go_hostname(host: &[u8]) -> String {
+    let mut host = host;
+
+    if let Some(colon) = host.iter().rposition(|&b| b == b':')
+        && host[colon + 1..].iter().all(|b| b.is_ascii_digit())
+    {
+        // `validOptionalPort(host[colon:])`: the substring is `":"` plus the rest, and Go accepts
+        // it when every byte after the colon is a digit — including **none at all**, so a
+        // trailing bare `:` is a valid empty port and comes off.
+        host = &host[..colon];
+    }
+
+    if host.len() >= 2 && host.first() == Some(&b'[') && host.last() == Some(&b']') {
+        host = &host[1..host.len() - 1];
+    }
+
+    // The host is percent-decoded by `go_parse`, so it can in principle hold bytes no `str` can.
+    // A cookie `Domain` is a header value; lossy is the only thing that could be sent anyway.
+    String::from_utf8_lossy(host).into_owned()
+}
+
 fn join_commas(values: Option<&[String]>) -> String {
     values.unwrap_or(&[]).join(",")
 }
