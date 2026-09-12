@@ -930,6 +930,20 @@ async fn the_brand_upload_forwards_before_it_writes() {
             .as_u16()
             == 200
     };
+    // **Purge first, do not merely assert.** The second half of this test uploads a brand image,
+    // and a mutation run that panics between the upload and the delete below leaves the file
+    // behind — after which every later run fails on its own debris rather than on the mutation.
+    // The harness rolls back source, not state ([D-385]), so the purge belongs here.
+    let _ = send(
+        &client,
+        reqwest::Method::DELETE,
+        RUST,
+        "/api/v4/brand/image",
+        &token,
+        None,
+        Vec::new(),
+    )
+    .await;
     assert!(
         !brand_exists().await,
         "this test starts from an installation with no brand image"
