@@ -564,10 +564,10 @@ async fn both_servers_publish_one_multiple_channels_viewed() {
 
     let seen = |probe: &SocketProbe| !probe.events_named("multiple_channels_viewed").is_empty();
     go_socket
-        .collect_until(common::EVENT_WINDOW, |_| false)
+        .collect_until(Duration::from_secs(3), |_| false)
         .await;
     rust_socket
-        .collect_until(common::EVENT_WINDOW, |_| false)
+        .collect_until(Duration::from_secs(3), |_| false)
         .await;
 
     let go_events = go_socket.events_named("multiple_channels_viewed");
@@ -686,7 +686,7 @@ async fn omitting_the_client_flag_publishes_thread_read_changed_on_both() {
 
     let waited = async |probe: &mut SocketProbe| {
         probe
-            .collect_until(common::EVENT_WINDOW, |frames| {
+            .collect_until(Duration::from_secs(3), |frames| {
                 frames
                     .iter()
                     .any(|f| f.get("event").and_then(|e| e.as_str()) == Some("thread_read_changed"))

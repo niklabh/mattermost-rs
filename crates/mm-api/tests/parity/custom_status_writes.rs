@@ -107,7 +107,7 @@ async fn wait_for_update(socket: &mut SocketProbe, user_id: &str, text: &str) {
     let user_id = user_id.to_owned();
     let text = text.to_owned();
     socket
-        .collect_until(common::EVENT_WINDOW, move |frames| {
+        .collect_until(Duration::from_secs(5), move |frames| {
             frames.iter().any(|frame| {
                 frame["event"] == "user_updated"
                     && frame["data"]["user"]["id"] == user_id

@@ -172,7 +172,7 @@ async fn wait_for_reaction_event(probe: &mut SocketProbe, event_type: &str, post
     let event_type = event_type.to_owned();
     let post_id = post_id.to_owned();
     probe
-        .collect_until(common::EVENT_WINDOW, move |frames| {
+        .collect_until(Duration::from_secs(5), move |frames| {
             frames.iter().any(|frame| {
                 frame["event"] == event_type.as_str()
                     && frame["data"]["reaction"]

@@ -32,7 +32,7 @@ const HELLO_SHARED_KEYS: &[&str] = &["connection_id", "server_version", "server_
 /// [`SocketProbe::responses`]), so waiting for the count is exact rather than merely generous.
 async fn wait_for_responses(probe: &mut SocketProbe, count: usize) {
     probe
-        .collect_until(common::EVENT_WINDOW, move |frames| {
+        .collect_until(Duration::from_secs(5), move |frames| {
             frames
                 .iter()
                 .filter(|frame| frame.get("seq_reply").is_some() || frame.get("status").is_some())

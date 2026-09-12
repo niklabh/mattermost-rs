@@ -16,6 +16,8 @@
 //! docker compose up -d && scripts/parity.sh -p mm-api --test parity system_post
 //! ```
 
+use std::time::Duration;
+
 use crate::common;
 
 use common::{
@@ -647,7 +649,7 @@ async fn a_membership_system_post_publishes_a_posted_event() {
         // whole-suite failure this test had on its first full run.
         let wanted_channel = channel.clone();
         let arrived = probe
-            .collect_until(common::EVENT_WINDOW, move |collected| {
+            .collect_until(Duration::from_secs(8), move |collected| {
                 collected.iter().any(|frame| {
                     frame.get("event").and_then(|e| e.as_str()) == Some("posted")
                         && frame["data"]["post"].as_str().is_some_and(|p| {
