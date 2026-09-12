@@ -12,6 +12,22 @@ pub trait UserStore {
     /// Port of `SqlUserStore.Get` (user_store.go:609).
     fn get(&self, id: &str) -> impl std::future::Future<Output = Result<User, StoreError>> + Send;
 
+    /// Port of `SqlUserStore.UpdateUpdateAt` (user_store.go) — one column, no read, no
+    /// validation.
+    ///
+    /// **The timestamp is minted before the write and returned even when the write fails**
+    /// (`return curTime, errors.Wrapf(...)`), and Go's caller only checks the error. It is also
+    /// not an upsert: an unknown id updates zero rows and is reported as success, which is why
+    /// `postProcessTeamMemberLeave` cannot notice a user that vanished under it.
+    ///
+    /// What it is *for* is `GET /users/{id}`'s etag: every client caching a user re-fetches after
+    /// this runs. Skipping it leaves the caches stale — which is exactly what [D-242] records for
+    /// the join path.
+    fn update_update_at(
+        &self,
+        user_id: &str,
+    ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
+
     /// Port of `SqlUserStore.Count` (user_store.go:1471) for the **one** options shape reachable
     /// today: `UserCountOptions{IncludeBotAccounts: true}` with nil view restrictions, which is
     /// what `App.GetTotalUsersStats` passes.
@@ -748,6 +764,19 @@ fn user_from_row(row: UserRow) -> Result<User, StoreError> {
 }
 
 impl UserStore for SqlUserStore {
+    #[tracing::instrument(skip(self), fields(user_id = %user_id))]
+    async fn update_update_at(&self, user_id: &str) -> Result<i64, StoreError> {
+        let now = mm_model::utils::get_millis();
+        sqlx::query!("UPDATE users SET updateat = $1 WHERE id = $2", now, user_id)
+            .execute(&self.pool)
+            .await
+            .map_err(|source| StoreError::Db {
+                context: format!("failed to update User with userId={user_id}"),
+                source,
+            })?;
+        Ok(now)
+    }
+
     /// # Two predicates, and one of them is three-valued
     ///
     /// `DeleteAt = 0` excludes deactivated users. `RemoteId = '' OR RemoteId IS NULL` excludes

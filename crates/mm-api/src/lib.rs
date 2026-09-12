@@ -702,7 +702,10 @@ pub fn router(state: AppState) -> Router {
         )
         .route(
             "/api/v4/teams/{team_id}/members/{user_id}",
-            partially_migrated_with_ids(&state, get(teams::get_team_member)),
+            partially_migrated_with_ids(
+                &state,
+                get(teams::get_team_member).delete(team_member_writes::remove_team_member),
+            ),
         )
         // `BaseRoutes.TeamMember.Handle("/roles")` and `.Handle("/schemeRoles")`
         // (api4/team.go:69-70). **`schemeRoles` is camelCase**, matched literally by gorilla and

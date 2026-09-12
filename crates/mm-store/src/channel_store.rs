@@ -521,6 +521,29 @@ pub trait ChannelStore {
 
     /// Port of `SqlChannelStore.RemoveMember` (channel_store.go:2802), which is
     /// `RemoveMembers` (channel_store.go:2771) with a one-element list.
+    /// Port of `SqlChannelStore.GetTeamSpaceChannelsForUser` (channel_store.go) — the space
+    /// channels of one team that one user belongs to, in `Channels.Id` order.
+    ///
+    /// # Why a separate query exists at all
+    ///
+    /// `messageChannelTypes` is `('O','P','D','G')`, so [`get_channels`] — and every other
+    /// membership listing — **cannot see a space channel**. Its `ChannelMembers` row therefore
+    /// survives an ordinary team leave and keeps authorising space-scoped websocket delivery to a
+    /// former member. That is the bug this function exists to prevent, and it is invisible in any
+    /// test that only looks at the four message types.
+    ///
+    /// Zero rows is an empty list, **not** `ErrNotFound` — unlike [`get_channels`], whose empty
+    /// result is an error. The caller does not special-case it.
+    ///
+    /// Spaces need `FeatureFlags.EnableDocs`, off on this deployment, so this returns nothing in
+    /// practice today; the cascade is written because the flag is the only thing between here
+    /// and a leaked membership.
+    fn get_team_space_channels_for_user(
+        &self,
+        team_id: &str,
+        user_id: &str,
+    ) -> impl std::future::Future<Output = Result<ChannelList, StoreError>> + Send;
+
     fn remove_member(
         &self,
         channel_id: &str,
@@ -1079,6 +1102,15 @@ impl ChannelStore for SqlChannelStore {
         props: &StringMap,
     ) -> Result<ChannelMember, StoreError> {
         update_member_notify_props(&self.pool, channel_id, user_id, props).await
+    }
+
+    #[tracing::instrument(skip(self), fields(team_id = %team_id, user_id = %user_id, found))]
+    async fn get_team_space_channels_for_user(
+        &self,
+        team_id: &str,
+        user_id: &str,
+    ) -> Result<ChannelList, StoreError> {
+        get_team_space_channels_for_user(&self.pool, team_id, user_id).await
     }
 
     #[tracing::instrument(skip_all, fields(channel_id = %channel_id, user_id = %user_id))]
@@ -3151,6 +3183,74 @@ pub async fn get_channels(
         });
     }
 
+    let channels = rows
+        .into_iter()
+        .map(channel_from_row)
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(ChannelList(channels))
+}
+
+/// Port of `SqlChannelStore.GetTeamSpaceChannelsForUser` — see the trait.
+pub async fn get_team_space_channels_for_user(
+    pool: &PgPool,
+    team_id: &str,
+    user_id: &str,
+) -> Result<ChannelList, StoreError> {
+    let rows = sqlx::query_as!(
+        ChannelRow,
+        r#"
+        SELECT ch.id,
+               ch.createat,
+               ch.updateat,
+               ch.deleteat,
+               ch.teamid,
+               ch.type::text AS "channel_type!",
+               ch.displayname,
+               ch.name,
+               ch.header,
+               ch.purpose,
+               ch.lastpostat,
+               ch.totalmsgcount,
+               ch.extraupdateat,
+               ch.creatorid,
+               ch.schemeid,
+               ch.groupconstrained,
+               ch.autotranslation,
+               ch.shared,
+               ch.totalmsgcountroot,
+               ch.lastrootpostat,
+               ch.bannerinfo,
+               ch.defaultcategoryname,
+               ch.discoverable,
+               EXISTS (
+                   SELECT 1 FROM accesscontrolpolicies acp
+                    WHERE acp.id = ch.id AND acp.type = 'channel'
+               ) AS "policy_enforced!",
+               COALESCE((
+                   SELECT acp.active FROM accesscontrolpolicies acp
+                    WHERE acp.id = ch.id AND acp.type = 'channel' AND acp.active = TRUE
+                    LIMIT 1
+               ), false) AS "policy_is_active!"
+          FROM channels ch
+          JOIN channelmembers cm ON ch.id = cm.channelid
+         WHERE ch.teamid = $1
+           AND ch.type = 'S'
+           AND cm.userid = $2
+         ORDER BY ch.id
+        "#,
+        team_id,
+        user_id,
+    )
+    .fetch_all(pool)
+    .await
+    .map_err(|source| StoreError::Db {
+        context: format!(
+            "failed to find space Channels with teamId={team_id} and userId={user_id}"
+        ),
+        source,
+    })?;
+
+    tracing::Span::current().record("found", rows.len());
     let channels = rows
         .into_iter()
         .map(channel_from_row)

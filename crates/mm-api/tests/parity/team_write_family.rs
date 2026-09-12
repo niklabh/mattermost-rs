@@ -11,6 +11,8 @@
 //! here writes to the seeded fixture team; each test creates its own and leaves it alive, per
 //! [D-155]'s note that Go's `town-square`/`off-topic` are orphaned rather than deleted.
 
+use std::time::Duration;
+
 use crate::common;
 
 use common::{GO, RUST, client, create_team, go_minted_token, stack_enabled};
@@ -783,4 +785,488 @@ async fn the_create_refusals_agree() {
         assert_eq!(status, 400, "body {body}: {raw}");
         assert_eq!(error_id(&raw), expected, "body {body}");
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// removeTeamMember
+// ---------------------------------------------------------------------------------------------
+
+/// Everything one removal touches, asserted on both servers against the same user: the
+/// membership row, the channel memberships, the `town-square` system post, the sidebar
+/// categories, the team-category preferences and the user's `update_at`.
+///
+/// Two teams, one user. The user is a member of both, so the two removals differ only in which
+/// server ran the cascade — which is what makes the *absence* of a step visible rather than the
+/// normal state of a fresh fixture.
+#[tokio::test]
+async fn a_removal_cascades_the_same_way_on_both_servers() {
+    if !stack_enabled() {
+        return;
+    }
+    let http = client();
+    let admin = go_minted_token(&http).await;
+    let go_team = create_team(&http, &admin, "twfrmg").await;
+    let rust_team = create_team(&http, &admin, "twfrmr").await;
+    let plain = common::create_plain_user(&http, &admin, &go_team, "twfremove").await;
+    let plain_username = common::plain_username("twfremove");
+
+    // The same user on the second team, and one extra private channel per team so the cascade has
+    // something beyond `town-square`/`off-topic` to clear.
+    add_user_to_team(&http, &admin, &rust_team, &plain.id).await;
+    let mut extra = Vec::new();
+    for (team, tag) in [(&go_team, "twfrmgc"), (&rust_team, "twfrmrc")] {
+        let channel = common::create_channel_typed(&http, &admin, team, tag, "P").await;
+        common::add_user_to_channel(&http, &admin, &channel, &plain.id).await;
+        extra.push(channel);
+    }
+
+    // A preference in each team's category — the category *is* the team id — and a sidebar
+    // category, which joining a team creates on its own.
+    for team in [&go_team, &rust_team] {
+        let (status, raw) = send(
+            &http,
+            reqwest::Method::PUT,
+            GO,
+            &plain.token,
+            &format!("/api/v4/users/{}/preferences", plain.id),
+            Some(&serde_json::json!([{
+                "user_id": plain.id,
+                "category": team,
+                "name": "last_channel",
+                "value": "mmrs",
+            }])),
+        )
+        .await;
+        assert_eq!(status, 200, "seeding the preference: {raw}");
+    }
+
+    let before: serde_json::Value = serde_json::from_str(
+        &send(
+            &http,
+            reqwest::Method::GET,
+            GO,
+            &admin,
+            &format!("/api/v4/users/{}", plain.id),
+            None,
+        )
+        .await
+        .1,
+    )
+    .expect("a user");
+    let update_at_before = before["update_at"].as_i64().expect("an update_at");
+
+    for (base, team_id, channel_id, expected_post) in [
+        (
+            GO,
+            &go_team,
+            &extra[0],
+            (
+                "system_remove_from_team",
+                format!("{} removed from the team.", plain_username),
+            ),
+        ),
+        (
+            RUST,
+            &rust_team,
+            &extra[1],
+            (
+                "system_remove_from_team",
+                format!("{} removed from the team.", plain_username),
+            ),
+        ),
+    ] {
+        // Sanity: the fixtures exist before the removal, or nothing below proves anything.
+        plant_sidebar_channel(&plain.id, team_id, channel_id).await;
+        let before_sidebar = sidebar_row_counts(&plain.id, team_id).await;
+        if let Some((categories, channels)) = before_sidebar {
+            assert!(
+                categories > 0 && channels > 0,
+                "{base}: the fixture must have sidebar rows to lose, got {categories}/{channels}"
+            );
+        }
+        assert!(
+            preference_exists(&http, &plain.token, &plain.id, team_id).await,
+            "{base}: the seeded preference is there"
+        );
+
+        let (status, raw) = send(
+            &http,
+            reqwest::Method::DELETE,
+            base,
+            &admin,
+            &format!("/api/v4/teams/{team_id}/members/{}", plain.id),
+            None,
+        )
+        .await;
+        assert_eq!(status, 200, "{base}: {raw}");
+        assert_eq!(
+            raw, r#"{"status":"OK"}"#,
+            "{base}: ReturnStatusOK, no newline"
+        );
+
+        // **The row is soft-deleted and stripped of its roles, and it is still readable.**
+        // `getTeamMember` has no `DeleteAt` predicate — measured, not assumed: the first draft of
+        // this test expected a 404 and Go answered 200. So the assertion has to be on the two
+        // columns `RemoveTeamMember` writes, which is also the pair a port can get half right.
+        let (status, raw) = send(
+            &http,
+            reqwest::Method::GET,
+            GO,
+            &admin,
+            &format!("/api/v4/teams/{team_id}/members/{}", plain.id),
+            None,
+        )
+        .await;
+        assert_eq!(status, 200, "{base}: the row survives the removal: {raw}");
+        let member: serde_json::Value = serde_json::from_str(&raw).expect("a member");
+        assert!(
+            member["delete_at"].as_i64().unwrap_or(0) > 0,
+            "{base}: DeleteAt is stamped: {raw}"
+        );
+        // **`Roles` is *not* cleared in the database**, on either server. `RemoveTeamMember`
+        // assigns `teamMember.Roles = ""`, but `UpdateMember` writes `ExplicitRoles` into the
+        // `Roles` column — so the assignment touches only the in-memory struct and the read still
+        // computes `team_user` from `SchemeUser`. Measured on Go first; asserted here so a port
+        // that "fixed" it by clearing the column would fail.
+        assert_eq!(
+            member["roles"].as_str(),
+            Some("team_user"),
+            "{base}: the scheme-derived roles survive"
+        );
+
+        // The private channel's membership is gone too.
+        let (status, _raw) = send(
+            &http,
+            reqwest::Method::GET,
+            GO,
+            &admin,
+            &format!("/api/v4/channels/{channel_id}/members/{}", plain.id),
+            None,
+        )
+        .await;
+        assert_eq!(status, 404, "{base}: the channel membership cascaded");
+
+        // The sidebar and the team-category preferences are cleared.
+        if before_sidebar.is_some() {
+            assert_eq!(
+                sidebar_row_counts(&plain.id, team_id).await,
+                Some((0, 0)),
+                "{base}: ClearSidebarOnTeamLeave empties both tables"
+            );
+        }
+        assert!(
+            !preference_exists(&http, &plain.token, &plain.id, team_id).await,
+            "{base}: DeleteCategory(user, team_id)"
+        );
+
+        // The system post, authored by the removed user, in `town-square`.
+        let town_square: serde_json::Value = serde_json::from_str(
+            &send(
+                &http,
+                reqwest::Method::GET,
+                GO,
+                &admin,
+                &format!("/api/v4/teams/{team_id}/channels/name/town-square"),
+                None,
+            )
+            .await
+            .1,
+        )
+        .expect("a channel");
+        let town_square_id = town_square["id"].as_str().expect("an id");
+        let posts: serde_json::Value = serde_json::from_str(
+            &send(
+                &http,
+                reqwest::Method::GET,
+                GO,
+                &admin,
+                &format!("/api/v4/channels/{town_square_id}/posts?per_page=50"),
+                None,
+            )
+            .await
+            .1,
+        )
+        .expect("a post list");
+        let matched = posts["posts"]
+            .as_object()
+            .expect("a post map")
+            .values()
+            .find(|post| post["type"] == expected_post.0 && post["user_id"] == plain.id.as_str());
+        let matched =
+            matched.unwrap_or_else(|| panic!("{base}: no {} post in town-square", expected_post.0));
+        assert_eq!(
+            matched["message"].as_str(),
+            Some(expected_post.1.as_str()),
+            "{base}: the message text"
+        );
+        assert_eq!(
+            matched["props"]["username"].as_str(),
+            Some(plain_username.as_str()),
+            "{base}: the username prop"
+        );
+    }
+
+    // `UpdateUpdateAt` ran at least once.
+    let after: serde_json::Value = serde_json::from_str(
+        &send(
+            &http,
+            reqwest::Method::GET,
+            GO,
+            &admin,
+            &format!("/api/v4/users/{}", plain.id),
+            None,
+        )
+        .await
+        .1,
+    )
+    .expect("a user");
+    assert!(
+        after["update_at"].as_i64().unwrap_or(0) > update_at_before,
+        "postProcessTeamMemberLeave bumps Users.UpdateAt"
+    );
+
+    // **A second removal of the same user is a 200, not a 400.** `GetTeamMember` has no
+    // `DeleteAt` predicate, so `LeaveTeam` finds the soft-deleted row and runs the whole cascade
+    // again — the route is idempotent. Measured on Go first; the 400
+    // (`api.team.remove_user_from_team.missing.app_error`) is reachable only for a user who was
+    // *never* a member, which the next loop asks for.
+    for (base, team_id) in [(GO, &go_team), (RUST, &rust_team)] {
+        let (status, raw) = send(
+            &http,
+            reqwest::Method::DELETE,
+            base,
+            &admin,
+            &format!("/api/v4/teams/{team_id}/members/{}", plain.id),
+            None,
+        )
+        .await;
+        assert_eq!(status, 200, "{base}: removing twice is idempotent: {raw}");
+    }
+
+    // A user who was never on the team is the 400.
+    let stranger = common::create_plain_user(&http, &admin, &go_team, "twfstranger").await;
+    for (base, team_id) in [(GO, &go_team), (RUST, &rust_team)] {
+        // `twfstranger` joined `go_team`, so only `rust_team` can answer the never-a-member case;
+        // the `go_team` pass is the *removal* that makes the next one meaningful.
+        let (status, raw) = send(
+            &http,
+            reqwest::Method::DELETE,
+            base,
+            &admin,
+            &format!("/api/v4/teams/{team_id}/members/{}", stranger.id),
+            None,
+        )
+        .await;
+        if team_id == &rust_team {
+            assert_eq!(status, 400, "{base}: never a member: {raw}");
+            assert_eq!(
+                error_id(&raw),
+                "api.team.remove_user_from_team.missing.app_error",
+                "{base}"
+            );
+        } else {
+            assert_eq!(status, 200, "{base}: {raw}");
+        }
+    }
+    common::delete_plain_user(&http, &admin, &stranger.id).await;
+
+    common::delete_plain_user(&http, &admin, &plain.id).await;
+}
+
+/// **Leaving is not a permission.** The gate is inside `if session.UserId != params.UserId`, so an
+/// ordinary member with no team permissions can remove themselves — and the same member removing
+/// *someone else* is a 403. The leave also posts the other message: "left", not "removed".
+#[tokio::test]
+async fn a_self_removal_needs_no_permission_and_posts_the_other_message() {
+    if !stack_enabled() {
+        return;
+    }
+    let http = client();
+    let admin = go_minted_token(&http).await;
+    let team_id = create_team(&http, &admin, "twfself").await;
+    let leaver = common::create_plain_user(&http, &admin, &team_id, "twfleave").await;
+    let leaver_username = common::plain_username("twfleave");
+    let bystander = common::create_plain_user(&http, &admin, &team_id, "twfstay").await;
+
+    // Removing someone else is a 403 on both servers.
+    for base in [GO, RUST] {
+        let (status, raw) = send(
+            &http,
+            reqwest::Method::DELETE,
+            base,
+            &leaver.token,
+            &format!("/api/v4/teams/{team_id}/members/{}", bystander.id),
+            None,
+        )
+        .await;
+        assert_eq!(status, 403, "{base}: {raw}");
+    }
+
+    // Removing yourself is a 200, from Rust, with no permission at all.
+    let (status, raw) = send(
+        &http,
+        reqwest::Method::DELETE,
+        RUST,
+        &leaver.token,
+        &format!("/api/v4/teams/{team_id}/members/{}", leaver.id),
+        None,
+    )
+    .await;
+    assert_eq!(status, 200, "a self-removal needs no permission: {raw}");
+
+    let town_square: serde_json::Value = serde_json::from_str(
+        &send(
+            &http,
+            reqwest::Method::GET,
+            GO,
+            &admin,
+            &format!("/api/v4/teams/{team_id}/channels/name/town-square"),
+            None,
+        )
+        .await
+        .1,
+    )
+    .expect("a channel");
+    let town_square_id = town_square["id"].as_str().expect("an id");
+    let posts: serde_json::Value = serde_json::from_str(
+        &send(
+            &http,
+            reqwest::Method::GET,
+            GO,
+            &admin,
+            &format!("/api/v4/channels/{town_square_id}/posts?per_page=50"),
+            None,
+        )
+        .await
+        .1,
+    )
+    .expect("a post list");
+    let matched = posts["posts"]
+        .as_object()
+        .expect("a post map")
+        .values()
+        .find(|post| post["user_id"] == leaver.id.as_str() && post["type"] == "system_leave_team")
+        .expect("a system_leave_team post");
+    assert_eq!(
+        matched["message"].as_str(),
+        Some(format!("{} left the team.", leaver_username).as_str()),
+        "a self-removal posts `left the team`, not `removed from the team`"
+    );
+
+    common::delete_plain_user(&http, &admin, &leaver.id).await;
+    common::delete_plain_user(&http, &admin, &bystander.id).await;
+}
+
+/// Add `user_id` to `team_id` through Go's API.
+async fn add_user_to_team(http: &reqwest::Client, admin_token: &str, team_id: &str, user_id: &str) {
+    let (status, raw) = send(
+        http,
+        reqwest::Method::POST,
+        GO,
+        admin_token,
+        &format!("/api/v4/teams/{team_id}/members"),
+        Some(&serde_json::json!({ "team_id": team_id, "user_id": user_id })),
+    )
+    .await;
+    assert!(
+        (200..300).contains(&status),
+        "adding {user_id} to {team_id} failed: {raw}"
+    );
+}
+
+/// Put `channel_id` into one of the user's sidebar categories for `team_id`, by hand.
+///
+/// Joining a team creates the three default **categories** and no `SidebarChannels` rows at all
+/// — measured: 3/0. So without this the first of `ClearSidebarOnTeamLeave`'s two statements has
+/// nothing to delete and any mutation of it survives. Returns whether the row was planted.
+async fn plant_sidebar_channel(user_id: &str, team_id: &str, channel_id: &str) -> bool {
+    let Ok(url) = std::env::var("DATABASE_URL") else {
+        return false;
+    };
+    let Ok(pool) = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .acquire_timeout(Duration::from_secs(5))
+        .connect(&url)
+        .await
+    else {
+        return false;
+    };
+    let category: Option<String> = sqlx::query_scalar(
+        "SELECT id FROM sidebarcategories WHERE userid = $1 AND teamid = $2 ORDER BY id LIMIT 1",
+    )
+    .bind(user_id)
+    .bind(team_id)
+    .fetch_optional(&pool)
+    .await
+    .expect("the category lookup runs");
+    let Some(category) = category else {
+        return false;
+    };
+    sqlx::query(
+        "INSERT INTO sidebarchannels (channelid, userid, categoryid, sortorder) \
+         VALUES ($1, $2, $3, 0) ON CONFLICT DO NOTHING",
+    )
+    .bind(channel_id)
+    .bind(user_id)
+    .bind(&category)
+    .execute(&pool)
+    .await
+    .expect("the sidebar channel is planted");
+    true
+}
+
+/// The user's sidebar rows for one team, **read straight from the database**.
+///
+/// Not through `GET /users/{id}/teams/{id}/channels/categories`: that handler *creates* the
+/// initial categories when it finds none, so it answers non-empty however well the cascade
+/// worked. The first draft of this test used it and failed against Go.
+async fn sidebar_row_counts(user_id: &str, team_id: &str) -> Option<(i64, i64)> {
+    let url = std::env::var("DATABASE_URL").ok()?;
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .acquire_timeout(Duration::from_secs(5))
+        .connect(&url)
+        .await
+        .ok()?;
+    let categories: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM sidebarcategories WHERE userid = $1 AND teamid = $2",
+    )
+    .bind(user_id)
+    .bind(team_id)
+    .fetch_one(&pool)
+    .await
+    .expect("the category count runs");
+    let channels: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM sidebarchannels sc \
+          JOIN sidebarcategories cat ON sc.categoryid = cat.id \
+         WHERE sc.userid = $1 AND cat.teamid = $2",
+    )
+    .bind(user_id)
+    .bind(team_id)
+    .fetch_one(&pool)
+    .await
+    .expect("the channel count runs");
+    Some((categories, channels))
+}
+
+async fn preference_exists(
+    http: &reqwest::Client,
+    token: &str,
+    user_id: &str,
+    category: &str,
+) -> bool {
+    let (status, raw) = send(
+        http,
+        reqwest::Method::GET,
+        GO,
+        token,
+        &format!("/api/v4/users/{user_id}/preferences/{category}"),
+        None,
+    )
+    .await;
+    status == 200
+        && serde_json::from_str::<serde_json::Value>(&raw)
+            .ok()
+            .and_then(|v| v.as_array().map(|rows| !rows.is_empty()))
+            .unwrap_or(false)
 }

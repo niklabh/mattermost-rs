@@ -57,6 +57,21 @@ pub trait PreferenceStore {
     /// Category = ?`. So `deleteFlaggedPosts` removes a deleted post's flag for *everyone* who
     /// flagged it, which is the point — and a reader who assumed the three-column delete beside it
     /// would leave other users' flags pointing at a post that is gone.
+    /// Port of `SqlPreferenceStore.DeleteCategory` (preference_store.go) — every preference one
+    /// user holds in one category.
+    ///
+    /// The sibling below deletes by **category and name across every user**; this one deletes by
+    /// **user and category**. Two deletes one line apart in the Go file with no overlapping
+    /// parameter, and swapping them on a team leave would wipe a category for the whole server.
+    ///
+    /// `removeTeamMember` calls it with the *team id* as the category: `GetTeamUnread`'s
+    /// last-channel preference and every other team-scoped preference are keyed that way.
+    fn delete_category(
+        &self,
+        user_id: &str,
+        category: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
     fn delete_category_and_name(
         &self,
         category: &str,
@@ -115,6 +130,24 @@ impl PreferenceStore for SqlPreferenceStore {
             context: format!(
                 "failed to delete Preference with userId={user_id}, category={category} and \
                  name={name}"
+            ),
+            source,
+        })?;
+        Ok(())
+    }
+
+    #[tracing::instrument(skip(self), fields(user_id = %user_id, category = %category))]
+    async fn delete_category(&self, user_id: &str, category: &str) -> Result<(), StoreError> {
+        sqlx::query!(
+            "DELETE FROM preferences WHERE userid = $1 AND category = $2",
+            user_id,
+            category,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!(
+                "failed to delete Preference with userId={user_id} and category={category}"
             ),
             source,
         })?;

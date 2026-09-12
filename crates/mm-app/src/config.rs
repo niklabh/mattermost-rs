@@ -269,6 +269,15 @@ pub struct Config {
     /// `ServiceSettings.EnableBurnOnRead` (config.go:472). Go default **`true`**.
     pub enable_burn_on_read: bool,
 
+    /// `ServiceSettings.ExperimentalEnableDefaultChannelLeaveJoinMessages` (config.go:450). Go
+    /// default **`true`** (config.go:873), which is the trap: the word "Experimental" reads like
+    /// an opt-in and it is on out of the box.
+    ///
+    /// Read by [`crate::App::leave_team`], where it gates a `town-square` lookup **whose failure
+    /// fails the whole removal** as well as the system post itself. So turning it off does not
+    /// merely silence a message; it removes a 404 branch from `DELETE /teams/{id}/members/{id}`.
+    pub experimental_enable_default_channel_leave_join_messages: bool,
+
     /// `ServiceSettings.PostEditTimeLimit` (config.go:437). Go default **`-1`**, which means
     /// "no limit" and is checked for explicitly rather than compared.
     ///
@@ -907,6 +916,8 @@ impl Default for Config {
             // config.go:2653 — `[]string{}`.
             experimental_default_channels: Vec::new(),
             enable_burn_on_read: true,
+            // config.go:873 — `new(true)`.
+            experimental_enable_default_channel_leave_join_messages: true,
             // config.go:870 — `new(-1)`.
             post_edit_time_limit: -1,
             // config.go:906 — `new(false)`.
@@ -1157,6 +1168,11 @@ impl Config {
                 lookup,
                 "MM_SERVICESETTINGS_ENABLEBURNONREAD",
                 default.enable_burn_on_read,
+            ),
+            experimental_enable_default_channel_leave_join_messages: lookup_bool(
+                lookup,
+                "MM_SERVICESETTINGS_EXPERIMENTALENABLEDEFAULTCHANNELLEAVEJOINMESSAGES",
+                default.experimental_enable_default_channel_leave_join_messages,
             ),
             post_edit_time_limit: lookup_int(
                 lookup,
@@ -1586,6 +1602,9 @@ impl Config {
             enable_burn_on_read: service
                 .enable_burn_on_read
                 .unwrap_or(default.enable_burn_on_read),
+            experimental_enable_default_channel_leave_join_messages: service
+                .experimental_enable_default_channel_leave_join_messages
+                .unwrap_or(default.experimental_enable_default_channel_leave_join_messages),
             post_edit_time_limit: service
                 .post_edit_time_limit
                 .unwrap_or(default.post_edit_time_limit),
@@ -2000,6 +2019,8 @@ struct ServiceSettingsDocument {
     enable_api_channel_deletion: Option<bool>,
     #[serde(rename = "EnableBurnOnRead")]
     enable_burn_on_read: Option<bool>,
+    #[serde(rename = "ExperimentalEnableDefaultChannelLeaveJoinMessages")]
+    experimental_enable_default_channel_leave_join_messages: Option<bool>,
     #[serde(rename = "PostEditTimeLimit")]
     post_edit_time_limit: Option<i64>,
     #[serde(rename = "ExperimentalEnableHardenedMode")]
