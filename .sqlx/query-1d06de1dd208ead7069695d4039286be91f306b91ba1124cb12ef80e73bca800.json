@@ -1,0 +1,212 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n               c.id AS \"id!\",\n               c.createat,\n               c.updateat,\n               c.deleteat,\n               c.teamid,\n               c.type::text AS \"channel_type!\",\n               c.displayname,\n               c.name,\n               c.header,\n               c.purpose,\n               c.lastpostat,\n               c.totalmsgcount,\n               c.extraupdateat,\n               c.creatorid,\n               c.schemeid,\n               c.groupconstrained,\n               c.autotranslation AS \"autotranslation!\",\n               c.shared,\n               c.totalmsgcountroot,\n               c.lastrootpostat,\n               c.bannerinfo,\n               c.defaultcategoryname AS \"defaultcategoryname!\",\n               c.discoverable AS \"discoverable!\",\n               EXISTS (\n                   SELECT 1 FROM accesscontrolpolicies acp\n                    WHERE acp.id = c.id AND acp.type = 'channel'\n               ) AS \"policy_enforced!\",\n               COALESCE((\n                   SELECT acp.active FROM accesscontrolpolicies acp\n                    WHERE acp.id = c.id AND acp.type = 'channel' AND acp.active = TRUE\n                    LIMIT 1\n               ), false) AS \"policy_is_active!\",\n               CASE WHEN $3 AND NOT $4 THEN (\n                   SELECT rpc.policyid FROM retentionpolicieschannels rpc\n                    WHERE rpc.channelid = c.id\n               ) END AS \"policyid\",\n               COALESCE(t.displayname, '') AS \"teamdisplayname!\",\n               COALESCE(t.name, '') AS \"teamname!\",\n               COALESCE(t.updateat, 0) AS \"teamupdateat!\"\n          FROM channels c\n          JOIN teams t ON t.id = c.teamid\n         WHERE (($5 AND c.deleteat <> 0) OR (NOT $5 AND ($6 OR c.deleteat = 0)))\n           AND (NOT $4 OR NOT EXISTS (\n                   SELECT 1 FROM retentionpolicieschannels rpc\n                    WHERE rpc.channelid = c.id))\n           AND (NOT $7\n                OR LOWER(c.name) LIKE LOWER($8) ESCAPE '*'\n                OR LOWER(c.displayname) LIKE LOWER($8) ESCAPE '*'\n                OR LOWER(c.purpose) LIKE LOWER($8) ESCAPE '*'\n                OR ($9 AND LOWER(c.id) LIKE LOWER($8) ESCAPE '*')\n                OR to_tsvector($10::text::regconfig,\n                               c.name || ' ' || c.displayname || ' ' || c.purpose)\n                   @@ to_tsquery($10::text::regconfig, $11))\n           AND (cardinality($12::text[]) = 0 OR c.name <> ALL($12::text[]))\n           AND ($13 = '' OR c.id NOT IN (\n                   SELECT gc.channelid FROM groupchannels gc\n                    WHERE gc.groupid = $13 AND gc.deleteat = 0))\n           AND (cardinality($14::text[]) = 0 OR c.teamid = ANY($14::text[]))\n           AND (NOT $15 OR c.groupconstrained = true)\n           AND ($15 OR NOT $16 OR c.groupconstrained IS DISTINCT FROM true)\n           AND (CASE\n                  WHEN $17 AND NOT $18\n                    THEN EXISTS (SELECT 1 FROM publicchannels pc WHERE pc.id = c.id)\n                  WHEN $18 AND NOT $17 THEN c.type = 'P'\n                  ELSE c.type IN ('O', 'P')\n                END)\n           AND (NOT $19\n                OR EXISTS (SELECT 1 FROM sharedchannels sc\n                            WHERE sc.channelid = c.id AND sc.home = true)\n                OR NOT EXISTS (SELECT 1 FROM sharedchannels sc WHERE sc.channelid = c.id))\n           AND (CASE\n                  WHEN $20 THEN c.id NOT IN (\n                      SELECT acp.id FROM accesscontrolpolicies acp WHERE acp.type = 'channel')\n                  WHEN $21 <> '' THEN c.id IN (\n                      SELECT acp.id FROM accesscontrolpolicies acp\n                       WHERE acp.type = 'channel' AND acp.data->'imports' @> $22::jsonb)\n                  WHEN $23\n                    THEN EXISTS (SELECT 1 FROM accesscontrolpolicies acp WHERE acp.id = c.id)\n                  ELSE true\n                END)\n         ORDER BY c.displayname, t.displayname\n         LIMIT $1 OFFSET $2\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "createat",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "updateat",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "deleteat",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "teamid",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "channel_type!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "displayname",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 7,
+        "name": "name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 8,
+        "name": "header",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 9,
+        "name": "purpose",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 10,
+        "name": "lastpostat",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 11,
+        "name": "totalmsgcount",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 12,
+        "name": "extraupdateat",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 13,
+        "name": "creatorid",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 14,
+        "name": "schemeid",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 15,
+        "name": "groupconstrained",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 16,
+        "name": "autotranslation!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 17,
+        "name": "shared",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 18,
+        "name": "totalmsgcountroot",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 19,
+        "name": "lastrootpostat",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 20,
+        "name": "bannerinfo",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 21,
+        "name": "defaultcategoryname!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 22,
+        "name": "discoverable!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 23,
+        "name": "policy_enforced!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 24,
+        "name": "policy_is_active!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 25,
+        "name": "policyid",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 26,
+        "name": "teamdisplayname!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 27,
+        "name": "teamname!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 28,
+        "name": "teamupdateat!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Bool",
+        "Bool",
+        "Bool",
+        "Bool",
+        "Bool",
+        "Text",
+        "Bool",
+        "Text",
+        "Text",
+        "TextArray",
+        "Text",
+        "TextArray",
+        "Bool",
+        "Bool",
+        "Bool",
+        "Bool",
+        "Bool",
+        "Bool",
+        "Text",
+        "Jsonb",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      true,
+      null,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "1d06de1dd208ead7069695d4039286be91f306b91ba1124cb12ef80e73bca800"
+}

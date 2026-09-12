@@ -1,0 +1,41 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT COUNT(*) AS \"count!\"\n          FROM channels c\n          JOIN teams t ON t.id = c.teamid\n         WHERE (($1 AND c.deleteat <> 0) OR (NOT $1 AND ($2 OR c.deleteat = 0)))\n           AND (NOT $3 OR NOT EXISTS (\n                   SELECT 1 FROM retentionpolicieschannels rpc\n                    WHERE rpc.channelid = c.id))\n           AND (NOT $4\n                OR LOWER(c.name) LIKE LOWER($5) ESCAPE '*'\n                OR LOWER(c.displayname) LIKE LOWER($5) ESCAPE '*'\n                OR LOWER(c.purpose) LIKE LOWER($5) ESCAPE '*'\n                OR ($6 AND LOWER(c.id) LIKE LOWER($5) ESCAPE '*')\n                OR to_tsvector($7::text::regconfig,\n                               c.name || ' ' || c.displayname || ' ' || c.purpose)\n                   @@ to_tsquery($7::text::regconfig, $8))\n           AND (cardinality($9::text[]) = 0 OR c.name <> ALL($9::text[]))\n           AND ($10 = '' OR c.id NOT IN (\n                   SELECT gc.channelid FROM groupchannels gc\n                    WHERE gc.groupid = $10 AND gc.deleteat = 0))\n           AND (cardinality($11::text[]) = 0 OR c.teamid = ANY($11::text[]))\n           AND (NOT $12 OR c.groupconstrained = true)\n           AND ($12 OR NOT $13 OR c.groupconstrained IS DISTINCT FROM true)\n           AND (CASE\n                  WHEN $14 AND NOT $15\n                    THEN EXISTS (SELECT 1 FROM publicchannels pc WHERE pc.id = c.id)\n                  WHEN $15 AND NOT $14 THEN c.type = 'P'\n                  ELSE c.type IN ('O', 'P')\n                END)\n           AND (NOT $16\n                OR EXISTS (SELECT 1 FROM sharedchannels sc\n                            WHERE sc.channelid = c.id AND sc.home = true)\n                OR NOT EXISTS (SELECT 1 FROM sharedchannels sc WHERE sc.channelid = c.id))\n           AND (CASE\n                  WHEN $17 THEN c.id NOT IN (\n                      SELECT acp.id FROM accesscontrolpolicies acp WHERE acp.type = 'channel')\n                  WHEN $18 <> '' THEN c.id IN (\n                      SELECT acp.id FROM accesscontrolpolicies acp\n                       WHERE acp.type = 'channel' AND acp.data->'imports' @> $19::jsonb)\n                  WHEN $20\n                    THEN EXISTS (SELECT 1 FROM accesscontrolpolicies acp WHERE acp.id = c.id)\n                  ELSE true\n                END)\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bool",
+        "Bool",
+        "Bool",
+        "Bool",
+        "Text",
+        "Bool",
+        "Text",
+        "Text",
+        "TextArray",
+        "Text",
+        "TextArray",
+        "Bool",
+        "Bool",
+        "Bool",
+        "Bool",
+        "Bool",
+        "Bool",
+        "Text",
+        "Jsonb",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "cc5540a90de33c72465f93a9c7db3c3586c5e68317a41d42a488dcd5adf7017a"
+}
