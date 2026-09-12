@@ -23,16 +23,18 @@
 use axum::extract::{Path, Request, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
+use mm_app::license::LicenseState;
 use mm_app::post::PrepareError;
+use mm_app::post_create::CreatePostFlags;
 use mm_app::post_write::post_edit_time_limit_expired;
 use mm_model::permission::{
-    PERMISSION_CREATE_POST, PERMISSION_CREATE_POST_PUBLIC, PERMISSION_DELETE_OTHERS_POSTS,
-    PERMISSION_DELETE_POST, PERMISSION_EDIT_FILE_ATTACHMENT, PERMISSION_EDIT_OTHERS_POSTS,
-    PERMISSION_EDIT_POST, PERMISSION_READ_CHANNEL_CONTENT, PERMISSION_UPLOAD_FILE,
-    make_permission_error,
+    PERMISSION_CREATE_POST, PERMISSION_CREATE_POST_EPHEMERAL, PERMISSION_CREATE_POST_PUBLIC,
+    PERMISSION_DELETE_OTHERS_POSTS, PERMISSION_DELETE_POST, PERMISSION_EDIT_FILE_ATTACHMENT,
+    PERMISSION_EDIT_OTHERS_POSTS, PERMISSION_EDIT_POST, PERMISSION_MANAGE_SYSTEM,
+    PERMISSION_READ_CHANNEL_CONTENT, PERMISSION_UPLOAD_FILE, make_permission_error,
 };
-use mm_model::post::{POST_TYPE_CARD, Post, PostPatch};
-use mm_model::utils::{AppError, is_valid_id, string_interface_to_json};
+use mm_model::post::{POST_TYPE_CARD, Post, PostEphemeral, PostPatch};
+use mm_model::utils::{AppError, is_valid_id, parse_go_bool, string_interface_to_json};
 
 use crate::AppState;
 use crate::auth::AuthenticatedSession;
@@ -795,4 +797,648 @@ fn encoded_post(mut post: Post) -> Result<Response, PrepareError> {
         body,
     )
         .into_response())
+}
+
+// ===========================================================================================
+// createPost / createEphemeralPost
+// ===========================================================================================
+
+/// Port of `createPost` (api4/post.go:111) — `POST /api/v4/posts`.
+///
+/// # Nine gates before the write, and the order is the wire format
+///
+/// decode → `SanitizeInput` → the session's user id is stamped over whatever the body claimed →
+/// `CreateAt` is zeroed unless the caller holds `manage_system` → `createPostChecks`' six checks
+/// in their own order → the message-length check → `?silent` → the app layer. Every one of them
+/// answers before the next runs, and three of them are easy to reorder wrongly: the `CreateAt`
+/// gate reads a **system** permission while the next check reads a channel one, `?silent=bogus`
+/// is a 400 that a permission failure gets in front of, and `rejectOversizedMessage` runs
+/// *after* the permission checks so an oversized message in a channel you cannot post to is a
+/// 403.
+///
+/// # `?set_online` swallows its parse error and `?silent` does not
+///
+/// `set_online=bogus` logs a warning and stays **true**; `silent=bogus` is
+/// `api.context.invalid_param.app_error` at 400. Two `strconv.ParseBool` calls a few lines apart,
+/// with opposite error handling — a port that shared one helper between them would answer 400 for
+/// both or 200 for both.
+///
+/// # The response is **201**, and the post has been through `PreparePostForClient` already
+///
+/// `w.WriteHeader(http.StatusCreated)` before the encode, so this is the one post route that is
+/// not a 200. The burn-on-read re-read that follows in Go needs that post type, which this port
+/// forwards.
+///
+/// # What is forwarded, and why the forward is always before the row
+///
+/// `mm_app::post_create` lists the shapes; what matters here is that every one of them is decided
+/// inside `App::create_post_as_user` before `Post().Save` and before the pending-post id is
+/// claimed. A forward that happened after either would leave Go to write a second row.
+#[tracing::instrument(skip_all, fields(forwarded))]
+pub async fn create_post(
+    State(state): State<AppState>,
+    session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    let (parts, body) = request.into_parts();
+    let bytes = match axum::body::to_bytes(body, usize::MAX).await {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            tracing::warn!(error = %err, "could not read the request body");
+            return ApiError::invalid_param("post").into_response();
+        }
+    };
+
+    // `c.SetInvalidParamWithErr("post", jsonErr)`.
+    let mut post: Post = match serde_json::from_slice(&bytes) {
+        Ok(post) => post,
+        Err(err) => {
+            tracing::debug!(error = %err, "post body did not decode");
+            return ApiError::invalid_param("post").into_response();
+        }
+    };
+
+    // MM-67055: strips `metadata.embeds`, `delete_at` and `remote_id` — the last of which is what
+    // makes `SanitizeProps` treat the post as *not* federated a moment later, so both
+    // `force_notification` and `silent_notification` are stripped from a REST create.
+    post.sanitize_input();
+    post.user_id.clone_from(&session.0.user_id);
+
+    let query = parts.uri.query().map(str::to_owned);
+
+    match serve_create(&state, &session, post, query.as_deref()).await {
+        Ok(response) => response,
+        Err(PrepareError::App(err)) => ApiError::from(err).into_response(),
+        Err(PrepareError::Unreproducible(why)) => {
+            tracing::Span::current().record("forwarded", true);
+            tracing::debug!(reason = why, "handing the post create to Go");
+            let request = Request::from_parts(parts, axum::body::Body::from(bytes));
+            proxy::forward_to_go(State(state), request).await
+        }
+    }
+}
+
+async fn serve_create(
+    state: &AppState,
+    session: &AuthenticatedSession,
+    mut post: Post,
+    query: Option<&str>,
+) -> Result<Response, PrepareError> {
+    // "if post.CreateAt != 0 && !c.App.SessionHasPermissionTo(session, PermissionManageSystem)".
+    // A **system** permission, not a channel one, and the failure is silent: the timestamp is
+    // dropped and the post is still created. Reversing the test would let any client backdate a
+    // post.
+    if post.create_at != 0
+        && !state
+            .app
+            .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)
+            .await
+    {
+        post.create_at = 0;
+    }
+
+    create_post_checks("Api4.createPost", state, session, &post).await?;
+    reject_oversized_message(state, "Api4.createPost", &post.message).await?;
+
+    // `strconv.ParseBool` with the error **warned and discarded** — the default is true and an
+    // unparseable value keeps it.
+    let set_online = match query_value(query, "set_online") {
+        Some(raw) if !raw.is_empty() => parse_go_bool(&raw).unwrap_or_else(|| {
+            tracing::warn!(
+                raw,
+                "Failed to parse set_online URL query parameter from createPost request"
+            );
+            true
+        }),
+        _ => true,
+    };
+
+    // The sibling that does *not* swallow: `c.SetInvalidParam("silent")`.
+    let silent = match query_value(query, "silent") {
+        Some(raw) if !raw.is_empty() => match parse_go_bool(&raw) {
+            Some(value) => value,
+            None => return Err(PrepareError::App(invalid_param_error("silent"))),
+        },
+        _ => false,
+    };
+
+    // `PostWithProxyRemovedFromImageURLs` is the identity when the proxy is off, and
+    // `App::create_post_as_user` refuses the post when it is on — reached through
+    // `prepare_post_for_client`, which runs before the response and after nothing that writes.
+
+    let created = state
+        .app
+        .create_post_as_user(
+            post,
+            &session.0,
+            CreatePostFlags {
+                set_online,
+                silent_notification: silent,
+            },
+        )
+        .await?;
+
+    if set_online {
+        state.app.set_status_online(&session.0.user_id, false).await;
+    }
+
+    // `c.App.Srv().Platform().UpdateLastActivityAtIfNeeded(*c.AppContext.Session())` — throttled,
+    // so most requests write nothing. `ExtendSessionExpiryIfNeeded` needs
+    // `ExtendSessionLengthWithActivity`, which is off by default and is not modelled.
+    state
+        .app
+        .update_last_activity_at_if_needed(&session.0)
+        .await;
+
+    created_post(created)
+}
+
+/// Port of `createEphemeralPost` (api4/post.go:215) — `POST /api/v4/posts/ephemeral`.
+///
+/// # It writes no row, and that is the whole reason it is served
+///
+/// `SendEphemeralPost` builds a post in memory, prepares it, pushes it down one user's websocket
+/// and returns it. There is no `Post().Save`, no channel counter and no thread row — so the only
+/// way this route can be wrong is by answering with a different *shape*, never by leaving a row
+/// Go would not have written.
+///
+/// # Three 400s before the permission check, and the permission is a system one
+///
+/// A body that does not decode is `body`, an empty `user_id` is `user_id`, and a null `post` is
+/// `post` — then `create_post_ephemeral`, checked on the session's **system** roles rather than
+/// on the channel. So a system admin can push an ephemeral post into a channel they cannot read,
+/// and a channel admin cannot push one into their own channel.
+///
+/// # `create_at` is overwritten, not defaulted
+///
+/// `ephRequest.Post.CreateAt = model.GetMillis()` — unconditionally, before the permission check.
+/// Unlike `createPost` there is no `manage_system` escape hatch and no zero test, so a client's
+/// timestamp is always discarded.
+#[tracing::instrument(skip_all, fields(forwarded))]
+pub async fn create_ephemeral_post(
+    State(state): State<AppState>,
+    session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    let (parts, body) = request.into_parts();
+    let bytes = match axum::body::to_bytes(body, usize::MAX).await {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            tracing::warn!(error = %err, "could not read the request body");
+            return ApiError::invalid_param("body").into_response();
+        }
+    };
+
+    // `c.SetInvalidParamWithErr("body", jsonErr)` — the parameter name is `body` here and `post`
+    // on the sibling route.
+    let ephemeral: PostEphemeral = match serde_json::from_slice(&bytes) {
+        Ok(ephemeral) => ephemeral,
+        Err(err) => {
+            tracing::debug!(error = %err, "ephemeral post body did not decode");
+            return ApiError::invalid_param("body").into_response();
+        }
+    };
+
+    if ephemeral.user_id.is_empty() {
+        return ApiError::invalid_param("user_id").into_response();
+    }
+    let Some(mut post) = ephemeral.post else {
+        return ApiError::invalid_param("post").into_response();
+    };
+
+    post.user_id.clone_from(&session.0.user_id);
+    post.create_at = mm_model::utils::get_millis();
+
+    if !state
+        .app
+        .session_has_permission_to(&session.0, &PERMISSION_CREATE_POST_EPHEMERAL)
+        .await
+    {
+        return ApiError::from(make_permission_error(
+            &session.0,
+            &[&PERMISSION_CREATE_POST_EPHEMERAL],
+        ))
+        .into_response();
+    }
+
+    match state
+        .app
+        .send_ephemeral_post(&ephemeral.user_id, post)
+        .await
+    {
+        Ok(sent) => match created_post(sent) {
+            Ok(response) => response,
+            Err(PrepareError::App(err)) => ApiError::from(err).into_response(),
+            Err(PrepareError::Unreproducible(why)) => {
+                tracing::Span::current().record("forwarded", true);
+                tracing::debug!(reason = why, "handing the ephemeral post to Go");
+                proxy::forward_to_go(State(state), Request::from_parts(parts, bytes.into())).await
+            }
+        },
+        Err(PrepareError::App(err)) => ApiError::from(err).into_response(),
+        Err(PrepareError::Unreproducible(why)) => {
+            tracing::Span::current().record("forwarded", true);
+            tracing::debug!(reason = why, "handing the ephemeral post to Go");
+            proxy::forward_to_go(State(state), Request::from_parts(parts, bytes.into())).await
+        }
+    }
+}
+
+/// Port of `createPostChecks` (api4/post.go:74), whose Go comment asks that any change here be
+/// mirrored into `scheduledPostChecks`.
+///
+/// Six checks, and the second is the one `scheduledPostChecks` does **not** have: a post carrying
+/// file ids additionally needs `upload_file` on the channel.
+async fn create_post_checks(
+    where_: &'static str,
+    state: &AppState,
+    session: &AuthenticatedSession,
+    post: &Post,
+) -> Result<(), PrepareError> {
+    user_create_post_permission_check(state, session, &post.channel_id).await?;
+
+    if post.file_ids.as_deref().is_some_and(|ids| !ids.is_empty()) {
+        let (granted, _) = state
+            .app
+            .session_has_permission_to_channel(
+                &session.0,
+                &post.channel_id,
+                &PERMISSION_UPLOAD_FILE,
+            )
+            .await;
+        if !granted {
+            return Err(PrepareError::App(make_permission_error(
+                &session.0,
+                &[&PERMISSION_UPLOAD_FILE],
+            )));
+        }
+    }
+
+    post_hardened_mode_check(state, session, post.get_props())?;
+    post_priority_check(where_, state, session, post).await?;
+    post_card_type_check(where_, state, &post.post_type)?;
+    state
+        .app
+        .post_burn_on_read_check(where_, &post.user_id, &post.channel_id, &post.post_type)
+        .await
+}
+
+/// Port of `postPriorityCheck` (app/post_permission_utils.go:14).
+///
+/// # `priority == nil` is the whole gate, and everything after it is a refusal
+///
+/// A post with no `metadata.priority` returns before the user is even fetched. With one, Go reads
+/// the user, the two settings and the licence, and every arm ends in an error — there is no
+/// "priority allowed" success path that does anything, which is why the checks below are all
+/// error branches.
+///
+/// # The licence arms are 501, not 403
+///
+/// `requested_ack` and `persistent_notifications` both need at least a Professional licence and
+/// answer `license_error.feature_unavailable` at **501** when they do not have one. That is
+/// before the `IsPersistentNotificationsEnabled` 403 and before the urgent-priority 400, so an
+/// unlicensed server never reaches either.
+async fn post_priority_check(
+    where_: &'static str,
+    state: &AppState,
+    session: &AuthenticatedSession,
+    post: &Post,
+) -> Result<(), PrepareError> {
+    let Some(priority) = post.get_priority() else {
+        return Ok(());
+    };
+
+    // `a.GetUser(userId)`, whose AppError is returned verbatim.
+    let user = state.app.get_user(&session.0.user_id).await?;
+
+    let forbidden = || {
+        PrepareError::App(AppError::boxed(
+            where_,
+            "api.post.post_priority.priority_post_not_allowed_for_user.request_error",
+            None,
+            format!("userId={}", user.id),
+            403,
+        ))
+    };
+
+    if !state.app.config().post_priority {
+        return Err(forbidden());
+    }
+
+    if !post.root_id.is_empty() {
+        return Err(PrepareError::App(AppError::boxed(
+            where_,
+            "api.post.post_priority.priority_post_only_allowed_for_root_post.request_error",
+            None,
+            String::new(),
+            400,
+        )));
+    }
+
+    let licensed = state.app.license_state().await? == LicenseState::Licensed;
+
+    if priority.requested_ack == Some(true) {
+        if licensed {
+            // `MinimumProfessionalLicense` compares the licence's SKU, which lives in the signed
+            // body this server never parses.
+            return Err(PrepareError::Unreproducible(
+                "the acknowledgement gate compares the licence SKU",
+            ));
+        }
+        return Err(license_feature_unavailable(where_));
+    }
+
+    if priority.persistent_notifications == Some(true) {
+        if licensed {
+            return Err(PrepareError::Unreproducible(
+                "the persistent-notification gate compares the licence SKU",
+            ));
+        }
+        return Err(license_feature_unavailable(where_));
+    }
+
+    Ok(())
+}
+
+/// `model.NewAppError("", "license_error.feature_unavailable", nil, "feature is not available for
+/// the current license", http.StatusNotImplemented)`.
+fn license_feature_unavailable(where_: &'static str) -> PrepareError {
+    PrepareError::App(AppError::boxed(
+        where_,
+        "license_error.feature_unavailable",
+        None,
+        "feature is not available for the current license",
+        501,
+    ))
+}
+
+/// Port of `PostCardTypeCheckWithApp` (app/post_permission_utils.go:118).
+///
+/// One branch, and both halves have to hold: the type is `card` **and** `FeatureFlags`
+/// `IntegratedBoards` is off. The flag is not in the configuration document either server
+/// persists, so a `card` post is forwarded rather than refused — which is the same decision
+/// `updatePost`, `patchPost` and `deletePost` already make for the type.
+fn post_card_type_check(
+    _where: &'static str,
+    _state: &AppState,
+    post_type: &str,
+) -> Result<(), PrepareError> {
+    if post_type == POST_TYPE_CARD {
+        return Err(PrepareError::Unreproducible(
+            "a card post's type check turns on FeatureFlags.IntegratedBoards",
+        ));
+    }
+    Ok(())
+}
+
+/// `c.SetInvalidParam(name)` — `api.context.invalid_body_param.app_error` at 400, which is a
+/// **different id** from `SetInvalidURLParam`'s.
+fn invalid_param_error(name: &'static str) -> Box<AppError> {
+    let mut params: std::collections::HashMap<String, serde_json::Value> =
+        std::collections::HashMap::new();
+    params.insert("Name".to_owned(), serde_json::json!(name));
+    AppError::boxed(
+        "Api4.createPost",
+        "api.context.invalid_body_param.app_error",
+        Some(params),
+        String::new(),
+        400,
+    )
+}
+
+/// `r.URL.Query().Get(key)` — the first value when the key repeats, percent-decoded.
+fn query_value(query: Option<&str>, key: &str) -> Option<String> {
+    form_urlencoded::parse(query?.as_bytes())
+        .find(|(name, _)| name == key)
+        .map(|(_, value)| value.into_owned())
+}
+
+/// `w.WriteHeader(http.StatusCreated)` then `rp.EncodeJSON(w)` — the same body as
+/// [`encoded_post`] with a **201**.
+fn created_post(mut post: Post) -> Result<Response, PrepareError> {
+    let mut body = Vec::new();
+    if let Err(err) = post.encode_json(&mut body) {
+        tracing::error!(error = %err, "failed to serialise Post");
+        return Err(PrepareError::App(AppError::boxed(
+            "createPost",
+            "api.marshal_error",
+            None,
+            String::new(),
+            500,
+        )));
+    }
+    Ok((
+        StatusCode::CREATED,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
+    )
+        .into_response())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A router built against a pool that is never connected and a Go upstream that refuses
+    /// every connection.
+    ///
+    /// Neither is a limitation: the requests below carry **no `Authorization` header**, and
+    /// `AuthenticatedSession` rejects a tokenless request before it reaches `get_session`, so no
+    /// query is ever issued. The refused upstream is the point of the control — it is what makes
+    /// "this route falls through to the proxy" a *visible* 502 rather than an indistinguishable
+    /// success.
+    async fn router_on_a_dead_stack() -> axum::Router {
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(1)
+            .acquire_timeout(std::time::Duration::from_millis(50))
+            .connect_lazy("postgres://nobody@127.0.0.1:1/nothing")
+            .expect("a lazy pool never connects");
+        let app = mm_app::App::new(mm_store::SqlStore::from_pool(pool));
+        crate::router(AppState::new(app, "http://127.0.0.1:1".to_owned()))
+    }
+
+    /// Send one request through the router in this process and return its status.
+    async fn status_of(method: &str, path: &str) -> u16 {
+        let router = router_on_a_dead_stack().await;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("an ephemeral port");
+        let addr = listener.local_addr().expect("the bound address");
+        let server = tokio::spawn(async move {
+            let _ = axum::serve(listener, router).await;
+        });
+
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(10))
+            .build()
+            .expect("a client");
+        let status = client
+            .request(
+                reqwest::Method::from_bytes(method.as_bytes()).expect("a method"),
+                format!("http://{addr}{path}"),
+            )
+            .header("Content-Type", "application/json")
+            .body("{}")
+            .send()
+            .await
+            .expect("the in-process router answers")
+            .status()
+            .as_u16();
+
+        server.abort();
+        status
+    }
+
+    /// A 26-character id, so `RequirePostId` passes and the request reaches the session check.
+    const AN_ID: &str = "mmrscreateposts00000000000";
+
+    /// Every `/api/v4/posts…` pair this server answered before `POST /posts` and
+    /// `POST /posts/ephemeral` were registered, re-asked through the router built in this
+    /// process.
+    ///
+    /// # The hazard this measures
+    ///
+    /// axum prefers a **static** segment over `{param}` and does not fall back across method
+    /// routers. `/api/v4/posts/ephemeral` is a literal sibling of `/api/v4/posts/{post_id}`, so
+    /// registering it with `POST` alone would silently take the `GET`, `PUT` and `DELETE` on that
+    /// exact path away from `get_post`, `update_post` and `delete_post` — each of which answers
+    /// **400** for the nine-character segment. That is the shape that took the served
+    /// `GET /groups/names` out of service; [`crate::invalid_post_id_param`] is the fix and this
+    /// is the proof.
+    ///
+    /// # Reading the expectations
+    ///
+    /// - **401** — the route is registered and reached `AuthenticatedSession`, which refused a
+    ///   request with no token. That is "this server answers it".
+    /// - **400** — the route is registered and answered before the session check, which is what
+    ///   `RequirePostId` does for a segment that is not 26 characters.
+    /// - **502** — nothing matched, so `Router::fallback` tried to proxy to a Go server that is
+    ///   not there. That is "this server forwards it", and
+    ///   [`a_forwarded_route_is_a_502_here_which_is_what_makes_the_list_above_mean_something`]
+    ///   is why a row of 401s is not vacuous.
+    #[tokio::test]
+    async fn registering_the_two_create_routes_un_serves_nothing() {
+        for (method, path, expected) in [
+            // The three on `{post_id}` that the `ephemeral` literal could have stolen.
+            ("GET", format!("/api/v4/posts/{AN_ID}"), 401),
+            ("PUT", format!("/api/v4/posts/{AN_ID}"), 401),
+            ("DELETE", format!("/api/v4/posts/{AN_ID}"), 401),
+            // The same three at the literal path. 400, not 401 and not 502: `ephemeral` is nine
+            // characters, so `RequirePostId` refuses it exactly as `{post_id}` did.
+            ("GET", "/api/v4/posts/ephemeral".to_owned(), 400),
+            ("PUT", "/api/v4/posts/ephemeral".to_owned(), 400),
+            ("DELETE", "/api/v4/posts/ephemeral".to_owned(), 400),
+            // The two newly registered POSTs.
+            ("POST", "/api/v4/posts".to_owned(), 401),
+            ("POST", "/api/v4/posts/ephemeral".to_owned(), 401),
+            // The literal that was already here, and the deeper paths.
+            ("POST", "/api/v4/posts/ids".to_owned(), 401),
+            ("POST", "/api/v4/posts/ids/reactions".to_owned(), 401),
+            ("PUT", format!("/api/v4/posts/{AN_ID}/patch"), 401),
+            ("GET", format!("/api/v4/posts/{AN_ID}/thread"), 401),
+            ("GET", format!("/api/v4/posts/{AN_ID}/reactions"), 401),
+            ("GET", format!("/api/v4/posts/{AN_ID}/edit_history"), 401),
+            ("POST", format!("/api/v4/posts/{AN_ID}/pin"), 401),
+            ("POST", format!("/api/v4/posts/{AN_ID}/unpin"), 401),
+            ("GET", format!("/api/v4/posts/{AN_ID}/files/info"), 401),
+        ] {
+            assert_eq!(
+                status_of(method, &path).await,
+                expected,
+                "{method} {path} stopped being answered by this server"
+            );
+        }
+    }
+
+    /// The control for the test above: a `/posts/…` path this server has never served answers
+    /// **502**, because nothing matched and the fallback tried the dead upstream.
+    ///
+    /// Without this, a bug that un-registered every route at once would leave the list above
+    /// full of 401s from some other cause and pass. Checked by hand the other way round too —
+    /// adding `POST /api/v4/posts/{post_id}/move` to the list above with an expectation of 401
+    /// fails with `502`, which is the vacuity check the list needs.
+    #[tokio::test]
+    async fn a_forwarded_route_is_a_502_here_which_is_what_makes_the_list_above_mean_something() {
+        for (method, path) in [
+            ("POST", format!("/api/v4/posts/{AN_ID}/move")),
+            ("POST", format!("/api/v4/posts/{AN_ID}/restore/{AN_ID}")),
+            ("POST", "/api/v4/posts/rewrite".to_owned()),
+            ("POST", "/api/v4/posts/search".to_owned()),
+        ] {
+            assert_eq!(
+                status_of(method, &path).await,
+                502,
+                "{method} {path} is answered here, so the list above proves less than it claims"
+            );
+        }
+    }
+
+    #[test]
+    fn set_online_swallows_its_parse_error_and_silent_does_not() {
+        // Not the handler — the two `strconv.ParseBool` calls it makes, whose *error handling* is
+        // opposite. `parse_go_bool` returning `None` is the branch both of them take.
+        assert_eq!(parse_go_bool("bogus"), None);
+        assert_eq!(parse_go_bool("1"), Some(true));
+        assert_eq!(parse_go_bool("True"), Some(true));
+        // Go's list is case-sensitive apart from the six spellings, so `yes` and `TrUe` are not
+        // booleans — `set_online=yes` stays true and `silent=yes` is a 400.
+        assert_eq!(parse_go_bool("yes"), None);
+        assert_eq!(parse_go_bool("TrUe"), None);
+    }
+
+    #[test]
+    fn the_query_reader_takes_the_first_value_when_a_key_repeats() {
+        // `url.Values.Get` returns `v[0]`.
+        assert_eq!(
+            query_value(Some("silent=true&silent=false"), "silent").as_deref(),
+            Some("true")
+        );
+        // A bare key is the empty string, which both call sites treat as "absent".
+        assert_eq!(query_value(Some("silent"), "silent").as_deref(), Some(""));
+        assert_eq!(query_value(Some("other=1"), "silent"), None);
+        assert_eq!(query_value(None, "silent"), None);
+        // Percent-decoding happens before ParseBool sees the value.
+        assert_eq!(
+            query_value(Some("set_online=%74rue"), "set_online").as_deref(),
+            Some("true")
+        );
+    }
+
+    #[test]
+    fn the_two_invalid_param_ids_are_not_the_same_error() {
+        // `SetInvalidParam` is `api.context.invalid_body_param.app_error`; `SetInvalidURLParam` is
+        // `api.context.invalid_url_param.app_error`. `?silent=bogus` raises the first, and a
+        // nine-character post id raises the second — clients branch on the id.
+        let silent = invalid_param_error("silent");
+        assert_eq!(silent.id, "api.context.invalid_body_param.app_error");
+        assert_eq!(silent.status_code, 400);
+        assert_eq!(
+            silent.params.as_ref().and_then(|p| p.get("Name")),
+            Some(&serde_json::json!("silent"))
+        );
+    }
+
+    #[tokio::test]
+    async fn a_card_post_is_forwarded_rather_than_refused() {
+        // `PostCardTypeCheckWithApp` answers 400 only when `FeatureFlags.IntegratedBoards` is
+        // *off*, and the flag is in neither configuration document. Answering the 400 would be a
+        // guess about a flag; forwarding is the same decision `updatePost` and `deletePost` make.
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .connect_lazy("postgres://nobody@127.0.0.1:1/nothing")
+            .expect("a lazy pool never connects");
+        let state = AppState::new(
+            mm_app::App::new(mm_store::SqlStore::from_pool(pool)),
+            "http://127.0.0.1:1".to_owned(),
+        );
+        assert!(matches!(
+            post_card_type_check("Api4.createPost", &state, POST_TYPE_CARD),
+            Err(PrepareError::Unreproducible(_))
+        ));
+        assert!(post_card_type_check("Api4.createPost", &state, "").is_ok());
+        // Only the exact type. `card_something` is a different post type and is not this branch.
+        assert!(post_card_type_check("Api4.createPost", &state, "cardigan").is_ok());
+    }
 }

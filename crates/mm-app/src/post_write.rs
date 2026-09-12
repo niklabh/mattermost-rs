@@ -706,7 +706,7 @@ impl App {
     /// store always has a materialised props map — so the arm is taken on every edit. It is a
     /// no-op on a post that never had the prop, and the prop itself is refused, so the only way to
     /// observe it is a mutation that removes it.
-    async fn fill_in_post_props(&self, post: &mut Post) -> Result<(), PrepareError> {
+    pub(crate) async fn fill_in_post_props(&self, post: &mut Post) -> Result<(), PrepareError> {
         // `ChannelMentionsAllWithOptions` reads the message *and* the attachments and interactive
         // payloads. `omit_interactive_blocks` is `!FeatureFlags.MmBlocksEnabled`, and that flag
         // defaults to true, so the blocks are walked.

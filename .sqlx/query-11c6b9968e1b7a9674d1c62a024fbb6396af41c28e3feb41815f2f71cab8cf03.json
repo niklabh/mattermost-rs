@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT EXISTS (\n                SELECT 1\n                  FROM channelmembers cm\n                  JOIN users u ON u.id = cm.userid\n                 WHERE cm.channelid = $1\n                   AND u.deleteat = 0\n                   AND ( COALESCE(TRIM(u.notifyprops ->> 'mention_keys'), '') <> ''\n                      OR u.notifyprops ->> 'first_name' = 'true' )\n            ) AS \"found!\"\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "found!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "11c6b9968e1b7a9674d1c62a024fbb6396af41c28e3feb41815f2f71cab8cf03"
+}

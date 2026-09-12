@@ -95,6 +95,7 @@ mod parity {
     pub mod oauth_apps;
     pub mod outgoing_hooks;
     pub mod post_bulk_reactions;
+    pub mod post_creates;
     pub mod post_edit_history;
     pub mod post_get;
     pub mod post_reactions;
