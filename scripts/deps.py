@@ -29,6 +29,18 @@ So read the *positive* signals — "these N routes all want `SaveMember`" is tru
 it found those edges. Do not read the zeroes as "this route is free". A trustworthy version would
 use `golang.org/x/tools/go/callgraph` over the SSA, which is buildable because `reference/dump`
 already compiles the tree; that is a session of its own and nobody has needed it yet.
+
+**It costs the licensed path, which this port forwards.** Measured 2026-09-12: the three group
+syncable routes were ranked joint-most-expensive at 8 new store methods each, and were sequenced
+behind two other families on that basis. They needed **zero**. `requireLicense` is the first
+statement of all three handlers, so on an unlicensed stack the entire body — the
+`GroupSyncable` writes, `Group.TeamMembersToAdd`, the team and channel member writes — is
+unreachable, and porting it would have been unverifiable by construction. This walker follows the
+call graph straight past the gate.
+
+So before sequencing on a cost from this script, check the handler's first statement. A route
+whose family is licence-gated (`api4/group.go` is 20 for 20) costs whatever its *refusal* costs,
+which is usually nothing, and the expensive half is a [D-360]-style forward rather than work.
 """
 import re, subprocess, collections, pathlib
 ROOT = pathlib.Path("/home/niklabh/projekts/mattermost-rs")
