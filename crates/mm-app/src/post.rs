@@ -257,7 +257,7 @@ impl App {
     }
 
     /// Port of `app.App.PreparePostForClient` (post_metadata.go:189). Stage order is Go's.
-    async fn prepare_post_for_client(
+    pub(crate) async fn prepare_post_for_client(
         &self,
         original: &Post,
         opts: PreparePostForClientOpts,

@@ -39,6 +39,7 @@ pub mod limits;
 pub mod oauth;
 pub mod password;
 pub mod post;
+pub mod post_create;
 pub mod post_write;
 pub mod preference;
 pub mod properties;
@@ -94,6 +95,16 @@ pub struct App {
     status_cache: std::sync::Arc<
         std::sync::RwLock<std::collections::HashMap<String, mm_model::status::Status>>,
     >,
+    /// Go's `Server.seenPendingPostIdsCache` (app/post.go:28), shared across every clone of
+    /// `App` for the same reason the status cache is: a pending post id claimed by one request
+    /// must be the one the retry sees.
+    ///
+    /// A map rather than an LRU because the eviction policy is not what
+    /// `deduplicateCreatePost` reads — the three states (absent, claimed, saved) are, and each
+    /// answers differently. Entries carry their own expiry and are dropped on the way past.
+    pending_post_ids: std::sync::Arc<
+        std::sync::Mutex<std::collections::HashMap<String, crate::post_create::PendingPostEntry>>,
+    >,
     /// Go's `platform.filestore` — the backend every file, image, emoji and brand read goes
     /// through. Built once from the configuration, like Go's, so a route never re-reads
     /// `FileSettings` to decide where to look.
@@ -145,6 +156,9 @@ impl App {
             export_filestore,
             hub: std::sync::Arc::new(crate::hub::Hub::new()),
             status_cache: std::sync::Arc::new(std::sync::RwLock::new(
+                std::collections::HashMap::new(),
+            )),
+            pending_post_ids: std::sync::Arc::new(std::sync::Mutex::new(
                 std::collections::HashMap::new(),
             )),
         }

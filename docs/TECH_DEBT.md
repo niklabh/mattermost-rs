@@ -7607,3 +7607,78 @@ write family from here on:
 > against** — including values that cannot carry the suite's name prefix, which are exactly the
 > interesting ones. And after any mutation batch over a write route, run the full suite once on a
 > clean tree before quoting a tally; the batch's own verdicts do not see the debris they leave.
+
+---
+
+## D-400 · the pending-post-id deduplication cache is per-server while Go is still running
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-12 (createPost)
+
+Go's `Server.seenPendingPostIdsCache` (app/post.go:28) is in-process, and so is
+`mm_app::App::pending_post_ids`. While both servers run they are independent: a post created
+through Go — because it was forwarded, or because a client talked to Go directly — leaves no entry
+here, so a retry that this server answers creates a **second post** rather than returning the
+first. The mirror case is the same.
+
+This is [D-191]'s shape, not a new one: the status cache has the same property for the same
+reason, and the same resolution — it ends when the Go process does. It is recorded rather than
+fixed because the alternative is a shared cache (Redis, or a table), which is infrastructure
+neither server has and which Go would not read anyway.
+
+Narrower than it sounds in practice: the retry window is `pendingPostIDsCacheTTL`, thirty seconds,
+and the webapp sends a pending id only on its own retries. It is listed as a divergence and not as
+coverage because a duplicate message is user-visible.
+
+One further gap inside our own cache. Go claims the pending id at the *top* of `CreatePost` and
+holds it across the author lookup, the root fetch, `FillInPostProps`, the plugin hook and the
+embed pipeline; we claim it after `refuse_create_post_shapes`, which is much later. So two
+genuinely concurrent requests carrying the same pending id have a smaller window here in which the
+second is answered with Go's 500 `api.post.deduplicate_create_post.pending`, and outside that
+window we create two posts where Go creates one. Closing it means claiming earlier, which cannot
+be done without claiming on shapes we then forward.
+
+## D-401 · createPost serves one shape and forwards the rest
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-12 (createPost)
+
+`POST /api/v4/posts` answers a plain root-level message in an open or private channel and
+forwards everything else. `mm_app::post_create::App::refuse_create_post_shapes` is the complete
+list and carries the Go branch behind each arm; what is owed, grouped by the subsystem that would
+unblock it:
+
+| forwarded shape | what it needs |
+|---|---|
+| a reply (`root_id` set) | `updateThreadsFromPosts` — a `Threads` row and a `ThreadMemberships` row; plus `ResolvePersistentNotification` and the CRT follower fan-out |
+| `file_ids` | `FileInfoStore::attach_to_post`, and `Post().Overwrite` for the partial-attachment path |
+| a `PostPriority` | `savePostsPriority`, `savePostsPersistentNotifications` |
+| `burn_on_read` | the `TemporaryPost` and `ReadReceipts` stores, and `RevealBurnOnReadPostsForUser` |
+| any non-default post type | `card` reads `FeatureFlags.IntegratedBoards`; `custom_*` is a plugin's |
+| a DM or group message | `SendAutoResponseIfNecessary`, which writes a second post |
+| a shared channel | the shared-channel sync service |
+| a message with a link | `getFirstLink`, `getLinkMetadata`, the permalink preview and the `previewed_post` prop |
+| a message with `@` or `~`, or a channel with a keyword-mention recipient | the mention engine and `Channel().IncrementMentionCount` |
+| a channel whose team has an outgoing webhook | `handleWebhookEvents`, whose *response* Go turns into a post |
+| `?silent=true` | the notification suppression the prop names |
+| the nine props in `REFUSED_CREATE_PROPS` | the username/icon overrides and the integration-authority re-derivation |
+
+The mention engine is the largest single unlock: it removes three rows at once and it is what
+`SendNotifications` is built around.
+
+## D-402 · email, push and plugin hooks do not fire for a post this server writes
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-12 (createPost)
+
+A post served here publishes the `posted` websocket event and nothing else.
+`sendNotificationEmail`, `sendPushNotification`, `SendAutoResponseIfNecessary`,
+`MessageWillBePosted` and `MessageHasBeenPosted` are all absent.
+
+Deliberately *not* turned into forward conditions, unlike the mention fan-out. The distinction is
+whether the effect is observable: the mention fan-out writes `ChannelMembers.MentionCount`, which
+any later read diverges on, while email and push leave the database untouched and the plugin hooks
+have no environment to run in at all ([D-183], which `update_post` already ships).
+`SendAutoResponseIfNecessary` *does* write a post, which is why DMs and group messages are
+forwarded rather than covered by this entry.
+
+What that costs: on a server with `EmailSettings.SendEmailNotifications` or
+`SendPushNotifications` on, a message posted through this server notifies nobody. Both default to
+false. Closing it means the notification pipeline, which is the same unlock [D-401] names.

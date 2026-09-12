@@ -418,6 +418,25 @@ pub trait PostStore {
         &self,
         post: &Post,
     ) -> impl std::future::Future<Output = Result<Post, StoreError>> + Send;
+
+    /// Whether any member of this channel can be mentioned by a **keyword** rather than by an
+    /// `@`-token.
+    ///
+    /// Not a port of a Go query: it is the cheapest sound test for "would
+    /// `getExplicitMentions` (app/mention_parser.go) find a mention in a message with no `@` in
+    /// it". Go builds each recipient's mention keys from `NotifyProps`: `@username` and the three
+    /// channel-wide tokens all need the `@`, but `mention_keys` is an arbitrary comma-separated
+    /// word list and `first_name` adds the member's own first name — either of which can match a
+    /// plain word.
+    ///
+    /// A mention reaches `Channel().IncrementMentionCount`, so `mm_app`'s create-post path
+    /// forwards whenever this answers `true`. It over-approximates deliberately: a member whose
+    /// `mention_keys` is `" ,"` counts, and so does one whose first name is empty. Narrowing it
+    /// would write a row Go would have raised somebody's mention count for.
+    fn channel_has_keyword_mention_recipients(
+        &self,
+        channel_id: &str,
+    ) -> impl std::future::Future<Output = Result<bool, StoreError>> + Send;
 }
 
 /// Port of `model.GetPostsOptions` (post.go:456), narrowed to the fields the page branch of
@@ -2956,6 +2975,35 @@ impl PostStore for SqlPostStore {
         .map(|_| ())
         .map_err(|source| StoreError::Db {
             context: format!("failed to delete notifications for channels [{channel_id}]"),
+            source,
+        })
+    }
+
+    #[tracing::instrument(skip(self), fields(channel_id = %channel_id))]
+    async fn channel_has_keyword_mention_recipients(
+        &self,
+        channel_id: &str,
+    ) -> Result<bool, StoreError> {
+        // Deactivated users are skipped: `SendNotifications` reads `GetAllProfilesInChannel`,
+        // which filters `Users.DeleteAt = 0`.
+        sqlx::query_scalar!(
+            r#"
+            SELECT EXISTS (
+                SELECT 1
+                  FROM channelmembers cm
+                  JOIN users u ON u.id = cm.userid
+                 WHERE cm.channelid = $1
+                   AND u.deleteat = 0
+                   AND ( COALESCE(TRIM(u.notifyprops ->> 'mention_keys'), '') <> ''
+                      OR u.notifyprops ->> 'first_name' = 'true' )
+            ) AS "found!"
+            "#,
+            channel_id,
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to look for keyword mention recipients".to_owned(),
             source,
         })
     }

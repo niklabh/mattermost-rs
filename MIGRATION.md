@@ -11286,3 +11286,70 @@ Go.
 image uploads, which can now reuse `mm_api::multipart` and `App::write_file`. Both need
 `imaging`'s resize question answered the same way this one answered it, and the profile-image one
 additionally needs `SetProfileImage`'s `UpdateAt` bump and its websocket event.
+
+
+## Ledger additions — api4/post.go `createPost` / `createEphemeralPost` (appended 2026-09-12, branch `wt/createpost`)
+
+| Go file | Rust file | Status | Tests | Notes |
+|---|---|---|---|---|
+| app/post.go (`CreatePostAsUserWithFlags`, `CreatePost`, `deduplicateCreatePost`, `SendEphemeralPost`, `PostBurnOnReadCheckWithApp`) | `mm-app/src/post_create.rs` | PARTIAL | 6 unit + parity | One shape is served — a plain root-level message in an open or private channel — and `App::refuse_create_post_shapes` names every other shape and forwards it **before** the pending-post id is claimed and before `Post().Save`. The forwards are not documented here; they are the doc comments on that function, one arm per Go branch. |
+| api4/post.go (`createPost`, `createEphemeralPost`, `createPostChecks`, `postPriorityCheck`, `postCardTypeCheck`) | `mm-api/src/post_writes.rs` | PARTIAL | 6 unit + 21 parity | `POST /api/v4/posts` and `POST /api/v4/posts/ephemeral`. Both answer **201**, not 200. The one thing a reader gets wrong: `?set_online=bogus` is swallowed and stays `true` while `?silent=bogus` is a 400 — two `strconv.ParseBool` calls a few lines apart with opposite error handling. |
+| store/sqlstore/post_store.go (member mention keys) | `mm-store/src/post_store.rs` | PARTIAL | parity | `PostStore::channel_has_keyword_mention_recipients` is not a port of a Go query: it is the sound test for "would `getExplicitMentions` find a mention in a message with no `@` in it", and it is what makes the notification fan-out a *detectable* forward condition rather than an assumed-absent one. |
+
+## Notes — api4/post.go (`createPost`)
+
+1. **`POST /api/v4/posts/ephemeral` is a literal beside `{post_id}`, and registering it took three
+   methods away until `invalid_post_id_param` put them back.** axum prefers a static segment and
+   does not backtrack across method routers, so the `GET`, `PUT` and `DELETE` that
+   `/api/v4/posts/{post_id}` answered on that exact path had to be re-registered by hand. Both
+   halves of the proof are committed: `mm_api::post_writes`'s
+   `registering_the_two_create_routes_un_serves_nothing` runs in-process against a dead stack, and
+   `parity::post_creates::the_ephemeral_literal_did_not_un_serve_its_parameterised_sibling`
+   re-asks the same three methods against Go and compares the bodies.
+2. **A forward that happens after a partial write is a correctness bug, and the response cannot
+   see it.** A forwarded 201 and a served 201 are indistinguishable to a client, so
+   `parity::post_creates::every_forward_condition_forwards_and_leaves_exactly_one_row` counts the
+   *rows in the channel* afterwards. Two rows would mean we wrote one and then proxied.
+3. **The deduplication cache is in-process and therefore per-server.** Go's
+   `seenPendingPostIdsCache` and ours are independent while both servers run, so a post Go created
+   is not deduplicated here — [D-400]. The claim/remove/overwrite sequence is Go's `defer`
+   unrolled, and unrolling it is what makes a *forward* safe: the forward is a failure as far as
+   `App::create_post` is concerned, so the entry is removed and Go's own cache deduplicates the
+   retry.
+4. **`api.post.create_post.channel_root_id.app_error` is built at 500 and lowered to 400.**
+   `CreatePostAsUserWithFlags` tests `err.Id` against two ids after `CreatePost` returns and
+   rewrites the status for both. Returning the constructed 500 would diverge on a body that is
+   otherwise identical.
+5. **`GetSenderName` and `GetChannelName` are both called with the literal `model.ShowUsername`.**
+   Neither the `TeammateNameDisplay` setting nor the caller's `name_format` preference is read for
+   the `posted` event, so this port needs no preference lookup there — a conclusion reached by
+   reading the call site rather than the function.
+
+### Mutation testing: 33 run, 31 caught, 2 controls survived, 0 harness faults
+
+Plan at `scripts/mutations/post-creates.plan`. The first pass scored 27 caught with four real
+survivors; each was a fixture gap rather than an equivalent mutant, and each is now caught by a
+test written for it. The finding they share is worth stating once: **every one of the four was an
+input the suite never sent**, so the right answer and the wrong answer coincided.
+
+1. **The keyword-recipient query is a disjunction and only one arm was exercised.**
+   `a_member_with_mention_keys_forwards_the_whole_channel` sets `mention_keys` and explicitly
+   turns `first_name` *off*, which pins the first arm and leaves the second free — deleting
+   `OR u.notifyprops ->> 'first_name' = 'true'` changed no answer anywhere in the suite.
+   `a_member_notified_on_their_first_name_forwards_the_whole_channel` is the mirror.
+2. **Every dedup test retried after a success.** The claim-release arm only runs after a
+   *failure*, and the refusals that forward are all decided before the claim is taken. The
+   discriminator is `?silent=true` from a session that is neither a bot nor an OAuth app: a 403
+   raised inside the claimed section. With the claim leaked, the retry answers 500
+   `api.post.deduplicate_create_post.pending` instead of creating the post.
+3. **The ephemeral route's `create_at` was blanked before comparison.** Correct for comparing the
+   rest of the shape, and exactly why "assign unconditionally" and "assign only when zero" were
+   indistinguishable. Note the two routes *disagree*: `createEphemeralPost` overwrites a submitted
+   `create_at` (api4/post.go:235) where the create route lets an admin's backdated one survive —
+   a reader would plausibly "fix" this in the wrong direction.
+4. **`len(post.FileIds) > 0` cannot be pinned at route level here.** Separating its arms needs a
+   caller holding `create_post` but not `upload_file`, and no stock role on an unlicensed stack
+   grants one without the other (`channel_user` has both). Patching the role would have been a
+   write to shared state that every concurrent suite reads, which is the shape that has produced
+   failures in suites that touched nothing. Extracted as `post_carries_file_ids` and pinned by
+   `only_a_non_empty_file_id_list_requires_upload_file`; the plan line moved to the `unit` suite.

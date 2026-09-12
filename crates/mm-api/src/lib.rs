@@ -312,6 +312,20 @@ pub(crate) async fn go_global_headers(
     response
 }
 
+/// The 400 `/api/v4/posts/{post_id}` answers for a segment that is not a 26-character id.
+///
+/// Registered on the `GET`, `PUT` and `DELETE` of the **literal** `/api/v4/posts/ephemeral` so
+/// that adding that literal does not take those three methods away from `posts::get_post`,
+/// `post_writes::update_post` and `post_writes::delete_post` — each of which refuses the
+/// nine-character segment with exactly this error, before reading a body or touching the
+/// database. axum prefers a static segment over `{param}` and does not fall back across method
+/// routers, so without this the three would silently start being forwarded. See [D-330].
+async fn invalid_post_id_param() -> axum::response::Response {
+    axum::response::IntoResponse::into_response(crate::error::ApiError::invalid_url_param(
+        "post_id",
+    ))
+}
+
 /// Build the router.
 ///
 /// The migrated routes are listed explicitly and everything else falls through to the proxy —
@@ -1261,6 +1275,35 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/posts/ids",
             partially_migrated(post(posts::get_posts_by_ids)),
+        )
+        // `BaseRoutes.Posts.Handle("")` (api4/post.go:25) — the route the product is built
+        // around. One segment shorter than `{post_id}`, so it collides with nothing; the GET,
+        // PUT and DELETE Go does not register on this path keep going to Go through
+        // `partially_migrated`.
+        .route(
+            "/api/v4/posts",
+            partially_migrated(post(post_writes::create_post)),
+        )
+        // `BaseRoutes.Posts.Handle("/ephemeral")` (api4/post.go:29) — the second literal sibling
+        // of `{post_id}`, and the one that has to carry four methods rather than one.
+        //
+        // **A literal un-serves its parameterised sibling for every method, and axum does not
+        // backtrack.** `GET /posts/ephemeral` was answered here before this line existed: it
+        // reached `posts::get_post`, whose `RequirePostId` refused the nine-character segment
+        // with a **400 `api.context.invalid_url_param.app_error`**. Registering the literal with
+        // POST alone would have sent that GET — and the PUT and the DELETE — to Go instead,
+        // silently. So the other three methods are registered too, answering exactly what
+        // `{post_id}` answered: the same 400, for the same reason, because `ephemeral` is not a
+        // 26-character id. `tests/parity/post_creates.rs` re-asks all four and would fail if any
+        // of them started being forwarded.
+        .route(
+            "/api/v4/posts/ephemeral",
+            partially_migrated(
+                post(post_writes::create_ephemeral_post)
+                    .get(invalid_post_id_param)
+                    .put(invalid_post_id_param)
+                    .delete(invalid_post_id_param),
+            ),
         )
         // `BaseRoutes.Post.Handle("/thread")` (api4/post.go:31) — one segment deeper than the
         // route above, so neither shadows the other. Its literal siblings under `{post_id}`
