@@ -279,6 +279,28 @@ async fn a_plain_user_may_not_replace_someone_elses_picture() {
     let plain = create_plain_user(&client, &admin, &team_id, "imgperm").await;
     let me = logged_in_user_id();
 
+    // **`RequireUserId` runs before the permission check, and only this case shows it.** With a
+    // well-formed id the two orderings coincide — an id that names nobody is a 400 either way,
+    // because `GetUser` fails and `setProfileImage` turns *that* into the same
+    // `invalid_url_param`. A malformed id in a **plain** user's hands separates them: the id
+    // check answers 400 and a permission check reached first would answer 403. Without this row
+    // `profile-require-id-dropped` survives, which is how it was found.
+    let body = both_refuse_identically(
+        &client,
+        reqwest::Method::POST,
+        &format!("/api/v4/users/{NOT_AN_ID}/image"),
+        &plain.token,
+        Some(&multipart()),
+        an_image_part(),
+        "a plain user posting to a user_id that is not an id",
+    )
+    .await;
+    assert_eq!(body["id"], "api.context.invalid_url_param.app_error");
+    assert_eq!(
+        body["status_code"], 400,
+        "the id check precedes the permission, so this is not the 403"
+    );
+
     // A good body: the refusal is the permission, not the shape.
     both_refuse_identically(
         &client,
