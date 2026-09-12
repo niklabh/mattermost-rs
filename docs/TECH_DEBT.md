@@ -7338,3 +7338,136 @@ are the ones a later port will get wrong:
 behind whichever route needs them first. `mm_model::Group`'s validators are already ported and are
 now pinned branch-by-branch against a generated oracle (`fixtures/behaviour_group.json`), so the
 model layer is not the blocker; the store and the permission model are.
+
+---
+
+## D-380 · `createEmoji` forwards every image it does not measure, and every resize
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-12 (emoji writes and the terms-of-service pair)
+
+`POST /api/v4/emoji` is served here for every refusal — the 501, both 413s, the multipart parse
+400, the permission 403, the model's name errors, the duplicate, the missing image part, the
+"not an image" 400 and the 1028×1028 refusal — and for the **write-through** image path, which is
+`WriteFile` on the bytes exactly as they arrived. Three cases go to Go, and each forwards *before*
+the file backend is touched, so a forwarded create leaves nothing behind:
+
+| forwarded | why |
+|---|---|
+| any image that is not a PNG this port can measure | `image.DecodeConfig` is six decoders with six header grammars; `mm_app::imaging::decode_config` reproduces PNG's `parseIHDR` in full — length, CRC, compression, filter, interlace, the depth/colour-type pairs, the signed-`int32` dimension read — and answers `Undecidable` for the rest. A dimension guessed wrong is a wrong *refusal*, or a wrong acceptance, on a route that writes. |
+| a paletted PNG (colour type 3) | `png.DecodeConfig` does **not** stop at IHDR for those: `cbPaletted(d.cb)` keeps the chunk loop going to `dsSeentRNS`, so it can fail on a PLTE chunk long after the dimensions were read. |
+| any filename whose extension is not `.png` | `isGIF` is `mime.TypeByExtension(filepath.Ext(name))` and Go's `mime` package reads the host's `/etc/mime.types` at init, so *which* extensions mean `image/gif` is a property of the machine the Go server runs on. `.png` is in the built-in table and cannot be displaced, so it is the one extension safe to claim without consulting the host — and it is never the GIF branch. |
+| any image over 128×128 | the resize path is `imaging.Fit` (Lanczos) plus `EncodePNG`, or `gif.EncodeAll` after `resizeEmojiGif`'s per-frame redraw and Floyd–Steinberg dither. A second implementation does not produce those bytes, and the emoji that lands is the resized one — so "close enough" is a different stored file. |
+
+`parity::emoji_writes::a_resize_and_a_gif_filename_are_answered_by_go` measures the boundary in
+both directions: 128×128 and 1028×1028 sit on the near side of their thresholds and are handled
+here and by Go respectively, which is what makes an off-by-one in either limit visible.
+
+**What is owed:** the GIF frame walk (`imgutils.CountGIFFrames`, an LZW decode per frame) and a
+resize whose output is byte-identical to `imaging.Fit` + Go's PNG encoder. The second is the hard
+one and may never be worth it; if it is not, the honest end state is that this route keeps a
+forward for the resize path and the strangler does not fully retire here. Recorded now rather than
+discovered later.
+
+---
+
+## D-381 · the multipart port does not decode RFC 2231 parameter continuations
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-12 (emoji writes and the terms-of-service pair)
+
+`mm_api::multipart::parse_media_type` reproduces `mime.ParseMediaType` for the forms a
+`multipart/form-data` body actually carries — quoted strings with backslash escapes, lower-cased
+attribute names, the duplicate-attribute error, the empty-value error, the trailing semicolon —
+and is pinned against Go over a 23-row corpus (`fixtures/behaviour_emoji_upload.json`,
+`parse_media_type`).
+
+What it does not do is RFC 2231: `filename*=utf-8''x` and the `name*0=`/`name*1=` continuation
+form. Go decodes those into the un-starred attribute; here `filename*` stays a separate attribute
+and `filename` is absent, so such a part is read as a **value** where Go reads it as a **file**.
+For `createEmoji` that means an image part sent that way would be dropped and the request answered
+`api.context.invalid_body_param.app_error` naming `createEmoji`, where Go would have stored it.
+
+No browser sends that form in a multipart body — it belongs to `Content-Disposition` on a
+*response* — and `createEmoji` is the only route that reads multipart today. **What is owed:** the
+continuation decoder, before the second multipart route (`POST /brand/image`,
+`POST /users/{id}/image`) ships, and a corpus row for it.
+
+---
+
+## D-382 · the licensed half of `createTermsOfService` has no oracle on this stack
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-12 (emoji writes and the terms-of-service pair)
+
+`POST /api/v4/terms_of_service` is `manage_system`, then `license == nil ||
+!*license.Features.CustomTermsOfService` → **400**. This installation is unlicensed, so the 400 is
+the whole route on the wire and it is compared against Go across six bodies — including bodies that
+are not JSON, which Go never parses because the gate precedes `MapFromJSON`.
+
+Everything past the gate *is* ported — `should_publish`, `App::create_terms_of_service`,
+`TermsOfServiceStore::save` and `get`, all with tests — because licensing does not gate development
+here. What is missing is an **oracle**: Go loads its licence at startup and re-reads it only on a
+save, so planting an `ActiveLicenseId` row moves our answer and not Go's, and a licensed server to
+compare against does not exist on this stack. The same shape as [D-360].
+
+Two branch-level facts recorded because no test here can reach them:
+
+1. **`App.CreateTermsOfService`'s `ErrInvalidInput` branch would nil-dereference in Go.**
+   `termsOfService, err = Save(termsOfService)` assigns `nil` on failure, and the very next line
+   reads `"id="+termsOfService.Id`. It is unreachable — the struct built there always has an empty
+   `Id`, which is the only thing that raises `ErrInvalidInput` — and the port carries the empty-id
+   string it would have produced.
+2. **Re-posting identical text publishes nothing and returns the *existing* row**, id and
+   `create_at` included, so a client cannot tell a no-op from a publish except by the id. The
+   comparison is exact: not trimmed, not case-folded.
+
+**What is owed:** a licensed oracle, which needs a second Go process started with `MM_LICENSE` the
+way `scripts/go-discoverable.sh` starts one with a different config. Until then the licensed side
+of this route and of the seven group writes are both untested in the same way.
+
+---
+
+## D-383 · a deleted emoji's reaction sweep does not invalidate Go's reaction cache
+
+**Status** ACCEPTED · **Severity** divergence · **Raised** 2026-09-12 (emoji writes and the terms-of-service pair)
+
+`DELETE /api/v4/emoji/{emoji_id}` served here soft-deletes the emoji, renames its image and sweeps
+the reactions that used it — all three in the shared database, all three verified against the
+table. Go's `LocalCacheReactionStore` memoises `GetReactionsForPost` and is invalidated by **Go's
+own** `DeleteAllWithEmojiName`, which never runs, so `GET /posts/{id}/reactions` on the Go server
+can keep listing a reaction whose row is gone until the entry expires.
+
+This is the staleness shape the emoji, terms-of-service and session ports already carry ([D-352]'s
+neighbourhood): both servers agree on a settled database and disagree only inside a cache window.
+It is ACCEPTED rather than OPEN because closing it means either reproducing Go's cache invalidation
+over a channel we do not have, or retiring the Go server — which is the project's actual end state
+and the thing that closes it.
+
+The consequence for tests, which is the part that costs time: **assert the table, not the route**,
+whenever this server writes something Go caches. `parity::emoji_writes::
+deleting_an_emoji_removes_the_reactions_that_used_it` failed on its first run for exactly this
+reason and now queries `reactions` directly.
+
+---
+
+## D-384 · `AppError.params` is on no wire, so only a unit test can pin an i18n parameter
+
+**Status** ACCEPTED · **Severity** test-harness · **Raised** 2026-09-12 (emoji writes and the terms-of-service pair)
+
+`uploadEmojiImage`'s 1028×1028 refusal carries `MaxWidth` **and** `MaxHeight` as i18n parameters.
+A mutation renaming the second key to the first — collapsing the pair to one key — survived the
+entire parity suite, and it was right to: `params map[string]any` is **unexported** in Go
+(utils.go:240) and `#[serde(skip)]` in `mm_model::utils::AppError`, so the field reaches neither
+server's response body. It exists only to interpolate `Message`, and `Message` is the one field
+[D-092] already tolerates as differing until an i18n bundle lands.
+
+So a cross-server body comparison is *structurally* blind to every `params` key in the tree, and
+no amount of fixture work on the parity side can change that. `mm_app::emoji`'s
+`the_too_large_refusal_names_both_dimensions` pins the pair as a unit test instead, against the
+oracle's own `png_header_1029x1028` bytes; the values themselves stay transcribed from
+app/emoji.go:36 because Go will not hand them out. `an_over_tall_image_is_refused_by_the_height_half`
+is its companion: `width > MAX || height > MAX` short-circuits, so only an input inside the width
+limit and outside the height one ever evaluates the second comparison.
+
+ACCEPTED rather than OPEN: nothing is owed here beyond the habit. The same blindness applies to the
+three `Group*MaxLength` params already recorded in `reference/dump/behaviour_group.go`'s header and
+to `TermsOfService.IsValid`'s `MaxLength`. **When a port builds a `params` map, pin it with a unit
+test — a parity test cannot see it.**
