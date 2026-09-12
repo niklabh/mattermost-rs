@@ -1,0 +1,85 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT createat            AS \"create_at!\",\n                   updateat            AS \"update_at!\",\n                   deleteat            AS \"delete_at!\",\n                   message             AS \"message!\",\n                   rootid              AS \"root_id!\",\n                   channelid           AS \"channel_id!\",\n                   userid              AS \"user_id!\",\n                   fileids             AS \"file_ids?\",\n                   props               AS \"props?\",\n                   priority            AS \"priority?\",\n                   COALESCE(type, '')  AS \"draft_type!\"\n              FROM drafts\n             WHERE userid = $1 AND channelid = $2 AND rootid = $3\n               AND ($4 OR deleteat = 0)\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "create_at!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "update_at!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "delete_at!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "message!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "root_id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "channel_id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 6,
+        "name": "user_id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 7,
+        "name": "file_ids?",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 8,
+        "name": "props?",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 9,
+        "name": "priority?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "draft_type!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      null
+    ]
+  },
+  "hash": "8e483115fd3c2873b4c24a4a0c0b4f7a1ae79e43b634dfa09c3e6a0083cb3dce"
+}

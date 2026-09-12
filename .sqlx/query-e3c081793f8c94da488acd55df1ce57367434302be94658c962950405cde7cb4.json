@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE views\n               SET sortorder = new_order.ord, updateat = $1\n              FROM (SELECT unnest($2::text[]) AS id, unnest($3::int[]) AS ord) AS new_order\n             WHERE views.id = new_order.id\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "TextArray",
+        "Int4Array"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e3c081793f8c94da488acd55df1ce57367434302be94658c962950405cde7cb4"
+}

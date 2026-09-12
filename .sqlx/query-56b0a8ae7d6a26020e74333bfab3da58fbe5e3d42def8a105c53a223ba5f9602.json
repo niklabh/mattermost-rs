@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE users\n                SET failedattempts = failedattempts + 1\n              WHERE id = $1 AND failedattempts < $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "56b0a8ae7d6a26020e74333bfab3da58fbe5e3d42def8a105c53a223ba5f9602"
+}

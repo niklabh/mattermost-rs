@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE threads SET threaddeleteat = $1 WHERE postid = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a05bdffc9bc8a934a8dbb8a039512b87c1ea53420c929ca1c9648f36ac1cd317"
+}

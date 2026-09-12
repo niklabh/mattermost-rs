@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            WITH to_delete AS (\n                SELECT id, token, userid\n                  FROM useraccesstokens\n                 WHERE (expiresat = 0 OR expiresat > $1)\n                   AND isactive = true\n                   AND userid NOT IN (SELECT userid FROM bots)\n                 LIMIT $2\n            ),\n            deleted_sessions AS (\n                DELETE FROM sessions\n                 WHERE token IN (SELECT token FROM to_delete)\n            ),\n            deleted_tokens AS (\n                DELETE FROM useraccesstokens\n                 WHERE id IN (SELECT id FROM to_delete)\n             RETURNING userid\n            )\n            SELECT userid AS \"userid!\" FROM deleted_tokens\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "userid!",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "c69e7f7c23e43b47c6403477eb7204d1d700b68b95f032eca825329d4b265556"
+}

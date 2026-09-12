@@ -1,0 +1,124 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id                              AS \"id!\",\n                   COALESCE(token, '')             AS \"token!\",\n                   COALESCE(createat, 0)           AS \"createat!\",\n                   COALESCE(updateat, 0)           AS \"updateat!\",\n                   COALESCE(deleteat, 0)           AS \"deleteat!\",\n                   COALESCE(creatorid, '')         AS \"creatorid!\",\n                   COALESCE(teamid, '')            AS \"teamid!\",\n                   COALESCE(\"trigger\", '')         AS \"trigger!\",\n                   COALESCE(method, '')            AS \"method!\",\n                   COALESCE(username, '')          AS \"username!\",\n                   COALESCE(iconurl, '')           AS \"iconurl!\",\n                   COALESCE(autocomplete, false)   AS \"autocomplete!\",\n                   COALESCE(autocompletedesc, '')  AS \"autocompletedesc!\",\n                   COALESCE(autocompletehint, '')  AS \"autocompletehint!\",\n                   COALESCE(displayname, '')       AS \"displayname!\",\n                   COALESCE(description, '')       AS \"description!\",\n                   COALESCE(url, '')               AS \"url!\",\n                   COALESCE(pluginid, '')          AS \"pluginid!\"\n              FROM commands\n             WHERE id = $1 AND deleteat = 0\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "token!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "createat!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "updateat!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "deleteat!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "creatorid!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 6,
+        "name": "teamid!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 7,
+        "name": "trigger!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 8,
+        "name": "method!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 9,
+        "name": "username!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 10,
+        "name": "iconurl!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 11,
+        "name": "autocomplete!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 12,
+        "name": "autocompletedesc!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 13,
+        "name": "autocompletehint!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 14,
+        "name": "displayname!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 15,
+        "name": "description!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 16,
+        "name": "url!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 17,
+        "name": "pluginid!",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "fb394f3b5608215c26d98b97f1def491db794ea585f71ae5fdb25a2c5085f5aa"
+}

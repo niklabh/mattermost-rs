@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT ts.defaultteamguestrole,\n               ts.defaultteamuserrole,\n               ts.defaultteamadminrole\n          FROM teams t\n          LEFT JOIN schemes ts ON t.schemeid = ts.id\n         WHERE t.id = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "defaultteamguestrole",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "defaultteamuserrole",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "defaultteamadminrole",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "e6c28281bbfc9d5316d4944921794886827dd83a0ee2c41748826c1245d9ef99"
+}

@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO sidebarchannels (channelid, userid, categoryid, sortorder)\n            SELECT entry.channelid, $2, $3, (entry.ord - 1) * $4\n            FROM unnest($1::text[]) WITH ORDINALITY AS entry(channelid, ord)\n            ON CONFLICT (channelid, userid, categoryid)\n                DO UPDATE SET sortorder = excluded.sortorder\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "TextArray",
+        "Varchar",
+        "Varchar",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "cdd111e0ca3dab3a21d6733c8e98bc688dc1ed0b2a729834fee261f78ceeb321"
+}

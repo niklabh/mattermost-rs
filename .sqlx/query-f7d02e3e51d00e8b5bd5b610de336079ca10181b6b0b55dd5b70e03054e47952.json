@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT COUNT(*) AS \"count!\"\n              FROM users u\n              LEFT JOIN bots b ON b.userid = u.id\n              LEFT JOIN teammembers tm\n                ON (tm.userid = u.id AND tm.teamid = $4 AND tm.deleteat = 0)\n              LEFT JOIN channelmembers cm ON (cm.userid = u.id AND cm.channelid = $5)\n             WHERE ($1 OR u.deleteat = 0)\n               AND ($2 OR u.remoteid = '' OR u.remoteid IS NULL)\n               AND ($3 OR b.userid IS NULL)\n               AND ($4 = '' OR tm.userid IS NOT NULL)\n               AND ($4 <> '' OR $5 = '' OR cm.userid IS NOT NULL)\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bool",
+        "Bool",
+        "Bool",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "f7d02e3e51d00e8b5bd5b610de336079ca10181b6b0b55dd5b70e03054e47952"
+}

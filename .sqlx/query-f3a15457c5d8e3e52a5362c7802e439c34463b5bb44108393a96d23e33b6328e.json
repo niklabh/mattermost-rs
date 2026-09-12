@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE oauthapps\n               SET updateat = $2, clientsecret = $3, name = $4, description = $5, iconurl = $6,\n                   callbackurls = $7, homepage = $8, istrusted = $9, mattermostappid = $10,\n                   isdynamicallyregistered = $11\n             WHERE id = $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Bool",
+        "Varchar",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f3a15457c5d8e3e52a5362c7802e439c34463b5bb44108393a96d23e33b6328e"
+}

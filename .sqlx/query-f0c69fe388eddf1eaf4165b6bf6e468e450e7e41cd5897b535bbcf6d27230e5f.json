@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE commands\n               SET token = $2, createat = $3, updateat = $4, creatorid = $5, teamid = $6,\n                   method = $7, username = $8, iconurl = $9, autocomplete = $10,\n                   autocompletedesc = $11, autocompletehint = $12, displayname = $13,\n                   description = $14, url = $15, pluginid = $16, \"trigger\" = $17\n             WHERE id = $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Varchar",
+        "Int8",
+        "Int8",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Bool",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Varchar"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f0c69fe388eddf1eaf4165b6bf6e468e450e7e41cd5897b535bbcf6d27230e5f"
+}

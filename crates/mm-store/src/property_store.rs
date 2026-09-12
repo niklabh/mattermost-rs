@@ -2,30 +2,38 @@
 //! `SqlPropertyValueStore` (channels/store/sqlstore/property_{group,field,value}_store.go).
 //!
 //! Ported for the seven custom-profile-attribute routes in
-//! `api4/custom_profile_attributes.go`; see [`mm_app::App::cpa_list_fields`] for what each read
-//! is reached by. Go hangs these off three separate store interfaces, which this crate keeps in
-//! one module because they are one table family, read through one group.
+//! `api4/custom_profile_attributes.go`, then extended to the whole predicate set for the four
+//! read routes of `api4/properties.go`; see [`mm_app::App::search_property_fields`] for what each
+//! read is reached by. Go hangs these off three separate store interfaces, which this crate keeps
+//! in one module because they are one table family, read through one group.
 //!
 //! # Nothing here writes
 //!
-//! Every CPA *write* — create, patch, delete, upsert — reaches the property service's
-//! `LicenseCheckHook` before it reaches the store, and that hook refuses without an Enterprise
-//! licence (app/properties/license_check.go:45). On an unlicensed deployment the write path is
-//! therefore unreachable, so porting it would produce code no test on this stack can exercise.
+//! Every write these tables take — create, patch, delete, upsert — runs the property service's
+//! hook chain first, and none of those hooks exist on this side. For the `access_control` group
+//! the first of them is a `LicenseCheckHook` that refuses outright without an Enterprise licence
+//! (app/properties/license_check.go:45), so that group's write path is unreachable here at all.
 //! The reads are ported because they are *not* unreachable: the licence hook's post-get arms
 //! short-circuit on an empty result set, so an unlicensed server answers a real 200 whenever the
 //! group holds no matching row and a 403 the moment it holds one. Telling those two apart is a
 //! database read, and that is what this module is for.
 //!
-//! # The searches implement a subset, and say so
+//! **The licence hook is scoped to one group, not to the tables.** It is constructed with
+//! `cpaGroup.ID` (app/server.go:325), so the `boards` and `post_attributes` groups — both
+//! registered unconditionally at startup and both PSAv2 — carry no hook at all and read straight
+//! through on any edition. That is what makes the generic `api4/properties.go` reads worth
+//! porting rather than forwarding: on those two groups there is nothing to refuse.
 //!
-//! `SearchPropertyFields`/`SearchPropertyValues` build a dozen optional predicates with squirrel.
-//! Compile-time-checked SQL cannot be assembled that way, and guessing at the rows a partially
-//! implemented predicate would return is exactly the failure this project exists to prevent — so
-//! [`SqlPropertyStore::search_fields`] and [`SqlPropertyStore::search_values`] implement the
-//! predicates their ported call sites set and **refuse** ([`StoreError::Argument`]) any option
-//! that is set but unimplemented. A later route that needs cursors, delta mode or the
-//! team/channel hierarchy gets a loud failure to extend, never a quietly truncated page.
+//! # The searches used to implement a subset; they no longer do
+//!
+//! `SearchPropertyFields`/`SearchPropertyValues` build a dozen optional predicates with squirrel,
+//! and compile-time-checked SQL cannot be assembled that way. The first port implemented only the
+//! predicates its CPA call sites set and refused the rest with [`StoreError::Argument`], so that
+//! a later route would get a loud failure to extend rather than a quietly truncated page. The
+//! properties routes were that route: both searches now carry the **whole** predicate set —
+//! cursors, delta mode, the four scopes, `IncludeDeleted` and the value filter — as one statement
+//! whose branches are chosen by bound parameters. Nothing is refused any more; each method's own
+//! docs say which Go branch each `CASE` arm is.
 
 use mm_model::property_field::{PermissionLevel, PropertyField, PropertyFieldSearchOpts};
 use mm_model::property_group::PropertyGroup;
@@ -231,13 +239,30 @@ impl PropertyStore for SqlPropertyStore {
         rows.into_iter().map(PropertyFieldRow::into_field).collect()
     }
 
-    /// # The predicates this implements
+    /// # Every predicate `SearchPropertyFields` builds, in one statement
     ///
-    /// `GroupID`, `ObjectType`, `PerPage` and the implicit `DeleteAt = 0`, ordered
-    /// `CreateAt ASC, Id ASC` — which is the whole of what `listCPAFields`
-    /// (custom_profile_attributes.go:43) sets. Every other option is refused rather than ignored;
-    /// see the module docs.
-    #[tracing::instrument(skip_all, fields(group_id = %opts.group_id, found))]
+    /// Go assembles a dozen optional `WHERE` clauses with squirrel and picks the ordering, the
+    /// tombstone rule and the cursor key from one derived flag, `deltaMode := SinceUpdateAt > 0`
+    /// (property_field_store.go:229). Compile-time-checked SQL cannot be assembled clause by
+    /// clause, so the whole decision tree is a single statement whose branches are taken by bound
+    /// parameters. Read it against the Go comment block above `SearchPropertyFields`; the two
+    /// modes and the four scopes are in the same order here.
+    ///
+    /// Three of those branches are the ones a reader gets wrong:
+    ///
+    /// * **Delta mode auto-includes tombstones.** `DeleteAt = 0` is applied only when
+    ///   `!deltaMode && !IncludeDeleted`, so a `since` query returns soft-deleted rows without
+    ///   asking — that is how a client learns a field was deleted.
+    /// * **The cursor key follows the mode, not the caller.** Delta mode compares `UpdateAt`,
+    ///   directory mode `CreateAt`, and [`PropertyFieldSearchOpts::is_valid`] rejects the
+    ///   mismatch rather than letting it compare against a column of zeroes and skip every row.
+    /// * **An empty cursor is no clause at all**, which is not the same as a clause that matches
+    ///   everything: `id > ''` would still drop nothing, but the paired `UpdateAt > 0` would drop
+    ///   every row whose timestamp Go never sets.
+    ///
+    /// The `since` boundary is `>=`, not `>`: a row updated at exactly `since` is on the first
+    /// page, and the cursor is what disambiguates the same millisecond across pages.
+    #[tracing::instrument(skip_all, fields(group_id = %opts.group_id, delta, found))]
     async fn search_fields(
         &self,
         opts: &PropertyFieldSearchOpts,
@@ -254,21 +279,10 @@ impl PropertyStore for SqlPropertyStore {
                 detail: "per page must be positive integer greater than zero",
             });
         }
-        if !opts.object_types.is_empty()
-            || !opts.target_type.is_empty()
-            || !opts.target_ids.is_empty()
-            || !opts.channel_id.is_empty()
-            || !opts.team_id.is_empty()
-            || !opts.linked_field_id.is_empty()
-            || opts.since_update_at > 0
-            || opts.include_deleted
-            || !opts.cursor.is_empty()
-        {
-            return Err(StoreError::Argument {
-                entity: "PropertyField",
-                detail: "this search option is not ported; see property_store.rs",
-            });
-        }
+
+        let delta = opts.since_update_at > 0;
+        let has_cursor = !opts.cursor.is_empty();
+        tracing::Span::current().record("delta", delta);
 
         let rows = sqlx::query_as!(
             PropertyFieldRow,
@@ -292,14 +306,53 @@ impl PropertyStore for SqlPropertyStore {
                    COALESCE(createdby, '')              AS "createdby!",
                    COALESCE(updatedby, '')              AS "updatedby!"
               FROM propertyfields
-             WHERE deleteat = 0
-               AND ($1 = '' OR groupid = $1)
-               AND ($2 = '' OR objecttype = $2)
-             ORDER BY createat ASC, id ASC
-             LIMIT $3
+             WHERE ($1::bool OR $2::bool OR deleteat = 0)
+               AND ($3::text = '' OR groupid = $3)
+               AND (CASE
+                      WHEN cardinality($4::text[]) > 0 THEN objecttype = ANY($4)
+                      WHEN $5::text <> ''              THEN objecttype = $5
+                      ELSE TRUE
+                    END)
+               AND (CASE
+                      WHEN $6::text <> '' AND $7::text <> ''
+                        THEN targettype = 'system'
+                          OR (targettype = 'team'    AND targetid = $7)
+                          OR (targettype = 'channel' AND targetid = $6)
+                      WHEN $6 <> ''
+                        THEN targettype = 'system'
+                          OR (targettype = 'channel' AND targetid = $6)
+                      WHEN $7 <> ''
+                        THEN targettype = 'system'
+                          OR (targettype = 'team'    AND targetid = $7)
+                      ELSE ($8::text = '' OR targettype = $8)
+                       AND (cardinality($9::text[]) = 0 OR targetid = ANY($9))
+                    END)
+               AND ($10::text = '' OR linkedfieldid = $10)
+               AND (NOT $11::bool
+                    OR CASE WHEN $1 THEN updateat > $12::bigint
+                                      OR (updateat = $12 AND id > $13::text)
+                            ELSE      createat > $14::bigint
+                                      OR (createat = $14 AND id > $13)
+                       END)
+               AND (NOT $1 OR updateat >= $15::bigint)
+             ORDER BY (CASE WHEN $1 THEN updateat ELSE createat END) ASC, id ASC
+             LIMIT $16
             "#,
+            delta,
+            opts.include_deleted,
             opts.group_id,
+            &opts.object_types,
             opts.object_type,
+            opts.channel_id,
+            opts.team_id,
+            opts.target_type,
+            &opts.target_ids,
+            opts.linked_field_id,
+            has_cursor,
+            opts.cursor.update_at,
+            opts.cursor.property_field_id,
+            opts.cursor.create_at,
+            opts.since_update_at,
             opts.per_page,
         )
         .fetch_all(&self.pool)
@@ -313,13 +366,16 @@ impl PropertyStore for SqlPropertyStore {
         rows.into_iter().map(PropertyFieldRow::into_field).collect()
     }
 
-    /// # The predicates this implements
+    /// # Every predicate `SearchPropertyValues` builds, in one statement
     ///
-    /// `GroupID`, `TargetType`, `TargetIDs`, `PerPage` and the implicit `DeleteAt = 0`, ordered
-    /// `CreateAt ASC, Id ASC` — the whole of what `listCPAValues`
-    /// (custom_profile_attributes.go:390) sets. Every other option is refused; see the module
-    /// docs.
-    #[tracing::instrument(skip_all, fields(group_id = %opts.group_id, found))]
+    /// The same two modes and the same cursor rule as [`SqlPropertyStore::search_fields`], minus
+    /// the channel/team hierarchy — values have no scope switch, only `TargetType`, `TargetIDs`
+    /// and `FieldID`, each applied independently (property_value_store.go:137).
+    ///
+    /// `Value` is compared as **jsonb**, which is how Go's `sq.Eq{"Value": string(opts.Value)}`
+    /// lands too: the column is `jsonb`, so the text on the wire is cast before the comparison
+    /// and the match is semantic — key order and insignificant whitespace do not matter.
+    #[tracing::instrument(skip_all, fields(group_id = %opts.group_id, delta, found))]
     async fn search_values(
         &self,
         opts: &PropertyValueSearchOpts,
@@ -334,17 +390,10 @@ impl PropertyStore for SqlPropertyStore {
                 detail: "per page must be positive integer greater than zero",
             });
         }
-        if !opts.field_id.is_empty()
-            || opts.since_update_at > 0
-            || opts.include_deleted
-            || !opts.cursor.is_empty()
-            || opts.value.is_some()
-        {
-            return Err(StoreError::Argument {
-                entity: "PropertyValue",
-                detail: "this search option is not ported; see property_store.rs",
-            });
-        }
+
+        let delta = opts.since_update_at > 0;
+        let has_cursor = !opts.cursor.is_empty();
+        tracing::Span::current().record("delta", delta);
 
         // Go applies the `TargetID IN (…)` predicate only when the list is non-empty; an empty
         // list is "no filter", not "match nothing".
@@ -363,16 +412,34 @@ impl PropertyStore for SqlPropertyStore {
                    COALESCE(createdby, '')              AS "createdby!",
                    COALESCE(updatedby, '')              AS "updatedby!"
               FROM propertyvalues
-             WHERE deleteat = 0
-               AND ($1 = '' OR groupid = $1)
-               AND ($2 = '' OR targettype = $2)
-               AND (cardinality($3::text[]) = 0 OR targetid = ANY($3))
-             ORDER BY createat ASC, id ASC
-             LIMIT $4
+             WHERE ($1::bool OR $2::bool OR deleteat = 0)
+               AND ($3::text = '' OR groupid = $3)
+               AND ($4::text = '' OR targettype = $4)
+               AND (cardinality($5::text[]) = 0 OR targetid = ANY($5))
+               AND ($6::text = '' OR fieldid = $6)
+               AND (NOT $7::bool
+                    OR CASE WHEN $1 THEN updateat > $8::bigint
+                                      OR (updateat = $8 AND id > $9::text)
+                            ELSE      createat > $10::bigint
+                                      OR (createat = $10 AND id > $9)
+                       END)
+               AND (NOT $1 OR updateat >= $11::bigint)
+               AND ($12::jsonb IS NULL OR value = $12)
+             ORDER BY (CASE WHEN $1 THEN updateat ELSE createat END) ASC, id ASC
+             LIMIT $13
             "#,
+            delta,
+            opts.include_deleted,
             opts.group_id,
             opts.target_type,
             target_ids,
+            opts.field_id,
+            has_cursor,
+            opts.cursor.update_at,
+            opts.cursor.property_value_id,
+            opts.cursor.create_at,
+            opts.since_update_at,
+            opts.value.as_ref(),
             opts.per_page,
         )
         .fetch_all(&self.pool)
@@ -431,11 +498,22 @@ struct PropertyFieldRow {
 
 impl PropertyFieldRow {
     fn into_field(self) -> Result<PropertyField, StoreError> {
-        // `Attrs` is `StringInterface`, so a `jsonb` holding anything but an object is a scan
-        // error in Go too. A SQL `NULL` is the nil map, which is `"attrs": null` on the wire and
-        // not `{}` — see `mm_model::property_field::PropertyField::attrs`.
+        // # A SQL `NULL` is `{}` and a jsonb `null` is `null`, and it is that way round
+        //
+        // `Attrs` is `StringInterface`, a Go **map**, and sqlx's `reflectx.FieldByIndexes`
+        // allocates a nil map before it scans into it. So a SQL `NULL`, whose
+        // `StringInterface.Scan` returns early without touching the destination (utils.go:186),
+        // leaves that freshly allocated *empty* map behind and marshals as `{}`. A jsonb `null`
+        // does reach `json.Unmarshal`, which sets a map destination to the zero value — nil — and
+        // marshals as `null`.
+        //
+        // Both measured against the Go server, and the port had them the other way round until
+        // the `boards` group gave the CPA reads a row to return: an empty result set cannot tell
+        // the two apart, so a whole family shipped on the inverted rule. Anything else in a
+        // `jsonb` column is a scan error in Go too.
         let attrs = match self.attrs {
-            None | Some(serde_json::Value::Null) => None,
+            None => Some(serde_json::Map::new()),
+            Some(serde_json::Value::Null) => None,
             Some(serde_json::Value::Object(map)) => Some(map),
             Some(_) => {
                 return Err(StoreError::Decode {

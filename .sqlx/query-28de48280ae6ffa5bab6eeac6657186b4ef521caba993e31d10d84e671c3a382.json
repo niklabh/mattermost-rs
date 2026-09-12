@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE incomingwebhooks\n               SET createat = $2, updateat = $3, deleteat = $4, channelid = $5, teamid = $6,\n                   displayname = $7, description = $8, username = $9, iconurl = $10,\n                   channellocked = $11\n             WHERE id = $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "28de48280ae6ffa5bab6eeac6657186b4ef521caba993e31d10d84e671c3a382"
+}

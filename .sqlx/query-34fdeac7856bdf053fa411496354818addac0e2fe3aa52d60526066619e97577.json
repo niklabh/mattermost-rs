@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE channelmemberhistory\n               SET leavetime = $1\n             WHERE userid = $2\n               AND channelid = $3\n               AND leavetime IS NULL\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "34fdeac7856bdf053fa411496354818addac0e2fe3aa52d60526066619e97577"
+}

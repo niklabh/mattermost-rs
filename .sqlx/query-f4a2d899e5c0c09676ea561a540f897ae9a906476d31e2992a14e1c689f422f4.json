@@ -1,0 +1,59 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT msgcount AS \"msgcount!\", msgcountroot AS \"msgcountroot!\",\n                  mentioncount AS \"mentioncount!\", mentioncountroot AS \"mentioncountroot!\",\n                  urgentmentioncount AS \"urgentmentioncount!\",\n                  lastviewedat AS \"lastviewedat!\", lastupdateat AS \"lastupdateat!\"\n             FROM channelmembers WHERE channelid = $1 AND userid = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "msgcount!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "msgcountroot!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "mentioncount!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "mentioncountroot!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "urgentmentioncount!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "lastviewedat!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "lastupdateat!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "f4a2d899e5c0c09676ea561a540f897ae9a906476d31e2992a14e1c689f422f4"
+}

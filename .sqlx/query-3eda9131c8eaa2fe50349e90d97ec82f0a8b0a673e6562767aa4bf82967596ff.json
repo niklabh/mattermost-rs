@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE persistentnotifications SET deleteat = $1 WHERE postid = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3eda9131c8eaa2fe50349e90d97ec82f0a8b0a673e6562767aa4bf82967596ff"
+}

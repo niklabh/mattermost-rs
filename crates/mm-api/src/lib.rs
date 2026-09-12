@@ -47,6 +47,7 @@ pub mod permissions;
 pub mod post_writes;
 pub mod posts;
 pub mod preferences;
+pub mod properties;
 pub mod proxy;
 pub mod reactions;
 pub mod recaps;
@@ -170,6 +171,33 @@ fn parameter_is_id_shaped(name: &str) -> bool {
     name.ends_with("_id") && name != "plugin_id"
 }
 
+/// Whether Go's mux would have matched this segment against the pattern it carries for this
+/// parameter name.
+///
+/// Two api4 parameters are not `_id`-shaped and carry their own classes, both in
+/// `api4/properties.go`'s prefixes (api.go:346-350):
+///
+/// * `{group_name:[a-z][a-z0-9_]*}` — lower-case, digits and underscores, **never leading with a
+///   digit or an underscore**. `Boards` and `_x` are both mux 404s where `IsValidPropertyGroupName`
+///   would have given a 400.
+/// * `{object_type:[a-z]+}` — lower-case letters only, so `XY` is a 404 and `xyz` reaches the
+///   handler's `RequireObjectType` for its 400. Both measured.
+///
+/// A parameter this does not know about is not checked, which is the right default: axum's
+/// `{name}` already matches one whole segment, and every pattern in api4 is a subset of that.
+fn segment_matches_go_mux_for(name: &str, value: &str) -> bool {
+    match name {
+        "group_name" => {
+            let mut bytes = value.bytes();
+            bytes.next().is_some_and(|b| b.is_ascii_lowercase())
+                && bytes.all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+        }
+        "object_type" => !value.is_empty() && value.bytes().all(|b| b.is_ascii_lowercase()),
+        _ if parameter_is_id_shaped(name) => segment_matches_go_mux(value),
+        _ => true,
+    }
+}
+
 /// Forward to Go any request whose id-shaped path segments Go's router would not have matched.
 ///
 /// Layered on the parameterised routes rather than folded into each handler, because the decision
@@ -185,7 +213,7 @@ async fn mux_segments_or_forward(
     next: Next,
 ) -> Response {
     for (name, value) in &params {
-        if parameter_is_id_shaped(name) && !segment_matches_go_mux(value) {
+        if !segment_matches_go_mux_for(name, value) {
             tracing::debug!(
                 parameter = name,
                 "path segment is outside Go's mux charset; forwarding so Go answers its own 404"
@@ -2018,6 +2046,29 @@ pub fn router(state: AppState) -> Router {
                 get(custom_profile_attributes::list_cpa_values)
                     .patch(custom_profile_attributes::patch_cpa_values_for_user),
             ),
+        )
+        // The four reads of `api4/properties.go` — the *generic* PSAv2 property API, of which the
+        // CPA family above is one group's worth pinned to one object type. The five writes in the
+        // same file are unregistered and fall through to the proxy.
+        //
+        // `partially_migrated_with_ids` on all four: `group_name` and `object_type` carry mux
+        // patterns of their own (`[a-z][a-z0-9_]*` and `[a-z]+`), so a segment outside them has to
+        // reach Go for its 404 rather than our handler for a 400. See `segment_matches_go_mux_for`.
+        .route(
+            "/api/v4/properties/groups/{group_name}/{object_type}/fields",
+            partially_migrated_with_ids(&state, get(properties::get_property_fields)),
+        )
+        .route(
+            "/api/v4/properties/groups/{group_name}/fields/search",
+            partially_migrated_with_ids(&state, post(properties::search_property_fields)),
+        )
+        .route(
+            "/api/v4/properties/groups/{group_name}/{object_type}/values/{target_id}",
+            partially_migrated_with_ids(&state, get(properties::get_property_values)),
+        )
+        .route(
+            "/api/v4/properties/groups/{group_name}/system/values",
+            partially_migrated_with_ids(&state, get(properties::get_system_property_values)),
         )
         // Four segments under `/users`, so it shadows none of the `{user_id}` routes; `APIHandler`
         // again, so no session extractor.

@@ -268,6 +268,20 @@ pub static ACTIVE_LICENCE_ROW: tokio::sync::RwLock<()> = tokio::sync::RwLock::co
 /// there; the emulator was hiding them.
 pub static BROADCAST_STREAM: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
+/// **`PropertyFields` and `PropertyValues` are one fixture shared by two suites.**
+///
+/// `parity/custom_profile_attributes` plants rows in the `access_control` group and
+/// `parity/properties` plants them in `boards`, and both assert on *counts and orderings* of what
+/// a search returns. Those assertions are only true while nothing else is writing the tables —
+/// and the group filter is not enough on its own, because the CPA suite's whole subject is that a
+/// single row in `access_control` flips five reads from 200 to 403, which the generic property
+/// routes reach as well.
+///
+/// One lock rather than one per module, for the reason [`ACTIVE_LICENCE_ROW`] gives: two modules
+/// with their own locks do not exclude each other, and the symptom is a count that is right on a
+/// re-run and wrong under `--workspace`.
+pub static PROPERTY_ROWS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 /// Write `Systems.ActiveLicenseId`, or clear it when `id` is `None`.
 ///
 /// A 26-character value passes `IsValidId`, which is all `LoadLicense` checks before it looks the
@@ -1123,6 +1137,18 @@ async fn purge_api_fixtures_once() {
         // written, from three days of runs.
         "DELETE FROM drafts WHERE NOT EXISTS (SELECT 1 FROM channels c WHERE c.id = drafts.channelid)",
         "DELETE FROM drafts WHERE NOT EXISTS (SELECT 1 FROM users u WHERE u.id = drafts.userid)",
+        // Property fields and values planted by `parity/custom_profile_attributes` (in the
+        // `access_control` group) and `parity/properties` (in `boards`). Neither table is reached
+        // by anything above: the rows carry no channel, team or user of this suite's making, and
+        // `PropertyFields` has no `DeleteAt`-respecting route that could clean them up while
+        // unlicensed. A leftover is not merely noise — a single row in `access_control` turns the
+        // CPA suite's `200 []` assertions into 403s, and a leftover `boards` field joins every
+        // ordering the properties suite compares. [D-155]'s class, third instance; see the `views`
+        // note above for the second.
+        //
+        // Values first: they are keyed on a field id and nothing else selects them.
+        "DELETE FROM propertyvalues WHERE id LIKE 'mmrscpa%' OR id LIKE 'mmrsprop%' OR fieldid LIKE 'mmrscpa%' OR fieldid LIKE 'mmrsprop%'",
+        "DELETE FROM propertyfields WHERE id LIKE 'mmrscpa%' OR id LIKE 'mmrsprop%'",
     ] {
         let _ = sqlx::query(statement).execute(&pool).await;
     }

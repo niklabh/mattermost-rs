@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT u.id,\n                   u.createat,\n                   u.updateat,\n                   u.deleteat,\n                   u.username,\n                   u.password,\n                   u.authdata,\n                   u.authservice,\n                   u.email,\n                   u.emailverified,\n                   u.nickname,\n                   u.firstname,\n                   u.lastname,\n                   u.position,\n                   u.roles,\n                   u.allowmarketing,\n                   u.props,\n                   u.notifyprops,\n                   u.lastpasswordupdate,\n                   u.lastpictureupdate,\n                   u.failedattempts::bigint AS failedattempts,\n                   u.locale,\n                   u.timezone,\n                   u.mfaactive,\n                   u.mfasecret,\n                   u.mfausedtimestamps,\n                   u.remoteid,\n                   u.lastlogin,\n                   (b.userid IS NOT NULL) AS \"isbot!\",\n                   COALESCE(b.description, '') AS \"botdescription!\",\n                   COALESCE(b.lasticonupdate, 0) AS \"botlasticonupdate!\"\n              FROM users u\n              LEFT JOIN teammembers tm\n                ON (tm.userid = u.id AND tm.deleteat = 0 AND tm.teamid = $1)\n              LEFT JOIN bots b ON b.userid = u.id\n             WHERE ($1 = '' OR tm.userid IS NOT NULL)\n               AND u.deleteat = 0\n               AND NOT EXISTS (\n                     SELECT 1\n                       FROM unnest($2::text[]) AS s(term)\n                      WHERE NOT (\n                                lower(u.username) LIKE lower('%' || s.term || '%') ESCAPE '*'\n                             OR ($3 AND lower(u.firstname) LIKE lower('%' || s.term || '%') ESCAPE '*')\n                             OR ($3 AND lower(u.lastname) LIKE lower('%' || s.term || '%') ESCAPE '*')\n                             OR lower(u.nickname) LIKE lower('%' || s.term || '%') ESCAPE '*'\n                             OR u.id = s.term\n                            )\n                   )\n             ORDER BY u.username ASC\n             LIMIT $4\n            ",
+  "query": "\n            SELECT u.id,\n                   u.createat,\n                   u.updateat,\n                   u.deleteat,\n                   u.username,\n                   u.password,\n                   u.authdata,\n                   u.authservice,\n                   u.email,\n                   u.emailverified,\n                   u.nickname,\n                   u.firstname,\n                   u.lastname,\n                   u.position,\n                   u.roles,\n                   u.allowmarketing,\n                   u.props,\n                   u.notifyprops,\n                   u.lastpasswordupdate,\n                   u.lastpictureupdate,\n                   u.failedattempts::bigint AS failedattempts,\n                   u.locale,\n                   u.timezone,\n                   u.mfaactive,\n                   u.mfasecret,\n                   u.mfausedtimestamps,\n                   u.remoteid,\n                   u.lastlogin,\n                   (b.userid IS NOT NULL) AS \"isbot!\",\n                   COALESCE(b.description, '') AS \"botdescription!\",\n                   COALESCE(b.lasticonupdate, 0) AS \"botlasticonupdate!\"\n              FROM users u\n              LEFT JOIN bots b ON b.userid = u.id\n             WHERE u.email = lower($1)\n            ",
   "describe": {
     "columns": [
       {
@@ -161,10 +161,7 @@
     ],
     "parameters": {
       "Left": [
-        "Text",
-        "TextArray",
-        "Bool",
-        "Int8"
+        "Text"
       ]
     },
     "nullable": [
@@ -201,5 +198,5 @@
       null
     ]
   },
-  "hash": "92b85b6003dec0e203039711453dbcb65d299dc386f7705d3f414712b8559970"
+  "hash": "181a479a973f17d38acc4d23e20ee38f4be26f09cd7b2f2913f2ff51cb0970f0"
 }

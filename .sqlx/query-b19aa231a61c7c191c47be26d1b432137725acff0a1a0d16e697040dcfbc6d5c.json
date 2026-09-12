@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE channelmembers\n           SET roles = $3,\n               lastviewedat = $4,\n               msgcount = $5,\n               mentioncount = $6,\n               mentioncountroot = $7,\n               urgentmentioncount = $8,\n               msgcountroot = $9,\n               notifyprops = $10,\n               lastupdateat = $11,\n               schemeguest = $12,\n               schemeuser = $13,\n               schemeadmin = $14,\n               autotranslationdisabled = $15\n         WHERE channelid = $1\n           AND userid = $2\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Varchar",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Jsonb",
+        "Int8",
+        "Bool",
+        "Bool",
+        "Bool",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b19aa231a61c7c191c47be26d1b432137725acff0a1a0d16e697040dcfbc6d5c"
+}

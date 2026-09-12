@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT users.timezone AS \"timezone?\"\n          FROM channelmembers\n          LEFT JOIN users ON channelmembers.userid = users.id\n         WHERE channelmembers.channelid = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "timezone?",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "6a8e1a4b44a2b22704115e33c967b23d7484f1076e3e4b728485c0298ea03716"
+}

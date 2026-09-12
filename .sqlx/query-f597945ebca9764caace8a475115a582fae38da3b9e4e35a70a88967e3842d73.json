@@ -1,0 +1,41 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE users\n               SET createat = $2, updateat = $3, deleteat = $4, username = $5, password = $6,\n                   authdata = $7, authservice = $8, email = $9, emailverified = $10,\n                   nickname = $11, firstname = $12, lastname = $13, position = $14, roles = $15,\n                   allowmarketing = $16, props = $17, notifyprops = $18,\n                   lastpasswordupdate = $19, lastpictureupdate = $20,\n                   failedattempts = $21, locale = $22, timezone = $23, mfaactive = $24,\n                   mfasecret = $25, remoteid = $26, lastlogin = $27, mfausedtimestamps = $28\n             WHERE id = $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Bool",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Bool",
+        "Jsonb",
+        "Jsonb",
+        "Int8",
+        "Int8",
+        "Int4",
+        "Varchar",
+        "Jsonb",
+        "Bool",
+        "Varchar",
+        "Varchar",
+        "Int8",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f597945ebca9764caace8a475115a582fae38da3b9e4e35a70a88967e3842d73"
+}

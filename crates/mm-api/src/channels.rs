@@ -627,9 +627,9 @@ pub(crate) fn is_content_reviewer_request(query: Option<&str>) -> bool {
 /// `web.PageDefault` (params.go:18).
 const PAGE_DEFAULT: i64 = 0;
 /// `web.PerPageDefault` (params.go:19).
-const PER_PAGE_DEFAULT: i64 = 60;
+pub(crate) const PER_PAGE_DEFAULT: i64 = 60;
 /// `web.PerPageMaximum` (params.go:20).
-const PER_PAGE_MAXIMUM: i64 = 200;
+pub(crate) const PER_PAGE_MAXIMUM: i64 = 200;
 
 /// `url.Values.Get`: the first value of a repeated key, percent-decoded. `None` when absent.
 pub(crate) fn query_first(query: Option<&str>, key: &str) -> Option<String> {

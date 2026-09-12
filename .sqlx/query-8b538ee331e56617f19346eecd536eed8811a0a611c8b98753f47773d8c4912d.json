@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE channelmembers\n           SET notifyprops = notifyprops || $1::jsonb,\n               lastupdateat = $2\n         WHERE userid = $3\n           AND channelid = $4\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Jsonb",
+        "Int8",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8b538ee331e56617f19346eecd536eed8811a0a611c8b98753f47773d8c4912d"
+}

@@ -1,0 +1,112 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id            AS \"id!\",\n                   token         AS \"token!\",\n                   createat      AS \"createat!\",\n                   updateat      AS \"updateat!\",\n                   deleteat      AS \"deleteat!\",\n                   creatorid     AS \"creatorid!\",\n                   channelid     AS \"channelid!\",\n                   teamid        AS \"teamid!\",\n                   triggerwords  AS \"triggerwords?\",\n                   triggerwhen   AS \"triggerwhen!\",\n                   callbackurls  AS \"callbackurls?\",\n                   displayname   AS \"displayname!\",\n                   description   AS \"description!\",\n                   contenttype   AS \"contenttype!\",\n                   username      AS \"username!\",\n                   iconurl       AS \"iconurl!\"\n              FROM outgoingwebhooks\n             WHERE teamid = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "token!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "createat!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "updateat!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "deleteat!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "creatorid!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 6,
+        "name": "channelid!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 7,
+        "name": "teamid!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 8,
+        "name": "triggerwords?",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 9,
+        "name": "triggerwhen!",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 10,
+        "name": "callbackurls?",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 11,
+        "name": "displayname!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 12,
+        "name": "description!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 13,
+        "name": "contenttype!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 14,
+        "name": "username!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 15,
+        "name": "iconurl!",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "2cb70f24e503422ac1be8c3ce12a53c2973b5d35adda91d3e3bdd66ccb59b91b"
+}

@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COUNT(DISTINCT emojiname) AS \"count!\" FROM reactions WHERE postid = $1 AND deleteat = 0",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "bb51a2f3a5c71f877fef5847b2e1ed9d165684659defb60d3c48fed87d3f5dd3"
+}

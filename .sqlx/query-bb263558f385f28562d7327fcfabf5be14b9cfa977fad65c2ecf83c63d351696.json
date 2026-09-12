@@ -1,0 +1,70 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                SELECT b.userid                       AS \"userid!\",\n                       COALESCE(u.username, '')       AS \"username!\",\n                       COALESCE(u.firstname, '')      AS \"displayname!\",\n                       COALESCE(b.description, '')    AS \"description!\",\n                       COALESCE(b.ownerid, '')        AS \"ownerid!\",\n                       COALESCE(b.lasticonupdate, 0)  AS \"lasticonupdate!\",\n                       COALESCE(b.createat, 0)        AS \"createat!\",\n                       COALESCE(b.updateat, 0)        AS \"updateat!\",\n                       COALESCE(b.deleteat, 0)        AS \"deleteat!\"\n                  FROM bots b\n                  JOIN users u ON u.id = b.userid\n                 WHERE b.userid = $1\n                ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "userid!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "username!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "displayname!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "description!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "ownerid!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "lasticonupdate!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "createat!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 7,
+        "name": "updateat!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 8,
+        "name": "deleteat!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "bb263558f385f28562d7327fcfabf5be14b9cfa977fad65c2ecf83c63d351696"
+}

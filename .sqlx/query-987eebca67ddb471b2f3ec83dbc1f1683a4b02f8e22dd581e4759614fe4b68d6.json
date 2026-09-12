@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM sidebarchannels WHERE categoryid = ANY($1::text[])",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "987eebca67ddb471b2f3ec83dbc1f1683a4b02f8e22dd581e4759614fe4b68d6"
+}

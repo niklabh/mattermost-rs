@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM oauthaccessdata WHERE clientid = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3dd5cd8f80afb4d160175bb2c2bb6e9be80ace166703e068b0b1193a60cdff4f"
+}

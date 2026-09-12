@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE reactions\n               SET updateat = $1, deleteat = $1, remoteid = $2\n             WHERE postid = $3 AND userid = $4 AND emojiname = $5\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Varchar",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ef887c9d941dcd7b8a4266600c1b69b48ff29063d5cffbce3b42683372ab75be"
+}

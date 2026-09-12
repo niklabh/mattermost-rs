@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE channels SET lastpostat = $1 WHERE id = $2 AND lastpostat < $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b177fce1ef06fa87cfd23f893a06836c56d3114cd69c4df5f2487ab93c65a254"
+}

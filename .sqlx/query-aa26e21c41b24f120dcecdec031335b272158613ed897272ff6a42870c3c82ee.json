@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE posts\n               SET updateat     = $1,\n                   hasreactions = (SELECT count(0) > 0\n                                     FROM reactions\n                                    WHERE postid = $2 AND COALESCE(deleteat, 0) = 0)\n             WHERE id = $2\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "aa26e21c41b24f120dcecdec031335b272158613ed897272ff6a42870c3c82ee"
+}

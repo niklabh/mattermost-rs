@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        WITH c AS (\n            SELECT id, lastpostat, totalmsgcount, totalmsgcountroot\n              FROM channels\n             WHERE id = ANY($1)\n        ),\n        updated AS (\n            UPDATE channelmembers cm\n               SET mentioncount = 0,\n                   mentioncountroot = 0,\n                   urgentmentioncount = 0,\n                   msgcount = greatest(cm.msgcount, c.totalmsgcount),\n                   msgcountroot = greatest(cm.msgcountroot, c.totalmsgcountroot),\n                   lastviewedat = greatest(cm.lastviewedat, c.lastpostat),\n                   lastupdateat = greatest(cm.lastviewedat, c.lastpostat)\n              FROM c\n             WHERE cm.userid = $2 AND c.id = cm.channelid\n        )\n        SELECT id AS \"id!\", lastpostat AS \"lastpostat!\" FROM c\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "lastpostat!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "TextArray",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      true
+    ]
+  },
+  "hash": "11fc06f885e4633c92c00dabb9f3d18f6bee2241636318e37565dcfad5b8b6a7"
+}

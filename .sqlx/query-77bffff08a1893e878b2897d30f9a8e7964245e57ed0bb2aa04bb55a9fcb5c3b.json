@@ -1,0 +1,74 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT b.userid                       AS \"userid!\",\n                   COALESCE(u.username, '')       AS \"username!\",\n                   COALESCE(u.firstname, '')      AS \"displayname!\",\n                   COALESCE(b.description, '')    AS \"description!\",\n                   COALESCE(b.ownerid, '')        AS \"ownerid!\",\n                   COALESCE(b.lasticonupdate, 0)  AS \"lasticonupdate!\",\n                   COALESCE(b.createat, 0)        AS \"createat!\",\n                   COALESCE(b.updateat, 0)        AS \"updateat!\",\n                   COALESCE(b.deleteat, 0)        AS \"deleteat!\"\n              FROM bots b\n              JOIN users u ON u.id = b.userid\n              LEFT JOIN users o ON o.id = b.ownerid\n             WHERE ($1 OR b.deleteat = 0)\n               AND ($2 = '' OR b.ownerid = $2)\n               AND (NOT $3 OR (o.id IS NOT NULL AND o.deleteat <> 0))\n             ORDER BY b.createat ASC, u.username ASC\n             LIMIT $4 OFFSET $5\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "userid!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "username!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "displayname!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "description!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "ownerid!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "lasticonupdate!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "createat!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 7,
+        "name": "updateat!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 8,
+        "name": "deleteat!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bool",
+        "Text",
+        "Bool",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "77bffff08a1893e878b2897d30f9a8e7964245e57ed0bb2aa04bb55a9fcb5c3b"
+}

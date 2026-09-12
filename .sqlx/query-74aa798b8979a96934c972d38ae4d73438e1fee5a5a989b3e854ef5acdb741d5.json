@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM channelmembers WHERE channelid = $1 AND userid = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "74aa798b8979a96934c972d38ae4d73438e1fee5a5a989b3e854ef5acdb741d5"
+}

@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT COUNT(0) AS \"count!\"\n              FROM teammembers tm\n              INNER JOIN users u ON tm.userid = u.id\n             WHERE tm.teamid = $1\n               AND tm.deleteat = 0\n               AND u.deleteat = 0\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "2919c04a2b66fafd0e5d59b6ef0367a0250314ebb1b4f4136b0db747ccd95f5d"
+}

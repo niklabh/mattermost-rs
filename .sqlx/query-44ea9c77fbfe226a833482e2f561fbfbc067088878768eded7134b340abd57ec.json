@@ -1,0 +1,73 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT                    id                          AS \"id!\",\n                   COALESCE(type, '')          AS \"job_type!\",\n                   COALESCE(priority, 0)       AS \"priority!\",\n                   COALESCE(createat, 0)       AS \"createat!\",\n                   COALESCE(startat, 0)        AS \"startat!\",\n                   COALESCE(lastactivityat, 0) AS \"lastactivityat!\",\n                   COALESCE(status, '')        AS \"status!\",\n                   COALESCE(progress, 0)       AS \"progress!\",\n                   data                        AS \"data?\"\n              FROM jobs\n             WHERE type = ANY($1) AND status = ANY($2)\n             ORDER BY createat DESC\n             LIMIT $3 OFFSET $4\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "job_type!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "priority!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "createat!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "startat!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "lastactivityat!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "status!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 7,
+        "name": "progress!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 8,
+        "name": "data?",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "TextArray",
+        "TextArray",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      true
+    ]
+  },
+  "hash": "44ea9c77fbfe226a833482e2f561fbfbc067088878768eded7134b340abd57ec"
+}

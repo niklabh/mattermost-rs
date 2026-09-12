@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM sidebarchannels WHERE categoryid = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "548975af2f05e7851cedf43b4fc9629a4199e15a9bec5794b989a0b44ec1243c"
+}

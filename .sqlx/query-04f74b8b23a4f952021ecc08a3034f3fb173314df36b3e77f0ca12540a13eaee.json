@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE outgoingwebhooks SET deleteat = $1, updateat = $1 WHERE id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "04f74b8b23a4f952021ecc08a3034f3fb173314df36b3e77f0ca12540a13eaee"
+}

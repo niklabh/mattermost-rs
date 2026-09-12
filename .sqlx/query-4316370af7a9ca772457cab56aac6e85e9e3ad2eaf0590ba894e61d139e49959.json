@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                        UPDATE threadmemberships\n                           SET following = $1,\n                               lastviewed = $2,\n                               lastupdated = $3,\n                               unreadmentions = $4\n                         WHERE postid = $5\n                           AND userid = $6\n                        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bool",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4316370af7a9ca772457cab56aac6e85e9e3ad2eaf0590ba894e61d139e49959"
+}

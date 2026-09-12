@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT COALESCE(SUM(tm.unreadmentions), 0)::bigint AS \"sum!\"\n              FROM threadmemberships tm\n              JOIN postspriority pp ON pp.postid = tm.postid\n              JOIN threads t ON t.postid = tm.postid\n             WHERE tm.userid = $1\n               AND tm.following = TRUE\n               AND pp.priority = 'urgent'\n               AND (COALESCE(t.threadteamid, '') = ''\n                    OR EXISTS (SELECT 1\n                                 FROM channelmembers cm\n                                WHERE cm.channelid = t.channelid\n                                  AND cm.userid = tm.userid))\n               AND (COALESCE(t.threadteamid, '') = $2\n                    OR COALESCE(t.threadteamid, '') = '')\n               AND COALESCE(t.threaddeleteat, 0) = 0\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "sum!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "c262e1bdf04c6d3c7c726aa64ef66f23c08455d7e8fbf12e10b11ed32d94d8ea"
+}

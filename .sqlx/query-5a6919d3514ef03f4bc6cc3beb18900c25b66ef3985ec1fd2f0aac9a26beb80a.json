@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        DELETE FROM preferences\n        WHERE userid = $1\n          AND name = ANY($2::text[])\n          AND category = $3\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "TextArray",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5a6919d3514ef03f4bc6cc3beb18900c25b66ef3985ec1fd2f0aac9a26beb80a"
+}

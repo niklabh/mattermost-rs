@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM drafts WHERE userid = $1 AND channelid = $2 AND rootid = $3",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "bf43a875c79045226fb25f93bbf76435f905ee566dd86d8020fc9fb48ec6fe55"
+}

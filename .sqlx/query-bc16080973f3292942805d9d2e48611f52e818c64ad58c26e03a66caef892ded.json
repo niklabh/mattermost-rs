@@ -1,0 +1,82 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id                            AS \"id!\",\n                   COALESCE(type::text, '')      AS \"type_!\",\n                   COALESCE(createat, 0)         AS \"createat!\",\n                   COALESCE(userid, '')          AS \"userid!\",\n                   COALESCE(channelid, '')       AS \"channelid!\",\n                   COALESCE(filename, '')        AS \"filename!\",\n                   COALESCE(path, '')            AS \"path!\",\n                   COALESCE(filesize, 0)         AS \"filesize!\",\n                   COALESCE(fileoffset, 0)       AS \"fileoffset!\",\n                   COALESCE(remoteid, '')        AS \"remoteid!\",\n                   COALESCE(reqfileid, '')       AS \"reqfileid!\"\n              FROM uploadsessions\n             WHERE id = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "type_!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "createat!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "userid!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "channelid!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "filename!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 6,
+        "name": "path!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 7,
+        "name": "filesize!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 8,
+        "name": "fileoffset!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 9,
+        "name": "remoteid!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 10,
+        "name": "reqfileid!",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "bc16080973f3292942805d9d2e48611f52e818c64ad58c26e03a66caef892ded"
+}

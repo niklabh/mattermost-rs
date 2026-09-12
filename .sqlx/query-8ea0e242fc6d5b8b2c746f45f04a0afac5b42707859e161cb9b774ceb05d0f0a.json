@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM preferences WHERE name = $1 AND category = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8ea0e242fc6d5b8b2c746f45f04a0afac5b42707859e161cb9b774ceb05d0f0a"
+}

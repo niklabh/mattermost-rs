@@ -1,0 +1,41 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT channelid AS channel_id,\n                   userid    AS user_id,\n                   jointime  AS join_time,\n                   leavetime AS leave_time\n              FROM channelmemberhistory\n             WHERE userid = $1\n               AND channelid = $2\n             ORDER BY jointime\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "channel_id",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "join_time",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "leave_time",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "f30a7bcc3693663bcd7c26f449f4a0fa6f0ffb09d5208948c748785759c81d4a"
+}

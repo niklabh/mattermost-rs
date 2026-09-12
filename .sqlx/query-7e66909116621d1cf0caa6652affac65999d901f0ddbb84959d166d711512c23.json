@@ -1,0 +1,181 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT t.postid                          AS \"postid!\",\n                   COALESCE(t.replycount, 0)         AS \"replycount!\",\n                   COALESCE(t.lastreplyat, 0)        AS \"lastreplyat!\",\n                   t.participants                    AS \"participants?\",\n                   COALESCE(t.threaddeleteat, 0)     AS \"threaddeleteat!\",\n                   COALESCE(tm.lastviewed, 0)        AS \"lastviewedat!\",\n                   COALESCE(tm.unreadmentions, 0)    AS \"unreadmentions!\",\n                   (SELECT COUNT(r.id)\n                      FROM posts r\n                     WHERE r.rootid = tm.postid\n                       AND r.createat > tm.lastviewed\n                       AND r.deleteat = 0)           AS \"unreadreplies!\",\n                   -- `pp` is left-joined, so `pp.priority = 'urgent'` is **NULL** for a thread\n                   -- with no priority row and `TRUE AND NULL` is NULL, not false. Go's\n                   -- `sq.Case().When(...).Else(\"false\")` returns the literal `false` there; the\n                   -- COALESCE is that `Else`.\n                   COALESCE($3 AND pp.priority = 'urgent', FALSE) AS \"isurgent!\",\n                   COALESCE(p.id, '')                AS \"p_id!\",\n                   COALESCE(p.createat, 0)           AS \"p_createat!\",\n                   COALESCE(p.updateat, 0)           AS \"p_updateat!\",\n                   COALESCE(p.editat, 0)             AS \"p_editat!\",\n                   COALESCE(p.deleteat, 0)           AS \"p_deleteat!\",\n                   COALESCE(p.ispinned, false)       AS \"p_ispinned!\",\n                   COALESCE(p.userid, '')            AS \"p_userid!\",\n                   COALESCE(p.channelid, '')         AS \"p_channelid!\",\n                   COALESCE(p.rootid, '')            AS \"p_rootid!\",\n                   COALESCE(p.originalid, '')        AS \"p_originalid!\",\n                   COALESCE(p.message, '')           AS \"p_message!\",\n                   COALESCE(p.type, '')              AS \"p_type!\",\n                   p.props                           AS \"p_props?\",\n                   COALESCE(p.hashtags, '')          AS \"p_hashtags!\",\n                   p.filenames                       AS \"p_filenames?\",\n                   p.fileids                         AS \"p_fileids?\",\n                   COALESCE(p.hasreactions, false)   AS \"p_hasreactions!\",\n                   p.remoteid                        AS \"p_remoteid?\"\n              FROM threads t\n              JOIN posts p ON p.id = t.postid\n              JOIN threadmemberships tm ON tm.postid = t.postid\n              LEFT JOIN postspriority pp ON pp.postid = t.postid\n             WHERE tm.userid = $1\n               AND tm.following = TRUE\n               AND (COALESCE(t.threadteamid, '') = ''\n                    OR EXISTS (SELECT 1\n                                 FROM channelmembers cm\n                                WHERE cm.channelid = t.channelid\n                                  AND cm.userid = tm.userid))\n               AND (COALESCE(t.threadteamid, '') = $2\n                    OR COALESCE(t.threadteamid, '') = '')\n               AND COALESCE(t.threaddeleteat, 0) = 0\n             ORDER BY t.lastreplyat DESC\n             LIMIT $4\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "postid!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "replycount!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "lastreplyat!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "participants?",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 4,
+        "name": "threaddeleteat!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "lastviewedat!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "unreadmentions!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 7,
+        "name": "unreadreplies!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 8,
+        "name": "isurgent!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 9,
+        "name": "p_id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 10,
+        "name": "p_createat!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 11,
+        "name": "p_updateat!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 12,
+        "name": "p_editat!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 13,
+        "name": "p_deleteat!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 14,
+        "name": "p_ispinned!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 15,
+        "name": "p_userid!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 16,
+        "name": "p_channelid!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 17,
+        "name": "p_rootid!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 18,
+        "name": "p_originalid!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 19,
+        "name": "p_message!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 20,
+        "name": "p_type!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 21,
+        "name": "p_props?",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 22,
+        "name": "p_hashtags!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 23,
+        "name": "p_filenames?",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 24,
+        "name": "p_fileids?",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 25,
+        "name": "p_hasreactions!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 26,
+        "name": "p_remoteid?",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Bool",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      null,
+      true,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      true,
+      null,
+      true,
+      true,
+      null,
+      true
+    ]
+  },
+  "hash": "7e66909116621d1cf0caa6652affac65999d901f0ddbb84959d166d711512c23"
+}

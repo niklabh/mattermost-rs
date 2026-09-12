@@ -476,6 +476,25 @@ pub struct Config {
     /// is no database source to read and giving it one would be inventing a value.
     pub feature_flag_session_attributes: bool,
 
+    /// The four other flags of the five-way `if` that registers `api4/properties.go`
+    /// (properties.go:23), alongside [`Config::feature_flag_session_attributes`]:
+    /// `IntegratedBoards`, `ManagedChannelCategories`, `ClassificationMarkings` and
+    /// `PostAttributes`.
+    ///
+    /// **`ClassificationMarkings` defaults to `true`** (feature_flags.go:185) and the other three
+    /// to `false`, so on a stock server the nine property routes *are* registered and the `if` is
+    /// satisfied by that one flag alone. A port that assumed the whole family was dark — which
+    /// every other flag in this block would suggest — would forward nine live routes.
+    ///
+    /// All four are environment-or-default like [`Config::feature_flag_burn_on_read`].
+    pub feature_flag_integrated_boards: bool,
+    /// See [`Config::feature_flag_integrated_boards`].
+    pub feature_flag_managed_channel_categories: bool,
+    /// See [`Config::feature_flag_integrated_boards`]. **Defaults to `true`.**
+    pub feature_flag_classification_markings: bool,
+    /// See [`Config::feature_flag_integrated_boards`].
+    pub feature_flag_post_attributes: bool,
+
     /// `ServiceSettings.CollapsedThreads` (config.go:485, defaulted **`"always_on"`** at :982).
     ///
     /// **The default short-circuits the preference lookup entirely.**
@@ -766,6 +785,20 @@ impl Config {
     pub fn burn_on_read(&self) -> bool {
         self.feature_flag_burn_on_read && self.enable_burn_on_read
     }
+
+    /// `InitProperties`' five-way registration `if` (api4/properties.go:23).
+    ///
+    /// When every one of the five is off, gorilla/mux has never heard of the nine property paths
+    /// and the answer is the mux's own 404 — not a 501 and not a 403. It is **not** off on a stock
+    /// server: `ClassificationMarkings` defaults to `true`, so this is `true` unless an operator
+    /// explicitly turns that one off.
+    pub fn properties_api_enabled(&self) -> bool {
+        self.feature_flag_integrated_boards
+            || self.feature_flag_managed_channel_categories
+            || self.feature_flag_classification_markings
+            || self.feature_flag_session_attributes
+            || self.feature_flag_post_attributes
+    }
 }
 
 impl Default for Config {
@@ -837,6 +870,12 @@ impl Default for Config {
             enable_user_access_tokens: false,
             message_export_download_export_results: false,
             feature_flag_session_attributes: false,
+            // feature_flags.go:194, :202, :206 — all three `false`.
+            feature_flag_integrated_boards: false,
+            feature_flag_managed_channel_categories: false,
+            feature_flag_post_attributes: false,
+            // feature_flags.go:185 — **`true`**, and the only one of the five that is.
+            feature_flag_classification_markings: true,
             // config.go:982 — `new(CollapsedThreadsAlwaysOn)`.
             collapsed_threads: mm_model::config::COLLAPSED_THREADS_ALWAYS_ON.to_owned(),
             // config.go:978 — `new(true)`.
@@ -1185,6 +1224,26 @@ impl Config {
                 "MM_FEATUREFLAGS_SESSIONATTRIBUTES",
                 default.feature_flag_session_attributes,
             ),
+            feature_flag_integrated_boards: lookup_bool(
+                lookup,
+                "MM_FEATUREFLAGS_INTEGRATEDBOARDS",
+                default.feature_flag_integrated_boards,
+            ),
+            feature_flag_managed_channel_categories: lookup_bool(
+                lookup,
+                "MM_FEATUREFLAGS_MANAGEDCHANNELCATEGORIES",
+                default.feature_flag_managed_channel_categories,
+            ),
+            feature_flag_classification_markings: lookup_bool(
+                lookup,
+                "MM_FEATUREFLAGS_CLASSIFICATIONMARKINGS",
+                default.feature_flag_classification_markings,
+            ),
+            feature_flag_post_attributes: lookup_bool(
+                lookup,
+                "MM_FEATUREFLAGS_POSTATTRIBUTES",
+                default.feature_flag_post_attributes,
+            ),
             collapsed_threads: lookup("MM_SERVICESETTINGS_COLLAPSEDTHREADS")
                 .unwrap_or(default.collapsed_threads),
             thread_auto_follow: lookup_bool(
@@ -1356,6 +1415,11 @@ impl Config {
             // The same rule as `feature_flag_burn_on_read` above: `FeatureFlags` never reaches the
             // persisted document, so there is nothing here to read.
             feature_flag_session_attributes: default.feature_flag_session_attributes,
+            feature_flag_integrated_boards: default.feature_flag_integrated_boards,
+            feature_flag_managed_channel_categories: default
+                .feature_flag_managed_channel_categories,
+            feature_flag_classification_markings: default.feature_flag_classification_markings,
+            feature_flag_post_attributes: default.feature_flag_post_attributes,
             collapsed_threads: service
                 .collapsed_threads
                 .unwrap_or(default.collapsed_threads),

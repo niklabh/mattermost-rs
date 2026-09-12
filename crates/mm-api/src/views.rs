@@ -24,7 +24,7 @@
 //! `api.context.404.app_error`** — the body whose `detailed_error` interpolates the request URL.
 //! Measured against the stack's Go server, not inferred from the source.
 //!
-//! That shapes the port: [`integrated_boards_enabled`] is consulted as the **first statement of
+//! That shapes the port: the flag is consulted as the **first statement of
 //! every handler**, and when it is off the request is *forwarded* rather than refused locally.
 //! Forwarding is what makes the two servers byte-identical for free — Go writes its own 404, URL
 //! interpolation, `request_id` and all, and there is nothing here to keep in step. It is the same
@@ -39,9 +39,11 @@
 //! can read it from, which is exactly how `MM_FEATUREFLAGS_ENABLESHIFTESCAPETOMARKALLREAD` is
 //! already handled for `readAllMessages`.
 //!
-//! It is read here rather than added to `Config` because this module is the only consumer. A
-//! second consumer should move it; `api4/post.go` has four sites and `api4/properties.go` one, so
-//! that day will come.
+//! It lived here as a private `OnceLock` while this module was its only consumer. That day came:
+//! `api4/properties.go` reads the same flag in its registration `if`, so it is now
+//! [`mm_app::config::Config::feature_flag_integrated_boards`] — one env lookup at startup, beside
+//! the other four `FeatureFlags` this server has to know about, instead of a second copy of the
+//! `strconv.ParseBool` spellings that could drift from `mm_app::config`'s.
 //!
 //! # Verifying the served shape at all required standing up a second Go server
 //!
@@ -83,29 +85,6 @@ use crate::proxy;
 /// `model.ConnectionId` (model/websocket_client.go) — the header the three write routes read so a
 /// client can be left out of the broadcast for its own change.
 const CONNECTION_ID_HEADER: &str = "Connection-Id";
-
-/// `FeatureFlags.IntegratedBoards` (feature_flags.go:100), read from the environment for the
-/// reason the module docs give.
-///
-/// `OnceLock` rather than a plain read per request: the value cannot change without a restart
-/// (Go reads it from a configuration document that is rebuilt at boot), and a handler that shelled
-/// out to `std::env::var` on every call would make the flag look mutable when it is not.
-static INTEGRATED_BOARDS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-
-/// `MM_FEATUREFLAGS_INTEGRATEDBOARDS`, parsed the way Go's `strconv.ParseBool` does.
-///
-/// Unset **or unparseable** is `false`, which is both `SetDefaults`' value and viper's fallback
-/// direction — `=yes` is not true on either server. The twelve accepted spellings are a copy of
-/// `mm_app::config`'s private `parse_bool`; see that function for why widening them would let the
-/// two configurations drift.
-pub fn integrated_boards_enabled() -> bool {
-    *INTEGRATED_BOARDS.get_or_init(|| {
-        matches!(
-            std::env::var("MM_FEATUREFLAGS_INTEGRATEDBOARDS").as_deref(),
-            Ok("1" | "t" | "T" | "TRUE" | "true" | "True")
-        )
-    })
-}
 
 /// What a handler decided to do, before it has been turned into bytes.
 enum Outcome {
@@ -312,7 +291,7 @@ pub async fn create_view(
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
-    if !integrated_boards_enabled() {
+    if !state.app.config().feature_flag_integrated_boards {
         return proxy::forward_to_go(State(state), request).await;
     }
     let connection_id = connection_id(&request);
@@ -413,7 +392,7 @@ pub async fn get_views_for_channel(
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
-    if !integrated_boards_enabled() {
+    if !state.app.config().feature_flag_integrated_boards {
         return proxy::forward_to_go(State(state), request).await;
     }
     let query = request.uri().query().map(str::to_owned);
@@ -501,7 +480,7 @@ pub async fn get_view(
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
-    if !integrated_boards_enabled() {
+    if !state.app.config().feature_flag_integrated_boards {
         return proxy::forward_to_go(State(state), request).await;
     }
     serve_get(&state, &channel_id, &view_id, &session)
@@ -582,7 +561,7 @@ pub async fn update_view(
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
-    if !integrated_boards_enabled() {
+    if !state.app.config().feature_flag_integrated_boards {
         return proxy::forward_to_go(State(state), request).await;
     }
     let connection_id = connection_id(&request);
@@ -696,7 +675,7 @@ pub async fn delete_view(
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
-    if !integrated_boards_enabled() {
+    if !state.app.config().feature_flag_integrated_boards {
         return proxy::forward_to_go(State(state), request).await;
     }
     let connection_id = connection_id(&request);
@@ -789,7 +768,7 @@ pub async fn update_view_sort_order(
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
-    if !integrated_boards_enabled() {
+    if !state.app.config().feature_flag_integrated_boards {
         return proxy::forward_to_go(State(state), request).await;
     }
     let connection_id = connection_id(&request);
@@ -909,7 +888,7 @@ pub async fn get_posts_for_view(
     session: AuthenticatedSession,
     request: Request,
 ) -> Response {
-    if !integrated_boards_enabled() {
+    if !state.app.config().feature_flag_integrated_boards {
         return proxy::forward_to_go(State(state), request).await;
     }
     let query = request.uri().query().map(str::to_owned);

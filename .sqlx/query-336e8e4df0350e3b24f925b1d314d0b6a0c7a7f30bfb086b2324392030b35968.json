@@ -1,0 +1,65 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT channels.id AS \"id!\",\n               channels.type::text AS \"channel_type!\",\n               channels.totalmsgcount AS \"totalmsgcount!\",\n               channels.lastpostat AS \"lastpostat!\",\n               channelmembers.msgcount AS \"msgcount!\",\n               channelmembers.mentioncount AS \"mentioncount!\",\n               channelmembers.notifyprops,\n               channelmembers.lastviewedat AS \"lastviewedat!\"\n          FROM channelmembers\n          JOIN channels ON channelmembers.channelid = channels.id\n         WHERE channels.teamid = $1\n           AND channelmembers.userid = $2\n           AND channels.type <> 'S'\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "channel_type!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "totalmsgcount!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "lastpostat!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "msgcount!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "mentioncount!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "notifyprops",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 7,
+        "name": "lastviewedat!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "336e8e4df0350e3b24f925b1d314d0b6a0c7a7f30bfb086b2324392030b35968"
+}

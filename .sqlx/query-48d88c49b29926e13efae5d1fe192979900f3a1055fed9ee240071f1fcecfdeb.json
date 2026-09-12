@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE views SET deleteat = $1, updateat = $1 WHERE id = $2 AND deleteat = 0",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "48d88c49b29926e13efae5d1fe192979900f3a1055fed9ee240071f1fcecfdeb"
+}

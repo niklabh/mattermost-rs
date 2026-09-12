@@ -1,0 +1,53 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT postid                        AS \"post_id!\",\n                   userid                        AS \"user_id!\",\n                   COALESCE(following, FALSE)    AS \"following!\",\n                   COALESCE(lastviewed, 0)       AS \"last_viewed!\",\n                   COALESCE(lastupdated, 0)      AS \"last_updated!\",\n                   COALESCE(unreadmentions, 0)   AS \"unread_mentions!\"\n              FROM threadmemberships\n             WHERE userid = $1\n               AND postid = $2\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "post_id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "user_id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "following!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "last_viewed!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "last_updated!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "unread_mentions!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "5bef94545c71f3dfde08ee8a7a6a19135df3ed61d806647ed9a4614e732136b9"
+}

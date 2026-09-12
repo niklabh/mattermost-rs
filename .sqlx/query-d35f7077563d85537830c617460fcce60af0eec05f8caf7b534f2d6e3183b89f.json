@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM sessions s\n             USING oauthaccessdata o\n             WHERE o.token = s.token AND o.clientid = $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d35f7077563d85537830c617460fcce60af0eec05f8caf7b534f2d6e3183b89f"
+}

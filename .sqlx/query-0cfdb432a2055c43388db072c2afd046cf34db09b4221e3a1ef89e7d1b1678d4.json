@@ -1,0 +1,208 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT u.id,\n                   u.createat,\n                   u.updateat,\n                   u.deleteat,\n                   u.username,\n                   u.password,\n                   u.authdata,\n                   u.authservice,\n                   u.email,\n                   u.emailverified,\n                   u.nickname,\n                   u.firstname,\n                   u.lastname,\n                   u.position,\n                   u.roles,\n                   u.allowmarketing,\n                   u.props,\n                   u.notifyprops,\n                   u.lastpasswordupdate,\n                   u.lastpictureupdate,\n                   u.failedattempts::bigint AS failedattempts,\n                   u.locale,\n                   u.timezone,\n                   u.mfaactive,\n                   u.mfasecret,\n                   u.mfausedtimestamps,\n                   u.remoteid,\n                   u.lastlogin,\n                   (b.userid IS NOT NULL) AS \"isbot!\",\n                   COALESCE(b.description, '') AS \"botdescription!\",\n                   COALESCE(b.lasticonupdate, 0) AS \"botlasticonupdate!\"\n              FROM users u\n              LEFT JOIN teammembers tm\n                ON (tm.userid = u.id AND tm.deleteat = 0 AND tm.teamid = $1)\n              LEFT JOIN channelmembers cm ON (cm.userid = u.id AND cm.channelid = $2)\n              LEFT JOIN bots b ON b.userid = u.id\n             WHERE cm.userid IS NULL\n               AND ($1 = '' OR tm.userid IS NOT NULL)\n               AND ($6 OR u.deleteat = 0)\n               AND NOT EXISTS (\n                     SELECT 1\n                       FROM unnest($3::text[]) AS s(term)\n                      WHERE NOT (\n                                lower(u.username) LIKE lower('%' || s.term || '%') ESCAPE '*'\n                             OR ($4 AND lower(u.firstname) LIKE lower('%' || s.term || '%') ESCAPE '*')\n                             OR ($4 AND lower(u.lastname) LIKE lower('%' || s.term || '%') ESCAPE '*')\n                             OR lower(u.nickname) LIKE lower('%' || s.term || '%') ESCAPE '*'\n                             OR ($7 AND lower(u.email) LIKE lower('%' || s.term || '%') ESCAPE '*')\n                             OR u.id = s.term\n                            )\n                   )\n             ORDER BY u.username ASC\n             LIMIT $5\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "createat",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "updateat",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "deleteat",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "username",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "password",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 6,
+        "name": "authdata",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 7,
+        "name": "authservice",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 8,
+        "name": "email",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 9,
+        "name": "emailverified",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 10,
+        "name": "nickname",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 11,
+        "name": "firstname",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 12,
+        "name": "lastname",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 13,
+        "name": "position",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 14,
+        "name": "roles",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 15,
+        "name": "allowmarketing",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 16,
+        "name": "props",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 17,
+        "name": "notifyprops",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 18,
+        "name": "lastpasswordupdate",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 19,
+        "name": "lastpictureupdate",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 20,
+        "name": "failedattempts",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 21,
+        "name": "locale",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 22,
+        "name": "timezone",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 23,
+        "name": "mfaactive",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 24,
+        "name": "mfasecret",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 25,
+        "name": "mfausedtimestamps",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 26,
+        "name": "remoteid",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 27,
+        "name": "lastlogin",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 28,
+        "name": "isbot!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 29,
+        "name": "botdescription!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 30,
+        "name": "botlasticonupdate!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "TextArray",
+        "Bool",
+        "Int8",
+        "Bool",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      null,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "0cfdb432a2055c43388db072c2afd046cf34db09b4221e3a1ef89e7d1b1678d4"
+}

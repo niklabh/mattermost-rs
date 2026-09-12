@@ -100,6 +100,8 @@ mod parity {
     pub mod posts_by_ids;
     pub mod preference_reads;
     pub mod preferences;
+    /// Appended out of alphabetical order; see `config_reads`.
+    pub mod properties;
     pub mod reaction_writes;
     pub mod recaps;
     pub mod recommended_channels;

@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT COUNT(u.id) AS \"count!\"\n              FROM users u\n              CROSS JOIN LATERAL (\n                SELECT COUNT(*) AS n\n                  FROM channelmembers cm\n                  INNER JOIN channels c\n                    ON c.id = cm.channelid AND c.deleteat = 0 AND c.type IN ('O', 'P')\n                 WHERE cm.userid = u.id\n              ) cc\n              LEFT JOIN bots b ON u.id = b.userid\n              LEFT JOIN teammembers tm\n                ON (tm.userid = u.id AND tm.deleteat = 0 AND tm.teamid = $1)\n             WHERE b.userid IS NULL\n               AND ($1 = '' OR tm.userid IS NOT NULL)\n               AND (NOT $2 OR u.id NOT IN (SELECT userid FROM teammembers WHERE deleteat = 0))\n               AND (NOT $3 OR u.deleteat > 0)\n               AND (NOT $4 OR u.deleteat = 0)\n               AND ($5::text IS NULL OR u.roles LIKE LOWER($5))\n               AND ($6 = 0 OR ($6 = 1 AND cc.n = 1) OR ($6 = 2 AND cc.n > 1))\n               AND NOT EXISTS (\n                     SELECT 1\n                       FROM unnest($7::text[]) AS srch(term)\n                      WHERE NOT (\n                                lower(u.username)  LIKE lower('%' || srch.term || '%') ESCAPE '*'\n                             OR lower(u.firstname) LIKE lower('%' || srch.term || '%') ESCAPE '*'\n                             OR lower(u.lastname)  LIKE lower('%' || srch.term || '%') ESCAPE '*'\n                             OR lower(u.nickname)  LIKE lower('%' || srch.term || '%') ESCAPE '*'\n                             OR lower(u.email)     LIKE lower('%' || srch.term || '%') ESCAPE '*'\n                             OR u.id = srch.term\n                            )\n                   )\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Bool",
+        "Bool",
+        "Bool",
+        "Text",
+        "Int4",
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "424051c4c76cbe51d6c71aad331a81720db707871332481769ed05f5d416e4dc"
+}

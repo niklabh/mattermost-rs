@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE teammembers\n           SET roles = $3,\n               deleteat = $4,\n               createat = $5,\n               schemeguest = $6,\n               schemeuser = $7,\n               schemeadmin = $8\n         WHERE teamid = $1\n           AND userid = $2\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Varchar",
+        "Int8",
+        "Int8",
+        "Bool",
+        "Bool",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "fcc59f2cccef4e004190fa144466f139bdbbe6de321f8c231d5b59259fb373e0"
+}

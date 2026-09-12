@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT 1 AS \"one!\"\n              FROM reactions\n             WHERE postid = $1 AND emojiname = $2 AND COALESCE(deleteat, 0) = 0\n             LIMIT 1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "one!",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "9655764333126656a922e6a89284f4ca6b79d49594c0823824d4e0b4f5ae4fe0"
+}

@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT channelscheme.defaultchannelguestrole AS channel_guest,\n               channelscheme.defaultchanneluserrole  AS channel_user,\n               channelscheme.defaultchanneladminrole AS channel_admin,\n               teamscheme.defaultchannelguestrole    AS team_guest,\n               teamscheme.defaultchanneluserrole     AS team_user,\n               teamscheme.defaultchanneladminrole    AS team_admin\n          FROM channels c\n          LEFT JOIN schemes channelscheme ON c.schemeid = channelscheme.id\n          LEFT JOIN teams t ON c.teamid = t.id\n          LEFT JOIN schemes teamscheme ON t.schemeid = teamscheme.id\n         WHERE c.id = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "channel_guest",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "channel_user",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "channel_admin",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "team_guest",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "team_user",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "team_admin",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "e126a34d7008d7f84143f2f205e96a0a89a0d149d2b524cab65881424f37d01a"
+}

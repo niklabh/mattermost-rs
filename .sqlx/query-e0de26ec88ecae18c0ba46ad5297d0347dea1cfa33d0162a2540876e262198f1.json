@@ -1,0 +1,94 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id                          AS \"id!\",\n                   COALESCE(createat, 0)       AS \"createat!\",\n                   COALESCE(updateat, 0)       AS \"updateat!\",\n                   COALESCE(deleteat, 0)       AS \"deleteat!\",\n                   COALESCE(userid, '')        AS \"userid!\",\n                   COALESCE(channelid, '')     AS \"channelid!\",\n                   COALESCE(teamid, '')        AS \"teamid!\",\n                   COALESCE(displayname, '')   AS \"displayname!\",\n                   COALESCE(description, '')   AS \"description!\",\n                   COALESCE(username, '')      AS \"username!\",\n                   COALESCE(iconurl, '')       AS \"iconurl!\",\n                   COALESCE(channellocked, FALSE) AS \"channellocked!\",\n                   lastused                    AS \"lastused!\"\n              FROM incomingwebhooks\n             WHERE id = $1\n               AND deleteat = 0\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "createat!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "updateat!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "deleteat!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "userid!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "channelid!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 6,
+        "name": "teamid!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 7,
+        "name": "displayname!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 8,
+        "name": "description!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 9,
+        "name": "username!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 10,
+        "name": "iconurl!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 11,
+        "name": "channellocked!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 12,
+        "name": "lastused!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      false
+    ]
+  },
+  "hash": "e0de26ec88ecae18c0ba46ad5297d0347dea1cfa33d0162a2540876e262198f1"
+}

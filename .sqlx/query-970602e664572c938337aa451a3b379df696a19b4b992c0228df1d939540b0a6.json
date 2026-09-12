@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO drafts\n                (createat, updateat, deleteat, message, rootid, channelid, userid,\n                 fileids, props, priority, type)\n            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)\n            ON CONFLICT (userid, channelid, rootid)\n                DO UPDATE SET updateat = $2,\n                              message  = $4,\n                              props    = $9,\n                              fileids  = $8,\n                              priority = $10,\n                              type     = $11,\n                              deleteat = 0\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "970602e664572c938337aa451a3b379df696a19b4b992c0228df1d939540b0a6"
+}

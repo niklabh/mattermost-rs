@@ -1,0 +1,125 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id                                   AS \"id!\",\n                   groupid                              AS \"groupid!\",\n                   name                                 AS \"name!\",\n                   COALESCE(type::text, '')             AS \"type_text!\",\n                   attrs                                AS \"attrs?\",\n                   COALESCE(targetid, '')               AS \"targetid!\",\n                   COALESCE(targettype, '')             AS \"targettype!\",\n                   objecttype                           AS \"objecttype!\",\n                   protected                            AS \"protected!\",\n                   permissionfield::text                AS \"permissionfield?\",\n                   permissionvalues::text               AS \"permissionvalues?\",\n                   permissionoptions::text              AS \"permissionoptions?\",\n                   linkedfieldid                        AS \"linkedfieldid?\",\n                   createat                             AS \"createat!\",\n                   updateat                             AS \"updateat!\",\n                   deleteat                             AS \"deleteat!\",\n                   COALESCE(createdby, '')              AS \"createdby!\",\n                   COALESCE(updatedby, '')              AS \"updatedby!\"\n              FROM propertyfields\n             WHERE id = $1\n               AND groupid = $2\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "groupid!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "name!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "type_text!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "attrs?",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 5,
+        "name": "targetid!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 6,
+        "name": "targettype!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 7,
+        "name": "objecttype!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 8,
+        "name": "protected!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 9,
+        "name": "permissionfield?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "permissionvalues?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "permissionoptions?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
+        "name": "linkedfieldid?",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 13,
+        "name": "createat!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 14,
+        "name": "updateat!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 15,
+        "name": "deleteat!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 16,
+        "name": "createdby!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 17,
+        "name": "updatedby!",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      null,
+      true,
+      null,
+      null,
+      false,
+      false,
+      null,
+      null,
+      null,
+      true,
+      false,
+      false,
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "329f42c4259134417461e051eb22ff2f0f421b54bd373b3ed8ee493a262a8a1a"
+}

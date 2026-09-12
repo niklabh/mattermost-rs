@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO users\n                (id, createat, updateat, deleteat, username, password, authdata, authservice,\n                 email, emailverified, nickname, firstname, lastname, position, roles,\n                 allowmarketing, props, notifyprops, lastpasswordupdate, lastpictureupdate,\n                 failedattempts, locale, timezone, mfaactive, mfasecret, remoteid,\n                 mfausedtimestamps)\n            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,\n                    $18, $19, $20, $21, $22, $23, $24, $25, $26, $27)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Varchar",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Bool",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Bool",
+        "Jsonb",
+        "Jsonb",
+        "Int8",
+        "Int8",
+        "Int4",
+        "Varchar",
+        "Jsonb",
+        "Bool",
+        "Varchar",
+        "Varchar",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "31d7b9b6c9987f570671034ff2e6da57c4cc672529546cc925100576dd7bd0b7"
+}

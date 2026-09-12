@@ -163,7 +163,10 @@ pub struct PropertyField {
     #[serde(rename = "type")]
     pub type_: PropertyFieldType,
 
-    /// Free-form per-field metadata. No `omitempty`, so an unset map is `null`, not `{}`.
+    /// Free-form per-field metadata. No `omitempty`, so a nil map is `null` — but a row read back
+    /// from Postgres never has one. Go scans this column through sqlx, which allocates a nil map
+    /// before scanning, so a SQL `NULL` arrives as an **empty map** (`{}`) and only a jsonb `null`
+    /// arrives as `None`. `mm-store`'s `PropertyFieldRow::into_field` carries the measurement.
     #[serde(rename = "attrs")]
     pub attrs: Option<StringInterface>,
 

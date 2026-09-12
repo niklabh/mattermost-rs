@@ -10654,3 +10654,94 @@ had its **first valid run: 33 run, 28 caught, both controls survived.** Three ea
 void and none of their numbers mean anything. The two remaining survivors are recorded in the plan
 header: no caller the suite has can tell the write gate from the read gate, and `skip_fetch_threads`
 is invisible while no fixture channel contains a reply.
+
+## The four generic property reads, and a flag that is on when four others are off (2026-09-12)
+
+**372 → 376 of 764.** `getPropertyFields`, `searchPropertyFields`, `getPropertyValues` and
+`getSystemPropertyValues` — the *generic* PSAv2 property API, of which the seven CPA routes
+already served are one group's worth pinned to one object type. Store, app, handler and the mux
+charset:
+
+- `crates/mm-store/src/property_store.rs` — both searches carry the whole predicate set now;
+  closes [D-301]
+- `crates/mm-app/src/properties.rs` — new; the group read and the two searches, with the licence
+  hook reproduced for the one group that has one
+- `crates/mm-api/src/properties.rs` — new; the four handlers, the scope resolver and
+  `hasTargetAccess`
+- `crates/mm-api/tests/parity/properties.rs` — new; 16 tests
+- `crates/mm-app/src/config.rs` — the four `FeatureFlags` the registration `if` needs
+- `crates/mm-api/src/views.rs` — now reads `IntegratedBoards` from that config rather than its own
+  `OnceLock`, which is what the module's own doc comment said should happen when a second consumer
+  appeared
+
+### The previous session's open question, answered: the routes are registered
+
+`InitProperties` is a five-way `if` over `IntegratedBoards || ManagedChannelCategories ||
+ClassificationMarkings || SessionAttributes || PostAttributes`. Four of the five default to
+`false`. **`ClassificationMarkings` defaults to `true`** (feature_flags.go:185), so the family is
+live on a stock server and sampling any of the other four would have concluded the opposite.
+
+### Why this family is comparable where CPA was not
+
+The licence hook is constructed with **one group id** (app/server.go:325). `RegisterBuiltinGroups`
+writes five rows unconditionally beside it, and two of them — `boards` and `post_attributes` — are
+PSAv2 with no hook on the read path at all. So on Team Edition these routes return real rows, and
+the whole predicate set is measurable against Go: cursors in both modes, the inclusive `since`
+boundary, delta mode's automatic tombstones, the three-way channel hierarchy and its two-way DM
+form. A sixth row, `managed_channel_categories`, is **version 3** and is a 404 like the v1
+`content_flagging` group; `IsPSAv2` is `Version == 2` exactly.
+
+### Three answers a port would smooth over
+
+- **An empty field list is `[]` and an empty value list is `null`.** The two sibling stores differ
+  by one line — `fields := []*model.PropertyField{}` against `var values []*model.PropertyValue`
+  — and nothing downstream normalises either.
+- **`per_page=0` is a 500 on the GET route and a 60-row page on the POST one.** `ParamsFromRequest`
+  clamps negatives and the maximum but not zero; the store's `PerPage < 1` guard is what the GET
+  reaches, and `searchPropertyFields` clamps `<= 0` itself before the store sees it.
+- **A malformed cursor has two different error ids.** The field route calls `cur.IsValid()` and
+  answers `invalid_body_param`; the value route does not, and `opts.IsValid()` inside the core
+  answers `api.property_value.get.invalid_opts.app_error` instead.
+
+### A NULL `jsonb` column is `{}` in Go, and the port had it inverted
+
+`PropertyField.Attrs` is a Go map, and sqlx's `reflectx.FieldByIndexes` allocates a nil map before
+scanning into it — so a SQL `NULL`, whose `Scan` returns early, marshals as **`{}`**, while a
+jsonb `null` reaches `json.Unmarshal`, which zeroes the map, and marshals as **`null`**. The store
+had them the other way round, with a doc comment asserting the wrong one. It was unreachable until
+now: the CPA reads that first used `search_fields` can only ever return an empty page. Fixed for
+`PropertyFields`; the same question for the dozen other `jsonb` columns this crate reads is
+[D-331].
+
+### The next route in this family
+
+The five **writes** of `api4/properties.go`: `createPropertyField`, `patchPropertyField`,
+`deletePropertyField`, `patchPropertyValues` and `patchSystemPropertyValues`. They are more
+reachable than [D-300] assumes, and for the same reason the reads were: on `boards` and
+`post_attributes` there is **no hook chain at all**, so a write there is a plain
+insert/update/delete plus the websocket events `App.CreatePropertyField` and friends publish. What
+they need behind them is the write half of `mm_store::property_store` — `Create`, `Update`,
+`Delete`, `Upsert` for both fields and values — which is genuinely unported, and
+`app.DefaultPropertyFieldPermissionLevel` plus `CanonicalizeSystemObjectField`, which the create
+handler calls before any permission check.
+
+`access_control` stays forwarded when licensed, exactly as the reads do.
+
+### Mutation tally
+
+`scripts/mutations/properties-routes.plan`: **44 run, 41 caught, 2 controls survived, 0 harness
+faults**, plus the one real survivor re-run and caught after its fixture gap was closed. Two
+earlier runs were void and no number from either is quoted here.
+
+What the void runs were worth is the point. The first said `store-fields-always-order-by-create-at`
+**survived**: the fixture's `update_at` values ascended in the same sequence as its `create_at`
+values, so delta mode and directory mode returned the same rows in the same order and the whole
+`CASE WHEN $1` in the field query was untested. Two timestamps were swapped. The same run said
+`store-values-the-target-filter-is-dropped` survived, because every planted value sat on the one
+channel the tests asked about; two values were added, on a DM and at the system target. And the
+valid run's survivor said the `template` guard on the value route could be swapped for `user`
+without anything noticing, because `hasTargetAccess` answers the same refusal one layer down —
+the suite had no `user/values` probe at all.
+
+None of those three would have been found by a green suite, and each was a real hole in the
+evidence for a predicate that decides which rows a client sees.

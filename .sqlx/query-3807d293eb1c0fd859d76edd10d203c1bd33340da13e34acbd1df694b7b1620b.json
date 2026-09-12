@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE threadmemberships\n               SET lastviewed = $1,\n                   unreadmentions = 0,\n                   lastupdated = $1\n              FROM threads\n             WHERE threadmemberships.userid = $2\n               AND threads.postid = threadmemberships.postid\n               AND threads.channelid = ANY($3)\n               AND threads.lastreplyat > threadmemberships.lastviewed\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3807d293eb1c0fd859d76edd10d203c1bd33340da13e34acbd1df694b7b1620b"
+}

@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT t.id AS \"id!\"\n          FROM teams t\n          JOIN (\n                SELECT teamid, userid\n                  FROM teammembers\n                 WHERE userid = ANY($1)\n                   AND deleteat = 0\n               ) AS tm ON t.id = tm.teamid\n         WHERE t.deleteat = 0\n         GROUP BY t.id\n        HAVING COUNT(tm.userid) = $2\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "TextArray",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "4a78c77e1b43eff67ef1a85a1a0d54196c8ebdbeddcf2f1f4aa97af481c2daa9"
+}

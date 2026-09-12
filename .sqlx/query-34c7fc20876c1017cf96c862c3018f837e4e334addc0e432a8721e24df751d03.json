@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        DELETE FROM sessions s\n              USING useraccesstokens o\n              WHERE o.token = s.token\n                AND o.id = $1\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "34c7fc20876c1017cf96c862c3018f837e4e334addc0e432a8721e24df751d03"
+}

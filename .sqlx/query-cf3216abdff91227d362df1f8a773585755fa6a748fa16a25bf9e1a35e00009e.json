@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO sidebarchannels (channelid, userid, categoryid, sortorder)\n            SELECT entry.channelid, $2, $3, (entry.ord - 1) * $4\n            FROM unnest($1::text[]) WITH ORDINALITY AS entry(channelid, ord)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "TextArray",
+        "Varchar",
+        "Varchar",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "cf3216abdff91227d362df1f8a773585755fa6a748fa16a25bf9e1a35e00009e"
+}

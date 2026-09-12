@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE useraccesstokens SET isactive = FALSE WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e4f0669a5137a9d6ab8c90afc7fdbb8339cc072e4eee1adf56d03593bd6ffc42"
+}

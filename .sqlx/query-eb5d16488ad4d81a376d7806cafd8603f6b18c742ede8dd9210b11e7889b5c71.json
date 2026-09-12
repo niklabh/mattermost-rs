@@ -1,0 +1,36 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE channels\n           SET createat            = $2,\n               updateat            = $3,\n               deleteat            = $4,\n               teamid              = $5,\n               type                = $6::text::channel_type,\n               displayname         = $7,\n               name                = $8,\n               header              = $9,\n               purpose             = $10,\n               lastpostat          = $11,\n               totalmsgcount       = $12,\n               extraupdateat       = $13,\n               creatorid           = $14,\n               schemeid            = $15,\n               groupconstrained    = $16,\n               shared              = $17,\n               totalmsgcountroot   = $18,\n               lastrootpostat      = $19,\n               bannerinfo          = $20,\n               defaultcategoryname = $21,\n               autotranslation     = $22,\n               discoverable        = $23\n         WHERE id = $1\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Varchar",
+        "Text",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Varchar",
+        "Varchar",
+        "Bool",
+        "Bool",
+        "Int8",
+        "Int8",
+        "Jsonb",
+        "Varchar",
+        "Bool",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "eb5d16488ad4d81a376d7806cafd8603f6b18c742ede8dd9210b11e7889b5c71"
+}

@@ -7083,9 +7083,16 @@ the comparison oracle has to be something other than the Go server beside it.
 
 ---
 
-## D-301 · `property_store`'s two searches implement a subset of the predicates
+## D-301 · `property_store`'s two searches implement a subset of the predicates — CLOSED 2026-09-12
 
-**Status** OPEN · **Severity** coverage · **Raised** 2026-09-11 (custom profile attributes)
+**Status** CLOSED · **Severity** coverage · **Raised** 2026-09-11 (custom profile attributes) ·
+**Closed** 2026-09-12 by the four read routes of `api4/properties.go`, which needed all of it
+
+Both searches now carry the whole predicate set as a **single statement whose branches are chosen
+by bound parameters** — the third option the entry below did not consider, and the one that keeps
+`query_as!`'s compile-time checking. `CASE` arms stand in for squirrel's `switch`, and each arm
+names the Go line it reproduces. Every predicate is exercised by `parity/properties`, against a
+fixture built so `create_at` order, `update_at` order and `id` order disagree.
 
 `SqlPropertyStore::search_fields` and `search_values` implement the predicates the CPA routes set —
 group, object type, target type, target ids, the implicit `DeleteAt = 0`, `PerPage` — and return
@@ -7138,3 +7145,52 @@ concurrent `total_count` race, the second a `CreateAt` tiebreak our store does i
 confident, wrong conclusions — once through `scripts/parity.sh` (36 false failures after a
 `git worktree move`) and once here. Both are fixed by killing on the **port**, which is the thing
 that identifies a server, rather than on a path or a ping.
+
+---
+
+## D-331 · a NULL `jsonb` column is `{}` in Go, and the audit of the other sites is owed
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-12 (properties read routes)
+
+`PropertyField.Attrs` is a Go **map**, and sqlx's `reflectx.FieldByIndexes` allocates a nil map
+before scanning into it. `StringInterface.Scan` returns early for a nil driver value
+(`model/utils.go:186`), so a SQL `NULL` leaves that freshly allocated empty map behind and
+marshals as **`{}`** — while a jsonb `null` reaches `json.Unmarshal`, which zeroes the map, and
+marshals as **`null`**. Measured on both, twice.
+
+`mm-store`'s port had the two the wrong way round and it was invisible: the CPA reads that first
+used `search_fields` can only return an empty page unlicensed, so no row ever carried an `attrs`.
+Fixed for `PropertyFields`.
+
+**What is owed:** the same question for every other `jsonb` column this crate reads into an
+`Option`. `crates/mm-store` has roughly a dozen `None | Some(Value::Null) => None` sites —
+`channel_store` (×4), `user_store` (×2), `team_store`, `post_store`, `job_store`, `draft_store`,
+`role_store` — and each is correct **only if** Go's destination is not a bare map. A pointer or a
+`*StringMap` destination really is nil for both cases; a plain `StringMap`/`StringInterface` is
+not. The audit is one grep of the Go struct per site.
+
+**Why it is not urgent:** Go's own writers never leave these columns SQL NULL — `Value()` on a nil
+map emits the four bytes `null` — so the divergence needs a row written by a migration or by hand.
+That is exactly how this one was found, and a migration adding a nullable `jsonb` would reach it
+for real.
+
+**Where the pin lives:** `PropertyFieldRow::into_field` in `crates/mm-store/src/property_store.rs`.
+
+---
+
+## D-332 · nothing proves `.sqlx/` still covers the workspace
+
+**Status** OPEN · **Severity** tooling · **Raised** 2026-09-12 (properties read routes)
+
+The cache itself is **fixed**: it held 87 entries against a store crate with several hundred
+queries, so `SQLX_OFFLINE=true cargo check --workspace` failed on `audit_store`, `bot_store` and
+many others — while `README.md` said the workspace builds with no database at all. Regenerated to
+320 entries with `cargo sqlx prepare --workspace -- --all-targets`, and the offline build of every
+target is clean.
+
+**What is owed is the guard, not the cache.** It drifted for a long time and nothing noticed,
+because every session runs with `DATABASE_URL` set and a live Postgres, so the offline path is
+never exercised. One `SQLX_OFFLINE=true cargo check --workspace --all-targets` in `scripts/` — or
+in whatever runs before a merge — is what turns the README's claim into something the tree
+asserts rather than something a reader has to trust.
+

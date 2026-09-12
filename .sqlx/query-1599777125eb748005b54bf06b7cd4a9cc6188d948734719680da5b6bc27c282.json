@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT msgcount AS \"msgcount!\", lastviewedat AS \"lastviewedat!\"\n             FROM channelmembers WHERE channelid = $1 AND userid = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "msgcount!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "lastviewedat!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      true,
+      true
+    ]
+  },
+  "hash": "1599777125eb748005b54bf06b7cd4a9cc6188d948734719680da5b6bc27c282"
+}

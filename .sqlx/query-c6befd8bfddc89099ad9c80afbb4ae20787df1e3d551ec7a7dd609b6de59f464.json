@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT COALESCE(character_maximum_length, 0) AS \"length!\"\n              FROM information_schema.columns\n             WHERE table_name = 'posts'\n               AND column_name = 'message'\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "length!",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "c6befd8bfddc89099ad9c80afbb4ae20787df1e3d551ec7a7dd609b6de59f464"
+}

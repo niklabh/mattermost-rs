@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT COALESCE(character_maximum_length, 0)::bigint AS \"length!\"\n              FROM information_schema.columns\n             WHERE table_name = 'posts' AND column_name = 'message'\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "length!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "6d65dc06d4effa5b43c633acf8aea3b52e64bed644e7521b5fd63081322e67b1"
+}

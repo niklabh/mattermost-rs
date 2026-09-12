@@ -24,9 +24,10 @@
 //! # Every test holds two locks
 //!
 //! [`ACTIVE_LICENCE_ROW`] read-side, because a licence row anywhere in the binary would make our
-//! side forward and the comparison would be Go against Go. And [`CPA_ROWS`], because the planted
-//! field is **global state for this whole family** — a test asserting `200 []` while a sibling
-//! holds a field up is asserting nothing.
+//! side forward and the comparison would be Go against Go. And [`common::PROPERTY_ROWS`], because
+//! the planted field is **global state for the whole `PropertyFields` table** — a test asserting
+//! `200 []` while a sibling holds a field up is asserting nothing, and the sibling is now as
+//! likely to be `parity/properties` as one of these twelve.
 
 use crate::common;
 
@@ -35,9 +36,6 @@ use common::{
     create_plain_user, create_team, delete_plain_user, fetch_both_raw, go_minted_token,
     logged_in_user_id, stack_enabled,
 };
-
-/// The `access_control` group's fields and values are one shared fixture for this file.
-static CPA_ROWS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// A valid 26-character id that names nothing.
 const NOWHERE: &str = "zzzzzzzzzzzzzzzzzzzzzzzzzz";
@@ -247,7 +245,7 @@ async fn the_empty_group_answers_two_hundred_twice() {
         return;
     }
     let _unlicensed = ACTIVE_LICENCE_ROW.read().await;
-    let _rows = CPA_ROWS.lock().await;
+    let _rows = common::PROPERTY_ROWS.lock().await;
     let client = client();
     let token = go_minted_token(&client).await;
     unplant().await;
@@ -279,7 +277,7 @@ async fn a_planted_row_flips_each_read_on_its_own_table() {
         return;
     }
     let _unlicensed = ACTIVE_LICENCE_ROW.read().await;
-    let _rows = CPA_ROWS.lock().await;
+    let _rows = common::PROPERTY_ROWS.lock().await;
     let client = client();
     let token = go_minted_token(&client).await;
     let me = logged_in_user_id();
@@ -353,7 +351,7 @@ async fn the_field_search_skips_what_the_by_id_reads_still_find() {
         return;
     }
     let _unlicensed = ACTIVE_LICENCE_ROW.read().await;
-    let _rows = CPA_ROWS.lock().await;
+    let _rows = common::PROPERTY_ROWS.lock().await;
     let client = client();
     let token = go_minted_token(&client).await;
     unplant().await;
@@ -414,7 +412,7 @@ async fn a_field_in_another_group_is_a_not_found() {
         return;
     }
     let _unlicensed = ACTIVE_LICENCE_ROW.read().await;
-    let _rows = CPA_ROWS.lock().await;
+    let _rows = common::PROPERTY_ROWS.lock().await;
     let client = client();
     let token = go_minted_token(&client).await;
     unplant().await;
@@ -463,7 +461,7 @@ async fn creating_a_field_refuses_after_the_body_and_before_the_table() {
         return;
     }
     let _unlicensed = ACTIVE_LICENCE_ROW.read().await;
-    let _rows = CPA_ROWS.lock().await;
+    let _rows = common::PROPERTY_ROWS.lock().await;
     let client = client();
     let token = go_minted_token(&client).await;
     unplant().await;
@@ -500,7 +498,7 @@ async fn creating_a_field_needs_manage_system() {
         return;
     }
     let _unlicensed = ACTIVE_LICENCE_ROW.read().await;
-    let _rows = CPA_ROWS.lock().await;
+    let _rows = common::PROPERTY_ROWS.lock().await;
     let client = client();
     let admin = go_minted_token(&client).await;
     let team = create_team(&client, &admin, "cpacreate").await;
@@ -550,7 +548,7 @@ async fn the_field_writes_are_a_not_found_until_the_field_exists() {
         return;
     }
     let _unlicensed = ACTIVE_LICENCE_ROW.read().await;
-    let _rows = CPA_ROWS.lock().await;
+    let _rows = common::PROPERTY_ROWS.lock().await;
     let client = client();
     let token = go_minted_token(&client).await;
     unplant().await;
@@ -619,7 +617,7 @@ async fn the_field_patch_refusals_come_in_order() {
         return;
     }
     let _unlicensed = ACTIVE_LICENCE_ROW.read().await;
-    let _rows = CPA_ROWS.lock().await;
+    let _rows = common::PROPERTY_ROWS.lock().await;
     let client = client();
     let token = go_minted_token(&client).await;
     unplant().await;
@@ -724,7 +722,7 @@ async fn the_value_patch_refusals_come_in_order() {
         return;
     }
     let _unlicensed = ACTIVE_LICENCE_ROW.read().await;
-    let _rows = CPA_ROWS.lock().await;
+    let _rows = common::PROPERTY_ROWS.lock().await;
     let client = client();
     let token = go_minted_token(&client).await;
     let me = logged_in_user_id();
@@ -829,7 +827,7 @@ async fn a_known_field_in_a_batch_reaches_the_licence() {
         return;
     }
     let _unlicensed = ACTIVE_LICENCE_ROW.read().await;
-    let _rows = CPA_ROWS.lock().await;
+    let _rows = common::PROPERTY_ROWS.lock().await;
     let client = client();
     let token = go_minted_token(&client).await;
     unplant().await;
@@ -886,7 +884,7 @@ async fn another_users_values_are_readable_but_not_writable() {
         return;
     }
     let _unlicensed = ACTIVE_LICENCE_ROW.read().await;
-    let _rows = CPA_ROWS.lock().await;
+    let _rows = common::PROPERTY_ROWS.lock().await;
     let client = client();
     let admin = go_minted_token(&client).await;
     let me = logged_in_user_id();
@@ -947,7 +945,7 @@ async fn me_is_the_session_user_on_both_value_routes() {
         return;
     }
     let _unlicensed = ACTIVE_LICENCE_ROW.read().await;
-    let _rows = CPA_ROWS.lock().await;
+    let _rows = common::PROPERTY_ROWS.lock().await;
     let client = client();
     let token = go_minted_token(&client).await;
     unplant().await;

@@ -1,0 +1,94 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT o.id                                  AS \"id!\",\n                   COALESCE(o.creatorid, '')             AS \"creatorid!\",\n                   COALESCE(o.createat, 0)               AS \"createat!\",\n                   COALESCE(o.updateat, 0)               AS \"updateat!\",\n                   COALESCE(o.clientsecret, '')          AS \"clientsecret!\",\n                   COALESCE(o.name, '')                  AS \"name!\",\n                   COALESCE(o.description, '')           AS \"description!\",\n                   COALESCE(o.iconurl, '')               AS \"iconurl!\",\n                   o.callbackurls                        AS \"callbackurls?\",\n                   COALESCE(o.homepage, '')              AS \"homepage!\",\n                   COALESCE(o.istrusted, FALSE)          AS \"istrusted!\",\n                   o.mattermostappid                     AS \"mattermostappid!\",\n                   COALESCE(o.isdynamicallyregistered, FALSE) AS \"isdynamicallyregistered!\"\n              FROM oauthapps o\n             WHERE o.id = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "creatorid!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "createat!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "updateat!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "clientsecret!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "name!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 6,
+        "name": "description!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 7,
+        "name": "iconurl!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 8,
+        "name": "callbackurls?",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 9,
+        "name": "homepage!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 10,
+        "name": "istrusted!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 11,
+        "name": "mattermostappid!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 12,
+        "name": "isdynamicallyregistered!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      true,
+      null,
+      null,
+      false,
+      null
+    ]
+  },
+  "hash": "e1285086f26cc6092e3fb6d226c5355e77d8e7eb0231df948b42dddf6a7d3ed8"
+}

@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT COUNT(*) AS \"value!\"\n              FROM posts p\n             WHERE p.type = ''\n               AND p.userid NOT IN (SELECT userid FROM bots)\n               AND p.deleteat = 0\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "value!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "70e54ff84dd7598a25c9d2d961ecc9650e23fb37bae1aff1da09fca3410f0b5a"
+}

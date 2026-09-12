@@ -1,0 +1,94 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id                                   AS \"id!\",\n                   targetid                             AS \"targetid!\",\n                   targettype                           AS \"targettype!\",\n                   groupid                              AS \"groupid!\",\n                   fieldid                              AS \"fieldid!\",\n                   value                                AS \"value!\",\n                   createat                             AS \"createat!\",\n                   updateat                             AS \"updateat!\",\n                   deleteat                             AS \"deleteat!\",\n                   COALESCE(createdby, '')              AS \"createdby!\",\n                   COALESCE(updatedby, '')              AS \"updatedby!\"\n              FROM propertyvalues\n             WHERE ($1::bool OR $2::bool OR deleteat = 0)\n               AND ($3::text = '' OR groupid = $3)\n               AND ($4::text = '' OR targettype = $4)\n               AND (cardinality($5::text[]) = 0 OR targetid = ANY($5))\n               AND ($6::text = '' OR fieldid = $6)\n               AND (NOT $7::bool\n                    OR CASE WHEN $1 THEN updateat > $8::bigint\n                                      OR (updateat = $8 AND id > $9::text)\n                            ELSE      createat > $10::bigint\n                                      OR (createat = $10 AND id > $9)\n                       END)\n               AND (NOT $1 OR updateat >= $11::bigint)\n               AND ($12::jsonb IS NULL OR value = $12)\n             ORDER BY (CASE WHEN $1 THEN updateat ELSE createat END) ASC, id ASC\n             LIMIT $13\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "targetid!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "targettype!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "groupid!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "fieldid!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "value!",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 6,
+        "name": "createat!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 7,
+        "name": "updateat!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 8,
+        "name": "deleteat!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 9,
+        "name": "createdby!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 10,
+        "name": "updatedby!",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bool",
+        "Bool",
+        "Text",
+        "Text",
+        "TextArray",
+        "Text",
+        "Bool",
+        "Int8",
+        "Text",
+        "Int8",
+        "Int8",
+        "Jsonb",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "bbefeeb044b08bb82c3d601b396e7bacbd13692ac3c8e96a070a08f1d3e37197"
+}

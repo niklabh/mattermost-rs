@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM sidebarchannels\n            USING sidebarcategories\n            WHERE sidebarchannels.categoryid = sidebarcategories.id\n              AND sidebarchannels.userid = $1\n              AND sidebarchannels.channelid = ANY($2::text[])\n              AND sidebarcategories.teamid = $3\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "TextArray",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "52bdf57f031b7bcffe35ba563fcab5c19370126f4c77954d0c28e0ede64bb47f"
+}

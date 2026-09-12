@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM threadmemberships tm\n             WHERE tm.userid = $1\n               AND EXISTS (\n                   SELECT 1\n                     FROM threads t\n                    WHERE t.postid = tm.postid\n                      AND t.channelid = $2\n               )\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ffa74b73a71b3369f64d47a10983811858e796d9b4511915983ec3d29564347e"
+}

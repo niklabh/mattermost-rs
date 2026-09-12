@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT cm.channelid    AS \"channel_id!\",\n               COUNT(*)        AS \"count!\"\n          FROM channelmembers cm\n          INNER JOIN users u ON u.id = cm.userid\n         WHERE cm.channelid = ANY($1::text[])\n           AND u.deleteat = 0\n         GROUP BY cm.channelid\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "channel_id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "b0ce8ceb0d1928591ad3fb6196d499ea1b86430cd6bb91e791f4ca1ce0b527ff"
+}

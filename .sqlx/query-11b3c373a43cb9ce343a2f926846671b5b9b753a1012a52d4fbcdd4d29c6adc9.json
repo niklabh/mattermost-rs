@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE fileinfo\n               SET deleteat = $1\n              FROM posts\n             WHERE fileinfo.postid = posts.id\n               AND posts.rootid = $2\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "11b3c373a43cb9ce343a2f926846671b5b9b753a1012a52d4fbcdd4d29c6adc9"
+}

@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT COUNT(0) AS \"count!\"\n          FROM channels\n         WHERE teamid = $1\n           AND type IN ('O', 'P', 'G')\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "4dca98425b791c50202002b85eb89fc2d45b2f61505e44871c1ed00bdf49b860"
+}

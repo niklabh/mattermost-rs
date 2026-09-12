@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE teams\n               SET createat = $2, updateat = $3, deleteat = $4, displayname = $5, name = $6,\n                   description = $7, email = $8, type = ($9::text)::team_type,\n                   companyname = $10,\n                   alloweddomains = $11, inviteid = $12, allowopeninvite = $13,\n                   lastteamiconupdate = $14, schemeid = $15, groupconstrained = $16,\n                   cloudlimitsarchived = $17\n             WHERE id = $1\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Text",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Bool",
+        "Int8",
+        "Varchar",
+        "Bool",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "885cf095656f09429387bf412175934d84cd29564912597513d1a87c51e39bce"
+}

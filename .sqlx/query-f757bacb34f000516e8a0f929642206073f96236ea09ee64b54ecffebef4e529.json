@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM sidebarchannels WHERE channelid = $1 AND userid = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f757bacb34f000516e8a0f929642206073f96236ea09ee64b54ecffebef4e529"
+}

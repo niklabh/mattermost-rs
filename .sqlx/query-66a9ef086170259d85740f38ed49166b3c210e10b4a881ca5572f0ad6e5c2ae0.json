@@ -1,0 +1,59 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id                          AS \"id!\",\n                   COALESCE(token, '')         AS \"token!\",\n                   COALESCE(userid, '')        AS \"userid!\",\n                   COALESCE(description, '')   AS \"description!\",\n                   COALESCE(isactive, false)   AS \"isactive!\",\n                   expiresat                   AS \"expiresat!\",\n                   lastnotifiedat              AS \"lastnotifiedat?\"\n              FROM useraccesstokens\n             LIMIT $1 OFFSET $2\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "token!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "userid!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "description!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "isactive!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
+        "name": "expiresat!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "lastnotifiedat?",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      null,
+      null,
+      null,
+      false,
+      true
+    ]
+  },
+  "hash": "66a9ef086170259d85740f38ed49166b3c210e10b4a881ca5572f0ad6e5c2ae0"
+}

@@ -1,0 +1,31 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE posts\n               SET createat     = $1,\n                   updateat     = $2,\n                   editat       = $3,\n                   deleteat     = $4,\n                   ispinned     = $5,\n                   userid       = $6,\n                   channelid    = $7,\n                   rootid       = $8,\n                   originalid   = $9,\n                   message      = $10,\n                   type         = $11,\n                   props        = $12,\n                   hashtags     = $13,\n                   filenames    = $14,\n                   fileids      = $15,\n                   hasreactions = $16,\n                   remoteid     = $17\n             WHERE id = $18\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Int8",
+        "Int8",
+        "Bool",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Jsonb",
+        "Varchar",
+        "Varchar",
+        "Varchar",
+        "Bool",
+        "Varchar",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f0cd1a6817f7aae47719b8804a2d02f321d704722ff27d7fef5885a802b81fc7"
+}

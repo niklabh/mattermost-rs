@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT type AS \"category_type!\"\n        FROM sidebarcategories\n        WHERE userid = $1\n          AND type IN ('favorites', 'channels', 'direct_messages')\n          AND teamid = $2\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "category_type!",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "0b40ff9c6fbb1f1e7c3ca64e7c8e6ebd7f7b3225d927d0c9db4898c9652d962c"
+}

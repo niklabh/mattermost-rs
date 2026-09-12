@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT COUNT(0) AS \"count!\"\n              FROM channels\n             WHERE teamid = $1\n               AND deleteat = 0\n               AND (type = 'O' OR type = 'P')\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "c160eae7fb5718084f2c9cd048dc5f23353a192941340e4857720d88105698a4"
+}

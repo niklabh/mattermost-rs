@@ -1,0 +1,60 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                SELECT id                        AS \"id!\",\n                       COALESCE(createat, 0)     AS \"createat!\",\n                       COALESCE(userid, '')      AS \"userid!\",\n                       COALESCE(action, '')      AS \"action!\",\n                       COALESCE(extrainfo, '')   AS \"extrainfo!\",\n                       COALESCE(ipaddress, '')   AS \"ipaddress!\",\n                       COALESCE(sessionid, '')   AS \"sessionid!\"\n                  FROM audits\n                 WHERE userid = $1\n                 ORDER BY createat DESC\n                 LIMIT $2 OFFSET $3\n                ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "createat!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "userid!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "action!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 4,
+        "name": "extrainfo!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "ipaddress!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 6,
+        "name": "sessionid!",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "4de43abaabdb0a5924b24ff154cb7fd91b9d5f45e7ed78f4637a6a3255116a02"
+}

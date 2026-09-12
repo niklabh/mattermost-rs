@@ -1,0 +1,96 @@
+# Mutation plan for the four read routes of `api4/properties.go`.
+#
+#   scripts/mutate-batch.sh scripts/mutations/properties-routes.plan
+#
+# Unlike its sibling `cpa-routes.plan`, most of what is worth mutating here is a **query
+# predicate** rather than an error id: the `boards` group carries no licence hook, so the parity
+# fixture holds seven field rows and three value rows and the suite compares the rows themselves.
+# The fixture is built so `create_at` order, `update_at` order and `id` order are three different
+# orders — without that, half of the store lines below could be swapped for one another and every
+# assertion would still pass.
+#
+# Two things on this family are invisible to any client and are **not** run:
+#
+#   * i18n is not ported ([D-092]), so `message` is the raw id and the parity helper excludes it.
+#   * `AppError`'s parameter map carries `json:"-"`, so *which* parameter a 400 named, and which
+#     permission a 403 named, are not on the wire.
+#
+# `IncludeDeleted` is unreachable from all four routes — no handler sets it — so the only way a
+# tombstone reaches a client is delta mode's auto-include, which is what the two
+# `delta-mode-hides-the-tombstones` lines test.
+#
+# # What the first (aborted) run found, and what was done about it
+#
+# * `store-fields-always-order-by-create-at` **survived**. The fixture's `update_at` values
+#   ascended in the same sequence as its `create_at` values, so delta mode and directory mode
+#   returned the same order and the mode switch was unobservable. Two timestamps were swapped;
+#   the mutation is caught now. This is the single most important line in this file: without it
+#   the whole `CASE WHEN $1` in the field query is untested.
+# * `store-values-the-target-filter-is-dropped` **survived**. Every planted value sat on the one
+#   channel the tests asked about, so a query with no `TargetID` predicate returned the same rows.
+#   Two values were added — one on a DM, one at the system target — and
+#   `each_value_route_reads_only_its_own_target` reads all three targets.
+# * `store-fields-a-dm-gets-the-team-arm-anyway` was an **equivalent mutant**, not a fixture gap:
+#   a DM's `opts.TeamID` is empty, so the arm it added (`targettype = 'team' AND targetid = ''`)
+#   can never match a row Go would have written. It is replaced by
+#   `store-fields-a-dm-sees-every-team-field`, which drops the target comparison instead.
+# * Two lines were **harness faults** rather than verdicts: `$12 <> $12` and `LIMIT $16 + 1000`
+#   leave Postgres with no type for the parameter, so the crate did not compile. Both carry an
+#   explicit `::bigint` now. A mutation that does not build is not a survivor and is not a catch.
+#
+# # The valid run: **44 run, 41 caught, 2 controls survived, 0 harness faults** (2026-09-12)
+#
+# One real survivor, and it was a fixture gap rather than an equivalent mutant:
+# `api-the-value-route-serves-the-template-object-type` swaps the handler's `template` guard for
+# `user`, and the template refusal **still came back** — from `hasTargetAccess`'s own template arm,
+# one layer down, with the same id and the same status. The suite had no `user/values` probe at
+# all and only ever asked for `template/values` with a well-formed id in a group that exists.
+# Three probes close it (`user/values` is a 200 `null`; `template/values/notanid` and
+# `nosuchgroup/template/values/…` are still the template 400, because the guard runs before both
+# `RequireTargetId` and the group read), and the mutation is **CAUGHT** on the re-run, by two
+# tests. The other 43 verdicts stand unchanged: the fix only adds probes, and an added probe can
+# turn a SURVIVED into a CAUGHT but never the reverse.
+store-fields-order-by-the-wrong-column	crates/mm-store/src/property_store.rs	ORDER BY (CASE WHEN $1 THEN updateat ELSE createat END) ASC, id ASC\n             LIMIT $16	ORDER BY (CASE WHEN $1 THEN createat ELSE updateat END) ASC, id ASC\n             LIMIT $16	api	properties
+store-fields-always-order-by-create-at	crates/mm-store/src/property_store.rs	ORDER BY (CASE WHEN $1 THEN updateat ELSE createat END) ASC, id ASC\n             LIMIT $16	ORDER BY createat ASC, id ASC\n             LIMIT $16	api	properties
+store-fields-the-cursor-key-ignores-the-mode	crates/mm-store/src/property_store.rs	OR CASE WHEN $1 THEN updateat > $12::bigint\n                                      OR (updateat = $12 AND id > $13::text)\n                            ELSE      createat > $14::bigint\n                                      OR (createat = $14 AND id > $13)\n                       END)	OR (createat > $14::bigint\n                        OR (createat = $14 AND id > $13::text)\n                        OR $12::bigint <> $12))	api	properties
+store-fields-the-cursor-tie-is-inclusive	crates/mm-store/src/property_store.rs	OR (updateat = $12 AND id > $13::text)	OR (updateat = $12 AND id >= $13::text)	api	properties
+store-fields-the-since-boundary-is-exclusive	crates/mm-store/src/property_store.rs	AND (NOT $1 OR updateat >= $15::bigint)	AND (NOT $1 OR updateat > $15::bigint)	api	properties
+store-fields-delta-mode-hides-the-tombstones	crates/mm-store/src/property_store.rs	WHERE ($1::bool OR $2::bool OR deleteat = 0)\n               AND ($3::text = '' OR groupid = $3)\n               AND (CASE\n                      WHEN cardinality($4::text[]) > 0 THEN objecttype = ANY($4)	WHERE ($2::bool OR deleteat = 0)\n               AND ($3::text = '' OR groupid = $3)\n               AND (CASE\n                      WHEN cardinality($4::text[]) > 0 THEN objecttype = ANY($4)	api	properties
+store-fields-the-hierarchy-drops-the-team-arm	crates/mm-store/src/property_store.rs	WHEN $6::text <> '' AND $7::text <> ''\n                        THEN targettype = 'system'\n                          OR (targettype = 'team'    AND targetid = $7)\n                          OR (targettype = 'channel' AND targetid = $6)	WHEN $6::text <> '' AND $7::text <> ''\n                        THEN targettype = 'system'\n                          OR (targettype = 'channel' AND targetid = $6)	api	properties
+store-fields-a-dm-sees-every-team-field	crates/mm-store/src/property_store.rs	WHEN $6 <> ''\n                        THEN targettype = 'system'\n                          OR (targettype = 'channel' AND targetid = $6)	WHEN $6 <> ''\n                        THEN targettype = 'system'\n                          OR targettype = 'team'\n                          OR (targettype = 'channel' AND targetid = $6)	api	properties
+store-fields-the-team-scope-includes-every-channel	crates/mm-store/src/property_store.rs	WHEN $7 <> ''\n                        THEN targettype = 'system'\n                          OR (targettype = 'team'    AND targetid = $7)\n                      ELSE	WHEN $7 <> ''\n                        THEN targettype = 'system'\n                          OR (targettype = 'team'    AND targetid = $7)\n                          OR targettype = 'channel'\n                      ELSE	api	properties
+store-fields-the-single-target-scope-becomes-a-hierarchy	crates/mm-store/src/property_store.rs	ELSE ($8::text = '' OR targettype = $8)\n                       AND (cardinality($9::text[]) = 0 OR targetid = ANY($9))	ELSE ($8::text = '' OR targettype = $8 OR targettype = 'system')\n                       AND (cardinality($9::text[]) = 0 OR targetid = ANY($9) OR targettype = 'system')	api	properties
+store-fields-object-types-is-ignored	crates/mm-store/src/property_store.rs	WHEN cardinality($4::text[]) > 0 THEN objecttype = ANY($4)	WHEN cardinality($4::text[]) > 0 THEN objecttype = ANY($4) OR TRUE	api	properties
+store-fields-the-page-is-not-bounded	crates/mm-store/src/property_store.rs	ORDER BY (CASE WHEN $1 THEN updateat ELSE createat END) ASC, id ASC\n             LIMIT $16\n	ORDER BY (CASE WHEN $1 THEN updateat ELSE createat END) ASC, id ASC\n             LIMIT $16::bigint + 1000\n	api	properties
+store-fields-the-per-page-floor-is-dropped	crates/mm-store/src/property_store.rs	        if opts.per_page < 1 {\n            return Err(StoreError::Argument {\n                entity: "PropertyField",	        if opts.per_page < -1 {\n            return Err(StoreError::Argument {\n                entity: "PropertyField",	api	properties
+store-values-order-by-the-wrong-column	crates/mm-store/src/property_store.rs	ORDER BY (CASE WHEN $1 THEN updateat ELSE createat END) ASC, id ASC\n             LIMIT $13	ORDER BY (CASE WHEN $1 THEN createat ELSE updateat END) ASC, id ASC\n             LIMIT $13	api	properties
+store-values-delta-mode-hides-the-tombstones	crates/mm-store/src/property_store.rs	WHERE ($1::bool OR $2::bool OR deleteat = 0)\n               AND ($3::text = '' OR groupid = $3)\n               AND ($4::text = '' OR targettype = $4)	WHERE ($2::bool OR deleteat = 0)\n               AND ($3::text = '' OR groupid = $3)\n               AND ($4::text = '' OR targettype = $4)	api	properties
+store-values-the-target-filter-is-dropped	crates/mm-store/src/property_store.rs	AND (cardinality($5::text[]) = 0 OR targetid = ANY($5))	AND (cardinality($5::text[]) = 0 OR targetid = ANY($5) OR TRUE)	api	properties
+store-a-null-attrs-column-is-a-json-null	crates/mm-store/src/property_store.rs	            None => Some(serde_json::Map::new()),\n            Some(serde_json::Value::Null) => None,	            None => None,\n            Some(serde_json::Value::Null) => None,	api	properties
+app-an-empty-result-is-refused-too	crates/mm-app/src/properties.rs	    !result_is_empty && group.name == ACCESS_CONTROL_PROPERTY_GROUP_NAME	    group.name == ACCESS_CONTROL_PROPERTY_GROUP_NAME	unit	properties::tests
+app-every-group-is-licence-managed	crates/mm-app/src/properties.rs	    !result_is_empty && group.name == ACCESS_CONTROL_PROPERTY_GROUP_NAME	    !result_is_empty	unit	properties::tests
+api-the-system-shortcut-does-not-erase-the-scope	crates/mm-api/src/properties.rs	        opts.channel_id = String::new();\n        opts.team_id = String::new();\n        opts.target_ids = Vec::new();\n        opts.target_type = PROPERTY_FIELD_TARGET_LEVEL_SYSTEM.to_owned();	        opts.target_type = PROPERTY_FIELD_TARGET_LEVEL_SYSTEM.to_owned();	api	properties
+api-the-system-shortcut-applies-to-a-mixed-list	crates/mm-api/src/properties.rs	    if opts.object_types.len() == 1 && opts.object_types[0] == PROPERTY_FIELD_OBJECT_TYPE_SYSTEM {	    if opts.object_types.iter().any(|t| t == PROPERTY_FIELD_OBJECT_TYPE_SYSTEM) {	api	properties
+api-the-channel-scope-does-not-fill-in-the-team	crates/mm-api/src/properties.rs	        opts.channel_id = channel.id;\n        opts.team_id = channel.team_id;	        opts.channel_id = channel.id;	api	properties
+api-a-missing-scope-is-allowed	crates/mm-api/src/properties.rs	    Err(refusal(\n        where_,\n        "api.property_field.get.scope_required.app_error",\n        400,\n    ))\n}	    Ok(())\n}	api	properties
+api-the-two-scope-shapes-may-be-mixed	crates/mm-api/src/properties.rs	    if scope_by_chan_team && scope_by_target {	    if scope_by_chan_team && scope_by_target && opts.group_id.is_empty() {	api	properties
+api-a-channel-target-needs-no-target-id	crates/mm-api/src/properties.rs	            PROPERTY_FIELD_TARGET_LEVEL_CHANNEL => {\n                let Some(target) = opts.target_ids.first() else {\n                    return Err(refusal(\n                        where_,\n                        "api.property_field.get.target_id_required.app_error",\n                        400,\n                    ));\n                };	            PROPERTY_FIELD_TARGET_LEVEL_CHANNEL => {\n                let Some(target) = opts.target_ids.first() else {\n                    return Ok(());\n                };	api	properties
+api-the-target-type-charset-is-not-checked	crates/mm-api/src/properties.rs	        if !is_valid_psav2_property_field_target_type(&opts.target_type) {	        if is_valid_psav2_property_field_target_type(&opts.target_type) && false {	api	properties
+api-the-post-route-does-not-clamp-per-page	crates/mm-api/src/properties.rs	    opts.per_page = match opts.per_page {\n        p if p <= 0 => PER_PAGE_DEFAULT,	    opts.per_page = match opts.per_page {\n        p if p < 0 => PER_PAGE_DEFAULT,	api	properties
+api-the-get-route-clamps-per-page-too	crates/mm-api/src/properties.rs	        per_page: parse_per_page(query),\n        ..PropertyFieldSearchOpts::default()	        per_page: parse_per_page(query).max(1),\n        ..PropertyFieldSearchOpts::default()	api	properties
+api-object-types-entries-are-not-validated	crates/mm-api/src/properties.rs	    if object_types.is_empty()\n        || !object_types\n            .iter()\n            .all(|ot| is_valid_property_field_object_type(ot))\n    {	    if object_types.is_empty() {	api	properties
+api-an-empty-object-types-list-is-allowed	crates/mm-api/src/properties.rs	    if object_types.is_empty()\n        || !object_types	    if object_types.len() > 9000\n        || !object_types	api	properties
+api-the-v2-check-is-dropped	crates/mm-api/src/properties.rs	    if !group.is_psav2() {	    if group.is_psav2() && group.version == 0 {	api	properties
+api-the-session-attributes-gate-is-inverted	crates/mm-api/src/properties.rs	        if !enabled {\n            return Group::Failed(refusal(\n                where_,\n                "api.property.session_attributes.license.app_error",	        if enabled {\n            return Group::Failed(refusal(\n                where_,\n                "api.property.session_attributes.license.app_error",	api	properties
+api-the-value-route-serves-the-template-object-type	crates/mm-api/src/properties.rs	    if object_type == PROPERTY_FIELD_OBJECT_TYPE_TEMPLATE {\n        return refusal(\n            "getPropertyValues",\n            "api.property_value.template_no_values.app_error",	    if object_type == PROPERTY_FIELD_OBJECT_TYPE_USER {\n        return refusal(\n            "getPropertyValues",\n            "api.property_value.template_no_values.app_error",	api	properties
+api-the-value-route-serves-the-system-object-type	crates/mm-api/src/properties.rs	    if object_type == PROPERTY_FIELD_OBJECT_TYPE_SYSTEM {\n        return refusal(\n            "getPropertyValues",\n            "api.property_value.system_use_dedicated_route.app_error",	    if object_type == PROPERTY_FIELD_OBJECT_TYPE_POST {\n        return refusal(\n            "getPropertyValues",\n            "api.property_value.system_use_dedicated_route.app_error",	api	properties
+api-the-system-values-route-reads-a-different-target	crates/mm-api/src/properties.rs	        PROPERTY_VALUE_SYSTEM_TARGET_ID,\n        request,	        "",\n        request,	api	properties
+api-an-empty-value-list-is-a-json-array	crates/mm-api/src/properties.rs	        Ok(values) if values.is_empty() => encoded(&serde_json::Value::Null, "getPropertyValues"),	        Ok(values) if values.is_empty() && values.capacity() > 9000 => {\n            encoded(&serde_json::Value::Null, "getPropertyValues")\n        }	api	properties
+api-the-cursor-is-validated-on-the-value-route-too	crates/mm-api/src/properties.rs	        // No `cur.IsValid()` on this route — see [`get_property_fields`].\n        opts.cursor = cursor;	        if cursor.is_valid().is_err() {\n            return ApiError::invalid_param("cursor").into_response();\n        }\n        opts.cursor = cursor;	api	properties
+api-the-field-route-skips-the-cursor-check	crates/mm-api/src/properties.rs	        if cursor.is_valid().is_err() {\n            return ApiError::invalid_param("cursor").into_response();\n        }\n        opts.cursor = cursor;	        opts.cursor = cursor;	api	properties
+api-a-bad-since-is-ignored	crates/mm-api/src/properties.rs	    raw.parse::<i64>()\n        .map(Some)\n        .map_err(|_| ApiError::invalid_param(key))	    Ok(raw.parse::<i64>().ok())	api	properties
+api-the-value-target-check-is-dropped	crates/mm-api/src/properties.rs	        TargetAccess::Denied(err) => return err.into_response(),	        TargetAccess::Denied(err) => {\n            let _ = err;\n        }	api	properties
+mux-the-group-name-may-start-with-a-digit	crates/mm-api/src/lib.rs	            bytes.next().is_some_and(|b| b.is_ascii_lowercase())	            bytes.next().is_some_and(|b| b.is_ascii_alphanumeric())	api	properties
+mux-the-object-type-may-hold-a-digit	crates/mm-api/src/lib.rs	        "object_type" => !value.is_empty() && value.bytes().all(|b| b.is_ascii_lowercase()),	        "object_type" => !value.is_empty() && value.bytes().all(|b| b.is_ascii_alphanumeric()),	api	properties
+control-rename-two-bindings	crates/mm-api/src/properties.rs	    let scope_by_chan_team = !opts.channel_id.is_empty() || !opts.team_id.is_empty();\n    let scope_by_target = !opts.target_type.is_empty() || !opts.target_ids.is_empty();\n    if scope_by_chan_team && scope_by_target {	    let hierarchical = !opts.channel_id.is_empty() || !opts.team_id.is_empty();\n    let single_target = !opts.target_type.is_empty() || !opts.target_ids.is_empty();\n    if hierarchical && single_target {	api	properties
+control-reorder-two-independent-select-columns	crates/mm-store/src/property_store.rs	                   createat                             AS "createat!",\n                   updateat                             AS "updateat!",\n                   deleteat                             AS "deleteat!",\n                   COALESCE(createdby, '')              AS "createdby!",\n                   COALESCE(updatedby, '')              AS "updatedby!"\n              FROM propertyvalues	                   updateat                             AS "updateat!",\n                   createat                             AS "createat!",\n                   deleteat                             AS "deleteat!",\n                   COALESCE(updatedby, '')              AS "updatedby!",\n                   COALESCE(createdby, '')              AS "createdby!"\n              FROM propertyvalues	api	properties

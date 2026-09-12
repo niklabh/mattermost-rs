@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT COUNT(*) AS \"count!\"\n              FROM useraccesstokens\n             WHERE (expiresat = 0 OR expiresat > $1)\n               AND isactive = true\n               AND userid NOT IN (SELECT userid FROM bots)\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "89db99b8266a77ee1f274e0ec66b884fddb28db1d381c50c101fa3e40748f1b8"
+}

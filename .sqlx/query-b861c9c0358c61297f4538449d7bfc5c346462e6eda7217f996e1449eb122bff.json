@@ -1,0 +1,58 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT postid                        AS \"post_id!\",\n                   COALESCE(channelid, '')       AS \"channel_id!\",\n                   COALESCE(replycount, 0)       AS \"reply_count!\",\n                   COALESCE(lastreplyat, 0)      AS \"last_reply_at!\",\n                   participants                  AS \"participants?\",\n                   COALESCE(threaddeleteat, 0)   AS \"delete_at!\",\n                   COALESCE(threadteamid, '')    AS \"team_id!\"\n              FROM threads\n             WHERE postid = $1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "post_id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "channel_id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "reply_count!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "last_reply_at!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "participants?",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 5,
+        "name": "delete_at!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "team_id!",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      null,
+      null,
+      true,
+      null,
+      null
+    ]
+  },
+  "hash": "b861c9c0358c61297f4538449d7bfc5c346462e6eda7217f996e1449eb122bff"
+}

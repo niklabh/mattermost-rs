@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT COUNT(tm.postid) AS \"count!\"\n              FROM threadmemberships tm\n              LEFT JOIN threads t ON t.postid = tm.postid\n             WHERE tm.userid = $1\n               AND tm.following = TRUE\n               AND (COALESCE(t.threadteamid, '') = ''\n                    OR EXISTS (SELECT 1\n                                 FROM channelmembers cm\n                                WHERE cm.channelid = t.channelid\n                                  AND cm.userid = tm.userid))\n               AND (COALESCE(t.threadteamid, '') = $2\n                    OR COALESCE(t.threadteamid, '') = '')\n               AND COALESCE(t.threaddeleteat, 0) = 0\n               AND tm.lastviewed < t.lastreplyat\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "c870565072e51de05c7bef94cedda80de4cf0a37d37458b51ca9cca461139151"
+}
