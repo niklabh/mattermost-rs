@@ -334,6 +334,39 @@ pub struct Config {
     /// two different file backends and no error to say so; see [D-201].
     pub file_directory: String,
 
+    /// `FileSettings.MaxFileSize` (config.go:1811). Go default **`100 * 1024 * 1024`**
+    /// (config.go:1888) — 100 MiB, not 100 MB.
+    ///
+    /// Read by `setProfileImage` and `uploadBrandImage` as `r.ContentLength > MaxFileSize`, and
+    /// again by `web.Handler.ServeHTTP` (web/handlers.go:220) as the `MaxBytesReader` cap on
+    /// every `handlerParamFileAPI` route — where the cap is `MaxFileSize + bytes.MinRead`, 512
+    /// bytes *more*. The two are not the same number and the difference is observable: a body
+    /// between the two lengths with no `Content-Length` header passes the first check and fails
+    /// the read.
+    pub file_max_file_size: i64,
+
+    /// `LdapSettings.PictureAttribute` (config.go:2712, defaulted **`""`** at :2831).
+    ///
+    /// One of the two halves of `setProfileImage`'s 409: an LDAP user — or a SAML user on a
+    /// server syncing with LDAP — may not replace a picture that LDAP owns, and *this being
+    /// non-empty* is what makes LDAP own it. Empty on a stock server, so the 409 is unreachable
+    /// until an administrator names an attribute.
+    pub ldap_picture_attribute: String,
+
+    /// `SamlSettings.EnableSyncWithLdap` (config.go:2992, defaulted **`false`** at :3037).
+    ///
+    /// The other half: it is what brings a SAML user under
+    /// [`Config::ldap_picture_attribute`]'s rule. An LDAP user is covered whatever this says.
+    pub saml_enable_sync_with_ldap: bool,
+
+    /// `TeamSettings.LockProfileFieldsForEmailUsers` (config.go:2566, defaulted
+    /// **`"none"`** at :2668).
+    ///
+    /// `IsProfileImageLockedForUser` (app/user.go:1465) compares it against `"all"` and nothing
+    /// else, so `"name_and_username"` — the third legal value — does **not** lock the picture.
+    /// See [`crate::App::is_profile_image_locked_for_user`] for the other three conjuncts.
+    pub lock_profile_fields_for_email_users: String,
+
     /// `FileSettings.PublicLinkSalt` (config.go:1832). Go's default is
     /// **`NewRandomString(32)`** — generated, not constant.
     ///
@@ -936,6 +969,13 @@ impl Default for Config {
             file_driver_name: "local".to_owned(),
             // config.go:1904 — `FileSettingsDefaultDirectory`.
             file_directory: "./data/".to_owned(),
+            // config.go:1888 — 100 MiB.
+            file_max_file_size: 100 * 1024 * 1024,
+            // config.go:2832 — `LdapSettingsDefaultPictureAttribute`, the empty string.
+            ldap_picture_attribute: String::new(),
+            saml_enable_sync_with_ldap: false,
+            // config.go:2669 — `TeamSettingsLockProfileFieldsNone`.
+            lock_profile_fields_for_email_users: "none".to_owned(),
             // No constant default exists; see the field's documentation.
             public_link_salt: String::new(),
             dedicated_export_store: false,
@@ -1209,6 +1249,22 @@ impl Config {
             file_driver_name: lookup("MM_FILESETTINGS_DRIVERNAME")
                 .unwrap_or(default.file_driver_name),
             file_directory: lookup("MM_FILESETTINGS_DIRECTORY").unwrap_or(default.file_directory),
+            file_max_file_size: lookup_int(
+                lookup,
+                "MM_FILESETTINGS_MAXFILESIZE",
+                default.file_max_file_size,
+            ),
+            ldap_picture_attribute: lookup("MM_LDAPSETTINGS_PICTUREATTRIBUTE")
+                .unwrap_or(default.ldap_picture_attribute),
+            saml_enable_sync_with_ldap: lookup_bool(
+                lookup,
+                "MM_SAMLSETTINGS_ENABLESYNCWITHLDAP",
+                default.saml_enable_sync_with_ldap,
+            ),
+            lock_profile_fields_for_email_users: lookup(
+                "MM_TEAMSETTINGS_LOCKPROFILEFIELDSFOREMAILUSERS",
+            )
+            .unwrap_or(default.lock_profile_fields_for_email_users),
             public_link_salt: lookup("MM_FILESETTINGS_PUBLICLINKSALT")
                 .unwrap_or(default.public_link_salt),
             dedicated_export_store: lookup_bool(
@@ -1640,6 +1696,22 @@ impl Config {
             // (config.go:1903), which `unwrap_or` alone would not: a document holding `""` must
             // read `./data/`, not `""`.
             file_directory: non_empty_or(file_settings.directory, default.file_directory),
+            file_max_file_size: file_settings
+                .max_file_size
+                .unwrap_or(default.file_max_file_size),
+            ldap_picture_attribute: parsed
+                .ldap_settings
+                .unwrap_or_default()
+                .picture_attribute
+                .unwrap_or(default.ldap_picture_attribute),
+            saml_enable_sync_with_ldap: parsed
+                .saml_settings
+                .unwrap_or_default()
+                .enable_sync_with_ldap
+                .unwrap_or(default.saml_enable_sync_with_ldap),
+            lock_profile_fields_for_email_users: team_settings
+                .lock_profile_fields_for_email_users
+                .unwrap_or(default.lock_profile_fields_for_email_users),
             public_link_salt: file_settings
                 .public_link_salt
                 .unwrap_or(default.public_link_salt),
@@ -1858,6 +1930,25 @@ struct Document {
     message_export_settings: Option<MessageExportSettingsDocument>,
     #[serde(rename = "CloudSettings")]
     cloud_settings: Option<CloudSettingsDocument>,
+    #[serde(rename = "LdapSettings")]
+    ldap_settings: Option<LdapSettingsDocument>,
+    #[serde(rename = "SamlSettings")]
+    saml_settings: Option<SamlSettingsDocument>,
+}
+
+/// The one field of `LdapSettings` a migrated route reads — `setProfileImage`'s 409.
+#[derive(Debug, Default, serde::Deserialize)]
+struct LdapSettingsDocument {
+    #[serde(rename = "PictureAttribute")]
+    picture_attribute: Option<String>,
+}
+
+/// The one field of `SamlSettings` a migrated route reads, and it is only ever consulted
+/// alongside `LdapSettings.PictureAttribute`.
+#[derive(Debug, Default, serde::Deserialize)]
+struct SamlSettingsDocument {
+    #[serde(rename = "EnableSyncWithLdap")]
+    enable_sync_with_ldap: Option<bool>,
 }
 
 /// The four rule flags and the minimum length `IsPasswordValidWithSettings` reads.
@@ -1913,6 +2004,8 @@ struct TeamSettingsDocument {
     max_users_per_team: Option<i64>,
     #[serde(rename = "ExperimentalDefaultChannels")]
     experimental_default_channels: Option<Vec<String>>,
+    #[serde(rename = "LockProfileFieldsForEmailUsers")]
+    lock_profile_fields_for_email_users: Option<String>,
 }
 
 /// The one field of `EmailSettings` a migrated route reads.
@@ -2071,6 +2164,8 @@ struct ExperimentalSettingsDocument {
 struct FileSettingsDocument {
     #[serde(rename = "DriverName")]
     driver_name: Option<String>,
+    #[serde(rename = "MaxFileSize")]
+    max_file_size: Option<i64>,
     #[serde(rename = "Directory")]
     directory: Option<String>,
     #[serde(rename = "EnablePublicLink")]
@@ -2174,6 +2269,13 @@ fn clamp_unique_reactions(value: i64) -> i64 {
 
 /// `model.ServiceSettingsMaxUniqueReactionsPerPost` (config.go:141).
 const MAX_UNIQUE_REACTIONS_PER_POST: i64 = 500;
+
+/// `model.TeamSettingsLockProfileFieldsAll` (config.go:151) — the only one of the three legal
+/// values of `TeamSettings.LockProfileFieldsForEmailUsers` that locks a profile *picture*.
+///
+/// `"name_and_username"` (config.go:150) locks the other fields and leaves the picture alone;
+/// `IsProfileImageLockedForUser` compares against this constant and nothing else.
+pub const TEAM_SETTINGS_LOCK_PROFILE_FIELDS_ALL: &str = "all";
 
 /// `model.DirectMessageAny` (config.go:80).
 pub const DIRECT_MESSAGE_ANY: &str = "any";
