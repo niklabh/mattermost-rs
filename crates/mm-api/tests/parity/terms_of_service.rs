@@ -53,6 +53,24 @@ async fn plant() {
                 .await
                 .expect("the shared database is reachable");
 
+            // **Sweep anything newer than this fixture's own latest, first.**
+            //
+            // Publishing is licence-refused on this stack, so no legitimate path creates a row
+            // after `LATEST_CREATE_AT` — but a *mutation* that inverts `createTermsOfService`'s
+            // licence gate does, and the row outlives the mutation's rollback. That happened: the
+            // `tos-licence-gate-inverted` line published `some terms`, which became "the latest"
+            // and failed this suite on every run afterwards. A mutation on a **write** route
+            // leaves debris in shared state, and the fixture that owns that state has to clear it.
+            //
+            // Note this does not clear Go's `"latest"` cache, which can keep serving the swept row
+            // for the rest of the process's life. The row is gone for the next run; the cache
+            // needs the restart the module docs already describe.
+            sqlx::query("DELETE FROM termsofservice WHERE createat > $1")
+                .bind(LATEST_CREATE_AT)
+                .execute(&pool)
+                .await
+                .expect("sweeps any revision published after the fixture's latest");
+
             // `ON CONFLICT DO NOTHING` rather than delete-and-insert: the rows are identical every
             // run, so re-inserting them is a no-op, and *deleting* them — even for a moment —
             // would let a concurrent read cache a different answer.

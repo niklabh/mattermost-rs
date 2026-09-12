@@ -7471,3 +7471,38 @@ ACCEPTED rather than OPEN: nothing is owed here beyond the habit. The same blind
 three `Group*MaxLength` params already recorded in `reference/dump/behaviour_group.go`'s header and
 to `TermsOfService.IsValid`'s `MaxLength`. **When a port builds a `params` map, pin it with a unit
 test — a parity test cannot see it.**
+
+---
+
+## D-385 · a mutation on a write route leaves debris in the shared database
+
+**Status** ACCEPTED · **Severity** test-harness · **Raised** 2026-09-12 (emoji writes and the terms-of-service pair)
+
+`scripts/mutate.sh` restores the **source** on every exit, including SIGINT — which its own comment
+is careful about. It cannot restore the **database**, and for a write route that is the more
+consequential half: a mutation that disables a refusal performs the write it was supposed to
+prevent, the test then fails (CAUGHT, correctly), and the row it wrote survives the rollback and
+poisons every later run.
+
+Two instances in one batch, both found by a clean `cargo test --workspace` afterwards rather than
+by the batch:
+
+1. `emoji-save-skips-validation` removed `SqlEmojiStore::save`'s `IsValid` call and inserted a live
+   emoji named `grinning`. `db_emoji_and_terms_writes`'s purge swept the `mmrsew%` prefix, which
+   that name cannot carry — it has to be a real system-emoji name to be the case under test. The
+   suite then failed on every run until the row was deleted by hand.
+2. `tos-licence-gate-inverted` published a terms-of-service revision, which became "the latest" and
+   failed `parity::terms_of_service` twice over — and Go's `"latest"` cache kept serving it after
+   the row was deleted, so the Go server had to be restarted as well.
+
+Both fixtures now sweep what their own subject would have written: the emoji purge names the two
+refused names explicitly, and `parity::terms_of_service::plant` deletes every revision newer than
+its own latest.
+
+ACCEPTED because there is nothing to build — the rule is the deliverable, and it belongs to every
+write family from here on:
+
+> **A test whose subject is "this write must not happen" has to purge the write it asserts
+> against** — including values that cannot carry the suite's name prefix, which are exactly the
+> interesting ones. And after any mutation batch over a write route, run the full suite once on a
+> clean tree before quoting a tally; the batch's own verdicts do not see the debris they leave.
