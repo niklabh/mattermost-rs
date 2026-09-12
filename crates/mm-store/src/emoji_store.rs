@@ -1,4 +1,5 @@
-//! Port of `SqlEmojiStore` (channels/store/sqlstore/emoji_store.go): the three reads.
+//! Port of `SqlEmojiStore` (channels/store/sqlstore/emoji_store.go): the reads, plus `Save` and
+//! `Delete`.
 //!
 //! `GetMultipleByName` unblocks `metadata.emojis` on `GET /api/v4/posts/{post_id}`, which is the
 //! *custom* emoji used by a post's text and its reactions — system emoji never reach this table,
@@ -64,6 +65,32 @@ pub trait EmojiStore {
         prefix_only: bool,
         limit: i64,
     ) -> impl std::future::Future<Output = Result<Vec<Emoji>, StoreError>> + Send;
+
+    /// Port of `SqlEmojiStore.Save` (emoji_store.go:38).
+    ///
+    /// **`PreSave` and `IsValid` run inside the store, not above it** — Go's `Save` opens with
+    /// `emoji.PreSave()` and returns `IsValid`'s `*model.AppError` verbatim. That is why this
+    /// takes the emoji **by value and hands it back**: the id, the lowercased name and the two
+    /// timestamps are all minted here, and the caller needs the mutated row.
+    ///
+    /// `App.CreateEmoji` calls `PreSave`/`IsValid` a second time before it ever reaches this
+    /// (app/emoji.go:54) so that a rejected emoji leaves no orphan image behind. The duplication
+    /// is Go's and is reproduced: the second `PreSave` moves `CreateAt` again.
+    fn save(
+        &self,
+        emoji: Emoji,
+    ) -> impl std::future::Future<Output = Result<Emoji, StoreError>> + Send;
+
+    /// Port of `SqlEmojiStore.Delete` (emoji_store.go:87) — a **soft** delete.
+    ///
+    /// `DeleteAt` and `UpdateAt` both take `time`, and the `AND DeleteAt = 0` in the predicate is
+    /// what makes a second delete a **404** rather than a silent success: zero rows affected is
+    /// `ErrNotFound`, which the app layer answers `app.emoji.delete.no_results` to.
+    fn delete(
+        &self,
+        emoji_id: &str,
+        time: i64,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 }
 
 #[derive(Debug, Clone)]
@@ -367,6 +394,92 @@ impl EmojiStore for SqlEmojiStore {
                 name: row.name,
             })
             .collect())
+    }
+
+    /// # The uniqueness is on `(Name, DeleteAt)`, which is not the constraint it looks like
+    ///
+    /// The schema carries `emoji_name_deleteat_key UNIQUE (name, deleteat)`, so two *live* rows
+    /// cannot share a name — `DeleteAt` is 0 for both — and `App.CreateEmoji`'s `GetByName` check
+    /// is therefore a nicer error message rather than the only guard. What it does **not** prevent
+    /// is a name reused after a delete, which is the whole point of the composite: a deleted
+    /// emoji keeps its name and a new one may take it.
+    ///
+    /// A losing race on that constraint arrives here as a plain [`StoreError::Db`], which
+    /// `App.CreateEmoji` folds into its one 500 — Go does the same, wrapping every `Save` failure
+    /// into `app.emoji.create.internal_error`. So a concurrent duplicate is a 500 on both servers,
+    /// not the 400 the `GetByName` check gives the sequential case.
+    ///
+    /// A validation failure is [`StoreError::Invalid`], which carries the `AppError` **with its
+    /// own status and id** (`model.emoji.*`, 400) all the way to the client — Go returns
+    /// `IsValid`'s error unwrapped and `App.CreateEmoji` lets it through with `errors.As`.
+    #[tracing::instrument(skip_all, fields(emoji_id, emoji_name))]
+    async fn save(&self, mut emoji: Emoji) -> Result<Emoji, StoreError> {
+        emoji.pre_save();
+        if let Err(app_error) = emoji.is_valid() {
+            return Err(StoreError::Invalid {
+                entity: "Emoji",
+                app_error,
+            });
+        }
+        tracing::Span::current().record("emoji_id", &emoji.id);
+        tracing::Span::current().record("emoji_name", &emoji.name);
+
+        sqlx::query!(
+            r#"
+            INSERT INTO emoji (id, createat, updateat, deleteat, creatorid, name)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            "#,
+            emoji.id,
+            emoji.create_at,
+            emoji.update_at,
+            emoji.delete_at,
+            emoji.creator_id,
+            emoji.name,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "error saving emoji".to_owned(),
+            source,
+        })?;
+
+        Ok(emoji)
+    }
+
+    /// # Zero rows is a miss, and the driver error is *discarded* when it is
+    ///
+    /// Go writes `else if rows, err := sqlResult.RowsAffected(); rows == 0` — the `err` from
+    /// `RowsAffected` is only ever used to `Wrap` the not-found, never checked, so a row count of
+    /// zero is `ErrNotFound` whatever else happened. sqlx has no such failure mode; the count is
+    /// what decides here too.
+    #[tracing::instrument(skip(self), fields(emoji_id = %emoji_id, time))]
+    async fn delete(&self, emoji_id: &str, time: i64) -> Result<(), StoreError> {
+        let result = sqlx::query!(
+            r#"
+            UPDATE emoji
+               SET deleteat = $1,
+                   updateat = $1
+             WHERE id = $2
+               AND deleteat = 0
+            "#,
+            time,
+            emoji_id,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "could not delete emoji".to_owned(),
+            source,
+        })?;
+
+        if result.rows_affected() == 0 {
+            return Err(StoreError::NotFound {
+                entity: "Emoji",
+                criteria: emoji_id.to_owned(),
+            });
+        }
+
+        Ok(())
     }
 }
 

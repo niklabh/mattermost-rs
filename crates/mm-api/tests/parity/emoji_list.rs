@@ -263,18 +263,44 @@ async fn pagination_clamps_rather_than_refusing() {
     // The offset is `page * per_page`, and the page size has to be **more than one** to say so:
     // with `per_page=1` the product equals `page` and dropping the multiplication changes
     // nothing. That is precisely how `emojilist-offset` survived its first run.
-    let (all, _) = names_from_both(&client, &token, "/api/v4/emoji?sort=name&per_page=200").await;
-    assert!(
-        all.len() >= 4,
-        "the fixture leaves at least four emoji: {all:?}"
-    );
+    //
+    // # This pair of reads is bracketed, and that is [D-352]'s fix for this test
+    //
+    // The claim relates **two different requests** — the whole list and its second page — against
+    // one table that every other emoji suite is writing to throughout the run. `names_from_both`
+    // brackets each request against itself, which is enough for a claim about one read and not
+    // for a claim across two: a create landing between them shifts every row after it and the
+    // slice no longer matches. So the whole list is read again afterwards, and the comparison is
+    // only trusted when the table did not move under it.
+    let mut compared = false;
+    for attempt in 1..=6 {
+        let (before, _) =
+            names_from_both(&client, &token, "/api/v4/emoji?sort=name&per_page=200").await;
+        let (second_page, _) =
+            names_from_both(&client, &token, "/api/v4/emoji?sort=name&per_page=2&page=1").await;
+        let (after, _) =
+            names_from_both(&client, &token, "/api/v4/emoji?sort=name&per_page=200").await;
 
-    let (second_page, _) =
-        names_from_both(&client, &token, "/api/v4/emoji?sort=name&per_page=2&page=1").await;
-    assert_eq!(
-        second_page,
-        all[2..4].to_vec(),
-        "page 1 of size 2 starts at offset 2, not at offset 1"
+        if before != after {
+            tokio::time::sleep(std::time::Duration::from_millis((60 * attempt).min(400))).await;
+            continue;
+        }
+
+        assert!(
+            before.len() >= 4,
+            "the fixture leaves at least four emoji: {before:?}"
+        );
+        assert_eq!(
+            second_page,
+            before[2..4].to_vec(),
+            "page 1 of size 2 starts at offset 2, not at offset 1"
+        );
+        compared = true;
+        break;
+    }
+    assert!(
+        compared,
+        "the emoji table never held still long enough to compare a page with the whole list"
     );
 
     assert!(!default_page.is_empty(), "the fixture emoji are listed");
@@ -295,7 +321,10 @@ async fn the_collection_does_not_shadow_the_single_reads() {
     let (go, rs) = fetch_both_stable(&client, &token, &path).await;
     assert_eq!(go, rs, "{path} is still getEmojiByName");
 
-    // `POST /api/v4/emoji` is createEmoji and must still be Go's.
+    // `POST /api/v4/emoji` is `createEmoji`, which is served here too. A body-less POST cannot
+    // be multipart, so it is the parse 400 and nothing is written — this suite counts rows and a
+    // create here would be a fixture nobody declared. Its own assertions are in
+    // `parity::emoji_writes`.
     let response = client
         .post(format!("{RUST}/api/v4/emoji"))
         .header("Authorization", format!("Bearer {token}"))
@@ -307,8 +336,13 @@ async fn the_collection_does_not_shadow_the_single_reads() {
             .headers()
             .get("x-mmrs-served-by")
             .and_then(|v| v.to_str().ok()),
-        Some("go"),
-        "only GET /emoji is migrated"
+        Some("rust"),
+        "POST /emoji is migrated now"
+    );
+    assert_eq!(
+        response.status().as_u16(),
+        400,
+        "a body-less POST is the multipart parse refusal, and writes nothing"
     );
 
     // `/emoji/autocomplete` used to be asserted here as forwarded. It is a route of its own

@@ -44,6 +44,7 @@ pub mod licensed_features;
 pub mod limits;
 /// The local-mode admin API: the api4 handlers on a unix socket, with an unrestricted session.
 pub mod local;
+pub mod multipart;
 pub mod oauth;
 pub mod permissions;
 pub mod post_writes;
@@ -1047,7 +1048,10 @@ pub fn router(state: AppState) -> Router {
         // request to reach a handler at all.
         .route(
             "/api/v4/users/{user_id}/terms_of_service",
-            partially_migrated_with_ids(&state, get(users::get_user_terms_of_service)),
+            partially_migrated_with_ids(
+                &state,
+                get(users::get_user_terms_of_service).post(users::save_user_terms_of_service),
+            ),
         )
         // `BaseRoutes.Teams.Handle("", ...)` (api4/team.go:35) — the bare `/teams` collection,
         // and the same non-question as `/api/v4/users` above: it is one segment shorter than
@@ -1181,7 +1185,10 @@ pub fn router(state: AppState) -> Router {
         )
         .route(
             "/api/v4/terms_of_service",
-            partially_migrated(get(terms_of_service::get_latest_terms_of_service)),
+            partially_migrated(
+                get(terms_of_service::get_latest_terms_of_service)
+                    .post(terms_of_service::create_terms_of_service),
+            ),
         )
         .route(
             "/api/v4/oauth/apps",
@@ -1392,17 +1399,23 @@ pub fn router(state: AppState) -> Router {
         //
         // `/emoji/{emoji_id}/image` is one segment deeper, so it shadows nothing; registered
         // below with the other three stored-image routes.
-        // `BaseRoutes.Emojis.Handle("")` (api4/emoji.go:15) — the bare `/emoji` collection, one
-        // segment shorter than `{emoji_id}` below, so axum sees a distinct path and there is no
-        // precedence question of the kind that route's comment describes. `GET` only; `POST`
-        // (createEmoji) falls to `partially_migrated`'s method fallback.
+        // `BaseRoutes.Emojis.Handle("")` (api4/emoji.go:15, :24) — the bare `/emoji` collection,
+        // one segment shorter than `{emoji_id}` below, so axum sees a distinct path and there is
+        // no precedence question of the kind that route's comment describes. Both methods are
+        // served; the `POST` is the multipart upload.
         .route(
             "/api/v4/emoji",
-            partially_migrated(get(emoji::get_emoji_list)),
+            partially_migrated(get(emoji::get_emoji_list).post(emoji::create_emoji)),
         )
+        // The `DELETE` is added to the **existing** `{emoji_id}` entry rather than a new route, so
+        // it introduces no path segment and cannot shadow anything. That matters here: the three
+        // literals beside it (`/emoji/names`, `/emoji/search`, `/emoji/autocomplete`) are already
+        // registered, and axum prefers a registered literal for *every* method — adding a literal
+        // takes the `{emoji_id}` route out of service for that segment, which is how
+        // `GET /groups/names` was lost for a round. `emoji_routes_are_not_shadowed` pins it.
         .route(
             "/api/v4/emoji/{emoji_id}",
-            partially_migrated_with_ids(&state, get(emoji::get_emoji)),
+            partially_migrated_with_ids(&state, get(emoji::get_emoji).delete(emoji::delete_emoji)),
         )
         // `BaseRoutes.EmojiByName` (api.go:287). One segment deeper than `{emoji_id}` above, so
         // neither shadows the other, and `emoji_name` is **not** id-shaped — Go's class is
@@ -2499,6 +2512,94 @@ mod tests {
         ));
         let state = AppState::new(app, "http://localhost:8065/".to_owned());
         assert_eq!(state.go_upstream, "http://localhost:8065");
+    }
+
+    /// Every route this server answers must still be answered after a sibling is registered.
+    ///
+    /// # The failure this exists to catch
+    ///
+    /// axum prefers a **registered literal** over a `{param}` at the same position, and it does
+    /// not backtrack across method routers: once `/api/v4/x/names` is a route, a request for it
+    /// never reaches `/api/v4/x/{id}` — for *any* method, not merely the one the literal was
+    /// registered with. Registering `POST /groups/names` that way took the already-served
+    /// `GET /groups/names` out of service, silently, and the emoji family is the same shape:
+    /// `/emoji/{emoji_id}` sits beside the literals `/emoji/names`, `/emoji/search` and
+    /// `/emoji/autocomplete`.
+    ///
+    /// # How "answered here" is detected without a stack
+    ///
+    /// Every request below carries no credentials, so a handler that is reached rejects with a
+    /// **401 and `x-mmrs-served-by: rust`** before it touches the store. A request that fell
+    /// through to the proxy would instead try the (absent) Go server and come back `502` with
+    /// `x-mmrs-served-by` unset — so the header, not the status, is the assertion.
+    #[tokio::test]
+    async fn the_emoji_and_terms_routes_are_all_still_answered_here() {
+        use axum::http::{Method, Request, StatusCode};
+        use tower::ServiceExt;
+
+        let app = App::new(mm_store::SqlStore::from_pool(
+            sqlx::postgres::PgPoolOptions::new()
+                .connect_lazy("postgres://x/y")
+                .expect("a lazy pool needs no server"),
+        ));
+        // A port nothing is listening on, so a forwarded request cannot accidentally pass.
+        let state = AppState::new(app, "http://127.0.0.1:1".to_owned());
+
+        let served: &[(Method, &str)] = &[
+            // The reads that were already migrated; each is a regression this test guards.
+            (Method::GET, "/api/v4/emoji"),
+            (Method::GET, "/api/v4/emoji/abcdefghijklmnopqrstuvwxyz"),
+            (Method::GET, "/api/v4/emoji/name/mmrsname"),
+            (Method::GET, "/api/v4/emoji/autocomplete"),
+            (Method::POST, "/api/v4/emoji/names"),
+            (Method::GET, "/api/v4/emoji/names"),
+            (Method::POST, "/api/v4/emoji/search"),
+            (Method::GET, "/api/v4/emoji/search"),
+            (
+                Method::GET,
+                "/api/v4/emoji/abcdefghijklmnopqrstuvwxyz/image",
+            ),
+            (Method::GET, "/api/v4/terms_of_service"),
+            (
+                Method::GET,
+                "/api/v4/users/abcdefghijklmnopqrstuvwxyz/terms_of_service",
+            ),
+            // The four this session adds.
+            (Method::POST, "/api/v4/emoji"),
+            (Method::DELETE, "/api/v4/emoji/abcdefghijklmnopqrstuvwxyz"),
+            (Method::POST, "/api/v4/terms_of_service"),
+            (
+                Method::POST,
+                "/api/v4/users/abcdefghijklmnopqrstuvwxyz/terms_of_service",
+            ),
+        ];
+
+        for (method, path) in served {
+            let response = router(state.clone())
+                .oneshot(
+                    Request::builder()
+                        .method(method.clone())
+                        .uri(*path)
+                        .body(axum::body::Body::empty())
+                        .expect("a request"),
+                )
+                .await
+                .expect("the router answers");
+
+            assert_eq!(
+                response
+                    .headers()
+                    .get(crate::error::SERVED_BY)
+                    .map(|v| v.as_bytes()),
+                Some(b"rust".as_slice()),
+                "{method} {path} is no longer answered here"
+            );
+            assert_eq!(
+                response.status(),
+                StatusCode::UNAUTHORIZED,
+                "{method} {path} should have stopped at the session check"
+            );
+        }
     }
 
     /// The two privacy accessors read **different** settings.

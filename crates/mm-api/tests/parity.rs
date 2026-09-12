@@ -75,6 +75,7 @@ mod parity {
     pub mod emoji_get;
     pub mod emoji_list;
     pub mod emoji_search;
+    pub mod emoji_writes;
     pub mod exports_and_uploads;
     pub mod file_bytes;
     pub mod file_info;
@@ -137,6 +138,7 @@ mod parity {
     pub mod teams_for_user;
     pub mod teams_unread;
     pub mod terms_of_service;
+    pub mod terms_of_service_writes;
     pub mod thread_for_user;
     pub mod thread_writes;
     pub mod threads_for_user;

@@ -196,6 +196,12 @@ mod backend_errors {
     /// server beside us still writes the other way.
     pub const LIST_DIRECTORY: (&str, &str) =
         ("ListExportDirectory", "api.file.list_directory.app_error");
+    /// `App.WriteFile` → `writeFile` (app/file.go:266). The `where` is `WriteFile`, not the
+    /// caller's name, so an emoji upload that fails the backend write reports the same string a
+    /// profile-image write would.
+    pub const WRITE_FILE: (&str, &str) = ("WriteFile", "api.file.write_file.app_error");
+    /// `App.MoveFile` (app/file.go:249).
+    pub const MOVE_FILE: (&str, &str) = ("MoveFile", "api.file.move_file.app_error");
 }
 
 impl App {
@@ -264,6 +270,29 @@ impl App {
             .file_exists(path)
             .await
             .map_err(|err| Self::backend_error(backend_errors::FILE_EXISTS, err))
+    }
+
+    /// Port of `app.App.WriteFile` → `Server.writeFile` (app/file.go:261).
+    ///
+    /// Go takes an `io.Reader` and streams; this takes the bytes, because every migrated caller
+    /// already has them buffered — `createEmoji` reads the whole multipart part into memory to
+    /// decode its header, and the part is capped at 512 KiB by `MaxEmojiFileSize`.
+    ///
+    /// The returned count is the number of bytes written, which no migrated caller reads; it is
+    /// kept because Go returns it and discarding it here would hide a short write.
+    pub async fn write_file(&self, data: &[u8], path: &str) -> Result<i64, PrepareError> {
+        self.file_backend()
+            .write_file(data, path)
+            .await
+            .map_err(|err| Self::backend_error(backend_errors::WRITE_FILE, err))
+    }
+
+    /// Port of `app.App.MoveFile` (app/file.go:249).
+    pub async fn move_file(&self, old_path: &str, new_path: &str) -> Result<(), PrepareError> {
+        self.file_backend()
+            .move_file(old_path, new_path)
+            .await
+            .map_err(|err| Self::backend_error(backend_errors::MOVE_FILE, err))
     }
 
     /// Port of `app.App.RemoveFile` (app/file.go:315).

@@ -1,0 +1,359 @@
+{
+    "terms_of_service_is_valid": [
+        {
+            "name": "valid",
+            "subject": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "create_at": 1700000000000,
+                "user_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "text": "the terms"
+            },
+            "text_repeat_rune": "",
+            "text_repeat_count": 0,
+            "error_id": "",
+            "detailed": "",
+            "status_code": 0,
+            "where": ""
+        },
+        {
+            "name": "id_empty",
+            "subject": {
+                "id": "",
+                "create_at": 1700000000000,
+                "user_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "text": "the terms"
+            },
+            "text_repeat_rune": "",
+            "text_repeat_count": 0,
+            "error_id": "model.terms_of_service.is_valid.id.app_error",
+            "detailed": "",
+            "status_code": 400,
+            "where": "TermsOfService.IsValid"
+        },
+        {
+            "name": "id_short",
+            "subject": {
+                "id": "aaaaaaaaaaaaaaaaaaaaaaaaa",
+                "create_at": 1700000000000,
+                "user_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "text": "the terms"
+            },
+            "text_repeat_rune": "",
+            "text_repeat_count": 0,
+            "error_id": "model.terms_of_service.is_valid.id.app_error",
+            "detailed": "",
+            "status_code": 400,
+            "where": "TermsOfService.IsValid"
+        },
+        {
+            "name": "create_at_zero",
+            "subject": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "create_at": 0,
+                "user_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "text": "the terms"
+            },
+            "text_repeat_rune": "",
+            "text_repeat_count": 0,
+            "error_id": "model.terms_of_service.is_valid.create_at.app_error",
+            "detailed": "terms_of_service_id=6bdz674pgq767e4jx75w4pf57a",
+            "status_code": 400,
+            "where": "TermsOfService.IsValid"
+        },
+        {
+            "name": "user_id_empty",
+            "subject": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "create_at": 1700000000000,
+                "user_id": "",
+                "text": "the terms"
+            },
+            "text_repeat_rune": "",
+            "text_repeat_count": 0,
+            "error_id": "model.terms_of_service.is_valid.user_id.app_error",
+            "detailed": "terms_of_service_id=6bdz674pgq767e4jx75w4pf57a",
+            "status_code": 400,
+            "where": "TermsOfService.IsValid"
+        },
+        {
+            "name": "user_id_nonsense",
+            "subject": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "create_at": 1700000000000,
+                "user_id": "nope",
+                "text": "the terms"
+            },
+            "text_repeat_rune": "",
+            "text_repeat_count": 0,
+            "error_id": "model.terms_of_service.is_valid.user_id.app_error",
+            "detailed": "terms_of_service_id=6bdz674pgq767e4jx75w4pf57a",
+            "status_code": 400,
+            "where": "TermsOfService.IsValid"
+        },
+        {
+            "name": "text_empty",
+            "subject": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "create_at": 1700000000000,
+                "user_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "text": ""
+            },
+            "text_repeat_rune": "",
+            "text_repeat_count": 0,
+            "error_id": "",
+            "detailed": "",
+            "status_code": 0,
+            "where": ""
+        },
+        {
+            "name": "text_at_limit",
+            "subject": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "create_at": 1700000000000,
+                "user_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "text": ""
+            },
+            "text_repeat_rune": "a",
+            "text_repeat_count": 16383,
+            "error_id": "",
+            "detailed": "",
+            "status_code": 0,
+            "where": ""
+        },
+        {
+            "name": "text_over_limit",
+            "subject": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "create_at": 1700000000000,
+                "user_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "text": ""
+            },
+            "text_repeat_rune": "a",
+            "text_repeat_count": 16384,
+            "error_id": "model.terms_of_service.is_valid.text.app_error",
+            "detailed": "terms_of_service_id=6bdz674pgq767e4jx75w4pf57a",
+            "status_code": 400,
+            "where": "TermsOfService.IsValid"
+        },
+        {
+            "name": "text_at_limit_multibyte",
+            "subject": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "create_at": 1700000000000,
+                "user_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "text": ""
+            },
+            "text_repeat_rune": "é",
+            "text_repeat_count": 16383,
+            "error_id": "",
+            "detailed": "",
+            "status_code": 0,
+            "where": ""
+        },
+        {
+            "name": "text_over_limit_multibyte",
+            "subject": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "create_at": 1700000000000,
+                "user_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "text": ""
+            },
+            "text_repeat_rune": "é",
+            "text_repeat_count": 16384,
+            "error_id": "model.terms_of_service.is_valid.text.app_error",
+            "detailed": "terms_of_service_id=6bdz674pgq767e4jx75w4pf57a",
+            "status_code": 400,
+            "where": "TermsOfService.IsValid"
+        },
+        {
+            "name": "id_and_create_at_both_wrong",
+            "subject": {
+                "id": "",
+                "create_at": 0,
+                "user_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "text": "the terms"
+            },
+            "text_repeat_rune": "",
+            "text_repeat_count": 0,
+            "error_id": "model.terms_of_service.is_valid.id.app_error",
+            "detailed": "",
+            "status_code": 400,
+            "where": "TermsOfService.IsValid"
+        },
+        {
+            "name": "create_at_and_user_id_both_wrong",
+            "subject": {
+                "id": "6bdz674pgq767e4jx75w4pf57a",
+                "create_at": 0,
+                "user_id": "",
+                "text": "the terms"
+            },
+            "text_repeat_rune": "",
+            "text_repeat_count": 0,
+            "error_id": "model.terms_of_service.is_valid.create_at.app_error",
+            "detailed": "terms_of_service_id=6bdz674pgq767e4jx75w4pf57a",
+            "status_code": 400,
+            "where": "TermsOfService.IsValid"
+        }
+    ],
+    "terms_of_service_pre_save": [
+        {
+            "name": "empty_id_is_generated",
+            "in_id": "",
+            "id_preserved": false,
+            "id_generated": true,
+            "create_at_overwritten": true
+        },
+        {
+            "name": "existing_id_kept",
+            "in_id": "6bdz674pgq767e4jx75w4pf57a",
+            "id_preserved": true,
+            "id_generated": false,
+            "create_at_overwritten": true
+        }
+    ],
+    "user_terms_of_service_is_valid": [
+        {
+            "name": "valid",
+            "subject": {
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "terms_of_service_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "create_at": 1700000000000
+            },
+            "text_repeat_rune": "",
+            "text_repeat_count": 0,
+            "error_id": "",
+            "detailed": "",
+            "status_code": 0,
+            "where": ""
+        },
+        {
+            "name": "user_id_empty",
+            "subject": {
+                "user_id": "",
+                "terms_of_service_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "create_at": 1700000000000
+            },
+            "text_repeat_rune": "",
+            "text_repeat_count": 0,
+            "error_id": "model.user_terms_of_service.is_valid.user_id.app_error",
+            "detailed": "",
+            "status_code": 400,
+            "where": "UserTermsOfService.IsValid"
+        },
+        {
+            "name": "user_id_short",
+            "subject": {
+                "user_id": "aaaaaaaaaaaaaaaaaaaaaaaaa",
+                "terms_of_service_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "create_at": 1700000000000
+            },
+            "text_repeat_rune": "",
+            "text_repeat_count": 0,
+            "error_id": "model.user_terms_of_service.is_valid.user_id.app_error",
+            "detailed": "user_terms_of_service_user_id=aaaaaaaaaaaaaaaaaaaaaaaaa",
+            "status_code": 400,
+            "where": "UserTermsOfService.IsValid"
+        },
+        {
+            "name": "user_id_nonsense",
+            "subject": {
+                "user_id": "nope",
+                "terms_of_service_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "create_at": 1700000000000
+            },
+            "text_repeat_rune": "",
+            "text_repeat_count": 0,
+            "error_id": "model.user_terms_of_service.is_valid.user_id.app_error",
+            "detailed": "user_terms_of_service_user_id=nope",
+            "status_code": 400,
+            "where": "UserTermsOfService.IsValid"
+        },
+        {
+            "name": "terms_id_empty",
+            "subject": {
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "terms_of_service_id": "",
+                "create_at": 1700000000000
+            },
+            "text_repeat_rune": "",
+            "text_repeat_count": 0,
+            "error_id": "model.user_terms_of_service.is_valid.terms_of_service_id.app_error",
+            "detailed": "user_terms_of_service_user_id=6bdz674pgq767e4jx75w4pf57a",
+            "status_code": 400,
+            "where": "UserTermsOfService.IsValid"
+        },
+        {
+            "name": "terms_id_short",
+            "subject": {
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "terms_of_service_id": "aaaaaaaaaaaaaaaaaaaaaaaaa",
+                "create_at": 1700000000000
+            },
+            "text_repeat_rune": "",
+            "text_repeat_count": 0,
+            "error_id": "model.user_terms_of_service.is_valid.terms_of_service_id.app_error",
+            "detailed": "user_terms_of_service_user_id=6bdz674pgq767e4jx75w4pf57a",
+            "status_code": 400,
+            "where": "UserTermsOfService.IsValid"
+        },
+        {
+            "name": "create_at_zero",
+            "subject": {
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "terms_of_service_id": "qr6kf7ztp7yifxt4wm5xn51bke",
+                "create_at": 0
+            },
+            "text_repeat_rune": "",
+            "text_repeat_count": 0,
+            "error_id": "model.user_terms_of_service.is_valid.create_at.app_error",
+            "detailed": "user_terms_of_service_user_id=6bdz674pgq767e4jx75w4pf57a",
+            "status_code": 400,
+            "where": "UserTermsOfService.IsValid"
+        },
+        {
+            "name": "both_ids_wrong",
+            "subject": {
+                "user_id": "",
+                "terms_of_service_id": "",
+                "create_at": 1700000000000
+            },
+            "text_repeat_rune": "",
+            "text_repeat_count": 0,
+            "error_id": "model.user_terms_of_service.is_valid.user_id.app_error",
+            "detailed": "",
+            "status_code": 400,
+            "where": "UserTermsOfService.IsValid"
+        },
+        {
+            "name": "terms_id_empty_user_id_present",
+            "subject": {
+                "user_id": "6bdz674pgq767e4jx75w4pf57a",
+                "terms_of_service_id": "",
+                "create_at": 1700000000000
+            },
+            "text_repeat_rune": "",
+            "text_repeat_count": 0,
+            "error_id": "model.user_terms_of_service.is_valid.terms_of_service_id.app_error",
+            "detailed": "user_terms_of_service_user_id=6bdz674pgq767e4jx75w4pf57a",
+            "status_code": 400,
+            "where": "UserTermsOfService.IsValid"
+        }
+    ],
+    "user_terms_of_service_pre_save": [
+        {
+            "name": "empty_user_id_is_generated",
+            "in_id": "",
+            "id_preserved": false,
+            "id_generated": true,
+            "create_at_overwritten": true
+        },
+        {
+            "name": "existing_user_id_kept",
+            "in_id": "6bdz674pgq767e4jx75w4pf57a",
+            "id_preserved": true,
+            "id_generated": false,
+            "create_at_overwritten": true
+        }
+    ]
+}

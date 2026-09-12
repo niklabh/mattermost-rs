@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE emoji\n               SET deleteat = $1,\n                   updateat = $1\n             WHERE id = $2\n               AND deleteat = 0\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "eca1b9a37d0e057ee92d973cfd50ff08c469da118f33a8dee4cee00b57cc9c76"
+}

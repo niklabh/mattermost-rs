@@ -292,9 +292,9 @@ whenever a session skips, approximates, or discovers-but-does-not-close somethin
 | app/authorization.go (`HasPermissionTo`) | `mm-app/src/authorization.rs` | PARTIAL | 1 pass | The **user-based** check: the user *row's* roles, fresh from the store, with no `is_unrestricted` shortcut — and a `GetUser` failure is a quiet `false` (Go discards the error), so a broken database denies rather than 500s here. |
 | app/team.go (`GetTeamStats`) | `mm-app/src/team.rs` | PARTIAL | 2 pass | Go runs the two counts on goroutines and reads the **total**'s channel first, so its error wins when both fail — sequential awaits preserve that precedence; the concurrency is invisible on the wire. The active id inserts `active_` into the total's id, which is also the id `GetChannelGuestCount` borrows — three call sites now share it. |
 | api4/team.go (`getTeamStats`) | `mm-api/src/teams.rs` | PARTIAL | 6 parity + 2 DB | `view_team` gate with **no public-team fallback** (a non-member can read a public team's body via `getTeam` and not its stats), and **nothing fetches the team** — so a missing id is a *200 of zeroes* for an admin and a 403 for a plain user, the exact opposite split of `getChannelStats` on the same shape; both measured. The restrictions path (`view_members` not held) **forwards to Go** — unreachable in this deployment, so the forward itself is transcribed, not measured. Six mutations, six caught; one control failure exposed a harness race (see notes), fixed and re-verified before the tally was trusted. |
-| model/user_terms_of_service.go | `mm-model/src/user_terms_of_service.rs` | PARTIAL | 2 pass | Wire struct only, fixture-pinned; `IsValid`/`PreSave` land with the save route. |
-| store/sqlstore/user_terms_of_service.go (`GetByUser`) | `mm-store/src/user_terms_of_service_store.rs` | PARTIAL | 1 DB | One row by PK (a user holds at most one acceptance). The nullable columns scan to zero values, as Go's non-pointer fields do. |
-| app/user_terms_of_service.go (`GetUserTermsOfService`) | `mm-app/src/user_terms_of_service.rs` | PARTIAL | 1 pass + 1 DB | The 404 (`no_rows.` inserted into the 500's id) is a **normal outcome** at its one call site — `getUser` ignores it, so the id needed an mm-app DB test to be falsifiable at all. Closes [D-083]. |
+| model/user_terms_of_service.go | `mm-model/src/user_terms_of_service.rs` | DONE | 5 pass | Whole file, pinned branch-by-branch against `fixtures/behaviour_terms_of_service.json`. **All three `IsValid` branches report the *user* id as their detail**, including the one about `terms_of_service_id`. |
+| store/sqlstore/user_terms_of_service.go (`GetByUser`, `Save`, `Delete`) | `mm-store/src/user_terms_of_service_store.rs` | DONE | 3 DB | One row by PK; `Save` is an `UPDATE`-then-`INSERT` upsert, so re-accepting rewrites `CreateAt`. `Delete` matches **both** columns and never checks the row count, so rejecting a revision you never accepted is a silent success. |
+| app/user_terms_of_service.go (`GetUserTermsOfService`, `SaveUserTermsOfService`) | `mm-app/src/user_terms_of_service.rs` | DONE | 1 pass + 1 DB + 5 parity | The 404 (`no_rows.` inserted into the 500's id) is a **normal outcome** at its one call site. `accepted` picks between two different store calls, not a column value, and only the save branch lets `IsValid`'s 400 through. Closes [D-083]. |
 | app/authorization.go (`HasPermissionTo` for `getUser`), api4/user.go (`getUser`) | `mm-api/src/users.rs` | PARTIAL | 6 pass + 9 parity | **`GET /users/{user_id}` served; [D-082]'s warning heeded and closed.** The `/users/*` namespace is api4's most crowded, so the handler serves only a segment that is *exactly* a valid 26-char id and forwards everything else — Go's literal GETs (`stats`, `known`, `autocomplete`, `tokens`) keep working unported and upstream additions cannot break it. `UserCanSeeOtherUser` on its nil-restrictions fast path (self, or user-based `view_members`); the restricted remainder forwards, like `getTeamStats`. ToS lands **before the etag** (its fields are etag inputs); sanitize split: self = lax empty map, other = strict `SanitizeProfile` (admin forces 4 flags, 2 of which have no config source). `/users/me` now shares the whole tail via `respond_with_user`. **Found and fixed: the missing-user 404 id is `app.user.missing_account.const`** — `.const`, the Go keyword — where this port had shipped `.error` unverified for three days ([D-151]'s lesson at the app layer). Eight mutations, eight caught, two controls survived. |
 | store/sqlstore/user_store.go (`GetByUsername`) | `mm-store/src/user_store.rs` | PARTIAL | 1 pass + 1 DB | `usersQuery` with `Username = lower(?)` — the **parameter** is folded, never the column, and the fold is **unreachable over REST** (`IsValidUsername` rejects uppercase first; it serves Go's login paths) — DB-pinned, [D-151]'s shape. The shared row mapping moved to `user_from_row`, `query_as!` style. |
 | app/user.go (`GetUserByUsername`) | `mm-app/src/user.rs` | PARTIAL | 1 pass | **One id for both branches** (`app.user.get_by_username.app_error`, status-only split) and it is *not* `MissingAccountError` — three lines from `GetUser`'s two-id shape in the same Go file. |
@@ -3881,7 +3881,7 @@ set aside. Three Rust files and one correction to the previous session's ledger 
 |---|---|---|---|---|
 | store/sqlstore/post_store.go (`GetSingle`), post_priority_store.go, post_acknowledgements_store.go | `mm-store/src/post_store.rs` | PARTIAL | 5 unit + parity | Eighteen columns plus a correlated `ReplyCount`; six `Post` fields are **never selected** and their zero values are on the wire. NULL `props`/`fileids` stay `null`, they do not become `{}`/`[]`. |
 | store/sqlstore/reaction_store.go (`GetForPost`) | `mm-store/src/reaction_store.rs` | PARTIAL | parity | Two `COALESCE`s, and the `DeleteAt` one appears in the predicate as well as the select list. `ORDER BY CreateAt` is wire surface. |
-| store/sqlstore/emoji_store.go (`GetMultipleByName`) | `mm-store/src/emoji_store.rs` | PARTIAL | parity | `DeleteAt = 0` lives in Go's **shared** `emojiSelectQuery`, not in the method body. No `ORDER BY` — see note 4. |
+| store/sqlstore/emoji_store.go (`GetMultipleByName`) | `mm-store/src/emoji_store.rs` | PARTIAL | parity | `DeleteAt = 0` lives in Go's **shared** `emojiSelectQuery`, not in the method body. No `ORDER BY` — see note 4. `Save` and `Delete` landed with the emoji writes; the table's uniqueness is `(Name, DeleteAt)`, so a name is free again after a delete. |
 | store/sqlstore/file_info_store.go (`GetByIds`) | `mm-store/src/file_info_store.rs` | PARTIAL | parity | `ORDER BY CreateAt DESC` is then overwritten by `orderFileInfosByID`; it only decides the tail. |
 | app/post.go + app/post_metadata.go (`GetSinglePost`, `GetPostIfAuthorized`, `PreparePostForClientWithEmbedsAndImages`, `SanitizePostMetadataForUser`) | `mm-app/src/post.rs` | PARTIAL | 9 unit + parity | The pipeline is a **total function that can refuse**: shapes needing the markdown parser or a link fetch return `PrepareError::Unreproducible` and the handler forwards. `REFUSED_PROPS` and `message_may_contain_a_link` are the predicate. |
 | api4/post.go (`getPost`) | `mm-api/src/posts.rs` | PARTIAL | 8 parity | `GET /api/v4/posts/{post_id}` served for reproducible shapes, forwarded otherwise. ETag, 304, `include_deleted` + `manage_system` gate all ported. Mutations: 23 run, 23 caught, 2 controls survived. |
@@ -11223,3 +11223,66 @@ to `POST /link` and which to `DELETE /link` changes nothing observable: both sto
 — `link` is a 201 carrying the syncable, `unlink` a 200 carrying `{"status":"OK"}` — so the line is
 kept in the plan as the cheapest check that [D-390] was really closed, rather than deleted for
 being inconvenient.
+
+
+## `POST /api/v4/emoji`, `DELETE /api/v4/emoji/{emoji_id}`, `POST /api/v4/terms_of_service`, `POST /api/v4/users/{user_id}/terms_of_service` (2026-09-12)
+
+| layer | file | status |
+|---|---|---|
+| model | `crates/mm-model/src/user_terms_of_service.rs` — `is_valid`, `pre_save` | DONE |
+| store | `crates/mm-store/src/emoji_store.rs` — `save`, `delete` | DONE |
+| store | `crates/mm-store/src/reaction_store.rs` — `delete_all_with_emoji_name` | DONE |
+| store | `crates/mm-store/src/terms_of_service_store.rs` — `get`, `save` | DONE |
+| store | `crates/mm-store/src/user_terms_of_service_store.rs` — `save`, `delete` | DONE |
+| app | `crates/mm-app/src/emoji.rs` — `create_emoji`, `upload_emoji_image`, `delete_emoji` | PARTIAL (see below) |
+| app | `crates/mm-app/src/imaging.rs` — `decode_config`, `filename_is_certainly_png` | PARTIAL (PNG only) |
+| app | `crates/mm-app/src/filestore.rs`, `file.rs` — `move_file`, `write_file` | DONE |
+| app | `crates/mm-app/src/terms_of_service.rs` — `create_terms_of_service`, `get_terms_of_service` | DONE |
+| app | `crates/mm-app/src/user_terms_of_service.rs` — `save_user_terms_of_service` | DONE |
+| api | `crates/mm-api/src/multipart.rs` — `multipart/form-data` as `ParseMultipartForm` reads it | DONE |
+| api | `crates/mm-api/src/emoji.rs` — `create_emoji`, `delete_emoji` | PARTIAL (see below) |
+| api | `crates/mm-api/src/terms_of_service.rs` — `create_terms_of_service` | DONE |
+| api | `crates/mm-api/src/users.rs` — `save_user_terms_of_service` | DONE |
+
+Three routes are served whole. `createEmoji` serves **every refusal** and the write-through image
+path; three image cases forward to Go and are recorded in [D-380].
+
+### What a reader would otherwise get wrong
+
+1. **The image branch is picked by the *filename*, not by the bytes.** `isGIF :=
+   model.NewInfo(filename).MimeType == "image/gif"` (app/emoji.go:129), so a PNG uploaded as
+   `x.gif` is walked by `CountGIFFrames` and fails, and an animated GIF uploaded as `x.png` skips
+   the 70-frame cap entirely. Go's `mime` package additionally reads the host's `/etc/mime.types`,
+   so the mapping is a property of the machine — which is why `imaging::filename_is_certainly_png`
+   tests for `.png` rather than for "not `.gif`".
+2. **Two size checks, and neither is the other.** `r.ContentLength > 512 KiB` is a **413** before
+   the body is read; the same 512 KiB as a `MaxBytesReader` cap makes an over-long body with no
+   `Content-Length` a **400** parse error instead. The third check, on the image part's own size,
+   cannot fire.
+3. **`createEmoji` validates before it checks for a duplicate**, so a name that is both illegal and
+   taken is the model's error, not `api.emoji.create.duplicate.app_error`.
+4. **`deleteEmoji` has no `EnableCustomEmoji` check in its handler**, unlike `getEmoji` beside it —
+   so the same setting answers 501 on the read and 403 on the delete.
+5. **`createTermsOfService`'s licence refusal is a 400**, not the 501 the content-flagging and
+   channel-bookmark families give, and `manage_system` is checked *first* — so a non-admin never
+   learns the feature is licensed. The empty-text error's `where` is Go's own paste,
+   **`Config.IsValid`**.
+6. **`saveUserTermsOfService` ignores `{user_id}`** and acts on the session's user, the same as the
+   `GET` beside it; and `accepted: false` is a `DELETE` matched on user *and* revision, so
+   rejecting revision A leaves an acceptance of revision B standing.
+
+### What is not here
+
+`crates/mm-app/src/imaging.rs` measures **PNG** headers and hands every other format to Go, and the
+resize-and-re-encode path is Go's because its output bytes are not reproducible by a second
+implementation. Both forwards happen before the file backend is touched. [D-380] records the gap,
+[D-381] the RFC 2231 parameter form the multipart port does not decode, [D-382] the licensed half
+of `createTermsOfService`, and [D-383] the reaction cache a deleted emoji does not invalidate on
+Go.
+
+### The next route in this family
+
+`POST /api/v4/brand/image` and `POST /api/v4/users/{user_id}/image` — the other two multipart
+image uploads, which can now reuse `mm_api::multipart` and `App::write_file`. Both need
+`imaging`'s resize question answered the same way this one answered it, and the profile-image one
+additionally needs `SetProfileImage`'s `UpdateAt` bump and its websocket event.
