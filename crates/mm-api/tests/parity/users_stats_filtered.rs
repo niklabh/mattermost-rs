@@ -146,6 +146,13 @@ async fn each_include_flag_raises_the_count() {
     if !stack_enabled() {
         return;
     }
+    // **`base` is captured once and compared for *equality* at the end of the test**, so any
+    // account another suite creates in between fails the last assertion — measured, 2026-09-13,
+    // on a full run right after the `user_creates` suite landed. `common::USER_COUNT` already
+    // serialises `users_stats` against that writer; the lock only works if both sides take it,
+    // and this sibling file did not. The `> base` comparisons above are insensitive to a
+    // concurrent create (it raises both sides); the `assert_eq!` at the bottom is not.
+    let _count = common::USER_COUNT.lock().await;
     let client = client();
     let token = go_minted_token(&client).await;
     let f = fixture(&client, &token).await;
