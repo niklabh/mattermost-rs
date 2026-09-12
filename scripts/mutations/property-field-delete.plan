@@ -1,0 +1,80 @@
+# Mutation plan for `deletePropertyField` — the first of the five writes in
+# `api4/properties.go`.
+#
+#   scripts/mutate-batch.sh scripts/mutations/property-field-delete.plan
+#
+# A write has two kinds of evidence and this plan mutates both: the **answer** (five refusals, one
+# of them a 409 nothing else in this family mints) and the **rows** — the field's `DeleteAt` and,
+# separately, its values'. A port that deleted the field and skipped the cascade answers
+# identically and leaves values every delta read keeps returning, so the fixture reads the two
+# columns back out of Postgres rather than trusting the 200.
+#
+# Two things are invisible to any client and are not run: i18n ([D-092]) and `AppError`'s
+# parameter map (`json:"-"`).
+#
+# `DeletePropertyField`'s own protected 403 (`app.property_field.delete.protected.app_error`) is
+# **unreachable from this route** — `SessionHasPermissionToEditPropertyField` refuses a protected
+# field first, so the handler's 403 always wins — and is therefore not mutated. It exists for
+# plugin and internal callers, which this server does not have.
+#
+# # What the first (aborted) run found
+#
+# Three survivors in the first four lines, all one hole: **every value in the fixture belonged to a
+# field the test deleted**, so a cascade with no `FieldID` predicate and a cascade with no
+# `GroupID` predicate both returned the same rows, and `CountLinkedFields` counting tombstones was
+# invisible because the lifted-refusal test asked *Go* to delete the source after *we* deleted the
+# dependent. Fixed by adding two values the delete must not touch — one in this group on a field
+# nobody deletes, one in `post_attributes` — and a second link pair so each server walks the whole
+# sequence on its own rows.
+#
+# One of those three was also a badly written mutation: `WHERE ($2 = '' OR fieldid = $2)` still
+# filters, because the field id is never empty. It widens as `($2 <> '' OR fieldid = $2)`.
+#
+# # Three lines removed as structurally unreachable, and one false catch
+#
+# The handler reads the field **with its group** before deleting it, so by the time the store
+# runs, the row is known to exist in that group. That makes three store guards unreachable from
+# any route: `delete_field`'s `GroupID` predicate, its `RowsAffected() == 0` not-found, and
+# `delete_values_for_field`'s `GroupID` predicate (redundant anyway — `PropertyFields.id` is the
+# primary key, so a field id belongs to exactly one group). All three stay in the code as the
+# contract for a caller that skips the read; none of them can be tested through HTTP.
+#
+# The zero-row one **appeared to be caught, twice, and was not.** The catch was
+# `the_delete_refusals_agree` failing on an assertion about **Go's** status — an answer no change
+# to this port can produce, which is the signature of a false catch. The cause was in the fixture:
+# `plant_delete_fixture` wrote its rows and *then* called `go_minted_token`, inside whose
+# `OnceCell` `purge_api_fixtures` runs — and that sweep deletes every `mmrsdel%` row. Whichever
+# properties test needed a token first wiped its own fixture. The token is minted before the first
+# `INSERT` now, and the mutation survives, which is the honest verdict.
+#
+# `delstore-the-delete-is-not-a-soft-delete` faulted twice before it ran, both times on parameter
+# typing rather than on anything about the port: `SET deleteat = $1 - $1` is `unknown - unknown`,
+# and `SET deleteat = 0` leaves `$1` bound but absent from the statement, which Postgres cannot
+# type either. `SET deleteat = $1::bigint * 0` keeps the parameter in the query and casts it.
+# **Check a new mutation compiles before launching an hour of machine time**: `cargo check` with
+# the replacement applied by hand costs seconds and would have saved two runs.
+#
+# # The valid run: **20 run, 17 caught, 3 survived, 0 harness faults** (2026-09-12)
+#
+# The three survivors are the two controls and `delapp-the-unrestricted-check-outranks-protected`,
+# which is equivalent on this server for the reason given above.
+delstore-linked-count-includes-tombstones	crates/mm-store/src/property_store.rs	             WHERE linkedfieldid = $1\n               AND deleteat = 0	             WHERE linkedfieldid = $1\n               AND deleteat >= 0	api	properties
+delstore-linked-count-matches-any-field	crates/mm-store/src/property_store.rs	            SELECT COUNT(id) AS "count!"\n              FROM propertyfields\n             WHERE linkedfieldid = $1	            SELECT COUNT(id) AS "count!"\n              FROM propertyfields\n             WHERE id = $1	api	properties
+delstore-the-cascade-ignores-the-field	crates/mm-store/src/property_store.rs	            UPDATE propertyvalues\n               SET deleteat = $1\n             WHERE fieldid = $2\n               AND ($3 = '' OR groupid = $3)	            UPDATE propertyvalues\n               SET deleteat = $1\n             WHERE ($2 <> '' OR fieldid = $2)\n               AND ($3 = '' OR groupid = $3)	api	properties
+delstore-the-delete-is-not-a-soft-delete	crates/mm-store/src/property_store.rs	            UPDATE propertyfields\n               SET deleteat = $1\n             WHERE id = $2	            UPDATE propertyfields\n               SET deleteat = $1::bigint * 0\n             WHERE id = $2	api	properties
+delapp-the-linked-refusal-is-off-by-one	crates/mm-app/src/properties.rs	        if linked > 0 {	        if linked > 1 {	api	properties
+delapp-the-cascade-runs-after-the-field-delete	crates/mm-app/src/properties.rs	        store\n            .property()\n            .delete_values_for_field(&group.id, &field.id)	        store\n            .property()\n            .delete_values_for_field(&group.id, "")	api	properties
+delapp-the-unrestricted-check-outranks-protected	crates/mm-app/src/properties.rs	        if field.protected {\n            return false;\n        }\n        let Some(level) = field.permission_field.as_ref() else {\n            return false;\n        };\n        if session.is_unrestricted() {	        if session.is_unrestricted() {\n            return true;\n        }\n        if field.protected {\n            return false;\n        }\n        let Some(level) = field.permission_field.as_ref() else {\n            return false;\n        };\n        if false {	api	properties
+delapp-a-legacy-field-has-no-permission-model	crates/mm-app/src/properties.rs	        let Some(level) = field.permission_field.as_ref() else {\n            return false;\n        };	        let level = field\n            .permission_field\n            .clone()\n            .unwrap_or(PermissionLevel(PermissionLevel::MEMBER.to_owned()));\n        let level = &level;	api	properties
+delapp-a-system-target-is-not-open-at-member-level	crates/mm-app/src/properties.rs	            PROPERTY_FIELD_TARGET_LEVEL_SYSTEM => true,\n            PROPERTY_FIELD_TARGET_LEVEL_TEAM => {\n                self.has_permission_to_team(user_id, &field.target_id, &PERMISSION_VIEW_TEAM)	            PROPERTY_FIELD_TARGET_LEVEL_SYSTEM => false,\n            PROPERTY_FIELD_TARGET_LEVEL_TEAM => {\n                self.has_permission_to_team(user_id, &field.target_id, &PERMISSION_VIEW_TEAM)	api	properties
+delapp-the-broadcast-scopes-a-system-field-to-a-channel	crates/mm-app/src/properties.rs	        PROPERTY_FIELD_TARGET_LEVEL_SYSTEM => Some(("", "")),	        PROPERTY_FIELD_TARGET_LEVEL_SYSTEM => Some(("", field.id.as_str())),	api	properties
+delapp-the-event-carries-the-wrong-object-type	crates/mm-app/src/properties.rs	        message.add(\n            "object_type",\n            serde_json::Value::String(field.object_type.clone()),\n        );	        message.add(\n            "object_type",\n            serde_json::Value::String(field.target_type.clone()),\n        );	api	properties
+delapp-no-event-is-published	crates/mm-app/src/properties.rs	        self.publish_property_field_deleted(field, connection_id)\n            .await;	        let _ = connection_id;	api	properties
+delapi-the-object-type-mismatch-is-not-checked	crates/mm-api/src/properties.rs	    if field.object_type != object_type {	    if field.object_type != object_type && false {	api	properties
+delapi-the-mismatch-is-a-bad-request	crates/mm-api/src/properties.rs	            "api.property_field.object_type_mismatch.app_error",\n            404,	            "api.property_field.object_type_mismatch.app_error",\n            400,	api	properties
+delapi-the-permission-check-is-skipped	crates/mm-api/src/properties.rs	    if !state\n        .app\n        .session_has_permission_to_edit_property_field(&session.0, &field)\n        .await\n    {	    if state\n        .app\n        .session_has_permission_to_edit_property_field(&session.0, &field)\n        .await\n        && false\n    {	api	properties
+delapi-the-permission-refusal-uses-the-generic-id	crates/mm-api/src/properties.rs	            "api.property_field.delete.no_permission.app_error",\n            403,	            "api.context.permissions.app_error",\n            403,	api	properties
+delapi-the-field-id-is-not-validated	crates/mm-api/src/properties.rs	    if !is_valid_id(&field_id) {\n        return ApiError::invalid_url_param("field_id").into_response();\n    }	    if field_id.is_empty() {\n        return ApiError::invalid_url_param("field_id").into_response();\n    }	api	properties
+delapi-return-status-ok-gets-a-trailing-newline	crates/mm-api/src/properties.rs	        br#"{"status":"OK"}"#.as_slice(),	        br#"{"status":"OK"}\n"#.as_slice(),	api	properties
+control-rename-the-connection-id-binding	crates/mm-api/src/properties.rs	    let connection_id = request\n        .headers()\n        .get(CONNECTION_ID_HEADER)\n        .and_then(|v| v.to_str().ok())\n        .unwrap_or_default()\n        .to_owned();	    let from_header = request\n        .headers()\n        .get(CONNECTION_ID_HEADER)\n        .and_then(|v| v.to_str().ok())\n        .unwrap_or_default()\n        .to_owned();\n    let connection_id = from_header;	api	properties
+control-reorder-two-independent-event-fields	crates/mm-app/src/properties.rs	        message.add("field_id", serde_json::Value::String(field.id.clone()));\n        message.add(\n            "object_type",\n            serde_json::Value::String(field.object_type.clone()),\n        );	        message.add(\n            "object_type",\n            serde_json::Value::String(field.object_type.clone()),\n        );\n        message.add("field_id", serde_json::Value::String(field.id.clone()));	api	properties

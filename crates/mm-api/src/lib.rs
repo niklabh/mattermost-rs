@@ -85,7 +85,7 @@ use axum::Router;
 use axum::extract::{RawPathParams, Request, State};
 use axum::middleware::Next;
 use axum::response::Response;
-use axum::routing::{MethodRouter, get, patch, post, put};
+use axum::routing::{MethodRouter, delete, get, patch, post, put};
 use mm_app::App;
 
 /// Shared state. Cloned per request, so every field is cheap to clone — `reqwest::Client` and
@@ -2061,6 +2061,14 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/properties/groups/{group_name}/fields/search",
             partially_migrated_with_ids(&state, post(properties::search_property_fields)),
+        )
+        // The first of the five writes in `api4/properties.go`. `PATCH` on the same path is
+        // `patchPropertyField` and stays forwarded, which `partially_migrated`'s method fallback
+        // handles; the path itself is one segment deeper than the `fields` collection above, so
+        // there is no precedence question with it.
+        .route(
+            "/api/v4/properties/groups/{group_name}/{object_type}/fields/{field_id}",
+            partially_migrated_with_ids(&state, delete(properties::delete_property_field)),
         )
         .route(
             "/api/v4/properties/groups/{group_name}/{object_type}/values/{target_id}",

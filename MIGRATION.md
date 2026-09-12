@@ -10797,3 +10797,93 @@ suite made carried a body Go rejects, so it never reached `session_has_permissio
 handler handed an ordinary session would have passed. The test now also sets a planted bot's
 status through each socket, which is a 200 only because the session is `Local`.
 
+
+## The first property write, and the refusal a caller can act on (2026-09-12)
+
+**388 → 389 of 764.** `DELETE /api/v4/properties/groups/{group_name}/{object_type}/fields/{field_id}`
+— one route, and the first *write* in `api4/properties.go`. It is here rather than
+`createPropertyField` because it is the only one of the five whose whole path is reachable: on
+`boards` and `post_attributes` a delete's sole pre-hook is the licence check, which does not manage
+those groups, so nothing unported sits between the handler and the `UPDATE … SET DeleteAt`.
+
+- `crates/mm-store/src/property_store.rs` — `count_linked_fields`, `delete_values_for_field`,
+  `delete_field`; the module writes now
+- `crates/mm-app/src/properties.rs` — `get_property_field`, `delete_property_field`, the
+  `property_field_deleted` broadcast, and the **permission ladder** the other four writes will
+  reuse
+- `crates/mm-api/src/properties.rs` — the handler
+- `crates/mm-api/tests/parity/properties.rs` — 4 more tests, 21 in the module
+
+### Two deletes, one line apart, with opposite conventions
+
+`deletePropertyField` cascades the field's values and then deletes the field. `DeleteForField`
+ignores `RowsAffected` entirely, so a field with no values is not an error; `Delete` treats zero
+rows as `store.NewErrNotFound` and the app layer turns it into a 404. Same function, two
+statements, and reading one and assuming the other is how a group boundary stops being a boundary
+— the `GroupID` predicate on the field delete is what makes deleting a real id through the wrong
+group a 404 rather than a silent success.
+
+### Three 404s and two 403s, and none of them are the obvious one
+
+A missing group, a field not in the group, and an **object type that does not match the URL** are
+all 404, with three different ids; Go's comment says the third is a 404 rather than a 400 so that
+fields can be bucketed by URL without leaking cross-bucket existence. Both 403s answer
+`api.property_field.delete.no_permission.app_error` — the handler's own id, not the
+`api.context.permissions.app_error` every other route in this file uses — and the second of them
+fires for a field whose `PermissionField` is `NULL`, which is a legacy row with no permission model
+rather than a permission that was denied.
+
+**`DeletePropertyField`'s own protected 403 is unreachable from this route.**
+`SessionHasPermissionToEditPropertyField` refuses a protected field before the app layer is
+reached, so the handler's 403 always wins. Measured on both servers; the app-layer check is still
+ported because it is the contract for the plugin and internal callers Go has.
+
+### The one refusal that names a state the caller can change
+
+A field with live linked dependents is **409** `app.property_field.delete.has_linked_dependents`.
+`CountLinkedFields` counts only `DeleteAt = 0`, so deleting the dependent lifts the refusal — and
+a parity test walks exactly that sequence, because counting every row instead would make the
+conflict permanent and no single-request test could tell.
+
+### The suite was wiping its own fixture, and a mutation said so
+
+The most useful thing this round produced is not in the port. `plant_delete_fixture` wrote its
+rows and *then* called `go_minted_token` — inside whose `OnceCell` `purge_api_fixtures` runs, by
+design, so that no fixture is built before the sweep. That sweep deletes every `mmrsdel%` row, so
+whichever properties test needed a token first **deleted its own fixture mid-test**. It never
+failed the suite, because the tests re-plant; it failed a mutation run, twice, by reporting
+`delstore-zero-rows-is-not-a-not-found` as CAUGHT on an assertion about **Go's** status — an answer
+no change to this port can produce, which is the signature of a false catch. The token is minted
+before the first `INSERT` now and the mutation honestly survives.
+
+The same ordering trap applies to every fixture in the file, so `plant` takes the token explicitly
+too rather than reaching it by accident through `fixture_team_and_channel`.
+
+### Three guards no route can reach, and why they stay
+
+Mutation established that three store-level guards on the delete path are unreachable through
+HTTP, each for a different reason:
+
+| guard | why it cannot fire |
+|---|---|
+| `delete_field`'s `GroupID` predicate | the handler already read the field **with the group** |
+| `delete_field`'s `RowsAffected() == 0` | same read — the row is known to exist |
+| `delete_values_for_field`'s `GroupID` predicate | `PropertyFields.id` is the primary key, so a field id belongs to exactly one group |
+
+A fourth is unreachable for a reason of its own: `SessionHasPermissionToEditPropertyField` tests
+`IsUnrestricted` *after* the protected check, and reordering the two is invisible because `api4`
+registers **no** properties routes on the local router — an HTTP session is never `Local`, so this
+family can never see an unrestricted one. All four stay, correctly ordered, because the functions
+are shared with callers Go has and this server does not; they are recorded in the code and in the
+plan header rather than chased with a fixture.
+
+### Mutation tally
+
+`scripts/mutations/property-field-delete.plan`: **20 run, 17 caught, 3 survived, 0 harness
+faults** — the three being the two controls and the one equivalent mutant above. Three earlier
+runs were void and no number from them is quoted: one found the self-wiping fixture, one found
+three survivors that were all the same missing bystander row, and two lines faulted on Postgres
+parameter typing rather than on anything about the port. The lesson from the last of those is in
+the plan header: **a new mutation is worth `cargo check`ing by hand before it costs an hour of
+machine time.**
+

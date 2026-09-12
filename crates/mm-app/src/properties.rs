@@ -43,9 +43,17 @@
 //! and attribute-validation hooks that run after the licence one exist only in Go. See
 //! [`crate::App::search_property_fields`].
 
-use mm_model::property_field::{PropertyField, PropertyFieldSearchOpts};
+use mm_model::permission::{
+    PERMISSION_MANAGE_CHANNEL_ROLES, PERMISSION_MANAGE_SYSTEM, PERMISSION_MANAGE_TEAM,
+    PERMISSION_READ_CHANNEL, PERMISSION_VIEW_TEAM,
+};
+use mm_model::property_field::{
+    PROPERTY_FIELD_TARGET_LEVEL_CHANNEL, PROPERTY_FIELD_TARGET_LEVEL_SYSTEM,
+    PROPERTY_FIELD_TARGET_LEVEL_TEAM, PermissionLevel, PropertyField, PropertyFieldSearchOpts,
+};
 use mm_model::property_group::{ACCESS_CONTROL_PROPERTY_GROUP_NAME, PropertyGroup};
 use mm_model::property_value::{PropertyValue, PropertyValueSearchOpts};
+use mm_model::session::Session;
 use mm_model::utils::{AppError, AppResult};
 use mm_store::PropertyStore;
 
@@ -166,6 +174,288 @@ impl App {
             return Err(property_licence_refusal("SearchPropertyValues"));
         }
         Ok(values)
+    }
+
+    /// Port of `App.GetPropertyField` (app/property_field.go:137) for a group that carries no
+    /// post-get hook.
+    ///
+    /// The store collapses every failure into not-found, so this is 404
+    /// `app.property.not_found.app_error` or a row — `mapPropertyServiceError`'s `*ErrNotFound`
+    /// arm, not `GetPropertyField`'s own 500 fallback, which is unreachable from here.
+    #[tracing::instrument(skip_all, fields(group_id = %group_id, field_id = %field_id, found))]
+    pub async fn get_property_field(
+        &self,
+        group_id: &str,
+        field_id: &str,
+    ) -> AppResult<PropertyField> {
+        let field = self
+            .store()
+            .property()
+            .get_field(group_id, field_id)
+            .await
+            .map_err(|err| {
+                if !err.is_not_found() {
+                    tracing::error!(error = ?err, "the property field read failed");
+                }
+                AppError::boxed(
+                    "GetPropertyField",
+                    "app.property.not_found.app_error",
+                    None,
+                    String::new(),
+                    404,
+                )
+            })?;
+
+        tracing::Span::current().record("found", true);
+        Ok(field)
+    }
+
+    /// Port of `App.DeletePropertyField` (app/property_field.go:425) composed with the service's
+    /// own `deletePropertyField` (app/properties/property_field.go:435), which is where two of
+    /// the three steps live.
+    ///
+    /// In Go's order, and the order is the contract:
+    ///
+    /// 1. **Read the field.** The caller has already done this to run its permission check, so it
+    ///    is passed in rather than re-read — Go reads it twice (once in the app layer, once
+    ///    inside the service's group check) and the second read cannot fail if the first did not.
+    /// 2. **Protected fields refuse with 403**, before anything is written.
+    /// 3. **Linked dependents refuse with 409** `…delete.has_linked_dependents.app_error`. This
+    ///    is the one refusal a caller can act on: unlink or delete the dependents, then retry.
+    /// 4. **Cascade the values, then delete the field** — in that order, and the cascade ignores
+    ///    how many rows it touched while the field delete treats zero as a 404.
+    ///
+    /// # The websocket event is addressed by the field's *target*, not its object type
+    ///
+    /// `propertyFieldBroadcastParams` (app/property_field.go:29) sends a `team` field to that
+    /// team, a `channel` field to that channel, and a `system` field to **everyone** — a
+    /// `WebSocketEvent` with neither a team nor a channel is broadcast unscoped. An unrecognised
+    /// target type skips the broadcast entirely rather than falling back to unscoped, which is
+    /// the safe direction and worth keeping: the fallback would leak a field definition.
+    ///
+    /// The payload is `field_id` and `object_type` — **not** the field itself, unlike the create
+    /// and update events, which carry the whole encoded field.
+    #[tracing::instrument(skip_all, fields(group = %group.name, field_id = %field.id, protected = field.protected))]
+    pub async fn delete_property_field(
+        &self,
+        group: &PropertyGroup,
+        field: &PropertyField,
+        connection_id: &str,
+    ) -> AppResult<()> {
+        if field.protected {
+            return Err(AppError::boxed(
+                "DeletePropertyField",
+                "app.property_field.delete.protected.app_error",
+                None,
+                String::new(),
+                403,
+            ));
+        }
+
+        let store = self.store();
+        let linked = store
+            .property()
+            .count_linked_fields(&field.id)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = ?err, "the linked-field count failed");
+                AppError::boxed(
+                    "DeletePropertyField",
+                    "app.property_field.delete.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })?;
+        if linked > 0 {
+            // **409**, and it is the only conflict status this family mints. The service returns a
+            // bare `*model.AppError` here, which `mapPropertyServiceError` passes through
+            // untouched via its `errors.As` arm rather than rewriting to a 500.
+            return Err(AppError::boxed(
+                "DeletePropertyField",
+                "app.property_field.delete.has_linked_dependents.app_error",
+                None,
+                String::new(),
+                409,
+            ));
+        }
+
+        store
+            .property()
+            .delete_values_for_field(&group.id, &field.id)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = ?err, "the property value cascade failed");
+                AppError::boxed(
+                    "DeletePropertyField",
+                    "app.property_field.delete.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })?;
+
+        store
+            .property()
+            .delete_field(&group.id, &field.id)
+            .await
+            .map_err(|err| {
+                let not_found = err.is_not_found();
+                if !not_found {
+                    tracing::error!(error = ?err, "the property field delete failed");
+                }
+                AppError::boxed(
+                    "DeletePropertyField",
+                    if not_found {
+                        "app.property.not_found.app_error"
+                    } else {
+                        "app.property_field.delete.app_error"
+                    },
+                    None,
+                    String::new(),
+                    if not_found { 404 } else { 500 },
+                )
+            })?;
+
+        self.publish_property_field_deleted(field, connection_id)
+            .await;
+        Ok(())
+    }
+
+    /// The `property_field_deleted` half of `publishPropertyFieldEvent`, which for a delete is
+    /// written out inline in Go (app/property_field.go:463) rather than sharing the helper.
+    ///
+    /// Guarded on `IsPSAv2()` exactly as Go is: a v1 field is deleted silently.
+    async fn publish_property_field_deleted(&self, field: &PropertyField, connection_id: &str) {
+        if !field.is_psav2() {
+            return;
+        }
+        let Some((team_id, channel_id)) = property_field_broadcast_params(field) else {
+            tracing::warn!(
+                target_type = %field.target_type,
+                field_id = %field.id,
+                "Unrecognized property field TargetType, skipping broadcast"
+            );
+            return;
+        };
+        let mut message = mm_model::websocket_message::WebSocketEvent::new(
+            mm_model::websocket_message::WEBSOCKET_EVENT_PROPERTY_FIELD_DELETED,
+            team_id,
+            channel_id,
+            "",
+            None,
+            connection_id,
+        );
+        message.add("field_id", serde_json::Value::String(field.id.clone()));
+        message.add(
+            "object_type",
+            serde_json::Value::String(field.object_type.clone()),
+        );
+        self.publish(message).await;
+    }
+
+    /// Port of `App.SessionHasPermissionToEditPropertyField` (app/authorization.go:514).
+    ///
+    /// Three refusals before any lookup, and each is a different reason to say no: a **protected**
+    /// field is never editable by anyone, a field whose `PermissionField` is `nil` is a legacy
+    /// (PSAv1) row with no permission model at all, and only then does an unrestricted session
+    /// pass. Reordering the unrestricted check above the protected one would let local mode delete
+    /// a protected field, which no session may do.
+    pub async fn session_has_permission_to_edit_property_field(
+        &self,
+        session: &Session,
+        field: &PropertyField,
+    ) -> bool {
+        if field.protected {
+            return false;
+        }
+        let Some(level) = field.permission_field.as_ref() else {
+            return false;
+        };
+        if session.is_unrestricted() {
+            return true;
+        }
+        self.has_property_field_permission_level(&session.user_id, field, level)
+            .await
+    }
+
+    /// Port of `App.hasPropertyFieldPermissionLevel` (app/authorization.go:607).
+    ///
+    /// `admin` resolves against the field's **target type**, not its object type: `manage_system`
+    /// on a system target, `manage_team` on a team target, `manage_channel_roles` on a channel
+    /// target. Go's own comment flags that this is stricter than `hasTargetAccess`, which uses
+    /// `manage_*_channel_properties` — the outer gate says "you may write here at all" and this
+    /// inner one says "you are an admin of this thing".
+    ///
+    /// An unknown level or an unknown target type is `false`, never a fallthrough to `true`.
+    async fn has_property_field_permission_level(
+        &self,
+        user_id: &str,
+        field: &PropertyField,
+        level: &PermissionLevel,
+    ) -> bool {
+        match level.as_str() {
+            PermissionLevel::NONE => false,
+            PermissionLevel::SYSADMIN => {
+                self.has_permission_to(user_id, &PERMISSION_MANAGE_SYSTEM)
+                    .await
+            }
+            PermissionLevel::MEMBER => self.has_property_field_scope_access(user_id, field).await,
+            PermissionLevel::ADMIN => match field.target_type.as_str() {
+                PROPERTY_FIELD_TARGET_LEVEL_SYSTEM => {
+                    self.has_permission_to(user_id, &PERMISSION_MANAGE_SYSTEM)
+                        .await
+                }
+                PROPERTY_FIELD_TARGET_LEVEL_TEAM => {
+                    self.has_permission_to_team(user_id, &field.target_id, &PERMISSION_MANAGE_TEAM)
+                        .await
+                }
+                PROPERTY_FIELD_TARGET_LEVEL_CHANNEL => {
+                    self.has_permission_to_channel(
+                        user_id,
+                        &field.target_id,
+                        &PERMISSION_MANAGE_CHANNEL_ROLES,
+                    )
+                    .await
+                    .0
+                }
+                _ => false,
+            },
+            _ => false,
+        }
+    }
+
+    /// Port of `App.hasPropertyFieldScopeAccess` (app/authorization.go:723) — the `member` level.
+    ///
+    /// **A system-target field is readable-and-writable at member level by any authenticated
+    /// user**, with no check at all. That is why `CanonicalizeSystemObjectField` pins all three
+    /// permission levels of a *system-object* field to `sysadmin`: without it, a member-level
+    /// system field would be world-writable.
+    async fn has_property_field_scope_access(&self, user_id: &str, field: &PropertyField) -> bool {
+        match field.target_type.as_str() {
+            PROPERTY_FIELD_TARGET_LEVEL_SYSTEM => true,
+            PROPERTY_FIELD_TARGET_LEVEL_TEAM => {
+                self.has_permission_to_team(user_id, &field.target_id, &PERMISSION_VIEW_TEAM)
+                    .await
+            }
+            PROPERTY_FIELD_TARGET_LEVEL_CHANNEL => {
+                self.has_permission_to_channel(user_id, &field.target_id, &PERMISSION_READ_CHANNEL)
+                    .await
+                    .0
+            }
+            _ => false,
+        }
+    }
+}
+
+/// Port of `propertyFieldBroadcastParams` (app/property_field.go:29): `(team_id, channel_id)`, or
+/// `None` for a target type the broadcast does not understand.
+fn property_field_broadcast_params(field: &PropertyField) -> Option<(&str, &str)> {
+    match field.target_type.as_str() {
+        PROPERTY_FIELD_TARGET_LEVEL_TEAM => Some((field.target_id.as_str(), "")),
+        PROPERTY_FIELD_TARGET_LEVEL_CHANNEL => Some(("", field.target_id.as_str())),
+        PROPERTY_FIELD_TARGET_LEVEL_SYSTEM => Some(("", "")),
+        _ => None,
     }
 }
 

@@ -95,6 +95,12 @@ use crate::channels::{PER_PAGE_DEFAULT, PER_PAGE_MAXIMUM, parse_per_page, query_
 use crate::error::ApiError;
 use crate::proxy;
 
+/// `model.ConnectionId` (model/websocket_client.go) — the header the write routes read so a client
+/// can be left out of the broadcast for its own change. Spelled here as it is in
+/// [`crate::views`] and [`crate::drafts`]; it is one constant in Go and three in this crate, which
+/// is a duplication worth collapsing the next time a fourth appears.
+const CONNECTION_ID_HEADER: &str = "Connection-Id";
+
 /// `json.NewEncoder(w).Encode(v)` — a JSON body **with** the encoder's trailing newline ([D-086]).
 fn encoded(value: &impl serde::Serialize, where_: &'static str) -> Response {
     let mut body = match serde_json::to_vec(value) {
@@ -527,6 +533,117 @@ async fn resolve_scope_and_check_permissions(
         "api.property_field.get.scope_required.app_error",
         400,
     ))
+}
+
+/// Port of `deletePropertyField` (properties.go:544) —
+/// `DELETE /api/v4/properties/groups/{group_name}/{object_type}/fields/{field_id}`.
+///
+/// The first of the five writes in this file to be ported, and it is the one whose whole path is
+/// reachable: on `boards` and `post_attributes` the only pre-hook a delete runs is the licence
+/// check, which does not manage those groups, so there is nothing unported between the handler
+/// and the `UPDATE … SET DeleteAt`. See [`mm_app::properties`] for the group table.
+///
+/// # Four refusals, in Go's order, and three of them are 404s that mean different things
+///
+/// 1. `RequireGroupName().RequireObjectType().RequireFieldId()` — 400 `invalid_url_param`.
+/// 2. `getV2Group` — a missing group is `app.property_group.get.app_error`, a non-v2 group is
+///    `api.property.v2_group_not_found.app_error`. Both 404, different ids.
+/// 3. `GetPropertyField` — a field that is not in this group is 404
+///    `app.property.not_found.app_error`.
+/// 4. **The object type in the URL must match the field's**, and a mismatch is a *third* 404,
+///    `api.property_field.object_type_mismatch.app_error`. Go's comment says why it is a 404 and
+///    not a 400: it lets fields be bucketed by URL without leaking cross-bucket existence.
+///
+/// Only then the permission check, which is **403 with its own id** —
+/// `api.property_field.delete.no_permission.app_error`, not the generic
+/// `api.context.permissions.app_error` every other route in this file answers with.
+///
+/// # The success body has no trailing newline
+///
+/// `ReturnStatusOK` is a bare `w.Write` of `{"status":"OK"}`, not an encoder — the other side of
+/// [D-086] from every other route here.
+#[tracing::instrument(skip_all, fields(group = %group_name, object_type = %object_type, field_id = %field_id, licensed, session_attributes))]
+pub async fn delete_property_field(
+    State(state): State<AppState>,
+    Path((group_name, object_type, field_id)): Path<(String, String, String)>,
+    session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    if !state.app.config().properties_api_enabled() {
+        return proxy::forward_to_go(State(state), request).await;
+    }
+
+    if !is_valid_property_group_name(&group_name) {
+        return ApiError::invalid_url_param("group_name").into_response();
+    }
+    if !is_valid_property_field_object_type(&object_type) {
+        return ApiError::invalid_url_param("object_type").into_response();
+    }
+    if !is_valid_id(&field_id) {
+        return ApiError::invalid_url_param("field_id").into_response();
+    }
+
+    let connection_id = request
+        .headers()
+        .get(CONNECTION_ID_HEADER)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or_default()
+        .to_owned();
+
+    let group = match v2_group(&state, &group_name, "deletePropertyField").await {
+        Group::Serve(group) => group,
+        Group::Forward => return proxy::forward_to_go(State(state), request).await,
+        Group::Failed(err) => return err.into_response(),
+    };
+
+    let field = match state.app.get_property_field(&group.id, &field_id).await {
+        Ok(field) => field,
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+
+    if field.object_type != object_type {
+        return refusal(
+            "deletePropertyField",
+            "api.property_field.object_type_mismatch.app_error",
+            404,
+        )
+        .into_response();
+    }
+
+    if !state
+        .app
+        .session_has_permission_to_edit_property_field(&session.0, &field)
+        .await
+    {
+        return refusal(
+            "deletePropertyField",
+            "api.property_field.delete.no_permission.app_error",
+            403,
+        )
+        .into_response();
+    }
+
+    match state
+        .app
+        .delete_property_field(&group, &field, &connection_id)
+        .await
+    {
+        Ok(()) => status_ok(),
+        Err(err) => ApiError::from(err).into_response(),
+    }
+}
+
+/// `web.ReturnStatusOK` (web/handlers.go) — `{"status":"OK"}` with **no** trailing newline.
+fn status_ok() -> Response {
+    (
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        br#"{"status":"OK"}"#.as_slice(),
+    )
+        .into_response()
 }
 
 /// Port of `getPropertyValues` (properties.go:582) —

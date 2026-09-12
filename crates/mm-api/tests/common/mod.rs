@@ -1147,8 +1147,8 @@ async fn purge_api_fixtures_once() {
         // note above for the second.
         //
         // Values first: they are keyed on a field id and nothing else selects them.
-        "DELETE FROM propertyvalues WHERE id LIKE 'mmrscpa%' OR id LIKE 'mmrsprop%' OR fieldid LIKE 'mmrscpa%' OR fieldid LIKE 'mmrsprop%'",
-        "DELETE FROM propertyfields WHERE id LIKE 'mmrscpa%' OR id LIKE 'mmrsprop%'",
+        "DELETE FROM propertyvalues WHERE id LIKE 'mmrscpa%' OR id LIKE 'mmrsprop%' OR id LIKE 'mmrsdel%' OR fieldid LIKE 'mmrscpa%' OR fieldid LIKE 'mmrsprop%' OR fieldid LIKE 'mmrsdel%'",
+        "DELETE FROM propertyfields WHERE id LIKE 'mmrscpa%' OR id LIKE 'mmrsprop%' OR id LIKE 'mmrsdel%'",
     ] {
         let _ = sqlx::query(statement).execute(&pool).await;
     }

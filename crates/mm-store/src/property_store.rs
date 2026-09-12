@@ -7,12 +7,19 @@
 //! read is reached by. Go hangs these off three separate store interfaces, which this crate keeps
 //! in one module because they are one table family, read through one group.
 //!
-//! # Nothing here writes
+//! # One write, and the rest still do not
 //!
 //! Every write these tables take — create, patch, delete, upsert — runs the property service's
 //! hook chain first, and none of those hooks exist on this side. For the `access_control` group
 //! the first of them is a `LicenseCheckHook` that refuses outright without an Enterprise licence
 //! (app/properties/license_check.go:45), so that group's write path is unreachable here at all.
+//!
+//! The **field delete** is the exception and is ported: on `boards` and `post_attributes` its
+//! only pre-hook is the licence one, which does not manage those groups, so the path from handler
+//! to `UPDATE … SET DeleteAt` has nothing unported in it. It is three statements —
+//! [`SqlPropertyStore::count_linked_fields`], [`SqlPropertyStore::delete_values_for_field`] and
+//! [`SqlPropertyStore::delete_field`] — and the two deletes disagree about whether touching zero
+//! rows is an error, which is the detail worth reading their docs for.
 //! The reads are ported because they are *not* unreachable: the licence hook's post-get arms
 //! short-circuit on an empty result set, so an unlicensed server answers a real 200 whenever the
 //! group holds no matching row and a 403 the moment it holds one. Telling those two apart is a
@@ -77,6 +84,28 @@ pub trait PropertyStore {
         &self,
         opts: &PropertyValueSearchOpts,
     ) -> impl std::future::Future<Output = Result<Vec<PropertyValue>, StoreError>> + Send;
+
+    /// Port of `SqlPropertyFieldStore.CountLinkedFields` (property_field_store.go:734) — how many
+    /// **live** fields name this one as their `LinkedFieldID`.
+    fn count_linked_fields(
+        &self,
+        field_id: &str,
+    ) -> impl std::future::Future<Output = Result<i64, StoreError>> + Send;
+
+    /// Port of `SqlPropertyValueStore.DeleteForField` (property_value_store.go:369) — the cascade
+    /// a field delete runs before it soft-deletes the field itself.
+    fn delete_values_for_field(
+        &self,
+        group_id: &str,
+        field_id: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlPropertyFieldStore.Delete` (property_field_store.go:504).
+    fn delete_field(
+        &self,
+        group_id: &str,
+        id: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 }
 
 /// Postgres-backed implementation.
@@ -466,6 +495,127 @@ impl PropertyStore for SqlPropertyStore {
                 updated_by: row.updatedby,
             })
             .collect())
+    }
+
+    /// # `DeleteAt = 0`, not "exists"
+    ///
+    /// A field whose dependent has itself been soft-deleted no longer blocks the delete, which is
+    /// what makes the refusal recoverable: delete the dependent, then the source. The `GetMaster`
+    /// in Go is a read-your-writes concern on a replica set this deployment does not have.
+    #[tracing::instrument(skip_all, fields(field_id = %field_id, linked))]
+    async fn count_linked_fields(&self, field_id: &str) -> Result<i64, StoreError> {
+        let count = sqlx::query_scalar!(
+            r#"
+            SELECT COUNT(id) AS "count!"
+              FROM propertyfields
+             WHERE linkedfieldid = $1
+               AND deleteat = 0
+            "#,
+            field_id
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "property_field_count_linked_fields".to_owned(),
+            source,
+        })?;
+
+        tracing::Span::current().record("linked", count);
+        Ok(count)
+    }
+
+    /// # It is a soft delete, and it does not care how many rows it touched
+    ///
+    /// Go's `DeleteForField` ignores `RowsAffected` entirely (property_value_store.go:379), so a
+    /// field with no values is not an error — unlike the field delete below, whose zero-row case
+    /// *is* a not-found. Two statements one line apart in the same service function, with
+    /// opposite conventions.
+    ///
+    /// The `DeleteAt` it stamps is **not** filtered on: a value already soft-deleted is stamped
+    /// again with the new timestamp. Reproduced rather than improved, because the column is on
+    /// the wire for any delta read that follows.
+    #[tracing::instrument(skip_all, fields(group_id = %group_id, field_id = %field_id, cleared))]
+    async fn delete_values_for_field(
+        &self,
+        group_id: &str,
+        field_id: &str,
+    ) -> Result<(), StoreError> {
+        let result = sqlx::query!(
+            r#"
+            UPDATE propertyvalues
+               SET deleteat = $1
+             WHERE fieldid = $2
+               AND ($3 = '' OR groupid = $3)
+            "#,
+            mm_model::utils::get_millis(),
+            field_id,
+            group_id,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "property_value_delete_for_field_exec".to_owned(),
+            source,
+        })?;
+
+        tracing::Span::current().record("cleared", result.rows_affected());
+        Ok(())
+    }
+
+    /// # Zero rows affected is a **not-found**, and the group is part of the key
+    ///
+    /// `RowsAffected() == 0` raises `store.NewErrNotFound("PropertyField", id)`, which the app
+    /// layer turns into 404 `app.property.not_found.app_error`. So deleting an id that is real but
+    /// lives in another group is a 404 and not a silent success — the `GroupID` predicate is what
+    /// makes a group boundary a boundary, and dropping it would let any group delete any field.
+    ///
+    /// Already-deleted rows still match (there is no `DeleteAt = 0` predicate), so a second
+    /// delete of the same field succeeds and re-stamps the timestamp.
+    ///
+    /// # Both of those guards are unreachable from `api4/properties.go`, and that is fine
+    ///
+    /// The handler reads the field **with the group** before it deletes
+    /// ([`mm_app::App::get_property_field`], whose query is `id = $1 AND groupid = $2`), so by the
+    /// time this runs the row is known to exist in the group: neither the `GroupID` predicate nor
+    /// the zero-row branch can fire. Go has the identical shape — the service's
+    /// `deletePropertyField` opens with `getPropertyField(groupID, id)`.
+    ///
+    /// Established by mutation, not by reading: both survive the whole parity suite, and the one
+    /// that appeared to be caught was a **false catch** from a fixture that wiped itself. They
+    /// stay because they are the contract for a caller that skips the read — Go's plugin API is
+    /// one — and because the cost of a redundant predicate is nothing.
+    ///
+    /// The same is true of the `GroupID` predicate on
+    /// [`SqlPropertyStore::delete_values_for_field`], for a different reason: `PropertyFields.id`
+    /// is the primary key, so a field id belongs to exactly one group and the group adds nothing
+    /// once `FieldID` is applied.
+    #[tracing::instrument(skip_all, fields(group_id = %group_id, id = %id))]
+    async fn delete_field(&self, group_id: &str, id: &str) -> Result<(), StoreError> {
+        let result = sqlx::query!(
+            r#"
+            UPDATE propertyfields
+               SET deleteat = $1
+             WHERE id = $2
+               AND ($3 = '' OR groupid = $3)
+            "#,
+            mm_model::utils::get_millis(),
+            id,
+            group_id,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to delete property field with id: {id}"),
+            source,
+        })?;
+
+        if result.rows_affected() == 0 {
+            return Err(StoreError::NotFound {
+                entity: "PropertyField",
+                criteria: format!("id={id}"),
+            });
+        }
+        Ok(())
     }
 }
 

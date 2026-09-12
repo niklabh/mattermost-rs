@@ -78,6 +78,11 @@ const EPOCH: i64 = 1_788_600_000_000;
 
 /// Plant the six fields and three values. Returns false when there is no database to plant into.
 async fn plant() -> bool {
+    // The same ordering rule as [`plant_delete_fixture`]: nothing may be written before
+    // `go_minted_token` has run its purge. This one reaches it through
+    // `fixture_team_and_channel` below, which is easy to reorder away by accident, so it is also
+    // taken here explicitly.
+    let _ = common::go_minted_token(&common::client()).await;
     let Some(pool) = common::fixture_pool().await else {
         return false;
     };
@@ -1153,4 +1158,523 @@ async fn the_search_route_validates_its_object_types() {
         let go = assert_error_bodies_match_except_known_gaps(&go_body, &rs_body, &context);
         assert_eq!(go["id"], "api.context.invalid_body_param.app_error");
     }
+}
+
+// ---------------------------------------------------------------------------------------------
+// `deletePropertyField` — the first of the five writes in `api4/properties.go`.
+//
+// Destructive, so the two servers delete **different** rows of the same shape rather than racing
+// for one. The refusals are non-destructive and share a row.
+// ---------------------------------------------------------------------------------------------
+
+/// Two equivalent live fields, one for each server to delete, each carrying a value.
+///
+/// **Every id here is exactly 26 characters.** A field id shorter than that is a `RequireFieldId`
+/// 400 before any handler logic runs, which turns a test of the 409 into a test of the parser —
+/// it did, once, and the failure named the wrong thing.
+const D_GO: &str = "mmrsdelgo00000000000000001";
+const D_RS: &str = "mmrsdelrs00000000000000001";
+/// `Protected` — no session may delete it, not even an unrestricted one.
+const D_PROTECTED: &str = "mmrsdelprot000000000000001";
+/// `PermissionField IS NULL` — a legacy (PSAv1-shaped) row with no permission model.
+const D_NO_PERMISSION: &str = "mmrsdelnoperm0000000000001";
+/// The source of a link, and the dependent that makes deleting it a 409.
+const D_LINK_SOURCE: &str = "mmrsdellink000000000000001";
+const D_LINK_DEPENDENT: &str = "mmrsdeldep0000000000000001";
+const D_VALUE_GO: &str = "mmrsdelvaluego000000000001";
+const D_VALUE_RS: &str = "mmrsdelvaluers000000000001";
+/// A second link pair, so **each** server can walk the whole unlink-then-delete sequence itself.
+const D_LINK_SOURCE_GO: &str = "mmrsdellinkgo0000000000001";
+const D_LINK_DEPENDENT_GO: &str = "mmrsdeldepgo00000000000001";
+/// Two values the delete must **not** touch: one in this group on a field nobody deletes, and one
+/// in another group entirely. Without them a cascade with no `FieldID` predicate and a cascade
+/// with no `GroupID` predicate are both invisible — measured, 2026-09-12, two survivors.
+const D_VALUE_BYSTANDER: &str = "mmrsdelvaluebystander00001";
+const D_VALUE_OTHER_GROUP: &str = "mmrsdelvalueothergroup0001";
+/// The field that other-group value hangs off, in `post_attributes`.
+const D_FIELD_OTHER_GROUP: &str = "mmrsdelfieldothergroup0001";
+
+/// Plant the delete fixture. Cleared first rather than `ON CONFLICT DO NOTHING`, because a row
+/// left soft-deleted by an interrupted run would make every assertion below vacuous.
+async fn plant_delete_fixture() -> bool {
+    // **The token first, and it is not optional.** `purge_api_fixtures` runs inside
+    // `go_minted_token`'s `OnceCell` — deliberately, so that no fixture is built before the sweep
+    // — and it deletes every `mmrsdel%` row. A test that plants and *then* asks for a token
+    // therefore wipes its own fixture whenever it is the first in the binary to need one, which
+    // is order-dependent and so does not fail every run. It failed this one: `the_delete_refusals
+    // _agree` saw **Go** answer 404 for a protected field, an answer no change to this port could
+    // produce. Minting here forces the sweep to have happened before the first `INSERT`.
+    let _ = common::go_minted_token(&common::client()).await;
+    let Some(pool) = common::fixture_pool().await else {
+        return false;
+    };
+    let Ok(group) =
+        sqlx::query_scalar::<_, String>("SELECT id FROM propertygroups WHERE name = 'boards'")
+            .fetch_one(&pool)
+            .await
+    else {
+        return false;
+    };
+    let Ok(other_group) = sqlx::query_scalar::<_, String>(
+        "SELECT id FROM propertygroups WHERE name = 'post_attributes'",
+    )
+    .fetch_one(&pool)
+    .await
+    else {
+        return false;
+    };
+    unplant_delete_fixture().await;
+
+    sqlx::query(
+        "INSERT INTO propertyfields
+            (id, groupid, name, type, attrs, targetid, targettype, objecttype, protected,
+             permissionfield, permissionvalues, permissionoptions, linkedfieldid,
+             createat, updateat, deleteat)
+         VALUES
+           ($1, $7, 'mmrs-del-go',     'text', '{}'::jsonb, '', 'system', 'channel', false,
+            'member', 'member', 'member', NULL, $8, $8, 0),
+           ($2, $7, 'mmrs-del-rs',     'text', '{}'::jsonb, '', 'system', 'channel', false,
+            'member', 'member', 'member', NULL, $8, $8, 0),
+           ($3, $7, 'mmrs-del-prot',   'text', '{}'::jsonb, '', 'system', 'channel', true,
+            'member', 'member', 'member', NULL, $8, $8, 0),
+           ($4, $7, 'mmrs-del-noperm', 'text', '{}'::jsonb, '', 'system', 'channel', false,
+            NULL, NULL, NULL, NULL, $8, $8, 0),
+           ($5, $7, 'mmrs-del-link',   'text', '{}'::jsonb, '', 'system', 'channel', false,
+            'member', 'member', 'member', NULL, $8, $8, 0),
+           ($6, $7, 'mmrs-del-dep',    'text', '{}'::jsonb, '', 'system', 'channel', false,
+            'member', 'member', 'member', $5, $8, $8, 0),
+           ($9, $7, 'mmrs-del-link-go', 'text', '{}'::jsonb, '', 'system', 'channel', false,
+            'member', 'member', 'member', NULL, $8, $8, 0),
+           ($10, $7, 'mmrs-del-dep-go', 'text', '{}'::jsonb, '', 'system', 'channel', false,
+            'member', 'member', 'member', $9, $8, $8, 0),
+           ($11, $12, 'mmrs-del-other', 'text', '{}'::jsonb, '', 'system', 'channel', false,
+            'member', 'member', 'member', NULL, $8, $8, 0)",
+    )
+    .bind(D_GO)
+    .bind(D_RS)
+    .bind(D_PROTECTED)
+    .bind(D_NO_PERMISSION)
+    .bind(D_LINK_SOURCE)
+    .bind(D_LINK_DEPENDENT)
+    .bind(&group)
+    .bind(EPOCH)
+    .bind(D_LINK_SOURCE_GO)
+    .bind(D_LINK_DEPENDENT_GO)
+    .bind(D_FIELD_OTHER_GROUP)
+    .bind(&other_group)
+    .execute(&pool)
+    .await
+    .expect("the delete fixture's fields are written");
+
+    sqlx::query(
+        "INSERT INTO propertyvalues
+            (id, targetid, targettype, groupid, fieldid, value, createat, updateat, deleteat)
+         VALUES ($1, 'system', 'system', $3, $5, '\"go\"'::jsonb,        $6, $6, 0),
+                ($2, 'system', 'system', $3, $4, '\"rust\"'::jsonb,      $6, $6, 0),
+                ($7, 'system', 'system', $3, $8, '\"bystander\"'::jsonb, $6, $6, 0),
+                ($9, 'system', 'system', $10, $11, '\"other\"'::jsonb,   $6, $6, 0)",
+    )
+    .bind(D_VALUE_GO)
+    .bind(D_VALUE_RS)
+    .bind(&group)
+    .bind(D_RS)
+    .bind(D_GO)
+    .bind(EPOCH)
+    .bind(D_VALUE_BYSTANDER)
+    .bind(D_PROTECTED)
+    .bind(D_VALUE_OTHER_GROUP)
+    .bind(&other_group)
+    .bind(D_FIELD_OTHER_GROUP)
+    .execute(&pool)
+    .await
+    .expect("the delete fixture's values are written");
+
+    true
+}
+
+async fn unplant_delete_fixture() {
+    let Some(pool) = common::fixture_pool().await else {
+        return;
+    };
+    let _ = sqlx::query("DELETE FROM propertyvalues WHERE id LIKE 'mmrsdel%'")
+        .execute(&pool)
+        .await;
+    let _ = sqlx::query("DELETE FROM propertyfields WHERE id LIKE 'mmrsdel%'")
+        .execute(&pool)
+        .await;
+}
+
+/// `(delete_at > 0)` for one `PropertyFields` or `PropertyValues` row, or `None` if it is gone.
+async fn is_soft_deleted(table: &str, id: &str) -> Option<bool> {
+    let pool = common::fixture_pool().await?;
+    let query = format!("SELECT deleteat > 0 FROM {table} WHERE id = $1");
+    sqlx::query_scalar::<_, bool>(&query)
+        .bind(id)
+        .fetch_optional(&pool)
+        .await
+        .ok()
+        .flatten()
+}
+
+/// One DELETE to one server.
+async fn delete_one(
+    client: &reqwest::Client,
+    token: &str,
+    base: &str,
+    path: &str,
+) -> (u16, Vec<u8>) {
+    let response = client
+        .delete(format!("{base}{path}"))
+        .header("Authorization", format!("Bearer {token}"))
+        .send()
+        .await
+        .unwrap_or_else(|e| panic!("{base}{path} is unreachable: {e}"));
+    let status = response.status().as_u16();
+    if base == RUST {
+        common::assert_served_by_rust(response.headers(), path);
+    }
+    (status, response.bytes().await.expect("body reads").to_vec())
+}
+
+/// **A delete is a soft delete, and it cascades to the field's values.**
+///
+/// Each server deletes its own row of an identical pair, so this is the same operation on
+/// equivalent rows rather than a second write to one. What is asserted is the answer *and* the
+/// two `DeleteAt` columns: a port that deleted the field and forgot `DeleteForField` would answer
+/// identically and leave orphaned values that every delta read would keep returning.
+///
+/// The body is `{"status":"OK"}` with **no trailing newline** — `ReturnStatusOK` is a bare
+/// `w.Write`, unlike every other route in this file. [D-086].
+#[tokio::test]
+async fn a_field_delete_soft_deletes_the_field_and_cascades_its_values() {
+    if !stack_enabled() {
+        return;
+    }
+    let _rows = common::PROPERTY_ROWS.lock().await;
+    if !plant_delete_fixture().await {
+        return;
+    }
+    let client = client();
+    let token = go_minted_token(&client).await;
+
+    let (go_status, go_body) = delete_one(
+        &client,
+        &token,
+        GO,
+        &format!("/api/v4/properties/groups/{GROUP}/channel/fields/{D_GO}"),
+    )
+    .await;
+    let (rs_status, rs_body) = delete_one(
+        &client,
+        &token,
+        RUST,
+        &format!("/api/v4/properties/groups/{GROUP}/channel/fields/{D_RS}"),
+    )
+    .await;
+
+    assert_eq!(go_status, 200, "Go deletes its field");
+    assert_eq!(rs_status, go_status);
+    assert_eq!(go_body, rs_body, "byte-identical success bodies");
+    assert_eq!(
+        String::from_utf8_lossy(&go_body),
+        r#"{"status":"OK"}"#,
+        "ReturnStatusOK writes no trailing newline"
+    );
+
+    assert_eq!(
+        is_soft_deleted("propertyfields", D_GO).await,
+        Some(true),
+        "Go soft-deletes rather than removing the row"
+    );
+    assert_eq!(
+        is_soft_deleted("propertyfields", D_RS).await,
+        Some(true),
+        "and so do we"
+    );
+    assert_eq!(
+        is_soft_deleted("propertyvalues", D_VALUE_GO).await,
+        Some(true),
+        "Go cascades to the field's values"
+    );
+    assert_eq!(
+        is_soft_deleted("propertyvalues", D_VALUE_RS).await,
+        Some(true),
+        "and so do we — `DeleteForField` runs before the field delete"
+    );
+
+    // **And two values it must not touch.** `DeleteForField` filters on `FieldID` *and*
+    // `GroupID`, and neither predicate is observable without a row on the other side of it: the
+    // bystander shares this group and belongs to a field nobody deleted, the other-group value
+    // shares nothing. Both mutations survived the whole suite before these rows existed.
+    assert_eq!(
+        is_soft_deleted("propertyvalues", D_VALUE_BYSTANDER).await,
+        Some(false),
+        "a value on another field in the same group is untouched"
+    );
+    assert_eq!(
+        is_soft_deleted("propertyvalues", D_VALUE_OTHER_GROUP).await,
+        Some(false),
+        "and a value in another group is untouched"
+    );
+
+    // The deleted field is gone from the directory read on both servers.
+    let listed = both_agree(
+        &client,
+        &token,
+        &format!("/api/v4/properties/groups/{GROUP}/channel/fields?target_type=system"),
+        200,
+    )
+    .await;
+    let ids = ids(&listed);
+    assert!(!ids.iter().any(|id| id == D_GO || id == D_RS));
+
+    unplant_delete_fixture().await;
+}
+
+/// Every refusal the delete route can mint, in Go's order.
+///
+/// Three of the five are **404s that mean different things** — a group that does not exist, a
+/// field that is not in this group, and a field whose object type does not match the URL — and
+/// the last of those is a 404 rather than a 400 on purpose: Go's comment says it lets fields be
+/// bucketed by URL without leaking cross-bucket existence.
+///
+/// The two 403s are the ones worth reading twice. A **protected** field and a field with a `NULL`
+/// `PermissionField` both answer `api.property_field.delete.no_permission.app_error` — the
+/// handler's own id, not the generic `api.context.permissions.app_error` every other route in
+/// this file uses. And because `SessionHasPermissionToEditPropertyField` refuses a protected
+/// field before the app layer is reached, `DeletePropertyField`'s own protected 403
+/// (`app.property_field.delete.protected.app_error`) is **unreachable from this route** — it
+/// exists for plugin and internal callers. Measured: a sysadmin deleting a protected field gets
+/// the handler's id on both servers.
+#[tokio::test]
+async fn the_delete_refusals_agree() {
+    if !stack_enabled() {
+        return;
+    }
+    let _rows = common::PROPERTY_ROWS.lock().await;
+    if !plant_delete_fixture().await {
+        return;
+    }
+    let client = client();
+    let token = go_minted_token(&client).await;
+    const NOWHERE: &str = "zzzzzzzzzzzzzzzzzzzzzzzzzz";
+
+    for (path, status, id) in [
+        (
+            format!("/api/v4/properties/groups/{GROUP}/channel/fields/{D_PROTECTED}"),
+            403,
+            "api.property_field.delete.no_permission.app_error",
+        ),
+        (
+            format!("/api/v4/properties/groups/{GROUP}/channel/fields/{D_NO_PERMISSION}"),
+            403,
+            "api.property_field.delete.no_permission.app_error",
+        ),
+        (
+            format!("/api/v4/properties/groups/{GROUP}/channel/fields/{D_LINK_SOURCE}"),
+            409,
+            "app.property_field.delete.has_linked_dependents.app_error",
+        ),
+        (
+            format!("/api/v4/properties/groups/{GROUP}/post/fields/{D_LINK_SOURCE}"),
+            404,
+            "api.property_field.object_type_mismatch.app_error",
+        ),
+        (
+            format!("/api/v4/properties/groups/{GROUP}/channel/fields/{NOWHERE}"),
+            404,
+            "app.property.not_found.app_error",
+        ),
+        // The same field id, asked for through a **different** group: the group is part of the
+        // key, so this is a 404 and not a delete.
+        (
+            format!("/api/v4/properties/groups/post_attributes/channel/fields/{D_LINK_SOURCE}"),
+            404,
+            "app.property.not_found.app_error",
+        ),
+        (
+            format!("/api/v4/properties/groups/nosuchgroup/channel/fields/{D_LINK_SOURCE}"),
+            404,
+            "app.property_group.get.app_error",
+        ),
+        (
+            format!("/api/v4/properties/groups/{GROUP}/channel/fields/notanid"),
+            400,
+            "api.context.invalid_url_param.app_error",
+        ),
+    ] {
+        let (go_status, go_body) = delete_one(&client, &token, GO, &path).await;
+        let (rs_status, rs_body) = delete_one(&client, &token, RUST, &path).await;
+        assert_eq!(go_status, status, "{path}: Go's status");
+        assert_eq!(rs_status, go_status, "{path}: our status");
+        let go = assert_error_bodies_match_except_known_gaps(&go_body, &rs_body, &path);
+        assert_eq!(go["id"], id, "{path}: the error id");
+    }
+
+    // Nothing above wrote: every refusal fires before the delete.
+    for id in [
+        D_PROTECTED,
+        D_NO_PERMISSION,
+        D_LINK_SOURCE,
+        D_LINK_DEPENDENT,
+    ] {
+        assert_eq!(
+            is_soft_deleted("propertyfields", id).await,
+            Some(false),
+            "{id} must still be live after a refusal"
+        );
+    }
+
+    unplant_delete_fixture().await;
+}
+
+/// **Deleting the dependent first makes the source deletable**, which is the whole point of the
+/// 409 being a conflict rather than a flat refusal: it names a state the caller can change.
+///
+/// `CountLinkedFields` counts only rows with `DeleteAt = 0`, so a soft-deleted dependent stops
+/// blocking. Counting every row would make the refusal permanent.
+#[tokio::test]
+async fn the_linked_dependent_refusal_lifts_once_the_dependent_is_gone() {
+    if !stack_enabled() {
+        return;
+    }
+    let _rows = common::PROPERTY_ROWS.lock().await;
+    if !plant_delete_fixture().await {
+        return;
+    }
+    let client = client();
+    let token = go_minted_token(&client).await;
+
+    // **Each server walks the whole sequence on its own pair.** An earlier version deleted the
+    // dependent through our route and then asked *Go* to delete the source, so our own
+    // `DeleteAt = 0` count was never exercised on the lifted case and a mutation that counted
+    // tombstones too survived the suite.
+    for (base, source, dependent) in [
+        (GO, D_LINK_SOURCE_GO, D_LINK_DEPENDENT_GO),
+        (RUST, D_LINK_SOURCE, D_LINK_DEPENDENT),
+    ] {
+        let source_path = format!("/api/v4/properties/groups/{GROUP}/channel/fields/{source}");
+        let (status, _) = delete_one(&client, &token, base, &source_path).await;
+        assert_eq!(status, 409, "{base}: blocked while the dependent is live");
+
+        let (status, _) = delete_one(
+            &client,
+            &token,
+            base,
+            &format!("/api/v4/properties/groups/{GROUP}/channel/fields/{dependent}"),
+        )
+        .await;
+        assert_eq!(status, 200, "{base}: the dependent itself deletes");
+
+        let (status, _) = delete_one(&client, &token, base, &source_path).await;
+        assert_eq!(
+            status, 200,
+            "{base}: the source is deletable once the dependent is a tombstone — the count is \
+             `DeleteAt = 0` only"
+        );
+        assert_eq!(is_soft_deleted("propertyfields", source).await, Some(true));
+    }
+
+    unplant_delete_fixture().await;
+}
+
+/// **The `property_field_deleted` event, on both servers' sockets.**
+///
+/// The payload is `field_id` and `object_type` — *not* the field itself, unlike the create and
+/// update events, which carry the whole encoded row. The fixture's fields are **system**-target,
+/// which `propertyFieldBroadcastParams` maps to a broadcast with neither a team nor a channel, so
+/// a fresh connection with no presence set receives it.
+#[tokio::test]
+async fn the_delete_publishes_the_same_websocket_event_on_both_servers() {
+    if !stack_enabled() {
+        return;
+    }
+    let _rows = common::PROPERTY_ROWS.lock().await;
+    let _stream = common::BROADCAST_STREAM.lock().await;
+    if !plant_delete_fixture().await {
+        return;
+    }
+    let client = client();
+    let token = go_minted_token(&client).await;
+
+    let mut go_socket = common::SocketProbe::connect(GO, &token).await;
+    let mut rust_socket = common::SocketProbe::connect(RUST, &token).await;
+
+    let (go_status, _) = delete_one(
+        &client,
+        &token,
+        GO,
+        &format!("/api/v4/properties/groups/{GROUP}/channel/fields/{D_GO}"),
+    )
+    .await;
+    let (rs_status, _) = delete_one(
+        &client,
+        &token,
+        RUST,
+        &format!("/api/v4/properties/groups/{GROUP}/channel/fields/{D_RS}"),
+    )
+    .await;
+    assert_eq!(go_status, 200);
+    assert_eq!(rs_status, 200);
+
+    let window = std::time::Duration::from_secs(3);
+    let carries = |id: &'static str| {
+        move |frames: &[serde_json::Value]| {
+            frames
+                .iter()
+                .any(|f| f["event"] == "property_field_deleted" && f["data"]["field_id"] == id)
+        }
+    };
+    assert!(
+        go_socket.collect_until(window, carries(D_GO)).await,
+        "Go published no property_field_deleted within the window"
+    );
+    assert!(
+        rust_socket.collect_until(window, carries(D_RS)).await,
+        "we published no property_field_deleted within the window"
+    );
+
+    let of = |probe: &common::SocketProbe, id: &str| -> serde_json::Value {
+        let mut found: Vec<serde_json::Value> = probe
+            .events_named("property_field_deleted")
+            .into_iter()
+            .filter(|f| f["data"]["field_id"] == id)
+            .collect();
+        assert_eq!(
+            found.len(),
+            1,
+            "exactly one property_field_deleted for {id}, got {found:?}"
+        );
+        found.remove(0)
+    };
+    let go_event = of(&go_socket, D_GO);
+    let rust_event = of(&rust_socket, D_RS);
+
+    assert_eq!(
+        go_event["data"]["object_type"], "channel",
+        "Go carries the field's object type"
+    );
+    assert_eq!(
+        rust_event["data"]["object_type"], go_event["data"]["object_type"],
+        "and so do we"
+    );
+    assert_eq!(
+        go_event["data"].as_object().map(|o| {
+            let mut keys: Vec<&String> = o.keys().collect();
+            keys.sort();
+            keys.into_iter().cloned().collect::<Vec<_>>()
+        }),
+        rust_event["data"].as_object().map(|o| {
+            let mut keys: Vec<&String> = o.keys().collect();
+            keys.sort();
+            keys.into_iter().cloned().collect::<Vec<_>>()
+        }),
+        "the same payload keys — `field_id` and `object_type`, and not the field itself"
+    );
+    assert_eq!(
+        go_event["broadcast"], rust_event["broadcast"],
+        "a system-target field broadcasts unscoped on both sides"
+    );
+
+    unplant_delete_fixture().await;
 }
