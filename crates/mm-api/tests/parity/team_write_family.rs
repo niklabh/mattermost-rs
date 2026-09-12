@@ -1402,3 +1402,250 @@ async fn invite_token_count(tag: &str) -> Option<i64> {
         .expect("the token count runs");
     Some(count)
 }
+
+// ---------------------------------------------------------------------------------------------
+// deleteTeam
+// ---------------------------------------------------------------------------------------------
+
+/// Archiving stamps `delete_at` and touches nothing else, and `restoreTeam` is its exact inverse.
+///
+/// Each server archives a team of its own, and both teams are restored before the test ends —
+/// the fixture teams are shared state and a suite that leaves one archived breaks the next.
+#[tokio::test]
+async fn archiving_a_team_stamps_delete_at_and_nothing_else() {
+    if !stack_enabled() {
+        return;
+    }
+    let http = client();
+    let token = go_minted_token(&http).await;
+
+    let mut shapes = Vec::new();
+    for base in [GO, RUST] {
+        let tag = if base == GO { "twfdelg" } else { "twfdelr" };
+        let team_id = create_team(&http, &token, tag).await;
+
+        let before: serde_json::Value = serde_json::from_str(
+            &send(
+                &http,
+                reqwest::Method::GET,
+                base,
+                &token,
+                &format!("/api/v4/teams/{team_id}"),
+                None,
+            )
+            .await
+            .1,
+        )
+        .expect("a team");
+
+        let (status, raw) = send(
+            &http,
+            reqwest::Method::DELETE,
+            base,
+            &token,
+            &format!("/api/v4/teams/{team_id}"),
+            None,
+        )
+        .await;
+        assert_eq!(status, 200, "{base}: {raw}");
+        assert_eq!(raw, r#"{"status":"OK"}"#, "{base}: ReturnStatusOK");
+
+        let after: serde_json::Value = serde_json::from_str(
+            &send(
+                &http,
+                reqwest::Method::GET,
+                base,
+                &token,
+                &format!("/api/v4/teams/{team_id}"),
+                None,
+            )
+            .await
+            .1,
+        )
+        .expect("a team");
+        assert!(
+            after["delete_at"].as_i64().unwrap_or(0) > 0,
+            "{base}: delete_at is stamped: {after}"
+        );
+
+        // Everything else survives, `update_at` excepted — `PreUpdate` moves it.
+        for key in [
+            "id",
+            "name",
+            "display_name",
+            "description",
+            "email",
+            "type",
+            "company_name",
+            "allowed_domains",
+            "invite_id",
+            "allow_open_invite",
+            "create_at",
+        ] {
+            assert_eq!(before[key], after[key], "{base}: {key} must not move");
+        }
+        assert!(
+            after["update_at"].as_i64().unwrap_or(0) >= before["update_at"].as_i64().unwrap_or(0),
+            "{base}: PreUpdate moves update_at"
+        );
+
+        // Restore, so the archived team does not outlive this test.
+        let (status, raw) = send(
+            &http,
+            reqwest::Method::POST,
+            base,
+            &token,
+            &format!("/api/v4/teams/{team_id}/restore"),
+            Some(&serde_json::json!({})),
+        )
+        .await;
+        assert_eq!(status, 200, "{base}: restoring the team: {raw}");
+        let restored: serde_json::Value = serde_json::from_str(&raw).expect("a team");
+        assert_eq!(restored["delete_at"], 0, "{base}: restore is the inverse");
+
+        // The *shape* of the answer, with the per-team values normalised away.
+        let mut shape = after.clone();
+        if let Some(object) = shape.as_object_mut() {
+            for key in ["id", "name", "display_name", "email", "invite_id"] {
+                object.insert(key.to_owned(), serde_json::json!(true));
+            }
+            for key in ["create_at", "update_at", "delete_at"] {
+                let nonzero = object
+                    .get(key)
+                    .and_then(serde_json::Value::as_i64)
+                    .unwrap_or(0)
+                    > 0;
+                object.insert(key.to_owned(), serde_json::json!(nonzero));
+            }
+        }
+        shapes.push(shape);
+    }
+    assert_eq!(
+        shapes[0], shapes[1],
+        "the archived teams have the same shape"
+    );
+}
+
+/// `?permanent=true` with `EnableAPITeamDeletion` off — the stock configuration — is a **401**,
+/// and the id depends on whether the caller is a system admin. Both halves are asserted, because
+/// the two ids differ by ten characters at the same status.
+///
+/// `strconv.ParseBool` discards its error, so `?permanent=yes` is *false* and archives the team.
+#[tokio::test]
+async fn permanent_deletion_is_a_401_whose_id_depends_on_the_caller() {
+    if !stack_enabled() {
+        return;
+    }
+    let http = client();
+    let admin = go_minted_token(&http).await;
+    let team_id = create_team(&http, &admin, "twfperm2").await;
+
+    // The admin gets the verbose id.
+    let mut answers = Vec::new();
+    for base in [GO, RUST] {
+        let (status, raw) = send(
+            &http,
+            reqwest::Method::DELETE,
+            base,
+            &admin,
+            &format!("/api/v4/teams/{team_id}?permanent=true"),
+            None,
+        )
+        .await;
+        assert_eq!(status, 401, "{base}: not 403: {raw}");
+        answers.push(error_id(&raw));
+    }
+    assert_eq!(
+        answers[0], "api.user.delete_team.not_enabled.for_admin.app_error",
+        "a system admin gets the verbose id"
+    );
+    assert_eq!(answers[0], answers[1]);
+
+    // A non-admin who nonetheless holds `manage_team` gets the short id. `team_admin` grants
+    // `manage_team`, and the plain user is made one through Go.
+    let plain = common::create_plain_user(&http, &admin, &team_id, "twfpermdel").await;
+    let (status, raw) = send(
+        &http,
+        reqwest::Method::PUT,
+        GO,
+        &admin,
+        &format!("/api/v4/teams/{team_id}/members/{}/roles", plain.id),
+        Some(&serde_json::json!({"roles": "team_user team_admin"})),
+    )
+    .await;
+    assert_eq!(status, 200, "promoting the fixture user: {raw}");
+
+    let mut answers = Vec::new();
+    for base in [GO, RUST] {
+        let (status, raw) = send(
+            &http,
+            reqwest::Method::DELETE,
+            base,
+            &plain.token,
+            &format!("/api/v4/teams/{team_id}?permanent=true"),
+            None,
+        )
+        .await;
+        assert_eq!(status, 401, "{base}: {raw}");
+        answers.push(error_id(&raw));
+    }
+    assert_eq!(
+        answers[0], "api.user.delete_team.not_enabled.app_error",
+        "a non-admin gets the short id"
+    );
+    assert_eq!(answers[0], answers[1]);
+
+    // `?permanent=yes` is not a bool, so it archives instead of refusing.
+    let (status, raw) = send(
+        &http,
+        reqwest::Method::DELETE,
+        RUST,
+        &admin,
+        &format!("/api/v4/teams/{team_id}?permanent=yes"),
+        None,
+    )
+    .await;
+    assert_eq!(status, 200, "ParseBool discards its error: {raw}");
+    let (status, _raw) = send(
+        &http,
+        reqwest::Method::POST,
+        RUST,
+        &admin,
+        &format!("/api/v4/teams/{team_id}/restore"),
+        Some(&serde_json::json!({})),
+    )
+    .await;
+    assert_eq!(status, 200, "and the team is restored");
+
+    common::delete_plain_user(&http, &admin, &plain.id).await;
+}
+
+/// The permission gate precedes both the archive and the permanent refusal, so a caller without
+/// `manage_team` gets a 403 even for `?permanent=true`.
+#[tokio::test]
+async fn archiving_needs_manage_team_before_anything_else() {
+    if !stack_enabled() {
+        return;
+    }
+    let http = client();
+    let admin = go_minted_token(&http).await;
+    let team_id = create_team(&http, &admin, "twfdelp").await;
+    let plain = common::create_plain_user(&http, &admin, &team_id, "twfdelperm").await;
+
+    for suffix in ["", "?permanent=true"] {
+        for base in [GO, RUST] {
+            let (status, raw) = send(
+                &http,
+                reqwest::Method::DELETE,
+                base,
+                &plain.token,
+                &format!("/api/v4/teams/{team_id}{suffix}"),
+                None,
+            )
+            .await;
+            assert_eq!(status, 403, "{base} for {suffix:?}: {raw}");
+        }
+    }
+
+    common::delete_plain_user(&http, &admin, &plain.id).await;
+}

@@ -227,6 +227,14 @@ pub struct Config {
     /// [`crate::channel_write`]'s delete path.
     pub enable_api_channel_deletion: bool,
 
+    /// `ServiceSettings.EnableAPITeamDeletion` (config.go:452). Go default **`false`**
+    /// (config.go:885).
+    ///
+    /// The team twin of the setting above, with the same 401-not-403 refusal and the same
+    /// admin/non-admin id split — `api.user.delete_team.not_enabled.for_admin.app_error` versus
+    /// `api.user.delete_team.not_enabled.app_error`. Read by `mm_api::teams::delete_team`.
+    pub enable_api_team_deletion: bool,
+
     /// `TeamSettings.EnableChannelCategorySorting` (config.go:2558). Go default **`true`**.
     ///
     /// Read only as the second half of `addChannelToDefaultCategory`'s gate
@@ -908,6 +916,8 @@ impl Default for Config {
             guest_restrict_creation_to_domains: String::new(),
             allow_synced_drafts: true,
             enable_api_channel_deletion: false,
+            // config.go:885 — `new(false)`.
+            enable_api_team_deletion: false,
             enable_channel_category_sorting: true,
             // config.go:2629 — `new(int64(2000))`.
             max_channels_per_team: 2000,
@@ -1143,6 +1153,11 @@ impl Config {
                 lookup,
                 "MM_SERVICESETTINGS_ENABLEAPICHANNELDELETION",
                 default.enable_api_channel_deletion,
+            ),
+            enable_api_team_deletion: lookup_bool(
+                lookup,
+                "MM_SERVICESETTINGS_ENABLEAPITEAMDELETION",
+                default.enable_api_team_deletion,
             ),
             enable_channel_category_sorting: lookup_bool(
                 lookup,
@@ -1587,6 +1602,9 @@ impl Config {
             enable_api_channel_deletion: service
                 .enable_api_channel_deletion
                 .unwrap_or(default.enable_api_channel_deletion),
+            enable_api_team_deletion: service
+                .enable_api_team_deletion
+                .unwrap_or(default.enable_api_team_deletion),
             enable_channel_category_sorting: team_settings
                 .enable_channel_category_sorting
                 .unwrap_or(default.enable_channel_category_sorting),
@@ -2017,6 +2035,8 @@ struct ServiceSettingsDocument {
     allow_synced_drafts: Option<bool>,
     #[serde(rename = "EnableAPIChannelDeletion")]
     enable_api_channel_deletion: Option<bool>,
+    #[serde(rename = "EnableAPITeamDeletion")]
+    enable_api_team_deletion: Option<bool>,
     #[serde(rename = "EnableBurnOnRead")]
     enable_burn_on_read: Option<bool>,
     #[serde(rename = "ExperimentalEnableDefaultChannelLeaveJoinMessages")]

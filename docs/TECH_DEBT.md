@@ -7293,3 +7293,52 @@ the suite alone does not help, because the race is *within* it.
 The shape is [D-284]'s and the memory note's "a failure naming a route you did not touch is usually
 a concurrent write to shared state". What is owed is per-test emoji name prefixes, or a serial
 marker on that one file.
+
+---
+
+## D-370 · `deleteTeam?permanent=true` forwards when `EnableAPITeamDeletion` is on
+
+**Status** OPEN · **Severity** unported-route-arm · **Raised** 2026-09-12 (team write family)
+
+`DELETE /api/v4/teams/{team_id}` serves its **archive** arm from Rust, and the permanent arm's
+refusal — the 401 whose id depends on whether the caller is a system admin — with it. What is
+still Go's is the permanent deletion *itself*, reached only when
+`ServiceSettings.EnableAPITeamDeletion` is true. It defaults to **false** and is unset on the
+parity stack, so nothing here is reachable today.
+
+`PermanentDeleteTeam` needs ten store methods across five stores that this tree does not have:
+`Channel.GetTeamChannels`, `GetTeamSpaceChannels`, `PermanentDeleteMembersByChannel` and
+`PermanentDelete`; `Post.PermanentDeleteByChannel`; `Webhook.PermanentDeleteIncomingByChannel`
+and `…OutgoingByChannel`; `PostPersistentNotification.DeleteByChannel` for the team path;
+`Team.RemoveAllMembersByTeam` and `Team.PermanentDelete`; plus `Command.PermanentDeleteByTeam`
+and `App.PermanentDeleteChannel` to drive them. Writing that cascade blind is precisely what the
+parity oracle exists to prevent: with the flag off, **no route-level test can exercise a single
+one of those deletes**, and a wrong `DELETE` predicate destroys data silently.
+
+The channel twin (`mm_api::channel_writes::delete_channel`) already forwards its permanent arm for
+the same reason, so this is the established shape rather than a new exception.
+
+What would close it: turn the flag on for one stack, port `PermanentDeleteChannel` and the ten
+store methods, and compare the surviving rows in `Posts`, `ChannelMembers`, `Channels`,
+`TeamMembers`, `Teams`, `Commands` and both webhook tables between two teams deleted by the two
+servers.
+
+---
+
+## D-371 · the team write family forwards a licensed installation on two routes
+
+**Status** OPEN · **Severity** unported-branch · **Raised** 2026-09-12 (team write family)
+
+`deleteTeam` calls `cleanupTeamAccessControlPolicy` between the team write and the websocket
+event, on **both** the archive and the permanent arm, and it needs the enterprise access-control
+service. So `mm_api::teams::delete_team` forwards whole when `license_state()` says Licensed,
+exactly as `mm_api::channel_writes::delete_channel` does for its channel-scope twin.
+
+`searchTeams` has the same shape one step further out: `FilterNonQualifyingTeamsForUser` and
+`AnnotateRecommendedTeamsForUser` both short-circuit unless `TeamMembershipAccessControlEnabled()`,
+which is a constant `false` here — so the search is served in full rather than forwarded, and the
+ABAC directory filter is simply absent. That is correct for an unlicensed server and **untested**
+for a licensed one.
+
+Both are unreachable on a `mattermost-team-edition` image with zero `Licenses` rows. Recorded so
+the next person to install a licence knows which two routes change shape.

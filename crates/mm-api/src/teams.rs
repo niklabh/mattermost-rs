@@ -15,6 +15,7 @@
 //! - `searchTeams` — `POST /api/v4/teams/search`
 //! - `createTeam` — `POST /api/v4/teams`
 //! - `invalidateAllEmailInvites` — `DELETE /api/v4/teams/invites/email`
+//! - `deleteTeam` — `DELETE /api/v4/teams/{team_id}` (the archive arm)
 
 use axum::body::Body;
 use axum::extract::{Path, Request, State};
@@ -1783,6 +1784,125 @@ pub async fn restore_team(
 
     match state.app.get_team(&team_id).await {
         Ok(team) => sanitized_team_response(&state, &session, team).await,
+        Err(err) => ApiError::from(err).into_response(),
+    }
+}
+
+/// The two ids `deleteTeam` chooses between when permanent deletion is disabled — Go's comment
+/// is "More verbose error message for system admins".
+///
+/// The pair differs by the ten characters `for_admin.` in the middle and both are **401**, so the
+/// wrong one is invisible to any test that only checks the status. Same shape as
+/// `mm_api::channel_writes`' channel twin, with `team` where it says `channel`.
+fn team_deletion_not_enabled_id(is_system_admin: bool) -> &'static str {
+    if is_system_admin {
+        "api.user.delete_team.not_enabled.for_admin.app_error"
+    } else {
+        "api.user.delete_team.not_enabled.app_error"
+    }
+}
+
+/// Port of `deleteTeam` (api4/team.go:687) — `DELETE /api/v4/teams/{team_id}`.
+///
+/// An **archive**. `?permanent=true` is a different operation behind
+/// `ServiceSettings.EnableAPITeamDeletion`, which defaults to **false**.
+///
+/// # The permanent refusal is a 401, not a 403
+///
+/// And which id it carries depends on who asked — see [`team_deletion_not_enabled_id`]. The user
+/// lookup that decides it is `usrErr == nil && user != nil && user.IsSystemAdmin()`, so a
+/// **failed** lookup falls to the non-admin message rather than becoming an error of its own.
+/// `strconv.ParseBool` decides what "true" means and discards its error, so `?permanent=yes`
+/// archives the team.
+///
+/// # One permission, and it precedes everything
+///
+/// `manage_team`, team-scoped. There is no separate permission for the permanent arm: the config
+/// flag is the whole difference. The audit record's `GetTeam` is best-effort and its failure is
+/// ignored, so a missing team is **not** a 404 here — `SoftDeleteTeam`'s own `GetTeam` produces
+/// that, after the permission check.
+///
+/// # What is forwarded
+///
+/// - **`?permanent=true` with the flag on.** `PermanentDeleteTeam` purges every channel's posts,
+///   members and webhooks, the memberships, the slash commands and the row — ten store methods
+///   across five stores, none of them reachable on this deployment because the flag is off. See
+///   [D-370].
+/// - **A licensed installation**, on either arm: `cleanupTeamAccessControlPolicy` runs between
+///   the write and the event and needs the enterprise access-control service. Same rule as
+///   `mm_api::channel_writes::delete_channel`.
+///
+/// # Wire format
+///
+/// `ReturnStatusOK` — `{"status":"OK"}`, no trailing newline.
+#[tracing::instrument(skip_all, fields(team_id = %team_id, permanent, forwarded = false))]
+pub async fn delete_team(
+    State(state): State<AppState>,
+    session: AuthenticatedSession,
+    Path(team_id): Path<String>,
+    request: Request,
+) -> Response {
+    if let Err(err) = require_id(&team_id, "team_id") {
+        return err.into_response();
+    }
+
+    // `params.Permanent, _ = strconv.ParseBool(query.Get("permanent"))` (web/params.go:232).
+    let permanent = crate::channels::query_flag_is_true(request.uri().query(), "permanent");
+    tracing::Span::current().record("permanent", permanent);
+
+    match state.app.license_state().await {
+        Ok(mm_app::license::LicenseState::Licensed) => {
+            tracing::Span::current().record("forwarded", true);
+            return crate::proxy::forward_to_go(State(state), request).await;
+        }
+        Ok(_) => {}
+        Err(err) => return ApiError::from(err).into_response(),
+    }
+
+    if !state
+        .app
+        .session_has_permission_to_team(&session.0, &team_id, &PERMISSION_MANAGE_TEAM)
+        .await
+    {
+        return ApiError::from(*make_permission_error(
+            &session.0,
+            &[&PERMISSION_MANAGE_TEAM],
+        ))
+        .into_response();
+    }
+
+    if permanent {
+        if state.app.config().enable_api_team_deletion {
+            tracing::Span::current().record("forwarded", true);
+            tracing::debug!("handing a permanent team deletion to Go");
+            return crate::proxy::forward_to_go(State(state), request).await;
+        }
+        let is_admin = state
+            .app
+            .get_user(&session.0.user_id)
+            .await
+            .map(|user| user.is_system_admin())
+            .unwrap_or(false);
+        return ApiError::from(mm_model::utils::AppError::new(
+            "deleteTeam",
+            team_deletion_not_enabled_id(is_admin),
+            None,
+            format!("teamId={team_id}"),
+            401,
+        ))
+        .into_response();
+    }
+
+    match state.app.soft_delete_team(&team_id).await {
+        Ok(()) => (
+            StatusCode::OK,
+            [
+                ("Content-Type", "application/json"),
+                ("x-mmrs-served-by", "rust"),
+            ],
+            r#"{"status":"OK"}"#,
+        )
+            .into_response(),
         Err(err) => ApiError::from(err).into_response(),
     }
 }

@@ -13,6 +13,7 @@ use mm_model::utils::{AppError, AppResult};
 use mm_store::TeamStore;
 use mm_store::channel_store::ChannelStore;
 use mm_store::job_store::JobStore;
+use mm_store::post_store::PostStore;
 use mm_store::system_store::SystemStore;
 use mm_store::team_store::TeamMembersGetOptions;
 use mm_store::token_store::TokenStore;
@@ -1682,6 +1683,58 @@ impl App {
         // request, leaving a created team the caller is not a member of.
         self.join_user_to_team(&created, &user, "").await?;
         Ok(created)
+    }
+
+    /// Port of `app.App.SoftDeleteTeam` (app/team.go:2113) — the archive arm of
+    /// `DELETE /api/v4/teams/{team_id}`.
+    ///
+    /// # The persistent-notification retirement comes **first**, and its failure is not swallowed
+    ///
+    /// `PostPersistentNotification().DeleteByTeam` runs before the team row is touched and answers
+    /// **500** `app.post_persistent_notification.delete_by_team.app_error`. So a failure there
+    /// leaves the team alive and un-archived, where every other cleanup on this path is either
+    /// after the write or logged. Ordering it after the update would archive a team while its
+    /// notifications kept firing.
+    ///
+    /// # `DeleteAt` and nothing else
+    ///
+    /// The row is otherwise untouched — the name stays taken, the invite id stays live, and
+    /// `restoreTeam` is the exact inverse. Contrast the *permanent* arm, which is a different
+    /// operation behind a config flag.
+    ///
+    /// # `cleanupTeamAccessControlPolicy` is not here
+    ///
+    /// Go calls it between the write and the event, and **never returns its error**. It needs the
+    /// enterprise access-control service; the handler forwards a licensed installation whole
+    /// rather than skipping it, the same rule `mm_api::channel_writes::delete_channel` follows.
+    ///
+    /// The event is `delete_team`, carrying the **sanitised** team — see [`App::send_team_event`].
+    #[tracing::instrument(skip(self), fields(team_id = %team_id))]
+    pub async fn soft_delete_team(&self, team_id: &str) -> AppResult<()> {
+        let mut team = self.get_team(team_id).await?;
+
+        self.store()
+            .post()
+            .delete_persistent_notifications_by_team(&team.id)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "persistent notification retirement failed");
+                AppError::boxed(
+                    "SoftDeleteTeam",
+                    "app.post_persistent_notification.delete_by_team.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })?;
+
+        team.delete_at = mm_model::utils::get_millis();
+        let deleted = self.write_team("SoftDeleteTeam", team).await?;
+        self.send_team_event(
+            &deleted,
+            mm_model::websocket_message::WEBSOCKET_EVENT_DELETE_TEAM,
+        )
+        .await
     }
 
     /// Port of `app.App.UpdateTeamPrivacy` (app/team.go:231).
