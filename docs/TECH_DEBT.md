@@ -6276,7 +6276,7 @@ pinned rather than assumed.
 
 ---
 
-## D-204 · The generated initials avatar is not reproducible, so two routes forward
+## D-204 · The generated initials avatar is not reproducible, so three routes forward
 
 **Status** OPEN · **Severity** incomplete · **Raised** 2026-09-09 (phase 2, profile image)
 
@@ -6287,7 +6287,14 @@ for a day under an etag we would have minted.
 
 Two consequences:
 
-- `GET /api/v4/users/{user_id}/image/default` is **entirely** that path and is not migrated.
+- `GET /api/v4/users/{user_id}/image/default` is **entirely** that path. It is now *registered*
+  here and answers its two refusals — the `RequireUserId` 400 and `GetUser`'s 404 — and forwards
+  the image itself. Its bot branch (`botDefaultImage`) is a `//go:embed` of a fixed PNG and would
+  be reproducible, by copying a binary out of the read-only reference tree; it is forwarded with
+  the rest. See [D-411].
+- `DELETE /api/v4/users/{user_id}/image` is the same rasteriser and forwards for the same reason,
+  which is not obvious from its name: it **generates and stores** the avatar rather than removing
+  anything.
 - `GET /api/v4/users/{user_id}/image` is migrated but forwards when the stored `profile.png`
   does not read — which is also the branch that *writes* the generated image back when
   `LastPictureUpdate == 0`, so forwarding is doubly right.
@@ -7471,9 +7478,19 @@ discovered later.
 
 ---
 
-## D-381 · the multipart port does not decode RFC 2231 parameter continuations
+## D-381 · the multipart port does not decode RFC 2231 parameter continuations — CLOSED 2026-09-13
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-12 (emoji writes and the terms-of-service pair)
+**Status** CLOSED · **Severity** divergence · **Raised** 2026-09-12 (emoji writes and the terms-of-service pair)
+
+**Closed by `86a802c`**, which was the condition this entry set: the continuation decoder before
+the second multipart route ships. `parse_media_type` is now a function-for-function transcription
+of `mime.ParseMediaType` including the `*`-attribute side map and the stitching loop, pinned over
+46 rows rather than 23, and four refusals the first port had backwards are fixed with it. The
+second and third multipart routes — `POST /api/v4/brand/image` and
+`POST /api/v4/users/{user_id}/image` — shipped on 2026-09-13 against that decoder. What is left of
+this entry is [D-410]: a decoded filename that is not valid UTF-8 is lossy in a Rust `String`.
+
+The original text follows.
 
 `mm_api::multipart::parse_media_type` reproduces `mime.ParseMediaType` for the forms a
 `multipart/form-data` body actually carries — quoted strings with backslash escapes, lower-cased
@@ -7607,3 +7624,115 @@ write family from here on:
 > against** — including values that cannot carry the suite's name prefix, which are exactly the
 > interesting ones. And after any mutation batch over a write route, run the full suite once on a
 > clean tree before quoting a tally; the batch's own verdicts do not see the debris they leave.
+
+---
+
+## D-410 · a percent-decoded multipart filename that is not valid UTF-8 is lossy here
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-13 (the four image routes)
+
+`mm_api::multipart::percent_hex_unescape` (a port of `mime/mediatype.go:345`) yields arbitrary
+bytes in Go and Go stores them in a `string`, which need not be valid UTF-8. A Rust `String`
+cannot hold that, so `filename*=utf-8''%ff` decodes lossily here — the replacement character — and
+byte-exactly there.
+
+Nothing observable turns on it today. The four multipart routes this server answers read a
+filename only to decide whether a part is a *file* or a *value* (`filename` present and non-empty),
+and `createEmoji` reads its extension; none reads its content, and none puts it on the wire. The
+first route that echoes an uploaded filename back to the client — `POST /api/v4/files` is the one
+that will — makes it visible.
+
+**What is owed:** carry the parameter map as `Vec<u8>` rather than `String`, or record the
+divergence at the one call site that would show it, before a route echoes a filename.
+
+---
+
+## D-411 · every write on the four image routes is Go's; only the refusals are served
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-13 (the four image routes)
+
+`POST /api/v4/users/{user_id}/image`, `DELETE /api/v4/users/{user_id}/image`,
+`GET /api/v4/users/{user_id}/image/default` and `POST /api/v4/brand/image` answer every refusal
+from here and forward the moment none has fired. Three different reasons, none of them the same
+as the others:
+
+1. **`SetProfileImage`** decodes the upload, rotates it by its EXIF orientation, `FillCenter`s it
+   to 128×128 and re-encodes it as PNG — *every* accepted upload, PNG or not. There is no
+   write-through case as there is for `createEmoji`, because Go never stores the client's bytes.
+   Same reason as [D-380]: `imaging.Fit` plus Go's PNG encoder do not reproduce from a second
+   implementation.
+2. **`SetDefaultProfileImage`** and **`getDefaultProfileImage`** are the freetype rasteriser of
+   [D-204] and nothing else — an FNV-1a hash picks one of 26 colours and the username's first
+   character is drawn at 64pt through `fonts/nunito-bold.ttf`. The **bot** branch
+   (`botDefaultImage`) is a `//go:embed` of a fixed PNG and *is* constant, but reproducing it
+   means copying a binary out of the read-only reference tree.
+3. **`SaveBrandImage`** re-encodes with `imgEncoder.EncodePNG`, so the stored bytes are Go's for
+   every accepted upload including one that was already a PNG.
+
+Each hand-over is before the file backend is touched, and a test says so rather than a comment:
+`image_writes::a_profile_upload_that_go_refuses_is_forwarded_without_writing` sends a body every
+refusal passes and Go's own decode then rejects, and checks `LastPictureUpdate` did not move;
+`the_brand_upload_forwards_before_it_writes` does the same against `GET /api/v4/brand/image`, so
+the archive `MoveFile` and the `WriteFile` are both provably past the forward.
+
+**What is owed:** a decision about pixel-exact image work, which is the same decision [D-380]
+deferred. Until it is taken these four are refusal-only, and the `Go server that is not running`
+end state is not reached for them. The profile POST additionally needs `SetProfileImage`'s
+`Users.UpdateAt` bump, its `LastPictureUpdate` write and its `user_updated` websocket event; the
+DELETE needs `ResetLastPictureUpdate` and the same event.
+
+---
+
+## D-412 · three refusal families on the image routes have no Go oracle on this stack
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-13 (the four image routes)
+
+Most of the refusals these four routes give are compared byte for byte against the live Go server —
+every invalid id, every permission denial, every unparseable body, every missing `image` part and
+the 400/404 split on a user that does not exist. Three families are not, because the stack's Go server cannot be asked for them without breaking
+every other suite in the binary, and each is measured against a **second mm-api** with the setting
+changed and expected values transcribed from the Go source instead:
+
+| family | what it needs | test |
+|---|---|---|
+| the three 501s | `FileSettings.DriverName == ""`, which `file_bytes` depends on not being | `a_driverless_server_501s_in_three_different_places` |
+| both size limits | `MaxFileSize` small enough to reach by sending bytes; it is 100 MiB here | `both_size_limits_are_where_go_puts_them` |
+| the LDAP 409 | `LdapSettings.PictureAttribute` set, and `Users.AuthService` written by SQL | `ldap_owns_the_picture_only_when_an_attribute_names_it` |
+
+Each names its transcription in its own doc comment. The *ordering* each family witnesses is
+genuinely measured — the permission ahead of the storage check, the storage check ahead of the
+body on one route and behind it on another — because those are visible from the second server
+alone. What is transcribed is the status and the error id.
+
+A fourth branch is not covered at all: `getDefaultProfileImage`'s `view_members` 403 is
+unreachable here, since `GetViewUsersRestrictions` is `None` for every pair on this stack and
+`user_can_see_other_user` forwards rather than answers when it is not.
+
+**What is owed:** a driverless Go server, the way `scripts/go-discoverable.sh` and
+`scripts/go-boards.sh` are third servers for a feature flag — it would turn the first family from
+transcribed into measured, and the same trick with `MM_FILESETTINGS_MAXFILESIZE` would do the
+second.
+
+---
+
+## D-413 · the profile-field lock forwards a licensed server
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-13 (the four image routes)
+
+`IsProfileImageLockedForUser` (app/user.go:1465) is a conjunction of four predicates, and the
+third is `model.MinimumEnterpriseLicense(a.License())` — `LicenseToLicenseTier[SkuShortName] >=
+EnterpriseTier`. `App::license_state` can see *whether* a licence row exists and never its SKU
+tier, so that conjunct cannot be answered here.
+
+`is_profile_image_locked_for_user` therefore evaluates the licence **last**, which reordering a
+conjunction of pure predicates does not change: an unlicensed server is `Ok(false)` outright, and
+a licensed one is forwarded *only when the other three already hold* — the caller lacks
+`edit_other_users`, the account is email/password, and `LockProfileFieldsForEmailUsers` is `"all"`.
+On a stock server that setting is `"none"`, so the forward is unreachable without an
+administrator turning it on.
+
+Both `setProfileImage` and `setDefaultProfileImage` check the lock **last**, so this forward too is
+before any write.
+
+**What is owed:** the SKU tier on `LicenseState`, which the same gap blocks in [D-300], [D-360],
+[D-371] and [D-390]. One port of `LicenseToLicenseTier` closes all five.
