@@ -464,6 +464,80 @@ async fn a_repeated_pending_post_id_is_answered_with_the_first_post() {
     );
 }
 
+/// A failed create **releases** its pending-post-id claim, so the client can retry.
+///
+/// `CreatePost` claims the id with `unknownPostId` before doing the work and `defer`s a `Remove`
+/// that runs on any failure (app/post.go); this port unrolls that defer, and the failure arm is
+/// what makes a forward safe — a forwarded request is a failure here, so Go's cache gets to
+/// deduplicate the retry instead of this one refusing it.
+///
+/// Keeping the claim instead of removing it survived the mutation run, because every dedup test
+/// above retries after a *success*. The discriminator is a request that fails **after** the claim
+/// is taken: `?silent=true` from a session that is neither a bot nor an OAuth app is a 403 raised
+/// inside the claimed section (`api.post.create_post.silent_notification.app_error`), where the
+/// refusals that forward are all decided before it.
+///
+/// With the claim leaked, the retry finds an entry whose post id is still `unknownPostId` and
+/// answers 500 `api.post.deduplicate_create_post.pending` instead of creating the post.
+#[tokio::test]
+async fn a_failed_create_releases_its_pending_post_id_for_the_retry() {
+    if !stack_enabled() {
+        return;
+    }
+    let client = client();
+    let token = go_minted_token(&client).await;
+    let (_team, channel) = own_channel(&client, &token, "dedupfail").await;
+
+    // Unique per run, for the reason the test above documents: the cache outlives the test.
+    let run = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or_default();
+
+    for base in [GO, RUST] {
+        let pending = format!(
+            "{}:mmrsdedupfail{run}{}",
+            logged_in_user_id(),
+            if base == GO { "go" } else { "rs" }
+        );
+        let body = serde_json::json!({
+            "channel_id": channel,
+            "message": "mmrs dedup after failure",
+            "pending_post_id": pending,
+        });
+
+        // The failure: silent notification from a plain session.
+        let (failed_status, _, _) =
+            create_on(&client, base, &token, "/api/v4/posts?silent=true", &body).await;
+        assert_eq!(
+            failed_status, 403,
+            "{base}: a silent notification from a non-integration session is refused"
+        );
+
+        // The retry, with the same pending id and no `?silent`.
+        let (retry_status, _, retry) =
+            create_on(&client, base, &token, "/api/v4/posts", &body).await;
+        assert_eq!(
+            retry_status, 201,
+            "{base}: the failed create released its claim, so the retry creates the post"
+        );
+        assert!(
+            retry["id"].as_str().is_some_and(|id| !id.is_empty()),
+            "{base}: the retry answered with a real post"
+        );
+    }
+
+    let messages = posts_in_channel_named(&client, &token, &channel).await;
+    assert_eq!(
+        messages
+            .iter()
+            .filter(|m| *m == "mmrs dedup after failure")
+            .count(),
+        2,
+        "one row per server — the refused create wrote nothing: {messages:?}"
+    );
+}
+
 /// A *different* pending post id is a different post — the control for the test above.
 ///
 /// Without it, a cache that deduplicated everything, or one keyed on the channel rather than on
@@ -1053,6 +1127,89 @@ async fn a_member_with_mention_keys_forwards_the_whole_channel() {
     delete_plain_user(&client, &admin, &user_id).await;
 }
 
+/// The **other** arm of the same query: `first_name` alone, with no `mention_keys`.
+///
+/// `channel_has_keyword_mention_recipients` is a disjunction — a member counts if their
+/// `mention_keys` is non-blank **or** their `first_name` notify prop is on, because Go builds a
+/// mention key from the member's own first name (app/mention_parser.go). The test above sets
+/// `mention_keys` and explicitly turns `first_name` off, which pins the first arm and leaves the
+/// second one free: deleting `OR u.notifyprops ->> 'first_name' = 'true'` changed no answer in
+/// the whole suite, and the mutation survived. Right and wrong coincided because nothing ever
+/// sent a member who qualifies *only* by first name.
+///
+/// So this is the mirror: `mention_keys` blank, `first_name` on. A post must still forward.
+#[tokio::test]
+async fn a_member_notified_on_their_first_name_forwards_the_whole_channel() {
+    if !stack_enabled() {
+        return;
+    }
+    let client = client();
+    let admin = go_minted_token(&client).await;
+    let (team, channel) = own_channel(&client, &admin, "firstname").await;
+
+    // The control, as above: before the member exists, this channel is served here.
+    let (_, served_before, _) = create_on(
+        &client,
+        RUST,
+        &admin,
+        "/api/v4/posts",
+        &serde_json::json!({ "channel_id": channel, "message": "mmrs before first name" }),
+    )
+    .await;
+    assert!(
+        served_before,
+        "the control: without a keyword recipient this channel is served"
+    );
+
+    let user_id = create_plain_user(&client, &admin, &team, "createpostfirstname")
+        .await
+        .id;
+    add_user_to_channel(&client, &admin, &channel, &user_id).await;
+
+    // Blank `mention_keys` on purpose: it is what makes this test about the second arm and not a
+    // duplicate of the one above. A non-blank value here would satisfy the disjunction's first
+    // arm and the mutation would survive again.
+    let response = client
+        .put(format!("{GO}/api/v4/users/{user_id}/patch"))
+        .header("Authorization", format!("Bearer {admin}"))
+        .json(&serde_json::json!({
+            "notify_props": { "mention_keys": "", "first_name": "true" },
+        }))
+        .send()
+        .await
+        .expect("Go answers");
+    assert!(
+        response.status().is_success(),
+        "setting the first_name notify prop failed"
+    );
+
+    let (status, served_after, _) = create_on(
+        &client,
+        RUST,
+        &admin,
+        "/api/v4/posts",
+        &serde_json::json!({ "channel_id": channel, "message": "mmrs after first name" }),
+    )
+    .await;
+    assert_eq!(status, 201);
+    assert!(
+        !served_after,
+        "a member notified on their first name must forward the channel"
+    );
+
+    let messages = posts_in_channel_named(&client, &admin, &channel).await;
+    assert_eq!(
+        messages
+            .iter()
+            .filter(|m| *m == "mmrs after first name")
+            .count(),
+        1,
+        "the forward left exactly one row: {messages:?}"
+    );
+
+    delete_plain_user(&client, &admin, &user_id).await;
+}
+
 // ---------------------------------------------------------------------------------------------
 // createEphemeralPost
 // ---------------------------------------------------------------------------------------------
@@ -1095,6 +1252,70 @@ async fn an_ephemeral_post_matches_go_and_writes_no_row() {
         obj.insert("create_at".to_owned(), serde_json::json!(0));
     }
     assert_eq!(go, rs, "an ephemeral post");
+
+    assert!(
+        posts_in_channel_named(&client, &token, &channel)
+            .await
+            .is_empty(),
+        "an ephemeral post is not written to the database by either server"
+    );
+}
+
+/// A submitted `create_at` is **overwritten**, not defaulted.
+///
+/// `createEphemeralPost` assigns `ephRequest.Post.CreateAt = model.GetMillis()` unconditionally
+/// (api4/post.go:235) — there is no "only if zero" about it. The test above cannot see the
+/// difference because it blanks `create_at` on both sides before comparing, which is right for
+/// comparing the rest of the shape and is exactly why changing the assignment to
+/// `if post.create_at == 0` survived the mutation run: nothing ever submitted a non-zero one.
+///
+/// A backdated ephemeral post is the discriminator. Note this is the opposite rule from the
+/// create route, where an admin's backdated `create_at` **survives** — the two routes disagree,
+/// and that is the kind of thing a reader would fix in the wrong direction.
+#[tokio::test]
+async fn an_ephemeral_posts_submitted_create_at_is_overwritten_by_both_servers() {
+    if !stack_enabled() {
+        return;
+    }
+    let client = client();
+    let token = go_minted_token(&client).await;
+    let (_team, channel) = own_channel(&client, &token, "ephback").await;
+
+    // 2001-09-09, far enough back that no clock skew explains it surviving.
+    const BACKDATED: i64 = 1_000_000_000_000;
+    // Any real answer is after this (2023-11-14) and before the heat death of the universe.
+    const PLAUSIBLY_NOW: i64 = 1_700_000_000_000;
+
+    let body = serde_json::json!({
+        "user_id": logged_in_user_id(),
+        "post": {
+            "channel_id": channel,
+            "message": "mmrs ephemeral backdated",
+            "create_at": BACKDATED,
+        },
+    });
+    let (go_status, _, go_post) =
+        create_on(&client, GO, &token, "/api/v4/posts/ephemeral", &body).await;
+    let (rs_status, served_by_rust, rs_post) =
+        create_on(&client, RUST, &token, "/api/v4/posts/ephemeral", &body).await;
+
+    assert_eq!(go_status, 201);
+    assert_eq!(rs_status, 201);
+    assert!(served_by_rust, "the ephemeral route must be served here");
+
+    for (label, post) in [("Go", &go_post), ("this server", &rs_post)] {
+        let create_at = post["create_at"]
+            .as_i64()
+            .unwrap_or_else(|| panic!("{label} answered a numeric create_at"));
+        assert_ne!(
+            create_at, BACKDATED,
+            "{label} kept the submitted create_at instead of overwriting it"
+        );
+        assert!(
+            create_at > PLAUSIBLY_NOW,
+            "{label} answered {create_at}, which is not a current timestamp"
+        );
+    }
 
     assert!(
         posts_in_channel_named(&client, &token, &channel)

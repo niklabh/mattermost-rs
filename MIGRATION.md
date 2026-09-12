@@ -11260,3 +11260,32 @@ being inconvenient.
    Neither the `TeammateNameDisplay` setting nor the caller's `name_format` preference is read for
    the `posted` event, so this port needs no preference lookup there — a conclusion reached by
    reading the call site rather than the function.
+
+### Mutation testing: 33 run, 31 caught, 2 controls survived, 0 harness faults
+
+Plan at `scripts/mutations/post-creates.plan`. The first pass scored 27 caught with four real
+survivors; each was a fixture gap rather than an equivalent mutant, and each is now caught by a
+test written for it. The finding they share is worth stating once: **every one of the four was an
+input the suite never sent**, so the right answer and the wrong answer coincided.
+
+1. **The keyword-recipient query is a disjunction and only one arm was exercised.**
+   `a_member_with_mention_keys_forwards_the_whole_channel` sets `mention_keys` and explicitly
+   turns `first_name` *off*, which pins the first arm and leaves the second free — deleting
+   `OR u.notifyprops ->> 'first_name' = 'true'` changed no answer anywhere in the suite.
+   `a_member_notified_on_their_first_name_forwards_the_whole_channel` is the mirror.
+2. **Every dedup test retried after a success.** The claim-release arm only runs after a
+   *failure*, and the refusals that forward are all decided before the claim is taken. The
+   discriminator is `?silent=true` from a session that is neither a bot nor an OAuth app: a 403
+   raised inside the claimed section. With the claim leaked, the retry answers 500
+   `api.post.deduplicate_create_post.pending` instead of creating the post.
+3. **The ephemeral route's `create_at` was blanked before comparison.** Correct for comparing the
+   rest of the shape, and exactly why "assign unconditionally" and "assign only when zero" were
+   indistinguishable. Note the two routes *disagree*: `createEphemeralPost` overwrites a submitted
+   `create_at` (api4/post.go:235) where the create route lets an admin's backdated one survive —
+   a reader would plausibly "fix" this in the wrong direction.
+4. **`len(post.FileIds) > 0` cannot be pinned at route level here.** Separating its arms needs a
+   caller holding `create_post` but not `upload_file`, and no stock role on an unlicensed stack
+   grants one without the other (`channel_user` has both). Patching the role would have been a
+   write to shared state that every concurrent suite reads, which is the shape that has produced
+   failures in suites that touched nothing. Extracted as `post_carries_file_ids` and pinned by
+   `only_a_non_empty_file_id_list_requires_upload_file`; the plan line moved to the `unit` suite.

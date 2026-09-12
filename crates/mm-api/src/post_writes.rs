@@ -1049,6 +1049,20 @@ pub async fn create_ephemeral_post(
 ///
 /// Six checks, and the second is the one `scheduledPostChecks` does **not** have: a post carrying
 /// file ids additionally needs `upload_file` on the channel.
+/// Go's `len(post.FileIds) > 0` (api4/post.go:86) — whether a create needs `upload_file`.
+///
+/// A named function rather than an inline condition because of the middle case. Three inputs,
+/// two answers: **no** `file_ids` key and an **empty** list both skip the permission check, and
+/// only a non-empty list requires it. `is_some_and(|ids| !ids.is_empty())` collapses the first
+/// two, and inverting the emptiness test is invisible from outside the process — separating the
+/// arms needs a caller holding `create_post` but **not** `upload_file`, and no stock role on an
+/// unlicensed stack grants one without the other (`channel_user` has both). A mutation that
+/// inverted it survived a route-level batch for exactly that reason; the unit tests below are
+/// what kill it now.
+fn post_carries_file_ids(post: &Post) -> bool {
+    post.file_ids.as_deref().is_some_and(|ids| !ids.is_empty())
+}
+
 async fn create_post_checks(
     where_: &'static str,
     state: &AppState,
@@ -1057,7 +1071,7 @@ async fn create_post_checks(
 ) -> Result<(), PrepareError> {
     user_create_post_permission_check(state, session, &post.channel_id).await?;
 
-    if post.file_ids.as_deref().is_some_and(|ids| !ids.is_empty()) {
+    if post_carries_file_ids(post) {
         let (granted, _) = state
             .app
             .session_has_permission_to_channel(
@@ -1374,6 +1388,48 @@ mod tests {
                 "{method} {path} is answered here, so the list above proves less than it claims"
             );
         }
+    }
+
+    /// The three inputs of `post_carries_file_ids`, and the middle one is the point.
+    ///
+    /// An absent `file_ids` and a present-but-empty one are the **same** answer; only a non-empty
+    /// list requires `upload_file`. Route-level parity cannot see a swap here, so these are the
+    /// tests that pin it — see the function's own doc comment for why.
+    #[test]
+    fn only_a_non_empty_file_id_list_requires_upload_file() {
+        let absent = Post::default();
+        assert!(
+            absent.file_ids.is_none(),
+            "the default post carries no file_ids, which is the case being tested"
+        );
+        assert!(
+            !post_carries_file_ids(&absent),
+            "no file_ids key: the upload_file check is skipped"
+        );
+
+        let empty = Post {
+            file_ids: Some(Vec::new()),
+            ..Post::default()
+        };
+        assert!(
+            !post_carries_file_ids(&empty),
+            "an empty list is len 0 in Go too: the check is skipped"
+        );
+
+        let one = Post {
+            file_ids: Some(vec!["kbcdefghijklmnopqrstuvwxyz".to_owned()]),
+            ..Post::default()
+        };
+        assert!(post_carries_file_ids(&one), "one id: the check fires");
+
+        let several = Post {
+            file_ids: Some(vec![
+                "kbcdefghijklmnopqrstuvwxyz".to_owned(),
+                "lbcdefghijklmnopqrstuvwxyz".to_owned(),
+            ]),
+            ..Post::default()
+        };
+        assert!(post_carries_file_ids(&several), "two ids: the check fires");
     }
 
     #[test]
