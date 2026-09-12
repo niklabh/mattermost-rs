@@ -449,6 +449,30 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/users/{user_id}/sessions",
             partially_migrated_with_ids(&state, get(sessions::get_sessions)),
         )
+        // The session write family (api4/user.go:82-85). Three segments under `/users/`, so all
+        // three are siblings of `/users/{user_id}/sessions` rather than shadowing it, and the
+        // literal `sessions` under the parameterised `{user_id}` keeps `revoke` from colliding
+        // with anything else.
+        .route(
+            "/api/v4/users/{user_id}/sessions/revoke",
+            partially_migrated_with_ids(&state, post(sessions::revoke_session)),
+        )
+        .route(
+            "/api/v4/users/{user_id}/sessions/revoke/all",
+            partially_migrated_with_ids(&state, post(sessions::revoke_all_sessions_for_user)),
+        )
+        // `BaseRoutes.Users`, not `.User` — the literal `sessions` here is a sibling of
+        // `{user_id}` and axum prefers it, so `POST /users/sessions/revoke/all` lands on the
+        // all-users handler rather than being read as a user called `sessions`. Go's router makes
+        // the same choice, by registration order.
+        .route(
+            "/api/v4/users/sessions/revoke/all",
+            partially_migrated(post(sessions::revoke_all_sessions_all_users)),
+        )
+        .route(
+            "/api/v4/users/sessions/device",
+            partially_migrated(put(sessions::handle_device_props)),
+        )
         // `BaseRoutes.Users.Handle("/logout", APIHandler(logout))` (api4/user.go:75) — a literal
         // sibling of `{user_id}`, so axum's static-first preference lands `POST /users/logout`
         // here while the `{user_id}` route keeps every other method and every other segment. The
