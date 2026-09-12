@@ -15,8 +15,6 @@
 //! each**, identical apart from the id and name, and the two bodies are normalised before they are
 //! compared. A shared channel would let one server's write decide the other's answer.
 
-use std::time::Duration;
-
 use crate::common;
 
 use common::{
@@ -1870,7 +1868,7 @@ async fn channel_updated_is_addressed_to_the_channel_and_ignores_the_connection_
 
     assert!(
         probe
-            .collect_until(Duration::from_secs(5), |frames| {
+            .collect_until(common::EVENT_WINDOW, |frames| {
                 frames
                     .iter()
                     .any(|frame| is_channel_event(frame, "channel_updated", &channel))
@@ -1927,7 +1925,7 @@ async fn the_privacy_change_publishes_channel_updated_and_channel_converted() {
 
     assert!(
         probe
-            .collect_until(Duration::from_secs(5), |frames| {
+            .collect_until(common::EVENT_WINDOW, |frames| {
                 frames.iter().any(|frame| {
                     frame["event"] == "channel_converted"
                         && frame["data"]["channel_id"] == channel.as_str()
@@ -2010,7 +2008,7 @@ async fn a_private_channels_archive_and_restore_are_addressed_to_the_channel() {
     assert_eq!(status, 200, "{body}");
     assert!(
         probe
-            .collect_until(Duration::from_secs(5), |frames| {
+            .collect_until(common::EVENT_WINDOW, |frames| {
                 frames
                     .iter()
                     .any(|frame| is_channel_event(frame, "channel_updated", &channel))
@@ -2024,7 +2022,7 @@ async fn a_private_channels_archive_and_restore_are_addressed_to_the_channel() {
     assert_eq!(status, 200, "{body}");
     assert!(
         probe
-            .collect_until(Duration::from_secs(5), |frames| {
+            .collect_until(common::EVENT_WINDOW, |frames| {
                 frames.iter().any(|frame| {
                     frame["event"] == "channel_deleted"
                         && frame["data"]["channel_id"] == channel.as_str()
@@ -2057,7 +2055,7 @@ async fn a_private_channels_archive_and_restore_are_addressed_to_the_channel() {
     assert_eq!(status, 200, "{body}");
     assert!(
         probe
-            .collect_until(Duration::from_secs(5), |frames| {
+            .collect_until(common::EVENT_WINDOW, |frames| {
                 frames.iter().any(|frame| {
                     frame["event"] == "channel_restored"
                         && frame["data"]["channel_id"] == channel.as_str()
@@ -2104,7 +2102,7 @@ async fn a_public_channels_archive_is_addressed_to_the_team() {
     assert_eq!(status, 200, "{body}");
     assert!(
         probe
-            .collect_until(Duration::from_secs(5), |frames| {
+            .collect_until(common::EVENT_WINDOW, |frames| {
                 frames.iter().any(|frame| {
                     frame["event"] == "channel_deleted"
                         && frame["data"]["channel_id"] == channel.as_str()
@@ -2166,14 +2164,14 @@ async fn gos_channel_updated_and_ours_carry_the_same_shape() {
     .await;
 
     go_probe
-        .collect_until(Duration::from_secs(3), |frames| {
+        .collect_until(common::EVENT_WINDOW, |frames| {
             frames
                 .iter()
                 .any(|frame| is_channel_event(frame, "channel_updated", &go_channel))
         })
         .await;
     rust_probe
-        .collect_until(Duration::from_secs(3), |frames| {
+        .collect_until(common::EVENT_WINDOW, |frames| {
             frames
                 .iter()
                 .any(|frame| is_channel_event(frame, "channel_updated", &rust_channel))

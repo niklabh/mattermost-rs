@@ -2427,6 +2427,27 @@ impl Drop for SecondServer {
 use futures_util::{SinkExt, StreamExt};
 use tokio_tungstenite::tungstenite::Message;
 
+/// How long [`SocketProbe::collect_until`] waits for an event before giving up.
+///
+/// **This is a ceiling on how long a failure takes, not a guess at how fast the server is.**
+/// `collect_until` returns the instant its predicate matches, so widening this costs a passing
+/// test nothing and only ever buys patience for a slow one. That asymmetry is the whole argument
+/// for setting it generously.
+///
+/// It was a literal `Duration::from_secs(5)` at nine call sites until 2026-09-13, and the value
+/// was wrong for the machine the suite actually runs on: with several worktrees compiling and
+/// testing at once, a five-second window is not a statement about the server but about CPU
+/// contention between agents. `channel_writes::a_public_channels_archive_is_addressed_to_the_team`
+/// was reported as "failed in the suite, passes alone" by four separate sessions, each of which
+/// spent time establishing it was not their change. The same reasoning is already written out
+/// one screen below, on `collect_until` itself — a fixed window encodes an assumption about
+/// speed, and the assumption keeps changing.
+///
+/// Note this was **not** reproduced on a quiet stack: three full runs of the merged tree passed.
+/// The change is a widened window, not a diagnosed root cause. If a socket assertion still fails
+/// intermittently, the event genuinely is not arriving and the window is no longer the suspect.
+pub const EVENT_WINDOW: std::time::Duration = std::time::Duration::from_secs(20);
+
 /// A live websocket connection to one of the two servers, with everything it has been sent.
 pub struct SocketProbe {
     socket: tokio_tungstenite::WebSocketStream<
