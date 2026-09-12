@@ -232,11 +232,18 @@ static BUSY_STATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 ///
 /// Its HTTP twin has been served for months, so a difference here is the *transport*, not the
 /// handler — which is exactly why this is the first route on the socket.
+///
+/// **Takes `ACTIVE_LICENCE_ROW`** for the reason
+/// [`the_local_client_licence_matches_including_its_refusals`] gives, which is not obvious from
+/// the route name: `getSystemPing` reports a licence-derived field, so it reads
+/// `Systems.ActiveLicenseId` and races every test that sets that row. Ping looks like the one
+/// route in the suite that depends on nothing.
 #[tokio::test]
 async fn the_local_ping_matches_over_the_socket() {
     if !sockets_enabled() {
         return;
     }
+    let _unlicensed = common::ACTIVE_LICENCE_ROW.read().await;
     let ((go_status, go_body), (rust_status, rust_body)) = both("GET", "/api/v4/system/ping").await;
 
     assert_eq!(go_status, 200);
@@ -344,11 +351,19 @@ async fn the_local_schema_version_matches() {
 ///
 /// The empty-`format` case is the one clients hit by accident and the one whose id they branch
 /// on, so it is compared as bytes rather than as a status.
+///
+/// **Takes `ACTIVE_LICENCE_ROW`**, like the busy tests take `BUSY_STATE`. The success case asserts
+/// `{"IsLicensed":"false"}`, which our server derives from `Systems.ActiveLicenseId` — the row the
+/// licence-boundary tests in `group_writes`, `group_syncables` and their kin set and clear. Without
+/// the read guard this test fails whenever one of them happens to be mid-flight, naming a route
+/// nobody touched. It is a *reader*, so it serialises against those writers and not against the
+/// other readers.
 #[tokio::test]
 async fn the_local_client_licence_matches_including_its_refusals() {
     if !sockets_enabled() {
         return;
     }
+    let _unlicensed = common::ACTIVE_LICENCE_ROW.read().await;
     let ((go_status, go_body), (rust_status, rust_body)) =
         both("GET", "/api/v4/license/client?format=old").await;
     assert_eq!((go_status, rust_status), (200, 200));
