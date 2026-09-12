@@ -7942,3 +7942,109 @@ take the web length.
 **What is owed:** add `session_length_sso_in_hours` (config.go:421, the same days→hours cascade as
 the other two) to `Config`, to `scripts/dump-config-fixture.sh` and to the third arm of
 `App::do_login`, at the same time as the first SSO login route.
+
+---
+
+## D-450 · no welcome e-mail is sent by any served account-creation branch
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-13 (the user-creation vertical)
+
+All four of Go's create branches end in `EmailService.SendWelcomeEmail`
+(app/user.go:240, :263, :280, :303) and all four treat its failure as a `Logger.Warn`. There is no
+e-mail service in this port ([D-238]), so `App::create_user_from_signup` and
+`App::create_user_as_admin` log where Go sends.
+
+This is **not** a reason to forward the route. The send happens strictly after the user row is
+committed, so a forward taken there would have Go allocate a second account for the same request.
+The divergence is confined to a mail that is not sent, on a stack that has no SMTP server anyway —
+which is also why no parity test can see it.
+
+**What is owed:** the e-mail service, at which point the call sites are one line each; they are
+marked with a `tracing::info!` naming this entry rather than left silent.
+
+---
+
+## D-451 · `createUser`'s token and invite-id branches are still Go's
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-13 (the user-creation vertical)
+
+`POST /api/v4/users` forwards whenever the query carries `t` or `iid`. Both branches end in
+`JoinUserToTeam` plus `AddDirectChannels`, neither of which is ported, and the token branch also
+reaches `CreateGuest`, the guest-invitation licence gates and
+`ValidateUserPermissionsOnChannels`.
+
+The forward is taken from the **query string**, before the body is read and before anything is
+written, which is what makes the split safe — see `mm_api::user_creates`. The served half is the
+admin branch and the anonymous signup.
+
+**What is owed:** `App::join_user_to_team` and `App::add_direct_channels`, at which point
+`CreateUserWithInviteId` is the smaller of the two and should land first; `CreateUserWithToken`
+additionally needs `Token().GetAllTokensByType` semantics for the invitation types and
+`CreateGuest`.
+
+---
+
+## D-452 · the send half of both e-mail-token routes is still Go's
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-13 (the user-creation vertical)
+
+`POST /users/email/verify/send` and `POST /users/password/reset/send` serve every refusal that
+precedes `Token().Save` and forward from there. What is not served is
+`EmailService.CreateVerifyEmailToken`, `App.CreatePasswordRecoveryToken` and
+`App.InvalidatePasswordRecoveryTokensForUser` — and, behind them, the mail itself ([D-238]).
+
+The store is not the obstacle: `TokenStore::save` and `delete` are ported.
+`InvalidatePasswordRecoveryTokensForUser` needs `GetAllTokensByType`, which is not, and
+`SendEmailVerification` branches on `GetStatus` to choose between two different templates, which
+only matters once there is a template.
+
+**What is owed:** `TokenStore::get_all_tokens_by_type`, the two token-minting functions, and the
+e-mail service. Serving the mint without the send would leave a one-shot credential nobody can
+receive, so these land together or not at all.
+
+---
+
+## D-453 · two side effects of account creation are not reproduced
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-13 (the user-creation vertical)
+
+`createUserOrGuest` ends with two things this port does not do:
+
+* `go a.UpdateViewedProductNoticesForNewUser(ruser.Id)` — a goroutine that writes
+  `ProductNoticeViewState`. Nothing in this tree models product notices, and the write is
+  invisible to every route that is served.
+* `a.ch.RunMultiHook(… UserHasBeenCreated …)` — the plugin host, which is not ported at all.
+
+Both run after the response is decided and neither can change it, so a client cannot tell. A
+**plugin** can: an account created through mm-api does not fire `UserHasBeenCreated`, so a plugin
+that provisions on that hook silently skips it.
+
+**What is owed:** the plugin host, which is its own vertical; the notice write is one store method
+whenever `ProductNoticeViewState` is otherwise needed.
+
+---
+
+## D-454 · `scripts/dump-config-fixture.sh` covers fewer keys than `Config` reads
+
+**Status** OPEN · **Severity** test gap · **Raised** 2026-09-13 (the user-creation vertical)
+
+The script's key list is meant to be `mm_app::config::Document`'s own keys, and
+`the_fixture_covers_every_document_sourced_setting` asserts a **hardcoded count** against the
+fixture the script wrote — so the test agrees with the list rather than with the struct, and the
+drift CLAUDE.md warns about is invisible by construction. It has now happened a third time:
+`TeamSettings` declares `EnableOpenServer`, `EnableChannelCategorySorting`, `MaxChannelsPerTeam`,
+`MaxUsersPerTeam` and `ExperimentalDefaultChannels` in `TeamSettingsDocument` and the script
+projects none of them, and `PasswordSettings`, `ExportSettings` and `ImportSettings` have no
+section in the script at all.
+
+Every one of those settings is therefore tested only against `Config::default`, comparing a
+transcribed default with itself.
+
+This session added its own three keys (`TeamSettings.EnableUserCreation`,
+`EmailSettings.EnableSignUpWithEmail`, `LocalizationSettings.DefaultClientLocale`) and moved the
+count from 67 to 70 rather than closing the gap, because regenerating the missing sections rewrites
+committed fixture values other suites assert against and that belongs in its own change.
+
+**What is owed:** derive the key list from `Document` — or, cheaper and nearly as good, assert the
+count against a `const` that lives beside the struct instead of beside the fixture — then
+regenerate and review the values that appear for the first time.

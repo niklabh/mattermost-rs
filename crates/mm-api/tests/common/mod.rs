@@ -291,6 +291,25 @@ pub static PROPERTY_ROWS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new
 /// 404, and the failure names a route the writer never mentioned.
 pub static BRAND_IMAGE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
+/// **`Users` is one table and `GET /api/v4/users/stats` counts it**, so a suite that creates
+/// accounts and a suite that compares that number across two servers cannot run at the same time.
+///
+/// `users_stats` already brackets its reads — it takes Go's answer twice and accepts ours if it
+/// matches either — and that is enough against the *occasional* `create_plain_user` in some other
+/// fixture, which happens once per module behind a `OnceCell`. It is not enough against
+/// `user_creates`, whose subject **is** account creation: fourteen tests creating and hard-deleting
+/// twenty-odd accounts move the total continuously, and a full-workspace run produced
+/// `total_users_count: 131` from Go and `130` from us, naming a route neither suite had changed.
+///
+/// So both sides take this: every `user_creates` test that creates an account holds it for the
+/// duration, and every `users_stats` test that compares or brackets the total holds it too. One
+/// lock rather than one per module, for the reason [`ACTIVE_LICENCE_ROW`] gives.
+///
+/// It does **not** make the count stable in general — fifty other suites still create users — and
+/// `users_stats`'s bracketing is still what covers those. This removes the one writer that made
+/// the bracketing insufficient.
+pub static USER_COUNT: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 /// Write `Systems.ActiveLicenseId`, or clear it when `id` is `None`.
 ///
 /// A 26-character value passes `IsValidId`, which is all `LoadLicense` checks before it looks the

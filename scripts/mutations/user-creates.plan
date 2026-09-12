@@ -19,6 +19,16 @@
 #   * the hardened-mode rewrite, which turns three 400s into a 200 and is off on this stack;
 #   * `SanitizeProfile(user, true)` on the verify-member reply.
 #
+# One line was replaced after the first pass. `app-locale-default-reads-the-wrong-setting`
+# substituted `restrict_creation_to_domains`, which is `""` on this stack — and `User::PreSave`
+# repairs an empty locale to `DefaultLocale`, which is also `"en"`. Right answer and wrong answer
+# coincided and the mutation SURVIVED a suite that was in fact watching. `"de"` is a different
+# *valid* locale and is caught.
+#
+# What no mutation here can show: that the reset reads `DefaultClientLocale` rather than a literal
+# `"en"`. The setting is `"en"` on this stack, so Go and this port would agree either way. The
+# config read is pinned by `Config`'s own fixture test instead.
+#
 # NOT mutated, and why: `is_first_user_account`'s `include_deleted: true`. Nothing reachable
 # through the REST API produces the input that separates it from `false` — it would need a
 # database whose every user row is soft-deleted — so the line would be a guaranteed survivor and
@@ -30,7 +40,7 @@ app-open-server-gate-is-an-or	crates/mm-app/src/user_create.rs	if !first && !sel
 app-new-users-get-the-admin-role	crates/mm-app/src/user_create.rs	user.roles = SYSTEM_USER_ROLE_ID.to_owned();	user.roles = SYSTEM_ADMIN_ROLE_ID.to_owned();	api	user_creates
 app-locale-reset-never-fires	crates/mm-app/src/user_create.rs	if !crate::i18n::is_supported_locale(&user.locale) {	if false {	api	user_creates
 app-locale-reset-always-fires	crates/mm-app/src/user_create.rs	if !crate::i18n::is_supported_locale(&user.locale) {	if true {	api	user_creates
-app-locale-default-reads-the-wrong-setting	crates/mm-app/src/user_create.rs	user.locale = self.config().default_client_locale.clone();	user.locale = self.config().restrict_creation_to_domains.clone();	api	user_creates
+app-locale-default-is-a-different-locale	crates/mm-app/src/user_create.rs	user.locale = self.config().default_client_locale.clone();	user.locale = "de".to_owned();	api	user_creates
 app-password-is-checked-only-for-sso-users	crates/mm-app/src/user_create.rs	if user.auth_service.is_empty() {	if !user.auth_service.is_empty() {	api	user_creates
 app-an-empty-domain-list-refuses-everything	crates/mm-app/src/user_create.rs	    if domains.is_empty() {	    if !domains.is_empty() {	api	user_creates
 app-domain-match-drops-the-at-sign	crates/mm-app/src/user_create.rs	.any(|domain| lowered.ends_with(&format!("@{domain}")))	.any(|domain| lowered.ends_with(domain))	unit	user_create::tests

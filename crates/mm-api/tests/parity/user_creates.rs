@@ -201,6 +201,9 @@ async fn an_anonymous_signup_agrees_field_for_field() {
     if !stack_enabled() {
         return;
     }
+    // Held for the whole test: this suite's creates are what made `users_stats`'s
+    // bracketing insufficient. See `common::USER_COUNT`.
+    let _count = common::USER_COUNT.lock().await;
     let http = client();
     scrub("anongo").await;
     scrub("anonrs").await;
@@ -286,6 +289,9 @@ async fn a_create_publishes_one_new_user_event() {
     if !stack_enabled() {
         return;
     }
+    // Held for the whole test: this suite's creates are what made `users_stats`'s
+    // bracketing insufficient. See `common::USER_COUNT`.
+    let _count = common::USER_COUNT.lock().await;
     let http = client();
     let admin = go_minted_token(&http).await;
     scrub("wsgo").await;
@@ -385,6 +391,9 @@ async fn an_anonymous_signup_cannot_assert_its_own_verification_or_timestamps() 
     if !stack_enabled() {
         return;
     }
+    // Held for the whole test: this suite's creates are what made `users_stats`'s
+    // bracketing insufficient. See `common::USER_COUNT`.
+    let _count = common::USER_COUNT.lock().await;
     let http = client();
     scrub("sango").await;
     scrub("sanrs").await;
@@ -450,6 +459,9 @@ async fn an_unsupported_locale_is_replaced_and_a_supported_one_is_not() {
     if !stack_enabled() {
         return;
     }
+    // Held for the whole test: this suite's creates are what made `users_stats`'s
+    // bracketing insufficient. See `common::USER_COUNT`.
+    let _count = common::USER_COUNT.lock().await;
     let http = client();
     for tag in ["locgo", "locrs", "keepgo", "keeprs"] {
         scrub(tag).await;
@@ -489,6 +501,9 @@ async fn the_creation_refusals_agree_id_for_id() {
     if !stack_enabled() {
         return;
     }
+    // Held for the whole test: this suite's creates are what made `users_stats`'s
+    // bracketing insufficient. See `common::USER_COUNT`.
+    let _count = common::USER_COUNT.lock().await;
     let http = client();
     scrub("dupe").await;
 
@@ -617,6 +632,9 @@ async fn the_token_and_invite_branches_forward_and_write_nothing() {
     if !stack_enabled() {
         return;
     }
+    // Held for the whole test: this suite's creates are what made `users_stats`'s
+    // bracketing insufficient. See `common::USER_COUNT`.
+    let _count = common::USER_COUNT.lock().await;
     let http = client();
     scrub("fwd").await;
 
@@ -695,6 +713,9 @@ async fn a_system_admin_may_create_a_pre_verified_account() {
     if !stack_enabled() {
         return;
     }
+    // Held for the whole test: this suite's creates are what made `users_stats`'s
+    // bracketing insufficient. See `common::USER_COUNT`.
+    let _count = common::USER_COUNT.lock().await;
     let http = client();
     let admin = go_minted_token(&http).await;
     scrub("admgo").await;
@@ -808,6 +829,9 @@ async fn a_matched_verification_send_forwards_and_mints_exactly_one_token() {
     if !stack_enabled() {
         return;
     }
+    // Held for the whole test: this suite's creates are what made `users_stats`'s
+    // bracketing insufficient. See `common::USER_COUNT`.
+    let _count = common::USER_COUNT.lock().await;
     let http = client();
     scrub("vsend").await;
 
@@ -865,6 +889,9 @@ async fn the_password_reset_send_refusals_write_no_token() {
     if !stack_enabled() {
         return;
     }
+    // Held for the whole test: this suite's creates are what made `users_stats`'s
+    // bracketing insufficient. See `common::USER_COUNT`.
+    let _count = common::USER_COUNT.lock().await;
     let http = client();
     let path = "/api/v4/users/password/reset/send";
     scrub("prsso").await;
@@ -958,6 +985,9 @@ async fn a_matched_password_reset_send_forwards_and_mints_exactly_one_token() {
     if !stack_enabled() {
         return;
     }
+    // Held for the whole test: this suite's creates are what made `users_stats`'s
+    // bracketing insufficient. See `common::USER_COUNT`.
+    let _count = common::USER_COUNT.lock().await;
     let http = client();
     scrub("prok").await;
 
@@ -1023,6 +1053,9 @@ async fn verifying_a_member_without_a_token_agrees_and_sets_the_flag() {
     if !stack_enabled() {
         return;
     }
+    // Held for the whole test: this suite's creates are what made `users_stats`'s
+    // bracketing insufficient. See `common::USER_COUNT`.
+    let _count = common::USER_COUNT.lock().await;
     let http = client();
     let admin = go_minted_token(&http).await;
     scrub("vergo").await;
@@ -1101,6 +1134,9 @@ async fn the_lookup_precedes_the_permission_check() {
     if !stack_enabled() {
         return;
     }
+    // Held for the whole test: this suite's creates are what made `users_stats`'s
+    // bracketing insufficient. See `common::USER_COUNT`.
+    let _count = common::USER_COUNT.lock().await;
     let http = client();
     let admin = go_minted_token(&http).await;
     scrub("permu").await;

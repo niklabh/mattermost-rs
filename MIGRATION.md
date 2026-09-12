@@ -11553,3 +11553,93 @@ Three things this stack cannot show, and none of them has a live oracle:
 `POST /api/v4/users/login/desktop_token` needs `ConsumeTokenOnce` and the OAuth/SAML user check;
 `POST /api/v4/users/login/switch` needs the whole `switchAccountType` matrix. Neither needs
 anything this session did not build except [D-431].
+
+## `POST /api/v4/users`, `/users/email/verify/send`, `/users/password/reset/send`, `/users/{user_id}/email/verify/member` (2026-09-13, branch `wt/createuser`)
+
+**PARTIAL, and deliberately so on three of the four.** `verifyUserEmailWithoutToken` serves whole.
+`createUser` serves the system-admin and anonymous-signup branches and forwards the two the query
+string selects. Both `/send` routes serve exactly the prefix that precedes `Token().Save` and
+forward from there — because Go mints the one-shot row *before* it tries to send, and a forward
+taken after that would leave a live credential behind for a request Go then handled from scratch.
+14 parity tests, 11 unit tests across the three new modules. Mutation run: first pass **24 run,
+21 caught, 1 survived, 2 controls survived, 0 harness faults**; after the repair below and a
+three-line re-run, **24 run, 22 caught, 2 controls survived, 0 faults**.
+`scripts/mutations/user-creates.plan`.
+
+The survivor was a fixture, not a shrug. `app-locale-default-reads-the-wrong-setting` substituted
+`TeamSettings.RestrictCreationToDomains`, which is `""` on this stack — and `User::pre_save`
+repairs an empty locale to `DefaultLocale`, which is *also* `"en"`. The right answer and the wrong
+answer coincided, so a suite that was in fact watching the field could not see the change.
+Replaced with a different **valid** locale (`"de"`), which is caught. What no mutation on this
+stack can show is that the reset reads `DefaultClientLocale` rather than a literal `"en"`: the
+setting is `"en"` here, so Go and this port agree either way.
+
+| File | What |
+|---|---|
+| `crates/mm-api/src/user_creates.rs` | all four handlers, the forwarding table, `decode_user` |
+| `crates/mm-app/src/user_create.rs` | `CreateUserFromSignup`, `CreateUserAsAdmin`, `CreateUser`/`createUserOrGuest`, `IsUserSignUpAllowed`, `IsFirstUserAccount`, `CheckEmailDomain` |
+| `crates/mm-app/src/i18n.rs` | `i18n.supportedLocales` and nothing else in that package |
+| `crates/mm-store/src/user_store.rs` | `IsEmpty` |
+| `crates/mm-app/src/config.rs` | `EnableUserCreation`, `EnableSignUpWithEmail`, `DefaultClientLocale` |
+
+### What a reader would otherwise get wrong
+
+1. **The query parameters are `t` and `iid`.** Not `token` and `invite_id` — those are labels the
+   audit record puts on a log line (api4/user.go:253-254). A port looking for `?token=` would take
+   the anonymous branch for every invitation, creating unverified accounts on a closed server.
+   `t` wins over `iid`, and the admin probe is consulted only when neither is present, so a system
+   admin following an invitation link takes the invitation branch.
+2. **`serde` accepts a JSON array where Go's decoder does not.** `model.User` carries
+   `#[serde(default)]`, and the derived `deserialize_struct` takes a *sequence* as well as a map —
+   so `[]` produced a zero user here and `api.context.invalid_body_param.app_error` on Go. The
+   parity suite found it as a password-length error compared against a decode error.
+   `mm_api::user_creates::decode_user` now admits only an object or `null`, and ignores trailing
+   bytes the way `Decoder.Decode` does.
+3. **The locale reset is a membership test, not a validation.** `users.CreateUser` replaces a
+   locale that is not one of the **23 locales the server ships translations for**
+   (`i18n.supportedLocales`, i18n.go:73) with `DefaultClientLocale`. `zz` passes
+   `model.IsValidLocale` and is still replaced; the list is case- and region-sensitive, so
+   `en-AU` is supported and `en-au` is not. `mm_app::i18n`.
+4. **`IsFirstUserAccount` counts with `IncludeDeleted: true`** and `UserStore::is_empty` excludes
+   bots. Two adjacent "is this server fresh" questions with two different rules, and both decide
+   whether the account being created gets `"system_admin system_user"`. Dropping the first flag
+   would hand the admin role to the next signup on a server whose only account was deactivated.
+5. **The refusal order inside `createUserOrGuest` is observable.** User limit → group-name
+   collision → accepted domain → password → store. Every one is a 400, so a body violating several
+   reports only the first, and reordering them changes the id a client sees.
+6. **`CheckEmailDomain`'s empty list allows everything.** That is the stock configuration, so the
+   function is a no-op on a default server — and an inverted empty case refuses every signup.
+   The match is a suffix test against `"@" + domain`, so a list of `example.com` does not admit
+   `bob@evil-example.com`.
+7. **`verifyUserEmailWithoutToken` looks the user up *before* checking the permission.** An
+   unprivileged caller therefore gets a **404** for an id that names nobody and a 403 for one that
+   resolves — the route tells them whether an account exists. Reversing it is not a fix, it is a
+   behaviour change. Its reply is also the copy fetched *before* the write, so it never reports
+   the change it just made.
+8. **`ExperimentalEnableHardenedMode` rewrites `sendPasswordReset`'s three 400s into a 200**, but
+   not its missing-`email` 400, which the handler raises before `SendPasswordReset` is called.
+
+### What is not here
+
+[D-450] no welcome e-mail on any served branch. [D-451] the `t` and `iid` branches, which need
+`JoinUserToTeam` and `AddDirectChannels`. [D-452] the token-minting half of both `/send` routes.
+[D-453] `UpdateViewedProductNoticesForNewUser` and the `UserHasBeenCreated` plugin hook. [D-454]
+the config fixture script's residual key drift, which this session grew by three keys (67 → 70)
+rather than closed.
+
+A licensed installation forwards `POST /users` whole: `CreateGuest`, the guest-invitation licence
+gates and the licensed user-limit id all live behind a licence and none is ported.
+
+Three things the stack cannot show. `EnableUserCreation` and `EnableSignUpWithEmail` are both
+`true` on it, so `IsUserSignUpAllowed`'s 501 is unit-reasoning rather than a measurement, and no
+mutation for it is in the plan. `MM_TEAMSETTINGS_ENABLEOPENSERVER=true` is an environment override
+on both servers, so the `no_open_server` 403 is likewise never produced — the open-server mutation
+in the plan asserts the *gate*, by flipping `&&` to `||`, rather than the refusal. And
+`isAtUserLimit` cannot fire below 250 active users.
+
+### The next route in this family
+
+`POST /api/v4/users/{user_id}/email/verify/member` closed the last unforwarded route on
+`api4/user.go`'s verification path. The cheapest next one is `POST /api/v4/teams/{team_id}/invite/email`
+— it needs [D-452]'s token minting, which is the same work the two `/send` routes are waiting on,
+and it would then unblock `CreateUserWithToken` behind it.
