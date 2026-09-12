@@ -49,6 +49,44 @@ pub trait SessionStore {
         &self,
         session_id_or_token: &str,
     ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlSessionStore.RemoveAllSessions` (session_store.go:298).
+    ///
+    /// `DELETE FROM Sessions` with no `WHERE`. There is exactly one caller — the
+    /// sysadmin-only `POST /api/v4/users/sessions/revoke/all` — and it logs out **every user on
+    /// the server, including the caller**. No id, no filter, no soft delete.
+    fn remove_all_sessions(
+        &self,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlSessionStore.UpdateDeviceId` (session_store.go:343).
+    ///
+    /// Four columns in one statement, and the fourth is the one a reader drops: `ExpiredNotify`
+    /// is reset to `false` alongside the new `ExpiresAt`. Go writes them together because the
+    /// flag records that the *old* expiry was already announced to the client; leaving it set
+    /// against a fresh expiry suppresses the next warning.
+    ///
+    /// **Both device columns are always written.** The caller is responsible for passing the
+    /// existing value back when it is only changing one of them — see `attachDeviceIds`
+    /// (api4/user.go:2810), which reads the current session to do exactly that. Omitting that
+    /// fallback here would be a silent wipe of the other column.
+    fn update_device_id(
+        &self,
+        session_id: &str,
+        device_id: &str,
+        voip_device_id: &str,
+        expires_at: i64,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlSessionStore.UpdateProps` (session_store.go:353).
+    ///
+    /// Writes the **whole** `Props` object, not a merge — the caller mutates the session it holds
+    /// and passes it back. A nil map marshals to JSON `null` in Go rather than `{}`, and that is
+    /// reproduced: see [D-331], which is the same column shape read back.
+    fn update_props(
+        &self,
+        session: &Session,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 }
 
 /// One row of `me.sessionSelectQuery`, named so both queries share a mapping.
@@ -291,6 +329,78 @@ impl SessionStore for SqlSessionStore {
         })?;
 
         tracing::Span::current().record("deleted", result.rows_affected());
+        Ok(())
+    }
+
+    #[tracing::instrument(skip_all, fields(deleted))]
+    async fn remove_all_sessions(&self) -> Result<(), StoreError> {
+        // `DELETE FROM Sessions` — verbatim, no predicate. See the trait doc for what that means.
+        let result = sqlx::query!("DELETE FROM sessions")
+            .execute(&self.pool)
+            .await
+            .map_err(|source| StoreError::Db {
+                context: "failed to delete all Sessions".to_owned(),
+                source,
+            })?;
+
+        tracing::Span::current().record("deleted", result.rows_affected());
+        Ok(())
+    }
+
+    #[tracing::instrument(skip_all, fields(session_id = %session_id))]
+    async fn update_device_id(
+        &self,
+        session_id: &str,
+        device_id: &str,
+        voip_device_id: &str,
+        expires_at: i64,
+    ) -> Result<(), StoreError> {
+        // `UPDATE Sessions SET DeviceId = ?, VoIPDeviceId = ?, ExpiresAt = ?, ExpiredNotify =
+        // false WHERE Id = ?`. `ExpiredNotify = false` is a literal in Go, not a parameter.
+        sqlx::query!(
+            "UPDATE sessions SET deviceid = $1, voipdeviceid = $2, expiresat = $3, \
+             expirednotify = false WHERE id = $4",
+            device_id,
+            voip_device_id,
+            expires_at,
+            session_id
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to update Session with id={session_id}"),
+            source,
+        })?;
+
+        Ok(())
+    }
+
+    #[tracing::instrument(skip_all, fields(session_id = %session.id))]
+    async fn update_props(&self, session: &Session) -> Result<(), StoreError> {
+        // `json.Marshal(session.Props)`: `None` is JSON `null`, an empty map is `{}`. Both are
+        // reachable — `Session::props` is `Option<StringMap>` precisely because the column is.
+        // A `StringMap` cannot fail to serialise, but `to_value` is fallible and swallowing the
+        // result would be the "never swallow an error you could type" rule broken for nothing.
+        // `Decode` is the variant `user_store` already uses for the same infallible-in-practice
+        // direction; a second variant for it would be noise.
+        let props = serde_json::to_value(&session.props).map_err(|source| StoreError::Decode {
+            entity: "Session",
+            column: "props",
+            source,
+        })?;
+
+        sqlx::query!(
+            "UPDATE sessions SET props = $1 WHERE id = $2",
+            props,
+            session.id
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to update Session".to_owned(),
+            source,
+        })?;
+
         Ok(())
     }
 }
