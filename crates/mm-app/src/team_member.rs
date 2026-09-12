@@ -1041,7 +1041,7 @@ impl App {
     /// ([D-183]), and the three cache invalidations this server has no caches for ([D-190]).
     #[tracing::instrument(skip(self, team, user), fields(team_id = %team.id, user_id = %user.id))]
     pub async fn leave_team(&self, team: &Team, user: &User, requestor_id: &str) -> AppResult<()> {
-        let member = self
+        let mut member = self
             .store()
             .team()
             .get_member(&team.id, &user.id)
@@ -1144,7 +1144,11 @@ impl App {
                 .await;
         }
 
-        self.remove_team_member(member.clone()).await?;
+        // `&mut`, matching Go's pointer: `RemoveTeamMember` stamps `DeleteAt` on the struct
+        // and `postProcessTeamMemberLeave` then reads the *mutated* one. It only reads `UserId`
+        // and `TeamId`, which do not move, so the sharing is not observable — but a clone here
+        // would quietly make it unobservable by construction.
+        self.remove_team_member(&mut member).await?;
         self.post_process_team_member_leave(&member).await
     }
 
@@ -1212,7 +1216,7 @@ impl App {
     /// `ExplicitRoles` to the column). Kept because it is what the source says; a mutation that
     /// deletes this line is **equivalent**, not a gap.
     #[tracing::instrument(skip(self, member), fields(team_id = %member.team_id, user_id = %member.user_id))]
-    async fn remove_team_member(&self, mut member: TeamMember) -> AppResult<()> {
+    async fn remove_team_member(&self, member: &mut TeamMember) -> AppResult<()> {
         let mut to_team = WebSocketEvent::new(
             WEBSOCKET_EVENT_LEAVE_TEAM,
             &member.team_id,
@@ -1247,7 +1251,7 @@ impl App {
 
         self.store()
             .team()
-            .update_member(&member)
+            .update_member(member)
             .await
             .map_err(|err| {
                 tracing::error!(error = %err, "team membership update failed");

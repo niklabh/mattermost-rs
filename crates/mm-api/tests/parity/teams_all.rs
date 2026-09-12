@@ -730,12 +730,12 @@ async fn neither_body_shape_ends_in_a_newline() {
     }
 }
 
-/// Registering `GET` on `/api/v4/teams` must not capture `POST` — `partially_migrated`'s method
-/// fallback forwards it, and axum would otherwise answer 405 for a route Go still owns. An empty
-/// body fails `Team.IsValid` before anything is created, so this asserts the routing without
-/// authoring a team.
+/// Registering `GET` and `POST` on `/api/v4/teams` must keep them apart: `createTeam` is served
+/// here now, and an empty body must reach *its* `Team.IsValid` rather than 405ing or being
+/// answered by the listing. The empty body fails validation before anything is created, so this
+/// asserts the routing without authoring a team.
 #[tokio::test]
-async fn post_to_the_same_path_is_still_forwarded() {
+async fn post_to_the_same_path_reaches_create_team() {
     if !stack_enabled() {
         return;
     }
@@ -754,8 +754,8 @@ async fn post_to_the_same_path_is_still_forwarded() {
             .headers()
             .get("x-mmrs-served-by")
             .and_then(|v| v.to_str().ok()),
-        Some("go"),
-        "createTeam is not migrated; it must still be forwarded"
+        Some("rust"),
+        "createTeam is served here"
     );
-    assert_eq!(response.status(), 400, "and Go rejects the empty body");
+    assert_eq!(response.status(), 400, "and the empty body is rejected");
 }

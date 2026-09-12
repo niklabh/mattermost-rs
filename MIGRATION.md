@@ -11006,3 +11006,88 @@ was the same answer the tiebreak gives. Planting `mmm` before `zzz` separates th
 third time in this project a mutation has found a fixture where the right answer and the wrong
 answer coincided, and the first where the coincidence was the database's sort stability rather than
 the data.
+
+---
+
+## The team write family, and three Go behaviours that read backwards (2026-09-12)
+
+**396 → 402 of 764.** The six writes of `api4/team.go`: `createTeam`, `updateTeamPrivacy`,
+`deleteTeam` (archive arm), `removeTeamMember`, `searchTeams` and `invalidateAllEmailInvites`.
+
+- `crates/mm-store/src/team_store.rs` — `Save`, `SearchAll`, its `count(*)` twin, `SearchOpen`
+  and `SearchPrivate`
+- `crates/mm-store/tests/db_team_search.rs` — 10 tests, on a fixture carrying a NULL
+  `allowopeninvite`, a group-constrained team and a retention-policy row, none of which the REST
+  API can create here
+- `crates/mm-store/src/{user,channel,sidebar_category,preference,token,system,job,post}_store.rs` —
+  one method each for the removal cascade and the invite purge
+- `crates/mm-app/src/team.rs` — `CreateTeam`, `CreateTeamWithUser`, `createDefaultChannels`,
+  `UpdateTeamPrivacy`, `SoftDeleteTeam`, `SearchAll/Public/PrivateTeams`,
+  `InvalidateAllEmailInvites`
+- `crates/mm-app/src/team_member.rs` — `RemoveUserFromTeam`, `LeaveTeam`, `RemoveTeamMember`,
+  `postProcessTeamMemberLeave`
+- `crates/mm-app/src/config.rs` — `ExperimentalEnableDefaultChannelLeaveJoinMessages` (default
+  **true**) and `EnableAPITeamDeletion` (default false)
+- `crates/mm-api/src/{teams,team_member_writes}.rs` — the six handlers
+- `crates/mm-api/tests/parity/team_write_family.rs` — 17 tests
+- `fixtures/behaviour_team_privacy.json`, `reference/dump/behaviour_team_privacy.go` — the
+  invite-id predicate over all sixteen input combinations, **transcribed** from app/team.go:237
+  rather than driven, and the generator says so
+
+### Three things measured against Go that contradict the obvious reading
+
+Each was written the other way first and the parity suite refused it.
+
+1. **`getTeamMember` has no `DeleteAt` predicate**, so `LeaveTeam` finds a soft-deleted membership
+   and runs the whole cascade again: removing an already-removed member is a **200**. The 400
+   (`api.team.remove_user_from_team.missing.app_error`) needs someone who was *never* a member.
+2. **`RemoveTeamMember`'s `Roles = ""` never reaches the database.** `UpdateMember` writes
+   `ExplicitRoles` into the `Roles` column, so the assignment touches only the struct, and a
+   departed member still reads back as `team_user`. Asserted in that direction so a "fix" fails.
+3. **`createTeam` keeps a submitted `delete_at`** — `Save` writes the column straight from the
+   struct — where `updateTeam` discards it, because the update path copies seven named fields onto
+   the stored row instead. A client can create a team that is already archived.
+
+### The permission gate for leaving a team is inside the `if`
+
+`if session.UserId != params.UserId { … }` — so a self-removal is checked against nothing at all,
+not `remove_user_from_team`, not membership, not that the team exists. Hoisting the check out of
+that `if` refuses every ordinary member trying to leave, and no fixture using an admin token can
+see it.
+
+### `searchTeams`' pagination refusal and its response shape disagree, deliberately
+
+The **501** on the single-permission arms fires when `page` **or** `per_page` is present; the
+`{"teams": …, "total_count": N}` shape needs **both**. So `{"page": 0}` is a 501 for a caller
+holding only `list_public_teams` and a 200 carrying a bare array for one holding both.
+
+### What is still Go's
+
+[D-370] — `?permanent=true` with `EnableAPITeamDeletion` **on**. The flag defaults to false and is
+unset on the stack, so the cascade it guards (ten store methods across five stores) has no
+reachable test; writing it blind is what the parity oracle exists to prevent, and the channel twin
+forwards its permanent arm for the same reason. [D-371] — a **licensed** installation forwards
+`deleteTeam` whole, for `cleanupTeamAccessControlPolicy`.
+
+Also absent, both inherited from `join_user_to_team` and already recorded: [D-242] no
+`Users.UpdateAt` bump on a join, [D-243] no join system post. The *leave* system post **is**
+written, in both its "left the team" and "removed from the team" forms.
+
+### Mutation tally
+
+`scripts/mutations/team-write-family.plan`: **40 run, 38 caught, 2 survived, 0 harness faults**,
+both survivors the controls.
+
+One line survived the first run and is counted only after its fixture was fixed. Moving the
+empty-term guard onto the *sanitised* term drops the `ILIKE` clause for a term of nothing but
+escape characters — and the fixture could not see it, because with the clause the query is
+`ILIKE '%%'` (every row) and without it there is no predicate (every row). The discriminator is a
+team with **NULL `name` and NULL `displayname`**: `NULL ILIKE '%%'` is NULL rather than true, so a
+built clause drops that row and a skipped one keeps it. That is the fourth time in this project a
+mutation has found a fixture where the right answer and the wrong answer coincided.
+
+A separate harness finding, recorded in the plan: `MUTATE_FILTER` filters test **names**, not
+targets, so `db_team_search` — a file name — matched no test function, ran zero tests and reported
+SURVIVED. The eight store lines now each name the single test that must catch them, and the batch
+is run with `MUTATE_STORE_TARGETS='--test db_team_search'`. `mutate.sh`'s own header warns about
+this; the warning was read and the trap still hit on the first attempt.

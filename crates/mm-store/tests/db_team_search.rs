@@ -39,6 +39,10 @@ const RETAINED: &str = "mmrssrch000000000000000ret";
 const INVITE_TYPE: &str = "mmrssrch000000000000000inv";
 const WILDCARD: &str = "mmrssrch000000000000000pct";
 const POLICY: &str = "mmrssrch000000000000000pol";
+/// NULL `name` **and** NULL `displayname` — the only row that can tell "the `ILIKE` clause was
+/// built" from "no clause at all". Seeded by one test rather than by [`seed`], because every
+/// other listing assertion in this file would have to carry it.
+const NAMELESS: &str = "mmrssrch000000000000000nul";
 
 fn db_enabled() -> bool {
     std::env::var("MM_STORE_DB").is_ok_and(|v| v == "1")
@@ -293,9 +297,21 @@ async fn the_term_matches_either_column_and_escapes_wildcards() {
 
 /// **The empty-term guard reads the raw term, not the sanitised one.** A term of `\` sanitises to
 /// `""` — `sanitizeSearchTerm` strips every occurrence of the escape character first — but
-/// `term != ""` was already true, so the clause is built and renders as `ILIKE '%%'`, which
-/// matches everything. The channel search guards on the *sanitised* value and drops the clause
-/// instead; the two routes genuinely disagree here.
+/// `term != ""` was already true, so the clause is built and renders as `ILIKE '%%'`. The channel
+/// search guards on the *sanitised* value and drops the clause instead; the two routes genuinely
+/// disagree here.
+///
+/// # The discriminator is a team with NULL name **and** NULL display name
+///
+/// `ILIKE '%%'` matches every row that has a value, and `NULL ILIKE '%%'` is NULL — not true — so
+/// a clause that is *built* drops the NULL-column team while a clause that is *skipped* keeps it.
+/// Without such a row the two behaviours are indistinguishable: both return every seeded team,
+/// and the mutation that moves the guard onto the sanitised term **survived** the first run of
+/// `scripts/mutations/team-write-family.plan` for exactly that reason. The right answer and the
+/// wrong answer coincided.
+///
+/// Both columns are nullable in the schema and nothing over REST can produce such a row, so it is
+/// inserted here and removed with the rest of the prefix.
 #[tokio::test]
 async fn a_term_of_nothing_but_escape_characters_matches_everything() {
     if !db_enabled() {
@@ -303,16 +319,41 @@ async fn a_term_of_nothing_but_escape_characters_matches_everything() {
     }
     let (_guard, pool) = setup().await;
 
+    // `ORDER BY displayname` puts NULL last in Postgres, so this team sorts after every seeded one.
+    sqlx::query(
+        "INSERT INTO teams (id, createat, updateat, deleteat, displayname, name, description,
+                            email, type, companyname, alloweddomains, inviteid, allowopeninvite,
+                            lastteamiconupdate, schemeid, groupconstrained, cloudlimitsarchived)
+         VALUES ($1, 1, 1, 0, NULL, NULL, '', $1 || '@mmrs.invalid', 'O'::text::team_type, '', '',
+                 $1, false, 0, NULL, NULL, false)",
+    )
+    .bind(NAMELESS)
+    .execute(&pool)
+    .await
+    .expect("inserts the nameless team");
+
+    // **Both reads happen before any assertion, and the row is deleted between them and the
+    // asserts.** A NULL `name` breaks Go's own scan — `GET /api/v4/teams` and
+    // `POST /api/v4/teams/search` both answer 500 `app.team.search_all_team.app_error` while this
+    // row exists — so a failing assertion that skipped the trailing `purge` would take out every
+    // other suite sharing this database. Measured, the hard way: it did.
     let backslash = listed(&pool, &term("\\")).await;
+    let empty = listed(&pool, &TeamSearch::default()).await;
+    purge(&pool).await;
+
+    let mut with_nameless = all_seeded();
+    with_nameless.push(NAMELESS);
+
     assert_eq!(
         backslash,
         all_seeded(),
-        "the clause is built and matches every row"
+        "the clause is built: `ILIKE '%%'` matches every row that has a value and drops the \
+         NULL-column team"
     );
-    // The genuinely empty term omits the clause and reaches the same rows by a different path.
-    assert_eq!(listed(&pool, &TeamSearch::default()).await, all_seeded());
-
-    purge(&pool).await;
+    assert_eq!(
+        empty, with_nameless,
+        "no clause at all is not the same as a clause that matches everything"
+    );
 }
 
 /// `AllowOpenInvite = Some(false)` is **two** ANDed pairs: not-open *and* not-group-constrained.
