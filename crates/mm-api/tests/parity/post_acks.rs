@@ -142,6 +142,25 @@ async fn delete_both_allowing_forward(
     (go, ours)
 }
 
+/// A post's `create_at`, read back through Go.
+///
+/// Needed because `LastViewedAt` is written as the **post's** `CreateAt - 1` and nothing else on
+/// the wire says what that value should be. Asserting only that it is non-zero leaves
+/// `lastviewedat = :lastviewedat` and `lastviewedat = :updatedat` indistinguishable — both are
+/// large positive millisecond timestamps.
+async fn post_create_at(client: &reqwest::Client, token: &str, post_id: &str) -> i64 {
+    let body: serde_json::Value = client
+        .get(format!("{GO}/api/v4/posts/{post_id}"))
+        .header("Authorization", format!("Bearer {token}"))
+        .send()
+        .await
+        .expect("Go answers")
+        .json()
+        .await
+        .expect("the post decodes");
+    body["create_at"].as_i64().expect("a create_at")
+}
+
 /// `id` out of an error body, or `None` when the body is not an `AppError`.
 fn error_id(body: &[u8]) -> Option<String> {
     serde_json::from_slice::<serde_json::Value>(body)
@@ -437,10 +456,14 @@ async fn set_unread_on_a_dm_root_matches_go_with_four_distinct_counters() {
         Some(5),
         "the five roots before the window"
     );
-    // `LastViewedAt` is the *post's* `CreateAt - 1`, never `GetMillis()`.
-    assert!(
-        body["last_viewed_at"].as_i64().unwrap_or_default() > 0,
-        "last_viewed_at is the post's timestamp"
+    // `LastViewedAt` is the *post's* `CreateAt - 1`, never `GetMillis()`. Asserted exactly:
+    // "non-zero" is true of the stamped `LastUpdateAt` as well, and the two sit in the same
+    // `SET` clause a line apart.
+    let created = post_create_at(&client, &token, &fixture.root_post).await;
+    assert_eq!(
+        body["last_viewed_at"].as_i64(),
+        Some(created - 1),
+        "last_viewed_at is the marked post's create_at minus one, not the time of the request"
     );
 
     unwind(&client, &token, fixture).await;
@@ -670,6 +693,88 @@ async fn a_malformed_set_unread_body_is_not_an_error() {
             String::from_utf8_lossy(body)
         );
     }
+
+    unwind(&client, &token, fixture).await;
+}
+
+/// An **absent** `collapsed_threads_supported` key is `false`, not `true`.
+///
+/// Every other test in this file sends the flag explicitly, and on a **root** post both values
+/// answer the same thing — so `unwrap_or(false)` and `unwrap_or(true)` are indistinguishable
+/// everywhere else in the suite. A reply with no flag at all is the one request that separates
+/// them: `false` sends it to Go, `true` answers it here with a different `mention_count_root`.
+///
+/// The same request pins the key's spelling: read a different key and the `unwrap_or` decides,
+/// which is the same observation from the other side.
+#[tokio::test]
+async fn an_absent_collapsed_threads_key_is_false() {
+    if !stack_enabled() {
+        return;
+    }
+    let client = client();
+    let token = go_minted_token(&client).await;
+    let fixture = fixture(&client, &token, "paabsent").await;
+
+    let path = format!(
+        "/api/v4/users/{}/posts/{}/set_unread",
+        fixture.reader.id, fixture.reply_post
+    );
+    for body in [&b"{}"[..], b"", br#"{"collapsed_threads_supported":null}"#] {
+        let (go, ours) =
+            post_both_allowing_forward(&client, &fixture.reader.token, &path, body).await;
+        assert_eq!(go.0, 200);
+        assert!(
+            !ours.2,
+            "an absent flag is false, so a reply must be forwarded: body {:?}",
+            String::from_utf8_lossy(body)
+        );
+        assert_eq!(
+            (ours.0, String::from_utf8_lossy(&ours.1).into_owned()),
+            (go.0, String::from_utf8_lossy(&go.1).into_owned()),
+        );
+    }
+
+    unwind(&client, &token, fixture).await;
+}
+
+/// The literal `me` in `{user_id}` resolves to the session's own user.
+///
+/// `RequireUserId` (web/context.go:301) substitutes it, and nothing else in this file sends it —
+/// so without this, dropping the substitution answers `api.context.invalid_url_param.app_error`
+/// for a path every Mattermost client uses and no test notices.
+#[tokio::test]
+async fn me_resolves_to_the_caller_on_set_unread() {
+    if !stack_enabled() {
+        return;
+    }
+    let client = client();
+    let token = go_minted_token(&client).await;
+    let fixture = fixture(&client, &token, "pame").await;
+
+    let by_id = format!(
+        "/api/v4/users/{}/posts/{}/set_unread",
+        fixture.reader.id, fixture.root_post
+    );
+    let by_me = format!("/api/v4/users/me/posts/{}/set_unread", fixture.root_post);
+    let flag = br#"{"collapsed_threads_supported":true}"#;
+
+    let (go_id, _) = post_both_allowing_forward(&client, &fixture.reader.token, &by_id, flag).await;
+    let (go_me, ours_me) =
+        post_both_allowing_forward(&client, &fixture.reader.token, &by_me, flag).await;
+
+    assert_eq!(go_me.0, 200, "Go resolves `me`");
+    assert!(ours_me.2, "`me` is answered here, not forwarded");
+    assert_eq!(
+        (ours_me.0, String::from_utf8_lossy(&ours_me.1).into_owned()),
+        (go_me.0, String::from_utf8_lossy(&go_me.1).into_owned()),
+    );
+    // And `me` really is the same user: the two spellings answer the same body, `user_id`
+    // included. A substitution that resolved to somebody else would still be a 200.
+    assert_eq!(
+        String::from_utf8_lossy(&go_id.1),
+        String::from_utf8_lossy(&go_me.1),
+        "`me` and the reader's own id are the same request"
+    );
 
     unwind(&client, &token, fixture).await;
 }
