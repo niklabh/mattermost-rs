@@ -1099,6 +1099,66 @@
             "prop_os": "Mac OS",
             "prop_browser": "Unknown/0.0",
             "is_mobile_request": false
+        },
+        {
+            "user_agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 3_1_3 like Mac OS X) AppleWebKit/528.18 (KHTML, like Gecko) Mobile/7E18 Safari/528.16",
+            "platform_enum": "iPhone",
+            "os_name_enum": "iOS",
+            "os_version": [
+                3,
+                1,
+                3
+            ],
+            "browser_name_enum": "Safari",
+            "browser_version": [
+                4,
+                1,
+                3
+            ],
+            "prop_platform": "iPhone",
+            "prop_os": "iOS",
+            "prop_browser": "Safari/4.1.3",
+            "is_mobile_request": true
+        },
+        {
+            "user_agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Safari/604.1",
+            "platform_enum": "iPhone",
+            "os_name_enum": "iOS",
+            "os_version": [
+                17,
+                5,
+                1
+            ],
+            "browser_name_enum": "Safari",
+            "browser_version": [
+                17,
+                5,
+                1
+            ],
+            "prop_platform": "iPhone",
+            "prop_os": "iOS",
+            "prop_browser": "Safari/17.5.1",
+            "is_mobile_request": true
+        },
+        {
+            "user_agent": "Mozilla/5.0 (Windows NT 10.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
+            "platform_enum": "Windows",
+            "os_name_enum": "Windows",
+            "os_version": [
+                10,
+                1,
+                0
+            ],
+            "browser_name_enum": "Chrome",
+            "browser_version": [
+                127,
+                0,
+                0
+            ],
+            "prop_platform": "Windows",
+            "prop_os": "Windows 10",
+            "prop_browser": "Chrome/127.0",
+            "is_mobile_request": false
         }
     ]
 }

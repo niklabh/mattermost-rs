@@ -115,6 +115,14 @@ var userAgentCorpus = []string{
 	"Mozilla/5.0 (Macintosh; Intel Mac OS X 10)",
 	"Mozilla/5.0 (Macintosh; Intel Mac OS X 1.2.3.4)",
 	"Mozilla/5.0 (Macintosh; Intel Mac OS X x)",
+	// Safari with **no** `version/` token, which is the only way to reach `evalBrowserVersion`s
+	// Safari arm — it copies the *OS* version and adds one below major 4. Every other Safari
+	// string in this corpus carries `version/` and returns before that arm.
+	"Mozilla/5.0 (iPhone; CPU iPhone OS 3_1_3 like Mac OS X) AppleWebKit/528.18 (KHTML, like Gecko) Mobile/7E18 Safari/528.16",
+	"Mozilla/5.0 (iPhone; CPU iPhone OS 17_5_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Safari/604.1",
+	// NT 10.**1**: the Windows name table matches `major == 10` and ignores the minor, so this
+	// is "Windows 10" too. Nothing else in the corpus separates that arm from a `(10, 0)` one.
+	"Mozilla/5.0 (Windows NT 10.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
 }
 
 // userAgentCase is one corpus string with everything both layers produce for it.

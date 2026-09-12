@@ -109,7 +109,10 @@ fn assert_user_bodies_agree(go_body: &[u8], rs_body: &[u8], context: &str) {
     for (name, obj) in [("go", go_obj), ("rust", rs_obj)] {
         for key in VOLATILE {
             assert!(
-                obj.get(*key).and_then(serde_json::Value::as_i64).unwrap_or(0) > 0,
+                obj.get(*key)
+                    .and_then(serde_json::Value::as_i64)
+                    .unwrap_or(0)
+                    > 0,
                 "{context}: {name} has no plausible `{key}`"
             );
         }
@@ -154,7 +157,10 @@ async fn an_unknown_account_is_refused_identically() {
         &rs_body,
         "login with an unknown account",
     );
-    assert_eq!(go["id"], "api.user.login.invalid_credentials_email_username");
+    assert_eq!(
+        go["id"],
+        "api.user.login.invalid_credentials_email_username"
+    );
 
     // A refused login mints nothing.
     assert!(rs_headers.get("token").is_none(), "no token on a refusal");
@@ -213,7 +219,10 @@ async fn a_successful_login_answers_the_same_user_and_a_token() {
     let (team_id, _) = common::a_team_and_channel_the_user_is_in(&client, &admin).await;
     let user = create_plain_user(&client, &admin, &team_id, "login1").await;
 
-    let [(go_status, go_headers, go_body), (rs_status, rs_headers, rs_body)] = login_both(
+    let [
+        (go_status, go_headers, go_body),
+        (rs_status, rs_headers, rs_body),
+    ] = login_both(
         &client,
         "/api/v4/users/login",
         serde_json::json!({
@@ -224,8 +233,18 @@ async fn a_successful_login_answers_the_same_user_and_a_token() {
     )
     .await;
 
-    assert_eq!(go_status, 200, "Go refused: {}", String::from_utf8_lossy(&go_body));
-    assert_eq!(rs_status, 200, "we refused: {}", String::from_utf8_lossy(&rs_body));
+    assert_eq!(
+        go_status,
+        200,
+        "Go refused: {}",
+        String::from_utf8_lossy(&go_body)
+    );
+    assert_eq!(
+        rs_status,
+        200,
+        "we refused: {}",
+        String::from_utf8_lossy(&rs_body)
+    );
     assert_user_bodies_agree(&go_body, &rs_body, "a successful login");
 
     // The token is a fresh 26-character id on both, and it is not the same one.
@@ -258,7 +277,10 @@ async fn a_successful_login_answers_the_same_user_and_a_token() {
             .expect("the server answers");
         assert_eq!(me.status(), 200, "{base} did not accept its own token");
         let body: serde_json::Value = me.json().await.expect("a user");
-        assert_eq!(body["id"], user.id, "{base} minted a token for someone else");
+        assert_eq!(
+            body["id"], user.id,
+            "{base} minted a token for someone else"
+        );
     }
 
     delete_plain_user(&client, &admin, &user.id).await;
@@ -354,6 +376,12 @@ async fn the_three_session_cookies_have_the_same_shape_on_both_servers() {
         assert_eq!(cookie_values[0].len(), 26, "the token cookie is an id");
         assert_eq!(cookie_values[1], user.id, "the user cookie names the user");
         assert_eq!(cookie_values[2].len(), 26, "the CSRF cookie is an id");
+        // A *different* id: `GenerateCSRF` mints its own rather than reusing the session token,
+        // and a port that put the token in all three would still pass every length assertion.
+        assert_ne!(
+            cookie_values[2], cookie_values[0],
+            "the CSRF token must not be the session token"
+        );
     }
 
     delete_plain_user(&client, &admin, &user.id).await;
@@ -433,7 +461,15 @@ async fn the_session_props_derived_from_the_user_agent_match() {
         let go_props = props_of(&go_token).await;
         let rs_props = props_of(&rs_token).await;
 
-        for key in ["platform", "os", "browser", "isMobile", "isSaml", "isOAuthUser", "is_guest"] {
+        for key in [
+            "platform",
+            "os",
+            "browser",
+            "isMobile",
+            "isSaml",
+            "isOAuthUser",
+            "is_guest",
+        ] {
             assert_eq!(
                 rs_props.get(key),
                 go_props.get(key),
@@ -561,7 +597,10 @@ async fn a_deactivated_account_is_refused_with_its_own_id() {
         .send()
         .await
         .expect("Go answers");
-    assert!(deactivated.status().is_success(), "the user was not deactivated");
+    assert!(
+        deactivated.status().is_success(),
+        "the user was not deactivated"
+    );
 
     let [(go_status, _, go_body), (rs_status, _, rs_body)] = login_both(
         &client,
@@ -657,7 +696,10 @@ async fn an_sso_account_is_masked_rather_than_named() {
     assert_eq!(go_status, 401, "the 400 must have been masked to a 401");
     assert_eq!(rs_status, go_status);
     let go = assert_error_bodies_match_except_known_gaps(&go_body, &rs_body, "an SSO account");
-    assert_eq!(go["id"], "api.user.login.invalid_credentials_email_username");
+    assert_eq!(
+        go["id"],
+        "api.user.login.invalid_credentials_email_username"
+    );
 
     delete_plain_user(&client, &admin, &user.id).await;
 }
@@ -777,8 +819,10 @@ async fn get_login_type_is_a_404_with_no_body() {
         serde_json::json!({}),
         serde_json::json!({ "login_id": "nobody@mmrs.invalid", "device_id": "x" }),
     ] {
-        let [(go_status, go_headers, go_body), (rs_status, rs_headers, rs_body)] =
-            login_both(&client, "/api/v4/users/login/type", body.clone(), &[]).await;
+        let [
+            (go_status, go_headers, go_body),
+            (rs_status, rs_headers, rs_body),
+        ] = login_both(&client, "/api/v4/users/login/type", body.clone(), &[]).await;
 
         assert_eq!(go_status, 404, "Go's status for {body}");
         assert_eq!(rs_status, go_status, "our status for {body}");
@@ -790,4 +834,209 @@ async fn get_login_type_is_a_404_with_no_body() {
             "the content type differs for {body}"
         );
     }
+}
+
+/// A successful login **clears** the failed-attempt counter, and it clears one that is already
+/// above zero.
+///
+/// Without the nonzero start this asserts nothing: the counter is already `0` on a fresh account,
+/// so a port that never wrote it would look identical. Three failures first is what makes the
+/// write observable. It also pins the two writes `DoLogin` leaves in `Users`: `LastLogin` is the
+/// **session's** `CreateAt` and `UpdateAt` is a *different*, later instant read inside the store.
+#[tokio::test]
+async fn a_successful_login_clears_the_counter_and_stamps_both_columns() {
+    if !stack_enabled() {
+        return;
+    }
+    let client = client();
+    let admin = go_minted_token(&client).await;
+    let (team_id, _) = common::a_team_and_channel_the_user_is_in(&client, &admin).await;
+    let user = create_plain_user(&client, &admin, &team_id, "login9").await;
+
+    let Some(pool) = common::fixture_pool().await else {
+        delete_plain_user(&client, &admin, &user.id).await;
+        return;
+    };
+    let columns = async |pool: &sqlx::PgPool| -> (i32, i64, i64) {
+        sqlx::query_as::<_, (i32, i64, i64)>(
+            "SELECT failedattempts, lastlogin, updateat FROM users WHERE id = $1",
+        )
+        .bind(&user.id)
+        .fetch_one(pool)
+        .await
+        .expect("the row is readable")
+    };
+
+    let (_, _, before_update_at) = columns(&pool).await;
+
+    for _ in 0..3 {
+        let refused = client
+            .post(format!("{RUST}/api/v4/users/login"))
+            .json(&serde_json::json!({
+                "login_id": plain_username("login9"),
+                "password": "Wrong-Password-9999",
+            }))
+            .send()
+            .await
+            .expect("we answer");
+        assert_eq!(refused.status(), 401);
+    }
+    let (raised, _, _) = columns(&pool).await;
+    assert_eq!(raised, 3, "three refusals must claim three slots");
+
+    // Now the right password, against **us**, so the clear is ours to get wrong.
+    let ok = client
+        .post(format!("{RUST}/api/v4/users/login"))
+        .json(&serde_json::json!({
+            "login_id": plain_username("login9"),
+            "password": PLAIN_USER_PASSWORD,
+        }))
+        .send()
+        .await
+        .expect("we answer");
+    assert_eq!(ok.status(), 200);
+    let token = ok
+        .headers()
+        .get("token")
+        .expect("a Token header")
+        .to_str()
+        .expect("ASCII")
+        .to_owned();
+
+    let (cleared, last_login, update_at) = columns(&pool).await;
+    assert_eq!(cleared, 0, "a successful login clears the counter");
+    assert!(
+        update_at > before_update_at,
+        "UpdateAt must move: {update_at} is not after {before_update_at}"
+    );
+
+    // `UpdateLastLogin(user.Id, session.CreateAt)` — the session's own create time, not a fresh
+    // clock read. Reading the session back is the only way to see which one was written.
+    let sessions: serde_json::Value = client
+        .get(format!("{RUST}/api/v4/users/me/sessions"))
+        .header("Authorization", format!("Bearer {token}"))
+        .send()
+        .await
+        .expect("we answer")
+        .json()
+        .await
+        .expect("a list");
+    let create_at = sessions[0]["create_at"].as_i64().expect("a create_at");
+    assert_eq!(
+        last_login, create_at,
+        "LastLogin must be the session CreateAt, not a second clock read"
+    );
+    assert!(
+        update_at >= last_login,
+        "UpdateAt is read after the insert, so it cannot precede LastLogin"
+    );
+
+    delete_plain_user(&client, &admin, &user.id).await;
+}
+
+/// A `device_id` in the body makes the session mobile **whatever the user agent says**, and lands
+/// on the session row.
+///
+/// The user agent here is a desktop browser, so `IsMobileRequest` is `false` and the only thing
+/// that can set `isMobile` is the explicit device id — which is exactly the line Go added a
+/// comment for (app/login.go:154). Go's session is read back **before** ours is created, because
+/// `DoLogin` revokes every other session holding the same device id and ours would take Go's
+/// with it.
+#[tokio::test]
+async fn an_explicit_device_id_makes_the_session_mobile() {
+    if !stack_enabled() {
+        return;
+    }
+    let client = client();
+    let admin = go_minted_token(&client).await;
+    let (team_id, _) = common::a_team_and_channel_the_user_is_in(&client, &admin).await;
+    let user = create_plain_user(&client, &admin, &team_id, "login10").await;
+
+    const DESKTOP: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
+                           (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36";
+    let device_id = format!("apple_rn:{}", "d".repeat(64));
+    let body = serde_json::json!({
+        "login_id": plain_username("login10"),
+        "password": PLAIN_USER_PASSWORD,
+        "device_id": device_id,
+    });
+
+    let login = async |base: &str| -> serde_json::Value {
+        let response = client
+            .post(format!("{base}/api/v4/users/login"))
+            .header("User-Agent", DESKTOP)
+            .json(&body)
+            .send()
+            .await
+            .expect("the server answers");
+        assert_eq!(
+            response.status(),
+            200,
+            "{base} refused a device login: {}",
+            response.text().await.unwrap_or_default()
+        );
+        let token = response
+            .headers()
+            .get("token")
+            .expect("a Token header")
+            .to_str()
+            .expect("ASCII")
+            .to_owned();
+        let sessions: serde_json::Value = client
+            .get(format!("{base}/api/v4/users/me/sessions"))
+            .header("Authorization", format!("Bearer {token}"))
+            .send()
+            .await
+            .expect("the server answers")
+            .json()
+            .await
+            .expect("a list");
+        sessions[0].clone()
+    };
+
+    // Go first, read back, then us — the second login revokes the first.
+    let go_session = login(GO).await;
+    let rs_session = login(RUST).await;
+
+    for (name, session) in [("go", &go_session), ("rust", &rs_session)] {
+        assert_eq!(
+            session["device_id"].as_str(),
+            Some(device_id.as_str()),
+            "{name} did not store the device id"
+        );
+        assert_eq!(
+            session["props"]["isMobile"].as_str(),
+            Some("true"),
+            "{name}: a device id forces isMobile even for a desktop agent"
+        );
+        // The user agent still decides the other three props, and it is a desktop browser.
+        assert_eq!(session["props"]["platform"].as_str(), Some("Windows"));
+    }
+    // Every prop but `csrf`, which is a fresh random id per session and is asserted to be one
+    // by the cookie test rather than compared here.
+    for key in [
+        "platform",
+        "os",
+        "browser",
+        "isMobile",
+        "isSaml",
+        "isOAuthUser",
+        "is_guest",
+    ] {
+        assert_eq!(
+            rs_session["props"][key], go_session["props"][key],
+            "`{key}` differs for a device login"
+        );
+    }
+    assert_eq!(
+        go_session["props"]
+            .as_object()
+            .map(|o| o.keys().collect::<Vec<_>>()),
+        rs_session["props"]
+            .as_object()
+            .map(|o| o.keys().collect::<Vec<_>>()),
+        "the prop sets differ for a device login"
+    );
+
+    delete_plain_user(&client, &admin, &user.id).await;
 }
