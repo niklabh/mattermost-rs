@@ -185,15 +185,29 @@ async fn a_session_is_required_and_no_permission_is() {
     common::assert_error_bodies_match_except_known_gaps(&go, &rs, PATH);
 }
 
-/// Registering the `GET` must not turn the `POST` beside it into our 405 — that route is
-/// licence-gated and answers 400, which is Go's answer to give.
+/// The `POST` beside this `GET` is now served too, and it must **not** publish.
+///
+/// `createTermsOfService` is licence-gated and this installation is unlicensed, so its whole
+/// behaviour here is a 400 — which is asserted against Go in `parity::terms_of_service_writes`.
+/// What this test guards is narrower and belongs beside the read: a `POST` that published would
+/// move *this* suite's answer, since the new revision would be the latest. It asks for the
+/// current latest, posts, and asks again.
 #[tokio::test]
-async fn other_methods_are_forwarded() {
+async fn the_post_beside_it_is_served_and_publishes_nothing() {
     if !stack_enabled() {
         return;
     }
     let client = client();
     let token = go_minted_token(&client).await;
+    plant().await;
+
+    let latest_id = async || -> String {
+        let (_, body) = fetch_both_raw(&client, &token, PATH).await.0;
+        let value: serde_json::Value = serde_json::from_slice(&body).expect("JSON");
+        value["id"].as_str().unwrap_or_default().to_owned()
+    };
+    let before = latest_id().await;
+    assert_eq!(before, LATEST_ID, "the fixture is in place");
 
     let ours = client
         .post(format!("{RUST}{PATH}"))
@@ -206,7 +220,14 @@ async fn other_methods_are_forwarded() {
         ours.headers()
             .get("x-mmrs-served-by")
             .and_then(|v| v.to_str().ok()),
-        Some("go"),
-        "POST {PATH} must be forwarded"
+        Some("rust"),
+        "POST {PATH} is served here now"
+    );
+    assert_eq!(ours.status().as_u16(), 400, "and it is the licence refusal");
+
+    assert_eq!(
+        latest_id().await,
+        before,
+        "a refused publish must leave the table alone"
     );
 }

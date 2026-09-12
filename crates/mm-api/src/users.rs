@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Request, State};
 use axum::http::header::{ETAG, IF_NONE_MATCH};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
@@ -1882,6 +1882,89 @@ pub async fn get_user_terms_of_service(
         body,
     )
         .into_response())
+}
+
+/// Port of `saveUserTermsOfService` (api4/user.go:3447), reached as
+/// `POST /api/v4/users/{user_id}/terms_of_service`.
+///
+/// # `{user_id}` is decoration
+///
+/// There is no `RequireUserId` and no permission check: the handler reads
+/// `c.AppContext.Session().UserId` and acts on the caller. So posting to another user's path
+/// records *your own* acceptance, and posting to a user id that does not exist works. Reproduced
+/// exactly — the segment is bound and dropped, as on the `GET` beside it.
+///
+/// # The body is `map[string]any` and the two type assertions are the validation
+///
+/// `StringInterfaceFromJSON` swallows every decode failure into an empty map, so an unparseable
+/// body reaches the first assertion and fails it. Then:
+///
+/// * `props["termsOfServiceId"].(string)` — absent, `null`, or any non-string → 400
+///   `api.context.invalid_body_param.app_error` naming **`termsOfServiceId`** (camel case, as the
+///   JSON key is spelled, not the snake case the model uses).
+/// * `props["accepted"].(bool)` — the same for `accepted`. A JSON `"true"` is a string and fails
+///   here; so does `1`.
+///
+/// The order is fixed: a body missing both names the terms id.
+///
+/// # An empty terms id is a 404, not a 400
+///
+/// `GetTermsOfService("")` runs before the write and misses, so `{"termsOfServiceId":"",
+/// "accepted":true}` is `app.terms_of_service.get.no_rows.app_error` — the model's own
+/// `is_valid` 400 is unreachable through this route because the lookup refuses first.
+///
+/// # Success is `ReturnStatusOK`
+///
+/// `{"status":"OK"}` with **no** trailing newline.
+#[tracing::instrument(skip_all, fields(accepted))]
+pub async fn save_user_terms_of_service(
+    State(state): State<AppState>,
+    Path(user_id): Path<String>,
+    session: AuthenticatedSession,
+    request: Request,
+) -> Result<Response, ApiError> {
+    // Bound so the shape of the route is visible, then dropped — see the doc comment.
+    let _ = user_id;
+
+    let bytes = axum::body::to_bytes(request.into_body(), usize::MAX)
+        .await
+        .unwrap_or_default();
+    // Port of `model.StringInterfaceFromJSON` (utils.go:527): every failure is an empty map.
+    let props: std::collections::HashMap<String, serde_json::Value> =
+        serde_json::from_slice(&bytes).unwrap_or_default();
+
+    let Some(terms_of_service_id) = props.get("termsOfServiceId").and_then(|v| v.as_str()) else {
+        return Err(ApiError::invalid_param("termsOfServiceId"));
+    };
+    let Some(accepted) = props.get("accepted").and_then(serde_json::Value::as_bool) else {
+        return Err(ApiError::invalid_param("accepted"));
+    };
+    tracing::Span::current().record("accepted", accepted);
+
+    // `c.App.GetTermsOfService` — the only thing between a client and an acceptance of a revision
+    // that was never published.
+    state.app.get_terms_of_service(terms_of_service_id).await?;
+
+    state
+        .app
+        .save_user_terms_of_service(&session.0.user_id, terms_of_service_id, accepted)
+        .await?;
+
+    Ok(status_ok())
+}
+
+/// Port of `web.ReturnStatusOK` (web/web.go:127) — `w.Write([]byte(MapToJSON(m)))`, so **no
+/// trailing newline**.
+fn status_ok() -> Response {
+    (
+        StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        br#"{"status":"OK"}"#.to_vec(),
+    )
+        .into_response()
 }
 
 /// Port of `getKnownUsers` (api4/user.go:1264), reached as `GET /api/v4/users/known`.

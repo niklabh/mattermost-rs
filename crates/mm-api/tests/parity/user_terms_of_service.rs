@@ -190,9 +190,14 @@ async fn a_short_id_is_not_a_400_because_nothing_validates_it() {
     assert_eq!(rs_status, go_status);
 }
 
-/// `POST` on the same path is `saveUserTermsOfService` and must still be Go's.
+/// `POST` on the same path is `saveUserTermsOfService`, which is served here too.
+///
+/// Its own assertions live in `parity::terms_of_service_writes`, which owns accounts of its own
+/// to write to. What is checked here is that registering it did not disturb the `GET`: this
+/// suite's `accepted_id` has a **planted** row that no test may rewrite, so the `POST` below is
+/// aimed at a revision that does not exist and must fail before the write.
 #[tokio::test]
-async fn the_post_on_the_same_path_is_still_forwarded() {
+async fn the_post_on_the_same_path_is_served_here() {
     if !stack_enabled() {
         return;
     }
@@ -204,6 +209,8 @@ async fn the_post_on_the_same_path_is_still_forwarded() {
     let response = client
         .post(format!("{}{path}", common::RUST))
         .header("Authorization", format!("Bearer {token}"))
+        // `TOS_ID` names no row in `TermsOfService` — only in `UserTermsOfService` — so
+        // `GetTermsOfService` 404s and nothing is written.
         .json(&serde_json::json!({ "termsOfServiceId": TOS_ID, "accepted": true }))
         .send()
         .await
@@ -213,7 +220,12 @@ async fn the_post_on_the_same_path_is_still_forwarded() {
             .headers()
             .get("x-mmrs-served-by")
             .and_then(|v| v.to_str().ok()),
-        Some("go"),
-        "only GET is migrated"
+        Some("rust"),
+        "the POST is migrated now"
+    );
+    assert_eq!(
+        response.status().as_u16(),
+        404,
+        "the revision lookup precedes the write"
     );
 }
