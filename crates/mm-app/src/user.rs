@@ -1108,11 +1108,191 @@ impl App {
                 unreproducible => unreproducible,
             })
     }
+
+    /// Port of `App.IsProfileImageLockedForUser` (app/user.go:1465).
+    ///
+    /// Four conjuncts, and Go writes them in an order this port deliberately does **not** keep:
+    ///
+    /// ```text
+    /// !SessionHasPermissionTo(edit_other_users)
+    ///   && MinimumEnterpriseLicense(a.License())
+    ///   && user.AuthService == ""
+    ///   && *TeamSettings.LockProfileFieldsForEmailUsers == "all"
+    /// ```
+    ///
+    /// # Why the licence conjunct is evaluated last here
+    ///
+    /// All four are pure predicates over values this process can read, except the licence: what
+    /// [`crate::App::license_state`] can see is *whether* a licence exists, never its SKU tier,
+    /// and `MinimumEnterpriseLicense` is a question about the tier. So a licensed server would
+    /// have to be handed to Go — for a function whose answer is `false` on a stock server
+    /// regardless, because `LockProfileFieldsForEmailUsers` defaults to `"none"`.
+    ///
+    /// Reordering a conjunction of pure predicates changes no answer, and it turns "licensed"
+    /// from a forward into a forward *only when the other three already hold*. An unlicensed
+    /// server is [`Ok(false)`] outright, since `MinimumEnterpriseLicense(nil)` is false.
+    ///
+    /// # `"name_and_username"` does not lock the picture
+    ///
+    /// The comparison is against `TeamSettingsLockProfileFieldsAll` and nothing else, so the
+    /// middle of the three legal values locks the name and the username and leaves this route
+    /// alone.
+    pub async fn is_profile_image_locked_for_user(
+        &self,
+        session: &mm_model::session::Session,
+        user: &mm_model::user::User,
+    ) -> Result<bool, crate::post::PrepareError> {
+        use crate::post::PrepareError;
+
+        if self
+            .session_has_permission_to(session, &mm_model::permission::PERMISSION_EDIT_OTHER_USERS)
+            .await
+        {
+            return Ok(false);
+        }
+        // `user.AuthService == ""` — an email/password account. Every SSO account is exempt.
+        if !user.auth_service.is_empty() {
+            return Ok(false);
+        }
+        if self.config().lock_profile_fields_for_email_users
+            != crate::config::TEAM_SETTINGS_LOCK_PROFILE_FIELDS_ALL
+        {
+            return Ok(false);
+        }
+
+        match self.license_state().await? {
+            crate::license::LicenseState::Unlicensed => Ok(false),
+            crate::license::LicenseState::Licensed => Err(PrepareError::Unreproducible(
+                "the profile-field lock needs the licence SKU tier, which is not visible here",
+            )),
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use crate::config::Config;
+    use mm_model::session::Session;
+    use mm_model::user::User;
+
+    /// A pool that fails fast. Every `is_profile_image_locked_for_user` branch below that reaches
+    /// the store is one the function is supposed to answer *without* it, so a slow failure here
+    /// would be a test that passes for the wrong reason as well as a slow one.
+    fn unreachable_store() -> mm_store::SqlStore {
+        mm_store::SqlStore::from_pool(
+            sqlx::postgres::PgPoolOptions::new()
+                .acquire_timeout(std::time::Duration::from_millis(250))
+                .connect_lazy("postgres://nobody@127.0.0.1:1/nothing")
+                .expect("a lazy pool is built without connecting"),
+        )
+    }
+
+    /// The configuration where every conjunct *but* the licence holds — the only shape from which
+    /// the other three tests can each flip exactly one thing.
+    fn locking_config() -> Config {
+        Config {
+            lock_profile_fields_for_email_users: "all".to_owned(),
+            ..Config::default()
+        }
+    }
+
+    /// An email/password account: `AuthService == ""` is the conjunct that makes the lock apply.
+    fn email_user() -> User {
+        User::default()
+    }
+
+    /// A local-mode session is `is_unrestricted`, so `SessionHasPermissionTo` answers **true**
+    /// without touching the store — which is what makes it usable as "the caller has
+    /// `edit_other_users`" in a test with no database.
+    fn privileged_session() -> Session {
+        Session {
+            local: true,
+            ..Session::default()
+        }
+    }
+
+    /// Conjunct 1. A caller with `edit_other_users` is never locked, whatever the other three say
+    /// — and the check short-circuits before the licence, which is why this passes with no store.
+    #[tokio::test]
+    async fn edit_other_users_defeats_the_lock() {
+        let app = crate::App::with_config(unreachable_store(), locking_config());
+        assert!(
+            !app.is_profile_image_locked_for_user(&privileged_session(), &email_user())
+                .await
+                .expect("no licence question is reached")
+        );
+    }
+
+    /// Conjunct 3. An SSO account is exempt — the lock is `LockProfileFieldsForEmailUsers`, and
+    /// an LDAP user is not an email user.
+    #[tokio::test]
+    async fn an_sso_account_is_not_locked() {
+        let app = crate::App::with_config(unreachable_store(), locking_config());
+        let user = User {
+            auth_service: mm_model::user::external::USER_AUTH_SERVICE_LDAP.to_owned(),
+            ..User::default()
+        };
+        assert!(
+            !app.is_profile_image_locked_for_user(&Session::default(), &user)
+                .await
+                .expect("no licence question is reached")
+        );
+    }
+
+    /// Conjunct 4, and the middle of the three legal values.
+    ///
+    /// `"name_and_username"` locks the name and the username and leaves the **picture** alone;
+    /// Go compares against `TeamSettingsLockProfileFieldsAll` and nothing else. A port that had
+    /// written `!= "none"` would lock it, and no parity test could see the difference because the
+    /// stack never sets the value at all.
+    #[tokio::test]
+    async fn name_and_username_does_not_lock_the_picture() {
+        let config = Config {
+            lock_profile_fields_for_email_users: "name_and_username".to_owned(),
+            ..Config::default()
+        };
+        let app = crate::App::with_config(unreachable_store(), config);
+        assert!(
+            !app.is_profile_image_locked_for_user(&Session::default(), &email_user())
+                .await
+                .expect("no licence question is reached")
+        );
+    }
+
+    /// Conjunct 2, both ways.
+    ///
+    /// With `MM_LICENSE` set — which [`crate::App::license_state`] reads as "licensed" without a
+    /// query — the other three conjuncts all hold and the tier is the only thing left, so the
+    /// answer is the hand-over rather than a guess. `MinimumEnterpriseLicense` is false for
+    /// `nil`, so an unlicensed server is a served `false` from the same configuration.
+    #[tokio::test]
+    async fn only_a_licensed_server_with_every_other_conjunct_forwards() {
+        let licensed = Config {
+            license: "a-signed-licence-blob".to_owned(),
+            ..locking_config()
+        };
+        let app = crate::App::with_config(unreachable_store(), licensed);
+        let err = app
+            .is_profile_image_locked_for_user(&Session::default(), &email_user())
+            .await
+            .expect_err("the SKU tier is not visible from here");
+        assert!(matches!(err, crate::post::PrepareError::Unreproducible(_)));
+
+        // The same request on a server with no licence is answered, not forwarded: the store is
+        // consulted for `ActiveLicenseId` and its failure is a 500, so this asserts the *shape*
+        // of the licensed branch rather than re-deriving it.
+        let app = crate::App::with_config(unreachable_store(), locking_config());
+        let err = app
+            .is_profile_image_locked_for_user(&Session::default(), &email_user())
+            .await
+            .expect_err("the store is unreachable");
+        assert!(
+            matches!(err, crate::post::PrepareError::App(ref e) if e.status_code == 500),
+            "a store failure is a 500, never a silent unlicensed"
+        );
+    }
 
     #[test]
     fn a_missing_user_is_404_with_gos_error_id() {

@@ -25,7 +25,8 @@
   },
   "FileSettings": {
     "DriverName": "local",
-    "EnablePublicLink": false
+    "EnablePublicLink": false,
+    "MaxFileSize": 104857600
   },
   "GuestAccountsSettings": {
     "RestrictCreationToDomains": ""
@@ -33,12 +34,18 @@
   "ImageProxySettings": {
     "Enable": false
   },
+  "LdapSettings": {
+    "PictureAttribute": ""
+  },
   "MessageExportSettings": {
     "DownloadExportResults": false
   },
   "PrivacySettings": {
     "ShowEmailAddress": true,
     "ShowFullName": true
+  },
+  "SamlSettings": {
+    "EnableSyncWithLdap": false
   },
   "ServiceSettings": {
     "AllowCookiesForSubdomains": false,
@@ -74,6 +81,7 @@
   },
   "TeamSettings": {
     "EnableCustomUserStatuses": true,
+    "LockProfileFieldsForEmailUsers": "none",
     "RestrictCreationToDomains": "",
     "RestrictDirectMessage": "any",
     "UserStatusAwayTimeout": 300

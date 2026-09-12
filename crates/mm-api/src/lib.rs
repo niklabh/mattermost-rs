@@ -1496,7 +1496,21 @@ pub fn router(state: AppState) -> Router {
         )
         .route(
             "/api/v4/users/{user_id}/image",
-            partially_migrated_with_ids(&state, get(images::get_profile_image)),
+            partially_migrated_with_ids(
+                &state,
+                get(images::get_profile_image)
+                    .post(images::set_profile_image)
+                    .delete(images::set_default_profile_image),
+            ),
+        )
+        // `BaseRoutes.User.Handle("/image/default")` (api4/user.go:42) — a **literal** segment
+        // under a parameter, one deeper than the route above. axum prefers a static segment to a
+        // `{param}` and does not backtrack across method routers, so registering it is the shape
+        // that has silently un-served a neighbour before; the router test below is what proves it
+        // did not.
+        .route(
+            "/api/v4/users/{user_id}/image/default",
+            partially_migrated_with_ids(&state, get(images::get_default_profile_image)),
         )
         .route(
             "/api/v4/teams/{team_id}/image",
@@ -1504,11 +1518,16 @@ pub fn router(state: AppState) -> Router {
         )
         // `BaseRoutes.Brand.Handle("/image")` (api4/brand.go:14). The GET is
         // `APIHandlerTrustRequester` — **unauthenticated** — and the DELETE is session-required
-        // with `edit_brand`; the POST between them uploads a multipart image and stays
-        // forwarded through `partially_migrated`'s method fallback.
+        // with `edit_brand`. The POST between them answers its four refusals and the 501 and
+        // forwards the re-encode; note its permission check comes *fourth*, after the body has
+        // been parsed, which is unlike every other write here.
         .route(
             "/api/v4/brand/image",
-            partially_migrated(get(images::get_brand_image).delete(images::delete_brand_image)),
+            partially_migrated(
+                get(images::get_brand_image)
+                    .post(images::upload_brand_image)
+                    .delete(images::delete_brand_image),
+            ),
         )
         // `BaseRoutes.Exports` / `BaseRoutes.Export` (api.go:302, :304) and the two import
         // routes. `{export_name}` and `{import_name}` are **not** id-shaped — gorilla's pattern
@@ -2623,6 +2642,111 @@ mod tests {
                     Request::builder()
                         .method(method.clone())
                         .uri(*path)
+                        .body(axum::body::Body::empty())
+                        .expect("a request"),
+                )
+                .await
+                .expect("the router answers");
+
+            assert_eq!(
+                response
+                    .headers()
+                    .get(crate::error::SERVED_BY)
+                    .map(|v| v.as_bytes()),
+                Some(b"rust".as_slice()),
+                "{method} {path} is no longer answered here"
+            );
+            assert_eq!(
+                response.status(),
+                StatusCode::UNAUTHORIZED,
+                "{method} {path} should have stopped at the session check"
+            );
+        }
+    }
+
+    /// Nothing the multipart-image session registered removed a route this server answers.
+    ///
+    /// # Why this route family needs its own guard
+    ///
+    /// `/users/{user_id}/image/default` is a **literal** segment sitting under a parameter whose
+    /// shorter prefix is already served. axum prefers a static segment to a `{param}` at the same
+    /// depth and does **not** backtrack across method routers, so a path registered one segment
+    /// too shallow, or a second `.route()` call for a path already registered, takes routes away
+    /// rather than adding them — and a parity suite that only exercises the new routes would not
+    /// notice.
+    ///
+    /// The list below is therefore the whole `/users/{user_id}/` neighbourhood at depths two and
+    /// three, plus every `/brand/image` method, not only the four this session added.
+    ///
+    /// # Non-vacuity
+    ///
+    /// Checked by temporarily adding a route this server forwards — `GET
+    /// /api/v4/users/{user_id}/image/default` before it was registered, and `POST
+    /// /api/v4/users/{user_id}/patch`, which is not migrated — and confirming the assertion
+    /// fails. It does: a forwarded response carries no `x-mmrs-served-by`.
+    #[tokio::test]
+    async fn the_image_routes_and_their_neighbours_are_all_still_answered_here() {
+        use axum::http::{Method, Request, StatusCode};
+        use tower::ServiceExt;
+
+        let app = App::new(mm_store::SqlStore::from_pool(
+            sqlx::postgres::PgPoolOptions::new()
+                .connect_lazy("postgres://x/y")
+                .expect("a lazy pool needs no server"),
+        ));
+        let state = AppState::new(app, "http://127.0.0.1:1".to_owned());
+
+        const USER: &str = "abcdefghijklmnopqrstuvwxyz";
+        const TEAM: &str = "bbcdefghijklmnopqrstuvwxyz";
+        const CHANNEL: &str = "cbcdefghijklmnopqrstuvwxyz";
+
+        let served: Vec<(Method, String)> = vec![
+            // The four this session adds.
+            (Method::POST, format!("/api/v4/users/{USER}/image")),
+            (Method::DELETE, format!("/api/v4/users/{USER}/image")),
+            (Method::GET, format!("/api/v4/users/{USER}/image/default")),
+            (Method::POST, "/api/v4/brand/image".to_owned()),
+            // The three that were already here and share a path or a prefix with them.
+            (Method::GET, format!("/api/v4/users/{USER}/image")),
+            (Method::DELETE, "/api/v4/brand/image".to_owned()),
+            (Method::GET, format!("/api/v4/teams/{TEAM}/image")),
+            // The `/users/{user_id}/` neighbourhood, two and three segments deep. Any of these
+            // going quiet is the failure mode this test exists for.
+            (Method::GET, format!("/api/v4/users/{USER}")),
+            (Method::GET, format!("/api/v4/users/{USER}/teams")),
+            (Method::GET, format!("/api/v4/users/{USER}/teams/unread")),
+            (Method::GET, format!("/api/v4/users/{USER}/channel_members")),
+            (Method::GET, format!("/api/v4/users/{USER}/posts/flagged")),
+            (Method::GET, format!("/api/v4/users/{USER}/sessions")),
+            (
+                Method::POST,
+                format!("/api/v4/users/{USER}/sessions/revoke"),
+            ),
+            (Method::GET, format!("/api/v4/users/{USER}/status")),
+            (Method::GET, format!("/api/v4/users/{USER}/preferences")),
+            (
+                Method::GET,
+                format!("/api/v4/users/{USER}/preferences/display"),
+            ),
+            (Method::GET, format!("/api/v4/users/{USER}/audits")),
+            (Method::GET, format!("/api/v4/users/{USER}/groups")),
+            (Method::GET, format!("/api/v4/users/{USER}/channels")),
+            (
+                Method::GET,
+                format!("/api/v4/users/{USER}/channels/{CHANNEL}/unread"),
+            ),
+            (
+                Method::GET,
+                format!("/api/v4/users/{USER}/terms_of_service"),
+            ),
+        ];
+
+        for (method, path) in &served {
+            let response = router(state.clone())
+                .oneshot(
+                    Request::builder()
+                        .method(method.clone())
+                        .uri(path)
                         .body(axum::body::Body::empty())
                         .expect("a request"),
                 )

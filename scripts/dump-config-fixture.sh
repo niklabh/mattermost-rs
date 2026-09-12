@@ -80,7 +80,7 @@ MODELLED = {
     "ComplianceSettings": ["Enable"],
     "ExperimentalSettings": ["RestrictSystemAdmin"],
     "ImageProxySettings": ["Enable"],
-    "FileSettings": ["DriverName", "EnablePublicLink"],
+    "FileSettings": ["DriverName", "EnablePublicLink", "MaxFileSize"],
     "PrivacySettings": ["ShowFullName", "ShowEmailAddress"],
     "ClientRequirements": [
         "AndroidLatestVersion", "AndroidMinVersion", "IosLatestVersion", "IosMinVersion",
@@ -90,8 +90,10 @@ MODELLED = {
     "AIRecapSettings": ["Enable"],
     "TeamSettings": [
         "RestrictDirectMessage", "RestrictCreationToDomains", "UserStatusAwayTimeout",
-        "EnableCustomUserStatuses",
+        "EnableCustomUserStatuses", "LockProfileFieldsForEmailUsers",
     ],
+    "LdapSettings": ["PictureAttribute"],
+    "SamlSettings": ["EnableSyncWithLdap"],
     "EmailSettings": ["RequireEmailVerification"],
     "GuestAccountsSettings": ["RestrictCreationToDomains"],
     "MessageExportSettings": ["DownloadExportResults"],

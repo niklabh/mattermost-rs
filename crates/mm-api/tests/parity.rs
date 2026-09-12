@@ -85,6 +85,7 @@ mod parity {
     pub mod group_syncables;
     pub mod group_writes;
     pub mod groups;
+    pub mod image_writes;
     pub mod incoming_hooks;
     pub mod invite_info;
     pub mod jobs;

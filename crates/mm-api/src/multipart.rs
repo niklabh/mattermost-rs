@@ -126,139 +126,324 @@ fn multipart_boundary(content_type: Option<&str>) -> Result<String, MultipartErr
         .ok_or(MultipartError::MissingBoundary)
 }
 
-/// Port of `mime.ParseMediaType` (mime/mediatype.go:112), for the two headers this module reads.
+/// Port of `mime.ParseMediaType` (mime/mediatype.go:141), transcribed function for function.
 ///
-/// # The three refusals that are easy to miss
+/// Go's parser is four small pieces — `checkMediaTypeDisposition`, `consumeMediaParam`,
+/// `consumeValue` and the RFC 2231 stitching loop — and each of them refuses in a way a lenient
+/// reader would not. They are transcribed rather than paraphrased because every refusal here
+/// **drops a part** (for a `Content-Disposition`) or **rejects the body** (for a `Content-Type`),
+/// and a part that Go turns into a file and this port turns into a value is a different HTTP
+/// status on a route that writes.
 ///
-/// Go returns an error — and therefore, for a part header, **drops the part** — on each of these,
-/// where a lenient parser would carry on:
+/// # The refusals
 ///
-/// * `name` with no `=` at all, and `name=` with nothing after it. A parameter must have a
-///   non-empty token or a quoted string as its value.
-/// * A **repeated** attribute. `name="a"; name="b"` is not "first wins", it is a parse error.
-/// * An unterminated quoted string.
+/// * `name` with no `=`, and `name=` with nothing after it — a value must be a non-empty token or
+///   a quoted string.
+/// * A repeated attribute with a **different** value. An exactly repeated one is *allowed*
+///   (mediatype.go:196, `exists && v != value`) — first-wins is wrong in both directions.
+/// * An unterminated quoted string, and a bare CR or LF inside one.
+/// * Anything between a value and the next `;` — `consumeMediaParam` fails and the outer loop
+///   only forgives the failure when the whole remainder is a single `;`. So `a/b;;name=x` is an
+///   **error**, not two parameters with an empty one between them.
+/// * A media type that is not `token` or `token/token`.
 ///
-/// What is otherwise reproduced: the media type is lower-cased and trimmed, attribute names are
-/// lower-cased (values are not), a trailing `;` is ignored, and a quoted value honours backslash
-/// escapes.
+/// # The backslash rule is not "escape the next character"
 ///
-/// # What is not reproduced
+/// `consumeValue` (mediatype.go:290) honours `\` only when the character after it is one of RFC
+/// 2045's `tspecials`; otherwise the backslash is kept **and** the character after it is kept.
+/// The comment in Go says why: MSIE sends `"C:\dev\go\foo.txt"` unescaped, and treating `\d` as
+/// `d` would eat the path separators. So `name="a\b"` is `a\b` and `name="a\\b"` is `a\b` too.
 ///
-/// RFC 2231's `filename*=utf-8''x` continuations and charset-tagged values. Go decodes those into
-/// the un-starred attribute; here `filename*` stays a separate attribute and `filename` is absent,
-/// so such a part would be read as a **value** where Go reads it as a file. No browser sends that
-/// form in a `multipart/form-data` body and `createEmoji` is the only route affected; recorded as
-/// [D-381] rather than left implicit.
+/// # RFC 2231, which this port now decodes (closing [D-381])
+///
+/// Any attribute containing `*` is diverted into a per-base-name side map and never reaches the
+/// result directly; after the loop the side map is stitched:
+///
+/// | form | result |
+/// |---|---|
+/// | `filename*=utf-8''caf%C3%A9.png` | `filename` = `café.png` |
+/// | `filename*0="a"; filename*1="b.png"` | `filename` = `ab.png` |
+/// | `filename*0*=utf-8''caf%C3%A9; filename*1=.png` | `filename` = `café.png` |
+/// | `filename*=iso-8859-1''x` | **nothing** — only `us-ascii` and `utf-8` decode, and a failed decode drops the key entirely |
+/// | `filename*1="b"` with no `*0` | nothing — the continuation walk starts at 0 and stops at the first gap |
+/// | `filename="a"; filename*=utf-8''b` | `filename` = `b` — the stitch runs *after* the loop and overwrites |
+///
+/// Note the asymmetry in the continuation walk (mediatype.go:224): segment 0 is percent-decoded
+/// only through `decode2231Enc`, which needs the `charset'lang'` prefix, while segments 1..n are
+/// percent-decoded **unconditionally** by `percentHexUnescape` whether or not they carry the
+/// trailing `*`. A port that decoded segment 0 the same way as the rest would turn
+/// `filename*0=100%` into a failure and `filename*1=100%25` into `100%%25`.
+///
+/// # The one thing still not byte-exact
+///
+/// `percentHexUnescape` yields arbitrary bytes and Go stores them in a `string`, which may not be
+/// valid UTF-8. A Rust `String` cannot hold that, so `filename*=utf-8''%ff` is decoded lossily
+/// here and byte-exactly there. No route this server answers reads a filename's *content* — see
+/// [D-410].
 fn parse_media_type(raw: &str) -> Option<(String, HashMap<String, String>)> {
-    let mut parts = raw.splitn(2, ';');
-    let media_type = parts.next()?.trim().to_ascii_lowercase();
-    if media_type.is_empty() {
+    let base = raw.split(';').next().unwrap_or(raw);
+    let media_type = base.trim().to_ascii_lowercase();
+    if !is_well_formed_media_type(&media_type) {
         return None;
     }
+
     let mut params: HashMap<String, String> = HashMap::new();
-    let Some(rest) = parts.next() else {
-        return Some((media_type, params));
-    };
+    // "Map of base parameter name -> parameter name -> value, for parameters containing a `*`."
+    let mut continuation: HashMap<String, HashMap<String, String>> = HashMap::new();
 
-    let chars: Vec<char> = rest.chars().collect();
-    let mut i = 0;
-    loop {
-        while i < chars.len() && (chars[i].is_whitespace() || chars[i] == ';') {
-            i += 1;
+    let mut rest = &raw[base.len()..];
+    while !rest.is_empty() {
+        let trimmed = rest.trim_start();
+        if trimmed.is_empty() {
+            break;
         }
-        if i >= chars.len() {
-            // Go's "ignore trailing semicolons" break.
-            return Some((media_type, params));
-        }
-
-        let key_start = i;
-        while i < chars.len() && is_token_char(chars[i]) {
-            i += 1;
-        }
-        let key: String = chars[key_start..i]
-            .iter()
-            .collect::<String>()
-            .to_ascii_lowercase();
-        if key.is_empty() || i >= chars.len() || chars[i] != '=' {
+        let Some((key, value, after)) = consume_media_param(trimmed) else {
+            // `consumeMediaParam` failed, so `key == ""`. Go forgives exactly one shape: the
+            // whole unconsumed remainder being a single `;`.
+            if trimmed.trim() == ";" {
+                break;
+            }
             return None;
-        }
-        i += 1; // past '='
-
-        let value = if chars.get(i) == Some(&'"') {
-            i += 1;
-            let mut value = String::new();
-            let mut closed = false;
-            while i < chars.len() {
-                match chars[i] {
-                    '\\' if i + 1 < chars.len() => {
-                        value.push(chars[i + 1]);
-                        i += 2;
-                    }
-                    '"' => {
-                        i += 1;
-                        closed = true;
-                        break;
-                    }
-                    c => {
-                        value.push(c);
-                        i += 1;
-                    }
-                }
-            }
-            if !closed {
-                return None;
-            }
-            value
-        } else {
-            // `consumeToken`: an unquoted value is a token, and an empty one is an error.
-            let start = i;
-            while i < chars.len() && is_token_char(chars[i]) {
-                i += 1;
-            }
-            if i == start {
-                return None;
-            }
-            chars[start..i].iter().collect::<String>()
         };
 
-        // Whatever follows a value must be whitespace and then a `;` or the end.
-        while i < chars.len() && chars[i].is_whitespace() {
-            i += 1;
-        }
-        if i < chars.len() && chars[i] != ';' {
+        let pmap = match key.split_once('*') {
+            Some((base_name, _)) => continuation.entry(base_name.to_owned()).or_default(),
+            None => &mut params,
+        };
+        if pmap.get(&key).is_some_and(|existing| *existing != value) {
+            // "mime: duplicate parameter name". An *equal* repeat is allowed.
             return None;
+        }
+        pmap.insert(key, value);
+        rest = after;
+    }
+
+    stitch_2231(&mut params, continuation);
+    Some((media_type, params))
+}
+
+/// Port of `checkMediaTypeDisposition` (mime/mediatype.go:100), as a predicate.
+///
+/// Go distinguishes four errors here; every one of them is the same `None` to both callers, so
+/// only the verdict is kept.
+fn is_well_formed_media_type(s: &str) -> bool {
+    let (typ, rest) = consume_token(s);
+    if typ.is_empty() {
+        return false;
+    }
+    if rest.is_empty() {
+        return true;
+    }
+    let Some(rest) = rest.strip_prefix('/') else {
+        return false;
+    };
+    if rest.contains('/') {
+        return false;
+    }
+    let (subtype, rest) = consume_token(rest);
+    !subtype.is_empty() && rest.is_empty()
+}
+
+/// Port of `consumeMediaParam` (mime/mediatype.go:316). `None` is Go's `("", "", v)`.
+///
+/// Whitespace is skipped in four places — before the `;`, after it, around the `=` — which is why
+/// `form-data; name = "x"` parses and `form-data;;name="x"` does not.
+fn consume_media_param(v: &str) -> Option<(String, String, &str)> {
+    let rest = v.trim_start().strip_prefix(';')?.trim_start();
+    let (param, rest) = consume_token(rest);
+    if param.is_empty() {
+        return None;
+    }
+    let rest = rest.trim_start().strip_prefix('=')?.trim_start();
+    let (value, after) = consume_value(rest)?;
+    Some((param.to_ascii_lowercase(), value, after))
+}
+
+/// Port of `consumeToken` (mime/mediatype.go:260): the leading run of token characters, and
+/// whatever follows it.
+fn consume_token(v: &str) -> (&str, &str) {
+    let end = v.bytes().position(|b| !is_token_byte(b)).unwrap_or(v.len());
+    v.split_at(end)
+}
+
+/// Port of `consumeValue` (mime/mediatype.go:277). `None` is Go's `("", v)` *when that means
+/// failure* — which is every case except an unquoted empty token, and the caller refuses that
+/// too (`value == "" && rest2 == rest`), so the two collapse into one `None`.
+fn consume_value(v: &str) -> Option<(String, &str)> {
+    if !v.starts_with('"') {
+        let (token, rest) = consume_token(v);
+        if token.is_empty() {
+            return None;
+        }
+        return Some((token.to_owned(), rest));
+    }
+
+    let bytes = v.as_bytes();
+    let mut value: Vec<u8> = Vec::new();
+    let mut i = 1;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'"' => {
+                // Byte indices only ever land on a character boundary here: every byte matched
+                // above is ASCII, and a multi-byte character's continuation bytes are copied
+                // through untouched.
+                let consumed = String::from_utf8(value).ok()?;
+                return Some((consumed, &v[i + 1..]));
+            }
+            b'\\' if i + 1 < bytes.len() && is_tspecial(bytes[i + 1]) => {
+                value.push(bytes[i + 1]);
+                i += 2;
+            }
+            // A bare CR or LF inside a quoted string is a failure, not a literal.
+            b'\r' | b'\n' => return None,
+            byte => {
+                value.push(byte);
+                i += 1;
+            }
+        }
+    }
+    // No closing quote.
+    None
+}
+
+/// Port of the stitching loop at the end of `ParseMediaType` (mime/mediatype.go:194-232).
+fn stitch_2231(
+    params: &mut HashMap<String, String>,
+    continuation: HashMap<String, HashMap<String, String>>,
+) {
+    for (key, pieces) in continuation {
+        // The single-part form, `filename*=charset'lang'text`. A decode failure drops the key —
+        // it does **not** fall through to the numbered walk.
+        if let Some(encoded) = pieces.get(&format!("{key}*")) {
+            if let Some(decoded) = decode_2231_enc(encoded) {
+                params.insert(key, decoded);
+            }
+            continue;
         }
 
-        if params.insert(key, value).is_some() {
-            // "mime: duplicate parameter name" — an error, not a last-wins overwrite.
-            return None;
+        let mut buf = String::new();
+        let mut valid = false;
+        for n in 0.. {
+            let simple_part = format!("{key}*{n}");
+            if let Some(piece) = pieces.get(&simple_part) {
+                valid = true;
+                buf.push_str(piece);
+                continue;
+            }
+            let Some(piece) = pieces.get(&format!("{simple_part}*")) else {
+                break;
+            };
+            valid = true;
+            if n == 0 {
+                // Segment zero carries the charset, so it goes through `decode2231Enc`; a
+                // failure there contributes **nothing** and the walk continues to segment 1.
+                if let Some(decoded) = decode_2231_enc(piece) {
+                    buf.push_str(&decoded);
+                }
+            } else if let Some(decoded) = percent_hex_unescape(piece) {
+                buf.push_str(&decoded);
+            }
+        }
+        if valid {
+            params.insert(key, buf);
         }
     }
 }
 
-/// `isTokenChar` (mime/grammar.go:15): an ASCII character that is neither a space, a control
+/// Port of `decode2231Enc` (mime/mediatype.go:239) — `charset'language'percent-encoded`.
+///
+/// Both apostrophes must be present, and the charset must be `us-ascii` or `utf-8`
+/// case-insensitively; every other charset, the empty charset included, fails. The language is
+/// parsed and thrown away, as Go's own TODO says.
+fn decode_2231_enc(v: &str) -> Option<String> {
+    let (charset, rest) = v.split_once('\'')?;
+    let (_language, text) = rest.split_once('\'')?;
+    match charset.to_ascii_lowercase().as_str() {
+        "us-ascii" | "utf-8" => percent_hex_unescape(text),
+        _ => None,
+    }
+}
+
+/// Port of `percentHexUnescape` (mime/mediatype.go:345).
+///
+/// A `%` not followed by two hex digits fails the **whole** string; a string with no `%` at all
+/// is returned unchanged without allocating a second time.
+///
+/// Go's result is a `string` over arbitrary bytes. This one is lossy where those bytes are not
+/// valid UTF-8 — see [D-410] and the note on [`parse_media_type`].
+fn percent_hex_unescape(s: &str) -> Option<String> {
+    let bytes = s.as_bytes();
+    let mut percents = 0usize;
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] != b'%' {
+            i += 1;
+            continue;
+        }
+        percents += 1;
+        if i + 2 >= bytes.len() || !is_hex(bytes[i + 1]) || !is_hex(bytes[i + 2]) {
+            return None;
+        }
+        i += 3;
+    }
+    if percents == 0 {
+        return Some(s.to_owned());
+    }
+
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len() - 2 * percents);
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] == b'%' {
+            out.push((unhex(bytes[i + 1]) << 4) | unhex(bytes[i + 2]));
+            i += 3;
+        } else {
+            out.push(bytes[i]);
+            i += 1;
+        }
+    }
+    Some(String::from_utf8_lossy(&out).into_owned())
+}
+
+fn is_hex(c: u8) -> bool {
+    c.is_ascii_hexdigit()
+}
+
+/// `unhex` (mime/mediatype.go:390). Only ever called on a byte `is_hex` accepted.
+fn unhex(c: u8) -> u8 {
+    match c {
+        b'0'..=b'9' => c - b'0',
+        b'a'..=b'f' => c - b'a' + 10,
+        b'A'..=b'F' => c - b'A' + 10,
+        _ => 0,
+    }
+}
+
+/// `isTSpecial` (mime/grammar.go:9) — RFC 2045's `tspecials`, the set the backslash rule in
+/// [`consume_value`] keys off.
+fn is_tspecial(b: u8) -> bool {
+    matches!(
+        b,
+        b'(' | b')'
+            | b'<'
+            | b'>'
+            | b'@'
+            | b','
+            | b';'
+            | b':'
+            | b'\\'
+            | b'"'
+            | b'/'
+            | b'['
+            | b']'
+            | b'?'
+            | b'='
+    )
+}
+
+/// `isTokenChar` (mime/grammar.go:15): an ASCII byte that is neither a space, a control
 /// character, nor one of RFC 2045's `tspecials`.
-fn is_token_char(c: char) -> bool {
-    c.is_ascii()
-        && !c.is_ascii_control()
-        && c != ' '
-        && !matches!(
-            c,
-            '(' | ')'
-                | '<'
-                | '>'
-                | '@'
-                | ','
-                | ';'
-                | ':'
-                | '\\'
-                | '"'
-                | '/'
-                | '['
-                | ']'
-                | '?'
-                | '='
-        )
+fn is_token_byte(b: u8) -> bool {
+    b.is_ascii() && !b.is_ascii_control() && b != b' ' && !is_tspecial(b)
 }
 
 /// Port of `Reader.readForm` (mime/multipart/formdata.go:60) over a buffered body.

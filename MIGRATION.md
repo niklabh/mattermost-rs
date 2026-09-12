@@ -11353,3 +11353,67 @@ input the suite never sent**, so the right answer and the wrong answer coincided
    write to shared state that every concurrent suite reads, which is the shape that has produced
    failures in suites that touched nothing. Extracted as `post_carries_file_ids` and pinned by
    `only_a_non_empty_file_id_list_requires_upload_file`; the plan line moved to the `unit` suite.
+
+
+## `POST`/`DELETE /api/v4/users/{user_id}/image`, `GET /api/v4/users/{user_id}/image/default`, `POST /api/v4/brand/image` (2026-09-13)
+
+| layer | file | status |
+|---|---|---|
+| app | `crates/mm-app/src/config.rs` — `file_max_file_size`, `ldap_picture_attribute`, `saml_enable_sync_with_ldap`, `lock_profile_fields_for_email_users` | DONE |
+| app | `crates/mm-app/src/user.rs` — `is_profile_image_locked_for_user` | PARTIAL (licensed forwards, [D-413]) |
+| app | `crates/mm-app/src/brand.rs` — `save_brand_image` | PARTIAL (the 501 only, [D-411]) |
+| api | `crates/mm-api/src/images.rs` — `set_profile_image`, `set_default_profile_image`, `get_default_profile_image`, `upload_brand_image` | PARTIAL (refusals only, [D-411]) |
+| test | `crates/mm-api/tests/parity/image_writes.rs` — 13 tests | DONE |
+| test | `crates/mm-app/tests/db_profile_image_lock.rs` — 3 tests | DONE |
+
+*34 mutations, 32 caught, 2 controls survived, 0 harness faults.*
+
+**No success on any of the four is served.** Go re-encodes every accepted upload with its own PNG
+encoder and generates the default avatar through freetype, so the write path forwards ([D-411]) —
+every refusal is answered here and byte-compared against Go, and each hand-over is proved to
+happen before the file backend is touched. `scripts/mutations/image-writes.plan`.
+
+### What a reader would otherwise get wrong
+
+1. **The same failed `GetUser` is a 400 on the POST and a 404 on the DELETE.** `setProfileImage`
+   discards the error for `SetInvalidURLParam("user_id")` (api4/user.go:668);
+   `setDefaultProfileImage` propagates `app.user.missing_account.const` (api4/user.go:719). One
+   call, two answers, and a shared helper would give one answer twice.
+2. **`uploadBrandImage` checks `edit_brand` fourth**, after the body is read, parsed and found to
+   contain an `image` part (api4/brand.go:69) — unlike every other write in the family. A caller
+   with no permission and a malformed body gets the 400.
+3. **The storage 501 is in a different place on each of the three writes**, and it is
+   `SaveBrandImage`'s own error id on the brand route and the *upload's* id under
+   `setDefaultProfileImage`'s `where` on the DELETE.
+4. **Two size limits, 512 bytes apart, and the over-long body is a 413 on one route and a 400 on
+   the other.** `r.ContentLength > MaxFileSize` is the handler's; `MaxFileSize + bytes.MinRead` is
+   `web.Handler.ServeHTTP`'s `MaxBytesReader` (web/handlers.go:217-225). Only `setProfileImage`
+   wraps its parse error, so only there can `handleContextError` find the `MaxBytesError` inside
+   it and rewrite it to `api.context.request_body_too_large.app_error`.
+5. **`setProfileImage`'s parse failure is a 500**, where the identical body is a 400 on
+   `createEmoji` and on `uploadBrandImage`.
+6. **`uploadBrandImage` answers 201**, not 200 — `w.WriteHeader(StatusCreated)` followed by
+   `ReturnStatusOK(w)`, so it is a 201 that still carries `{"status":"OK"}`.
+7. **The DELETE is a write.** `SetDefaultProfileImage` generates the initials avatar and stores
+   it; nothing is removed. And `"name_and_username"` — the middle of the three legal values of
+   `LockProfileFieldsForEmailUsers` — does **not** lock the picture.
+
+### What is not here
+
+Every write. [D-411] records the three forwards and what each would need;
+[D-412] the three refusal families this stack has no Go oracle for (the 501s, both size
+boundaries and the LDAP 409, each measured against a second mm-api with the setting changed);
+[D-413] the licensed profile-field lock. [D-381] is **CLOSED** — RFC 2231 landed in `86a802c`,
+which was the condition it set for this route shipping — and [D-410] is what remains of it.
+
+One branch is observable **nowhere over HTTP**, which the mutation run is what found:
+`is_profile_image_locked_for_user`'s unlicensed `Ok(false)` and its licensed forward reach the
+same place, because both callers spell the check `== Some(true)` and a hand-over follows either
+way. `crates/mm-app/tests/db_profile_image_lock.rs` covers it against a live store, where the
+function returns its own value.
+
+### The next route in this family
+
+`GET /api/v4/users/{user_id}/image` already serves its stored-bytes branch; what is unported
+beside these four is `PUT /api/v4/users/{user_id}/patch` and the rest of the `users.go` write
+surface, none of which needs multipart.

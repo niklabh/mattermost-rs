@@ -284,6 +284,33 @@ func emojiParseMediaTypeAll() []map[string]any {
 		"form-data; name=\"unterminated",
 		"form-data; NAME=\"emoji\"",
 		"form-data; name=\"emoji\"; name=\"second\"",
+		// Appended with the profile-image routes: the RFC 2231 forms `mime.ParseMediaType`
+		// decodes (D-381) and four refusals the first port got wrong.
+		"form-data; name=\"image\"; filename*=utf-8''caf%C3%A9.png",
+		"form-data; name*=utf-8''image; filename=\"e.png\"",
+		"form-data; name=\"image\"; filename*0=\"long\"; filename*1=\"name.png\"",
+		"form-data; name=\"image\"; filename*0*=utf-8''caf%C3%A9; filename*1=.png",
+		"form-data; name=\"image\"; filename*0*=utf-8''a; filename*1*=%2Epng",
+		"form-data; name=\"image\"; filename*=iso-8859-1''caf%E9.png",
+		"form-data; name=\"image\"; filename*=utf-8''bad%zz",
+		"form-data; name=\"image\"; filename*=nocharset",
+		"form-data; name=\"image\"; filename*=''plain.png",
+		"form-data; name=\"image\"; filename=\"plain.png\"; filename*=utf-8''star.png",
+		"form-data; name=\"image\"; filename*1=\"b\"; filename*2=\"c\"",
+		"form-data; name=\"image\"; filename*0=\"a\"; filename*2=\"c\"",
+		"form-data; name=\"image\"; filename*=US-ASCII''up%2Ecase",
+		"form-data; name=\"image\"; filename*=utf-8''hundred%25",
+		"form-data; name=\"emoji\"; name=\"emoji\"",
+		"form-data; name=\"a\\\\b\"",
+		"form-data; name=\"a\\bc\"",
+		"form-data;;name=\"emoji\"",
+		"form-data; name = \"emoji\"",
+		"form-data; name=\"a\\rb\"",
+		// A real carriage return inside the quoted string, which `consumeValue` refuses —
+		// unlike the backslash-r two rows up, which is a literal backslash.
+		"form-data; name=\"a\rb\"",
+		"form-data extra; name=\"emoji\"",
+		"multipart/form-data/x; boundary=abc",
 	}
 	rows := make([]map[string]any, 0, len(corpus))
 	for _, in := range corpus {
@@ -351,6 +378,13 @@ func emojiReadFormAll() []map[string]any {
 		{"empty", b, ""},
 		{"extra_header_is_kept", b, "--" + b + "\r\nContent-Disposition: form-data; name=\"emoji\"\r\nX-Thing: 1\r\n\r\nv\r\n" + close},
 		{"boundary_with_trailing_space", b, "--" + b + " \r\nContent-Disposition: form-data; name=\"emoji\"\r\n\r\nv\r\n" + close},
+		// Appended with the profile-image routes: end-to-end proof that an RFC 2231 parameter
+		// decides *which map* a part lands in, not merely how it is spelled. Both of these are
+		// **files** to Go; before D-381 was closed they were values here.
+		{"rfc2231_filename_is_a_file", b, part(`form-data; name="image"; filename*=utf-8''caf%C3%A9.png`, "\x89PNG") + close},
+		{"rfc2231_name_keys_the_map", b, part(`form-data; name*=utf-8''image; filename="e.png"`, "\x89PNG") + close},
+		{"rfc2231_continued_filename", b, part(`form-data; name="image"; filename*0="pre"; filename*1="fix.png"`, "d") + close},
+		{"rfc2231_undecodable_filename_is_a_value", b, part(`form-data; name="image"; filename*=iso-8859-1''x.png`, "d") + close},
 	}
 
 	rows := make([]map[string]any, 0, len(corpus))
