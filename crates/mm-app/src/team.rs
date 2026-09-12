@@ -12,7 +12,10 @@ use mm_model::user::MARK_UNREAD_NOTIFY_PROP;
 use mm_model::utils::{AppError, AppResult};
 use mm_store::TeamStore;
 use mm_store::channel_store::ChannelStore;
+use mm_store::job_store::JobStore;
+use mm_store::system_store::SystemStore;
 use mm_store::team_store::TeamMembersGetOptions;
+use mm_store::token_store::TokenStore;
 
 use crate::App;
 
@@ -1331,6 +1334,142 @@ impl App {
         Ok(updated)
     }
 
+    /// Port of `app.App.InvalidateAllEmailInvites` (app/team.go:2440) —
+    /// `DELETE /api/v4/teams/invites/email`.
+    ///
+    /// Three steps, **one error id between them**: every failure is
+    /// `api.team.invalidate_all_email_invites.app_error` at 500, so a client cannot tell which
+    /// half failed. Each step also runs only if the previous one succeeded, so a token delete
+    /// that fails leaves the guest tokens and the pending jobs alone.
+    ///
+    /// The two token types are `team_invitation` and `guest_invitation`, and neither delete has
+    /// an expiry predicate: **live invitations are removed too**, which is the point of the
+    /// route.
+    #[tracing::instrument(skip(self), fields(jobs_cancelled))]
+    pub async fn invalidate_all_email_invites(&self) -> AppResult<()> {
+        for token_type in [
+            mm_model::token::TOKEN_TYPE_TEAM_INVITATION,
+            mm_model::token::TOKEN_TYPE_GUEST_INVITATION,
+        ] {
+            self.store()
+                .token()
+                .remove_all_tokens_by_type(token_type)
+                .await
+                .map_err(|err| {
+                    tracing::error!(error = %err, token_type, "token purge failed");
+                    invalidate_invites_error()
+                })?;
+        }
+
+        self.invalidate_all_resend_invite_email_jobs().await
+    }
+
+    /// Port of `app.App.InvalidateAllResendInviteEmailJobs` (app/team.go:2454).
+    ///
+    /// # The listing failure is fatal and the per-job failures are not
+    ///
+    /// `GetJobsByTypeAndStatus` propagates — and its id, `app.job.get_all_jobs_by_type_and_status
+    /// .app_error`, is then **replaced** by the caller with the invite-invalidation id, so the
+    /// job error never reaches a client. Inside the loop both writes are `Logger().Warn` and the
+    /// loop continues: a job that cannot be cancelled does not stop the next one, and the route
+    /// still answers `{"status":"OK"}`.
+    ///
+    /// The `Systems` delete is keyed on the **job id**, which is how the resend worker stores its
+    /// per-run state. Dropping it leaves a row nothing will ever read again.
+    async fn invalidate_all_resend_invite_email_jobs(&self) -> AppResult<()> {
+        let jobs = self
+            .store()
+            .job()
+            .get_all_by_type_and_status(
+                mm_model::job::JOB_TYPE_RESEND_INVITATION_EMAIL,
+                mm_model::job::JOB_STATUS_PENDING,
+            )
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "pending resend-invite job lookup failed");
+                invalidate_invites_error()
+            })?;
+
+        tracing::Span::current().record("jobs_cancelled", jobs.len());
+
+        for job in &jobs {
+            match self.set_job_canceled(job).await {
+                Ok(()) => {}
+                Err(err) => tracing::warn!(
+                    error = %err,
+                    job_id = %job.id,
+                    "Error canceling resend invitation email job during team invitation invalidation",
+                ),
+            }
+            if let Err(err) = self
+                .store()
+                .system()
+                .permanent_delete_by_name(&job.id)
+                .await
+            {
+                tracing::warn!(
+                    error = %err,
+                    job_id = %job.id,
+                    "Error deleting system values for resend invitation email job during team invitation invalidation",
+                );
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Port of `JobServer.SetJobCanceled` (jobs/jobs.go:236).
+    ///
+    /// The status write, then a `job_updated` socket event carrying the **updated** job with its
+    /// status overwritten a second time in a copy — `publishJobStatus(ret, JobStatusCanceled)`
+    /// re-assigns the field the write just set, which is redundant here and is not in
+    /// `UpdateStatusOptimistically`'s callers.
+    ///
+    /// The broadcast is **unaddressed** (no team, channel or user) and carries
+    /// `contains_sensitive_data`, which is what confines it to system admins — a port that
+    /// dropped the flag would broadcast job state to every connected client.
+    ///
+    /// The metrics decrement is not reproduced; this server has no metrics service.
+    async fn set_job_canceled(&self, job: &mm_model::job::Job) -> AppResult<()> {
+        let updated = self
+            .store()
+            .job()
+            .update_status(&job.id, mm_model::job::JOB_STATUS_CANCELED)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, job_id = %job.id, "job status update failed");
+                AppError::boxed(
+                    "SetJobCanceled",
+                    "app.job.update.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })?;
+
+        let mut message = mm_model::websocket_message::WebSocketEvent::new(
+            mm_model::websocket_message::WEBSOCKET_EVENT_JOB_UPDATED,
+            "",
+            "",
+            "",
+            None,
+            "",
+        );
+        match serde_json::to_string(&updated) {
+            Ok(json) => message.add("job", serde_json::Value::String(json)),
+            Err(err) => {
+                // Go logs and returns without publishing, leaving the write done.
+                tracing::warn!(error = %err, "Failed to marshal job for WebSocket event");
+                return Ok(());
+            }
+        }
+        if let Some(broadcast) = message.broadcast.as_mut() {
+            broadcast.contains_sensitive_data = true;
+        }
+        self.publish(message).await;
+        Ok(())
+    }
+
     /// Port of `app.App.SearchAllTeams` (app/team.go:1050).
     ///
     /// **Two store calls behind one name.** `IsPaginated()` — both `page` *and* `per_page`
@@ -1722,6 +1861,18 @@ pub fn privacy_change_regenerates_invite_id(
 ) -> bool {
     (allow_open_invite != old_allow_open_invite || team_type != old_team_type)
         && (!allow_open_invite || team_type == mm_model::team::TEAM_INVITE)
+}
+
+/// The one error `DELETE /teams/invites/email` can answer with, whichever of its three steps
+/// failed: `api.team.invalidate_all_email_invites.app_error` at 500.
+fn invalidate_invites_error() -> Box<AppError> {
+    AppError::boxed(
+        "InvalidateAllEmailInvites",
+        "api.team.invalidate_all_email_invites.app_error",
+        None,
+        String::new(),
+        500,
+    )
 }
 
 /// `i18n.T("api.channel.create_default_channels.town_square")` on a default-locale server

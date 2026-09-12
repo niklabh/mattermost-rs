@@ -1,0 +1,72 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE jobs\n               SET status = $2,\n                   lastactivityat = $3\n             WHERE id = $1\n         RETURNING                    id                          AS \"id!\",\n                   COALESCE(type, '')          AS \"job_type!\",\n                   COALESCE(priority, 0)       AS \"priority!\",\n                   COALESCE(createat, 0)       AS \"createat!\",\n                   COALESCE(startat, 0)        AS \"startat!\",\n                   COALESCE(lastactivityat, 0) AS \"lastactivityat!\",\n                   COALESCE(status, '')        AS \"status!\",\n                   COALESCE(progress, 0)       AS \"progress!\",\n                   data                        AS \"data?\"\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "job_type!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "priority!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "createat!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "startat!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "lastactivityat!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "status!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 7,
+        "name": "progress!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 8,
+        "name": "data?",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Varchar",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      true
+    ]
+  },
+  "hash": "23881fca151955084a436ad3b5ec531251f10a2509c97d192f98dcbda7fd03cb"
+}

@@ -1270,3 +1270,135 @@ async fn preference_exists(
             .and_then(|v| v.as_array().map(|rows| !rows.is_empty()))
             .unwrap_or(false)
 }
+
+// ---------------------------------------------------------------------------------------------
+// invalidateAllEmailInvites
+// ---------------------------------------------------------------------------------------------
+
+/// The route voids **every** outstanding invitation on the installation, so both halves of the
+/// comparison plant their own token row and check it is gone.
+///
+/// Tokens are planted directly: minting a real one needs `POST /teams/{id}/invite/email`, which
+/// needs a working SMTP server. The row is all this route looks at.
+#[tokio::test]
+async fn invalidating_email_invites_removes_both_token_types() {
+    if !stack_enabled() {
+        return;
+    }
+    let http = client();
+    let admin = go_minted_token(&http).await;
+
+    for base in [GO, RUST] {
+        let tag = if base == GO { "twfinvg" } else { "twfinvr" };
+        let planted = plant_invite_tokens(tag).await;
+        if !planted {
+            return;
+        }
+        assert_eq!(
+            invite_token_count(tag).await,
+            Some(2),
+            "{base}: the fixture tokens are there"
+        );
+
+        let (status, raw) = send(
+            &http,
+            reqwest::Method::DELETE,
+            base,
+            &admin,
+            "/api/v4/teams/invites/email",
+            None,
+        )
+        .await;
+        assert_eq!(status, 200, "{base}: {raw}");
+        assert_eq!(
+            raw, r#"{"status":"OK"}"#,
+            "{base}: ReturnStatusOK, no newline"
+        );
+
+        assert_eq!(
+            invite_token_count(tag).await,
+            Some(0),
+            "{base}: both token types are gone, live ones included"
+        );
+    }
+}
+
+/// An ordinary member does not hold `invalidate_email_invite`, so the route is a 403 with the
+/// same id on both servers.
+#[tokio::test]
+async fn invalidating_email_invites_needs_the_permission() {
+    if !stack_enabled() {
+        return;
+    }
+    let http = client();
+    let admin = go_minted_token(&http).await;
+    let team_id = create_team(&http, &admin, "twfinvp").await;
+    let plain = common::create_plain_user(&http, &admin, &team_id, "twfinvperm").await;
+
+    let mut answers = Vec::new();
+    for base in [GO, RUST] {
+        let (status, raw) = send(
+            &http,
+            reqwest::Method::DELETE,
+            base,
+            &plain.token,
+            "/api/v4/teams/invites/email",
+            None,
+        )
+        .await;
+        assert_eq!(status, 403, "{base}: {raw}");
+        answers.push(error_id(&raw));
+    }
+    assert_eq!(answers[0], answers[1], "the same refusal id");
+
+    common::delete_plain_user(&http, &admin, &plain.id).await;
+}
+
+/// One `team_invitation` and one `guest_invitation` row, tagged so the count below can find
+/// exactly these two. Returns false when there is no database to reach.
+async fn plant_invite_tokens(tag: &str) -> bool {
+    let Ok(url) = std::env::var("DATABASE_URL") else {
+        return false;
+    };
+    let Ok(pool) = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .acquire_timeout(Duration::from_secs(5))
+        .connect(&url)
+        .await
+    else {
+        return false;
+    };
+    for (suffix, token_type) in [("t", "team_invitation"), ("g", "guest_invitation")] {
+        let token = format!("mmrs{tag}{suffix}000000000000000000000000")
+            .chars()
+            .take(26)
+            .collect::<String>();
+        sqlx::query(
+            "INSERT INTO tokens (token, createat, type, extra) VALUES ($1, $2, $3, 'mmrs') \
+             ON CONFLICT (token) DO NOTHING",
+        )
+        .bind(&token)
+        .bind(1_700_000_000_000_i64)
+        .bind(token_type)
+        .execute(&pool)
+        .await
+        .expect("the invite token is planted");
+    }
+    true
+}
+
+async fn invite_token_count(tag: &str) -> Option<i64> {
+    let url = std::env::var("DATABASE_URL").ok()?;
+    let pool = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .acquire_timeout(Duration::from_secs(5))
+        .connect(&url)
+        .await
+        .ok()?;
+    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM tokens WHERE token LIKE $1")
+        .bind(format!("mmrs{tag}%"))
+        .fetch_one(&pool)
+        .await
+        .expect("the token count runs");
+    Some(count)
+}

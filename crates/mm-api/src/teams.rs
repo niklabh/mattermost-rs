@@ -14,6 +14,7 @@
 //! - `updateTeamPrivacy` — `PUT /api/v4/teams/{team_id}/privacy`
 //! - `searchTeams` — `POST /api/v4/teams/search`
 //! - `createTeam` — `POST /api/v4/teams`
+//! - `invalidateAllEmailInvites` — `DELETE /api/v4/teams/invites/email`
 
 use axum::body::Body;
 use axum::extract::{Path, Request, State};
@@ -21,8 +22,8 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use mm_app::team::TeamWrite;
 use mm_model::permission::{
-    PERMISSION_CREATE_TEAM, PERMISSION_INVITE_USER, PERMISSION_MANAGE_TEAM,
-    PERMISSION_SYSCONSOLE_WRITE_USER_MANAGEMENT_PERMISSIONS,
+    PERMISSION_CREATE_TEAM, PERMISSION_INVALIDATE_EMAIL_INVITE, PERMISSION_INVITE_USER,
+    PERMISSION_MANAGE_TEAM, PERMISSION_SYSCONSOLE_WRITE_USER_MANAGEMENT_PERMISSIONS,
 };
 use mm_model::permission::{
     PERMISSION_EDIT_OTHER_USERS, PERMISSION_LIST_PRIVATE_TEAMS, PERMISSION_LIST_PUBLIC_TEAMS,
@@ -1782,6 +1783,47 @@ pub async fn restore_team(
 
     match state.app.get_team(&team_id).await {
         Ok(team) => sanitized_team_response(&state, &session, team).await,
+        Err(err) => ApiError::from(err).into_response(),
+    }
+}
+
+/// Port of `invalidateAllEmailInvites` (api4/team.go:2016) —
+/// `DELETE /api/v4/teams/invites/email`.
+///
+/// One permission, `invalidate_email_invite`, and no parameters at all — the route is
+/// server-wide, not team-scoped, despite living under `/teams`. Every outstanding team and guest
+/// invitation on the installation is voided and every pending resend job is cancelled.
+///
+/// # Wire format
+///
+/// `ReturnStatusOK` — `{"status":"OK"}`, no trailing newline.
+#[tracing::instrument(skip_all, fields(user_id = %session.0.user_id))]
+pub async fn invalidate_all_email_invites(
+    State(state): State<AppState>,
+    session: AuthenticatedSession,
+) -> Response {
+    if !state
+        .app
+        .session_has_permission_to(&session.0, &PERMISSION_INVALIDATE_EMAIL_INVITE)
+        .await
+    {
+        return ApiError::from(*make_permission_error(
+            &session.0,
+            &[&PERMISSION_INVALIDATE_EMAIL_INVITE],
+        ))
+        .into_response();
+    }
+
+    match state.app.invalidate_all_email_invites().await {
+        Ok(()) => (
+            StatusCode::OK,
+            [
+                ("Content-Type", "application/json"),
+                ("x-mmrs-served-by", "rust"),
+            ],
+            r#"{"status":"OK"}"#,
+        )
+            .into_response(),
         Err(err) => ApiError::from(err).into_response(),
     }
 }

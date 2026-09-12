@@ -1063,6 +1063,14 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/teams/search",
             partially_migrated(post(teams::search_teams)),
         )
+        // `BaseRoutes.Teams.Handle("/invites/email")` (api4/team.go:74). Two static segments
+        // under `/teams/`, so no overlap with `{team_id}` — `invites` would have matched the
+        // id class, but the path is one segment longer than `{team_id}` and matches nothing
+        // else gorilla registers.
+        .route(
+            "/api/v4/teams/invites/email",
+            partially_migrated(axum::routing::delete(teams::invalidate_all_email_invites)),
+        )
         // `BaseRoutes.Roles` (api4/api.go). The literal `names` sits beside `{role_id}` and
         // gorilla registered `{role_id:[A-Za-z0-9]+}` *first*, so `GET /roles/names` is a
         // `getRole` call there with `role_id = "names"` and 400s. Registered POST-only here, so
