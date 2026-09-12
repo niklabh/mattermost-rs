@@ -29,6 +29,8 @@ pub mod file;
 pub mod filestore;
 /// The websocket connection registry and event fan-out — Go's `app/platform` hub.
 pub mod hub;
+/// The supported-locale list, for `users.CreateUser`'s locale reset.
+pub mod i18n;
 /// The format-detection half of Go's `image.DecodeConfig`.
 pub mod imaging;
 /// Port of the file-backend half of `app/import.go`.
@@ -64,6 +66,7 @@ pub mod usage;
 pub mod user;
 pub mod user_access_token;
 pub mod user_agent;
+pub mod user_create;
 pub mod user_terms_of_service;
 pub mod utils;
 /// Port of `app/view.go` — the integrated-boards (kanban view) surface.

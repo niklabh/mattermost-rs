@@ -151,6 +151,7 @@ mod parity {
     pub mod user_audits;
     pub mod user_by_email;
     pub mod user_by_username;
+    pub mod user_creates;
     pub mod user_get;
     pub mod user_lookups;
     pub mod user_reports;

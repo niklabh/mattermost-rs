@@ -718,7 +718,7 @@ impl App {
     ///
     /// A username may not collide with a **group** name. The empty string is exempt, and the
     /// query has no `DeleteAt` predicate — a soft-deleted group keeps its name reserved.
-    async fn is_unique_to_group_names(&self, value: &str) -> AppResult<()> {
+    pub(crate) async fn is_unique_to_group_names(&self, value: &str) -> AppResult<()> {
         if value.is_empty() {
             return Ok(());
         }

@@ -20,6 +20,7 @@
   "EmailSettings": {
     "EnableSignInWithEmail": true,
     "EnableSignInWithUsername": true,
+    "EnableSignUpWithEmail": true,
     "RequireEmailVerification": false
   },
   "ExperimentalSettings": {
@@ -47,6 +48,9 @@
   "LdapSettings": {
     "Enable": false,
     "PictureAttribute": ""
+  },
+  "LocalizationSettings": {
+    "DefaultClientLocale": "en"
   },
   "MessageExportSettings": {
     "DownloadExportResults": false
@@ -103,6 +107,7 @@
   },
   "TeamSettings": {
     "EnableCustomUserStatuses": true,
+    "EnableUserCreation": true,
     "LockProfileFieldsForEmailUsers": "none",
     "RestrictCreationToDomains": "",
     "RestrictDirectMessage": "any",

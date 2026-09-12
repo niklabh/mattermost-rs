@@ -74,6 +74,7 @@ pub mod tokens;
 /// The two upload-session reads.
 pub mod uploads;
 pub mod usage;
+pub mod user_creates;
 pub mod users;
 pub mod views;
 pub mod webhooks;
@@ -541,6 +542,13 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/users/password/reset",
             partially_migrated(post(auth_writes::reset_password)),
         )
+        // `BaseRoutes.Users.Handle("/password/reset/send")` (api4/user.go:56) — a static child of
+        // the static above, with no catch-all anywhere near it, so the only thing it could shadow
+        // is a `/users/password/reset/{something}` route, and there is none in Go either.
+        .route(
+            "/api/v4/users/password/reset/send",
+            partially_migrated(post(user_creates::send_password_reset)),
+        )
         // `BaseRoutes.Users.Handle("/email/verify", APIHandler(verifyUserEmail))`
         // (api4/user.go:57), and the one registration on this list with a real routing subtlety.
         //
@@ -566,6 +574,20 @@ pub fn router(state: AppState) -> Router {
                 post(auth_writes::verify_user_email).get(auth_writes::get_user_by_email_verify),
             ),
         )
+        // `BaseRoutes.Users.Handle("/email/verify/send")` (api4/user.go:58) — a **static child of
+        // a static child** of the `{*email}` catch-all, which is the shape that has twice taken a
+        // route away in this file. Two properties have to hold at once and only a router test can
+        // show either: this path must answer here, and `/users/email/<anything else>` must still
+        // reach the catch-all beside it. Both are asserted in
+        // `the_user_creation_routes_and_their_neighbours_are_all_still_answered_here`.
+        //
+        // Its comment above — "unregistered is what keeps it forwarded" — described the state of
+        // this file before the refusals were ported, not a rule. The route now answers the two
+        // cases that precede `Token().Save` and forwards the rest; see `crate::user_creates`.
+        .route(
+            "/api/v4/users/email/verify/send",
+            partially_migrated(post(user_creates::send_verification_email)),
+        )
         // `BaseRoutes.User.Handle("/password", APISessionRequired(updatePassword))`
         // (api4/user.go:51), PUT only — a sibling of `/users/{user_id}/status` and one segment
         // deeper than `/users/{user_id}`, so it shadows nothing.
@@ -577,6 +599,18 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/users/{user_id}/reset_failed_attempts",
             partially_migrated_with_ids(&state, post(auth_writes::reset_password_failed_attempts)),
+        )
+        // `BaseRoutes.User.Handle("/email/verify/member")` (api4/user.go:59), POST only. Three
+        // segments deeper than `/users/{user_id}`, and note that the `{user_id}` here is the
+        // *parameter* — unlike `/users/email/verify/send` above, where `email` is a literal at
+        // the same depth. The two paths differ only in their second segment and land in different
+        // handlers; both are in the router test.
+        .route(
+            "/api/v4/users/{user_id}/email/verify/member",
+            partially_migrated_with_ids(
+                &state,
+                post(user_creates::verify_user_email_without_token),
+            ),
         )
         .route(
             "/api/v4/users/{user_id}/status",
@@ -1065,7 +1099,16 @@ pub fn router(state: AppState) -> Router {
         // answer: nothing that matched `{user_id}` or the `me`/`ids`/`username` literals can
         // match here, and nothing here could have matched them. Only `GET` is migrated; `POST`
         // (createUser) and the rest fall to `partially_migrated`'s method fallback.
-        .route("/api/v4/users", partially_migrated(get(users::get_users)))
+        //
+        // `POST` is `createUser` (api4/user.go:30), added later. It shares the path with the GET
+        // above and adds no segment, so it takes part in no precedence question either — but it
+        // *is* the route at the root of the `{user_id}` subtree, and every literal registered
+        // under `/users/` below is one that could have matched `{user_id}`. See
+        // `the_user_creation_routes_and_their_neighbours_are_all_still_answered_here`.
+        .route(
+            "/api/v4/users",
+            partially_migrated(get(users::get_users).post(user_creates::create_user)),
+        )
         // `BaseRoutes.Users.Handle("/known")` and `("/stats")` (api4/user.go:34, :37) — two more
         // literals beside `{user_id}`, so the same reasoning as `ids` and `autocomplete` above:
         // axum prefers a registered literal, and the `{user_id}` handler's exact-26-character
@@ -3052,6 +3095,181 @@ mod tests {
             .await
             .expect("a body");
         assert!(body.is_empty(), "getLoginType writes no body: {body:?}");
+    }
+
+    /// Nothing the user-creation session registered removed a route this server answers.
+    ///
+    /// # Why this family needs its own guard, beyond the login one
+    ///
+    /// Three of the four routes added here are **static children of static children**, and one of
+    /// those statics sits directly beside a catch-all:
+    ///
+    /// ```text
+    /// /api/v4/users/email/{*email}          the catch-all, GET, served
+    /// /api/v4/users/email/verify            static child, POST + GET, served
+    /// /api/v4/users/email/verify/send       static grandchild, POST, added here
+    /// ```
+    ///
+    /// matchit prefers a static segment to a parameter and to a catch-all, and does **not**
+    /// backtrack across method routers. So the question this test answers is not only "does the
+    /// new path answer" but "does `/users/email/<anything>` still reach the catch-all now that
+    /// the static subtree is a segment deeper". Both directions are asserted below.
+    ///
+    /// `POST /api/v4/users` is the other half: it is the route at the *root* of the `{user_id}`
+    /// subtree, so every literal under `/users/` is a path that could have matched `{user_id}`
+    /// and did not.
+    ///
+    /// # Non-vacuity
+    ///
+    /// Checked by temporarily adding `POST /api/v4/users/login/desktop_token` — a route this
+    /// server deliberately forwards — to the `anonymous` list and confirming the `x-mmrs-served-by`
+    /// assertion fails on it. It does.
+    #[tokio::test]
+    async fn the_user_creation_routes_and_their_neighbours_are_all_still_answered_here() {
+        use axum::http::{Method, Request, StatusCode};
+        use tower::ServiceExt;
+
+        let app = App::new(mm_store::SqlStore::from_pool(
+            sqlx::postgres::PgPoolOptions::new()
+                .connect_lazy("postgres://x/y")
+                .expect("a lazy pool needs no server"),
+        ));
+        let state = AppState::new(app, "http://127.0.0.1:1".to_owned());
+
+        const USER: &str = "abcdefghijklmnopqrstuvwxyz";
+
+        // `APIHandler` routes: no session to stop at, so `x-mmrs-served-by` is the only assertion
+        // that applies to all of them.
+        let anonymous: Vec<(Method, String)> = vec![
+            // The three this session adds that take no session.
+            (Method::POST, "/api/v4/users".to_owned()),
+            (Method::POST, "/api/v4/users/email/verify/send".to_owned()),
+            (Method::POST, "/api/v4/users/password/reset/send".to_owned()),
+            // Their parents and siblings, all anonymous before this session.
+            (Method::POST, "/api/v4/users/email/verify".to_owned()),
+            (Method::POST, "/api/v4/users/password/reset".to_owned()),
+            (Method::POST, "/api/v4/users/login".to_owned()),
+            (Method::POST, "/api/v4/users/login/type".to_owned()),
+            (Method::POST, "/api/v4/users/logout".to_owned()),
+        ];
+
+        // The session-gated neighbourhood. The first is this session's fourth route.
+        let authenticated: Vec<(Method, String)> = vec![
+            (
+                Method::POST,
+                format!("/api/v4/users/{USER}/email/verify/member"),
+            ),
+            (Method::GET, "/api/v4/users".to_owned()),
+            (Method::GET, "/api/v4/users/me".to_owned()),
+            (Method::GET, format!("/api/v4/users/{USER}")),
+            (Method::GET, "/api/v4/users/stats".to_owned()),
+            (Method::GET, "/api/v4/users/stats/filtered".to_owned()),
+            (Method::GET, "/api/v4/users/known".to_owned()),
+            (Method::GET, "/api/v4/users/autocomplete".to_owned()),
+            (Method::POST, "/api/v4/users/ids".to_owned()),
+            (Method::POST, "/api/v4/users/usernames".to_owned()),
+            (Method::PUT, format!("/api/v4/users/{USER}/password")),
+            (
+                Method::POST,
+                format!("/api/v4/users/{USER}/reset_failed_attempts"),
+            ),
+            (Method::GET, format!("/api/v4/users/{USER}/sessions")),
+            (
+                Method::GET,
+                "/api/v4/users/email/someone@example.com".to_owned(),
+            ),
+            (Method::GET, "/api/v4/users/username/someone".to_owned()),
+        ];
+
+        for (method, path) in anonymous.iter().chain(authenticated.iter()) {
+            let response = router(state.clone())
+                .oneshot(
+                    Request::builder()
+                        .method(method.clone())
+                        .uri(path)
+                        .body(axum::body::Body::empty())
+                        .expect("a request"),
+                )
+                .await
+                .expect("the router answers");
+
+            assert_eq!(
+                response
+                    .headers()
+                    .get(crate::error::SERVED_BY)
+                    .map(|v| v.as_bytes()),
+                Some(b"rust".as_slice()),
+                "{method} {path} is no longer answered here"
+            );
+        }
+
+        for (method, path) in &authenticated {
+            let response = router(state.clone())
+                .oneshot(
+                    Request::builder()
+                        .method(method.clone())
+                        .uri(path)
+                        .body(axum::body::Body::empty())
+                        .expect("a request"),
+                )
+                .await
+                .expect("the router answers");
+            assert_eq!(
+                response.status(),
+                StatusCode::UNAUTHORIZED,
+                "{method} {path} should have stopped at the session check"
+            );
+        }
+
+        // The catch-all is still reachable *past* the new static grandchild. `verify` itself is
+        // claimed by the static route (Go reaches the same outcome by registration order), but
+        // anything else under `/users/email/` must still be read as an address — including a
+        // multi-segment one, since Go's `{email:.+}` matches slashes.
+        for path in [
+            "/api/v4/users/email/someone@example.com",
+            "/api/v4/users/email/verify/not-send",
+            "/api/v4/users/email/a/b/c",
+        ] {
+            let response = router(state.clone())
+                .oneshot(
+                    Request::builder()
+                        .method(Method::GET)
+                        .uri(path)
+                        .body(axum::body::Body::empty())
+                        .expect("a request"),
+                )
+                .await
+                .expect("the router answers");
+            assert_eq!(
+                response.status(),
+                StatusCode::UNAUTHORIZED,
+                "GET {path} no longer reaches the by-email catch-all"
+            );
+        }
+
+        // And the method fallback: the new literals answer only the method Go registers. A `GET`
+        // on either must forward rather than 405, which `partially_migrated` is what provides —
+        // no Go server on port 1, so a forward carries no `x-mmrs-served-by`.
+        for path in [
+            "/api/v4/users/password/reset/send",
+            "/api/v4/users/email/verify/send",
+        ] {
+            let response = router(state.clone())
+                .oneshot(
+                    Request::builder()
+                        .method(Method::DELETE)
+                        .uri(path)
+                        .body(axum::body::Body::empty())
+                        .expect("a request"),
+                )
+                .await
+                .expect("the router answers");
+            assert_eq!(
+                response.headers().get(crate::error::SERVED_BY),
+                None,
+                "DELETE {path} should have been forwarded, not answered here"
+            );
+        }
     }
 
     /// The two privacy accessors read **different** settings.

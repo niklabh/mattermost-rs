@@ -95,12 +95,19 @@ MODELLED = {
     "TeamSettings": [
         "RestrictDirectMessage", "RestrictCreationToDomains", "UserStatusAwayTimeout",
         "EnableCustomUserStatuses", "LockProfileFieldsForEmailUsers",
+        # Half of `IsUserSignUpAllowed`, read by `POST /api/v4/users`.
+        "EnableUserCreation",
     ],
     "LdapSettings": ["PictureAttribute", "Enable"],
     "SamlSettings": ["EnableSyncWithLdap", "Enable"],
     "EmailSettings": [
         "RequireEmailVerification", "EnableSignInWithEmail", "EnableSignInWithUsername",
+        # The other half of `IsUserSignUpAllowed`. Distinct from `EnableSignInWithEmail`
+        # above, which Go merely *seeds* from it.
+        "EnableSignUpWithEmail",
     ],
+    # `users.CreateUser` replaces an unsupported submitted locale with this.
+    "LocalizationSettings": ["DefaultClientLocale"],
     "GuestAccountsSettings": ["RestrictCreationToDomains", "Enable", "EnableGuestMagicLink"],
     # The five flags the deferred error mask in `login` reads. Any one of them being on
     # replaces every masked failure id with `api.user.login.invalid_credentials_sso`.

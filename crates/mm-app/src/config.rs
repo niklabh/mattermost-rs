@@ -168,6 +168,38 @@ pub struct Config {
     /// meaning; the handler refuses rather than returning an empty list.
     pub enable_open_server: bool,
 
+    /// `TeamSettings.EnableUserCreation` (config.go:2545, defaulted **`true`** at :2585).
+    ///
+    /// Half of `App.IsUserSignUpAllowed`, which refuses with **501**
+    /// `api.user.create_user.signup_email_disabled.app_error` when *either* this or
+    /// [`Config::enable_sign_up_with_email`] is off. Both halves produce the **same** id, so a
+    /// client cannot tell which switch closed the door — and a port that read only one of them
+    /// would create accounts an operator had turned off.
+    ///
+    /// The refusal is skipped entirely for a system admin (`CreateUserAsAdmin` does not call
+    /// `IsUserSignUpAllowed`) and for the token/invite paths' *other* gates, so this is the
+    /// anonymous-signup switch specifically.
+    pub enable_user_creation: bool,
+
+    /// `EmailSettings.EnableSignUpWithEmail` (config.go:2140, defaulted **`true`** at :2174).
+    ///
+    /// The other half of `App.IsUserSignUpAllowed`; see [`Config::enable_user_creation`].
+    ///
+    /// **Not the same setting as [`Config::enable_sign_in_with_email`]**, though Go seeds the
+    /// latter from it when the latter is unset (config.go:2178). Sign-*up* gates account
+    /// creation; sign-*in* gates the login form. Reading one for the other would make turning
+    /// off registrations also turn off logins.
+    pub enable_sign_up_with_email: bool,
+
+    /// `LocalizationSettings.DefaultClientLocale` (config.go:2893, defaulted **`"en"`** at :2904).
+    ///
+    /// `users.CreateUser` **overwrites** a submitted locale that is not in
+    /// [`crate::i18n::SUPPORTED_LOCALES`] with this value (app/users/users.go:57). The check is a
+    /// membership test against the twenty-three production locales, *not*
+    /// `model.IsValidLocale` — so `"zz"` passes `User.IsValid` and is still replaced here, and
+    /// the replacement is visible in the created user's response body.
+    pub default_client_locale: String,
+
     /// `ServiceSettings.EnableUserStatuses` (config.go:445, defaulted **`true`** at :711).
     ///
     /// **`ServiceSettings`, not `TeamSettings`** — its sibling `UserStatusAwayTimeout` *is* in
@@ -1031,6 +1063,12 @@ impl Default for Config {
             restrict_creation_to_domains: String::new(),
             // config.go:2588 — `new(false)`.
             enable_open_server: false,
+            // config.go:2585 — `new(true)`.
+            enable_user_creation: true,
+            // config.go:2174 — `new(true)`.
+            enable_sign_up_with_email: true,
+            // config.go:2904 — `new(DefaultLocale)`, which is `"en"`.
+            default_client_locale: "en".to_owned(),
             enable_user_statuses: true,
             user_status_away_timeout: 300,
             enable_custom_user_statuses: true,
@@ -1260,6 +1298,18 @@ impl Config {
                 "MM_TEAMSETTINGS_ENABLEOPENSERVER",
                 default.enable_open_server,
             ),
+            enable_user_creation: lookup_bool(
+                lookup,
+                "MM_TEAMSETTINGS_ENABLEUSERCREATION",
+                default.enable_user_creation,
+            ),
+            enable_sign_up_with_email: lookup_bool(
+                lookup,
+                "MM_EMAILSETTINGS_ENABLESIGNUPWITHEMAIL",
+                default.enable_sign_up_with_email,
+            ),
+            default_client_locale: lookup("MM_LOCALIZATIONSETTINGS_DEFAULTCLIENTLOCALE")
+                .unwrap_or(default.default_client_locale),
             enable_user_statuses: lookup_bool(
                 lookup,
                 "MM_SERVICESETTINGS_ENABLEUSERSTATUSES",
@@ -1678,6 +1728,7 @@ impl Config {
         let client_requirements = parsed.client_requirements.unwrap_or_default();
         let team_settings = parsed.team_settings.unwrap_or_default();
         let email_settings = parsed.email_settings.unwrap_or_default();
+        let localization_settings = parsed.localization_settings.unwrap_or_default();
         let guest_accounts = parsed.guest_accounts_settings.unwrap_or_default();
         let file_settings = parsed.file_settings.unwrap_or_default();
         let password_settings = parsed.password_settings.unwrap_or_default();
@@ -1784,6 +1835,15 @@ impl Config {
             enable_open_server: team_settings
                 .enable_open_server
                 .unwrap_or(default.enable_open_server),
+            enable_user_creation: team_settings
+                .enable_user_creation
+                .unwrap_or(default.enable_user_creation),
+            enable_sign_up_with_email: email_settings
+                .enable_sign_up_with_email
+                .unwrap_or(default.enable_sign_up_with_email),
+            default_client_locale: localization_settings
+                .default_client_locale
+                .unwrap_or(default.default_client_locale),
             enable_user_statuses: service
                 .enable_user_statuses
                 .unwrap_or(default.enable_user_statuses),
@@ -2112,6 +2172,8 @@ struct Document {
     team_settings: Option<TeamSettingsDocument>,
     #[serde(rename = "EmailSettings")]
     email_settings: Option<EmailSettingsDocument>,
+    #[serde(rename = "LocalizationSettings")]
+    localization_settings: Option<LocalizationSettingsDocument>,
     #[serde(rename = "GuestAccountsSettings")]
     guest_accounts_settings: Option<GuestAccountsSettingsDocument>,
     #[serde(rename = "MessageExportSettings")]
@@ -2195,7 +2257,7 @@ struct MessageExportSettingsDocument {
     download_export_results: Option<bool>,
 }
 
-/// The one field of `TeamSettings` a migrated route reads.
+/// The fields of `TeamSettings` a migrated route reads.
 #[derive(Debug, Default, serde::Deserialize)]
 struct TeamSettingsDocument {
     #[serde(rename = "RestrictDirectMessage")]
@@ -2204,6 +2266,8 @@ struct TeamSettingsDocument {
     restrict_creation_to_domains: Option<String>,
     #[serde(rename = "EnableOpenServer")]
     enable_open_server: Option<bool>,
+    #[serde(rename = "EnableUserCreation")]
+    enable_user_creation: Option<bool>,
     #[serde(rename = "UserStatusAwayTimeout")]
     user_status_away_timeout: Option<i64>,
     #[serde(rename = "EnableCustomUserStatuses")]
@@ -2220,15 +2284,28 @@ struct TeamSettingsDocument {
     lock_profile_fields_for_email_users: Option<String>,
 }
 
-/// The three fields of `EmailSettings` a migrated route reads.
+/// The four fields of `EmailSettings` a migrated route reads.
 #[derive(Debug, Default, serde::Deserialize)]
 struct EmailSettingsDocument {
     #[serde(rename = "RequireEmailVerification")]
     require_email_verification: Option<bool>,
+    #[serde(rename = "EnableSignUpWithEmail")]
+    enable_sign_up_with_email: Option<bool>,
     #[serde(rename = "EnableSignInWithEmail")]
     enable_sign_in_with_email: Option<bool>,
     #[serde(rename = "EnableSignInWithUsername")]
     enable_sign_in_with_username: Option<bool>,
+}
+
+/// The one field of `LocalizationSettings` a migrated route reads.
+///
+/// `AvailableLocales` and `EnableExperimentalLocales` live in the same Go section and are *not*
+/// here: neither takes part in `users.CreateUser`'s locale reset, which tests membership of the
+/// compiled-in supported list rather than of the operator's allow-list.
+#[derive(Debug, Default, serde::Deserialize)]
+struct LocalizationSettingsDocument {
+    #[serde(rename = "DefaultClientLocale")]
+    default_client_locale: Option<String>,
 }
 
 /// The fields of `GuestAccountsSettings` a migrated route reads. `RestrictCreationToDomains`'s
@@ -3187,8 +3264,8 @@ mod go_parity {
             .sum();
 
         assert_eq!(
-            keys, 67,
-            "the fixture covers {keys} settings and Config reads 67 from the document. \
+            keys, 70,
+            "the fixture covers {keys} settings and Config reads 70 from the document. \
              Add the new key to scripts/dump-config-fixture.sh and re-run it — a modelled \
              setting the fixture does not carry is a setting Go's own output never checked"
         );

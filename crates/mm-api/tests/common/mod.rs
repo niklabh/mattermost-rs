@@ -994,6 +994,14 @@ async fn purge_api_fixtures_once() {
         "DELETE FROM channelmembers WHERE userid IN (SELECT id FROM users WHERE username LIKE 'mmrsplain%')",
         "DELETE FROM teammembers WHERE userid IN (SELECT id FROM users WHERE username LIKE 'mmrsplain%')",
         "DELETE FROM sessions WHERE userid IN (SELECT id FROM users WHERE username LIKE 'mmrsplain%')",
+        // Accounts `parity/user_creates.rs` creates through the route under test. It scrubs its
+        // own, hard — but a panicked assertion skips the scrub, and a leftover here is worse than
+        // most: the username and the e-mail stay reserved, so the *next* run of that file gets
+        // `app.user.save.username_exists.app_error` from both servers and reads as a port bug.
+        // It is also a row `users_stats` counts.
+        "DELETE FROM preferences WHERE userid IN (SELECT id FROM users WHERE username LIKE 'mmrsnewuser%')",
+        "DELETE FROM sessions WHERE userid IN (SELECT id FROM users WHERE username LIKE 'mmrsnewuser%')",
+        "DELETE FROM users WHERE username LIKE 'mmrsnewuser%'",
         // Rows keyed on a *post* id, which nothing below reaches — the channel subquery is the
         // only handle on them, and it stops resolving once the posts are gone. These used to
         // live in each suite's own purge, which is a race rather than a cleanup: the parity

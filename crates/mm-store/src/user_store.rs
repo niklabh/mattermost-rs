@@ -474,6 +474,29 @@ pub trait UserStore {
         hasher: &(dyn mm_model::user::UserPasswordHasher + Sync),
     ) -> impl std::future::Future<Output = Result<User, StoreError>> + Send;
 
+    /// Port of `SqlUserStore.IsEmpty` (user_store.go:2379).
+    ///
+    /// # The bot exclusion is the whole point of the call site
+    ///
+    /// `users.CreateUser` calls it as `IsEmpty(true)` to decide whether the account being created
+    /// is the **first** one and should therefore be granted `system_admin system_user` rather
+    /// than plain `system_user`. On a fresh install the plugin-created bots can be the only rows
+    /// in `Users`, so counting them would silently deny the first human administrator their
+    /// role — which is why Go left-joins `Bots` and requires `Bots.UserId IS NULL`.
+    ///
+    /// # Deleted users still count
+    ///
+    /// There is no `DeleteAt = 0` predicate. A server whose only account has been deactivated is
+    /// *not* empty, so the next signup does not become an admin.
+    ///
+    /// Go spells it `SELECT EXISTS (SELECT 1 FROM Users …)` and negates the answer; the negation
+    /// is kept here rather than flipped into a `NOT EXISTS`, so the SQL reads the same in both
+    /// trees.
+    fn is_empty(
+        &self,
+        exclude_bots: bool,
+    ) -> impl std::future::Future<Output = Result<bool, StoreError>> + Send;
+
     /// Port of `SqlUserStore.PermanentDelete` (user_store.go:1464).
     ///
     /// One `DELETE`, and **no error for a row that was not there** — Go does not look at
@@ -3121,6 +3144,32 @@ impl UserStore for SqlUserStore {
         })?;
 
         Ok(user)
+    }
+
+    #[tracing::instrument(skip(self), fields(exclude_bots = exclude_bots, empty))]
+    async fn is_empty(&self, exclude_bots: bool) -> Result<bool, StoreError> {
+        // Two statements rather than one with a bound flag: `sqlx::query_scalar!` needs the SQL
+        // at compile time, and Go builds the same two shapes from its squirrel builder.
+        let has_rows: Option<bool> = if exclude_bots {
+            sqlx::query_scalar!(
+                "SELECT EXISTS (SELECT 1 FROM users LEFT JOIN bots ON users.id = bots.userid \
+                 WHERE bots.userid IS NULL)"
+            )
+            .fetch_one(&self.pool)
+            .await
+        } else {
+            sqlx::query_scalar!("SELECT EXISTS (SELECT 1 FROM users)")
+                .fetch_one(&self.pool)
+                .await
+        }
+        .map_err(|source| StoreError::Db {
+            context: "failed to check if table is empty".to_owned(),
+            source,
+        })?;
+
+        let empty = !has_rows.unwrap_or(false);
+        tracing::Span::current().record("empty", empty);
+        Ok(empty)
     }
 
     #[tracing::instrument(skip_all, fields(user_id = %user_id, deleted))]
