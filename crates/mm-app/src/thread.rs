@@ -1,9 +1,9 @@
-//! Port of the threads read in `server/channels/app/user.go`.
+//! Port of the thread reads and the thread-write family in `server/channels/app/user.go`.
 
 use mm_model::thread::Threads;
 use mm_model::user::User;
 use mm_model::utils::{AppError, AppResult};
-use mm_store::thread_store::ThreadStore;
+use mm_store::thread_store::{ThreadMembershipOpts, ThreadStore};
 use mm_store::user_store::UserStore;
 
 use crate::App;
@@ -268,6 +268,134 @@ impl App {
                     .collect();
             }
         }
+        Ok(())
+    }
+    /// Port of `app.App.UpdateThreadsReadForUser` (app/user.go:3114), behind
+    /// `PUT /users/{user_id}/teams/{team_id}/threads/read`.
+    ///
+    /// Two statements and one event. The websocket event carries **no data at all** — no
+    /// `thread_id`, no timestamp, no counters — unlike the per-thread `thread_read_changed` the
+    /// `/read/{timestamp}` route publishes under the same name. A client has to re-read the
+    /// threads list to learn what changed.
+    ///
+    /// The store call is the widest write in this family; see
+    /// [`mm_store::thread_store::SqlThreadStore::mark_all_as_read_by_team`] for the four
+    /// predicates it does *not* carry.
+    #[tracing::instrument(skip(self), fields(user_id = %user_id, team_id = %team_id))]
+    pub async fn update_threads_read_for_user(
+        &self,
+        user_id: &str,
+        team_id: &str,
+    ) -> AppResult<()> {
+        self.store()
+            .thread()
+            .mark_all_as_read_by_team(user_id, team_id)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "marking every thread read failed");
+                AppError::boxed(
+                    "UpdateThreadsReadForUser",
+                    "app.user.update_threads_read_for_user.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })?;
+
+        self.publish(mm_model::websocket_message::WebSocketEvent::new(
+            mm_model::websocket_message::WEBSOCKET_EVENT_THREAD_READ_CHANGED,
+            team_id,
+            "",
+            user_id,
+            None,
+            "",
+        ))
+        .await;
+
+        Ok(())
+    }
+
+    /// Port of `app.App.UpdateThreadFollowForUser` (app/user.go:3124), behind both
+    /// `PUT` and `DELETE` on `/users/{user_id}/teams/{team_id}/threads/{thread_id}/following`.
+    ///
+    /// # `UpdateViewedTimestamp` is `state`, not `true`
+    ///
+    /// So a **follow** also marks the thread read — `LastViewed` to now, `UnreadMentions` to 0 —
+    /// and an unfollow touches neither. That is the one line in the options that a reader
+    /// reproducing this by intuition gets wrong, and it is why a parity fixture that follows a
+    /// thread loses whatever read mark it planted. See
+    /// [`mm_store::thread_store::SqlThreadStore::maintain_membership`].
+    ///
+    /// # The thread lookup is not a check
+    ///
+    /// `Thread().Get` runs *after* the membership is written, and a `nil` thread is not an error:
+    /// it only supplies `reply_count` for the event, and a missing row contributes `0`. A root
+    /// post with no replies has no `Threads` row at all, so this is the ordinary case for the
+    /// first follow of a fresh root — the membership is still written.
+    ///
+    /// # Three data keys, and `state` is a JSON boolean
+    ///
+    /// `thread_id` (string), `state` (bool) and `reply_count` (number). Go's `message.Add` puts
+    /// the Go value straight into a `map[string]any`, so `state` is `true`/`false` on the wire
+    /// rather than the string a stringly-typed port would send.
+    #[tracing::instrument(
+        skip(self),
+        fields(user_id = %user_id, team_id = %team_id, thread_id = %thread_id, state)
+    )]
+    pub async fn update_thread_follow_for_user(
+        &self,
+        user_id: &str,
+        team_id: &str,
+        thread_id: &str,
+        state: bool,
+    ) -> AppResult<()> {
+        let wrap = |err: mm_store::error::StoreError| {
+            tracing::error!(error = %err, "thread follow update failed");
+            AppError::boxed(
+                "UpdateThreadFollowForUser",
+                "app.user.update_thread_follow_for_user.app_error",
+                None,
+                String::new(),
+                500,
+            )
+        };
+
+        self.store()
+            .thread()
+            .maintain_membership(
+                user_id,
+                thread_id,
+                ThreadMembershipOpts {
+                    following: state,
+                    increment_mentions: false,
+                    update_following: true,
+                    update_viewed_timestamp: state,
+                },
+            )
+            .await
+            .map_err(wrap)?;
+
+        let reply_count = self
+            .store()
+            .thread()
+            .get(thread_id)
+            .await
+            .map_err(wrap)?
+            .map_or(0, |thread| thread.reply_count);
+
+        let mut message = mm_model::websocket_message::WebSocketEvent::new(
+            mm_model::websocket_message::WEBSOCKET_EVENT_THREAD_FOLLOW_CHANGED,
+            team_id,
+            "",
+            user_id,
+            None,
+            "",
+        );
+        message.add("thread_id", serde_json::Value::String(thread_id.to_owned()));
+        message.add("state", serde_json::Value::Bool(state));
+        message.add("reply_count", serde_json::Value::from(reply_count));
+        self.publish(message).await;
+
         Ok(())
     }
 }

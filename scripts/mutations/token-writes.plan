@@ -1,0 +1,75 @@
+# Mutation plan for the seven personal-access-token writes.
+#
+#   scripts/mutate-batch.sh scripts/mutations/token-writes.plan
+#
+# The decisions a reader could plausibly get the wrong way round, and what each one changes:
+#
+#   * the search term is escaped and **not** wrapped in `%`, so the three LIKEs are equalities;
+#   * the session DELETE joins on the token's *secret*, so on rotate it must precede the UPDATE;
+#   * `enable` is gated on create_user_access_token and `disable` on revoke_user_access_token -
+#     an admin holds both, so only a single-permission role can tell them apart;
+#   * `json.Decoder.Decode` treats an array as an error and a null as a zero struct, which decides
+#     which parameter the 400 names;
+#   * revoke/disable/enable set an invalid-param error for an empty token_id and then **do not
+#     return**, so the answer is a 404.
+#
+# Deliberately NOT mutated, and why:
+#
+#   * dropping either predicate of `o.token = s.token AND o.id = $1` deletes every session on the
+#     installation, including the admin's, which would poison every later line in this batch. The
+#     direction is covered by an assertion instead: `revoking_a_token_takes_its_session_with_it`
+#     plants a bystander session no token minted and requires it to survive.
+#   * `DeleteNonCompliantExpiry`'s three predicates are unreachable from this stack -
+#     MaximumPersonalAccessTokenLifetimeDays is 0, so the route refuses before querying. Its
+#     `limit <= 0` guard is covered by a store unit test instead.
+#   * `IsRemote()` on create and rotate, and the system-admin-target gate: no remote user exists
+#     here and the parity caller is an admin, so neither branch has a reachable false side.
+#
+# Two lines moved to the `unit` suite after a run, and the reason is the same for both:
+# **the invalid-param *name* never reaches our wire.** Go distinguishes `Name: token_id` from
+# `Name: rotate_user_access_token` only through its translated `message`, and ours is the raw id
+# until i18n lands (D-092) - so over HTTP those two 400s are the same document. The null branch is
+# therefore asserted in `tokens::tests::a_struct_body_decodes_the_way_gos_decoder_does`, where it
+# is visible. The array branch stayed on the `api` suite because it *does* have an observable
+# form: serde fills a struct from a sequence positionally, so a six-element array would mint a
+# real token (200) where Go answers 400, and `a_created_token_carries_a_fresh_secret_on_both_servers`
+# now sends exactly that.
+#
+# The last two lines are the no-op controls and must SURVIVE.
+
+
+store-search-term-not-sanitized	crates/mm-store/src/user_access_token_store.rs	        let term = crate::user_store::sanitize_search_term(term, '\\\\');	        let term = term.to_owned();	api	token_writes
+store-search-wraps-the-term-in-wildcards	crates/mm-store/src/user_access_token_store.rs	        let term = crate::user_store::sanitize_search_term(term, '\\\\');	        let term = format!("%{}%", crate::user_store::sanitize_search_term(term, '\\\\'));	api	token_writes
+store-search-id-clause-dropped	crates/mm-store/src/user_access_token_store.rs	             WHERE uat.id LIKE $1 OR uat.userid LIKE $1 OR u.username LIKE $1	             WHERE uat.userid LIKE $1 OR u.username LIKE $1	api	token_writes
+store-search-username-clause-dropped	crates/mm-store/src/user_access_token_store.rs	             WHERE uat.id LIKE $1 OR uat.userid LIKE $1 OR u.username LIKE $1	             WHERE uat.id LIKE $1 OR uat.userid LIKE $1	api	token_writes
+store-save-isactive-hardcoded-false	crates/mm-store/src/user_access_token_store.rs	            token.description,\n            token.is_active,	            token.description,\n            false,	api	token_writes
+store-save-token-and-description-swapped	crates/mm-store/src/user_access_token_store.rs	            token.token,\n            token.user_id,\n            token.description,	            token.description,\n            token.user_id,\n            token.token,	api	token_writes
+store-session-sweep-is-a-noop	crates/mm-store/src/user_access_token_store.rs	                AND o.id = $1	                AND o.id = $1 AND false	api	token_writes
+store-revoke-leaves-the-row	crates/mm-store/src/user_access_token_store.rs	sqlx::query!("DELETE FROM useraccesstokens WHERE id = $1", token_id)	sqlx::query!("DELETE FROM useraccesstokens WHERE id = $1 AND false", token_id)	api	token_writes
+store-disable-sets-active	crates/mm-store/src/user_access_token_store.rs	"UPDATE useraccesstokens SET isactive = FALSE WHERE id = $1",	"UPDATE useraccesstokens SET isactive = TRUE WHERE id = $1",	api	token_writes
+store-enable-sets-inactive	crates/mm-store/src/user_access_token_store.rs	"UPDATE useraccesstokens SET isactive = TRUE WHERE id = $1",	"UPDATE useraccesstokens SET isactive = FALSE WHERE id = $1",	api	token_writes
+store-rotate-updates-before-deleting-sessions	crates/mm-store/src/user_access_token_store.rs	        delete_sessions_for_token(&mut transaction, token_id).await?;\n\n        sqlx::query!(\n            "UPDATE useraccesstokens SET token = $1, expiresat = $2 WHERE id = $3",	        sqlx::query!(\n            "UPDATE useraccesstokens SET token = $1, expiresat = $2 WHERE id = $3",	api	token_writes
+store-rotate-keeps-the-old-expiry	crates/mm-store/src/user_access_token_store.rs	"UPDATE useraccesstokens SET token = $1, expiresat = $2 WHERE id = $3",\n            new_token,\n            expires_at,	"UPDATE useraccesstokens SET token = $1, expiresat = expiresat + ($2::bigint * 0) WHERE id = $3",\n            new_token,\n            expires_at,	api	token_writes
+app-create-bot-exemption-inverted	crates/mm-app/src/user_access_token.rs	        if !self.config().enable_user_access_tokens && !user.is_bot {\n            return Err(AppError::boxed(\n                "CreateUserAccessToken",	        if !self.config().enable_user_access_tokens && user.is_bot {\n            return Err(AppError::boxed(\n                "CreateUserAccessToken",	api	token_writes
+app-rotate-bot-exemption-inverted	crates/mm-app/src/user_access_token.rs	        if !self.config().enable_user_access_tokens && !user.is_bot {\n            return Err(AppError::boxed(\n                "RotateUserAccessToken",	        if !self.config().enable_user_access_tokens && user.is_bot {\n            return Err(AppError::boxed(\n                "RotateUserAccessToken",	api	token_writes
+app-create-sanitizes-the-new-secret	crates/mm-app/src/user_access_token.rs	        tracing::Span::current().record("token_id", &saved.id);\n        Ok(saved)	        tracing::Span::current().record("token_id", &saved.id);\n        let mut saved = saved;\n        saved.token.clear();\n        Ok(saved)	api	token_writes
+app-rotate-returns-the-old-secret	crates/mm-app/src/user_access_token.rs	        token.token = new_secret;	        let _unused = new_secret;	api	token_writes
+app-rotate-keeps-the-old-expiry	crates/mm-app/src/user_access_token.rs	        token.expires_at = expires_at;	        let _unused = expires_at;	api	token_writes
+app-noncompliant-sweep-allows-no-policy	crates/mm-app/src/user_access_token.rs	            return Err(AppError::boxed(\n                "RevokeNonCompliantUserAccessTokens",\n                "app.user_access_token.revoke_non_compliant.no_policy.app_error",	            return Ok(0);\n            #[allow(unreachable_code)]\n            return Err(AppError::boxed(\n                "RevokeNonCompliantUserAccessTokens",\n                "app.user_access_token.revoke_non_compliant.no_policy.app_error",	api	token_writes
+app-save-error-swallows-the-validation-failure	crates/mm-app/src/user_access_token.rs	        StoreError::Invalid { app_error, .. } => app_error,	        StoreError::Invalid { .. } => AppError::boxed(where_, "swallowed", None, String::new(), 500),	unit	user_access_token
+app-expiry-in-past-is-exclusive	crates/mm-app/src/user_access_token.rs	    if expires_at <= now_millis {	    if expires_at < now_millis {	unit	user_access_token
+app-expiry-window-far-edge-excluded	crates/mm-app/src/user_access_token.rs	    if max_days > 0 && expires_at > now_millis + max_days * MILLIS_PER_DAY {	    if max_days > 0 && expires_at >= now_millis + max_days * MILLIS_PER_DAY {	unit	user_access_token
+app-zero-days-still-requires-an-expiry	crates/mm-app/src/user_access_token.rs	    if expires_at == 0 {\n        if max_days > 0 {	    if expires_at == 0 {\n        if max_days >= 0 {	unit	user_access_token
+app-negative-lifetime-enables-the-policy	crates/mm-app/src/user_access_token.rs	    if max_days <= 0 {	    if max_days < 0 {	unit	user_access_token
+api-decode-treats-null-as-an-error	crates/mm-api/src/tokens.rs	        Some(Ok(serde_json::Value::Null)) => Ok(T::default()),	        Some(Ok(serde_json::Value::Null)) => Err("EOF".to_owned()),	unit	tokens
+api-decode-accepts-an-array	crates/mm-api/src/tokens.rs	        Some(Ok(value @ serde_json::Value::Object(_))) => {	        #[allow(unreachable_patterns)]\n        Some(Ok(value)) => {	api	token_writes
+api-decode-reads-past-the-first-value	crates/mm-api/src/tokens.rs	        .next();	        .last();	unit	tokens
+api-lifecycle-returns-on-an-empty-token-id	crates/mm-api/src/tokens.rs	    let token_id = props\n        .get("token_id")\n        .map(String::as_str)\n        .unwrap_or_default();	    let token_id = props\n        .get("token_id")\n        .map(String::as_str)\n        .unwrap_or_default();\n    if token_id.is_empty() {\n        return Err(ApiError::invalid_param("token_id"));\n    }	api	token_writes
+api-enable-gated-on-the-revoke-permission	crates/mm-api/src/tokens.rs	        &bytes,\n        &PERMISSION_CREATE_USER_ACCESS_TOKEN,\n    )	        &bytes,\n        &PERMISSION_REVOKE_USER_ACCESS_TOKEN,\n    )	api	token_writes
+api-create-takes-the-user-id-from-the-body	crates/mm-api/src/tokens.rs	    access_token.user_id = user_id;	    let _unused = user_id;	api	token_writes
+api-create-accepts-an-empty-description	crates/mm-api/src/tokens.rs	    if access_token.description.is_empty() {	    if access_token.description.is_empty() && false {	api	token_writes
+api-rotate-does-not-return-on-an-empty-token-id	crates/mm-api/src/tokens.rs	    if props.token_id.is_empty() {	    if props.token_id.is_empty() && false {	api	token_writes
+api-rotate-refuses-an-active-token	crates/mm-api/src/tokens.rs	    if !token.is_active {	    if token.is_active {	api	token_writes
+api-created-token-has-no-newline	crates/mm-api/src/tokens.rs	            body.push(b'\\n');	            body.truncate(body.len());	api	token_writes
+CONTROL-rename-a-binding	crates/mm-api/src/tokens.rs	    let bytes = body_or_empty(request).await;\n    let token = match token_lifecycle(\n        &state,\n        &session,\n        &bytes,\n        &PERMISSION_REVOKE_USER_ACCESS_TOKEN,\n    )\n    .await\n    {\n        Ok(token) => token,\n        Err(err) => return err.into_response(),\n    };\n\n    match state.app.revoke_user_access_token(&token.id).await {	    let raw = body_or_empty(request).await;\n    let token = match token_lifecycle(\n        &state,\n        &session,\n        &raw,\n        &PERMISSION_REVOKE_USER_ACCESS_TOKEN,\n    )\n    .await\n    {\n        Ok(token) => token,\n        Err(err) => return err.into_response(),\n    };\n\n    match state.app.revoke_user_access_token(&token.id).await {	api	token_writes
+CONTROL-reorder-two-independent-or-terms	crates/mm-store/src/user_access_token_store.rs	             WHERE uat.id LIKE $1 OR uat.userid LIKE $1 OR u.username LIKE $1	             WHERE uat.userid LIKE $1 OR uat.id LIKE $1 OR u.username LIKE $1	api	token_writes

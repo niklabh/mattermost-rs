@@ -11,6 +11,10 @@ hand. This produces it from the two sources of truth:
     routers, so the same path+method can legitimately appear in both.
   * `crates/mm-api/src/lib.rs` — the axum chain, parsed by matching parentheses rather than by
     line, since a `.route(...)` call spans as many lines as its comment needs.
+  * `crates/mm-api/src/local.rs` — the **second** axum chain. The local-mode routes land on a
+    different router bound to a unix socket, so a local route served there is invisible to a
+    parse of `lib.rs` alone; before 2026-09-11 this script hardcoded every local pair as
+    unserved, which would have reported a whole migrated router as no progress at all.
 
 Usage:
     scripts/routes.py                 summary by base + a served/total tally
@@ -31,6 +35,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 API4 = ROOT / "reference/mattermost/server/channels/api4"
 LIBRS = ROOT / "crates/mm-api/src/lib.rs"
+LOCALRS = ROOT / "crates/mm-api/src/local.rs"
 
 # `{name:[A-Za-z0-9]+}` -> `{name}`. Go escapes some classes (`[A-Za-z0-9\\_\\-\\.]`), and the
 # import/export names carry a `.zip` suffix inside the braces, so the regex half is matched
@@ -184,9 +189,13 @@ ALIASES = {
 }
 
 
-def served():
-    """Every (method, path) the axum router registers, by matching parens on `.route(`."""
-    text = LIBRS.read_text()
+def served(source=LIBRS):
+    """Every (method, path) an axum router registers, by matching parens on `.route(`.
+
+    Takes the file so the same parser reads both routers: `lib.rs` for the HTTP one and
+    `local.rs` for the unix-socket one.
+    """
+    text = source.read_text()
     out = set()
     for m in re.finditer(r'\.route\(\s*"([^"]+)"\s*,', text):
         depth, i = 1, m.end()
@@ -200,7 +209,14 @@ def served():
         # Strip comments so a verb named in prose is not counted as a registration.
         body = re.sub(r'//[^\n]*', '', body)
         path = m.group(1).replace("{*", "{")
-        for verb in re.findall(r'\b(get|post|put|delete|patch)\s*\(\s*[a-z_]+::', body):
+        # `get(system::get_system_ping)` in lib.rs, but `get(local_get_system_ping)` in local.rs:
+        # the local router's handlers are module-private and therefore unqualified. Requiring the
+        # `::` matched neither an unqualified handler nor anything else — it silently reported a
+        # whole migrated router as unserved. The trailing `[),]` is what keeps this from matching
+        # an extractor or a nested call: a handler is the last thing before the closing paren.
+        for verb in re.findall(
+                r'\b(get|post|put|delete|patch)\s*\(\s*(?:[a-z_0-9]+::)*[a-z_0-9]+\s*[),]',
+                body):
             here = normalise(path)
             out.add((verb.upper(), ALIASES.get(here, here)))
             # axum's `get` answers HEAD as well, dispatching it to the GET handler with the body
@@ -217,10 +233,14 @@ def main():
     args = set(sys.argv[1:])
     routes = collect()
     have = served()
+    have_local = served(LOCALRS) if LOCALRS.exists() else set()
     want_local = "--local" in args
 
     for r in routes:
-        r["served"] = (r["method"], r["path"]) in have and not r["local"]
+        # Two routers, two registries. A path+method can legitimately be served on one and not
+        # the other — `/api/v4/server_busy` was migrated on both at once, but `/system/timezones`
+        # exists only on the HTTP side — so the local flag selects which registry to ask.
+        r["served"] = (r["method"], r["path"]) in (have_local if r["local"] else have)
 
     if "--tsv" in args:
         for r in routes:
@@ -258,8 +278,9 @@ def main():
     local = sum(r["local"] for r in routes)
     print(f'\n{done}/{total} route+method pairs served '
           f'({total - local} on the HTTP router, {local} local-mode).')
-    unserved = [r for r in routes if not r["served"] and not r["local"]]
-    print(f'{len(unserved)} HTTP pairs remain.')
+    http_left = sum(1 for r in routes if not r["served"] and not r["local"])
+    local_left = sum(1 for r in routes if not r["served"] and r["local"])
+    print(f'{http_left} HTTP pairs and {local_left} local-mode pairs remain.')
 
 
 if __name__ == "__main__":

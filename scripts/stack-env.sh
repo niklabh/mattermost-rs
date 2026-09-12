@@ -71,3 +71,20 @@ mmrs_compose() {
     docker compose "$@"
   fi
 }
+
+# The two unix domain sockets of the local-mode admin API, per stack.
+#
+# `MMRS_GO_LOCAL_SOCKET` is the one the Go server binds (`ServiceSettings.LocalModeSocketLocation`,
+# app/server.go:1233). `MMRS_LOCAL_SOCKET` is mm-api's own, which serves the local routes that have
+# been migrated and forwards the rest to the Go socket beside it — the Strangler Fig proxy, over a
+# socket instead of a port.
+#
+# **Per-stack, and inside the run directory on purpose.** The config default is the *shared*
+# `/var/tmp/mattermost_local.socket`; four stacks pointing at one path is one server stealing
+# another's socket on restart, since `startLocalModeServer` begins with `os.RemoveAll(socket)`.
+# `$RUN` is torn down with the stack, so the sockets go with it.
+#
+# Short names because `sockaddr_un.sun_path` is 108 bytes including the NUL — a worktree nested a
+# few directories deeper than this one is closer to that limit than it looks.
+export MMRS_GO_LOCAL_SOCKET="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)/reference/.build/mmroot$MMRS_RUN_SUFFIX/local.socket"
+export MMRS_LOCAL_SOCKET="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)/reference/.build/mmroot$MMRS_RUN_SUFFIX/mmrs.socket"

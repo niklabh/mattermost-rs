@@ -151,6 +151,16 @@ up_stack() {
   # The Go server owns the schema: its first boot on a fresh volume runs every migration.
   MMRS_STACK="$k" "$ROOT/scripts/go-server.sh" start >/dev/null
   echo "  go server up"
+  # The boards-on oracle, because `parity_views` asserts nothing without it.
+  #
+  # `api4/view.go` registers its seven routes only behind `FeatureFlags.IntegratedBoards`, which is
+  # false at the pinned SHA and cannot be turned on for the main server without moving the answers
+  # under `post.go` and `properties.go` — see `scripts/go-boards.sh`. So the suite needs a second
+  # process, and when it is missing the suite used to skip **silently**: cargo hides the output of
+  # a passing test, so twelve tests passed while exercising nothing. Measured: the view mutation
+  # plan scored 5 caught of 33 on a stack with no oracle and 33 of 33 with one.
+  MMRS_STACK="$k" "$ROOT/scripts/go-boards.sh" start >/dev/null
+  echo "  boards oracle up"
   seed_stack "$MMRS_GO_BASE"
   echo "  eval \"\$(scripts/stack.sh env $k)\" to point a shell at it"
 }
@@ -160,6 +170,7 @@ down_stack() {
   export MMRS_STACK="$k"
   source "$ROOT/scripts/stack-env.sh"
   MMRS_STACK="$k" "$ROOT/scripts/go-server.sh" stop >/dev/null 2>&1 || true
+  MMRS_STACK="$k" "$ROOT/scripts/go-boards.sh" stop >/dev/null 2>&1 || true
   pkill -f "MM_API_LISTEN=127.0.0.1:$MMRS_API_PORT" 2>/dev/null || true
   mmrs_compose down -v
   rm -rf "$ROOT/reference/.build/mmroot$MMRS_RUN_SUFFIX"

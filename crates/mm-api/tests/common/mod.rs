@@ -1054,6 +1054,17 @@ async fn purge_api_fixtures_once() {
         "DELETE FROM publicchannels WHERE name LIKE 'mmrs-parity-%'",
         "DELETE FROM sidebarchannels WHERE channelid IN (SELECT id FROM channels WHERE name LIKE 'mmrs-parity-%')",
         "DELETE FROM channelmemberhistory WHERE channelid IN (SELECT id FROM channels WHERE name LIKE 'mmrs-parity-%')",
+        // `Views` is keyed on `ChannelId` and carries no name of its own, so like the other
+        // channel-scoped tables it has to go before the channels do. It is swept by the **orphan**
+        // rule as well, further down, because `parity_views` archives channels through the boards
+        // server and a view whose channel is gone is unreachable through any API on either side.
+        //
+        // Added after the fact, and the cost of its absence is on record: 33 sequential mutation
+        // runs of `view-routes.plan` left **754** rows here, at which point the suite's own
+        // byte-identical list and pagination comparisons started disagreeing between runs — so
+        // both no-op controls came back CAUGHT and the whole tally was void. A new table that the
+        // purge does not know about is [D-155]'s class, and this is its second instance.
+        "DELETE FROM views WHERE channelid IN (SELECT id FROM channels WHERE name LIKE 'mmrs-parity-%')",
         "DELETE FROM channels WHERE name LIKE 'mmrs-parity-%'",
         // Teams created by tests: Go's `DELETE /teams/{id}` archives like the channel one, and
         // an archived team keeps its name, so the next run's create fails without this.
@@ -1723,6 +1734,31 @@ pub async fn create_direct_channel(
 /// Requires a system-admin token. Panics if Go refuses, because a silently skipped invalidation
 /// would turn this into a flake rather than a failure.
 pub async fn invalidate_go_caches(client: &reqwest::Client, admin_token: &str) {
+    let _go_cache = GO_CACHE.lock().await;
+    invalidate_go_caches_locked(client, admin_token).await;
+}
+
+/// Serialises the tests that make Go **fresh** against the one that asserts Go is **stale**.
+///
+/// [`invalidate_go_caches`]'s "safe for the rest of the suite" argument — invalidation can only
+/// make Go fresher, and every staleness assertion in this suite is one-sided in that direction —
+/// has exactly one counterexample, and it is a credential one.
+/// `auth_writes::a_session_revoked_here_is_gone_here_but_lingers_in_gos_cache` asserts that Go
+/// *still accepts* a session mm-api revoked, which is the tripwire on [D-237]. A concurrent
+/// invalidation from `system_usage` or `channel_creates` purges the very entry that test is
+/// pinning: Go answers 401, and the failure reads as "D-237 can be closed and the cache is being
+/// invalidated" when nothing about D-237 has changed.
+///
+/// Measured on a full-suite run on 2026-09-11, on unchanged code: left `401`, right `200`.
+///
+/// The lock is taken by [`invalidate_go_caches`] itself rather than at its call sites, so a
+/// future caller participates without having to know any of this. A test that must *hold* the
+/// lock across its own assertions takes it and then calls [`invalidate_go_caches_locked`], which
+/// is the same request without the re-acquire that would deadlock it.
+pub static GO_CACHE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// [`invalidate_go_caches`] for a caller already holding [`GO_CACHE`].
+pub async fn invalidate_go_caches_locked(client: &reqwest::Client, admin_token: &str) {
     let response = client
         .post(format!("{GO}/api/v4/caches/invalidate"))
         .header("Authorization", format!("Bearer {admin_token}"))
@@ -2234,6 +2270,29 @@ impl SecondServer {
         }
         let database_url = std::env::var("DATABASE_URL").ok()?;
 
+        // **Free the port first, or this function reports success for somebody else's server.**
+        //
+        // The poll below asks `{base}/system/ping` whether *something* is listening. If a stale
+        // mm-api already holds the port, the child we spawn fails to bind and exits immediately,
+        // the ping is answered by the stale process anyway, and `start` returns `Some` wrapping a
+        // child that is already dead — after which every request in the suite is served by the old
+        // binary. Nothing in the result says so.
+        //
+        // That is not hypothetical and it cost a wrong conclusion: a SecondServer left from a build
+        // hours earlier held :8082, and `parity_views`' two list comparisons disagreed with Go on
+        // row order on every run. It was reported as a port bug and filed as [D-330]. It was not
+        // one — the store, the app layer and the handler were all correct, and Postgres with the
+        // store's own `ORDER BY` returns exactly Go's order. Killing the stale process made both
+        // tests pass three runs out of three. `scripts/parity.sh` had just been taught the same
+        // lesson for the stack's own port; this is the other port nobody had checked.
+        let _ = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(format!(
+                "ss -ltnp 2>/dev/null | awk '$4 ~ /:{port}$/' \
+                 | grep -oE 'pid=[0-9]+' | cut -d= -f2 | sort -u | xargs -r kill -9"
+            ))
+            .status();
+
         let mut command = std::process::Command::new(binary);
         command
             .env("DATABASE_URL", database_url)
@@ -2248,7 +2307,13 @@ impl SecondServer {
 
         let base = format!("http://127.0.0.1:{port}");
         let client = client();
+        let mut child = child;
         for _ in 0..60 {
+            // Our own child has to still be running. A ping alone cannot tell "my server came up"
+            // from "somebody else's was already there", which is the whole failure above.
+            if child.try_wait().ok().flatten().is_some() {
+                return None;
+            }
             if client
                 .get(format!("{base}/api/v4/system/ping"))
                 .send()
@@ -2260,7 +2325,6 @@ impl SecondServer {
             tokio::time::sleep(Duration::from_millis(200)).await;
         }
         // Never came up: kill it rather than leaving it, and let the caller skip.
-        let mut child = child;
         let _ = child.kill();
         let _ = child.wait();
         None
@@ -2487,4 +2551,113 @@ pub async fn sidebar_category_ids(user_id: &str, team_id: &str) -> Option<Vec<St
     .await
     .ok()?;
     Some(ids)
+}
+
+/// The `Users` and `Bots` rows behind one bot, as the database holds them.
+///
+/// The bot write routes answer with a `model.Bot`, which shows neither the email a rename
+/// rewrites nor the `Users.DeleteAt` a disable sets — and those are half of what the routes do.
+/// Returns [`None`] when there is no `DATABASE_URL` to read, so a caller can skip.
+pub async fn bot_and_user_rows(bot_user_id: &str) -> Option<serde_json::Value> {
+    let pool = fixture_pool().await?;
+    let row: (String, String, String, i64, i64, String, String, i64, i64) = sqlx::query_as(
+        "SELECT u.username, u.email, u.firstname, u.deleteat, u.updateat,
+                b.ownerid, b.description, b.deleteat, b.updateat
+           FROM users u JOIN bots b ON b.userid = u.id
+          WHERE u.id = $1",
+    )
+    .bind(bot_user_id)
+    .fetch_one(&pool)
+    .await
+    .expect("the bot's two rows are readable");
+    Some(serde_json::json!({
+        "username": row.0,
+        "email": row.1,
+        "firstname": row.2,
+        "user_delete_at": row.3,
+        "user_update_at": row.4,
+        "owner_id": row.5,
+        "description": row.6,
+        "bot_delete_at": row.7,
+        "bot_update_at": row.8,
+    }))
+}
+
+/// Serialises every suite that plants or sweeps `mmrsbot%` rows.
+///
+/// [`plant_bot`] writes ids under one fixed prefix and [`unplant_bots`] deletes **all** of them,
+/// so two bot suites running concurrently delete each other's fixtures mid-assertion. The reads
+/// suite and the writes suite both do it; the lock is what keeps the second from emptying the
+/// table the first is paging through.
+pub static BOT_FIXTURES: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// Remove **one** planted bot, by id.
+///
+/// [`unplant_bots`] sweeps the whole `mmrsbot%` prefix, which is the wrong tool for a suite whose
+/// tests plant a pair each: the sweep deletes a sibling test's fixtures as readily as its own.
+pub async fn unplant_bot(bot_user_id: &str) {
+    let Some(pool) = fixture_pool().await else {
+        return;
+    };
+    for statement in [
+        "DELETE FROM bots WHERE userid = $1",
+        "DELETE FROM users WHERE id = $1",
+    ] {
+        sqlx::query(statement)
+            .bind(bot_user_id)
+            .execute(&pool)
+            .await
+            .expect("the planted bot is removed");
+    }
+}
+
+/// Delete every `Users` row (and any `Bots` row behind it) carrying this exact username, and
+/// return how many there were — the assertion that a *refused* write wrote nothing.
+///
+/// **It removes rather than counts, and the caller asserts on the return value.** A test that
+/// only counted left the row in place when the count was wrong, which is precisely the case where
+/// something *did* get written: a mutation inverting `EnableBotAccountCreation` made the create
+/// succeed once, and the leftover row then decided the verdict of every later mutation in the
+/// batch — twenty-three of them, including both no-op controls. Cleaning up unconditionally is
+/// what makes the assertion safe to fail.
+///
+/// Returns [`None`] when there is no `DATABASE_URL`.
+pub async fn remove_users_named(username: &str) -> Option<i64> {
+    let pool = fixture_pool().await?;
+    let bots =
+        sqlx::query("DELETE FROM bots WHERE userid IN (SELECT id FROM users WHERE username = $1)")
+            .bind(username)
+            .execute(&pool)
+            .await
+            .expect("any bot row is removed");
+    let _ = bots;
+    let removed = sqlx::query("DELETE FROM users WHERE username = $1")
+        .bind(username)
+        .execute(&pool)
+        .await
+        .expect("the user rows are removed");
+    Some(removed.rows_affected() as i64)
+}
+
+/// Give a planted bot a chosen description and display name.
+///
+/// [`plant_bot`] derives both from the tag, so two bots planted for a two-server comparison
+/// differ in exactly the fields the comparison is about. This makes the pair identical in
+/// everything but the id, the username and the clocks.
+pub async fn set_bot_fixture_text(bot_user_id: &str, description: &str, display_name: &str) {
+    let Some(pool) = fixture_pool().await else {
+        return;
+    };
+    sqlx::query("UPDATE bots SET description = $2 WHERE userid = $1")
+        .bind(bot_user_id)
+        .bind(description)
+        .execute(&pool)
+        .await
+        .expect("the bot description is set");
+    sqlx::query("UPDATE users SET firstname = $2 WHERE id = $1")
+        .bind(bot_user_id)
+        .bind(display_name)
+        .execute(&pool)
+        .await
+        .expect("the bot display name is set");
 }

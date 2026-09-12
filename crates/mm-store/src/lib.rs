@@ -29,6 +29,8 @@ pub mod job_store;
 pub mod oauth_store;
 pub mod post_store;
 pub mod preference_store;
+/// The five CPA reads across `PropertyGroups`, `PropertyFields` and `PropertyValues`.
+pub mod property_store;
 pub mod reaction_store;
 pub mod role_store;
 pub mod scheme_store;
@@ -46,6 +48,8 @@ pub mod upload_session_store;
 pub mod user_access_token_store;
 pub mod user_store;
 pub mod user_terms_of_service_store;
+/// Port of `SqlViewStore` — the whole of the integrated-boards store.
+pub mod view_store;
 pub mod webhook_store;
 
 pub use audit_store::{AUDIT_LIMIT_MAXIMUM, AuditStore, SqlAuditStore};
@@ -63,6 +67,7 @@ pub use job_store::{JobStore, SqlJobStore};
 pub use oauth_store::{OAuthStore, SqlOAuthStore};
 pub use post_store::{PostStore, SqlPostStore};
 pub use preference_store::{PreferenceStore, SqlPreferenceStore};
+pub use property_store::{PropertyStore, SqlPropertyStore};
 pub use reaction_store::{ReactionStore, SqlReactionStore};
 pub use role_store::{RoleStore, SqlRoleStore};
 pub use scheme_store::{SchemeStore, SqlSchemeStore};
@@ -80,6 +85,7 @@ pub use upload_session_store::{SqlUploadSessionStore, UploadSessionStore};
 pub use user_access_token_store::{SqlUserAccessTokenStore, UserAccessTokenStore};
 pub use user_store::{SqlUserStore, UserStore};
 pub use user_terms_of_service_store::{SqlUserTermsOfServiceStore, UserTermsOfServiceStore};
+pub use view_store::{SqlViewStore, ViewStore};
 pub use webhook_store::{SqlWebhookStore, WebhookStore};
 
 use mm_model::system::AppliedMigration;
@@ -109,6 +115,7 @@ pub struct SqlStore {
     terms_of_service: SqlTermsOfServiceStore,
     thread: SqlThreadStore,
     preference: SqlPreferenceStore,
+    property: SqlPropertyStore,
     role: SqlRoleStore,
     scheme: SqlSchemeStore,
     session: SqlSessionStore,
@@ -123,6 +130,7 @@ pub struct SqlStore {
     webhook: SqlWebhookStore,
     channel_member_history: SqlChannelMemberHistoryStore,
     group: SqlGroupStore,
+    view: SqlViewStore,
     /// Go's `SqlStore` owns the connections and hands them to each sub-store; a handful of its
     /// methods — [`SqlStore::get_applied_migrations`] is the first ported — query directly rather
     /// than through a sub-store, which is why the pool is held here too. `PgPool` is a handle over
@@ -168,6 +176,7 @@ impl SqlStore {
             terms_of_service: SqlTermsOfServiceStore::new(pool.clone()),
             thread: SqlThreadStore::new(pool.clone()),
             preference: SqlPreferenceStore::new(pool.clone()),
+            property: SqlPropertyStore::new(pool.clone()),
             role: SqlRoleStore::new(pool.clone()),
             scheme: SqlSchemeStore::new(pool.clone()),
             session: SqlSessionStore::new(pool.clone()),
@@ -182,6 +191,7 @@ impl SqlStore {
             user_access_token: SqlUserAccessTokenStore::new(pool.clone()),
             channel_member_history: SqlChannelMemberHistoryStore::new(pool.clone()),
             group: SqlGroupStore::new(pool.clone()),
+            view: SqlViewStore::new(pool.clone()),
             pool,
         }
     }
@@ -319,6 +329,12 @@ impl SqlStore {
         &self.preference
     }
 
+    /// The `PropertyGroup()`, `PropertyField()` and `PropertyValue()` reads, which Go exposes as
+    /// three accessors over one table family.
+    pub fn property(&self) -> &SqlPropertyStore {
+        &self.property
+    }
+
     /// Port of `store.Store.Role()`.
     pub fn role(&self) -> &SqlRoleStore {
         &self.role
@@ -363,5 +379,10 @@ impl SqlStore {
     /// Port of `store.Store.UserTermsOfService()`.
     pub fn user_terms_of_service(&self) -> &SqlUserTermsOfServiceStore {
         &self.user_terms_of_service
+    }
+
+    /// Port of `store.Store.View()`.
+    pub fn view(&self) -> &SqlViewStore {
+        &self.view
     }
 }

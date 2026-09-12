@@ -5569,37 +5569,6 @@ porting an Enterprise surface this build cannot exercise.
 
 **Where the pin lives:** the doc comment on `users::get_users` in `mm-api/src/users.rs`.
 
-## D-155 · `purge_api_fixtures` deletes test teams but not the default channels Go creates under them
-
-**Status** OPEN · **Severity** test-harness · **Raised** 2026-08-21 (parallel route session)
-
-`purge_api_fixtures_once` (`mm-api/tests/common/mod.rs:631`) selects almost everything by the
-`mmrs-parity-%` name prefix. That prefix is correct for rows the suites author, but **not** for
-the rows Go authors on their behalf: creating a team makes `town-square` and `off-topic`, whose
-names carry no prefix, plus a `SidebarCategories` row per member keyed on `TeamId`. The teardown
-then runs `DELETE FROM teams WHERE name LIKE 'mmrs-parity-%'` and leaves all of them behind with
-a dangling `TeamId`.
-
-Measured 2026-08-21: 4,790 orphan channels and 11,019 orphan sidebar categories had accumulated
-since 2026-08-20 and were cleared by hand mid-session; **1,426 and 3,489 came back within the
-same day's runs**, so the rate is roughly one leak per fixture team per run.
-
-This is not inert. `getChannelMembersForTeamForUser` already documents that a dangling `TeamId`
-arrives as NULL through its LEFT join and therefore matches the `IS NULL` arm — so an orphan is
-listed under *every* team. Orphans also share tied sort keys under the channel lists'
-`ORDER BY DisplayName` with no tiebreak, which is the mechanism behind the intermittent
-`pages_split_cover_and_run_out_identically` and `a_team_and_channel_the_user_is_in` failures seen
-this session.
-
-**What is owed:** delete by `TeamId` rather than by name — the orphan set is
-`channels c LEFT JOIN teams t ON t.id = c.teamid WHERE c.teamid <> '' AND t.id IS NULL`, plus the
-same shape for `sidebarcategories`/`sidebarchannels`, ordered before the `teams` delete. Deferred
-here only because `common/mod.rs` was shared by four concurrent agents.
-
-**Where the pin lives:** the doc comment on `purge_api_fixtures` in `mm-api/tests/common/mod.rs`.
-
----
-
 ## D-156 · The two config settings the permission checks read cannot be read from Go's config
 
 **Status** CLOSED · **Severity** divergence · **Raised** 2026-08-21 (phase 2, authorization.go)
@@ -6871,3 +6840,301 @@ has to mask both columns — `parity::team_member_writes::adding_a_member_agrees
 does, and says so. And the config field itself is **not** read by this port: when the post write
 lands, `Config` needs `experimental_enable_default_channel_leave_join_messages` adding alongside
 the other `ServiceSettings` fields, because both arms of that branch then matter.
+
+## D-250 · The two thread read-state writes are blocked on `countThreadMentions`
+
+**Status** OPEN · **Severity** unported route · **Raised** 2026-09-11 (phase 2, thread writes)
+
+```text
+PUT  /api/v4/users/{user_id}/teams/{team_id}/threads/{thread_id}/read/{timestamp}
+POST /api/v4/users/{user_id}/teams/{team_id}/threads/{thread_id}/set_unread/{post_id}
+```
+
+Both reach `App.UpdateThreadReadForUser` (app/user.go:3234), whose second statement is
+`a.countThreadMentions(rctx, user, post, teamID, timestamp)` (app/post.go:2505). That function
+**writes its result to `ThreadMemberships.UnreadMentions`** — a column the Go server reads on
+every threads-list request — so a partial or approximate port corrupts state shared with the
+still-running Go server rather than merely answering wrongly. It is not a candidate for a
+best-effort stub.
+
+What it needs, none of which exists here:
+
+| Go | where it would land | owner this round |
+|---|---|---|
+| `Group().GetGroups`, `GetGroupsByChannel`, `GetGroupsByTeam` | `crates/mm-store/src/group_store.rs` | not this worktree |
+| `MentionKeywords` / `makeStandardMentionParser` | `crates/mm-app` (~370 lines across four Go files) | unported |
+| `getExplicitMentions` + a Markdown `Inspect` walker | `crates/mm-app` | unported, and the Markdown walker has no crate yet |
+| `Post().GetPostsByThread` | `crates/mm-store/src/post_store.rs` | not this worktree |
+
+`clearPushNotification` (the `UnreadReplies == 0` arm) and the six-key `thread_read_changed`
+event are straightforward once the count exists; the count is the whole blocker.
+
+Both routes stay forwarded to Go. The *other* three routes of the family are served — see
+`crates/mm-api/src/thread_writes.rs` — so `PUT …/threads/read` and both `/following` methods are
+local while these two are not, which is visible as `x-mmrs-served-by` on an otherwise uniform
+path family.
+## D-260 · `/exportlink` is never reserved as a built-in trigger
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-11 (phase 2, command writes)
+
+`ExportLinkProvider.GetCommand` (app/slashcommands/command_exportlink.go:32) returns `nil` — and
+so frees the trigger `exportlink` for a custom slash command — unless all three of:
+
+1. `FeatureFlags.EnableExportDirectDownload`, defaulted **`false`** (model/feature_flags.go:168);
+2. `FileSettings.DedicatedExportStore`, already modelled as `Config::dedicated_export_store`;
+3. the export file backend implementing `filestore.FileBackendWithLinkGenerator`.
+
+`built_in_command_triggers` (crates/mm-app/src/command.rs) therefore never reserves it. On a
+stock server that is exact and the parity suite asserts it — `POST /api/v4/commands` with trigger
+`exportlink` is a 201 from both servers. With the flag on and a dedicated export store
+configured, an operator could create a custom `/exportlink` here that Go refuses with
+`api.command.duplicate_trigger.app_error`.
+
+Closing it needs the feature-flag block in `Config`, which nothing else reads yet — no
+`FeatureFlags.*` field is modelled at all — plus a decision about condition 3, which is a
+property of a backend this server does not construct. The sibling `/test`, gated only on
+`ServiceSettings.EnableTesting`, **is** handled: the field already exists and the list is
+conditional on it.
+---
+
+## D-270 · The migrated writes do not append to `Audits`, and one served route reads that table
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-11 (phase 2, token writes)
+
+`Context.LogAudit` (web/context.go:95) builds a `model.Audit` and calls `Store().Audit().Save`
+**unconditionally** — no config gate, no feature flag. Five of the seven personal-access-token
+writes call it, once on entry and again on success, so a token revoked through Go leaves two
+`Audits` rows and the same revoke through `mm-api` leaves none.
+
+That is observable through the API, which is what makes this an entry rather than a note:
+`GET /api/v4/users/{user_id}/audits` is already served from Rust (`mm_api::audits`) and reads the
+same table. So the two servers disagree about a user's audit history in proportion to how much of
+their traffic each one answered.
+
+It is **not** specific to this family. Every migrated write has the gap — the channel-member
+writes, the team-member writes, the auth writes, the post writes — and it had not been written
+down. Raised here because this is the first family whose Go handlers call `LogAudit` on *every*
+route rather than on some of them, and because the reading route is already ported, so the
+divergence can be measured rather than argued about.
+
+What is needed: `AuditStore::save` (`mm-store/src/audit_store.rs` is read-only today) and a
+`Context`-equivalent hook in `mm-api` that has the session, the request path and the client IP —
+`mm_model::audit_record` is already ported in full. `LogAuditRec`/`MakeAuditRecord` are a
+**separate** and much smaller question: those write to the audit *log* (mlog) rather than to the
+database, so nothing over the API can see them and they need no entry.
+---
+
+## D-280 · `POST /api/v4/bots` cannot be compared with Go on this deployment
+
+**Status** OPEN · **Severity** unverified · **Raised** 2026-09-11 (phase 2, bot writes)
+
+`ServiceSettings.EnableBotAccountCreation` defaults to **`false`** (config.go:917) and the stack
+leaves it there deliberately — `scripts/stack.sh`'s seeded bots are written straight to the tables
+for exactly this reason, and turning it on changes what other routes answer. So every
+`POST /api/v4/bots` against stack N is a 403 `api.bot.create_disabled`, and the route's success
+path — the 201, the `Users` insert, the `Bots` insert, the rollback between them — has **no
+cross-server test**.
+
+What exists instead: `db_bot_store.rs` drives the two inserts and the rollback against the real
+database, and `mm_api::bots`'s unit test pins the 201 and its trailing newline. What is missing is
+the one thing only Go can supply — that the bot it creates for a given `BotPatch` is byte-identical
+to the bot we create for the same patch.
+
+What is owed, in the order it would be done: flip the row in `Configurations`, `POST /config/reload`
+on the Go server so it re-reads, start a second mm-api with
+`MM_SERVICESETTINGS_ENABLEBOTACCOUNTCREATION=true` (`common::SecondServer` already does this), create
+one bot through each, and compare. The reload half is the risk: the configuration row is global and
+`parity::config_source` compares the document, so the flip needs a lock of its own rather than the
+`ACTIVE_LICENCE_ROW` pattern, which is a read/write lock over a different row.
+
+---
+
+## D-281 · A bot created through this server sends its owner no direct message
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-11 (phase 2, bot writes)
+
+`App.CreateBot` (app/bot.go:139-158) finishes by opening a direct channel with the bot's owner and
+posting `api.bot.teams_channels.add_message_mobile` — "Please add me to teams and channels you want
+me to interact in." — into it **as the bot**, through `CreatePostAsUser`. That function is not
+ported: it is the whole of `POST /api/v4/posts`, which checks the channel is not archived, refuses a
+`system_`-prefixed type, applies the restricted-DM rule, runs `CreatePost` with webhooks enabled and
+then marks the channel viewed. `mm_app::App::create_system_post` is **not** a substitute — it is a
+different Go function with different side effects, and `add_bot_teams_channels` is not a system type.
+
+The owner lookup *is* ported, because its non-`NotFound` branch is a wire-visible 500 and because it
+is where the divergence begins. Two consequences: no DM, and Go's create can fail *after* both rows
+are written (the DM or the post can error and Go returns that error) where ours cannot.
+
+Blocked behind `CreatePostAsUser`. Unreachable today in any case — see [D-280].
+
+---
+
+## D-282 · Disabling a bot does not run `userDeactivated`
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-11 (phase 2, bot writes)
+
+`App.UpdateActive` calls `userDeactivated` (app/user.go:1172) for every deactivation, and
+`mm_app::App::update_active_for_bot` does not. Four things it does:
+
+| Go call | consequence of omitting it |
+|---|---|
+| `SetStatusOffline` | the disabled bot keeps whatever `Status` row it had |
+| `notifySysadminsBotOwnerDeactivated` | skipped for a bot anyway (`if !user.IsBot`), so no gap here |
+| `disableUserBots` | **a bot that owns bots leaves them enabled** when `DisableBotsWhenOwnerIsDeactivated` is on, which is its default |
+| `OAuth().RemoveAuthDataByUserId` / `PermanentDeleteAuthDataByUser` | the bot's OAuth grants survive its deactivation |
+
+The cascade is the one with teeth, and it is also the one that will matter when
+`PUT /users/{id}/active` lands: that route deactivates *people*, whose bots the setting exists to
+disable. `disableUserBots` pages `GetBots` with `OwnerId` set and calls `UpdateBotActive` on each,
+so the store side is already here; what it needs is the app function and an owner whose
+deactivation is reachable.
+
+The plugin hook `UserHasBeenDeactivated` is not in scope — there is no plugin host.
+
+---
+
+## D-283 · Session revocation does not handle an OAuth session
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-11 (phase 2, bot writes)
+
+`PlatformService.RevokeAllSessions` (app/platform/session.go:329) branches on `session.IsOAuth`:
+an OAuth session goes through `RevokeAccessToken`, which deletes the `OAuthAccessData` row as well
+as the session. `mm_app::App::revoke_all_sessions_for_bot` removes every session the same way, so an
+OAuth session is revoked but its access data survives — a row that can then never be cleaned up
+through any route.
+
+Unreachable from the bot routes: a bot's sessions are personal access tokens, never OAuth grants.
+It becomes reachable the moment user deactivation lands. What is owed is `RevokeAccessToken`
+(app/oauth.go), which needs `OAuthStore::remove_access_data` and `SessionStore::remove` — the
+second already exists.
+
+The function also lives in the wrong file. It is not bot-specific and belongs beside the other
+session code; it is in `mm_app::bot` because the session store was another agent's file in the
+round it was written. Move it when session revocation gets a route of its own.
+
+---
+
+## D-284 · `channel_writes::a_public_channels_archive_is_addressed_to_the_team` misses its event under load
+
+**Status** OPEN · **Severity** test-harness · **Raised** 2026-09-11 (parallel route round)
+
+Three independent worktrees reported this failing on a full run and passing in isolation; it has
+**not** been reproduced on `main`, which is why this is an entry and not a fix.
+
+```
+panicked at crates/mm-api/tests/parity/channel_writes.rs:2105:5:
+no channel_deleted arrived: [ ...48 events... ]
+```
+
+The test holds `common::BROADCAST_STREAM`, connects a `SocketProbe`, archives a public channel and
+waits 5s for a `channel_deleted` addressed to the team. What it collects instead is 48 frames
+belonging to *other* suites — `user_updated` for the `mmrsplaincs*` custom-status users,
+`draft_created`/`draft_deleted`, `preferences_changed`, `sidebar_category_updated`. So the socket
+is alive and receiving; the one frame under test is the only one missing.
+
+**That rules out the obvious reading.** It is not a connect-then-act race (the connection is
+plainly registered) and not the 5s window being too short for traffic in general. The lock does
+not help here: it excludes the other tests that *count* frames, not the many that merely write and
+broadcast.
+
+**What is owed:** reproduce it before changing anything. The hypothesis worth testing first is
+that a team-addressed broadcast is filtered against team membership the hub cached when the
+connection opened, and that a sibling suite removing the shared admin from a team (there are
+several: `teams_for_user.rs:66`, `users_list.rs:76`, `team_name_members.rs:82`) makes the hub drop
+it. If that is it, the fix is a dedicated user for this test rather than the shared admin — not a
+longer timeout, which would only make the flake rarer.
+
+**Reproduction attempted and failed, 2026-09-11:** twelve further full-suite runs on the merge
+stack, deliberately under load from four concurrent worktree builds, did not reproduce it. Three
+*other* flakes surfaced in those runs and were fixed (`user_get`'s etag pair, and the bot pair
+below); this one did not recur. So it is either rarer than 1 in 12 or it needs something a
+worktree stack has and the merge stack does not — note that two worktrees shared stack 1 during
+the round in which all three reports were made, which would put two servers and two purges on one
+database. Check that before assuming the hub.
+
+**Where the pin lives:** the doc comment on the test.
+
+---
+
+## D-300 · The licensed half of the seven CPA routes is forwarded, not served
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-11 (custom profile attributes)
+
+`crate::custom_profile_attributes` serves the **unlicensed** contract of all seven routes and
+forwards to Go the moment `LicenseState::Licensed` comes back. That is not a stopgap for these
+routes' error paths — those are fully ported and compared — but it does mean the success path of
+`POST`/`PATCH`/`DELETE /fields`, `PATCH …/values` and the two non-empty reads has never run here.
+
+What a licensed server reaches that this side does not have, in the order it reaches them:
+
+| behind the gate | Go |
+|---|---|
+| `AccessControlHook` — read filtering, owners, sync lock, access modes | `app/properties/access_control.go` |
+| the attribute-validation hook — visibility, sort order, option and user-id checks, managed-flag authorisation | `app/properties/access_control_attribute_validation.go` |
+| `TypeChangeValueCleanupHook` — clears dependent values on a type change | `app/properties/type_change_value_cleanup.go` |
+| the group field limit | `app/properties/field_limit.go` |
+| four websocket events | `custom_profile_attributes_field_{created,updated,deleted}`, `custom_profile_attributes_values_updated` |
+| `App.UpsertPropertyValues`' value audit and broadcast | `app/property_value.go:169` |
+
+**What is owed:** the write half of `mm_store::property_store` and the three hooks, behind whichever
+route needs them first. Nothing here is blocked on the licence — a licence is not obtainable and is
+not a reason to skip the work, only a reason nothing on this stack can *compare* it. When it lands
+the comparison oracle has to be something other than the Go server beside it.
+
+---
+
+## D-301 · `property_store`'s two searches implement a subset of the predicates
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-11 (custom profile attributes)
+
+`SqlPropertyStore::search_fields` and `search_values` implement the predicates the CPA routes set —
+group, object type, target type, target ids, the implicit `DeleteAt = 0`, `PerPage` — and return
+`StoreError::Argument` for any option that is set and unimplemented: cursors, delta mode
+(`SinceUpdateAt`), `IncludeDeleted`, `ObjectTypes`, `LinkedFieldID`, the team/channel hierarchy and
+the `Value` filter.
+
+That is deliberate — a partially implemented predicate returns *wrong rows* silently, where a
+refusal is loud — but it is still unfinished work, because `api4/properties.go`'s nine routes need
+most of it. `searchPropertyFields` and `getPropertyValues` both take a cursor and a `since`, and
+`getPropertyFields` scopes by team and channel.
+
+**What is owed:** the missing predicates, which sqlx's compile-time checking cannot assemble from
+an options struct the way squirrel does. Either a small set of purpose-shaped queries (one per
+scope shape, which is what Go's `switch` already is) or `QueryBuilder`, which this crate does not
+use anywhere yet and would be the first.
+
+**Where the pin lives:** the module doc comment on `crates/mm-store/src/property_store.rs`.
+
+---
+
+## [D-330] `parity_views`' list order — CLOSED 2026-09-12, and it was never a port bug
+
+Raised as a wire-order divergence: `views::include_total_count_and_pagination_agree` and
+`views::the_list_is_byte_identical_including_the_props_key_order` disagreed with Go on row order on
+every run, Go returning `CreateAt` order and our side returning `Id` order.
+
+**Both tests were correct and so was the port.** `SecondServer::start` spawned mm-api and then
+decided it was up by polling `{base}/system/ping`. When a stale mm-api already held the port, the
+child failed to bind and exited, the ping was answered by the **stale process**, and `start`
+returned `Some` wrapping a dead child — so the suite measured a binary from hours earlier. A
+SecondServer from 00:31 held :8082. Killing it made both tests pass, three runs out of three, and
+they have passed every run since.
+
+What was established while chasing it, all of it now permanent:
+
+* `crates/mm-store/tests/db_view_store.rs` exists. The view store had **no** DB-backed test before.
+* Postgres, given the store's own `ORDER BY`, returns exactly Go's order for the rows the failing
+  test produced. The store, the app layer and the handler never reordered anything.
+* `SecondServer::start` frees its port before spawning **and** requires its own child to still be
+  running. A ping cannot distinguish "mine came up" from "someone else's was already there", which
+  was the whole defect.
+* `scripts/mutations/view-routes.plan` now has its first valid run: 33 run, 28 caught, both controls
+  survived.
+
+Two entries in this file were wrong about this and are superseded by the above: the first blamed a
+concurrent `total_count` race, the second a `CreateAt` tiebreak our store does in fact apply.
+
+**The lesson worth keeping is not about views.** Twice in one session a stale server produced
+confident, wrong conclusions — once through `scripts/parity.sh` (36 false failures after a
+`git worktree move`) and once here. Both are fixed by killing on the **port**, which is the thing
+that identifies a server, rather than on a path or a ping.

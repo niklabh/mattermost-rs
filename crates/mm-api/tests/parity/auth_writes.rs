@@ -212,6 +212,9 @@ async fn a_session_revoked_here_is_gone_here_but_lingers_in_gos_cache() {
     if !stack_enabled() {
         return;
     }
+    // The only test in the binary that asserts Go has *not* caught up, so it is the only one that
+    // has to exclude the tests that make Go catch up. See `common::GO_CACHE`.
+    let _go_cache = common::GO_CACHE.lock().await;
     let http = client();
     let (team, _channel) =
         a_team_and_channel_the_user_is_in(&http, &go_minted_token(&http).await).await;
@@ -258,7 +261,8 @@ async fn a_session_revoked_here_is_gone_here_but_lingers_in_gos_cache() {
          the cache is being invalidated and the entry can be closed"
     );
 
-    common::invalidate_go_caches(&http, &admin).await;
+    // Already holding `GO_CACHE`; the re-acquiring form would deadlock here.
+    common::invalidate_go_caches_locked(&http, &admin).await;
     assert_eq!(me(GO).await, 401, "and the row really is gone");
 
     delete_plain_user(&http, &admin, &user.id).await;

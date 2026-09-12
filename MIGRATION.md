@@ -10126,6 +10126,15 @@ Go `Exec`s the UPDATE and never looks at the rows affected, then computes the an
 **in-memory** member. `PUT …/roles` for a user who is not on the team therefore answers 200 having
 written nothing — unlike the channel twin, whose re-select turns that into a 404.
 
+### The `/following` validator order has no wire-visible oracle
+
+`RequireUserId().RequireThreadId().RequireTeamId()` — **thread before team**, the opposite of the
+read route on the same prefix. Which parameter Go names reaches a client only through the
+translated `message`, and we send the raw error id there ([D-092]), so every ordering of the
+three produces byte-identical output from us and a mutation swapping two of them survived the
+parity suite. `mm_api::thread_writes::first_invalid_following_param` is that branch extracted so
+a unit test can be the oracle; the mutation is caught there instead.
+
 ### Mutation testing: see the tally in the session report
 
 Plan committed at `scripts/mutations/team-member-writes.plan`, which also records the four
@@ -10141,3 +10150,507 @@ member).
 (`user_store.rs`, likewise). The websocket events, the soft-delete of the membership and the
 preference cleanup are all straightforward once those exist. See [D-242] for the `UpdateUpdateAt`
 gap, which the *add* path shares.
+
+## Two cross-test races, and a safety argument with one counterexample (2026-09-11)
+
+A baseline run of the full suite on the merge stack, on unchanged code, failed one test per run
+and a *different* test each run. Neither was a port bug; both are now fixed and the suite is
+green at 3373 across 56 targets. No route changed.
+
+The first: `user_by_email::a_plain_caller_reads_an_admin_address` is the only byte comparison in
+that file whose subject is the **shared admin** rather than a plain fixture user, and
+`custom_status_writes` writes that row. `fetch_both_raw` reads Go then Rust, so a concurrent
+`Users.UpdateAt` bump lands between them — 39ms, `update_at` alone. It uses `fetch_both_stable`
+now; the test's doc comment says why its siblings must not.
+
+The second is the more interesting one, because the harness asserted its own safety.
+`common::invalidate_go_caches` carried a written argument that it could not break anything:
+invalidation only makes Go **fresher**, and every staleness assertion in the suite is one-sided
+in that direction. That is true of all of them but one —
+`auth_writes::a_session_revoked_here_is_gone_here_but_lingers_in_gos_cache` asserts Go is
+**stale**, and it is the tripwire on [D-237]. `POST /caches/invalidate` is global with six
+concurrent callers, so a firing from `system_usage` turns that tripwire into a false "D-237 can
+be closed". See `common::GO_CACHE`, which the helper takes itself so a future caller inherits it.
+## Three of the five thread writes (2026-09-11)
+
+`PUT /users/{user_id}/teams/{team_id}/threads/read`, and `PUT`/`DELETE` on
+`…/threads/{thread_id}/following`. Handlers in `crates/mm-api/src/thread_writes.rs`, app layer in
+`crates/mm-app/src/thread.rs`, store in `crates/mm-store/src/thread_store.rs`
+(`mark_all_as_read_by_team`, `maintain_membership`, `get`). Suite:
+`crates/mm-api/tests/parity/thread_writes.rs`, 13 tests.
+
+The other two — `PUT …/read/{timestamp}` and `POST …/set_unread/{post_id}` — are **deferred**,
+not skipped: both write `ThreadMemberships.UnreadMentions` from `countThreadMentions`, which needs
+three `GroupStore` methods, `PostStore::GetPostsByThread` and the Markdown mention parser. See
+[D-250].
+
+### `UpdateViewedTimestamp` is `state`, not `true`
+
+The one line in `UpdateThreadFollowForUser`'s options a reader reconstructs wrongly: a **follow**
+also marks the thread read — `LastViewed` to now, `UnreadMentions` to zero — and an unfollow
+touches neither while still moving `LastUpdated`. Consequences documented on
+`mm_app::App::update_thread_follow_for_user`: a redundant follow is not idempotent, and any
+fixture that follows a thread loses the read mark it planted.
+
+### `MarkAllAsReadByTeam` carries four predicates fewer than the threads list
+
+No `Following`, no channel-membership `EXISTS`, no `ThreadDeleteAt = 0`, no
+`LastReplyAt > LastViewed` — so it marks read what the list would never show, and it compares
+`ThreadTeamId` **without** `COALESCE`, unlike every read query in the same file. Both facts are on
+`mm_store::thread_store::SqlThreadStore::mark_all_as_read_by_team`.
+
+### Unfollowing a thread you have no row for creates one
+
+The insert branch of `maintainMembershipTx` is unguarded and takes `Following` from
+`opts.Following` regardless of `UpdateFollowing`. The row it leaves behind changes which 404 the
+read route answers, from `app.user.get_thread_membership_for_user.not_found` to
+`app.user.get_threads_for_user.not_found` — asserted in the suite rather than inferred.
+
+### `/threads/read` is a static sibling of `{thread_id}`, and matchit has no method dimension
+
+So the static route wins for **every** method, including the `GET` gorilla falls through to
+`getThreadForUser` with `read` as the thread id. The method-router fallback forwards it and Go
+answers its own 400; `parity::thread_writes::a_get_on_the_read_path_is_still_gos_404_shaped_400`
+is what would notice if that stopped being true. Note that test compares the two bodies directly
+rather than through `assert_error_bodies_match_except_known_gaps`, whose "our message is the raw
+id" pin is false of a proxied answer.
+
+### Mutation testing: see the tally in the session report
+
+Plan committed at `scripts/mutations/thread-writes.plan`. Its header records why the verdicts
+depend on the fixture *planting* non-zero, mutually distinct `LastViewed`, `LastUpdated` and
+`UnreadMentions`: with three zeroes, "left alone", "rewritten to the same value" and "zeroed" are
+the same observation and most of the plan would survive while proving nothing.
+## The slash-command writes (2026-09-11)
+
+`POST /api/v4/commands`, `PUT|DELETE /api/v4/commands/{command_id}`, and the two sub-routes
+`PUT …/move` and `PUT …/regen_token` — five routes, closing the write half of `api4/command.go`.
+`executeCommand` and the two autocomplete routes remain forwarded. New:
+`crates/mm-api/tests/parity/command_writes.rs`, `scripts/mutations/command-writes.plan`; the rest
+extends `command_store.rs`, `mm-app/src/command.rs` and `mm-api/src/commands.rs`.
+
+### The built-in registry is 33 strings, and the parity suite is its oracle
+
+`validateCommandTriggerUniqueness` asks ~35 provider objects for a `*model.Command` and reads
+`.Trigger` and nothing else, so the whole of what the check needs is a list. Two providers return
+`nil` on a stock server, which *frees* their trigger: `/test` needs `EnableTesting` and
+`/exportlink` a feature flag this port does not model ([D-260]). Because a transcribed list is
+exactly the thing that is quietly wrong, `parity::command_writes` posts every entry to both
+servers and demands the same refusal, and posts the two free ones and demands the same
+acceptance. See `BUILT_IN_COMMAND_TRIGGERS` in `crates/mm-app/src/command.rs`.
+
+### The 404-for-a-403 rule is not uniform across the family
+
+Rung one of the ownership ladder — no `manage_own_slash_commands` on the command's team — is a
+404 in all five writes and in `getCommand`. Rung two — not the creator and no `manage_others` —
+is a plain **403** in the writes and a 404 in `getCommand`. So `PUT /commands/{id}` tells two
+refusals apart that `GET /commands/{id}` deliberately does not. `moveCommand` is further out
+still: its `manage_own` check is on the *destination* team and runs before the command is
+fetched, so a caller who fails rung one is refused there with a 403. Measured — the ladder test
+expected 404 and Go answered 403.
+
+### `UpdateAt` is stamped in the store, and that is load-bearing
+
+`App.MoveCommand` and `App.RegenCommandToken` never mention the field; `SqlCommandStore.Update`
+assigns it before validating. Moving that assignment up a layer — the shape the webhook store
+uses — leaves both routes writing a stale `UpdateAt`. `command_store.rs` says so at the trait.
+
+### Go's `SqlCommandStore.Delete` cannot fail
+
+`if err != nil { errors.Wrapf(err, …) }` with the result discarded, so it returns `nil`
+unconditionally and `app.command.deletecommand.internal_error` is dead code. This port returns
+the driver error, which diverges only on a database that is already down. Recorded in the doc
+comment on `CommandStore::delete`, not as debt.
+
+### Every JSON body in this module was missing Go's HTML escaping
+
+`encoding/json` escapes `&`, `<` and `>`; `serde_json::to_string` does not, and a slash command's
+`url` is the field that makes that reachable — `?a=1&b=2` is an ordinary callback. `encoded` now
+goes through `go_json_marshal`, which also fixes the already-shipped `getCommand` and
+`listCommands`. `regenCommandToken` is the one body here written with `w.Write` rather than the
+encoder, so it alone carries no trailing newline and only the token.
+
+### `POST` is deliberately unregistered on `/commands/{command_id}`
+
+`/api/v4/commands/execute` matches that pattern and this router does not carry it, so the method
+fallback is the only thing still forwarding it. `create_command` lives on `/api/v4/commands`;
+registering it on the parameterised path as well would swallow `executeCommand` silently.
+`parity::command_writes::the_execute_route_is_still_forwarded` is the guard.
+
+### Mutation testing, and the survivor that was a bug in the test
+
+**39 run, 36 caught, 3 survived, 0 harness faults** (`scripts/mutations/command-writes.plan`).
+Two survivors are the required no-op controls. The third, `app-update-takes-the-bodys-team`, is a
+documented equivalent mutant: `updateCommand` refuses unless the body's `team_id` already equals
+the old command's, so the copy below it cannot be observed through any request. `plugin_id` — the
+same assignment with no handler guard in front of it — is mutated in its place and is caught.
+
+Two more survived the first run and were **findings about the test**, not equivalents: the move
+test searched for trigger `mmrscolg` while writing `mmrscol{tag}` with `tag` already `colg`, so
+`occupied()` found nothing, took its `else { return; }` meant for a machine with no database, and
+the test passed having run none of its move assertions — including the `team_id` read-back — and
+never reaching its own `sweep` (227 rows had leaked). `occupied` now **panics** on a missing row
+and returns `None` only for a missing `DATABASE_URL`, and the trigger is one binding used both to
+create and to look up. Both mutations are caught since.
+## The personal-access-token writes (2026-09-11)
+
+`POST /api/v4/users/{user_id}/tokens` and `/users/tokens/{revoke,disable,enable,rotate,search}`
+and `/users/tokens/non_compliant/revoke` — seven route+method pairs, the whole write half of the
+family whose reads landed on 2026-09-08. Touched: `crates/mm-store/src/user_access_token_store.rs`,
+`crates/mm-app/src/user_access_token.rs`, `crates/mm-api/src/tokens.rs`, the router and one
+config field (`enable_user_access_tokens`). New: `crates/mm-api/tests/parity/token_writes.rs`,
+`scripts/mutations/token-writes.plan`. No new model type: `UserAccessTokenSearch` was already
+ported into `mm-model/src/search_requests.rs`, where Go's own separate file put it — this session
+wrote a second copy beside `UserAccessToken` before noticing, which is exactly the silent fork of
+a wire type that grouping was meant to prevent.
+
+### The secret is on the wire exactly twice
+
+Creation and rotation return the token with `Token` populated; every other route blanks it, and
+`omitempty` turns the cleared string into an absent key. A port that sanitised these two for
+symmetry would hand clients a credential they can never learn. See
+[`App::create_user_access_token`](crates/mm-app/src/user_access_token.rs).
+
+### Revoke, disable and rotate delete the session the token minted — in the store
+
+The join is `Sessions.Token = UserAccessTokens.Token`, on the **secret**, so on rotate the DELETE
+must precede the UPDATE or every session the old secret minted is orphaned: still valid, still
+authenticating, no longer reachable from the row that would revoke it. `delete_sessions_for_token`
+in the store is the one copy of that statement.
+
+### The search term is an equality, not a pattern
+
+`sanitizeSearchTerm` escapes `%` and `_` and nothing wraps the term, so `seed` does not find
+`seed-bot` and `%` finds nothing at all. Measured against the running server before it was
+written; a port that "fixed" it into `%…%` returns rows Go does not.
+
+### An empty `token_id` is a 404, not the 400 the code appears to set
+
+Revoke, disable and enable all do `if tokenId == "" { c.SetInvalidParam("token_id") }` **without
+returning**, so that error is overwritten by the 404 from looking up the empty id. Rotate's
+identical-looking three lines *do* return, so its 400 is real. Both confirmed against Go.
+
+### `json.Decoder.Decode` is not `serde_json::from_slice`
+
+An array is an error in Go and is not in serde (which fills a struct positionally); a `null` is
+*not* an error in Go (the struct keeps its zero value); trailing bytes after the first value are
+ignored. Each difference changes which parameter the 400 names, so
+[`decode_go_struct`](crates/mm-api/src/tokens.rs) ports all three.
+
+### `Store.Delete` reports success when its transaction failed
+
+Go guards the commit with `if err := …; err == nil` and then returns `nil` regardless, so a failed
+revoke answers `{"status":"OK"}` having deleted nothing. Reproduced — it is on the wire — and
+logged at error level, because nothing else would record it. `UpdateTokenDisable`, in the same
+file, propagates instead.
+
+### `enable` is gated on *create*, `disable` on *revoke*
+
+Not a symmetry: if enable took the revoke permission, a caller whose only power is to withdraw
+credentials could re-arm every one they had disabled. An admin holds both, so
+`parity::token_writes::enable_and_disable_are_gated_on_opposite_permissions` plants a role holding
+exactly one.
+
+### Our 400s cannot be told apart, because the parameter name is message-only
+
+`NewInvalidParamError` puts the parameter in the AppError's **params**, which Go never serialises;
+a client learns whether it was `token_id` or `rotate_user_access_token` only from the translated
+`message`, and ours is the raw id until i18n lands ([D-092]). So over HTTP those two 400s are the
+same document, and no parity assertion on **our** body can separate them. A mutation run proved
+it: making `decode_go_struct` reject a JSON `null` changed which branch every route took and the
+suite did not notice, because the assertion pinned *Go's* message, which the mutation cannot move.
+The null branch is now asserted in `mm_api::tokens`'s unit tests, where it is visible; the array
+branch stayed in the parity suite because it has an observable form — serde fills a struct from a
+sequence **positionally**, so a six-element array would mint a real token (200) where Go answers
+400.
+
+### `detailed_error` is empty on every error body here, and everywhere else
+
+`MakePermissionError` fills it with `userId=…, permission=…` and `handleContextError` then wipes it
+unless `ServiceSettings.EnableDeveloper` (web/handlers.go:436). So the appended
+", attempted access by oauth app" the five OAuth refusals build is reproduced for the log and for
+developer mode, and reaches no client on a stock server.
+
+### What the writes are still missing
+
+The `Audits` rows every one of these handlers writes ([D-270], the first entry for a gap every
+migrated write shares), and the create/rotate notification e-mails ([D-238], whose "two writes are
+silent" is now four). Neither changes a response byte.
+
+### A fixture sweep keyed on a column a mutation can change is not a sweep
+
+`token_writes::sweep` deleted by the `mmrs-write` description every body here posts — and the
+`store-save-token-and-description-swapped` mutation writes the *secret* into that column, so two
+rows outlived it and the **reads** suite's `an_empty_page_is_an_empty_array` failed hours later on
+debris from next door. It sweeps by owner now (`TOKEN_BOT` owns nothing else).
+
+### Mutation testing: 35 run, 33 caught, 2 controls survived
+
+Two passes. The first was 30 caught, 2 real survivors and one harness fault (a replacement whose
+`$2 = $2` sqlx could not type-check); the second re-ran those three after the fixes above and
+caught all three, with both no-op controls surviving as they must.
+
+Plan at `scripts/mutations/token-writes.plan`, which also records the three things it deliberately
+does **not** mutate — the session join (dropping either predicate wipes every session on the
+installation), `DeleteNonCompliantExpiry` (unreachable while no lifetime policy is set) and the
+remote-user and system-admin-target gates (no reachable false side on this stack).
+## The bot writes (2026-09-11)
+
+Five of the six writes in `channels/api4/bot.go`: `POST /bots`, `PUT /bots/{bot_user_id}`,
+`POST /bots/{bot_user_id}/{disable,enable}` and `POST /bots/{bot_user_id}/assign/{user_id}`.
+`convertBotToUser` is deliberately left in Go. Behind them: `SqlBotStore::Save`/`Update`,
+`UserStore::save`/`permanent_delete`, and `App.CreateBot`/`PatchBot`/`UpdateBotActive`/
+`UpdateBotOwner`. `SessionHasPermissionToManageBot` was already ported for
+`SessionHasPermissionToUserOrBot` and is reused unchanged.
+
+Tests: 7 parity (`parity::bot_writes`), 12 store DB (`db_bot_store`), 5 unit. Full workspace run
+56 targets, 3392 passed. Mutations: 35 run, 30 caught, 2 controls survived; the three non-control
+survivors are the two below and `assignBot`'s id-check order, all three invisible to a client.
+
+### There is no `enabled` column, and only one of the two rows it writes is idempotent
+
+Disabling a bot soft-deletes `Users` *and* `Bots`. `UpdateBotActive` guards the `Bots` write with
+Go's `changed` flag while `UpdateActive` above it runs unconditionally — so a second
+`POST /disable` answers with the **first** disable's `update_at` while still bumping
+`Users.UpdateAt`. Measured against the running server. See `mm_app::App::update_bot_active`.
+
+### `Bot().Update` answers with the row it re-read, which is why `PatchBot` writes `Users` first
+
+The store copies five fields onto the stored join and returns *that*, so `username` and
+`display_name` in the answer come from `Users` rather than from the caller's bot. `App.PatchBot`
+writes the user row first for exactly that reason; reversing the two answers with the old username
+while having stored the new one. See `mm_store::bot_store::BotStore::update`.
+
+### Renaming a bot rewrites its email, and nothing on the wire says so
+
+`UserFromBot` regenerates the address as `<username>@localhost`, and `PatchBot` copies it onto the
+user row along with `Id`, `Username` and `FirstName`. A `model.Bot` shows none of that, so the
+parity suite reads both tables — `common::bot_and_user_rows`.
+
+### The database picks the field a duplicate username is reported under, not Go's order of checks
+
+A bot's email derives from its username, so a clash violates both unique indexes, and Go tests its
+email list first — which reads as "email wins". It does not: Postgres names one constraint per
+error and `IsUniqueConstraintError` is a substring test over that text. The answer is `username`
+on both servers. `db_bot_store.rs` asserted the intuitive reading and failed; the finding is on
+`mm_store::user_store::UserStore::save`.
+
+### Three orderings, each invisible to a single-gate test
+
+`createBot` decodes the body before checking the permission and checks the permission before the
+feature flag, so three callers get three different answers and only an admin ever learns bot
+creation is disabled. `patchBot` likewise decodes before the manage gate, so a caller who may not
+know the id is a bot still gets a 400 for a malformed body. `assignBot` validates `user_id` before
+`bot_user_id`. All three are in `parity::bot_writes`; the third is **not** catchable, below.
+
+### What a client cannot see, and therefore no parity test can pin
+
+`model.AppError`'s parameter map and `MakePermissionError`'s detail both carry `json:"-"`. So
+*which* parameter a 400 named and *which* permission a 403 named are absent from the wire —
+`detailed_error` is empty on both servers. Two mutations exercise this and are expected to survive;
+`scripts/mutations/bot-writes.plan` lists them under their own heading rather than among the
+controls.
+
+### `POST /bots` answers 403 on this deployment and always will
+
+`ServiceSettings.EnableBotAccountCreation` defaults false and the stack leaves it there on purpose.
+The refusal is what the parity suite compares; the success path is covered by `db_bot_store.rs` and
+a unit test, and the gap is [D-280]. Three more divergences on that path and the one below it are
+[D-281] (no owner DM), [D-282] (`userDeactivated`'s cascade) and [D-283] (the OAuth arm of session
+revocation).
+
+### One survivor nothing can catch: `DeleteAt = UpdateAt` is one clock read
+
+Reading the clock twice instead would put the two columns a millisecond apart on an unlucky run,
+and both servers would drift the same way — so the right answer and the wrong answer coincide, and
+a test that could tell them apart would fail intermittently on correct code. Recorded on
+`mm_app::App::update_active_for_bot` and in the plan's "invisible on the wire" section rather than
+papered over.
+
+### A mutation that makes a write *succeed* needs a fixture that can undo it
+
+`api-create-flag-is-inverted` inverts the `EnableBotAccountCreation` guard, so the mutated server
+actually created the bot — and `the_create_gates_fire_in_gos_order` asserted that row's absence
+**without removing it**. Every later api mutation in the batch then failed that test for a reason
+that had nothing to do with it, both no-op controls included: 23 void verdicts. `count_users_named`
+became `common::remove_users_named`, which deletes what it counts so a failing assertion cleans up
+after itself, and the api half was re-run. The rule generalises past this route.
+
+### `db_bot_store.rs` stopped sweeping `mmrsbot%`
+
+The parity binary plants under that prefix from a **different process**, which no mutex in either
+can serialise; this file now sweeps only `mmrsbotstore%`/`mmrsbotowner%` plus the usernames its own
+creates mint. Within the parity binary, `common::BOT_FIXTURES` serialises the reads suite against
+the writes suite for the same reason.
+
+### The next route in this family
+
+`convertBotToUser` (`POST /bots/{bot_user_id}/convert_to_user`). Its gate is the simplest in the
+file — a bare `manage_system` — and three of the five things `App.ConvertBotToUser`
+(app/user.go:2942) does are already here: `User().Get`, `User::patch` and `App.UpdateUser`. Two are
+not: `App.UpdateUserRoles`, reached only when `?set_system_admin=true` and the user is not already
+an admin, and `BotStore::permanent_delete` — one `DELETE FROM Bots`, which is the step that makes
+the conversion irreversible. `App.update_password` exists in `mm_app::auth` but under a different
+name from Go's `UpdatePassword`; check which of the four variants matches before calling one.
+
+## A second flake pass, and an assertion that was wrong about Go (2026-09-11)
+
+Twelve full runs on the merge stack, deliberately under load, hunting [D-284]. It never
+reproduced — but three *other* failures did, none of them port bugs, and one of them was a test
+asserting something untrue of the Go server.
+
+`user_get`'s etag pair read the **shared admin**, whose `Users.UpdateAt` a sibling suite bumps;
+when that lands between the unconditional GET and the `If-None-Match` GET the etag has genuinely
+changed and **200 is correct**. The pair retries now, as `fetch_both_stable` does for bytes.
+
+The one worth reading: `bot_writes` asserted `Users.DeleteAt == Users.UpdateAt` exactly, under the
+comment "UpdateActive reads the clock once". It reads it **twice** — `UpdateActive` stamps both
+columns, then `SqlUserStore.Update` calls `PreUpdate`, which re-stamps `UpdateAt` unconditionally
+(`model/user.go:563`). The columns are equal only when two `GetMillis()` calls share a
+millisecond; measured at `470` vs `471`. Our port makes the same two reads in the same order, so
+the parity was exact and only the assertion was false.
+
+Its sibling `bots` failure was the *same* fault: panicking at that assertion skipped the disable
+test's `unplant_bot` cleanup, leaving two disabled bots, which broke a `with.len() == without.len()
++ 1` count elsewhere. One bug, two red tests, and a lock that could not have helped — residue
+outlives it. That count is a subset assertion now.
+
+[D-284] itself now carries the negative result and the one environmental difference worth
+checking: two worktrees shared stack 1 during the round that produced all three reports.
+`scripts/worktree.sh` refuses that configuration as of this session.
+## Custom profile attributes: seven routes whose gate is five different answers (2026-09-11)
+
+`listCPAFields`, `createCPAField`, `patchCPAField`, `deleteCPAField`, `patchCPAValues`,
+`listCPAValues` and `patchCPAValuesForUser` — the rest of
+`api4/custom_profile_attributes.go`, whose eighth route (`/group`) was already served in
+`mm_api::gated_reads`. New: `mm_store::property_store`, `mm_app::custom_profile_attributes`,
+`mm_api::custom_profile_attributes`, `parity::custom_profile_attributes` (12 tests).
+`scripts/mutations/cpa-routes.plan`: MUTATION_TALLY_PLACEHOLDER.
+
+**No model work was needed.** `property_field.rs`, `property_value.rs`, `property_group.rs`,
+`property_access.rs`, `property_field_attrs_validation.rs` and `custom_profile_attributes.rs` were
+all already in `mm-model` with generated fixtures, so `reference/dump/main.go` is untouched. This
+is the first session where the breadth-first model port paid for itself outright.
+
+### The licence gate is real, and it is not one answer
+
+The `access_control` property group carries a `LicenseCheckHook` registered first, so it runs
+before access control and attribute validation (app/server.go:322). Unlicensed it gives 403
+`app.property.license_error` — but only from the arms that fire. `PreCreatePropertyField` has no
+escape, so `POST /fields` is always a 403. `PostGetPropertyField` runs after the row is found, so
+an unknown field is a **404** first. `PostGetPropertyFields` and `PostGetPropertyValues` return
+`nil` for an empty slice, so an empty group answers a genuine `200 []` and a user with no values a
+genuine `200 {}`.
+
+So this deployment reaches five distinct answers across the seven routes and *which* one depends on
+a row in `PropertyFields` or `PropertyValues`. A port that refused everything would be wrong on
+five of the seven — which is why these are real database reads and not a constant. The pin is in
+`mm_app::custom_profile_attributes`' module docs.
+
+### What the empty group cannot test, and what planting one row showed
+
+Nothing on this stack can create a CPA field without a licence, so the parity suite writes the rows
+directly. Four findings only visible that way, each verified against the Go server:
+
+- A soft-deleted `user` field and a live `channel` field are both skipped by the list — and both
+  are still **found by id**: `PropertyFieldStore.Get` has no `DeleteAt` filter, `GetMany` no
+  object-type filter, and both handlers' own `ObjectType != user` check sits *after* the licence
+  hook, so it is unreachable while unlicensed.
+- A `session_attributes` field id is a 404 through `/custom_profile_attributes/fields/{id}`, which
+  is the only evidence the group scope on the by-id reads is real.
+- A value planted for one user leaves every other target's read at `200 {}`.
+- The batch cap is `>`, so exactly fifty ids get through to the miss and fifty-one do not.
+
+### Two decode paths, because Go has two
+
+`Decode` into a `*Struct` refuses a JSON array; **serde does not**, because a struct deserialises
+happily from a sequence of its fields — so `PATCH …/fields/{id}` with a body of `[]` would have
+produced an all-default patch and reached a write where Go answers 400. Caught by a unit test while
+writing one, pinned by `an_array_is_not_an_object`. `Decode` into a `map` takes `null` as a nil map
+**without** an error, so the same four bytes give `invalid_body_param` on the field routes and
+`empty_body` on the value routes. Both in `mm_api::custom_profile_attributes::{decode_struct,
+decode_map}`.
+
+### Two orderings a tidier port would lose
+
+`listCPAValues` checks target access **before** reading the group; `cpaPatchValues`, shared by both
+PATCH-values routes, reads the group **first**. And `patchCPAField` trims the name before
+validating it and clears `target_id` before validating it — so `{"name":"   "}` is a 400 and a
+300-character `target_id` is a 404, from the same body shape.
+
+### What is deferred
+
+[D-300] — the licensed half of all seven routes forwards, so three hooks, the group field limit and
+four websocket events have never run here. [D-301] — the two store searches implement the
+predicates these routes set and refuse the rest rather than ignoring them.
+
+### The next route in this family
+
+`api4/properties.go`, nine routes on the same store: `getPropertyFields`, `searchPropertyFields`,
+`getPropertyValues`, `getSystemPropertyValues` and the five writes. The four reads need exactly
+what [D-301] lists — cursors, `since`, `ObjectTypes` and the team/channel scope switch — plus
+`PropertyGroup::is_psav2`, which is already ported, because `getV2Group` refuses a v1 group before
+anything else. **They are registered behind a five-way feature-flag `if` (properties.go:23)**:
+`IntegratedBoards || ManagedChannelCategories || ClassificationMarkings || SessionAttributes ||
+PostAttributes`. Establish which of those five are on at the pinned SHA before writing a handler —
+if all five are false the routes are 404s from the mux and that, not the licence, is the contract
+to port.
+
+## Four families, a rate limit, and what the mutation runs were worth (2026-09-12)
+
+**346 → 372 of 764.** `view.go` entire, seven custom-profile-attribute routes, the three config
+reads, and the **first local-mode routes this project has ever served** — the unix socket, its
+unrestricted session, and six pairs, against a denominator that had been 171-to-0.
+
+All four sessions were terminated mid-work by a session rate limit. Their branches were preserved
+as labelled WIP commits, then verified here rather than trusted: all four compiled, passed clippy
+and fmt, and went green on their own stacks before merging. `wt/config` had reached **zero**
+commits when it died — its ~2,800 lines existed only in a working tree — and it merged green.
+
+### The merge that was green for the wrong reason
+
+`wt/view` failed 36 tests across `token_writes`, `command_writes`, `bot_writes`, `file_bytes` and
+`emoji_get` — every one a route that branch predated, all reporting "was forwarded to Go". None of
+it was the branch. A process's command line is fixed at `exec` time and does **not** follow a
+`git worktree move`, so renaming worktrees between rounds left an mm-api whose cmdline still named
+`…/threads/…` holding stack 1's port, and `parity.sh`'s path-scoped `pkill` could not match it.
+The suite ran against the previous round's server. `parity.sh` frees the port now — the port is the
+owner key, the path is not — and the same shape could as easily have produced a false *pass*.
+
+### The mutation tallies, and the one that is void
+
+| plan | run | caught | controls | verdict |
+|---|---|---|---|---|
+| `cpa-routes` | 35 | 33 | both survived | valid, no real survivors |
+| `local-mode` | 26 | 22 | both survived | valid, two real survivors |
+| `view-routes` | 33 | — | **both CAUGHT** | **void** |
+
+The view plan first scored 5 of 33 because nothing on the merge stack starts `go-boards.sh` and
+`start_boards` skipped with an `eprintln!` cargo hides — twelve tests passing while asserting
+nothing. That is fixed three ways (`stack.sh` starts the oracle, the skip is now a panic, and the
+purge sweeps the `Views` table it had never heard of, 754 leaked rows). It still scores nothing:
+both controls fail, naming `include_total_count_and_pagination_agree`. See [D-330]. A run whose
+controls fail has no verdicts, so no number from that plan is quoted here.
+
+## The view "wire-order bug" did not exist (2026-09-12)
+
+The previous entry closed by reporting that the view round "shipped a wire-order bug that only
+mutation testing's controls exposed". **That was wrong and this retracts it.** The port was correct
+at every layer; the suite was measuring a stale server.
+
+`SecondServer::start` judged success by polling `/system/ping`. With a stale mm-api already on the
+port, the child it spawned failed to bind and died, the ping was answered by the *old* process, and
+`start` handed back a dead child — so `parity_views` compared Go against a binary built hours
+earlier. That is the second time in one session a stale server produced a confident wrong answer:
+the first, through `scripts/parity.sh`, produced 36 false failures after a `git worktree move`
+stranded a server whose cmdline no `pkill` pattern could match. **Identify a server by its port.**
+Both call sites now free the port, and `SecondServer` additionally requires its own child to be
+alive, because a ping cannot tell whose server answered.
+
+Along the way the view store acquired the DB-backed test it never had
+(`crates/mm-store/tests/db_view_store.rs`), built so that ordering by `sortorder`, `createat` and
+`id` each give a different answer — without that, the assertion is vacuous. `view-routes.plan` then
+had its **first valid run: 33 run, 28 caught, both controls survived.** Three earlier attempts were
+void and none of their numbers mean anything. The two remaining survivors are recorded in the plan
+header: no caller the suite has can tell the write gate from the read gate, and `skip_fetch_threads`
+is invisible while no fixture channel contains a reply.

@@ -29,6 +29,7 @@ mod common;
 mod parity {
     pub mod auth_writes;
     pub mod authorized_oauth_apps;
+    pub mod bot_writes;
     pub mod bots;
     pub mod by_ids_lists;
     pub mod channel_autocomplete;
@@ -56,9 +57,14 @@ mod parity {
     pub mod channels_for_user;
     pub mod channels_member_count;
     pub mod cloud_and_workspaces;
+    pub mod command_writes;
     pub mod commands;
     pub mod common_teams;
+    /// Appended out of alphabetical order: this list is shared by every worktree and an
+    /// insertion in the middle of it is a merge conflict for somebody else.
+    pub mod config_reads;
     pub mod config_source;
+    pub mod custom_profile_attributes;
     pub mod custom_status_writes;
     pub mod data_retention;
     pub mod draft_and_preference_writes;
@@ -125,7 +131,9 @@ mod parity {
     pub mod teams_unread;
     pub mod terms_of_service;
     pub mod thread_for_user;
+    pub mod thread_writes;
     pub mod threads_for_user;
+    pub mod token_writes;
     pub mod user_access_tokens;
     pub mod user_audits;
     pub mod user_by_email;
@@ -145,6 +153,12 @@ mod parity {
     pub mod users_search;
     pub mod users_stats;
     pub mod users_stats_filtered;
+    pub mod views;
     pub mod webhook_writes;
     pub mod websocket;
+
+    // Appended 2026-09-11: the local-mode (unix socket) API. Out of alphabetical order on
+    // purpose — four agents were editing this file in parallel and an append conflicts with
+    // nothing.
+    pub mod local_mode;
 }

@@ -44,6 +44,14 @@ reqwest = { version = "0.12", default-features = false, features = [
 ] }
 # Body plumbing for the proxy: axum's `Body` and reqwest's are different types.
 http-body-util = "0.1"
+
+# The local-mode API's forward leg. `reqwest` cannot dial a unix socket and the pinned feature set
+# exists to stop it rewriting what it forwards, so the socket proxy drives HTTP/1 over a
+# `tokio::net::UnixStream` directly. Both crates are already in the tree under axum and reqwest;
+# these lines only make them direct. No default features on hyper-util: the pooled `legacy` client
+# and its connectors are exactly the machinery this deliberately does without.
+hyper = { version = "1", default-features = false, features = ["client", "http1"] }
+hyper-util = { version = "0.1", default-features = false, features = ["tokio"] }
 # Query-string parsing that decodes like Go's `url.ParseQuery` (percent-escapes and `+` as
 # space). Already in the tree through reqwest → url; this only makes it a direct dependency.
 form_urlencoded = "1"

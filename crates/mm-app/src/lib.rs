@@ -17,6 +17,7 @@ pub mod channel_write;
 pub mod command;
 pub mod common_teams;
 pub mod config;
+pub mod custom_profile_attributes;
 pub mod draft;
 pub mod emoji;
 /// Port of the file-backend half of `app/export.go`.
@@ -59,6 +60,8 @@ pub mod user;
 pub mod user_access_token;
 pub mod user_terms_of_service;
 pub mod utils;
+/// Port of `app/view.go` — the integrated-boards (kanban view) surface.
+pub mod view;
 pub mod webhook;
 
 use mm_store::SqlStore;

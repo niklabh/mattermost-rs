@@ -1,0 +1,76 @@
+# Mutation plan for the five bot writes (POST /bots, PUT /bots/{id},
+# POST /bots/{id}/{disable,enable}, POST /bots/{id}/assign/{user_id}).
+#
+#   scripts/mutate-batch.sh scripts/mutations/bot-writes.plan
+#
+# The decisions worth mutating here are **orderings** and **which of two rows is written**.
+# Neither is visible in a status code: the create's three gates all answer 403 or 400, the
+# activity routes all answer 200, and `Users` is written by every one of them without appearing
+# in any response body. So most of these are caught by `bot_and_user_rows`, not by HTTP.
+#
+# Three things on this family are **invisible to any client**, and a mutation touching them can
+# only survive. They are listed with the controls rather than pretended to be caught:
+#
+#   * `AppError`'s parameter map carries `json:"-"`, so which parameter a 400 named
+#     (`bot_user_id` versus `user_id`) is not on the wire. `assignBot` validating its two ids in
+#     the wrong order is therefore uncatchable over HTTP.
+#   * `MakePermissionError`'s detail is likewise blank on the wire, so naming the wrong
+#     permission in a 403 is uncatchable.
+#   * `POST /bots` is refused by `EnableBotAccountCreation` on this deployment, so nothing past
+#     that gate — the 201, the two inserts, the rollback — can be reached by a request. The
+#     store half is covered by `db_bot_store.rs` instead, and the 201 by a unit test.
+#   * `UpdateActive` sets `DeleteAt = UpdateAt` from **one** clock read. Reading the clock twice
+#     gives the same millisecond on all but the unluckiest run, so the right answer and the wrong
+#     answer coincide — and Go would show the same drift, so there is nothing to compare against
+#     either. A test that could see it would be a test that fails intermittently for real code.
+#     Found by running the batch, not predicted.
+#
+# **The batch poisoned its own fixture on the first run, and every api verdict after that was
+# void.** `api-create-flag-is-inverted` makes the create *succeed*, so the Rust server wrote a
+# `mmrsbotnever` user — and `the_create_gates_fire_in_gos_order` asserted that row's absence
+# without removing it. Twenty-three api mutations then "caught" a mutation they had nothing to do
+# with, including both no-op controls. The fix is in the test, not here:
+# `common::remove_users_named` deletes what it counts, so a failing assertion also cleans up.
+# The lesson generalises — a mutation that makes a write succeed needs a fixture that can undo it.
+#
+# The last two lines are the no-op controls and must SURVIVE.
+
+api-create-checks-the-flag-before-the-permission	crates/mm-api/src/bots.rs	    if !state\n        .app\n        .session_has_permission_to(session, &PERMISSION_CREATE_BOT)\n        .await\n    {	    if !state.app.config().enable_bot_account_creation {\n        return Err(ApiError::from(AppError::new(\n            "createBot",\n            "api.bot.create_disabled",\n            None,\n            String::new(),\n            403,\n        )));\n    }\n\n    if !state\n        .app\n        .session_has_permission_to(session, &PERMISSION_CREATE_BOT)\n        .await\n    {	api	bot_writes
+api-create-flag-is-inverted	crates/mm-api/src/bots.rs	    if !state.app.config().enable_bot_account_creation {	    if state.app.config().enable_bot_account_creation {	api	bot_writes
+api-create-body-is-decoded-after-the-gates	crates/mm-api/src/bots.rs	        Ok(None) => return ApiError::invalid_param("bot").into_response(),\n        Err(err) => {\n            tracing::debug!(error = %err, "bot patch body did not decode");\n            return ApiError::invalid_param("bot").into_response();\n        }\n    };\n\n    let mut bot = Bot {	        Ok(None) => BotPatch::default(),\n        Err(_) => BotPatch::default(),\n    };\n\n    let mut bot = Bot {	api	bot_writes
+api-patch-body-is-decoded-after-the-manage-gate	crates/mm-api/src/bots.rs	        Ok(None) => return ApiError::invalid_param("bot").into_response(),\n        Err(err) => {\n            tracing::debug!(error = %err, "bot patch body did not decode");\n            return ApiError::invalid_param("bot").into_response();\n        }\n    };\n\n    let served = async {	        Ok(None) => BotPatch::default(),\n        Err(_) => BotPatch::default(),\n    };\n\n    let served = async {	api	bot_writes
+api-patch-skips-the-manage-gate	crates/mm-api/src/bots.rs	        state\n            .app\n            .session_has_permission_to_manage_bot(&session.0, &bot_user_id)\n            .await?;\n        let patched = state.app.patch_bot(&bot_user_id, &patch).await?;	        let patched = state.app.patch_bot(&bot_user_id, &patch).await?;	api	bot_writes
+api-disable-disables-nothing	crates/mm-api/src/bots.rs	    update_bot_active(state, path, session, false).await	    update_bot_active(state, path, session, true).await	api	bot_writes
+api-enable-enables-nothing	crates/mm-api/src/bots.rs	    update_bot_active(state, path, session, true).await	    update_bot_active(state, path, session, false).await	api	bot_writes
+api-activity-skips-the-manage-gate	crates/mm-api/src/bots.rs	        state\n            .app\n            .session_has_permission_to_manage_bot(&session.0, &bot_user_id)\n            .await?;\n        let bot = state.app.update_bot_active(&bot_user_id, active).await?;	        let bot = state.app.update_bot_active(&bot_user_id, active).await?;	api	bot_writes
+api-assign-does-not-resolve-me	crates/mm-api/src/bots.rs	    let user_id = if user_id == mm_model::user::ME {	    let user_id = if false {	api	bot_writes
+api-assign-lets-a-bot-own-a-bot	crates/mm-api/src/bots.rs	        if let Ok(user) = state.app.get_user(&user_id).await\n            && user.is_bot\n        {	        if let Ok(user) = state.app.get_user(&user_id).await\n            && !user.is_bot\n        {	api	bot_writes
+api-assign-skips-the-manage-gate	crates/mm-api/src/bots.rs	        state\n            .app\n            .session_has_permission_to_manage_bot(&session.0, &bot_user_id)\n            .await?;\n\n        if let Ok(user) = state.app.get_user(&user_id).await	        if let Ok(user) = state.app.get_user(&user_id).await	api	bot_writes
+api-no-trailing-newline	crates/mm-api/src/bots.rs	    body.push(b'\\n');\n\n    Ok((	    Ok((	api	bot_writes
+app-patch-ignores-would-patch	crates/mm-app/src/bot.rs	        if !would_patch {\n            return Ok(bot);\n        }	        if false {\n            return Ok(bot);\n        }	api	bot_writes
+app-patch-writes-the-bot-but-not-the-user	crates/mm-app/src/bot.rs	        let update = self\n            .store()\n            .user()\n            .update(&user, true)\n            .await\n            .map_err(|err| patch_bot_user_update_error(err, bot_user_id))?;\n\n        self.send_updated_user_event(&update.new).await;	        let _ = &user;	api	bot_writes
+app-active-changed-is-always-true	crates/mm-app/src/bot.rs	        } else {\n            false\n        };\n        tracing::Span::current().record("changed", changed);	        } else {\n            true\n        };\n        tracing::Span::current().record("changed", changed);	api	bot_writes
+app-active-enable-never-clears	crates/mm-app/src/bot.rs	        let changed = if active && bot.delete_at != 0 {	        let changed = if !active && bot.delete_at != 0 {	api	bot_writes
+app-active-disable-writes-a-marker	crates/mm-app/src/bot.rs	            bot.delete_at = get_millis();\n            true	            bot.delete_at = 1;\n            true	api	bot_writes
+app-active-does-not-touch-the-user-row	crates/mm-app/src/bot.rs	        self.update_active_for_bot(&user, active).await?;	        let _ = (&user, active);	api	bot_writes
+app-assign-does-not-set-the-owner	crates/mm-app/src/bot.rs	        bot.owner_id = new_owner_id.to_owned();	        let _ = new_owner_id;	api	bot_writes
+store-update-answers-with-the-callers-bot	crates/mm-store/src/bot_store.rs	        let mut stored = self.get(&bot.user_id, true).await?;	        let mut stored = bot.clone();\n        self.get(&bot.user_id, true).await?;	store	bot_store_
+store-update-reads-without-deleted	crates/mm-store/src/bot_store.rs	        let mut stored = self.get(&bot.user_id, true).await?;	        let mut stored = self.get(&bot.user_id, false).await?;	store	bot_store_
+store-update-drops-the-owner-copy	crates/mm-store/src/bot_store.rs	        stored.owner_id = bot.owner_id;	        stored.owner_id = stored.owner_id.clone();	store	bot_store_
+store-update-drops-the-description-copy	crates/mm-store/src/bot_store.rs	        stored.description = bot.description;	        stored.description = stored.description.clone();	store	bot_store_
+store-update-drops-the-delete-at-copy	crates/mm-store/src/bot_store.rs	        stored.delete_at = bot.delete_at;	        stored.delete_at = stored.delete_at;	store	bot_store_
+store-save-validates-before-stamping	crates/mm-store/src/bot_store.rs	        let mut bot = bot.clone();\n        bot.pre_save();\n        if let Err(app_error) = bot.is_valid() {	        let mut bot = bot.clone();\n        if let Err(app_error) = bot.is_valid() {\n            bot.pre_save();	store	bot_store_
+store-save-writes-the-wrong-owner-column	crates/mm-store/src/bot_store.rs	            bot.user_id,\n            bot.description,\n            bot.owner_id,\n            bot.last_icon_update,\n            bot.create_at,	            bot.user_id,\n            bot.owner_id,\n            bot.description,\n            bot.last_icon_update,\n            bot.create_at,	store	bot_store_
+store-user-save-allows-a-non-empty-id	crates/mm-store/src/user_store.rs	        if !user.id.is_empty() && !user.is_remote() {	        if false {	store	bot_store_
+store-user-save-calls-every-clash-an-email	crates/mm-store/src/user_store.rs	            Some("Username") => StoreError::InvalidInput {\n                entity: "User",\n                field: "username",	            Some("Username") => StoreError::InvalidInput {\n                entity: "User",\n                field: "email",	store	bot_store_
+store-user-save-swaps-nickname-and-firstname	crates/mm-store/src/user_store.rs	                 email, emailverified, nickname, firstname, lastname, position, roles,	                 email, emailverified, firstname, nickname, lastname, position, roles,	store	bot_store_
+store-user-permanent-delete-deletes-nothing	crates/mm-store/src/user_store.rs	        let result = sqlx::query!("DELETE FROM users WHERE id = $1", user_id)	        let result = sqlx::query!("DELETE FROM users WHERE id = $1 AND false", user_id)	store	bot_store_
+#
+# --- invisible on the wire: these SURVIVE, and the reason is the finding ---
+app-active-delete-at-is-its-own-clock-read	crates/mm-app/src/bot.rs	        user.delete_at = if active { 0 } else { user.update_at };	        user.delete_at = if active { 0 } else { get_millis() };	api	bot_writes
+api-assign-validates-the-bot-id-first	crates/mm-api/src/bots.rs	    if !is_valid_id(&user_id) {\n        return ApiError::invalid_url_param("user_id").into_response();\n    }\n    if !is_valid_id(&bot_user_id) {\n        return ApiError::invalid_url_param("bot_user_id").into_response();\n    }	    if !is_valid_id(&bot_user_id) {\n        return ApiError::invalid_url_param("bot_user_id").into_response();\n    }\n    if !is_valid_id(&user_id) {\n        return ApiError::invalid_url_param("user_id").into_response();\n    }	api	bot_writes
+api-assign-names-the-wrong-permission	crates/mm-api/src/bots.rs	                &[&PERMISSION_ASSIGN_BOT],	                &[&PERMISSION_CREATE_BOT],	api	bot_writes
+#
+# --- no-op controls: these must SURVIVE ---
+control-rename-binding	crates/mm-app/src/bot.rs	        bot.owner_id = new_owner_id.to_owned();	        let new_owner = new_owner_id.to_owned();\n        bot.owner_id = new_owner;	api	bot_writes
+control-store-reorder-independent-set-columns	crates/mm-store/src/bot_store.rs	               SET description = $2, ownerid = $3, lasticonupdate = $4,\n                   updateat = $5, deleteat = $6	               SET ownerid = $3, description = $2, lasticonupdate = $4,\n                   deleteat = $6, updateat = $5	store	bot_store_

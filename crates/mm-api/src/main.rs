@@ -9,8 +9,10 @@
 //!                            one shared Postgres
 //! ```
 
+use std::path::PathBuf;
+
 use anyhow::Context;
-use mm_api::{AppState, router};
+use mm_api::{AppState, local, router};
 use mm_app::App;
 use mm_store::SqlStore;
 
@@ -18,6 +20,23 @@ use mm_store::SqlStore;
 /// during a migration the interesting failure is two servers exhausting the connection limit
 /// while each behaves as though it were alone.
 const DEFAULT_MAX_DB_CONNECTIONS: u32 = 8;
+
+/// `LocalModeSocketPath` (model/config.go), Go's default for
+/// `ServiceSettings.LocalModeSocketLocation`.
+///
+/// It is a **shared, fixed path**, which is fine for one server on a host and is a collision for
+/// the numbered development stacks — `startLocalModeServer` opens with `os.RemoveAll(socket)`, so
+/// the last server to start silently unlinks every other one's socket. `scripts/stack-env.sh`
+/// therefore sets both variables per stack; this default exists only so a bare `cargo run` with
+/// local mode on finds the same socket a stock Go server would.
+const GO_DEFAULT_LOCAL_SOCKET: &str = "/var/tmp/mattermost_local.socket";
+
+/// Where this server puts *its* local socket when nothing says otherwise.
+///
+/// Deliberately not Go's path: both servers run side by side during the migration, and a shared
+/// path means whichever starts second unlinks the other's socket and then proxies to a socket
+/// that is no longer there.
+const DEFAULT_LOCAL_SOCKET: &str = "/var/tmp/mmrs_local.socket";
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -76,6 +95,51 @@ async fn main() -> anyhow::Result<()> {
         .await
         .with_context(|| format!("could not bind {listen}"))?;
 
+    // The local-mode admin API, on a unix socket beside the Go server's own.
+    //
+    // Off unless `MM_SERVICESETTINGS_ENABLELOCALMODE` says otherwise, which is Go's default and
+    // Go's variable name. **Read from the environment and not from the configuration document**
+    // that `Config::load` parsed: `mm_app::config::Config` does not model either of these two
+    // settings, and a deployment that enables local mode only in the database therefore gets no
+    // socket from this server. That is [D-321], and it is a gap rather than a decision.
+    if local_mode_enabled() {
+        let socket = PathBuf::from(
+            std::env::var("MM_API_LOCAL_SOCKET")
+                .unwrap_or_else(|_| DEFAULT_LOCAL_SOCKET.to_owned()),
+        );
+        let go_socket = PathBuf::from(
+            std::env::var("MM_SERVICESETTINGS_LOCALMODESOCKETLOCATION")
+                .unwrap_or_else(|_| GO_DEFAULT_LOCAL_SOCKET.to_owned()),
+        );
+
+        // Binding both servers to one path is not a misconfiguration that degrades — it is this
+        // process unlinking the socket it is about to forward to, and then forwarding to itself.
+        // Fatal at startup, where it is one line to fix.
+        anyhow::ensure!(
+            socket != go_socket,
+            "MM_API_LOCAL_SOCKET and MM_SERVICESETTINGS_LOCALMODESOCKETLOCATION are the same \
+             path ({}). They are two servers' sockets and must differ — see scripts/stack-env.sh",
+            socket.display()
+        );
+
+        let local_listener = local::bind(&socket)
+            .await
+            .with_context(|| format!("could not bind the local socket {}", socket.display()))?;
+        let local_router = local::router(state.clone(), go_socket.clone());
+
+        tracing::info!(
+            socket = %socket.display(),
+            go_socket = %go_socket.display(),
+            "local-mode API listening; unmigrated local routes forward to the Go server's socket"
+        );
+
+        tokio::spawn(async move {
+            if let Err(err) = local::serve(local_listener, local_router).await {
+                tracing::error!(error = %err, "the local-mode server stopped");
+            }
+        });
+    }
+
     tracing::info!(
         listen = %listen,
         upstream = %go_upstream,
@@ -87,4 +151,17 @@ async fn main() -> anyhow::Result<()> {
         .context("server error")?;
 
     Ok(())
+}
+
+/// `*ServiceSettings.EnableLocalMode`, from the environment.
+///
+/// Go's `applyEnvironmentMap` parses a bool with `strconv.ParseBool`, which accepts `1`, `t`,
+/// `T`, `TRUE`, `true`, `True` and their false counterparts — and **rejects** anything else,
+/// leaving the setting at its previous value rather than treating a typo as true. Reproduced so a
+/// `MM_SERVICESETTINGS_ENABLELOCALMODE=yes` does not silently open an unauthenticated socket.
+fn local_mode_enabled() -> bool {
+    match std::env::var("MM_SERVICESETTINGS_ENABLELOCALMODE") {
+        Ok(value) => matches!(value.as_str(), "1" | "t" | "T" | "TRUE" | "true" | "True"),
+        Err(_) => false,
+    }
 }

@@ -16,7 +16,7 @@
 //! rather than factored in Go, and repeated here for the same reason: sqlx needs one literal
 //! statement per query.
 
-use mm_model::thread::{ThreadMembership, ThreadResponse};
+use mm_model::thread::{Thread, ThreadMembership, ThreadResponse};
 use mm_model::user::User;
 use sqlx::PgPool;
 
@@ -94,6 +94,51 @@ pub trait ThreadStore {
         user_id: &str,
         channel_id: &str,
     ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlThreadStore.MarkAllAsReadByTeam` (thread_store.go:678).
+    fn mark_all_as_read_by_team(
+        &self,
+        user_id: &str,
+        team_id: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlThreadStore.MaintainMembership` (thread_store.go:851).
+    fn maintain_membership(
+        &self,
+        user_id: &str,
+        post_id: &str,
+        opts: ThreadMembershipOpts,
+    ) -> impl std::future::Future<Output = Result<ThreadMembership, StoreError>> + Send;
+
+    /// Port of `SqlThreadStore.Get` (thread_store.go:119).
+    fn get(
+        &self,
+        post_id: &str,
+    ) -> impl std::future::Future<Output = Result<Option<Thread>, StoreError>> + Send;
+}
+
+/// Port of `store.ThreadMembershipOpts` (store/store.go:436), narrowed to the fields the follow
+/// and unfollow routes set.
+///
+/// **`UpdateParticipants` and `ImportData` are deliberately absent.** Both exist in Go and both
+/// pull in `updateThreadParticipantsForUserTx`; no route this server answers sets either, and
+/// modelling a flag whose effect is unimplemented is how a caller silently loses the participant
+/// write. Add the field and the `UPDATE Threads.Participants` together, or not at all.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ThreadMembershipOpts {
+    /// The state `UpdateFollowing` moves the row to. Also the `Following` an inserted row gets,
+    /// **whether or not `update_following` is set** — Go reads it unconditionally on the insert
+    /// path (thread_store.go:962).
+    pub following: bool,
+    /// `+1` to `UnreadMentions` on an existing row, or `1` on a new one. Loses to
+    /// `update_viewed_timestamp`, which zeroes the same column.
+    pub increment_mentions: bool,
+    /// Gates the `following` assignment on an **existing** row, and only when the value actually
+    /// changes. Not a gate on the insert path.
+    pub update_following: bool,
+    /// Moves `LastViewed` to now and zeroes `UnreadMentions`. The follow route sets this to the
+    /// same value as `following`, so following a thread marks it read and unfollowing does not.
+    pub update_viewed_timestamp: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -704,5 +749,284 @@ impl ThreadStore for SqlThreadStore {
 
         tracing::Span::current().record("removed", result.rows_affected());
         Ok(())
+    }
+
+    /// **Not the same statement as [`Self::mark_all_as_read_by_channels`], and the differences
+    /// are all widenings.** This one carries neither `Following = TRUE`, nor the channel
+    /// membership `EXISTS`, nor `ThreadDeleteAt = 0`, nor `LastReplyAt > LastViewed`. So "mark
+    /// the team read" touches memberships the threads *list* would never show the user: threads
+    /// they unfollowed, threads in channels they have left, threads whose root is deleted, and
+    /// threads already caught up — whose `LastUpdated` it therefore moves. Adding any of those
+    /// predicates for symmetry would leave rows unread that Go reads.
+    ///
+    /// # `ThreadTeamId` is compared **without** `COALESCE`
+    ///
+    /// Go writes `sq.Or{sq.Eq{"Threads.ThreadTeamId": teamId}, sq.Eq{"Threads.ThreadTeamId": ""}}`
+    /// — two plain equalities. The column is nullable, and `NULL = ''` is NULL, not true, so a
+    /// thread with a NULL team is **skipped** here. Wrapping it in `COALESCE` to match the read
+    /// queries in this file would mark DM threads read that Go leaves alone.
+    ///
+    /// One `GetMillis()` for both `LastViewed` and `LastUpdated`, as Go does — reading the clock
+    /// twice would let the two columns differ within a single call.
+    #[tracing::instrument(skip(self), fields(user_id = %user_id, team_id = %team_id, updated))]
+    async fn mark_all_as_read_by_team(
+        &self,
+        user_id: &str,
+        team_id: &str,
+    ) -> Result<(), StoreError> {
+        let now = mm_model::utils::get_millis();
+
+        let result = sqlx::query!(
+            r#"
+            UPDATE threadmemberships
+               SET lastviewed = $1,
+                   unreadmentions = 0,
+                   lastupdated = $1
+              FROM threads
+             WHERE threads.postid = threadmemberships.postid
+               AND threadmemberships.userid = $2
+               AND (threads.threadteamid = $3 OR threads.threadteamid = '')
+            "#,
+            now,
+            user_id,
+            team_id,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to update thread read state for user id={user_id}"),
+            source,
+        })?;
+
+        tracing::Span::current().record("updated", result.rows_affected());
+        Ok(())
+    }
+
+    /// Port of `maintainMembershipTx` (thread_store.go:899) for the option sets a ported route
+    /// builds — see [`ThreadMembershipOpts`], which carries no `ImportData`.
+    ///
+    /// # The update branch is guarded, and an unfollow of an unfollowed thread writes nothing
+    ///
+    /// An existing row is rewritten only when `followingNeedsUpdate || IncrementMentions ||
+    /// UpdateViewedTimestamp`. The unfollow route sets the last two to `false`, so unfollowing a
+    /// thread that is already unfollowed leaves `LastUpdated` where it was — observable, because
+    /// `LastUpdated` is what the websocket reconnect query and the retention policy read.
+    ///
+    /// # Following a thread you already follow still moves the read mark
+    ///
+    /// `followingNeedsUpdate` is false there, but `UpdateViewedTimestamp` is `state` — `true` for
+    /// a follow — so `LastViewed` jumps to now and `UnreadMentions` is zeroed anyway. A `PUT
+    /// …/following` is therefore not idempotent in its effect on unread state.
+    ///
+    /// # Unfollowing a thread with no row **creates** one
+    ///
+    /// The not-found path inserts unconditionally, with `Following = opts.Following` — `false`
+    /// for an unfollow. The row it leaves behind changes what `GET …/threads/{id}` answers: a
+    /// caller who had no row gets `app.user.get_thread_membership_for_user.not_found`, and after
+    /// this insert gets the store's `app.user.get_threads_for_user.not_found` instead.
+    ///
+    /// # `UpdateViewedTimestamp` wins over `IncrementMentions` on an existing row, and not on a
+    /// new one
+    ///
+    /// Go writes `if UpdateViewedTimestamp { … } else if IncrementMentions { … }` for the update
+    /// and two independent `if`s for the insert. Neither ported route sets `increment_mentions`,
+    /// so the asymmetry is unreachable today; it is reproduced rather than tidied because the
+    /// post-create path that does set it is the next caller.
+    ///
+    /// The whole thing runs in one transaction, as Go's does: the read and the write must not be
+    /// split by a concurrent follow, and the insert has **no** `ON CONFLICT` — a lost race is an
+    /// error on both servers.
+    #[tracing::instrument(
+        skip(self),
+        fields(user_id = %user_id, post_id = %post_id, existing, wrote)
+    )]
+    async fn maintain_membership(
+        &self,
+        user_id: &str,
+        post_id: &str,
+        opts: ThreadMembershipOpts,
+    ) -> Result<ThreadMembership, StoreError> {
+        let mut tx = self.pool.begin().await.map_err(|source| StoreError::Db {
+            context: "begin_transaction".to_owned(),
+            source,
+        })?;
+
+        let existing = sqlx::query!(
+            r#"
+            SELECT postid                        AS "post_id!",
+                   userid                        AS "user_id!",
+                   COALESCE(following, FALSE)    AS "following!",
+                   COALESCE(lastviewed, 0)       AS "last_viewed!",
+                   COALESCE(lastupdated, 0)      AS "last_updated!",
+                   COALESCE(unreadmentions, 0)   AS "unread_mentions!"
+              FROM threadmemberships
+             WHERE userid = $1
+               AND postid = $2
+            "#,
+            user_id,
+            post_id,
+        )
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to get thread membership with userid={user_id}"),
+            source,
+        })?;
+
+        let now = mm_model::utils::get_millis();
+
+        let membership = match existing {
+            Some(row) => {
+                tracing::Span::current().record("existing", true);
+                let mut membership = ThreadMembership {
+                    post_id: row.post_id,
+                    user_id: row.user_id,
+                    following: row.following,
+                    last_updated: row.last_updated,
+                    last_viewed: row.last_viewed,
+                    unread_mentions: row.unread_mentions,
+                };
+
+                let following_needs_update =
+                    opts.update_following && membership.following != opts.following;
+                let wrote = following_needs_update
+                    || opts.increment_mentions
+                    || opts.update_viewed_timestamp;
+                tracing::Span::current().record("wrote", wrote);
+
+                if wrote {
+                    if following_needs_update {
+                        membership.following = opts.following;
+                    }
+                    if opts.update_viewed_timestamp {
+                        membership.last_viewed = now;
+                        membership.unread_mentions = 0;
+                    } else if opts.increment_mentions {
+                        membership.unread_mentions += 1;
+                    }
+                    membership.last_updated = now;
+
+                    sqlx::query!(
+                        r#"
+                        UPDATE threadmemberships
+                           SET following = $1,
+                               lastviewed = $2,
+                               lastupdated = $3,
+                               unreadmentions = $4
+                         WHERE postid = $5
+                           AND userid = $6
+                        "#,
+                        membership.following,
+                        membership.last_viewed,
+                        membership.last_updated,
+                        membership.unread_mentions,
+                        membership.post_id,
+                        membership.user_id,
+                    )
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(|source| StoreError::Db {
+                        context: format!(
+                            "failed to update thread membership with postid={post_id} userid={user_id}"
+                        ),
+                        source,
+                    })?;
+                }
+
+                membership
+            }
+            None => {
+                tracing::Span::current().record("existing", false);
+                tracing::Span::current().record("wrote", true);
+                let membership = ThreadMembership {
+                    post_id: post_id.to_owned(),
+                    user_id: user_id.to_owned(),
+                    following: opts.following,
+                    last_updated: now,
+                    // Two independent `if`s in Go, not the update path's `else if`.
+                    last_viewed: if opts.update_viewed_timestamp { now } else { 0 },
+                    unread_mentions: i64::from(opts.increment_mentions),
+                };
+
+                sqlx::query!(
+                    r#"
+                    INSERT INTO threadmemberships
+                                (postid, userid, following, lastviewed, lastupdated, unreadmentions)
+                         VALUES ($1, $2, $3, $4, $5, $6)
+                    "#,
+                    membership.post_id,
+                    membership.user_id,
+                    membership.following,
+                    membership.last_viewed,
+                    membership.last_updated,
+                    membership.unread_mentions,
+                )
+                .execute(&mut *tx)
+                .await
+                .map_err(|source| StoreError::Db {
+                    context: format!(
+                        "failed to save thread membership with postid={post_id} userid={user_id}"
+                    ),
+                    source,
+                })?;
+
+                membership
+            }
+        };
+
+        tx.commit().await.map_err(|source| StoreError::Db {
+            context: "commit_transaction".to_owned(),
+            source,
+        })?;
+
+        Ok(membership)
+    }
+
+    /// **A missing row is `Ok(None)`, not `ErrNotFound`.** Go returns `nil, nil` for
+    /// `sql.ErrNoRows` here, unlike every other getter in this file, and its one caller
+    /// (`UpdateThreadFollowForUser`) leans on it: a thread whose metadata row does not exist
+    /// answers `reply_count: 0` on the websocket event rather than failing the request. Turning
+    /// this into a `NotFound` would 500 the follow of a root post nobody has replied to.
+    ///
+    /// The two columns are aliased in Go and are aliased here for the same reason
+    /// (`ThreadDeleteAt` → `delete_at`, `ThreadTeamId` → `team_id`); `COALESCE` matches Go's
+    /// select list, which wraps exactly those two and leaves `ReplyCount` and `LastReplyAt` bare
+    /// — they are nullable columns, so the model's `i64` needs the coalesce Go's does not.
+    #[tracing::instrument(skip(self), fields(post_id = %post_id, found))]
+    async fn get(&self, post_id: &str) -> Result<Option<Thread>, StoreError> {
+        let row = sqlx::query!(
+            r#"
+            SELECT postid                        AS "post_id!",
+                   COALESCE(channelid, '')       AS "channel_id!",
+                   COALESCE(replycount, 0)       AS "reply_count!",
+                   COALESCE(lastreplyat, 0)      AS "last_reply_at!",
+                   participants                  AS "participants?",
+                   COALESCE(threaddeleteat, 0)   AS "delete_at!",
+                   COALESCE(threadteamid, '')    AS "team_id!"
+              FROM threads
+             WHERE postid = $1
+            "#,
+            post_id,
+        )
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to get thread with id={post_id}"),
+            source,
+        })?;
+
+        tracing::Span::current().record("found", row.is_some());
+
+        Ok(row.map(|row| Thread {
+            post_id: row.post_id,
+            channel_id: row.channel_id,
+            reply_count: row.reply_count,
+            last_reply_at: row.last_reply_at,
+            participants: row
+                .participants
+                .and_then(|value| serde_json::from_value(value).ok()),
+            delete_at: row.delete_at,
+            team_id: row.team_id,
+        }))
     }
 }

@@ -1,0 +1,71 @@
+# Mutation plan for the five slash-command writes — createCommand, updateCommand,
+# deleteCommand, moveCommand and regenCommandToken.
+#
+#   scripts/mutate-batch.sh scripts/mutations/command-writes.plan
+#
+# The decisions a reader could plausibly get wrong, none of which a status code alone would catch:
+#
+#   * the built-in trigger registry, which this port replaces with 33 strings. Drop one and a
+#     client can register a command that shadows a built-in; reserve one of the two switched-off
+#     providers and a legal trigger is refused.
+#   * `excludeCommandID`, in both polarities — it is the only thing that lets a command keep its
+#     own trigger across an update, and dropping it makes every update a duplicate.
+#   * which team `MoveCommand` checks the trigger against: the destination, not the source.
+#   * the nine fields `UpdateCommand` copies off the old command, four of which a client supplies
+#     in the same request body and none of which may survive it.
+#   * where `UpdateAt` is stamped — in the *store*, which is the only reason a move or a token
+#     regeneration bumps it at all.
+#   * the ownership ladder's two rungs, 404 then 403, and `moveCommand`'s destination gate, which
+#     answers 403 where its siblings answer 404.
+#   * `go_json_marshal` versus `serde_json::to_string`, which differ only on `&`, `<` and `>`.
+#   * `ReturnStatusOK`'s exact bytes, and `regenCommandToken`'s missing trailing newline.
+#
+# The last two lines are the no-op controls and must SURVIVE.
+
+store-save-accepts-an-id-in-the-body	crates/mm-store/src/command_store.rs	        if !command.id.is_empty() {	        if false {	store	command_store
+store-save-mints-nothing	crates/mm-store/src/command_store.rs	        command.pre_save();	        command.pre_update();	store	command_store
+store-save-swaps-display-name-and-description	crates/mm-store/src/command_store.rs	            command.display_name,\n            command.description,\n            command.url,\n            command.plugin_id,\n        )\n        .execute(&self.pool)\n        .await\n        .map_err(|source| StoreError::Db {\n            context: format!("insert:	            command.description,\n            command.display_name,\n            command.url,\n            command.plugin_id,\n        )\n        .execute(&self.pool)\n        .await\n        .map_err(|source| StoreError::Db {\n            context: format!("insert:	api	command_writes
+store-update-swaps-description-and-url	crates/mm-store/src/command_store.rs	                   description = $14, url = $15,	                   description = $15, url = $14,	api	command_writes
+store-update-does-not-stamp-update-at	crates/mm-store/src/command_store.rs	        command.pre_update();\n        command\n            .is_valid()	        command.update_at += 0;\n        command\n            .is_valid()	api	command_writes
+store-update-skips-is-valid	crates/mm-store/src/command_store.rs	        command.pre_update();\n        command\n            .is_valid()\n            .map_err(|app_error| StoreError::Invalid {\n                entity: "Command",\n                app_error,\n            })?;	        command.pre_update();\n        let _ = command.is_valid();	api	command_writes
+store-delete-does-not-hide-the-row	crates/mm-store/src/command_store.rs	SET deleteat = $1, updateat = $1 WHERE id = $2	SET deleteat = 0, updateat = $1 WHERE id = $2	api	command_writes
+app-builtin-list-loses-status	crates/mm-app/src/command.rs	    "status",\n];	    "status_is_not_a_builtin",\n];	api	command_writes
+app-builtin-list-loses-mobile-logs	crates/mm-app/src/command.rs	    "mobile-logs",	    "mobile_logs",	api	command_writes
+app-builtin-reserves-test-unconditionally	crates/mm-app/src/command.rs	.chain(enable_testing.then_some(BUILT_IN_TRIGGER_BEHIND_ENABLE_TESTING))	.chain(Some(BUILT_IN_TRIGGER_BEHIND_ENABLE_TESTING))	api	command_writes
+app-uniqueness-skips-the-builtins	crates/mm-app/src/command.rs	.any(|built_in| built_in.eq_ignore_ascii_case(&trigger))	.any(|built_in| built_in.eq_ignore_ascii_case(""))	api	command_writes
+app-uniqueness-drops-the-exclusion	crates/mm-app/src/command.rs	existing.id != exclude_command_id && existing.trigger.to_lowercase() == trigger	existing.trigger.to_lowercase() == trigger	api	command_writes
+app-uniqueness-inverts-the-exclusion	crates/mm-app/src/command.rs	existing.id != exclude_command_id && existing.trigger.to_lowercase() == trigger	existing.id == exclude_command_id && existing.trigger.to_lowercase() == trigger	api	command_writes
+app-create-does-not-lowercase-the-trigger	crates/mm-app/src/command.rs	        command.trigger = command.trigger.to_lowercase();	        command.trigger = command.trigger.trim().to_owned();	api	command_writes
+app-update-takes-the-bodys-token	crates/mm-app/src/command.rs	        updated.token.clone_from(&old_command.token);	        let _ = &old_command.token;	api	command_writes
+app-update-takes-the-bodys-create-at	crates/mm-app/src/command.rs	        updated.create_at = old_command.create_at;	        updated.create_at = updated.create_at.max(1);	api	command_writes
+app-update-takes-the-bodys-creator	crates/mm-app/src/command.rs	        updated.creator_id.clone_from(&old_command.creator_id);	        let _ = &old_command.creator_id;	api	command_writes
+app-update-takes-the-bodys-delete-at	crates/mm-app/src/command.rs	        updated.delete_at = old_command.delete_at;	        updated.delete_at = updated.delete_at.max(0);	api	command_writes
+#
+# `updated.team_id.clone_from(&old_command.team_id)` is NOT mutated, and that is a finding
+# rather than an omission: `updateCommand` answers `api.command.team_mismatch.app_error` unless
+# the body's `team_id` already equals the old command's, so by the time the copy runs the two
+# values are provably equal and no request can tell the difference. It survived on its first
+# run for exactly that reason. `plugin_id` is the same family of assignment with **no** handler
+# guard in front of it, so it is mutated instead and stands in for the group.
+app-update-takes-the-bodys-plugin-id	crates/mm-app/src/command.rs	        updated.plugin_id.clone_from(&old_command.plugin_id);	        let _ = &old_command.plugin_id;	api	command_writes
+app-regen-does-not-mint-a-token	crates/mm-app/src/command.rs	        command.token = new_id();	        command.token = command.token.clone();	api	command_writes
+app-delete-stamps-zero	crates/mm-app/src/command.rs	.delete(command_id, mm_model::utils::get_millis())	.delete(command_id, 0)	api	command_writes
+app-move-checks-the-source-team	crates/mm-app/src/command.rs	        self.validate_command_trigger_uniqueness(team_id, &command.trigger, &command.id)	        self.validate_command_trigger_uniqueness(&command.team_id, &command.trigger, &command.id)	api	command_writes
+app-move-does-not-change-the-team	crates/mm-app/src/command.rs	        command.team_id = team_id.to_owned();	        command.team_id = command.team_id.clone();	api	command_writes
+api-ladder-first-rung-is-a-403	crates/mm-api/src/commands.rs	        return Some(command_not_found().into_response());	        return Some(permission_error(session, &PERMISSION_MANAGE_OWN_SLASH_COMMANDS));	api	command_writes
+api-ladder-second-rung-is-a-404	crates/mm-api/src/commands.rs	        return Some(permission_error(\n            session,\n            &PERMISSION_MANAGE_OTHERS_SLASH_COMMANDS,\n        ));	        return Some(command_not_found().into_response());	api	command_writes
+api-ladder-creator-check-inverted	crates/mm-api/src/commands.rs	    if session.0.user_id != command.creator_id\n        && !state\n            .app\n            .session_has_permission_to_team(\n                &session.0,\n                &command.team_id,\n                &PERMISSION_MANAGE_OTHERS_SLASH_COMMANDS,\n            )\n            .await\n    {\n        return Some(permission_error(	    if session.0.user_id == command.creator_id\n        && !state\n            .app\n            .session_has_permission_to_team(\n                &session.0,\n                &command.team_id,\n                &PERMISSION_MANAGE_OTHERS_SLASH_COMMANDS,\n            )\n            .await\n    {\n        return Some(permission_error(	api	command_writes
+api-create-does-not-stamp-the-creator	crates/mm-api/src/commands.rs	    command.creator_id = user_id;	    command.creator_id = command.creator_id.clone();	api	command_writes
+api-create-answers-200	crates/mm-api/src/commands.rs	match encoded(StatusCode::CREATED, &created, "createCommand")	match encoded(StatusCode::OK, &created, "createCommand")	api	command_writes
+api-update-skips-the-id-match	crates/mm-api/src/commands.rs	    if command.id != command_id {	    if command.id == command_id && false {	api	command_writes
+api-update-skips-the-team-match	crates/mm-api/src/commands.rs	    if command.team_id != old_command.team_id {	    if command.team_id == old_command.team_id && false {	api	command_writes
+api-move-destination-gate-is-view-team	crates/mm-api/src/commands.rs	            &new_team.id,\n            &PERMISSION_MANAGE_OWN_SLASH_COMMANDS,\n        )\n        .await\n    {\n        return permission_error(&session, &PERMISSION_MANAGE_OWN_SLASH_COMMANDS);	            &new_team.id,\n            &PERMISSION_VIEW_TEAM,\n        )\n        .await\n    {\n        return permission_error(&session, &PERMISSION_MANAGE_OWN_SLASH_COMMANDS);	api	command_writes
+api-move-checks-the-caller-not-the-creator	crates/mm-api/src/commands.rs	        .has_permission_to_team(\n            &command.creator_id,	        .has_permission_to_team(\n            &session.0.user_id,	api	command_writes
+api-regen-adds-the-encoders-newline	crates/mm-api/src/commands.rs	        body,\n    )\n        .into_response()\n}	        body + "\n",\n    )\n        .into_response()\n}	api	command_writes
+api-status-ok-is-lowercased	crates/mm-api/src/commands.rs	r#"{"status":"OK"}"#	r#"{"status":"Ok"}"#	api	command_writes
+api-marshals-with-serde-not-gos-escaping	crates/mm-api/src/commands.rs	    let body = mm_model::utils::go_json_marshal(value).map_err(|err| {	    let body = serde_json::to_string(value).map_err(|err| {	api	command_writes
+api-require-command-id-is-dropped	crates/mm-api/src/commands.rs	    if !is_valid_id(command_id) {\n        return Err(ApiError::invalid_url_param("command_id"));	    if false {\n        return Err(ApiError::invalid_url_param("command_id"));	api	command_writes
+#
+# --- no-op controls: these must SURVIVE ---
+control-rename-binding	crates/mm-api/src/commands.rs	    let regenerated = match state.app.regen_command_token(command).await {\n        Ok(regenerated) => regenerated,\n        Err(err) => return ApiError::from(err).into_response(),\n    };	    let fresh = match state.app.regen_command_token(command).await {\n        Ok(fresh) => fresh,\n        Err(err) => return ApiError::from(err).into_response(),\n    };\n    let regenerated = fresh;	api	command_writes
+control-reorder-independent-set-columns	crates/mm-store/src/command_store.rs	                   method = $7, username = $8, iconurl = $9, autocomplete = $10,	                   method = $7, iconurl = $9, username = $8, autocomplete = $10,	api	command_writes

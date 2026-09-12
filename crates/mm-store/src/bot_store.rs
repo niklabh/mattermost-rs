@@ -1,7 +1,9 @@
-//! Port of `SqlBotStore` (channels/store/sqlstore/bot_store.go), the two read methods.
+//! Port of `SqlBotStore` (channels/store/sqlstore/bot_store.go) — the two reads and the two
+//! writes.
 //!
-//! Ported for `getBot` (`GET /api/v4/bots/{bot_user_id}`) and `getBots` (`GET /api/v4/bots`). The
-//! write half belongs to bot *creation*, which is a `POST` and not migrated.
+//! Ported for `getBot` (`GET /api/v4/bots/{bot_user_id}`), `getBots` (`GET /api/v4/bots`),
+//! `createBot` (`POST /api/v4/bots`) and the three routes that go through `Update`: `patchBot`,
+//! `updateBotActive` and `assignBot`.
 //!
 //! # A bot is half a join
 //!
@@ -36,6 +38,34 @@ pub trait BotStore {
         &self,
         options: &BotGetOptions,
     ) -> impl std::future::Future<Output = Result<BotList, StoreError>> + Send;
+
+    /// Port of `SqlBotStore.Save` (bot_store.go:164).
+    ///
+    /// "It assumes the corresponding user was saved via the user store" — the `Users` row must
+    /// already exist, because [`BotStore::get`] inner-joins it and would not find this bot
+    /// otherwise. `App.CreateBot` therefore saves the user first and deletes it again if this
+    /// call fails.
+    ///
+    /// `PreSave` then `IsValid`, in that order: `PreSave` fills `CreateAt`/`UpdateAt`, and
+    /// `IsValid` rejects a zero in either — so validating first would fail every create.
+    fn save(&self, bot: &Bot) -> impl std::future::Future<Output = Result<Bot, StoreError>> + Send;
+
+    /// Port of `SqlBotStore.Update` (bot_store.go:184).
+    ///
+    /// # It re-reads, and the read is what the caller gets back
+    ///
+    /// Go copies five fields — `Description`, `OwnerId`, `LastIconUpdate`, `UpdateAt`,
+    /// `DeleteAt` — onto the row it just read and returns **that**, so `Username`,
+    /// `DisplayName` and `CreateAt` in the answer come from the join and not from the caller's
+    /// in-memory bot. `App.PatchBot` depends on the ordering: it writes the `Users` row *first*,
+    /// so the username this re-read picks up is the patched one. Writing the bot first would
+    /// answer with the old username while having stored the new one.
+    ///
+    /// A miss here is `NotFound`, which the app layer turns back into the same 404 a read gets.
+    fn update(
+        &self,
+        bot: &Bot,
+    ) -> impl std::future::Future<Output = Result<Bot, StoreError>> + Send;
 }
 
 /// Postgres-backed implementation.
@@ -202,6 +232,106 @@ impl BotStore for SqlBotStore {
 
         tracing::Span::current().record("found", rows.len());
         Ok(BotList(rows.into_iter().map(Bot::from).collect()))
+    }
+
+    #[tracing::instrument(skip_all, fields(bot_user_id = %bot.user_id, owner_id = %bot.owner_id))]
+    async fn save(&self, bot: &Bot) -> Result<Bot, StoreError> {
+        // Go's `bot = bot.Clone()`: `PreSave` stamps the timestamps and lowercases the username,
+        // and the caller's value must not see either — `App.CreateBot` still holds the bot it
+        // built from the patch and returns the *store's* copy instead.
+        let mut bot = bot.clone();
+        bot.pre_save();
+        if let Err(app_error) = bot.is_valid() {
+            return Err(StoreError::Invalid {
+                entity: "Bot",
+                app_error,
+            });
+        }
+
+        // Seven columns, Go's order. `Username` and `DisplayName` are **not** among them: they
+        // live on `Users`, which the caller has already written.
+        sqlx::query!(
+            r#"
+            INSERT INTO bots
+                (userid, description, ownerid, lasticonupdate, createat, updateat, deleteat)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            "#,
+            bot.user_id,
+            bot.description,
+            bot.owner_id,
+            bot.last_icon_update,
+            bot.create_at,
+            bot.update_at,
+            bot.delete_at,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("insert: user_id={}", bot.user_id),
+            source,
+        })?;
+
+        Ok(bot)
+    }
+
+    #[tracing::instrument(skip_all, fields(bot_user_id = %bot.user_id, delete_at = bot.delete_at))]
+    async fn update(&self, bot: &Bot) -> Result<Bot, StoreError> {
+        let mut bot = bot.clone();
+        bot.pre_update();
+        if let Err(app_error) = bot.is_valid() {
+            return Err(StoreError::Invalid {
+                entity: "Bot",
+                app_error,
+            });
+        }
+
+        // `includeDeleted = true`, unconditionally — `UpdateBotActive` re-enabling a disabled bot
+        // would otherwise never find the row it is about to clear `DeleteAt` on.
+        let mut stored = self.get(&bot.user_id, true).await?;
+        stored.description = bot.description;
+        stored.owner_id = bot.owner_id;
+        stored.last_icon_update = bot.last_icon_update;
+        stored.update_at = bot.update_at;
+        stored.delete_at = bot.delete_at;
+        let bot = stored;
+
+        let affected = sqlx::query!(
+            r#"
+            UPDATE bots
+               SET description = $2, ownerid = $3, lasticonupdate = $4,
+                   updateat = $5, deleteat = $6
+             WHERE userid = $1
+            "#,
+            bot.user_id,
+            bot.description,
+            bot.owner_id,
+            bot.last_icon_update,
+            bot.update_at,
+            bot.delete_at,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("update: user_id={}", bot.user_id),
+            source,
+        })?
+        .rows_affected();
+
+        // Go's guard is `count > 1`, not `!= 1`: `UserId` is the primary key so two rows cannot
+        // match, and **zero** is not an error here because the `Get` above already proved the row
+        // exists. Tightening it to `!= 1` would turn a concurrent delete into a 500 where Go
+        // answers with the bot.
+        if affected > 1 {
+            return Err(StoreError::Db {
+                context: format!(
+                    "unexpected count while updating bot: count={affected}, userId={}",
+                    bot.user_id
+                ),
+                source: sqlx::Error::RowNotFound,
+            });
+        }
+
+        Ok(bot)
     }
 }
 

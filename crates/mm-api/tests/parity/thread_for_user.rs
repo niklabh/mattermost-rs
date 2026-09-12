@@ -626,8 +626,18 @@ async fn other_methods_are_forwarded() {
         );
     }
 
-    // And the sibling that hangs off this path is still Go's.
-    let following = format!("{p}/following");
+    // The sibling that hangs off this path is **no longer** Go's: `PUT`/`DELETE …/following` are
+    // served here (`mm_api::thread_writes`), and `tests/parity/thread_writes.rs` is their suite.
+    // Asserted rather than deleted, because this test is what would otherwise notice a
+    // regression in the router's static-versus-parameter preference on this path.
+    //
+    // The **team** segment is deliberately malformed, so the handler answers 400 before it
+    // writes anything: this test shares its fixture with the rest of the suite, and a follow
+    // would move the read mark every other test here depends on.
+    let following = format!(
+        "/api/v4/users/{}/teams/short/threads/zzzzzzzzzzzzzzzzzzzzzzzzzz/following",
+        f.plain_id
+    );
     let rs = client
         .put(format!("{RUST}{following}"))
         .header("Authorization", format!("Bearer {token}"))
@@ -638,8 +648,8 @@ async fn other_methods_are_forwarded() {
         rs.headers()
             .get("x-mmrs-served-by")
             .and_then(|v| v.to_str().ok()),
-        Some("go"),
-        "{following} must be forwarded"
+        Some("rust"),
+        "{following} is served here now"
     );
 }
 

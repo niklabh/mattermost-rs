@@ -31,8 +31,32 @@ MMRS_ROOT="$ROOT"
 source "$ROOT/scripts/mm-api-env.sh"
 
 cargo build -p mm-api
-# Scoped to **this checkout's** binary: two worktrees have different paths, so one stack's
-# restart cannot kill another's server.
+# Free this stack's port, then make sure this checkout has no server left over.
+#
+# **The port is the owner key, not the path.** The path-scoped `pkill` below used to be the only
+# step, on the reasoning that two worktrees have different paths so one stack's restart cannot
+# kill another's server. That reasoning has a hole: a process's command line is fixed at `exec`
+# time and does **not** follow a `git worktree move`. Renaming a worktree between rounds therefore
+# leaves an mm-api whose cmdline still names the old directory, which the new pattern cannot
+# match — so it keeps the port, the freshly built binary never binds, and the suite runs against
+# **last round's server**.
+#
+# That is not a hypothetical and it does not announce itself. Measured on 2026-09-11: a server
+# left from a worktree previously named `threads` held :8166, and 36 tests across `token_writes`,
+# `command_writes`, `bot_writes`, `file_bytes` and `emoji_get` failed with "was forwarded to Go" —
+# every one of them a route that branch predated. The same shape could as easily produce a false
+# *pass*, since an older binary still serves the routes it did have.
+#
+# Killing by port is safe now that `scripts/worktree.sh` enforces one stack per worktree: the port
+# belongs to the stack, and the stack belongs to exactly one checkout. `ss -ltnp` is Linux-only,
+# which is what this harness runs on; the path-scoped kill stays as a second pass so a process
+# that is running but not listening is still cleared.
+for pid in $(ss -ltnp 2>/dev/null \
+  | awk -v port=":$MMRS_API_PORT" '$4 ~ port"$" {print $0}' \
+  | grep -oE 'pid=[0-9]+' | cut -d= -f2 | sort -u); do
+  echo "  freeing :$MMRS_API_PORT from pid $pid ($(tr '\0' ' ' < /proc/$pid/cmdline 2>/dev/null | cut -c1-70))"
+  kill -9 "$pid" 2>/dev/null || true
+done
 pkill -f "$ROOT/target/debug/mm-api" 2>/dev/null || true
 sleep 1
 mmrs_launch_mm_api "/tmp/mmrs-mm-api$MMRS_STACK_SUFFIX.log"

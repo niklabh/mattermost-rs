@@ -1,0 +1,60 @@
+# Mutation plan for the thread write family:
+#
+#   PUT    /users/{user_id}/teams/{team_id}/threads/read
+#   PUT    /users/{user_id}/teams/{team_id}/threads/{thread_id}/following
+#   DELETE /users/{user_id}/teams/{team_id}/threads/{thread_id}/following
+#
+#   scripts/mutate-batch.sh scripts/mutations/thread-writes.plan
+#
+# Tab-separated: name<TAB>file<TAB>from<TAB>to<TAB>suite<TAB>filter.  `\n` becomes a newline.
+#
+# `thread_store.rs` now holds four statements that touch `ThreadMemberships`, two of which set
+# `LastViewed` and `LastUpdated` from the same binding.  Every anchor below therefore carries a
+# token unique to its statement: `threadmemberships.userid = $2` for the team sweep,
+# `WHERE postid = $5` for the membership update, `INSERT INTO` for the insert.
+#
+# The verdicts these can produce depend entirely on the fixture's *planted* prior state.  A
+# membership whose `LastViewed`, `LastUpdated` and `UnreadMentions` were all zero would make
+# "left alone", "rewritten to the same value" and "zeroed" indistinguishable, and two thirds of
+# this plan would survive while proving nothing.  See the suite's module comment.
+#
+#
+# `api-validator-order` is the one mutation here with a **unit** suite, and it is a finding
+# rather than a preference.  Run against the parity suite it SURVIVED: the offending parameter's
+# name reaches a client only through the translated `message`, and this server sends the raw
+# error id there instead ([D-092]), so every ordering of the three validators produces
+# byte-identical output from us.  `first_invalid_following_param` exists so the order has an
+# oracle at all; delete it and this mutation goes back to being invisible.
+#
+# The last two lines are the no-op controls and must SURVIVE.
+
+mark-join-predicate	crates/mm-store/src/thread_store.rs	             WHERE threads.postid = threadmemberships.postid\n               AND threadmemberships.userid = $2	             WHERE threadmemberships.userid = $2	api	thread_writes
+mark-empty-team-arm	crates/mm-store/src/thread_store.rs	               AND (threads.threadteamid = $3 OR threads.threadteamid = '')	               AND (threads.threadteamid = $3)	api	thread_writes
+mark-team-arm	crates/mm-store/src/thread_store.rs	               AND (threads.threadteamid = $3 OR threads.threadteamid = '')	               AND (threads.threadteamid <> $3 OR threads.threadteamid = '')	api	thread_writes
+mark-adds-following-filter	crates/mm-store/src/thread_store.rs	               AND (threads.threadteamid = $3 OR threads.threadteamid = '')\n            "#,	               AND (threads.threadteamid = $3 OR threads.threadteamid = '')\n               AND threadmemberships.following = TRUE\n            "#,	api	thread_writes
+mark-mentions-not-zeroed	crates/mm-store/src/thread_store.rs	                   unreadmentions = 0,\n                   lastupdated = $1\n              FROM threads\n             WHERE threads.postid = threadmemberships.postid	                   unreadmentions = threadmemberships.unreadmentions,\n                   lastupdated = $1\n              FROM threads\n             WHERE threads.postid = threadmemberships.postid	api	thread_writes
+mark-lastupdated-frozen	crates/mm-store/src/thread_store.rs	                   unreadmentions = 0,\n                   lastupdated = $1\n              FROM threads\n             WHERE threads.postid = threadmemberships.postid	                   unreadmentions = 0,\n                   lastupdated = threadmemberships.lastupdated\n              FROM threads\n             WHERE threads.postid = threadmemberships.postid	api	thread_writes
+mark-user-binding	crates/mm-store/src/thread_store.rs	            now,\n            user_id,\n            team_id,	            now,\n            team_id,\n            team_id,	api	thread_writes
+maintain-following-comparison	crates/mm-store/src/thread_store.rs	                    opts.update_following && membership.following != opts.following;	                    opts.update_following && membership.following == opts.following;	api	thread_writes
+maintain-guard-always-writes	crates/mm-store/src/thread_store.rs	                if wrote {\n                    if following_needs_update {	                if true {\n                    if following_needs_update {	api	thread_writes
+maintain-viewed-timestamp-branch	crates/mm-store/src/thread_store.rs	                    if opts.update_viewed_timestamp {\n                        membership.last_viewed = now;	                    if false {\n                        membership.last_viewed = now;	api	thread_writes
+maintain-mentions-not-zeroed	crates/mm-store/src/thread_store.rs	                        membership.last_viewed = now;\n                        membership.unread_mentions = 0;	                        membership.last_viewed = now;	api	thread_writes
+maintain-update-column-order	crates/mm-store/src/thread_store.rs	                        membership.following,\n                        membership.last_viewed,\n                        membership.last_updated,	                        membership.following,\n                        membership.last_updated,\n                        membership.last_viewed,	api	thread_writes
+maintain-insert-following	crates/mm-store/src/thread_store.rs	                    following: opts.following,\n                    last_updated: now,	                    following: true,\n                    last_updated: now,	api	thread_writes
+maintain-insert-lastviewed	crates/mm-store/src/thread_store.rs	                    last_viewed: if opts.update_viewed_timestamp { now } else { 0 },	                    last_viewed: now,	api	thread_writes
+app-opts-viewed-timestamp	crates/mm-app/src/thread.rs	                    update_following: true,\n                    update_viewed_timestamp: state,	                    update_following: true,\n                    update_viewed_timestamp: true,	api	thread_writes
+app-opts-following	crates/mm-app/src/thread.rs	                    following: state,\n                    increment_mentions: false,	                    following: true,\n                    increment_mentions: false,	api	thread_writes
+app-event-reply-count-column	crates/mm-app/src/thread.rs	            .map_or(0, |thread| thread.reply_count);	            .map_or(0, |thread| thread.last_reply_at);	api	thread_writes
+app-event-state-value	crates/mm-app/src/thread.rs	        message.add("state", serde_json::Value::Bool(state));	        message.add("state", serde_json::Value::Bool(!state));	api	thread_writes
+app-event-thread-id-key	crates/mm-app/src/thread.rs	        message.add("thread_id", serde_json::Value::String(thread_id.to_owned()));	        message.add("threadid", serde_json::Value::String(thread_id.to_owned()));	api	thread_writes
+app-read-changed-broadcast-team	crates/mm-app/src/thread.rs	            mm_model::websocket_message::WEBSOCKET_EVENT_THREAD_READ_CHANGED,\n            team_id,	            mm_model::websocket_message::WEBSOCKET_EVENT_THREAD_READ_CHANGED,\n            "",	api	thread_writes
+api-read-all-team-gate	crates/mm-api/src/thread_writes.rs	    if !state\n        .app\n        .session_has_permission_to_team(&session.0, &team_id, &PERMISSION_VIEW_TEAM)	    if false\n        && !state\n        .app\n        .session_has_permission_to_team(&session.0, &team_id, &PERMISSION_VIEW_TEAM)	api	thread_writes
+api-following-read-gate	crates/mm-api/src/thread_writes.rs	        .session_has_permission_to_read_post(&session.0, thread_id)\n        .await;\n    if !allowed {	        .session_has_permission_to_read_post(&session.0, thread_id)\n        .await;\n    if false && !allowed {	api	thread_writes
+api-following-user-gate	crates/mm-api/src/thread_writes.rs	    if !state\n        .app\n        .session_has_permission_to_user(&session.0, user_id)\n        .await\n    {\n        return Err(ApiError::from(make_permission_error(\n            &session.0,\n            &[&PERMISSION_EDIT_OTHER_USERS],\n        )));\n    }\n\n    let (allowed, _is_member) = state	    if false\n        && !state\n            .app\n            .session_has_permission_to_user(&session.0, user_id)\n            .await\n    {\n        return Err(ApiError::from(make_permission_error(\n            &session.0,\n            &[&PERMISSION_EDIT_OTHER_USERS],\n        )));\n    }\n\n    let (allowed, _is_member) = state	api	thread_writes
+api-validator-order	crates/mm-api/src/thread_writes.rs	    if !is_valid_id(thread_id) {\n        return Some("thread_id");\n    }\n    if !is_valid_id(team_id) {\n        return Some("team_id");\n    }	    if !is_valid_id(team_id) {\n        return Some("team_id");\n    }\n    if !is_valid_id(thread_id) {\n        return Some("thread_id");\n    }	unit	thread_writes::tests
+api-status-ok-newline	crates/mm-api/src/thread_writes.rs	        r#"{"status":"OK"}"#,	        "{\\"status\\":\\"OK\\"}\\n",	api	thread_writes
+api-me-resolution	crates/mm-api/src/thread_writes.rs	    let user_id = resolve_me(user_id, session);	    let user_id = user_id;	api	thread_writes
+#
+# --- no-op controls: these must SURVIVE ---
+control-rename-binding	crates/mm-store/src/thread_store.rs	                let wrote = following_needs_update\n                    || opts.increment_mentions\n                    || opts.update_viewed_timestamp;\n                tracing::Span::current().record("wrote", wrote);\n\n                if wrote {	                let needs_write = following_needs_update\n                    || opts.increment_mentions\n                    || opts.update_viewed_timestamp;\n                tracing::Span::current().record("wrote", needs_write);\n\n                if needs_write {	api	thread_writes
+control-reorder-select	crates/mm-store/src/thread_store.rs	                   COALESCE(threaddeleteat, 0)   AS "delete_at!",\n                   COALESCE(threadteamid, '')    AS "team_id!"	                   COALESCE(threadteamid, '')    AS "team_id!",\n                   COALESCE(threaddeleteat, 0)   AS "delete_at!"	api	thread_writes

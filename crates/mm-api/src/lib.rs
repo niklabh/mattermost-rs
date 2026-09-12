@@ -19,6 +19,7 @@ pub mod commands;
 pub mod common_teams;
 pub mod compliance;
 pub mod connected_workspaces;
+pub mod custom_profile_attributes;
 pub mod data_retention;
 pub mod drafts;
 pub mod emoji;
@@ -39,6 +40,8 @@ pub mod jobs;
 pub mod license;
 pub mod licensed_features;
 pub mod limits;
+/// The local-mode admin API: the api4 handlers on a unix socket, with an unrestricted session.
+pub mod local;
 pub mod oauth;
 pub mod permissions;
 pub mod post_writes;
@@ -59,21 +62,29 @@ pub mod system;
 pub mod team_member_writes;
 pub mod teams;
 pub mod terms_of_service;
+/// The thread write family: `PUT …/threads/read` and the two `/following` methods.
+pub mod thread_writes;
 /// The four personal-access-token reads.
 pub mod tokens;
 /// The two upload-session reads.
 pub mod uploads;
 pub mod usage;
 pub mod users;
+/// Port of `api4/view.go` — the seven integrated-boards routes.
+pub mod views;
 pub mod webhooks;
 /// `GET /api/v4/websocket` — the upgrade, the pumps, and the action router.
 pub mod websocket;
+
+/// The three `/api/v4/config` reads. Appended rather than filed alphabetically, because this
+/// list is shared by every worktree and a middle insertion is somebody else's merge conflict.
+pub mod config;
 
 use axum::Router;
 use axum::extract::{RawPathParams, Request, State};
 use axum::middleware::Next;
 use axum::response::Response;
-use axum::routing::{MethodRouter, get, post, put};
+use axum::routing::{MethodRouter, get, patch, post, put};
 use mm_app::App;
 
 /// Shared state. Cloned per request, so every field is cheap to clone — `reqwest::Client` and
@@ -227,7 +238,7 @@ fn partially_migrated_with_ids(
 ///
 /// `Strict-Transport-Security` is not reproduced: it is gated on `TLSStrictTransport`, which
 /// defaults to `false` and is not modelled in [`mm_app::config::Config`].
-async fn go_global_headers(
+pub(crate) async fn go_global_headers(
     State(state): State<AppState>,
     request: Request,
     next: Next,
@@ -367,6 +378,30 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/users/{user_id}/teams/{team_id}/threads/{thread_id}",
             partially_migrated_with_ids(&state, get(users::get_thread_for_user)),
+        )
+        // `BaseRoutes.UserThreads.Handle("/read")` (api4/user.go:112), PUT only.
+        //
+        // A **static** sibling of `{thread_id}`, and matchit has no method dimension in its path
+        // preference — so this route wins for every method on `/threads/read`, including the
+        // `GET` that gorilla falls through to `getThreadForUser` with `read` as the thread id.
+        // That is why the fallback matters: an unregistered method here is forwarded, and Go
+        // answers its own 400 from the route it would have reached.
+        .route(
+            "/api/v4/users/{user_id}/teams/{team_id}/threads/read",
+            partially_migrated_with_ids(
+                &state,
+                put(thread_writes::update_read_state_all_threads_by_user),
+            ),
+        )
+        // `BaseRoutes.UserThread.Handle("/following")` (api4/user.go:115-116) — PUT and DELETE
+        // on one path, two handlers in Go and two here.
+        .route(
+            "/api/v4/users/{user_id}/teams/{team_id}/threads/{thread_id}/following",
+            partially_migrated_with_ids(
+                &state,
+                put(thread_writes::follow_thread_by_user)
+                    .delete(thread_writes::unfollow_thread_by_user),
+            ),
         )
         // `BaseRoutes.TeamForUser.Handle("/drafts")` (api4/drafts.go:17) — the threads routes'
         // sibling under the same base, and the one route here whose `{user_id}` is decorative.
@@ -1954,6 +1989,36 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/custom_profile_attributes/group",
             partially_migrated(get(gated_reads::get_cpa_group)),
         )
+        // The other seven routes of `api4/custom_profile_attributes.go`. Registered beside the
+        // `/group` read they share a licence contract with, and served only while this
+        // installation is unlicensed — see `crate::custom_profile_attributes`.
+        .route(
+            "/api/v4/custom_profile_attributes/fields",
+            partially_migrated(
+                get(custom_profile_attributes::list_cpa_fields)
+                    .post(custom_profile_attributes::create_cpa_field),
+            ),
+        )
+        .route(
+            "/api/v4/custom_profile_attributes/fields/{field_id}",
+            partially_migrated_with_ids(
+                &state,
+                patch(custom_profile_attributes::patch_cpa_field)
+                    .delete(custom_profile_attributes::delete_cpa_field),
+            ),
+        )
+        .route(
+            "/api/v4/custom_profile_attributes/values",
+            partially_migrated(patch(custom_profile_attributes::patch_cpa_values)),
+        )
+        .route(
+            "/api/v4/users/{user_id}/custom_profile_attributes",
+            partially_migrated_with_ids(
+                &state,
+                get(custom_profile_attributes::list_cpa_values)
+                    .patch(custom_profile_attributes::patch_cpa_values_for_user),
+            ),
+        )
         // Four segments under `/users`, so it shadows none of the `{user_id}` routes; `APIHandler`
         // again, so no session extractor.
         .route(
@@ -2011,7 +2076,39 @@ pub fn router(state: AppState) -> Router {
         )
         .route(
             "/api/v4/users/{user_id}/tokens",
-            partially_migrated_with_ids(&state, get(tokens::get_user_access_tokens_for_user)),
+            partially_migrated_with_ids(
+                &state,
+                get(tokens::get_user_access_tokens_for_user).post(tokens::create_user_access_token),
+            ),
+        )
+        // The six personal-access-token **writes**. Five are literal children of `/users/tokens`
+        // and therefore siblings of the `{token_id}` route above; matchit prefers the literal for
+        // **every** method, so registering `POST /users/tokens/revoke` also takes `GET` on that
+        // path away from the `{token_id}` handler — which is why each of these goes through
+        // `partially_migrated` and forwards its other methods to Go rather than 405-ing.
+        .route(
+            "/api/v4/users/tokens/revoke",
+            partially_migrated(post(tokens::revoke_user_access_token)),
+        )
+        .route(
+            "/api/v4/users/tokens/disable",
+            partially_migrated(post(tokens::disable_user_access_token)),
+        )
+        .route(
+            "/api/v4/users/tokens/enable",
+            partially_migrated(post(tokens::enable_user_access_token)),
+        )
+        .route(
+            "/api/v4/users/tokens/rotate",
+            partially_migrated(post(tokens::rotate_user_access_token)),
+        )
+        .route(
+            "/api/v4/users/tokens/search",
+            partially_migrated(post(tokens::search_user_access_tokens)),
+        )
+        .route(
+            "/api/v4/users/tokens/non_compliant/revoke",
+            partially_migrated(post(tokens::revoke_non_compliant_user_access_tokens)),
         )
         // `BaseRoutes.Teams.Handle("/invite/{invite_id:[A-Za-z0-9]+}")` (api4/team.go:75) — a
         // literal `invite` sibling of `{team_id}`, and an `APIHandler`, so no session extractor.
@@ -2024,16 +2121,57 @@ pub fn router(state: AppState) -> Router {
         )
         .route(
             "/api/v4/commands",
-            partially_migrated(get(commands::list_commands)),
+            partially_migrated(get(commands::list_commands).post(commands::create_command)),
         )
+        // `POST` is **not** registered here, and that is load-bearing: `/api/v4/commands/execute`
+        // is a static sibling this router does not carry, so a `POST` to it matches this pattern
+        // and reaches the method fallback, which forwards it to Go. Registering `create_command`
+        // on `{command_id}` as well would swallow `executeCommand` instead.
         .route(
             "/api/v4/commands/{command_id}",
-            partially_migrated_with_ids(&state, get(commands::get_command)),
+            partially_migrated_with_ids(
+                &state,
+                get(commands::get_command)
+                    .put(commands::update_command)
+                    .delete(commands::delete_command),
+            ),
         )
-        .route("/api/v4/bots", partially_migrated(get(bots::get_bots)))
+        .route(
+            "/api/v4/commands/{command_id}/move",
+            partially_migrated_with_ids(&state, put(commands::move_command)),
+        )
+        .route(
+            "/api/v4/commands/{command_id}/regen_token",
+            partially_migrated_with_ids(&state, put(commands::regen_command_token)),
+        )
+        .route(
+            "/api/v4/bots",
+            partially_migrated(get(bots::get_bots).post(bots::create_bot)),
+        )
+        // `BaseRoutes.Bot.Handle("")` carries **three** methods in Go (`GET`, `PUT`, and a
+        // `DELETE` that does not exist), so the `get` and the `put` are one `MethodRouter` here.
+        // Registering them as two `.route` calls on the same path panics at startup.
         .route(
             "/api/v4/bots/{bot_user_id}",
-            partially_migrated_with_ids(&state, get(bots::get_bot)),
+            partially_migrated_with_ids(&state, get(bots::get_bot).put(bots::patch_bot)),
+        )
+        // One segment deeper than `{bot_user_id}`, so there is no precedence question with the
+        // route above — axum matches on the number of segments first.
+        .route(
+            "/api/v4/bots/{bot_user_id}/disable",
+            partially_migrated_with_ids(&state, post(bots::disable_bot)),
+        )
+        .route(
+            "/api/v4/bots/{bot_user_id}/enable",
+            partially_migrated_with_ids(&state, post(bots::enable_bot)),
+        )
+        // `{user_id:[A-Za-z0-9]+}` is the **only** id in this family Go spells with an explicit
+        // charset in `InitBot`; the other two inherit it from `BaseRoutes`. Both are id-shaped, so
+        // `partially_migrated_with_ids` applies the same rule to each — including to the literal
+        // `me`, which is alphanumeric and therefore routed rather than forwarded.
+        .route(
+            "/api/v4/bots/{bot_user_id}/assign/{user_id}",
+            partially_migrated_with_ids(&state, post(bots::assign_bot)),
         )
         .route("/api/v4/jobs", partially_migrated(get(jobs::get_jobs)))
         // `BaseRoutes.Jobs.Handle("/type/{job_type:[A-Za-z0-9_-]+}")` (api4/job.go:28). Two
@@ -2063,6 +2201,65 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/permissions/ancillary",
             partially_migrated(post(permissions::append_ancillary_permissions_post)),
+        )
+        // `api.BaseRoutes.ChannelViews` / `ChannelView` / `ChannelViewPosts` (api4/api.go), all
+        // seven registered by `InitView` (api4/view.go:14) — and registered here
+        // **unconditionally**, unlike Go. The `FeatureFlags.IntegratedBoards` gate is the first
+        // statement of each handler instead, and forwards when it is off, so a dark deployment
+        // answers Go's own mux 404 rather than one reproduced here. See [`views`].
+        .route(
+            "/api/v4/channels/{channel_id}/views",
+            partially_migrated_with_ids(
+                &state,
+                get(views::get_views_for_channel).post(views::create_view),
+            ),
+        )
+        .route(
+            "/api/v4/channels/{channel_id}/views/{view_id}",
+            partially_migrated_with_ids(
+                &state,
+                get(views::get_view)
+                    .patch(views::update_view)
+                    .delete(views::delete_view),
+            ),
+        )
+        .route(
+            "/api/v4/channels/{channel_id}/views/{view_id}/posts",
+            partially_migrated_with_ids(&state, get(views::get_posts_for_view)),
+        )
+        .route(
+            "/api/v4/channels/{channel_id}/views/{view_id}/sort_order",
+            partially_migrated_with_ids(&state, post(views::update_view_sort_order)),
+        )
+        // `api.BaseRoutes.APIRoot.Handle("/server_busy", …)` three times (api4/system.go:60-62).
+        // The state behind them is in *this* process's memory and Go's is in its own, which is
+        // [D-320] — the routes are ported, the divergence is recorded, and the local twins of all
+        // three are in `local::router`.
+        .route(
+            "/api/v4/server_busy",
+            partially_migrated(
+                get(system::get_server_busy_expires)
+                    .post(system::set_server_busy)
+                    .delete(system::clear_server_busy),
+            ),
+        )
+        // ---- the config reads (2026-09-11) ----
+        //
+        // `/config` shares its path with `PUT /config`, which is still Go's, so it must go
+        // through `partially_migrated` or the PUT becomes a 405 — see that function's comment.
+        .route(
+            "/api/v4/config",
+            partially_migrated(get(config::get_config)),
+        )
+        // `APIHandler`, not `APISessionRequired`: an anonymous caller gets the limited map rather
+        // than a 401, which is what every client reads before it can log in.
+        .route(
+            "/api/v4/config/client",
+            partially_migrated(get(config::get_client_config)),
+        )
+        .route(
+            "/api/v4/config/environment",
+            partially_migrated(get(config::get_environment_config)),
         )
         .fallback(proxy::forward_to_go)
         // Outermost, so it sees every response this server produces — including the proxy's,
