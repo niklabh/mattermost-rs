@@ -27,6 +27,17 @@ pub trait SystemStore {
         &self,
         name: &str,
     ) -> impl std::future::Future<Output = Result<Option<String>, StoreError>> + Send;
+
+    /// Port of `SqlSystemStore.PermanentDeleteByName` (system_store.go:105) — one `DELETE`.
+    ///
+    /// Go's signature returns `*model.System`, and the struct it returns is the **zero value**:
+    /// it declares `var system model.System`, never reads a row into it, and returns `&system`.
+    /// Even its own error message interpolates `system.Name`, which is always `""`. Nothing
+    /// reachable reads the result, so this returns `()` rather than reproducing an empty struct.
+    fn permanent_delete_by_name(
+        &self,
+        name: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 }
 
 /// Postgres-backed implementation.
@@ -42,6 +53,20 @@ impl SqlSystemStore {
 }
 
 impl SystemStore for SqlSystemStore {
+    #[tracing::instrument(skip(self), fields(name = name))]
+    async fn permanent_delete_by_name(&self, name: &str) -> Result<(), StoreError> {
+        sqlx::query!("DELETE FROM systems WHERE name = $1", name)
+            .execute(&self.pool)
+            .await
+            .map_err(|source| StoreError::Db {
+                // Go interpolates `system.Name` here, which is the zero value — so its message
+                // never names the row it failed on. Ours does.
+                context: format!("failed to permanent delete system property with name={name}"),
+                source,
+            })?;
+        Ok(())
+    }
+
     /// `Value` is nullable in the schema while Go scans it into a plain `string`, so a NULL there
     /// fails Go's own scan and the row is unreadable to both servers. `COALESCE` is *not* applied:
     /// mirroring the column's nullability keeps a NULL distinguishable from an empty string, and

@@ -4,6 +4,7 @@
 //! |---|---|
 //! | `PUT /teams/{id}/members/{user}/roles` | [`App::update_team_member_roles`] |
 //! | `PUT /teams/{id}/members/{user}/schemeRoles` | [`App::update_team_member_scheme_roles`] |
+//! | `DELETE /teams/{id}/members/{user}` | [`App::remove_user_from_team`] |
 //!
 //! # These are the team twins of `mm_app::channel_member`'s two role routes, and they differ
 //!
@@ -27,6 +28,7 @@
 //! cache is unreachable from here — the standing consequence recorded as **D-190**.
 
 use mm_model::channel::CHANNEL_TYPE_OPEN;
+use mm_model::channel::DEFAULT_CHANNEL_NAME;
 use mm_model::channel_member::{ChannelMember, get_default_channel_notify_props};
 use mm_model::role::{TEAM_ADMIN_ROLE_ID, TEAM_GUEST_ROLE_ID, TEAM_USER_ROLE_ID};
 use mm_model::team::Team;
@@ -34,10 +36,13 @@ use mm_model::team_member::{TeamMember, TeamMemberWithError};
 use mm_model::user::User;
 use mm_model::utils::{AppError, AppResult, get_millis};
 use mm_model::websocket_message::{
-    WEBSOCKET_EVENT_ADDED_TO_TEAM, WEBSOCKET_EVENT_MEMBERROLE_UPDATED, WEBSOCKET_EVENT_USER_ADDED,
-    WebSocketEvent,
+    WEBSOCKET_EVENT_ADDED_TO_TEAM, WEBSOCKET_EVENT_LEAVE_TEAM, WEBSOCKET_EVENT_MEMBERROLE_UPDATED,
+    WEBSOCKET_EVENT_USER_ADDED, WebSocketEvent,
 };
-use mm_store::{ChannelMemberHistoryStore, ChannelStore, GroupStore, TeamStore, UserStore};
+use mm_store::sidebar_category_store::SidebarCategoryStore;
+use mm_store::{
+    ChannelMemberHistoryStore, ChannelStore, GroupStore, PreferenceStore, TeamStore, UserStore,
+};
 
 use crate::App;
 
@@ -941,6 +946,415 @@ fn save_member_error(err: mm_store::StoreError) -> Box<AppError> {
                 500,
             )
         }
+    }
+}
+
+impl App {
+    /// Port of `app.App.RemoveUserFromTeam` (app/team.go:1240).
+    ///
+    /// Go runs the team and user reads in **parallel goroutines** and then joins on the team
+    /// first, so the team's error wins when both fail. Sequential here, in that same order, which
+    /// is the only part of the concurrency that is observable.
+    ///
+    /// # The team's not-found id is a copy-paste
+    ///
+    /// Both arms of the team read answer `app.team.get_by_invite_id.finding.app_error` — an id
+    /// about *invite ids* on a plain `Team().Get` — and they differ only in status: **404** for
+    /// not-found, **500** otherwise. Reproduced verbatim; a client matching on the id would break
+    /// if this were "corrected" to `app.team.get.find.app_error`.
+    #[tracing::instrument(skip(self), fields(team_id = %team_id, user_id = %user_id))]
+    pub async fn remove_user_from_team(
+        &self,
+        team_id: &str,
+        user_id: &str,
+        requestor_id: &str,
+    ) -> AppResult<()> {
+        let team = self.store().team().get(team_id).await.map_err(|err| {
+            let status = if err.is_not_found() { 404 } else { 500 };
+            if status == 500 {
+                tracing::error!(error = %err, "team lookup failed");
+            }
+            AppError::boxed(
+                "RemoveUserFromTeam",
+                "app.team.get_by_invite_id.finding.app_error",
+                None,
+                String::new(),
+                status,
+            )
+        })?;
+
+        let user = self.store().user().get(user_id).await.map_err(|err| {
+            if err.is_not_found() {
+                AppError::boxed(
+                    "RemoveUserFromTeam",
+                    MISSING_ACCOUNT_ERROR,
+                    None,
+                    String::new(),
+                    404,
+                )
+            } else {
+                tracing::error!(error = %err, "user lookup failed");
+                AppError::boxed(
+                    "RemoveUserFromTeam",
+                    "app.user.get.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            }
+        })?;
+
+        self.leave_team(&team, &user, requestor_id).await
+    }
+
+    /// Port of `app.App.LeaveTeam` (app/team.go:1331) — the cascade a team departure runs.
+    ///
+    /// # Order of operations, and every step's failure mode
+    ///
+    /// 1. `GetTeamMember`. **Any** failure, not-found included, is
+    ///    `api.team.remove_user_from_team.missing.app_error` at **400** — so removing someone who
+    ///    is not on the team is a 400 and not a 404.
+    /// 2. `GetChannels(team, user, {include_deleted: true})`. `ErrNotFound` — which this store
+    ///    raises for an **empty** result — is an empty list, not an error. Getting that backwards
+    ///    makes every removal of a channel-less member a 500.
+    /// 3. Each channel that is **not** a DM or GM: cache invalidation, then
+    ///    `removeChannelMembership`. So a departing member keeps their DMs, which is why the
+    ///    predicate is `IsGroupOrDirect` and not "is on this team".
+    /// 4. The team's **space** channels, which step 2 cannot see: `messageChannelTypes` excludes
+    ///    `S`. Their membership rows would otherwise survive the leave and keep authorising
+    ///    space-scoped websocket delivery — see
+    ///    [`mm_store::channel_store::get_team_space_channels_for_user`].
+    /// 5. `ExperimentalEnableDefaultChannelLeaveJoinMessages`, which defaults to **true**: read
+    ///    `town-square` by name — **and its failure fails the whole removal**, 404 or 500 — then
+    ///    post one of two system messages. `requestorId == user.Id` picks "left the team", any
+    ///    other requestor picks "removed from the team"; both are logged and swallowed.
+    /// 6. `RemoveTeamMember`, the membership write and its two websocket events.
+    /// 7. `postProcessTeamMemberLeave`.
+    ///
+    /// Steps 1-5 read and write **channel** state before the membership row is touched, so a
+    /// failure in the middle leaves a user in the team and out of its channels. Go's.
+    ///
+    /// # What is deliberately not here
+    ///
+    /// The ABAC audit records (`policyDriven` is `team.PolicyEnforced && requestorId == ""`, and
+    /// this route always passes the session's user id, so it is false), the plugin hook
+    /// ([D-183]), and the three cache invalidations this server has no caches for ([D-190]).
+    #[tracing::instrument(skip(self, team, user), fields(team_id = %team.id, user_id = %user.id))]
+    pub async fn leave_team(&self, team: &Team, user: &User, requestor_id: &str) -> AppResult<()> {
+        let mut member = self
+            .store()
+            .team()
+            .get_member(&team.id, &user.id)
+            .await
+            .map_err(|err| {
+                tracing::debug!(error = %err, "team membership lookup failed");
+                AppError::boxed(
+                    "LeaveTeam",
+                    "api.team.remove_user_from_team.missing.app_error",
+                    None,
+                    String::new(),
+                    400,
+                )
+            })?;
+
+        let opts = mm_model::channel::ChannelSearchOpts {
+            include_deleted: true,
+            last_delete_at: 0,
+            ..Default::default()
+        };
+        let channels = match self
+            .store()
+            .channel()
+            .get_channels(&team.id, &user.id, &opts)
+            .await
+        {
+            Ok(list) => list.0,
+            // Go's `errors.As(nErr, &nfErr)` arm: an empty membership list, not a failure.
+            Err(err) if err.is_not_found() => Vec::new(),
+            Err(err) => {
+                tracing::error!(error = %err, "channel listing failed");
+                return Err(AppError::boxed(
+                    "LeaveTeam",
+                    "app.channel.get_channels.get.app_error",
+                    None,
+                    String::new(),
+                    500,
+                ));
+            }
+        };
+
+        for channel in &channels {
+            if !channel.is_group_or_direct() {
+                self.remove_channel_membership(&user.id, &channel.id)
+                    .await?;
+            }
+        }
+
+        let space_channels = self
+            .store()
+            .channel()
+            .get_team_space_channels_for_user(&team.id, &user.id)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "space channel listing failed");
+                AppError::boxed(
+                    "LeaveTeam",
+                    "app.channel.get_channels.get.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })?;
+        for channel in &space_channels.0 {
+            self.remove_channel_membership(&user.id, &channel.id)
+                .await?;
+        }
+
+        if self
+            .config()
+            .experimental_enable_default_channel_leave_join_messages
+        {
+            let channel = self
+                .store()
+                .channel()
+                .get_by_name(&team.id, DEFAULT_CHANNEL_NAME, false)
+                .await
+                .map_err(|err| {
+                    if err.is_not_found() {
+                        AppError::boxed(
+                            "LeaveTeam",
+                            "app.channel.get_by_name.missing.app_error",
+                            None,
+                            String::new(),
+                            404,
+                        )
+                    } else {
+                        tracing::error!(error = %err, "town-square lookup failed");
+                        AppError::boxed(
+                            "LeaveTeam",
+                            "app.channel.get_by_name.existing.app_error",
+                            None,
+                            String::new(),
+                            500,
+                        )
+                    }
+                })?;
+
+            self.post_team_leave_message(user, &channel, requestor_id == user.id)
+                .await;
+        }
+
+        // `&mut`, matching Go's pointer: `RemoveTeamMember` stamps `DeleteAt` on the struct
+        // and `postProcessTeamMemberLeave` then reads the *mutated* one. It only reads `UserId`
+        // and `TeamId`, which do not move, so the sharing is not observable — but a clone here
+        // would quietly make it unobservable by construction.
+        self.remove_team_member(&mut member).await?;
+        self.post_process_team_member_leave(&member).await
+    }
+
+    /// The two system posts of `LeaveTeam` — `postLeaveTeamMessage` (team.go:1440) and
+    /// `postRemoveFromTeamMessage` (team.go:1459).
+    ///
+    /// One function because they differ in exactly two values: the message text and the post
+    /// type. **`self_leave` is `requestorId == user.Id`**, so an admin removing themselves posts
+    /// "left" and an admin removing someone else posts "removed" — the distinction a reader is
+    /// most likely to collapse, and it is the post body every member of the team then sees.
+    ///
+    /// Go's translations are `"%v left the team."` and `"%v removed from the team."` — note the
+    /// second has no "was". Both are `i18n.T` with the **server's** locale, not the acting user's.
+    ///
+    /// Go swallows both errors (`rctx.Logger().Warn`), so [`App::post_system_message`] is the
+    /// right wrapper: a post that cannot be written does not fail the removal.
+    async fn post_team_leave_message(
+        &self,
+        user: &User,
+        channel: &mm_model::channel::Channel,
+        self_leave: bool,
+    ) {
+        let (message, post_type) = if self_leave {
+            (
+                format!("{} left the team.", user.username),
+                mm_model::post::POST_TYPE_LEAVE_TEAM,
+            )
+        } else {
+            (
+                format!("{} removed from the team.", user.username),
+                mm_model::post::POST_TYPE_REMOVE_FROM_TEAM,
+            )
+        };
+
+        let mut post = mm_model::post::Post {
+            channel_id: channel.id.clone(),
+            message,
+            post_type: post_type.to_owned(),
+            user_id: user.id.clone(),
+            ..Default::default()
+        };
+        post.add_prop("username", serde_json::Value::String(user.username.clone()));
+
+        self.post_system_message(post, channel).await;
+    }
+
+    /// Port of `TeamService.RemoveTeamMember` (app/teams/teams.go).
+    ///
+    /// # Two websocket events, and they are published **before** the write
+    ///
+    /// One addressed to the **team** omitting the departing user, one addressed to the **user**
+    /// alone — so the person being removed is told exactly once, on their own connection, and
+    /// does not also receive the team broadcast. Both carry `user_id` and `team_id`.
+    ///
+    /// Publishing first means a failed write leaves every client believing the removal happened.
+    /// Go's order; moving the events after the write would be the safer code and the wrong port.
+    ///
+    /// # The row is soft-deleted, and the roles clear is a **no-op on the database**
+    ///
+    /// `Roles = ""` and `DeleteAt = now`, but `UpdateMember` writes `ExplicitRoles` into the
+    /// `Roles` column — `member.roles` is the *computed* field and is never persisted by either
+    /// server. So the assignment changes only the struct that is about to be dropped, and a
+    /// departed member still reads back as `team_user` because `SchemeUser` is untouched.
+    /// Measured against Go, which does exactly the same thing (`NewTeamMemberFromModel` maps
+    /// `ExplicitRoles` to the column). Kept because it is what the source says; a mutation that
+    /// deletes this line is **equivalent**, not a gap.
+    #[tracing::instrument(skip(self, member), fields(team_id = %member.team_id, user_id = %member.user_id))]
+    async fn remove_team_member(&self, member: &mut TeamMember) -> AppResult<()> {
+        let mut to_team = WebSocketEvent::new(
+            WEBSOCKET_EVENT_LEAVE_TEAM,
+            &member.team_id,
+            "",
+            "",
+            // `omitUsers` is Go's `map[string]bool{userId: true}`: the departing user is *not*
+            // told through the team broadcast, only through the personal event below.
+            Some(std::collections::BTreeMap::from([(
+                member.user_id.clone(),
+                true,
+            )])),
+            "",
+        );
+        to_team.add("user_id", serde_json::Value::String(member.user_id.clone()));
+        to_team.add("team_id", serde_json::Value::String(member.team_id.clone()));
+        self.publish(to_team).await;
+
+        let mut to_user = WebSocketEvent::new(
+            WEBSOCKET_EVENT_LEAVE_TEAM,
+            "",
+            "",
+            &member.user_id,
+            None,
+            "",
+        );
+        to_user.add("user_id", serde_json::Value::String(member.user_id.clone()));
+        to_user.add("team_id", serde_json::Value::String(member.team_id.clone()));
+        self.publish(to_user).await;
+
+        member.roles = String::new();
+        member.delete_at = get_millis();
+
+        self.store()
+            .team()
+            .update_member(member)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "team membership update failed");
+                // Go's `Where` is `RemoveTeamMemberFromTeam`, not `LeaveTeam` — invisible on the
+                // wire (`Where` is `json:"-"`), kept because it is what the source says.
+                AppError::boxed(
+                    "RemoveTeamMemberFromTeam",
+                    "app.team.save_member.save.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })?;
+        Ok(())
+    }
+
+    /// Port of `app.App.postProcessTeamMemberLeave` (app/team.go:1286).
+    ///
+    /// Three writes, each one a 500 with its own id, in Go's order: the user's `UpdateAt`, the
+    /// **sidebar** rows for that team, and every preference in the team's category. The user is
+    /// re-read first purely so the `MissingAccountError` branch exists; the id is already in hand.
+    ///
+    /// The sidebar and preference deletes are what stop a removed-and-re-added member seeing a
+    /// stale sidebar and a stale "last channel viewed" — and neither has any other trigger, so
+    /// dropping one is invisible until a rejoin.
+    ///
+    /// The plugin hook and the three cache invalidations are [D-183] and [D-190].
+    #[tracing::instrument(skip(self, member), fields(team_id = %member.team_id, user_id = %member.user_id))]
+    async fn post_process_team_member_leave(&self, member: &TeamMember) -> AppResult<()> {
+        let user = self
+            .store()
+            .user()
+            .get(&member.user_id)
+            .await
+            .map_err(|err| {
+                if err.is_not_found() {
+                    AppError::boxed(
+                        "postProcessTeamMemberLeave",
+                        MISSING_ACCOUNT_ERROR,
+                        None,
+                        String::new(),
+                        404,
+                    )
+                } else {
+                    tracing::error!(error = %err, "user lookup failed");
+                    AppError::boxed(
+                        "postProcessTeamMemberLeave",
+                        "app.user.get.app_error",
+                        None,
+                        String::new(),
+                        500,
+                    )
+                }
+            })?;
+
+        self.store()
+            .user()
+            .update_update_at(&user.id)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "user update_at bump failed");
+                AppError::boxed(
+                    "postProcessTeamMemberLeave",
+                    "app.user.update_update.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })?;
+
+        self.store()
+            .sidebar_category()
+            .clear_sidebar_on_team_leave(&user.id, &member.team_id)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "sidebar clear failed");
+                AppError::boxed(
+                    "postProcessTeamMemberLeave",
+                    "app.channel.sidebar_categories.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })?;
+
+        // **The team id is the preference category.** Go's comment: "delete the preferences that
+        // set the last channel used in the team and other team specific preferences".
+        self.store()
+            .preference()
+            .delete_category(&user.id, &member.team_id)
+            .await
+            .map_err(|err| {
+                tracing::error!(error = %err, "preference category delete failed");
+                AppError::boxed(
+                    "postProcessTeamMemberLeave",
+                    "app.preference.delete.app_error",
+                    None,
+                    String::new(),
+                    500,
+                )
+            })?;
+
+        Ok(())
     }
 }
 

@@ -62,6 +62,21 @@ pub trait TokenStore {
         &self,
         token: &str,
     ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlTokenStore.RemoveAllTokensByType` (tokens_store.go:117) — one `DELETE`, no
+    /// expiry check, no row count.
+    ///
+    /// `DELETE /teams/invites/email` calls it twice, for `team_invitation` and
+    /// `guest_invitation`. **There is no `CreateAt` predicate**: it removes live invitations as
+    /// well as expired ones, which is the whole point of the route and also why it cannot be
+    /// narrowed to "clean up old tokens".
+    ///
+    /// Deleting nothing is success. Go reports no count and the route's reply is
+    /// `{"status":"OK"}` either way, so a caller cannot tell an empty table from a full one.
+    fn remove_all_tokens_by_type(
+        &self,
+        token_type: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 }
 
 #[derive(Debug, Clone)]
@@ -96,6 +111,18 @@ impl From<TokenRow> for Token {
 }
 
 impl TokenStore for SqlTokenStore {
+    #[tracing::instrument(skip(self), fields(token_type = %token_type))]
+    async fn remove_all_tokens_by_type(&self, token_type: &str) -> Result<(), StoreError> {
+        sqlx::query!("DELETE FROM tokens WHERE type = $1", token_type)
+            .execute(&self.pool)
+            .await
+            .map_err(|source| StoreError::Db {
+                context: format!("failed to remove all Tokens with Type={token_type}"),
+                source,
+            })?;
+        Ok(())
+    }
+
     #[tracing::instrument(skip_all, fields(token_type = %token.type_))]
     async fn save(&self, token: &Token) -> Result<(), StoreError> {
         // `IsValid` before the insert, exactly as Go orders it — the column is `varchar(64)` and

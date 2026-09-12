@@ -1,0 +1,188 @@
+{
+    "privacy_switch": [
+        {
+            "privacy": "O",
+            "accepted": true,
+            "team_type": "O",
+            "open_invite": true
+        },
+        {
+            "privacy": "I",
+            "accepted": true,
+            "team_type": "I",
+            "open_invite": false
+        },
+        {
+            "privacy": "o",
+            "accepted": false,
+            "team_type": "",
+            "open_invite": false
+        },
+        {
+            "privacy": "i",
+            "accepted": false,
+            "team_type": "",
+            "open_invite": false
+        },
+        {
+            "privacy": "P",
+            "accepted": false,
+            "team_type": "",
+            "open_invite": false
+        },
+        {
+            "privacy": "",
+            "accepted": false,
+            "team_type": "",
+            "open_invite": false
+        },
+        {
+            "privacy": "OI",
+            "accepted": false,
+            "team_type": "",
+            "open_invite": false
+        },
+        {
+            "privacy": "open",
+            "accepted": false,
+            "team_type": "",
+            "open_invite": false
+        },
+        {
+            "privacy": " O",
+            "accepted": false,
+            "team_type": "",
+            "open_invite": false
+        }
+    ],
+    "regenerates_invite_id": [
+        {
+            "name": "new_O_closed_old_O_closed",
+            "allow_open_invite": false,
+            "team_type": "O",
+            "old_allow_open_invite": false,
+            "old_team_type": "O",
+            "regenerates": false
+        },
+        {
+            "name": "new_O_closed_old_I_closed",
+            "allow_open_invite": false,
+            "team_type": "O",
+            "old_allow_open_invite": false,
+            "old_team_type": "I",
+            "regenerates": true
+        },
+        {
+            "name": "new_O_closed_old_O_open",
+            "allow_open_invite": false,
+            "team_type": "O",
+            "old_allow_open_invite": true,
+            "old_team_type": "O",
+            "regenerates": true
+        },
+        {
+            "name": "new_O_closed_old_I_open",
+            "allow_open_invite": false,
+            "team_type": "O",
+            "old_allow_open_invite": true,
+            "old_team_type": "I",
+            "regenerates": true
+        },
+        {
+            "name": "new_I_closed_old_O_closed",
+            "allow_open_invite": false,
+            "team_type": "I",
+            "old_allow_open_invite": false,
+            "old_team_type": "O",
+            "regenerates": true
+        },
+        {
+            "name": "new_I_closed_old_I_closed",
+            "allow_open_invite": false,
+            "team_type": "I",
+            "old_allow_open_invite": false,
+            "old_team_type": "I",
+            "regenerates": false
+        },
+        {
+            "name": "new_I_closed_old_O_open",
+            "allow_open_invite": false,
+            "team_type": "I",
+            "old_allow_open_invite": true,
+            "old_team_type": "O",
+            "regenerates": true
+        },
+        {
+            "name": "new_I_closed_old_I_open",
+            "allow_open_invite": false,
+            "team_type": "I",
+            "old_allow_open_invite": true,
+            "old_team_type": "I",
+            "regenerates": true
+        },
+        {
+            "name": "new_O_open_old_O_closed",
+            "allow_open_invite": true,
+            "team_type": "O",
+            "old_allow_open_invite": false,
+            "old_team_type": "O",
+            "regenerates": false
+        },
+        {
+            "name": "new_O_open_old_I_closed",
+            "allow_open_invite": true,
+            "team_type": "O",
+            "old_allow_open_invite": false,
+            "old_team_type": "I",
+            "regenerates": false
+        },
+        {
+            "name": "new_O_open_old_O_open",
+            "allow_open_invite": true,
+            "team_type": "O",
+            "old_allow_open_invite": true,
+            "old_team_type": "O",
+            "regenerates": false
+        },
+        {
+            "name": "new_O_open_old_I_open",
+            "allow_open_invite": true,
+            "team_type": "O",
+            "old_allow_open_invite": true,
+            "old_team_type": "I",
+            "regenerates": false
+        },
+        {
+            "name": "new_I_open_old_O_closed",
+            "allow_open_invite": true,
+            "team_type": "I",
+            "old_allow_open_invite": false,
+            "old_team_type": "O",
+            "regenerates": true
+        },
+        {
+            "name": "new_I_open_old_I_closed",
+            "allow_open_invite": true,
+            "team_type": "I",
+            "old_allow_open_invite": false,
+            "old_team_type": "I",
+            "regenerates": true
+        },
+        {
+            "name": "new_I_open_old_O_open",
+            "allow_open_invite": true,
+            "team_type": "I",
+            "old_allow_open_invite": true,
+            "old_team_type": "O",
+            "regenerates": true
+        },
+        {
+            "name": "new_I_open_old_I_open",
+            "allow_open_invite": true,
+            "team_type": "I",
+            "old_allow_open_invite": true,
+            "old_team_type": "I",
+            "regenerates": false
+        }
+    ]
+}

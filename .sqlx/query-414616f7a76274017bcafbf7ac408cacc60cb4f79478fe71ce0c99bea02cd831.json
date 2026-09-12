@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM sidebarchannels\n             WHERE categoryid IN (\n                   SELECT sc.categoryid\n                     FROM sidebarchannels sc\n                     JOIN sidebarcategories cat ON sc.categoryid = cat.id\n                    WHERE cat.teamid = $1 AND sc.userid = $2)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "414616f7a76274017bcafbf7ac408cacc60cb4f79478fe71ce0c99bea02cd831"
+}

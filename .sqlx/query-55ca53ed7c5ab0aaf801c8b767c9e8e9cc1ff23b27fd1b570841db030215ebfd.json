@@ -1,0 +1,146 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT t.id,\n               t.createat,\n               t.updateat,\n               t.deleteat,\n               t.displayname,\n               t.name,\n               t.description,\n               t.email,\n               t.type::text AS \"team_type\",\n               t.companyname,\n               t.alloweddomains,\n               t.inviteid,\n               t.allowopeninvite,\n               t.lastteamiconupdate,\n               t.schemeid,\n               t.groupconstrained,\n               t.cloudlimitsarchived,\n               EXISTS (\n                   SELECT 1 FROM accesscontrolpolicies acp\n                    WHERE acp.id = t.id AND acp.type = 'team'\n               ) AS \"policy_enforced!\",\n               COALESCE((\n                   SELECT acp.active FROM accesscontrolpolicies acp\n                    WHERE acp.id = t.id AND acp.type = 'team' AND acp.active = TRUE\n                    LIMIT 1\n               ), false) AS \"policy_is_active!\",\n               CASE WHEN $1::boolean THEN rpt.policyid END AS \"policyid\"\n          FROM teams t\n          LEFT JOIN retentionpoliciesteams rpt ON t.id = rpt.teamid\n         WHERE ($2::text IS NULL OR rpt.policyid = $2)\n           AND (NOT $3::boolean OR rpt.teamid IS NULL)\n           AND ($4::text IS NULL OR t.name ILIKE $4 OR t.displayname ILIKE $4)\n           AND (CASE\n                  WHEN $5::boolean AND NOT $6::boolean THEN\n                      EXISTS (SELECT 1 FROM accesscontrolpolicies acp\n                               WHERE acp.id = t.id AND acp.type = 'team')\n                  ELSE\n                      ($5::boolean AND EXISTS (\n                           SELECT 1 FROM accesscontrolpolicies acp\n                            WHERE acp.id = t.id AND acp.type = 'team'))\n                      OR (\n                          ($7::boolean IS NULL\n                           OR ($7 AND t.allowopeninvite = TRUE)\n                           OR (NOT $7\n                               AND t.allowopeninvite IS DISTINCT FROM TRUE\n                               AND t.groupconstrained IS DISTINCT FROM TRUE))\n                          AND ($8::boolean IS NULL\n                               OR ($8 AND t.groupconstrained = TRUE)\n                               OR (NOT $8 AND t.groupconstrained IS DISTINCT FROM TRUE))\n                          AND ($9::text IS NULL OR t.type::text = $9)\n                      )\n                END)\n         ORDER BY t.displayname\n         LIMIT $10::bigint OFFSET $11::bigint\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "createat",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "updateat",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "deleteat",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "displayname",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "name",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 6,
+        "name": "description",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 7,
+        "name": "email",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 8,
+        "name": "team_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "companyname",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 10,
+        "name": "alloweddomains",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 11,
+        "name": "inviteid",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 12,
+        "name": "allowopeninvite",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 13,
+        "name": "lastteamiconupdate",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 14,
+        "name": "schemeid",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 15,
+        "name": "groupconstrained",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 16,
+        "name": "cloudlimitsarchived",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 17,
+        "name": "policy_enforced!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 18,
+        "name": "policy_is_active!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 19,
+        "name": "policyid",
+        "type_info": "Varchar"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bool",
+        "Text",
+        "Bool",
+        "Text",
+        "Bool",
+        "Bool",
+        "Bool",
+        "Bool",
+        "Text",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      null,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "55ca53ed7c5ab0aaf801c8b767c9e8e9cc1ff23b27fd1b570841db030215ebfd"
+}

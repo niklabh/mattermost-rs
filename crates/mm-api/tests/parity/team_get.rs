@@ -378,10 +378,14 @@ async fn a_non_alphanumeric_segment_answers_exactly_as_go_does() {
     );
 }
 
-/// `partially_migrated` again: only GET is ours, so a DELETE (Go's `deleteTeam`) must reach Go —
-/// and its side effect proves it ran there: the team comes back archived.
+/// **Was** "only GET is ours"; `deleteTeam`'s archive arm is now served from Rust too, so what
+/// this asserts is the *side effect* rather than the forward: the team comes back archived, and
+/// both servers answer the follow-up `GET` identically.
+///
+/// Kept rather than deleted because the archive is what made this test worth writing — it is the
+/// only place in this file that proves a write on this path reaches the database at all.
 #[tokio::test]
-async fn other_methods_on_this_path_are_still_forwarded() {
+async fn a_delete_on_this_path_archives_the_team() {
     if !stack_enabled() {
         eprintln!("skipping: set MM_PARITY_STACK=1 with the stack running");
         return;
@@ -403,16 +407,12 @@ async fn other_methods_on_this_path_are_still_forwarded() {
             .headers()
             .get("x-mmrs-served-by")
             .and_then(|v| v.to_str().ok()),
-        Some("go"),
-        "DELETE is not migrated, so it must be forwarded"
+        Some("rust"),
+        "the archive arm of deleteTeam is served here"
     );
-    assert_eq!(
-        response.status().as_u16(),
-        200,
-        "Go's deleteTeam accepts it"
-    );
+    assert_eq!(response.status().as_u16(), 200, "deleteTeam accepts it");
 
-    // And the GET both servers now agree on shows the archive actually happened in Go.
+    // And the GET both servers agree on shows the archive actually happened.
     let path = format!("/api/v4/teams/{team_id}");
     let (go_body, rs_body) = fetch_both_stable(&client, &token, &path).await;
     assert_eq!(
@@ -423,6 +423,6 @@ async fn other_methods_on_this_path_are_still_forwarded() {
     assert_ne!(
         parsed["delete_at"].as_i64(),
         Some(0),
-        "the DELETE reached Go"
+        "the DELETE reached the database"
     );
 }

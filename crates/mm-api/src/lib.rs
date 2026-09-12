@@ -627,7 +627,12 @@ pub fn router(state: AppState) -> Router {
         // route below applies unchanged.
         .route(
             "/api/v4/teams/{team_id}",
-            partially_migrated_with_ids(&state, get(teams::get_team).put(teams::update_team)),
+            partially_migrated_with_ids(
+                &state,
+                get(teams::get_team)
+                    .put(teams::update_team)
+                    .delete(teams::delete_team),
+            ),
         )
         // `BaseRoutes.Team.Handle("/patch")` (api4/team.go) — a segment deeper than `{team_id}`,
         // so no precedence question with the route above.
@@ -638,6 +643,12 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/teams/{team_id}/restore",
             partially_migrated_with_ids(&state, post(teams::restore_team)),
+        )
+        // `BaseRoutes.Team.Handle("/privacy")` (api4/team.go:46) — PUT only, one segment deeper
+        // than `{team_id}`.
+        .route(
+            "/api/v4/teams/{team_id}/privacy",
+            partially_migrated_with_ids(&state, axum::routing::put(teams::update_team_privacy)),
         )
         .route(
             "/api/v4/teams/{team_id}/regenerate_invite_id",
@@ -696,7 +707,10 @@ pub fn router(state: AppState) -> Router {
         )
         .route(
             "/api/v4/teams/{team_id}/members/{user_id}",
-            partially_migrated_with_ids(&state, get(teams::get_team_member)),
+            partially_migrated_with_ids(
+                &state,
+                get(teams::get_team_member).delete(team_member_writes::remove_team_member),
+            ),
         )
         // `BaseRoutes.TeamMember.Handle("/roles")` and `.Handle("/schemeRoles")`
         // (api4/team.go:69-70). **`schemeRoles` is camelCase**, matched literally by gorilla and
@@ -1040,10 +1054,27 @@ pub fn router(state: AppState) -> Router {
         // every `/api/v4/teams/...` route registered earlier, so axum sees a distinct path and
         // there is no literal-versus-parameter precedence to settle. Nothing that matched
         // `{team_id}` or the `name` literal can match here, and nothing here could have matched
-        // them. `GET` only; `POST` (createTeam) falls to `partially_migrated`'s method fallback.
+        // them.
         .route(
             "/api/v4/teams",
-            partially_migrated(get(teams::get_all_teams)),
+            partially_migrated(get(teams::get_all_teams).post(teams::create_team)),
+        )
+        // `BaseRoutes.Teams.Handle("/search")` (api4/team.go:37). A static sibling of
+        // `{team_id}`; gorilla registered `/search` *after* `{team_id:[A-Za-z0-9]+}`, but
+        // `search` is id-shaped and would have matched it — so on Go the literal wins only
+        // because `{team_id}` carries no POST handler, and on axum the literal wins outright.
+        // Same answer either way.
+        .route(
+            "/api/v4/teams/search",
+            partially_migrated(post(teams::search_teams)),
+        )
+        // `BaseRoutes.Teams.Handle("/invites/email")` (api4/team.go:74). Two static segments
+        // under `/teams/`, so no overlap with `{team_id}` — `invites` would have matched the
+        // id class, but the path is one segment longer than `{team_id}` and matches nothing
+        // else gorilla registers.
+        .route(
+            "/api/v4/teams/invites/email",
+            partially_migrated(axum::routing::delete(teams::invalidate_all_email_invites)),
         )
         // `BaseRoutes.Roles` (api4/api.go). The literal `names` sits beside `{role_id}` and
         // gorilla registered `{role_id:[A-Za-z0-9]+}` *first*, so `GET /roles/names` is a

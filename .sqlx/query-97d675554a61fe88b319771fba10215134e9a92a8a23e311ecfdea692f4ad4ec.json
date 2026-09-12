@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE persistentnotifications\n               SET deleteat = $1\n              FROM posts, channels\n             WHERE posts.id = persistentnotifications.postid\n               AND posts.channelid = channels.id\n               AND channels.teamid = $2\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "97d675554a61fe88b319771fba10215134e9a92a8a23e311ecfdea692f4ad4ec"
+}

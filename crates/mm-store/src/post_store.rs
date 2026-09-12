@@ -360,6 +360,26 @@ pub trait PostStore {
         channel_id: &str,
     ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 
+    /// Port of `SqlPostPersistentNotificationStore.DeleteByTeam`
+    /// (post_persistent_notification_store.go) for the single team its only reachable caller —
+    /// `App.SoftDeleteTeam` — passes.
+    ///
+    /// **A soft delete two joins away from its predicate.** The rows live in
+    /// `PersistentNotifications`, the team id lives on `Channels`, and the two are connected only
+    /// through `Posts`: `Posts.Id = PersistentNotifications.PostId AND Posts.ChannelId =
+    /// Channels.Id AND Channels.TeamId = ?`. A port that reached for a `TeamId` column would find
+    /// none.
+    ///
+    /// `DeleteAt` is this statement's own clock read, not the team's — same as the channel
+    /// sibling — and like it, the failure is **not** swallowed: archiving a team answers 500
+    /// `app.post_persistent_notification.delete_by_team.app_error`. It is also the **first** thing
+    /// `SoftDeleteTeam` does, before the team row is touched, so that failure leaves the team
+    /// alive.
+    fn delete_persistent_notifications_by_team(
+        &self,
+        team_id: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
     /// Port of `SqlPostStore.Save` (post_store.go:341) and the `SaveMultiple` (:159) it delegates
     /// to, narrowed to **one root post that is not burn-on-read, prioritised or persistent**.
     ///
@@ -2887,6 +2907,32 @@ impl PostStore for SqlPostStore {
             context: format!("failed to delete notifications for posts [{post_id}]"),
             source,
         })
+    }
+
+    #[tracing::instrument(skip(self), fields(team_id = %team_id))]
+    async fn delete_persistent_notifications_by_team(
+        &self,
+        team_id: &str,
+    ) -> Result<(), StoreError> {
+        sqlx::query!(
+            r#"
+            UPDATE persistentnotifications
+               SET deleteat = $1
+              FROM posts, channels
+             WHERE posts.id = persistentnotifications.postid
+               AND posts.channelid = channels.id
+               AND channels.teamid = $2
+            "#,
+            mm_model::utils::get_millis(),
+            team_id,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to delete notifications for teams [{team_id}]"),
+            source,
+        })?;
+        Ok(())
     }
 
     #[tracing::instrument(skip(self), fields(channel_id = %channel_id))]

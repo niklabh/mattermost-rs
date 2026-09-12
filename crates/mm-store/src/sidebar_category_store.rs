@@ -131,6 +131,26 @@ pub trait SidebarCategoryStore {
     ) -> impl std::future::Future<Output = Result<SidebarCategoryUpdate, StoreError>> + Send;
 
     /// Port of `SqlChannelStore.DeleteSidebarCategory` (channel_store_categories.go:1013).
+    /// Port of `SqlChannelStore.ClearSidebarOnTeamLeave`
+    /// (channel_store_categories.go:986) — the sidebar half of a team departure.
+    ///
+    /// Lives here rather than on the channel store because the tables do: Go keeps the sidebar
+    /// queries on `SqlChannelStore` and this tree split them out.
+    ///
+    /// **Two statements and the order is fixed**: `SidebarChannels` first, by a sub-select over
+    /// the categories the user owns *on that team*, then `SidebarCategories`. Reversing them
+    /// leaves the channel rows orphaned, because the sub-select would no longer find a category
+    /// to match. Every other delete in this file reverses them deliberately and says why; this
+    /// one must not.
+    ///
+    /// Both statements are scoped by `UserId` **and** `TeamId`. Dropping the user from either
+    /// clears the sidebar of everyone else on the team.
+    fn clear_sidebar_on_team_leave(
+        &self,
+        user_id: &str,
+        team_id: &str,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
     fn delete_sidebar_category(
         &self,
         category_id: &str,
@@ -221,6 +241,46 @@ impl SidebarCategoryStore for SqlSidebarCategoryStore {
         categories: &[SidebarCategoryWithChannels],
     ) -> Result<SidebarCategoryUpdate, StoreError> {
         update_sidebar_categories(&self.pool, user_id, team_id, categories).await
+    }
+
+    #[tracing::instrument(skip(self), fields(user_id = %user_id, team_id = %team_id))]
+    async fn clear_sidebar_on_team_leave(
+        &self,
+        user_id: &str,
+        team_id: &str,
+    ) -> Result<(), StoreError> {
+        sqlx::query!(
+            r#"
+            DELETE FROM sidebarchannels
+             WHERE categoryid IN (
+                   SELECT sc.categoryid
+                     FROM sidebarchannels sc
+                     JOIN sidebarcategories cat ON sc.categoryid = cat.id
+                    WHERE cat.teamid = $1 AND sc.userid = $2)
+            "#,
+            team_id,
+            user_id,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to delete from SidebarChannels".to_owned(),
+            source,
+        })?;
+
+        sqlx::query!(
+            "DELETE FROM sidebarcategories WHERE teamid = $1 AND userid = $2",
+            team_id,
+            user_id,
+        )
+        .execute(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to delete from SidebarCategories".to_owned(),
+            source,
+        })?;
+
+        Ok(())
     }
 
     #[tracing::instrument(skip_all, fields(category_id = %category_id))]

@@ -6,6 +6,7 @@
 //! | `PUT /teams/{team_id}/members/{user_id}/schemeRoles` | [`update_team_member_scheme_roles`] | api4/team.go:1409 |
 //! | `POST /teams/{team_id}/members` | [`add_team_member`] | api4/team.go:976 |
 //! | `POST /teams/{team_id}/members/batch` | [`add_team_members`] | api4/team.go:1131 |
+//! | `DELETE /teams/{team_id}/members/{user_id}` | [`remove_team_member`] | api4/team.go:1271 |
 //!
 //! # What the add routes do not do
 //!
@@ -35,7 +36,8 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use mm_model::permission::{
     PERMISSION_ADD_USER_TO_TEAM, PERMISSION_INVITE_GUEST, PERMISSION_JOIN_PRIVATE_TEAMS,
-    PERMISSION_JOIN_PUBLIC_TEAMS, PERMISSION_MANAGE_TEAM_ROLES, make_permission_error,
+    PERMISSION_JOIN_PUBLIC_TEAMS, PERMISSION_MANAGE_TEAM_ROLES, PERMISSION_REMOVE_USER_FROM_TEAM,
+    make_permission_error,
 };
 use mm_model::scheme::SchemeRoles;
 use mm_model::team_member::{TeamMember, team_members_with_error_to_team_members};
@@ -46,6 +48,86 @@ use crate::AppState;
 use crate::auth::AuthenticatedSession;
 use crate::channels::{ME, require_id};
 use crate::error::ApiError;
+
+/// Port of `removeTeamMember` (api4/team.go:1271) — `DELETE /teams/{team_id}/members/{user_id}`.
+///
+/// # The permission gate is **skipped entirely** for a self-removal
+///
+/// `if session.UserId != params.UserId { … }`. So leaving a team needs no permission at all —
+/// not `remove_user_from_team`, not team membership, not even that the team exists yet, since
+/// the gate precedes both reads. Hoisting the check out of that `if` would refuse every ordinary
+/// member trying to leave.
+///
+/// # Two reads, then one group check, then the cascade
+///
+/// `GetTeam` and `GetUser` both precede the group-constraint refusal, so a removal naming a
+/// missing team is a 404 before it can be a 400. The refusal itself is three ANDed clauses:
+/// the team is group-constrained, **the target is not the caller**, and the target is **not a
+/// bot**. A member of a group-constrained team can therefore still leave it, and a bot can still
+/// be removed from it — both easy to lose, and each is a route that stops working if lost.
+///
+/// # Wire format
+///
+/// `ReturnStatusOK` — `{"status":"OK"}` with no trailing newline.
+#[tracing::instrument(skip_all, fields(team_id = %team_id, user_id = %user_id, self_removal))]
+pub async fn remove_team_member(
+    State(state): State<AppState>,
+    Path((team_id, user_id)): Path<(String, String)>,
+    session: AuthenticatedSession,
+) -> Response {
+    if let Err(err) = require_id(&team_id, "team_id") {
+        return err.into_response();
+    }
+    if let Err(err) = require_id(&user_id, "user_id") {
+        return err.into_response();
+    }
+
+    let self_removal = session.0.user_id == user_id;
+    tracing::Span::current().record("self_removal", self_removal);
+
+    if !self_removal
+        && !state
+            .app
+            .session_has_permission_to_team(&session.0, &team_id, &PERMISSION_REMOVE_USER_FROM_TEAM)
+            .await
+    {
+        return ApiError::from(*make_permission_error(
+            &session.0,
+            &[&PERMISSION_REMOVE_USER_FROM_TEAM],
+        ))
+        .into_response();
+    }
+
+    let team = match state.app.get_team(&team_id).await {
+        Ok(team) => team,
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+
+    let user = match state.app.get_user(&user_id).await {
+        Ok(user) => user,
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+
+    if team.is_group_constrained() && !self_removal && !user.is_bot {
+        return ApiError::from(mm_model::utils::AppError::new(
+            "removeTeamMember",
+            "api.team.remove_member.group_constrained.app_error",
+            None,
+            String::new(),
+            400,
+        ))
+        .into_response();
+    }
+
+    match state
+        .app
+        .remove_user_from_team(&team_id, &user_id, &session.0.user_id)
+        .await
+    {
+        Ok(()) => status_ok(),
+        Err(err) => ApiError::from(err).into_response(),
+    }
+}
 
 /// Port of `model.MapFromJSON` (utils.go:507) — **every** failure is an empty map.
 ///
