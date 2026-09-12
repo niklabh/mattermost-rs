@@ -7387,3 +7387,55 @@ for a licensed one.
 
 Both are unreachable on a `mattermost-team-edition` image with zero `Licenses` rows. Recorded so
 the next person to install a licence knows which two routes change shape.
+
+---
+
+## D-390 · the licensed half of the three group syncable writes is forwarded, not served
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-12 (group syncables)
+
+`crate::groups` now serves the **unlicensed** contract of the last three handlers in
+`api4/group.go` — `linkGroupSyncable` (`POST .../link`), `unlinkGroupSyncable` (`DELETE .../link`)
+and `patchGroupSyncable` (`PUT .../patch`) — which completes the file: all twenty route+method
+pairs `InitGroup` registers are answered here, and `parity::group_syncables` re-measures every one
+of them. `requireLicense` is the first statement of all three, above `RequireGroupId`,
+`RequireSyncableId`, `RequireSyncableType` **and** `io.ReadAll(r.Body)`, so the unlicensed
+contract is one 501 and it is fully compared. Everything past it forwards, for the reason
+[D-360] gives: Go loads its licence at startup, so `set_active_licence_id` moves our answer and
+not Go's, and the licensed side has no oracle beside it on this stack.
+
+What a licensed server reaches that this side does not have:
+
+| behind the gate | Go |
+|---|---|
+| `verifyLinkUnlinkPermission` — `IsSyncable`, an `AllowReference` gate, then a per-type switch | `api4/group.go:679` |
+| its channel arm's **parent-team** question: a channel not yet synced via its team needs `invite_user` on the team, and the private/public channel type then picks `manage_private_channel_members` or `manage_public_channel_members` | `api4/group.go:705` |
+| `verifySchemeAdminAssignmentPermission` — `manage_team_roles` / `manage_channel_roles`, skipped entirely when `patch.SchemeAdmin` is nil | `api4/group.go:573` |
+| `GetGroupSyncable` / `UpsertGroupSyncable` / `UpdateGroupSyncable` / `DeleteGroupSyncable` | `channels/store/sqlstore/group_store.go` |
+| `SyncRolesAndMembership` and `RemoveMembershipsFromUnlinkedSyncable`, both dispatched through `Srv().Go` **after** the response is written | `app/syncables.go` |
+
+Four branch-level facts are recorded here because no test on this stack can reach them, and they
+are the ones a later port will get wrong:
+
+1. **`linkGroupSyncable`'s re-link deliberately discards the old row.** It upserts onto the
+   existing syncable only when `DeleteAt == 0`; a fresh link *or a re-link of a soft-deleted row*
+   starts from a zero-value `GroupSyncable`, so fields the caller did not set are not carried over
+   from the previous incarnation (group.go:385). A port that always patched the existing row would
+   resurrect `SchemeAdmin` from before the unlink.
+2. **The two handlers differ in exactly one place.** `GetGroupSyncable` returning 404 is tolerated
+   by `link` (it creates the row) and fatal to `patch`. Everything else — both verifiers, the
+   `Patch` call, the async sync — is identical.
+3. **Three routes, three response shapes.** `link` is a **201** with the marshalled syncable,
+   `patch` a 200 with the same, `unlink` a 200 with `ReturnStatusOK`'s `{"status":"OK"}`.
+4. **`RequireSyncableType` is unreachable through the mux.** The route pattern
+   `{syncable_type:teams|channels}` refuses a third value before any handler, and `params.go:269`
+   maps only those two strings onto `GroupSyncableType`. So its `SetInvalidURLParam("syncable_type")`
+   branch is dead code for every HTTP caller, which is why a third value is *forwarded* for
+   gorilla's own 404 rather than answered with a 400. Measured in
+   `parity::group_syncables::a_third_syncable_type_is_forwarded`.
+
+**What is owed:** `mm_store`'s `GroupSyncable` surface (the four CRUD methods plus
+`TeamMembersToAdd`/`ChannelMembersToAdd`), the two permission verifiers, and `app/syncables.go`'s
+membership reconciliation — behind whichever route needs them first. The team and channel member
+*writes* they would build on are already ported (`mm_app::team_member`, `mm_app::channel_member`),
+so the reconciliation loop is the blocker, not the membership primitives.

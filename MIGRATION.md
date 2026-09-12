@@ -11162,3 +11162,64 @@ targets, so `db_team_search` — a file name — matched no test function, ran z
 SURVIVED. The eight store lines now each name the single test that must catch them, and the batch
 is run with `MUTATE_STORE_TARGETS='--test db_team_search'`. `mutate.sh`'s own header warns about
 this; the warning was read and the trap still hit on the first attempt.
+
+
+## The three group syncable writes, and `api4/group.go` finished (2026-09-12)
+
+**+3, and 416 of 764 served in this tree** (measured with `scripts/routes.py` on `wt/syncables`,
+whose base is `main` at ab0a424 — 413 there; a sibling branch merging moves the absolute number,
+not the delta). `POST` and `DELETE /groups/{id}/{type}/{sid}/link` and
+`PUT /groups/{id}/{type}/{sid}/patch`. **`api4/group.go` is now 20/20** — no handler in the file
+is forwarded on its own account. The two `group_local.go` pairs are a different file and remain.
+
+- `crates/mm-api/src/groups.rs` — three handlers; `lib.rs` — the two registrations
+- `crates/mm-api/tests/parity/group_syncables.rs` — 7 tests
+- `docs/TECH_DEBT.md` — [D-390]
+- `scripts/mutations/group-syncables.plan`
+
+### What a reader would otherwise get wrong
+
+**The licence gate precedes four things here, not one.** `requireLicense` is the first statement
+of all three handlers, above `RequireGroupId`, `RequireSyncableId`, `RequireSyncableType` *and*
+`io.ReadAll(r.Body)`. So an unlicensed server answers one 501 to every combination of a bad id and
+an unparseable body, and there are four places a helpful port could answer early — all four wrong.
+
+**`RequireSyncableType` is dead code for every HTTP caller.** The route pattern
+`{syncable_type:teams|channels}` is an alternation of two literals, so gorilla refuses a third
+value before any handler runs, and `params.go:269` maps only those two strings onto
+`GroupSyncableType`. A third value is therefore **forwarded** for Go's own mux 404 rather than
+answered with the licence error or a 400 — two paths that look like one route, three possible
+answers.
+
+### The literal that could have un-served something, measured rather than argued
+
+`/groups/names` cost this project a served route once: axum prefers a static segment over
+`{group_id}` and does not backtrack across method routers. `link` and `patch` sit two parameters
+deeper, where nothing was registered, so they *should* shadow nothing — but that is an argument
+about matchit, not evidence. `every_group_route_this_server_answered_still_answers` re-asks all
+**twenty-two** rust-served pairs in the family (the twenty handlers plus the two methods re-claimed
+at the `/names` literal) and fails naming any pair that started being forwarded.
+
+### What is not here
+
+Everything behind the gate: the `GroupSyncable` CRUD surface, `verifyLinkUnlinkPermission` with
+its parent-team question, `verifySchemeAdminAssignmentPermission`, and `SyncRolesAndMembership`.
+[D-390] records what is owed and four branch-level facts no test on this stack can reach — chief
+among them that **a re-link of a soft-deleted syncable deliberately starts from a zero value**
+rather than patching the old row, so `SchemeAdmin` is not resurrected by an unlink/relink cycle.
+
+The team and channel member writes this family was sequenced behind are already ported
+(`mm_app::team_member`, `mm_app::channel_member`) and were **not** needed: the reconciliation loop
+in `app/syncables.go`, not the membership primitives, is what the licensed half actually blocks on.
+
+### Mutation tally
+
+`scripts/mutations/group-syncables.plan`: **15 run, 12 caught, 3 survived, 0 harness faults**,
+two of the survivors the controls.
+
+The third survivor is real and **cannot** be caught from this side. Swapping which handler is wired
+to `POST /link` and which to `DELETE /link` changes nothing observable: both stop at the same
+`requireLicense` 501, so the two responses are byte-identical. They diverge only behind the licence
+— `link` is a 201 carrying the syncable, `unlink` a 200 carrying `{"status":"OK"}` — so the line is
+kept in the plan as the cheapest check that [D-390] was really closed, rather than deleted for
+being inconvenient.
