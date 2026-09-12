@@ -11080,8 +11080,10 @@ member writes, so they sequence behind that family rather than behind this one.
 
 ## The team write family, and three Go behaviours that read backwards (2026-09-12)
 
-**396 → 402 of 764.** The six writes of `api4/team.go`: `createTeam`, `updateTeamPrivacy`,
-`deleteTeam` (archive arm), `removeTeamMember`, `searchTeams` and `invalidateAllEmailInvites`.
+**+6, and 413 of 764 served once this merged** (the branch measured 396 → 402 against a base
+that predated the group writes; the merged tree is the number that counts). The six writes of
+`api4/team.go`: `createTeam`, `updateTeamPrivacy`, `deleteTeam` (archive arm), `removeTeamMember`,
+`searchTeams` and `invalidateAllEmailInvites`.
 
 - `crates/mm-store/src/team_store.rs` — `Save`, `SearchAll`, its `count(*)` twin, `SearchOpen`
   and `SearchPrivate`
