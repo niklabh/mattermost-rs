@@ -1,0 +1,78 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id           AS \"id!\",\n                   channelid    AS \"channel_id!\",\n                   userid       AS \"user_id!\",\n                   message      AS \"message!\",\n                   status       AS \"status!\",\n                   denialreason AS \"denial_reason!\",\n                   createat     AS \"create_at!\",\n                   updateat     AS \"update_at!\",\n                   reviewedby   AS \"reviewed_by!\",\n                   reviewedat   AS \"reviewed_at!\"\n              FROM channeljoinrequests\n             WHERE channelid = $1 AND userid = $2 AND status = $3\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "channel_id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "user_id!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
+        "name": "message!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "status!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 5,
+        "name": "denial_reason!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "create_at!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 7,
+        "name": "update_at!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 8,
+        "name": "reviewed_by!",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 9,
+        "name": "reviewed_at!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "7cd01bdd9d52ce2423e954ea7b3fa3b891306af1fadc25a5f5bbe999aff1e454"
+}
