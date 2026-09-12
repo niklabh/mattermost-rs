@@ -9,25 +9,52 @@ correctness and idiomatic Rust conflict on the wire format, the wire format wins
 
 ---
 
-## Status: early, but it runs.
+## Status: phases 1-4 are live
 
-Phase 1 of 5 — the model crate — with one **vertical slice** through phases 2-4 landed to prove
-the architecture end to end. `GET /api/v4/users/me` is served from Rust, authenticated against a
-session row the Go server wrote, and returns bytes identical to Go's. Every other route is
-forwarded to the Go server and comes back unaltered.
+The model crate, the store, the app layer and the REST API all serve real traffic. `mm-api`
+listens on :8066, authenticates against session rows the **Go** server wrote, and forwards
+anything it has not migrated — so a client cannot tell which server answered. Three surfaces are
+up:
 
-The later crates are ported in dependency order; see [Layout](#layout) for what each one is and
-which phase it belongs to.
+- **the HTTP api4 router** — reads and writes across users, teams, channels, posts, threads,
+  files, emoji, webhooks, OAuth, roles, schemes, jobs, and the licence-gated families that answer
+  by refusing before they read anything;
+- **the local-mode admin API** — the same handlers on a unix socket with no session, which is
+  what `mmctl --local` talks to. It is a *second* router with its own proxy leg, so an unmigrated
+  local route still reaches the Go server's socket rather than a 404;
+- **`GET /api/v4/websocket`** — the upgrade, both pumps, and the fan-out hub in
+  `crates/mm-app/src/hub.rs`, `ShouldSendEvent`'s addressing rules included.
 
-**[`MIGRATION.md`](MIGRATION.md) is the authoritative ledger** — per-file status, test counts,
-and the non-obvious semantics each translation turned up. Progress is tracked there and only
-there. It is deliberately not summarised here: a README carrying counts is a README that is
-quietly wrong most of the time, and every merged file would otherwise drag an unrelated edit
-along with it.
+**No progress count lives in this file.** A README carrying counts is a README that is quietly
+wrong most of the time, and every merged route would otherwise drag an unrelated edit along with
+it. Ask the tree instead — `scripts/routes.py` derives the tally from the Go registrations and
+*both* axum routers:
 
-Three model files are explicitly **out of scope** and will be proxied to Go or generated rather
-than hand-translated: `client4.go` (a REST client, not server code), `permission.go`, and
-`config.go`.
+```sh
+scripts/routes.py                  # served / total route+method pairs, per api4 file
+scripts/routes.py --todo           # what is left on the HTTP router
+scripts/routes.py --todo --local   # ... including the unix-socket routes
+```
+
+The denominator is **every** api4 route+method pair, the local-mode socket API and the
+licensed/enterprise handlers included. A route no client calls is deferred, not dropped: the
+strangler proxy is test apparatus, and the end state is a Go server that is not running.
+
+**[`MIGRATION.md`](MIGRATION.md) is the authoritative ledger** — per-route status, test counts,
+and the non-obvious Go semantics each translation turned up. Progress is tracked there and only
+there.
+
+Phase 5 has no crate of its own yet. The hub lives in `mm-app` and the socket in `mm-api`,
+mirroring how Go splits `api4/websocket.go` from `app/platform`; `crates/mm-ws/` is an empty stub
+kept for the day fan-out is worth its own binary.
+
+**Out of scope**, to be proxied or generated rather than hand-translated: `client4.go`,
+`client4_route.go` and `websocket_client.go` (Go's own REST and websocket *clients*, not server
+code), and the `*_serial_gen.go` msgpack codecs, which encode a Go cache this server never
+populates. `config.go` and `permission.go` *are* ported, but **generated** — 1,300-odd config
+fields and 311 permission ids are exactly where a hand-copy mistypes a key in silence. `config.go`
+is the wire shape only; `SetDefaults`, `IsValid` and the `Sanitize`/`Clone` family are not
+ported.
 
 ---
 
@@ -74,9 +101,36 @@ lookup that reads the host's `/etc` — the generator emits Rust source instead 
 
 ---
 
+## A suite that passes on its first run is not evidence
+
+The oracle says our answer matches Go's. It does not say the *test* would have noticed if it
+didn't — a fixture where the right answer and the wrong answer coincide passes either way. So
+anything that ships logic is mutated afterwards:
+
+```sh
+scripts/mutate.sh <name> <file> <from> <to> [suite]    # one mutation, one verdict
+scripts/mutate-batch.sh scripts/mutations/<x>.plan     # a committed plan of them
+scripts/preflight-plans.sh                             # every plan, checked against the tree
+```
+
+A mutation flips a decision a reader could plausibly get wrong — predicate direction, check
+*order*, which column, which constant, off-by-one, a dropped `COALESCE` — and the run reports
+CAUGHT or SURVIVED. **A survivor is a finding about the tests, not a shrug:** in the
+`getChannelUnread` round three survivors each named a fixture where the right answer and the wrong
+answer coincided, and fixing the fixture is what closed them.
+
+Every run also carries **two no-op controls** (rename a binding, reorder two independent SELECT
+columns). If a control fails, the harness is measuring something other than the mutation and the
+whole run is void — which is not hypothetical: one plan scored 5 of 33 because the suite was
+talking to a stale server left on the port, and the controls are what said so. Plans keep their
+surviving mutations in their own header, so a later reader does not re-litigate them.
+
+---
+
 ## Getting started
 
-Requires Rust 1.85+ (edition 2024) and, to regenerate fixtures, Go 1.26+.
+Requires Rust 1.85+ (edition 2024). Go 1.26+ is needed to regenerate fixtures **and** to build the
+forward target — the Go server is compiled from the pinned source, not pulled as an image.
 
 ```sh
 # The Go source is a read-only reference, pinned to a fixed commit and never vendored.
@@ -87,63 +141,68 @@ git -C reference/mattermost remote add origin https://github.com/mattermost/matt
 git -C reference/mattermost fetch --depth 1 origin 9dfbaeca99f4096388fd1c048a9e6d1d0a86743e
 git -C reference/mattermost checkout FETCH_HEAD
 
-cargo test -p mm-model
+cargo test --workspace
 ```
 
-### Running the two servers
+`.sqlx/` is committed, so the workspace — compile-time checked queries included — builds and
+tests with no database and no Go clone at all. The suite runs in well under a minute; the handful
+of tests ignored for wall clock run under `scripts/slow-tests.sh`.
 
-**You probably don't need this.** Porting a model file needs `cargo test -p mm-model` and the
-committed fixtures, nothing else; `SQLX_OFFLINE=true` builds the whole workspace without a
-database, and the cross-server tests skip themselves unless you ask for them. Since no arm64
-image is published, the Go server runs under emulation on Apple silicon and is slow to boot —
-so start the stack when you need it, not by habit.
+### Running the stack
 
-You need it for exactly three things:
+Porting a route means asking both servers the same question and diffing the answers, so unlike the
+model-only sessions this repo started with, you want the stack up most of the time. It is there
+for three things:
 
 - **the schema** — this repo contains no DDL and never will; the Go server's migrations create
   every table `mm-store` reads
 - **the parity oracle** — the only way to claim our bytes match Go's is to ask Go for the same
-  request and diff. This is what caught both wrong beliefs in the vertical slice
-- **a forward target** — for exercising the proxy
-
-The Strangler Fig needs a Go server to forward to and a Postgres both servers share. Both are in
-`docker-compose.yml`; the Rust server runs on the host so it can be rebuilt without a container
-cycle.
+  request and diff. Nearly every wrong belief this project has corrected was corrected here
+- **a forward target** — for exercising the proxy, over the port and over the socket
 
 ```sh
-docker compose up -d          # postgres :5432, the Go server :8065
+docker compose up -d          # postgres :5432 — and postgres only
+scripts/go-server.sh start    # the pinned Go server, built from source, on :8065
 export DATABASE_URL=postgres://mmuser:mmuser_password@localhost:5432/mattermost
 cargo run -p mm-api           # :8066 — serves what is migrated, forwards the rest
 ```
 
-The image tag is **pinned** to the minor the reference SHA belongs to, and must stay pinned:
-`latest` silently drifted a minor ahead of the source and every parity claim in this repo was
-measured against the wrong server for a while. See D-130.
+Or `scripts/stack.sh up 0`, which does the first two and then seeds the fixture user, team and
+channel every parity suite needs. Seeding is idempotent — it does nothing when the login already
+works — so `up` and `seed` are safe to re-run. The first user created becomes the system admin,
+and no id is hardcoded anywhere, so that user, team and channel are the only fixture state the
+suites assume.
+
+**The Go server is no longer a container.** `scripts/go-server.sh` builds it from the pinned
+reference SHA and runs it on the host. The published image and `reference/mattermost/` are both
+"11.11.0" and are *not* the same code: rc1 answers `GET /api/v4/bots` with a `system_owned` field
+the pinned source has never heard of, and 404s routes the pinned source registers. A route whose
+live shape disagrees with the source cannot be ported honestly — matching the source produces a
+body the proxy's own target does not serve — so building the reference is what keeps "read the Go
+source" and "ask the forward target" the same question. That is D-130, closed by this build; the
+image remains in `docker-compose.yml` behind the `published-image` profile as a fallback, and the
+same entry is why any tag there must stay pinned — `latest` once drifted a minor ahead of the
+source, and every parity claim in the repo was measured against the wrong server for a while.
+Building natively also retired the qemu tax on arm64.
+
+Two route families are still absent from the forward target, and it is **not** skew:
+`api4/view.go`'s seven and `api4/channel_join_request.go`'s seven sit behind feature flags that are
+off at the pinned SHA. `scripts/go-boards.sh` runs a second Go server with
+`IntegratedBoards` on, on its own port, because turning the flag on in the main one would move the
+answers under routes already ported.
 
 **Both servers also share one configuration**, not just one database. `MM_CONFIG` points the Go
 server at the shared Postgres, so it keeps `model.Config` in a `Configurations` row instead of a
-`config.json` on a volume the Rust process cannot see — and `mm-api` reads that row at startup.
-If you have a container from before this change, recreate it (`docker compose up -d mattermost`)
-or `mm-api` will refuse to start and tell you so. See D-156.
+`config.json` on a volume the Rust process cannot see — and `mm-api` reads that row at startup,
+refusing to start and saying so if it is missing. See D-156.
 
-**On a fresh volume** the database has no users and no teams, and the tests need both. Two calls,
-after the server is up:
-
-```sh
-curl -X POST localhost:8065/api/v4/users -H 'Content-Type: application/json' \
-  -d '{"email":"slice@example.com","username":"sliceuser","password":"Slice-Test-1234"}'
-
-TOKEN=$(curl -si -X POST localhost:8065/api/v4/users/login -H 'Content-Type: application/json' \
-  -d '{"login_id":"slice@example.com","password":"Slice-Test-1234"}' | grep -i '^token:' | tr -d '\r' | awk '{print $2}')
-USER=$(curl -s localhost:8065/api/v4/users/me -H "Authorization: Bearer $TOKEN" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-TEAM=$(curl -s -X POST localhost:8065/api/v4/teams -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"name":"slice-team","display_name":"Slice Team","type":"O"}' | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
-curl -X POST "localhost:8065/api/v4/teams/$TEAM/members" -H "Authorization: Bearer $TOKEN" \
-  -H 'Content-Type: application/json' -d "{\"team_id\":\"$TEAM\",\"user_id\":\"$USER\"}"
-```
-
-The first user created becomes the system admin. No id is hardcoded anywhere — the tests discover
-what they need — so the values above are the only fixture state the suites assume.
+**Local mode is opt-in, and the two sockets must differ.** With
+`MM_SERVICESETTINGS_ENABLELOCALMODE=true`, `mm-api` binds its own socket (`MM_API_LOCAL_SOCKET`,
+default `/var/tmp/mmrs_local.socket`) and forwards unmigrated local routes to the Go server's
+(`MM_SERVICESETTINGS_LOCALMODESOCKETLOCATION`). Go's `startLocalModeServer` opens with
+`os.RemoveAll`, so pointing both at one path means whichever starts second unlinks the other's
+socket and then proxies to itself; `mm-api` refuses that configuration at startup rather than
+letting you discover it later.
 
 The Go server owns the schema and runs the migrations. **Never point a migration tool at this
 database from the Rust side** — the two would race, and Go's migrations are the reference.
@@ -156,8 +215,8 @@ curl -si localhost:8066/api/v4/system/ping | grep -i served-by     # -> go
 
 ## Several stacks at once
 
-A *stack* is one Postgres, one pinned Go server and one `mm-api`, sharing nothing with any other
-stack:
+Route work parallelises, and a *stack* is what makes that safe: one Postgres, one pinned Go
+server and one `mm-api`, sharing nothing with any other stack.
 
 ```
 stack k    postgres  5432 + k      go  8065 + 100k      mm-api  8066 + 100k
@@ -199,8 +258,18 @@ MM_STORE_DB=1 cargo test -p mm-app --test db_authorization
 ```
 
 The permission checks are gated the same way. They read the roles and users the Go server created,
-so what they assert is what the reference implementation would answer — subject to the version skew
-in `docs/TECH_DEBT.md` under D-130.
+so what they assert is what the reference implementation would answer.
+
+In practice neither gate is set by hand: `scripts/parity.sh` rebuilds `mm-api` from the current
+checkout, replaces whatever is bound to the stack's port with it, takes the stack lock and runs
+the suites with both gates set. **Identify a server by its port, never by its command line** — a
+stale server answering `/system/ping` has twice produced confident wrong answers here, once 36
+false failures and once a whole mutation plan's worth of false verdicts.
+
+Branches from several worktrees merge one at a time through `scripts/merge-worktrees.sh`, which
+re-runs the suite after each: four branches that each passed alone are not four branches that
+pass together, because the parity suites share fixture users, teams and channels and two routes
+that each sort correctly can still tie on a sort key once both sets exist.
 
 `.sqlx/` is committed, so `SQLX_OFFLINE=true cargo check --workspace` builds the compile-time
 checked queries with no database at all. Re-run `cargo sqlx prepare --workspace` after changing
@@ -221,10 +290,12 @@ Anything else appearing in `git status` is a signal worth reading.
 ### Definition of done for a change
 
 ```sh
-cargo fmt && cargo check --workspace && cargo clippy -- -D warnings && cargo test -p mm-model
+cargo fmt && cargo check --workspace && cargo clippy --all-targets -- -D warnings && cargo test --workspace
 ```
 
-Plus `gofmt -l reference/dump/` and `go vet ./...` if you touched the generator.
+Plus `scripts/mutate.sh` over anything with logic in it, and the tally reported — *N run, N
+caught, N controls survived*. Plus `gofmt -l reference/dump/` and `go vet ./...` if you touched
+the generator.
 
 ---
 
@@ -236,8 +307,9 @@ crates/
   mm-store/      phase 2  persistence (sqlx, Postgres); depends on mm-model
   mm-app/        phase 3  business logic; depends on mm-store; knows nothing about HTTP
   mm-api/        phase 4  REST + the Strangler Fig proxy; depends on mm-app
-  mm-ws/         phase 5  WebSocket hub; separate binary so fan-out scales independently
+  mm-ws/         phase 5  empty stub; the hub is in mm-app and the socket in mm-api for now
 fixtures/        generated parity fixtures — never edit by hand
+scripts/         the harness: stacks, worktrees, parity runs, mutation plans
 reference/
   mattermost/    pinned Go source, read-only, gitignored
   dump/          the fixture generator and behavioural oracles
@@ -245,7 +317,7 @@ docs/
   MIGRATION_STRATEGY.md   the plan: phases, sequencing, proxy cutover
   TECH_DEBT.md            what we owe — deferred work and known divergences
   PROMPTS.md              per-phase execution prompts
-MIGRATION.md     THE LEDGER: per-file status and hard-won semantics
+MIGRATION.md     THE LEDGER: per-route status and hard-won semantics
 CLAUDE.md        agent context — read this before contributing
 ```
 
@@ -259,9 +331,10 @@ Sessions are short and context does not carry across them. Three files carry it 
 - **`MIGRATION.md`** — what is translated, and every non-obvious Go semantic discovered while
   doing it. Most entries cost real time to find and are not recoverable by re-reading the source
   casually.
-- **`docs/TECH_DEBT.md`** — numbered entries, each `OPEN` (owed), `ACCEPTED` (a deliberate
-  permanent divergence) or `CLOSED` (paid off). Anything skipped, approximated, or
-  found-but-not-fixed gets an entry here.
+- **`docs/TECH_DEBT.md`** — a backlog, not a diary: numbered entries for work genuinely
+  deferred, each `OPEN` (owed), `ACCEPTED` (a deliberate permanent divergence) or `CLOSED` (paid
+  off). A permanent finding belongs in a doc comment on the thing it constrains and a two-sentence
+  `MIGRATION.md` row; only something actually owed gets an entry here.
 - **`CLAUDE.md`** — the rules a contributor (human or agent) is expected to follow.
 
 ---
@@ -270,10 +343,14 @@ Sessions are short and context does not carry across them. Three files carry it 
 
 Read [`CLAUDE.md`](CLAUDE.md) first. The rules that matter most:
 
+- **The unit of work is a route, not a file.** Pick a route; port the handler, the app function
+  and the store function behind it. Porting a model file with no route to exercise it is how this
+  project accumulated ~20,000 lines of unreachable code.
 - **Never edit `fixtures/` by hand.** Extend the generator and re-run it.
 - **Every translated file ships with tests in the same file** — serialization parity against a
   generated fixture, and a behavioural test per branch for anything with logic.
 - **Never claim parity you did not verify with a test.** If you guessed at a JSON tag, say so.
+- **Mutate what you ship.** A suite that passes on its first run has not been tested yet.
 - No `unwrap`/`expect`/`panic!` in library code. No `.clone()` to appease the borrow checker.
 - The Go tree under `reference/mattermost/` is **read-only**.
 
