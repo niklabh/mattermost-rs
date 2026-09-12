@@ -231,8 +231,145 @@ async fn an_anonymous_signup_agrees_field_for_field() {
     assert_eq!(rs_user.get("password"), None);
     assert_eq!(go_user.get("password"), None);
 
+    // The three preferences `createUserOrGuest` writes after the insert. Nothing in the response
+    // mentions them and no route this server serves reads them back, so the table is the only
+    // oracle — and a port that skipped the write, or wrote a different value, would be invisible
+    // to every other assertion in this file.
+    //
+    // `tutorial_step`'s **name is the user's own id**, so it is normalised to a placeholder
+    // before the two sets are compared; the other two are constants.
+    if let Some(pool) = pool().await {
+        let read = async |user: &serde_json::Value| {
+            let id = user["id"].as_str().expect("an id").to_owned();
+            let mut rows: Vec<(String, String, String)> = sqlx::query_as(
+                "SELECT category, name, value FROM preferences WHERE userid = $1
+                 ORDER BY category, name",
+            )
+            .bind(&id)
+            .fetch_all(&pool)
+            .await
+            .expect("the preferences read");
+            for row in &mut rows {
+                if row.1 == id {
+                    row.1 = "<the user's own id>".to_owned();
+                }
+            }
+            rows
+        };
+        let go_prefs = read(&go_user).await;
+        let rs_prefs = read(&rs_user).await;
+        assert_eq!(go_prefs, rs_prefs, "the created users' preferences differ");
+        assert_eq!(
+            go_prefs.len(),
+            3,
+            "createUserOrGuest writes exactly three preferences: {go_prefs:?}"
+        );
+    }
+
     scrub("anongo").await;
     scrub("anonrs").await;
+}
+
+/// A create publishes exactly one `new_user`, carrying only the new user's id.
+///
+/// # The wait and the count are both scoped to this test's own account
+///
+/// An unscoped `collect_until(|f| f["event"] == "new_user")` is satisfied by any other suite's
+/// create, and the count beside it then counts the stranger's frame. Both the predicate and the
+/// tally below filter on `data.user_id` being the id this test just allocated, so a concurrent
+/// create cannot make this pass or fail.
+///
+/// The event is deliberately *not* the user object: "this message goes to everyone", so it
+/// carries an id and a client fetches the profile itself under its own permissions.
+#[tokio::test]
+async fn a_create_publishes_one_new_user_event() {
+    if !stack_enabled() {
+        return;
+    }
+    let http = client();
+    let admin = go_minted_token(&http).await;
+    scrub("wsgo").await;
+    scrub("wsrs").await;
+
+    let mut go_probe = common::SocketProbe::connect(GO, &admin).await;
+    let mut rs_probe = common::SocketProbe::connect(RUST, &admin).await;
+
+    let mut ids = Vec::new();
+    for (base, tag) in [(GO, "wsgo"), (RUST, "wsrs")] {
+        let (status, user) = post(
+            &http,
+            base,
+            "/api/v4/users",
+            None,
+            serde_json::json!({
+                "email": new_email(tag),
+                "username": new_username(tag),
+                "password": PLAIN_USER_PASSWORD,
+            }),
+        )
+        .await;
+        assert_eq!(status, 201, "{tag}: {user}");
+        ids.push(user["id"].as_str().expect("an id").to_owned());
+    }
+
+    let window = std::time::Duration::from_secs(5);
+    let mine = |frames: &[serde_json::Value], id: &str| -> Vec<serde_json::Value> {
+        frames
+            .iter()
+            .filter(|frame| {
+                frame.get("event").and_then(|e| e.as_str()) == Some("new_user")
+                    && frame
+                        .get("data")
+                        .and_then(|d| d.get("user_id"))
+                        .and_then(|v| v.as_str())
+                        == Some(id)
+            })
+            .cloned()
+            .collect()
+    };
+
+    for (probe, id, who) in [
+        (&mut go_probe, &ids[0], "Go"),
+        (&mut rs_probe, &ids[1], "we"),
+    ] {
+        let id = id.clone();
+        let arrived = probe
+            .collect_until(window, move |frames| !mine(frames, &id).is_empty())
+            .await;
+        assert!(
+            arrived,
+            "{who} published no new_user for the created account"
+        );
+    }
+
+    // Wait out a further window so a *second* frame for the same id would have arrived.
+    for probe in [&mut go_probe, &mut rs_probe] {
+        probe
+            .collect_for(std::time::Duration::from_millis(600))
+            .await;
+    }
+
+    for (probe, id, who) in [(&go_probe, &ids[0], "Go"), (&rs_probe, &ids[1], "we")] {
+        let frames = mine(&probe.frames(), id);
+        assert_eq!(
+            frames.len(),
+            1,
+            "{who} published {} new_user frames for its own account",
+            frames.len()
+        );
+        let data = frames[0]["data"].as_object().expect("a data object");
+        assert_eq!(
+            data.keys().collect::<Vec<_>>(),
+            vec!["user_id"],
+            "{who}: new_user must carry the id and nothing else"
+        );
+        assert_eq!(frames[0]["broadcast"]["user_id"], serde_json::json!(""));
+        assert_eq!(frames[0]["broadcast"]["channel_id"], serde_json::json!(""));
+        assert_eq!(frames[0]["broadcast"]["team_id"], serde_json::json!(""));
+    }
+
+    scrub("wsgo").await;
+    scrub("wsrs").await;
 }
 
 /// `SanitizeInput(false)` clears what an anonymous caller is not allowed to assert.
@@ -416,22 +553,56 @@ async fn the_creation_refusals_agree_id_for_id() {
     assert_eq!((go_status, rs_status), (400, 400), "a malformed username");
     assert_error_bodies_match_except_known_gaps(&go_body, &rs_body, "a malformed username");
 
-    // A duplicate. Create once through Go, then ask both servers to do it again.
-    let dupe = serde_json::json!({
-        "email": new_email("dupe"),
-        "username": new_username("dupe"),
-        "password": PLAIN_USER_PASSWORD,
-    });
-    let (created, _) = post(&http, GO, "/api/v4/users", None, dupe.clone()).await;
+    // Duplicates, and **the two constraints are tested separately on purpose**. A body that
+    // repeats both the e-mail and the username violates both unique indexes at once, and
+    // Postgres reports whichever index it happened to check — so the id would be
+    // `email_exists` or `username_exists` depending on nothing the port controls, and a test
+    // that sent both could not tell the two apart. One duplicated field each.
+    let (created, _) = post(
+        &http,
+        GO,
+        "/api/v4/users",
+        None,
+        serde_json::json!({
+            "email": new_email("dupe"),
+            "username": new_username("dupe"),
+            "password": PLAIN_USER_PASSWORD,
+        }),
+    )
+    .await;
     assert_eq!(created, 201, "the fixture account could not be created");
 
-    let raw = serde_json::to_vec(&dupe).expect("a body");
-    let (go_status, go_body) = post_raw(&http, GO, "/api/v4/users", None, &raw).await;
-    let (rs_status, rs_body) = post_raw(&http, RUST, "/api/v4/users", None, &raw).await;
-    assert_eq!((go_status, rs_status), (400, 400), "a duplicate account");
-    assert_error_bodies_match_except_known_gaps(&go_body, &rs_body, "a duplicate account");
+    for (case, expected, body) in [
+        (
+            "a duplicate e-mail",
+            "app.user.save.email_exists.app_error",
+            serde_json::json!({
+                "email": new_email("dupe"),
+                "username": new_username("dupemail"),
+                "password": PLAIN_USER_PASSWORD,
+            }),
+        ),
+        (
+            "a duplicate username",
+            "app.user.save.username_exists.app_error",
+            serde_json::json!({
+                "email": new_email("dupename"),
+                "username": new_username("dupe"),
+                "password": PLAIN_USER_PASSWORD,
+            }),
+        ),
+    ] {
+        let raw = serde_json::to_vec(&body).expect("a body");
+        let (go_status, go_body) = post_raw(&http, GO, "/api/v4/users", None, &raw).await;
+        let (rs_status, rs_body) = post_raw(&http, RUST, "/api/v4/users", None, &raw).await;
+        assert_eq!((go_status, rs_status), (400, 400), "{case}");
+        let go = assert_error_bodies_match_except_known_gaps(&go_body, &rs_body, case);
+        assert_eq!(go["id"], serde_json::json!(expected), "{case}");
+    }
 
-    scrub("dupe").await;
+    for tag in ["dupe", "dupemail", "dupename"] {
+        scrub(tag).await;
+    }
 }
 
 /// A request carrying `?t=` or `?iid=` is forwarded, and both spellings behave identically across

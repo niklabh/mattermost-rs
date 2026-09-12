@@ -1,0 +1,51 @@
+# Mutation plan for user creation and the two e-mail-token sends.
+#
+#   scripts/mutate-batch.sh scripts/mutations/user-creates.plan
+#
+# The decisions worth mutating here are the ones a reader could plausibly get backwards and whose
+# wrong answer is a *successful* response:
+#
+#   * `IsEmpty`'s negation, which is the difference between a new signup being a plain member and
+#     being a system administrator;
+#   * the open-server gate's `&&`, whose `||` closes signup on a server that allows it;
+#   * the locale reset in both directions — never firing keeps `zz`, always firing discards `fr`
+#     — and the *setting* it resets to;
+#   * the password guard's `AuthService == ""`, whose inversion admits a one-character password;
+#   * `CheckEmailDomain`'s empty-list case, which is "allow" and reads like "deny";
+#   * which query parameter forwards, and whether it forwards at all: a create that served the
+#     `?t=` branch would allocate an account Go also allocates;
+#   * `SanitizeInput`'s admin argument in both directions — one lets an anonymous signup verify
+#     its own address, the other discards a system admin's;
+#   * the hardened-mode rewrite, which turns three 400s into a 200 and is off on this stack;
+#   * `SanitizeProfile(user, true)` on the verify-member reply.
+#
+# NOT mutated, and why: `is_first_user_account`'s `include_deleted: true`. Nothing reachable
+# through the REST API produces the input that separates it from `false` — it would need a
+# database whose every user row is soft-deleted — so the line would be a guaranteed survivor and
+# a survivor that says nothing. It is pinned by its doc comment instead.
+#
+# The last two lines are the no-op controls and must SURVIVE.
+store-is-empty-answers-backwards	crates/mm-store/src/user_store.rs	let empty = !has_rows.unwrap_or(false);	let empty = has_rows.unwrap_or(false);	api	user_creates
+app-open-server-gate-is-an-or	crates/mm-app/src/user_create.rs	if !first && !self.config().enable_open_server {	if !first || !self.config().enable_open_server {	api	user_creates
+app-new-users-get-the-admin-role	crates/mm-app/src/user_create.rs	user.roles = SYSTEM_USER_ROLE_ID.to_owned();	user.roles = SYSTEM_ADMIN_ROLE_ID.to_owned();	api	user_creates
+app-locale-reset-never-fires	crates/mm-app/src/user_create.rs	if !crate::i18n::is_supported_locale(&user.locale) {	if false {	api	user_creates
+app-locale-reset-always-fires	crates/mm-app/src/user_create.rs	if !crate::i18n::is_supported_locale(&user.locale) {	if true {	api	user_creates
+app-locale-default-reads-the-wrong-setting	crates/mm-app/src/user_create.rs	user.locale = self.config().default_client_locale.clone();	user.locale = self.config().restrict_creation_to_domains.clone();	api	user_creates
+app-password-is-checked-only-for-sso-users	crates/mm-app/src/user_create.rs	if user.auth_service.is_empty() {	if !user.auth_service.is_empty() {	api	user_creates
+app-an-empty-domain-list-refuses-everything	crates/mm-app/src/user_create.rs	    if domains.is_empty() {	    if !domains.is_empty() {	api	user_creates
+app-domain-match-drops-the-at-sign	crates/mm-app/src/user_create.rs	.any(|domain| lowered.ends_with(&format!("@{domain}")))	.any(|domain| lowered.ends_with(domain))	unit	user_create::tests
+app-save-error-map-swaps-the-two-fields	crates/mm-app/src/user_create.rs	"email" => "app.user.save.email_exists.app_error",	"email" => "app.user.save.username_exists.app_error",	unit	user_create::tests
+app-verified-flag-is-written-backwards	crates/mm-app/src/user_create.rs	if user.email_verified {\n            // Go logs and continues	if !user.email_verified {\n            // Go logs and continues	api	user_creates
+api-token-branch-does-not-forward	crates/mm-api/src/user_creates.rs	if !token_id.is_empty() {	if token_id.is_empty() {	api	user_creates
+api-invite-branch-does-not-forward	crates/mm-api/src/user_creates.rs	if !invite_id.is_empty() {	if invite_id.is_empty() {	api	user_creates
+api-sanitize-input-always-trusts-the-caller	crates/mm-api/src/user_creates.rs	user.sanitize_input(is_admin);	user.sanitize_input(true);	api	user_creates
+api-sanitize-input-never-trusts-the-caller	crates/mm-api/src/user_creates.rs	user.sanitize_input(is_admin);	user.sanitize_input(false);	api	user_creates
+api-create-answers-two-hundred	crates/mm-api/src/user_creates.rs	StatusCode::CREATED,	StatusCode::OK,	api	user_creates
+api-admin-branch-is-never-taken	crates/mm-api/src/user_creates.rs	let created = if is_admin {	let created = if false {	api	user_creates
+api-verification-send-serves-the-matched-address	crates/mm-api/src/user_creates.rs	if state.app.get_user_for_login("", &email).await.is_err() {	if state.app.get_user_for_login("", &email).await.is_ok() {	api	user_creates
+api-sso-refusal-reports-the-remote-id	crates/mm-api/src/user_creates.rs	        Some("api.user.send_password_reset.sso.app_error")	        Some("api.user.send_password_reset.send.app_error")	api	user_creates
+api-hardened-mode-is-inverted	crates/mm-api/src/user_creates.rs	        if hardened {	        if !hardened {	api	user_creates
+api-verify-member-sanitizes-as-a-member	crates/mm-api/src/user_creates.rs	state.app.sanitize_profile(&mut user, true);	state.app.sanitize_profile(&mut user, false);	api	user_creates
+api-verify-member-skips-the-permission-check	crates/mm-api/src/user_creates.rs	    if !state\n        .app\n        .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)\n        .await\n    {	    if !state\n        .app\n        .session_has_permission_to(&session.0, &PERMISSION_MANAGE_SYSTEM)\n        .await\n        || true\n    {	api	user_creates
+control-rename-the-first-account-binding	crates/mm-app/src/user_create.rs	let first = self.is_first_user_account().await;\n        tracing::Span::current().record("first_account", first);\n        if !first && !self.config().enable_open_server {	let is_first = self.is_first_user_account().await;\n        tracing::Span::current().record("first_account", is_first);\n        if !is_first && !self.config().enable_open_server {	api	user_creates
+control-reorder-two-span-records	crates/mm-api/src/user_creates.rs	        tracing::Span::current().record("forwarded", true);\n        tracing::Span::current().record("branch", "token");	        tracing::Span::current().record("branch", "token");\n        tracing::Span::current().record("forwarded", true);	api	user_creates
