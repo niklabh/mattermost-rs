@@ -1026,6 +1026,12 @@ func main() {
 	}
 	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_channel_view.json"))
 
+	if err := writeChannelJoinRequestBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: channel join request behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("wrote %s\n", filepath.Join(*out, "behaviour_channel_join_request.json"))
+
 	if err := writeChannelDataBehaviourFixture(*out); err != nil {
 		fmt.Fprintf(os.Stderr, "FAIL: channel data behaviour fixture: %v\n", err)
 		os.Exit(1)
