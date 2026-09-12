@@ -11,6 +11,7 @@ pub mod bot;
 pub mod brand;
 pub mod channel;
 pub mod channel_create;
+pub mod channel_join_request;
 pub mod channel_member;
 pub mod channel_view;
 pub mod channel_write;

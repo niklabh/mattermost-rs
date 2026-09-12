@@ -495,6 +495,18 @@ pub struct Config {
     /// See [`Config::feature_flag_integrated_boards`].
     pub feature_flag_post_attributes: bool,
 
+    /// `FeatureFlags.DiscoverableChannels` (feature_flags.go:208, defaulted **`false`** at :208).
+    ///
+    /// The registration `if` of `initChannelJoinRequestRoutes` (api4/channel_join_request.go:18):
+    /// with it off, gorilla/mux has never heard of any of the seven join-request routes and
+    /// answers `api.context.404.app_error`. It also turns on `serveDiscoverableNonMember` in
+    /// `getChannel` and the `discoverable` arms of `createChannel`/`patchChannel`, which are
+    /// [D-153]'s pin — so a deployment that sets it needs those three ported too.
+    ///
+    /// Environment-or-default like [`Config::feature_flag_burn_on_read`]: `FeatureFlags` never
+    /// reaches the persisted document, which is exactly what [D-153] records.
+    pub feature_flag_discoverable_channels: bool,
+
     /// `ServiceSettings.CollapsedThreads` (config.go:485, defaulted **`"always_on"`** at :982).
     ///
     /// **The default short-circuits the preference lookup entirely.**
@@ -874,6 +886,8 @@ impl Default for Config {
             feature_flag_integrated_boards: false,
             feature_flag_managed_channel_categories: false,
             feature_flag_post_attributes: false,
+            // feature_flags.go:208 — `false`, like the other four.
+            feature_flag_discoverable_channels: false,
             // feature_flags.go:185 — **`true`**, and the only one of the five that is.
             feature_flag_classification_markings: true,
             // config.go:982 — `new(CollapsedThreadsAlwaysOn)`.
@@ -1244,6 +1258,11 @@ impl Config {
                 "MM_FEATUREFLAGS_POSTATTRIBUTES",
                 default.feature_flag_post_attributes,
             ),
+            feature_flag_discoverable_channels: lookup_bool(
+                lookup,
+                "MM_FEATUREFLAGS_DISCOVERABLECHANNELS",
+                default.feature_flag_discoverable_channels,
+            ),
             collapsed_threads: lookup("MM_SERVICESETTINGS_COLLAPSEDTHREADS")
                 .unwrap_or(default.collapsed_threads),
             thread_auto_follow: lookup_bool(
@@ -1420,6 +1439,7 @@ impl Config {
                 .feature_flag_managed_channel_categories,
             feature_flag_classification_markings: default.feature_flag_classification_markings,
             feature_flag_post_attributes: default.feature_flag_post_attributes,
+            feature_flag_discoverable_channels: default.feature_flag_discoverable_channels,
             collapsed_threads: service
                 .collapsed_threads
                 .unwrap_or(default.collapsed_threads),
