@@ -13,6 +13,7 @@
 //! - `getTeamMembersByIds` — `POST /api/v4/teams/{team_id}/members/ids`
 //! - `updateTeamPrivacy` — `PUT /api/v4/teams/{team_id}/privacy`
 //! - `searchTeams` — `POST /api/v4/teams/search`
+//! - `createTeam` — `POST /api/v4/teams`
 
 use axum::body::Body;
 use axum::extract::{Path, Request, State};
@@ -20,11 +21,14 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use mm_app::team::TeamWrite;
 use mm_model::permission::{
+    PERMISSION_CREATE_TEAM, PERMISSION_INVITE_USER, PERMISSION_MANAGE_TEAM,
+    PERMISSION_SYSCONSOLE_WRITE_USER_MANAGEMENT_PERMISSIONS,
+};
+use mm_model::permission::{
     PERMISSION_EDIT_OTHER_USERS, PERMISSION_LIST_PRIVATE_TEAMS, PERMISSION_LIST_PUBLIC_TEAMS,
     PERMISSION_MANAGE_SYSTEM, PERMISSION_SYSCONSOLE_READ_COMPLIANCE_DATA_RETENTION_POLICY,
     PERMISSION_SYSCONSOLE_READ_USER_MANAGEMENT_USERS, PERMISSION_VIEW_TEAM, make_permission_error,
 };
-use mm_model::permission::{PERMISSION_INVITE_USER, PERMISSION_MANAGE_TEAM};
 use mm_model::team::{Team, TeamPatch};
 
 use crate::AppState;
@@ -1779,6 +1783,202 @@ pub async fn restore_team(
     match state.app.get_team(&team_id).await {
         Ok(team) => sanitized_team_response(&state, &session, team).await,
         Err(err) => ApiError::from(err).into_response(),
+    }
+}
+
+/// Port of `creatorCanInviteUsersOnTeam` (api4/team.go:158).
+///
+/// "Will the creator hold `invite_user` on the team once it exists?" — asked **twice** by
+/// `createTeam`, once as a gate and once to decide whether the reply carries an invite id, and
+/// the second call sees the *stored* team rather than the submitted one.
+///
+/// Three arms, in order:
+///
+/// 1. the session already holds `invite_user` at **system** scope → yes, without reading anything;
+/// 2. the team names a non-empty scheme → the scheme's `DefaultTeamUserRole` and
+///    `DefaultTeamAdminRole` are asked. **A scheme that cannot be read is a `false`, not an
+///    error** — Go logs and carries on, so an unreadable scheme silently strips the invite id
+///    from the reply rather than failing the create;
+/// 3. otherwise the built-in `team_user` and `team_admin`.
+///
+/// The last arm is why a create normally succeeds with an invite id: `team_user` grants
+/// `invite_user` on a stock server, and the creator is about to become a team member. The
+/// creator's *session* does not reflect that yet, which is exactly why Go asks the roles rather
+/// than the session.
+async fn creator_can_invite_users_on_team(
+    state: &AppState,
+    session: &AuthenticatedSession,
+    team: &Team,
+) -> bool {
+    if state
+        .app
+        .session_has_permission_to(&session.0, &PERMISSION_INVITE_USER)
+        .await
+    {
+        return true;
+    }
+
+    let roles = match team.scheme_id.as_deref().filter(|id| !id.is_empty()) {
+        Some(scheme_id) => match state.app.get_scheme(scheme_id).await {
+            Ok(scheme) => vec![
+                scheme.default_team_user_role.clone(),
+                scheme.default_team_admin_role.clone(),
+            ],
+            Err(err) => {
+                tracing::warn!(
+                    error = %err,
+                    scheme_id,
+                    "Failed to fetch scheme while checking invite permission for new team"
+                );
+                return false;
+            }
+        },
+        None => vec![
+            mm_model::role::TEAM_USER_ROLE_ID.to_owned(),
+            mm_model::role::TEAM_ADMIN_ROLE_ID.to_owned(),
+        ],
+    };
+
+    state
+        .app
+        .roles_grant_permission(&roles, &PERMISSION_INVITE_USER.id)
+        .await
+}
+
+/// Port of `createTeam` (api4/team.go:80) — `POST /api/v4/teams`.
+///
+/// # The refusal for "you may not create teams" is **not** a permission error
+///
+/// `model.NewAppError("createTeam", "api.team.is_team_creation_allowed.disabled.app_error", nil,
+/// "", http.StatusForbidden)` — a 403 with an id that names team *creation being disabled*, where
+/// every other gate on this route calls `SetPermissionError`. A client branching on the id sees
+/// the difference, and `SetPermissionError` would also fill `params` with a permission name this
+/// answer does not carry.
+///
+/// # The submitted `email` is discarded
+///
+/// The handler lower-cases it, and then `CreateTeamWithUser` overwrites the field with the
+/// creator's own address before anything is written. So the lower-casing is dead on this route —
+/// reproduced anyway, because it is one `strings.ToLower` away from mattering if the assignment
+/// ever moves.
+///
+/// # The reply's invite id is decided a second time
+///
+/// After the team exists, `creatorCanInviteUsersOnTeam(rteam)` runs **again** and blanks
+/// `InviteId` when it says no. So the 201 body of a create by a caller who cannot invite carries
+/// `"invite_id": ""` — the team has one, this caller is simply not shown it. Dropping that second
+/// call hands out a working invite link.
+///
+/// # What is deliberately not here
+///
+/// - `PrivacySettings.UseAnonymousURLs`, which randomises the team's name. Go ANDs it with
+///   `MinimumEnterpriseAdvancedLicense`, false on this Team Edition deployment for the reasons
+///   set out on [`mm_app::App::team_membership_access_control_enabled`], so the branch is dark.
+/// - The cloud team-limit check, gated on `License().IsCloud()` — likewise false.
+///
+/// Both are read from the Go source and never exercised; nothing here is a claim about them.
+///
+/// # Wire format
+///
+/// **201**, and `json.NewEncoder` leaves a trailing newline.
+#[tracing::instrument(skip_all, fields(user_id = %session.0.user_id, team_id))]
+pub async fn create_team(
+    State(state): State<AppState>,
+    session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    let bytes = match axum::body::to_bytes(request.into_body(), usize::MAX).await {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            tracing::warn!(error = %err, "could not read the request body");
+            return ApiError::invalid_param("team").into_response();
+        }
+    };
+    let mut team: Team = match decode_one_from_json::<Option<Team>>(&bytes) {
+        Ok(decoded) => decoded.unwrap_or_default(),
+        Err(err) => {
+            tracing::debug!(error = %err, "team body did not decode");
+            return ApiError::invalid_param("team").into_response();
+        }
+    };
+
+    // `strings.ToLower`, the *simple* mapping — see `go_to_lower`. Overwritten downstream; see
+    // the note above.
+    team.email = mm_model::utils::go_to_lower(&team.email);
+
+    if !state
+        .app
+        .session_has_permission_to(&session.0, &PERMISSION_CREATE_TEAM)
+        .await
+    {
+        return ApiError::from(mm_model::utils::AppError::new(
+            "createTeam",
+            "api.team.is_team_creation_allowed.disabled.app_error",
+            None,
+            String::new(),
+            403,
+        ))
+        .into_response();
+    }
+
+    // `team.SchemeId != nil` — **presence**, so `{"scheme_id": ""}` needs the permission too.
+    if team.scheme_id.is_some()
+        && !state
+            .app
+            .session_has_permission_to(
+                &session.0,
+                &PERMISSION_SYSCONSOLE_WRITE_USER_MANAGEMENT_PERMISSIONS,
+            )
+            .await
+    {
+        return ApiError::from(*make_permission_error(
+            &session.0,
+            &[&PERMISSION_SYSCONSOLE_WRITE_USER_MANAGEMENT_PERMISSIONS],
+        ))
+        .into_response();
+    }
+
+    // Matching `updateTeam`/`patchTeam`: asking for open invitations or an allowed-domains list
+    // needs `invite_user`. `AllowedDomains != ""` is a value check where `SchemeId` above is a
+    // presence check, one line apart.
+    if (team.allow_open_invite || !team.allowed_domains.is_empty())
+        && !creator_can_invite_users_on_team(&state, &session, &team).await
+    {
+        return ApiError::from(*make_permission_error(
+            &session.0,
+            &[&PERMISSION_INVITE_USER],
+        ))
+        .into_response();
+    }
+
+    let mut created = match state
+        .app
+        .create_team_with_user(&mut team, &session.0.user_id)
+        .await
+    {
+        Ok(created) => created,
+        Err(err) => return ApiError::from(err).into_response(),
+    };
+    tracing::Span::current().record("team_id", &created.id);
+
+    if !creator_can_invite_users_on_team(&state, &session, &created).await {
+        created.invite_id = String::new();
+    }
+
+    match mm_model::utils::go_json_marshal(&created) {
+        Ok(json) => (
+            StatusCode::CREATED,
+            [
+                ("Content-Type", "application/json"),
+                ("x-mmrs-served-by", "rust"),
+            ],
+            json + "\n",
+        )
+            .into_response(),
+        Err(err) => {
+            tracing::warn!(error = %err, "Error while writing response");
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
     }
 }
 

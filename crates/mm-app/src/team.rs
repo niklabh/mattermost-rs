@@ -11,6 +11,7 @@ use mm_model::team_search::TeamSearch;
 use mm_model::user::MARK_UNREAD_NOTIFY_PROP;
 use mm_model::utils::{AppError, AppResult};
 use mm_store::TeamStore;
+use mm_store::channel_store::ChannelStore;
 use mm_store::team_store::TeamMembersGetOptions;
 
 use crate::App;
@@ -640,6 +641,81 @@ mod tests {
             "the image is mattermost-team-edition and Licenses holds no rows, so \
              MinimumEnterpriseAdvancedLicense is false and the whole ABAC gate is dark"
         );
+    }
+
+    /// `CreateTeam`'s six-arm error table, one case per arm. The two `InvalidInput` arms differ
+    /// only in which entity and field the store named, and they produce different ids at the same
+    /// status — so a transcription that collapsed them would still be a 400 and still be wrong.
+    #[test]
+    fn the_create_error_table_keys_on_entity_and_field() {
+        use mm_store::StoreError;
+        let cases: Vec<(StoreError, &str, i32)> = vec![
+            (
+                StoreError::InvalidInput {
+                    entity: "Team",
+                    field: "id",
+                    value: "t".to_owned(),
+                },
+                "store.sql_team.save_team.existing.app_error",
+                400,
+            ),
+            (
+                StoreError::InvalidInput {
+                    entity: "Team",
+                    field: "Name",
+                    value: "t".to_owned(),
+                },
+                "app.team.save.existing.app_error",
+                400,
+            ),
+            (
+                StoreError::InvalidInput {
+                    entity: "Channel",
+                    field: "DeleteAt",
+                    value: "1".to_owned(),
+                },
+                "store.sql_channel.save.archived_channel.app_error",
+                400,
+            ),
+            (
+                StoreError::InvalidInput {
+                    entity: "Channel",
+                    field: "Type",
+                    value: "D".to_owned(),
+                },
+                "store.sql_channel.save.direct_channel.app_error",
+                400,
+            ),
+            (
+                StoreError::InvalidInput {
+                    entity: "Channel",
+                    field: "Id",
+                    value: "c".to_owned(),
+                },
+                "store.sql_channel.save_channel.existing.app_error",
+                400,
+            ),
+            (
+                StoreError::LimitExceeded {
+                    what: "Channel",
+                    count: 9,
+                    details: String::new(),
+                },
+                "store.sql_channel.save_channel.limit.app_error",
+                400,
+            ),
+            (
+                StoreError::OutOfBounds { limit: 1 },
+                "app.team.save.app_error",
+                500,
+            ),
+        ];
+        for (err, id, status) in cases {
+            let mapped = create_team_error(err);
+            assert_eq!(mapped.id, id);
+            assert_eq!(mapped.status_code, status, "{id}");
+            assert_eq!(mapped.where_, "CreateTeam", "{id}");
+        }
     }
 
     /// Go's own answer for all sixteen combinations of the four inputs to
@@ -1331,6 +1407,144 @@ impl App {
             })
     }
 
+    /// Port of `app.App.CreateTeam` (app/team.go:104) wrapped around
+    /// `TeamService.CreateTeam` (app/teams/teams.go).
+    ///
+    /// # The invite id is cleared, then re-minted
+    ///
+    /// `team.InviteId = ""` is the **first** line of `TeamService.CreateTeam`, and `PreSave` mints
+    /// a new one because the field is empty. So a client-supplied `invite_id` is discarded rather
+    /// than honoured, and a port that skipped the clear would let a caller choose the invite link
+    /// for a team it creates — which anyone holding that string could then join.
+    ///
+    /// # The id guard runs **before** `PreSave`
+    ///
+    /// `Save` refuses a non-empty `Id` first, then pre-saves. `PreSave` *assigns* an id when the
+    /// field is empty, so validating after it could never see a client-supplied one. The order is
+    /// reproduced here rather than in the store, for the reason [`mm_store::team_store::save`]
+    /// sets out.
+    ///
+    /// # The default channels are part of the create, and their failures are not swallowed
+    ///
+    /// `createDefaultChannels` runs inside `TeamService.CreateTeam`, so a `town-square` that
+    /// cannot be written fails the whole request — and the **team row is already committed**.
+    /// That is Go's: there is no transaction spanning the two, so a failed create can leave a
+    /// team with no channels. Which is why `CreateTeam`'s error table carries `Channel` arms at
+    /// all.
+    #[tracing::instrument(skip_all, fields(team_id))]
+    pub async fn create_team(&self, team: &mut Team) -> AppResult<Team> {
+        team.invite_id = String::new();
+
+        if !team.id.is_empty() {
+            return Err(create_team_error(mm_store::StoreError::InvalidInput {
+                entity: "Team",
+                field: "id",
+                value: team.id.clone(),
+            }));
+        }
+
+        team.pre_save();
+        team.is_valid()?;
+
+        let saved = self
+            .store()
+            .team()
+            .save(team)
+            .await
+            .map_err(create_team_error)?;
+        tracing::Span::current().record("team_id", &saved.id);
+
+        self.create_default_channels(&saved.id).await?;
+        Ok(saved)
+    }
+
+    /// Port of `TeamService.createDefaultChannels` (app/teams/teams.go).
+    ///
+    /// # It writes through the **channel store**, not through `CreateChannel`
+    ///
+    /// So none of `CreateChannel`'s work happens: no display-name trim, no board or space guard,
+    /// no membership, no `user_added`/`channel_created` websocket event, no system post. A port
+    /// that reached for the app-layer create would publish two events per team creation that Go
+    /// does not.
+    ///
+    /// # The display names are translated, the extra channels are not
+    ///
+    /// `town-square` and `off-topic` go through `i18n.T`; anything added by
+    /// `ExperimentalDefaultChannels` is used **verbatim as its own display name**, because Go
+    /// says "if the default channel is experimental we don't have to translate". This server has
+    /// no i18n layer, so the two known ids are their English translations from
+    /// `i18n/en.json` — which is what a default-locale Go server emits.
+    ///
+    /// The first failure aborts, so a team whose `off-topic` collides keeps its `town-square`.
+    #[tracing::instrument(skip(self), fields(team_id = %team_id))]
+    async fn create_default_channels(&self, team_id: &str) -> AppResult<()> {
+        let max = self.config().max_channels_per_team;
+        for name in self.default_channel_names() {
+            let display_name = match name.as_str() {
+                "town-square" => TOWN_SQUARE_DISPLAY_NAME,
+                "off-topic" => OFF_TOPIC_DISPLAY_NAME,
+                other => other,
+            }
+            .to_owned();
+            let mut channel = mm_model::channel::Channel {
+                display_name,
+                name: name.clone(),
+                channel_type: mm_model::channel::CHANNEL_TYPE_OPEN.to_owned(),
+                team_id: team_id.to_owned(),
+                ..Default::default()
+            };
+            match self.store().channel().save(&mut channel, max).await {
+                Ok(mm_store::ChannelSave::Saved) => {}
+                // Go's `saveChannelT` returns the existing channel **with** an `ErrConflict`, so
+                // this is an error on the create path, not a silent reuse.
+                Ok(mm_store::ChannelSave::Existing(_)) => {
+                    return Err(AppError::boxed(
+                        "CreateTeam",
+                        "store.sql_channel.save_channel.exists.app_error",
+                        None,
+                        String::new(),
+                        400,
+                    ));
+                }
+                Err(err) => return Err(create_team_error(err)),
+            }
+        }
+        Ok(())
+    }
+
+    /// Port of `app.App.CreateTeamWithUser` (app/team.go:140).
+    ///
+    /// Four steps, and the **second** is the one that surprises: `team.Email = user.Email`
+    /// overwrites whatever the request body carried, *after* the handler has already lower-cased
+    /// it. So a team's contact address is always its creator's, and the `email` field of a create
+    /// request is inert — except that `JoinUserToTeam` then compares `team.Email == user.Email`
+    /// and makes the creator a **team admin** because of it.
+    ///
+    /// `IsTeamEmailAllowed` is checked here against the freshly assigned address, and its refusal
+    /// is `api.team.is_team_creation_allowed.domain.app_error` at 400 — a *different* id from the
+    /// one `JoinUserToTeam` raises for the same predicate a moment later.
+    #[tracing::instrument(skip_all, fields(user_id = %user_id))]
+    pub async fn create_team_with_user(&self, team: &mut Team, user_id: &str) -> AppResult<Team> {
+        let user = self.get_user(user_id).await?;
+        team.email.clone_from(&user.email);
+
+        if !self.is_team_email_allowed(&user, team) {
+            return Err(AppError::boxed(
+                "CreateTeamWithUser",
+                "api.team.is_team_creation_allowed.domain.app_error",
+                None,
+                String::new(),
+                400,
+            ));
+        }
+
+        let created = self.create_team(team).await?;
+        // Go discards the membership and returns the team; a join failure still fails the
+        // request, leaving a created team the caller is not a member of.
+        self.join_user_to_team(&created, &user, "").await?;
+        Ok(created)
+    }
+
     /// Port of `app.App.UpdateTeamPrivacy` (app/team.go:231).
     ///
     /// # The invite id is regenerated on a narrowing, and the condition is two ANDed disjunctions
@@ -1508,6 +1722,104 @@ pub fn privacy_change_regenerates_invite_id(
 ) -> bool {
     (allow_open_invite != old_allow_open_invite || team_type != old_team_type)
         && (!allow_open_invite || team_type == mm_model::team::TEAM_INVITE)
+}
+
+/// `i18n.T("api.channel.create_default_channels.town_square")` on a default-locale server
+/// (i18n/en.json:411). This server has no i18n layer; see [`App::create_default_channels`].
+const TOWN_SQUARE_DISPLAY_NAME: &str = "Town Square";
+
+/// `i18n.T("api.channel.create_default_channels.off_topic")` (i18n/en.json:407).
+const OFF_TOPIC_DISPLAY_NAME: &str = "Off-Topic";
+
+/// `App.CreateTeam`'s error table (app/team.go:106-134) — **six arms, and three of them are about
+/// channels**, because `createDefaultChannels` runs inside the call this wraps.
+///
+/// The discriminator is Go's nested `switch` on `invErr.Entity` and `invErr.Field`, and two of
+/// the ids differ only by where the underscore falls:
+///
+/// - `Team`/`id` → `store.sql_team.save_team.existing.app_error`, which is what a **duplicate
+///   name** produces (the store reports a name collision as an `id` field — see
+///   [`mm_store::team_store::save`]);
+/// - any other `InvalidInput` → `app.team.save.existing.app_error`, a different id at the same
+///   status.
+///
+/// Everything unrecognised is `app.team.save.app_error` at **500**, the only non-400 here.
+fn create_team_error(err: mm_store::StoreError) -> Box<AppError> {
+    use mm_store::StoreError;
+    match err {
+        StoreError::InvalidInput {
+            entity: "Channel",
+            field,
+            value,
+        } => match field {
+            "DeleteAt" => AppError::boxed(
+                "CreateTeam",
+                "store.sql_channel.save.archived_channel.app_error",
+                None,
+                String::new(),
+                400,
+            ),
+            "Type" => AppError::boxed(
+                "CreateTeam",
+                "store.sql_channel.save.direct_channel.app_error",
+                None,
+                String::new(),
+                400,
+            ),
+            _ => AppError::boxed(
+                "CreateTeam",
+                "store.sql_channel.save_channel.existing.app_error",
+                None,
+                format!("id={value}"),
+                400,
+            ),
+        },
+        StoreError::InvalidInput {
+            entity: "Team",
+            field: "id",
+            value,
+        } => AppError::boxed(
+            "CreateTeam",
+            "store.sql_team.save_team.existing.app_error",
+            None,
+            format!("id={value}"),
+            400,
+        ),
+        StoreError::InvalidInput { .. } => AppError::boxed(
+            "CreateTeam",
+            "app.team.save.existing.app_error",
+            None,
+            String::new(),
+            400,
+        ),
+        // `store.ChannelExistsError` (store/constants.go:7).
+        StoreError::Conflict { .. } => AppError::boxed(
+            "CreateTeam",
+            "store.sql_channel.save_channel.exists.app_error",
+            None,
+            String::new(),
+            400,
+        ),
+        StoreError::LimitExceeded { .. } => AppError::boxed(
+            "CreateTeam",
+            "store.sql_channel.save_channel.limit.app_error",
+            None,
+            String::new(),
+            400,
+        ),
+        // `errors.As(err, &appErr)` — a model `IsValid` failure travelling up through the store.
+        StoreError::Invalid { app_error, .. } => app_error,
+        other => {
+            tracing::error!(error = %other, "team save failed");
+            AppError::boxed(
+                "CreateTeam",
+                "app.team.save.app_error",
+                None,
+                String::new(),
+                500,
+            )
+        }
+    }
 }
 
 /// Port of `normalizeDomains` (app/teams/utils.go).

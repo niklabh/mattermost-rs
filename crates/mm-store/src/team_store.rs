@@ -324,6 +324,12 @@ pub trait TeamStore {
         team: &Team,
     ) -> impl std::future::Future<Output = Result<Team, StoreError>> + Send;
 
+    /// Port of `SqlTeamStore.Save` (team_store.go:280) — see [`save`].
+    fn save(
+        &self,
+        team: &Team,
+    ) -> impl std::future::Future<Output = Result<Team, StoreError>> + Send;
+
     /// Port of `SqlTeamStore.UpdateMember` (team_store.go:1025) — see [`update_member`].
     fn update_member(
         &self,
@@ -351,6 +357,11 @@ impl SqlTeamStore {
 }
 
 impl TeamStore for SqlTeamStore {
+    #[tracing::instrument(skip_all, fields(team_id = %team.id))]
+    async fn save(&self, team: &Team) -> Result<Team, StoreError> {
+        save(&self.pool, team).await
+    }
+
     #[tracing::instrument(skip_all, fields(team_id = %team.id))]
     async fn update(&self, team: &Team) -> Result<Team, StoreError> {
         let mut team = team.clone();
@@ -860,6 +871,88 @@ pub async fn get(pool: &PgPool, id: &str) -> Result<Team, StoreError> {
     tracing::Span::current().record("found", true);
 
     Ok(team_from_row(row))
+}
+
+/// Port of `SqlTeamStore.Save` (team_store.go:280) — the `INSERT` behind `POST /api/v4/teams`.
+///
+/// **Sixteen columns and the id, all of them written**, where [`TeamStore::update`] writes
+/// everything but the id. The three computed fields on `Team` — `policy_enforced`,
+/// `policy_is_active`, `policy_id` — have no columns and are not written; a freshly created team
+/// is never governed, so the struct handed back carries their zero values, which is also what a
+/// re-read would say.
+///
+/// # `PreSave` and `IsValid` are the caller's
+///
+/// Go runs both inside this function, between the id check and the insert, and lets the
+/// resulting `AppError` travel up through `errors.As`. A store in this tree does not produce
+/// `AppError`s, so `mm_app::team::create_team` runs them — **and it runs the id check first**,
+/// which is the ordering that matters: `PreSave` *assigns* an id when the struct has none, so a
+/// port that validated after pre-saving could never reject a client-supplied one.
+///
+/// # A duplicate `Name` is reported as a duplicate **`id`**
+///
+/// Go catches the `teams_name_key` unique violation and returns
+/// `store.NewErrInvalidInput("Team", "id", team.Id)` — the *id* field, carrying the id of the
+/// team that was refused, for a collision on the name. The app layer then answers
+/// `store.sql_team.save_team.existing.app_error`. Transcribing this as a `Name` field would move
+/// the answer to `app.team.save.existing.app_error`, a different id on the wire for the single
+/// most common way this call fails.
+#[tracing::instrument(skip_all, fields(team_id = %team.id))]
+pub async fn save(pool: &PgPool, team: &Team) -> Result<Team, StoreError> {
+    let result = sqlx::query!(
+        r#"
+        INSERT INTO teams
+            (id, createat, updateat, deleteat, displayname, name, description, email, type,
+             companyname, alloweddomains, inviteid, allowopeninvite, lastteamiconupdate,
+             schemeid, groupconstrained, cloudlimitsarchived)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, ($9::text)::team_type, $10, $11, $12, $13, $14,
+                $15, $16, $17)
+        "#,
+        team.id,
+        team.create_at,
+        team.update_at,
+        team.delete_at,
+        team.display_name,
+        team.name,
+        team.description,
+        team.email,
+        team.team_type,
+        team.company_name,
+        team.allowed_domains,
+        team.invite_id,
+        team.allow_open_invite,
+        team.last_team_icon_update,
+        team.scheme_id,
+        team.group_constrained,
+        team.cloud_limits_archived,
+    )
+    .execute(pool)
+    .await;
+
+    match result {
+        Ok(_) => Ok(team.clone()),
+        Err(source) => {
+            // `IsUniqueConstraintError(err, []string{"Name", "teams_name_key"})`. Postgres reports
+            // the constraint by name, so the primary-key collision on `Id` is deliberately **not**
+            // folded in here: Go's list names the name index alone, and an id collision falls to
+            // the generic wrap below.
+            let is_name_conflict = source
+                .as_database_error()
+                .and_then(|db| db.constraint())
+                .is_some_and(|name| name.eq_ignore_ascii_case("teams_name_key"));
+            if is_name_conflict {
+                return Err(StoreError::InvalidInput {
+                    entity: "Team",
+                    field: "id",
+                    value: team.id.clone(),
+                });
+            }
+            Err(StoreError::Db {
+                context: format!("failed to save Team with id={}", team.id),
+                source,
+            })
+        }
+    }
 }
 
 /// Port of `SqlTeamStore.GetByInviteId` (team_store.go:391).

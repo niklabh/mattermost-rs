@@ -1046,10 +1046,10 @@ pub fn router(state: AppState) -> Router {
         // every `/api/v4/teams/...` route registered earlier, so axum sees a distinct path and
         // there is no literal-versus-parameter precedence to settle. Nothing that matched
         // `{team_id}` or the `name` literal can match here, and nothing here could have matched
-        // them. `GET` only; `POST` (createTeam) falls to `partially_migrated`'s method fallback.
+        // them.
         .route(
             "/api/v4/teams",
-            partially_migrated(get(teams::get_all_teams)),
+            partially_migrated(get(teams::get_all_teams).post(teams::create_team)),
         )
         // `BaseRoutes.Teams.Handle("/search")` (api4/team.go:37). A static sibling of
         // `{team_id}`; gorilla registered `/search` *after* `{team_id:[A-Za-z0-9]+}`, but
