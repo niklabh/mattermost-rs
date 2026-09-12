@@ -1,0 +1,898 @@
+{
+    "constants": {
+        "max_emoji_file_size": 524288,
+        "max_emoji_gif_frames": 70,
+        "max_emoji_height": 128,
+        "max_emoji_original_height": 1028,
+        "max_emoji_original_width": 1028,
+        "max_emoji_width": 128
+    },
+    "decode_config": [
+        {
+            "bytes_base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAAEElEQVR4nGLi5GAHBAAA//8APgAbZGVITgAAAABJRU5ErkJggg==",
+            "err_is_format": false,
+            "format": "png",
+            "height": 1,
+            "name": "png_1x1",
+            "ok": true,
+            "width": 1
+        },
+        {
+            "bytes_base64": "iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAYAAADDPmHLAAABU0lEQVR4nOzSMRGAQBDAQOYawL/gfxlXZFdBisz/vecBmmY7gF0GiDNAnAHiDBBngDgDxBkgzgBxBogzQJwB4gwQZ4A4A8QZIM4AcQaIM0CcAeIMEGeAOAPEGSDOAHEGiDNAnAHiDBBngDgDxBkgzgBxBogzQJwB4gwQZ4A4A8QZIM4AcQaIM0CcAeIMEGeAOAPEGSDOAHEGiDNAnAHiDBBngDgDxBkgzgBxBogzQJwB4gwQZ4A4A8QZIM4AcQaIM0CcAeIMEGeAOAPEGSDOAHEGiDNAnAHiDBBngDgDxBkgzgBxBogzQJwB4gwQZ4A4A8QZIM4AcQaIM0CcAeIMEGeAOAPEGSDOAHEGiDNAnAHiDBBngDgDxBkgzgBxBogzQJwB4gwQZ4A4A8QZIM4AcQaIM0CcAeIMEGeAOAPEGSDOAHEGiDNAnAHiDBBngLgbAAD//+MxAhbXbzXTAAAAAElFTkSuQmCC",
+            "err_is_format": false,
+            "format": "png",
+            "height": 128,
+            "name": "png_128x128",
+            "ok": true,
+            "width": 128
+        },
+        {
+            "bytes_base64": "iVBORw0KGgoAAAANSUhEUgAAAIEAAACACAYAAAAs/Ar1AAABFUlEQVR4nOzSMRGAQBDAwMw1gH/BMKi44ncVpMg89/UGnG22A9hnAkyACTABmYBMQCYgE5AJyARkAjIBmYBMQCYgE5AJyARkAjIBmYBMQCYgE5AJyARkAjIBmYBMQCYgE5AJyARkAjIBmYBMQCYgE5AJyARkAjIBmYBMQCYgE5AJyARkAjIBmYBMQCYgE5AJyARkAjIBmYBMQCYgE5AJyARkAjIBmYBMQCYgE5AJyARkAjIBmYBMQCYgE5AJyARkAjIBmYBMQCYgE5AJyARkAjIBmYBMQCYgE5AJyARkAjIBmYBMQCYgE5AJyARkAjIBmYBMQCYgE5AJyARkAjIBmYBMQCYgE5AJyARkAjIBmYDfFwAA//8RdQIWwdJTyQAAAABJRU5ErkJggg==",
+            "err_is_format": false,
+            "format": "png",
+            "height": 128,
+            "name": "png_129x128",
+            "ok": true,
+            "width": 129
+        },
+        {
+            "bytes_base64": "iVBORw0KGgoAAAANSUhEUgAAAIAAAACBCAYAAAAIYrJuAAABVklEQVR4nOzSMRGAQBDAQOYawL/gfxlXZFdBisz/vecBmmY7gF0GiDNAnAHiDBBngDgDxBkgzgBxBogzQJwB4gwQZ4A4A8QZIM4AcQaIM0CcAeIMEGeAOAPEGSDOAHEGiDNAnAHiDBBngDgDxBkgzgBxBogzQJwB4gwQZ4A4A8QZIM4AcQaIM0CcAeIMEGeAOAPEGSDOAHEGiDNAnAHiDBBngDgDxBkgzgBxBogzQJwB4gwQZ4A4A8QZIM4AcQaIM0CcAeIMEGeAOAPEGSDOAHEGiDNAnAHiDBBngDgDxBkgzgBxBogzQJwB4gwQZ4A4A8QZIM4AcQaIM0CcAeIMEGeAOAPEGSDOAHEGiDNAnAHiDBBngDgDxBkgzgBxBogzQJwB4gwQZ4A4A8QZIM4AcQaIM0CcAeIMEGeAOAPEGSDOAHEGiDNAnAHiDBBngDgDxN0AAAD//xWUAhgRrBHUAAAAAElFTkSuQmCC",
+            "err_is_format": false,
+            "format": "png",
+            "height": 129,
+            "name": "png_128x129",
+            "ok": true,
+            "width": 128
+        },
+        {
+            "bytes_base64": "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAIAQMAAAD+wSzIAAAABlBMVEUAAAD///+l2Z/dAAAAD0lEQVR4nGJAA4AAAAD//wAQAAFcpSljAAAAAElFTkSuQmCC",
+            "err_is_format": false,
+            "format": "png",
+            "height": 8,
+            "name": "png_paletted_8x8",
+            "ok": true,
+            "width": 8
+        },
+        {
+            "bytes_base64": "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAAAElFTkSuQmCC",
+            "err_is_format": false,
+            "format": "png",
+            "height": 64,
+            "name": "png_header_64x64",
+            "ok": true,
+            "width": 64
+        },
+        {
+            "bytes_base64": "iVBORw0KGgoAAAANSUhEUgAABAQAAAQECAYAAADtZ8nvAAAAAElFTkSuQmCC",
+            "err_is_format": false,
+            "format": "png",
+            "height": 1028,
+            "name": "png_header_1028x1028",
+            "ok": true,
+            "width": 1028
+        },
+        {
+            "bytes_base64": "iVBORw0KGgoAAAANSUhEUgAABAUAAAQECAYAAAACpaLRAAAAAElFTkSuQmCC",
+            "err_is_format": false,
+            "format": "png",
+            "height": 1028,
+            "name": "png_header_1029x1028",
+            "ok": true,
+            "width": 1029
+        },
+        {
+            "bytes_base64": "iVBORw0KGgoAAAANSUhEUgAABAQAAAQFCAYAAAAmOxpKAAAAAElFTkSuQmCC",
+            "err_is_format": false,
+            "format": "png",
+            "height": 1029,
+            "name": "png_header_1028x1029",
+            "ok": true,
+            "width": 1028
+        },
+        {
+            "bytes_base64": "iVBORw0KGgoAAAANSUhEUgAAB9AAAAfQCAYAAACaOMR5AAAAAElFTkSuQmCC",
+            "err_is_format": false,
+            "format": "png",
+            "height": 2000,
+            "name": "png_header_2000x2000",
+            "ok": true,
+            "width": 2000
+        },
+        {
+            "bytes_base64": "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAAHdbkFIAAAAAElFTkSuQmCC",
+            "err_is_format": false,
+            "format": "png",
+            "height": 64,
+            "name": "png_header_interlaced",
+            "ok": true,
+            "width": 64
+        },
+        {
+            "bytes_base64": "iVBORw0KGgoAAAANSUhEUgAAAEAAAABAAQAAAACCEkxzAAAAAElFTkSuQmCC",
+            "err_is_format": false,
+            "format": "png",
+            "height": 64,
+            "name": "png_header_grayscale_1bit",
+            "ok": true,
+            "width": 64
+        },
+        {
+            "bytes_base64": "iVBORw0KGgoAAAANSUhEUgAAAEAAAABAEAAAAADfkvJBAAAAAElFTkSuQmCC",
+            "err_is_format": false,
+            "format": "png",
+            "height": 64,
+            "name": "png_header_grayscale_16bit",
+            "ok": true,
+            "width": 64
+        },
+        {
+            "bytes_base64": "iVBORw0KGgoAAAANSUhEUgAAAEAAAABAEAIAAAB1mzrKAAAAAElFTkSuQmCC",
+            "err_is_format": false,
+            "format": "png",
+            "height": 64,
+            "name": "png_header_truecolor_16bit",
+            "ok": true,
+            "width": 64
+        },
+        {
+            "bytes_base64": "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAQAAAAAYLlVAAAAAElFTkSuQmCC",
+            "err_is_format": false,
+            "format": "png",
+            "height": 64,
+            "name": "png_header_gray_alpha",
+            "ok": true,
+            "width": 64
+        },
+        {
+            "bytes_base64": "iVBORw0KGgoAAAANSUhEUgAAAAAAAABACAYAAAA003Z+AAAAAElFTkSuQmCC",
+            "err_is_format": false,
+            "format": "",
+            "height": 0,
+            "name": "png_header_zero_width",
+            "ok": false,
+            "width": 0
+        },
+        {
+            "bytes_base64": "iVBORw0KGgoAAAANSUhEUgAAAEAAAAAACAYAAAClMXuyAAAAAElFTkSuQmCC",
+            "err_is_format": false,
+            "format": "",
+            "height": 0,
+            "name": "png_header_zero_height",
+            "ok": false,
+            "width": 0
+        },
+        {
+            "bytes_base64": "iVBORw0KGgoAAAANSUhEUoAAAAEAAABACAYAAAB7ezhXAAAAAElFTkSuQmCC",
+            "err_is_format": false,
+            "format": "",
+            "height": 0,
+            "name": "png_header_negative_width",
+            "ok": false,
+            "width": 0
+        },
+        {
+            "bytes_base64": "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYBAACrqxvpAAAAAElFTkSuQmCC",
+            "err_is_format": false,
+            "format": "",
+            "height": 0,
+            "name": "png_header_bad_compression",
+            "ok": false,
+            "width": 0
+        },
+        {
+            "bytes_base64": "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAQCzckCfAAAAAElFTkSuQmCC",
+            "err_is_format": false,
+            "format": "",
+            "height": 0,
+            "name": "png_header_bad_filter",
+            "ok": false,
+            "width": 0
+        },
+        {
+            "bytes_base64": "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAAJEZxDyAAAAAElFTkSuQmCC",
+            "err_is_format": false,
+            "format": "",
+            "height": 0,
+            "name": "png_header_bad_interlace",
+            "ok": false,
+            "width": 0
+        },
+        {
+            "bytes_base64": "iVBORw0KGgoAAAANSUhEUgAAAEAAAABAAwYAAADduUDPAAAAAElFTkSuQmCC",
+            "err_is_format": false,
+            "format": "",
+            "height": 0,
+            "name": "png_header_bad_depth",
+            "ok": false,
+            "width": 0
+        },
+        {
+            "bytes_base64": "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAcAAAAS1Ra7AAAAAElFTkSuQmCC",
+            "err_is_format": false,
+            "format": "",
+            "height": 0,
+            "name": "png_header_bad_colour_type",
+            "ok": false,
+            "width": 0
+        },
+        {
+            "bytes_base64": "iVBORw0KGgoAAAANSUhEUgAAAEAAAABAAQIAAAAoG4T4AAAAAElFTkSuQmCC",
+            "err_is_format": false,
+            "format": "",
+            "height": 0,
+            "name": "png_header_truecolor_1bit",
+            "ok": false,
+            "width": 0
+        },
+        {
+            "bytes_base64": "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAABVlo4hAAAAAElFTkSuQmCC",
+            "err_is_format": false,
+            "format": "",
+            "height": 0,
+            "name": "png_header_bad_crc",
+            "ok": false,
+            "width": 0
+        },
+        {
+            "bytes_base64": "iVBORw0KGgoAAAAMSUhEUgAAAEAAAABACAYAAACqaXHeAAAAAElFTkSuQmCC",
+            "err_is_format": false,
+            "format": "",
+            "height": 0,
+            "name": "png_header_bad_length",
+            "ok": false,
+            "width": 0
+        },
+        {
+            "bytes_base64": "iVBORw0KGgo=",
+            "err_is_format": false,
+            "format": "",
+            "height": 0,
+            "name": "png_signature_only",
+            "ok": false,
+            "width": 0
+        },
+        {
+            "bytes_base64": "iVBORw0KGgoAAAANSUhEUgAAAEA=",
+            "err_is_format": false,
+            "format": "",
+            "height": 0,
+            "name": "png_truncated_ihdr",
+            "ok": false,
+            "width": 0
+        },
+        {
+            "bytes_base64": "",
+            "err_is_format": true,
+            "format": "",
+            "height": 0,
+            "name": "empty",
+            "ok": false,
+            "width": 0
+        },
+        {
+            "bytes_base64": "bm90IGFuIGltYWdlIGF0IGFsbA==",
+            "err_is_format": true,
+            "format": "",
+            "height": 0,
+            "name": "garbage",
+            "ok": false,
+            "width": 0
+        },
+        {
+            "bytes_base64": "R0lGODlh",
+            "err_is_format": false,
+            "format": "",
+            "height": 0,
+            "name": "gif_magic_only",
+            "ok": false,
+            "width": 0
+        },
+        {
+            "bytes_base64": "/9g=",
+            "err_is_format": false,
+            "format": "",
+            "height": 0,
+            "name": "jpeg_magic_only",
+            "ok": false,
+            "width": 0
+        }
+    ],
+    "filepath_base": [
+        {
+            "in": "",
+            "out": "."
+        },
+        {
+            "in": "e.png",
+            "out": "e.png"
+        },
+        {
+            "in": "/e.png",
+            "out": "e.png"
+        },
+        {
+            "in": "a/b/e.png",
+            "out": "e.png"
+        },
+        {
+            "in": "a/b/",
+            "out": "b"
+        },
+        {
+            "in": "/",
+            "out": "/"
+        },
+        {
+            "in": "//",
+            "out": "/"
+        },
+        {
+            "in": "///",
+            "out": "/"
+        },
+        {
+            "in": "../../etc/passwd",
+            "out": "passwd"
+        },
+        {
+            "in": "./e.png",
+            "out": "e.png"
+        },
+        {
+            "in": "a/b/.",
+            "out": "."
+        },
+        {
+            "in": "..",
+            "out": ".."
+        },
+        {
+            "in": ".",
+            "out": "."
+        },
+        {
+            "in": "C:\\windows\\e.png",
+            "out": "C:\\windows\\e.png"
+        },
+        {
+            "in": "e.png/",
+            "out": "e.png"
+        },
+        {
+            "in": "e.png//",
+            "out": "e.png"
+        }
+    ],
+    "mime_by_extension": [
+        {
+            "extension": "png",
+            "filename": "e.png",
+            "is_gif": false,
+            "mime_type": "image/png"
+        },
+        {
+            "extension": "png",
+            "filename": "e.PNG",
+            "is_gif": false,
+            "mime_type": "image/png"
+        },
+        {
+            "extension": "png",
+            "filename": "e.Png",
+            "is_gif": false,
+            "mime_type": "image/png"
+        },
+        {
+            "extension": "gif",
+            "filename": "e.gif",
+            "is_gif": true,
+            "mime_type": "image/gif"
+        },
+        {
+            "extension": "gif",
+            "filename": "e.GIF",
+            "is_gif": true,
+            "mime_type": "image/gif"
+        },
+        {
+            "extension": "jpg",
+            "filename": "e.jpg",
+            "is_gif": false,
+            "mime_type": "image/jpeg"
+        },
+        {
+            "extension": "jpeg",
+            "filename": "e.jpeg",
+            "is_gif": false,
+            "mime_type": "image/jpeg"
+        },
+        {
+            "extension": "webp",
+            "filename": "e.webp",
+            "is_gif": false,
+            "mime_type": "image/webp"
+        },
+        {
+            "extension": "bmp",
+            "filename": "e.bmp",
+            "is_gif": false,
+            "mime_type": "image/bmp"
+        },
+        {
+            "extension": "",
+            "filename": "e",
+            "is_gif": false,
+            "mime_type": ""
+        },
+        {
+            "extension": "",
+            "filename": "",
+            "is_gif": false,
+            "mime_type": ""
+        },
+        {
+            "extension": "png",
+            "filename": ".png",
+            "is_gif": false,
+            "mime_type": "image/png"
+        },
+        {
+            "extension": "gif",
+            "filename": "e.png.gif",
+            "is_gif": true,
+            "mime_type": "image/gif"
+        },
+        {
+            "extension": "png",
+            "filename": "e.gif.png",
+            "is_gif": false,
+            "mime_type": "image/png"
+        },
+        {
+            "extension": "png",
+            "filename": "a/b/c.png",
+            "is_gif": false,
+            "mime_type": "image/png"
+        },
+        {
+            "extension": "png",
+            "filename": "../../e.png",
+            "is_gif": false,
+            "mime_type": "image/png"
+        },
+        {
+            "extension": "gz",
+            "filename": "e.tar.gz",
+            "is_gif": false,
+            "mime_type": "application/gzip"
+        },
+        {
+            "extension": "txt",
+            "filename": "e.txt",
+            "is_gif": false,
+            "mime_type": "text/plain; charset=utf-8"
+        },
+        {
+            "extension": "",
+            "filename": "e.",
+            "is_gif": false,
+            "mime_type": ""
+        }
+    ],
+    "parse_media_type": [
+        {
+            "in": "multipart/form-data; boundary=abc",
+            "media_type": "multipart/form-data",
+            "ok": true,
+            "params": {
+                "boundary": "abc"
+            }
+        },
+        {
+            "in": "multipart/form-data; boundary=\"abc\"",
+            "media_type": "multipart/form-data",
+            "ok": true,
+            "params": {
+                "boundary": "abc"
+            }
+        },
+        {
+            "in": "multipart/form-data;boundary=abc",
+            "media_type": "multipart/form-data",
+            "ok": true,
+            "params": {
+                "boundary": "abc"
+            }
+        },
+        {
+            "in": "multipart/form-data; boundary=abc; charset=utf-8",
+            "media_type": "multipart/form-data",
+            "ok": true,
+            "params": {
+                "boundary": "abc",
+                "charset": "utf-8"
+            }
+        },
+        {
+            "in": "MULTIPART/FORM-DATA; BOUNDARY=AbC",
+            "media_type": "multipart/form-data",
+            "ok": true,
+            "params": {
+                "boundary": "AbC"
+            }
+        },
+        {
+            "in": "multipart/form-data",
+            "media_type": "multipart/form-data",
+            "ok": true,
+            "params": {}
+        },
+        {
+            "in": "multipart/mixed; boundary=abc",
+            "media_type": "multipart/mixed",
+            "ok": true,
+            "params": {
+                "boundary": "abc"
+            }
+        },
+        {
+            "in": "application/json",
+            "media_type": "application/json",
+            "ok": true,
+            "params": {}
+        },
+        {
+            "in": "",
+            "media_type": "",
+            "ok": false,
+            "params": {}
+        },
+        {
+            "in": "form-data; name=\"emoji\"",
+            "media_type": "form-data",
+            "ok": true,
+            "params": {
+                "name": "emoji"
+            }
+        },
+        {
+            "in": "form-data; name=emoji",
+            "media_type": "form-data",
+            "ok": true,
+            "params": {
+                "name": "emoji"
+            }
+        },
+        {
+            "in": "form-data; name=\"image\"; filename=\"e.png\"",
+            "media_type": "form-data",
+            "ok": true,
+            "params": {
+                "filename": "e.png",
+                "name": "image"
+            }
+        },
+        {
+            "in": "form-data; name=\"image\"; filename=\"\"",
+            "media_type": "form-data",
+            "ok": true,
+            "params": {
+                "filename": "",
+                "name": "image"
+            }
+        },
+        {
+            "in": "form-data; name=\"\"; filename=\"e.png\"",
+            "media_type": "form-data",
+            "ok": true,
+            "params": {
+                "filename": "e.png",
+                "name": ""
+            }
+        },
+        {
+            "in": "form-data; filename=\"e.png\"",
+            "media_type": "form-data",
+            "ok": true,
+            "params": {
+                "filename": "e.png"
+            }
+        },
+        {
+            "in": "form-data; name=\"a b\"; filename=\"a b.png\"",
+            "media_type": "form-data",
+            "ok": true,
+            "params": {
+                "filename": "a b.png",
+                "name": "a b"
+            }
+        },
+        {
+            "in": "form-data; name=\"quo\\\"te\"",
+            "media_type": "form-data",
+            "ok": true,
+            "params": {
+                "name": "quo\"te"
+            }
+        },
+        {
+            "in": "attachment; name=\"emoji\"",
+            "media_type": "attachment",
+            "ok": true,
+            "params": {
+                "name": "emoji"
+            }
+        },
+        {
+            "in": "form-data; name",
+            "media_type": "",
+            "ok": false,
+            "params": {}
+        },
+        {
+            "in": "form-data; name=",
+            "media_type": "",
+            "ok": false,
+            "params": {}
+        },
+        {
+            "in": "form-data; name=\"unterminated",
+            "media_type": "",
+            "ok": false,
+            "params": {}
+        },
+        {
+            "in": "form-data; NAME=\"emoji\"",
+            "media_type": "form-data",
+            "ok": true,
+            "params": {
+                "name": "emoji"
+            }
+        },
+        {
+            "in": "form-data; name=\"emoji\"; name=\"second\"",
+            "media_type": "",
+            "ok": false,
+            "params": {}
+        }
+    ],
+    "read_form": [
+        {
+            "body_base64": "LS1CT1VOREFSWQ0KQ29udGVudC1EaXNwb3NpdGlvbjogZm9ybS1kYXRhOyBuYW1lPSJlbW9qaSINCg0KeyJuYW1lIjoieCJ9DQotLUJPVU5EQVJZLS0NCg==",
+            "boundary": "BOUNDARY",
+            "files": [],
+            "name": "one_value",
+            "ok": true,
+            "values": {
+                "emoji": [
+                    "{\"name\":\"x\"}"
+                ]
+            }
+        },
+        {
+            "body_base64": "LS1CT1VOREFSWQ0KQ29udGVudC1EaXNwb3NpdGlvbjogZm9ybS1kYXRhOyBuYW1lPSJpbWFnZSI7IGZpbGVuYW1lPSJlLnBuZyINCg0KiVBORw0KLS1CT1VOREFSWS0tDQo=",
+            "boundary": "BOUNDARY",
+            "files": [
+                {
+                    "filename": "e.png",
+                    "index": 0,
+                    "name": "image",
+                    "size": 4
+                }
+            ],
+            "name": "one_file",
+            "ok": true,
+            "values": {}
+        },
+        {
+            "body_base64": "LS1CT1VOREFSWQ0KQ29udGVudC1EaXNwb3NpdGlvbjogZm9ybS1kYXRhOyBuYW1lPSJpbWFnZSI7IGZpbGVuYW1lPSJlLnBuZyINCkNvbnRlbnQtVHlwZTogaW1hZ2UvcG5nDQoNColQTkdieXRlcw0KLS1CT1VOREFSWQ0KQ29udGVudC1EaXNwb3NpdGlvbjogZm9ybS1kYXRhOyBuYW1lPSJlbW9qaSINCg0KeyJuYW1lIjoieCIsImNyZWF0b3JfaWQiOiJ5In0NCi0tQk9VTkRBUlktLQ0K",
+            "boundary": "BOUNDARY",
+            "files": [
+                {
+                    "filename": "e.png",
+                    "index": 0,
+                    "name": "image",
+                    "size": 9
+                }
+            ],
+            "name": "the_shape_the_webapp_sends",
+            "ok": true,
+            "values": {
+                "emoji": [
+                    "{\"name\":\"x\",\"creator_id\":\"y\"}"
+                ]
+            }
+        },
+        {
+            "body_base64": "LS1CT1VOREFSWQ0KQ29udGVudC1EaXNwb3NpdGlvbjogZm9ybS1kYXRhOyBuYW1lPSJpbWFnZSI7IGZpbGVuYW1lPSIiDQoNCmRhdGENCi0tQk9VTkRBUlktLQ0K",
+            "boundary": "BOUNDARY",
+            "files": [],
+            "name": "empty_filename_is_a_value",
+            "ok": true,
+            "values": {
+                "image": [
+                    "data"
+                ]
+            }
+        },
+        {
+            "body_base64": "LS1CT1VOREFSWQ0KQ29udGVudC1EaXNwb3NpdGlvbjogZm9ybS1kYXRhOyBmaWxlbmFtZT0iZS5wbmciDQoNCmRhdGENCi0tQk9VTkRBUlktLQ0K",
+            "boundary": "BOUNDARY",
+            "files": [],
+            "name": "no_name_is_dropped",
+            "ok": true,
+            "values": {}
+        },
+        {
+            "body_base64": "LS1CT1VOREFSWQ0KQ29udGVudC1EaXNwb3NpdGlvbjogZm9ybS1kYXRhOyBuYW1lPSIiDQoNCmRhdGENCi0tQk9VTkRBUlktLQ0K",
+            "boundary": "BOUNDARY",
+            "files": [],
+            "name": "empty_name_is_dropped",
+            "ok": true,
+            "values": {}
+        },
+        {
+            "body_base64": "LS1CT1VOREFSWQ0KQ29udGVudC1EaXNwb3NpdGlvbjogYXR0YWNobWVudDsgbmFtZT0iZW1vamkiDQoNCmRhdGENCi0tQk9VTkRBUlktLQ0K",
+            "boundary": "BOUNDARY",
+            "files": [],
+            "name": "not_form_data_is_dropped",
+            "ok": true,
+            "values": {}
+        },
+        {
+            "body_base64": "LS1CT1VOREFSWQ0KQ29udGVudC1EaXNwb3NpdGlvbjogZm9ybS1kYXRhOyBuYW1lPSJ1bnRlcm1pbmF0ZWQNCg0KZGF0YQ0KLS1CT1VOREFSWS0tDQo=",
+            "boundary": "BOUNDARY",
+            "files": [],
+            "name": "unparseable_disposition_is_dropped",
+            "ok": true,
+            "values": {}
+        },
+        {
+            "body_base64": "LS1CT1VOREFSWQ0KDQpkYXRhDQotLUJPVU5EQVJZLS0NCg==",
+            "boundary": "BOUNDARY",
+            "files": [],
+            "name": "no_disposition_at_all_is_dropped",
+            "ok": true,
+            "values": {}
+        },
+        {
+            "body_base64": "LS1CT1VOREFSWQ0KQ29udGVudC1EaXNwb3NpdGlvbjogZm9ybS1kYXRhOyBuYW1lPSJlbW9qaSINCg0KZmlyc3QNCi0tQk9VTkRBUlkNCkNvbnRlbnQtRGlzcG9zaXRpb246IGZvcm0tZGF0YTsgbmFtZT0iZW1vamkiDQoNCnNlY29uZA0KLS1CT1VOREFSWS0tDQo=",
+            "boundary": "BOUNDARY",
+            "files": [],
+            "name": "repeated_name_keeps_both",
+            "ok": true,
+            "values": {
+                "emoji": [
+                    "first",
+                    "second"
+                ]
+            }
+        },
+        {
+            "body_base64": "LS1CT1VOREFSWQ0KQ29udGVudC1EaXNwb3NpdGlvbjogZm9ybS1kYXRhOyBuYW1lPSJpbWFnZSI7IGZpbGVuYW1lPSIuLi8uLi9lLnBuZyINCg0KZA0KLS1CT1VOREFSWS0tDQo=",
+            "boundary": "BOUNDARY",
+            "files": [
+                {
+                    "filename": "e.png",
+                    "index": 0,
+                    "name": "image",
+                    "size": 1
+                }
+            ],
+            "name": "filename_is_based",
+            "ok": true,
+            "values": {}
+        },
+        {
+            "body_base64": "dGhpcyBpcyBhIHByZWFtYmxlDQotLUJPVU5EQVJZDQpDb250ZW50LURpc3Bvc2l0aW9uOiBmb3JtLWRhdGE7IG5hbWU9ImVtb2ppIg0KDQp2DQotLUJPVU5EQVJZLS0NCg==",
+            "boundary": "BOUNDARY",
+            "files": [],
+            "name": "preamble_is_discarded",
+            "ok": true,
+            "values": {
+                "emoji": [
+                    "v"
+                ]
+            }
+        },
+        {
+            "body_base64": "LS1CT1VOREFSWQ0KQ29udGVudC1EaXNwb3NpdGlvbjogZm9ybS1kYXRhOyBuYW1lPSJlbW9qaSINCg0Kdg0KLS1CT1VOREFSWS0tDQp0cmFpbGluZyBqdW5rDQo=",
+            "boundary": "BOUNDARY",
+            "files": [],
+            "name": "epilogue_is_discarded",
+            "ok": true,
+            "values": {
+                "emoji": [
+                    "v"
+                ]
+            }
+        },
+        {
+            "body_base64": "LS1CT1VOREFSWQ0KQ29udGVudC1EaXNwb3NpdGlvbjogZm9ybS1kYXRhOyBuYW1lPSJlbW9qaSINCg0KDQotLUJPVU5EQVJZLS0NCg==",
+            "boundary": "BOUNDARY",
+            "files": [],
+            "name": "empty_body_part",
+            "ok": true,
+            "values": {
+                "emoji": [
+                    ""
+                ]
+            }
+        },
+        {
+            "body_base64": "LS1CT1VOREFSWQ0KQ29udGVudC1EaXNwb3NpdGlvbjogZm9ybS1kYXRhOyBuYW1lPSJpbWFnZSI7IGZpbGVuYW1lPSJlLmJpbiINCg0KYQ0KYg0KYw0KLS1CT1VOREFSWS0tDQo=",
+            "boundary": "BOUNDARY",
+            "files": [
+                {
+                    "filename": "e.bin",
+                    "index": 0,
+                    "name": "image",
+                    "size": 7
+                }
+            ],
+            "name": "binary_body_with_crlf",
+            "ok": true,
+            "values": {}
+        },
+        {
+            "body_base64": "LS1CT1VOREFSWQpDb250ZW50LURpc3Bvc2l0aW9uOiBmb3JtLWRhdGE7IG5hbWU9ImVtb2ppIgoKdgotLUJPVU5EQVJZLS0K",
+            "boundary": "BOUNDARY",
+            "files": [],
+            "name": "lf_only_delimiters",
+            "ok": true,
+            "values": {
+                "emoji": [
+                    "v"
+                ]
+            }
+        },
+        {
+            "body_base64": "LS1CT1VOREFSWQ0KQ29udGVudC1EaXNwb3NpdGlvbjogZm9ybS1kYXRhOyBuYW1lPSJlbW9qaSINCg0Kdg0K",
+            "boundary": "BOUNDARY",
+            "files": [],
+            "name": "no_closing_delimiter",
+            "ok": false,
+            "values": {}
+        },
+        {
+            "body_base64": "anVzdCBzb21lIGJ5dGVzDQo=",
+            "boundary": "BOUNDARY",
+            "files": [],
+            "name": "no_delimiter_at_all",
+            "ok": false,
+            "values": {}
+        },
+        {
+            "body_base64": "",
+            "boundary": "BOUNDARY",
+            "files": [],
+            "name": "empty",
+            "ok": false,
+            "values": {}
+        },
+        {
+            "body_base64": "LS1CT1VOREFSWQ0KQ29udGVudC1EaXNwb3NpdGlvbjogZm9ybS1kYXRhOyBuYW1lPSJlbW9qaSINClgtVGhpbmc6IDENCg0Kdg0KLS1CT1VOREFSWS0tDQo=",
+            "boundary": "BOUNDARY",
+            "files": [],
+            "name": "extra_header_is_kept",
+            "ok": true,
+            "values": {
+                "emoji": [
+                    "v"
+                ]
+            }
+        },
+        {
+            "body_base64": "LS1CT1VOREFSWSANCkNvbnRlbnQtRGlzcG9zaXRpb246IGZvcm0tZGF0YTsgbmFtZT0iZW1vamkiDQoNCnYNCi0tQk9VTkRBUlktLQ0K",
+            "boundary": "BOUNDARY",
+            "files": [],
+            "name": "boundary_with_trailing_space",
+            "ok": true,
+            "values": {
+                "emoji": [
+                    "v"
+                ]
+            }
+        }
+    ]
+}
