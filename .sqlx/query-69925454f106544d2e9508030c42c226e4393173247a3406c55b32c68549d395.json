@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT COUNT(id) AS \"count!\"\n              FROM propertyfields\n             WHERE linkedfieldid = $1\n               AND deleteat = 0\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "69925454f106544d2e9508030c42c226e4393173247a3406c55b32c68549d395"
+}

@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE propertyvalues\n               SET deleteat = $1\n             WHERE fieldid = $2\n               AND ($3 = '' OR groupid = $3)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "567ffbac8f3a7064d202928577656805d1a4080db2da24b3c38312ae57e177fc"
+}
