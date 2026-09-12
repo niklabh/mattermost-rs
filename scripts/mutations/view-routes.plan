@@ -20,9 +20,36 @@
 # A `\n` in a pattern becomes a newline, so no anchor here can quote Rust's own `b'\n'` — which is
 # why `ENCODER_NEWLINE` is a named constant in `views.rs` rather than a literal.
 #
+# # The tally, and the two survivors that are documented rather than fixed (2026-09-12)
+#
+# **33 run, 28 caught, both controls SURVIVED** — the first valid run this plan has had. Three
+# earlier attempts were void: two had both controls CAUGHT, decided by the two list tests that were
+# being served by a stale `SecondServer` on :8082 (see `common::SecondServer::start`), and one
+# scored 5 of 33 because nothing started the boards oracle at all.
+#
+# `store-list-drops-the-createat-tiebreak` was a real gap and is **fixed**: it ran against the `api`
+# suite, where the parity fixture's views are created by quick API calls whose `CreateAt` values can
+# tie and whose id order can agree with them, so neither answer distinguished the tiebreak. It now
+# runs against `crates/mm-store/tests/db_view_store.rs`, whose fixture is built so that ordering by
+# `sortorder`, by `createat` and by `id` each give a different answer. CAUGHT there.
+#
+# Two survivors remain, both **coverage gaps in the parity suite rather than shrugs**, and both are
+# recorded here because closing either needs apparatus this plan does not own:
+#
+# * `api-write-gate-uses-the-read-permission` — swapping `create_post` for `read_channel_content`
+#   inside `check_view_write_permission` changes nothing observable, because every caller the suite
+#   has either holds both permissions or neither. `session_has_permission_to_channel` reads the
+#   membership in both cases, so a non-member of a public channel is refused either way. Catching it
+#   needs a member whose role grants `read_channel_content` and **not** `create_post` — a custom
+#   channel-scheme role, planted the way `parity_teams_all::user_with_role` plants system roles.
+#   Worth doing: this is the gate that separates reading a board from writing one.
+# * `api-posts-route-skips-fetching-threads` — flipping `skip_fetch_threads` to `true` is invisible
+#   because no fixture view's channel has a **reply**. With only root posts, fetching threads and
+#   skipping them return the same list. Catching it needs one threaded reply in the seeded channel.
+#
 # The last two lines are the no-op controls and must SURVIVE.
 
-store-list-drops-the-createat-tiebreak	crates/mm-store/src/view_store.rs	             ORDER BY sortorder ASC, createat ASC, id ASC\n             LIMIT $2 OFFSET $3	             ORDER BY sortorder ASC, id ASC\n             LIMIT $2 OFFSET $3	api	views
+store-list-drops-the-createat-tiebreak	crates/mm-store/src/view_store.rs	             ORDER BY sortorder ASC, createat ASC, id ASC\n             LIMIT $2 OFFSET $3	             ORDER BY sortorder ASC, id ASC\n             LIMIT $2 OFFSET $3	store	view_store
 store-list-offset-is-not-multiplied	crates/mm-store/src/view_store.rs	            page * per_page,	            page,	api	views
 store-get-forgets-the-delete-predicate	crates/mm-store/src/view_store.rs	             WHERE id = $1 AND deleteat = 0	             WHERE id = $1	api	views
 store-count-forgets-the-delete-predicate	crates/mm-store/src/view_store.rs	FROM views WHERE channelid = $1 AND deleteat = 0"#	FROM views WHERE channelid = $1"#	api	views
