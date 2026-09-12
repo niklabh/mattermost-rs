@@ -567,6 +567,12 @@ async fn the_console_search_flags_narrow_the_same_way() {
             "a multi-word term goes through the fulltext arm",
             serde_json::json!({ "term": format!("z{STEM} shared") }),
         ),
+        (
+            // `App.SearchAllChannels` trims; without that the LIKE carries the spaces and
+            // matches nothing.
+            "a padded term is trimmed before it reaches the store",
+            serde_json::json!({ "term": format!("   {STEM}   ") }),
+        ),
     ];
 
     for (label, body) in bodies {
@@ -734,10 +740,13 @@ async fn the_console_search_refuses_a_plain_user_identically() {
         &rust_first.1,
         "POST /channels/search with exclude_policy_constrained",
     );
-    assert_ne!(
-        rust_first.1, rust.1,
-        "the earlier check reports a different permission"
-    );
+    // **Which permission each refusal names is not observable over HTTP.**
+    // `MakePermissionError` puts the list in `detailed_error`, and Go wipes that field before it
+    // reaches the wire ([D-092]) — so the two 403s above differ only in `request_id`. Asserting
+    // they differ would be asserting that two random ids are not equal. The list still matters
+    // (it is what the server log says), and it is pinned by `make_permission_error_matches_go`
+    // against a Go-generated oracle; what *this* test can see is the status and the id, and it
+    // does.
 }
 
 // ---------------------------------------------------------------------------
@@ -1370,6 +1379,37 @@ async fn the_retention_and_access_control_filters_need_planted_rows() {
                     !names.contains(&format!("m{STEM} private")),
                     "{label} must drop the enforced channel: {names:?}"
                 ),
+            }
+        }
+
+        // `getAllChannels` has its own copies of the same three predicates, reached by query
+        // string rather than by body, and none of them is exercised anywhere else.
+        for (label, path, present) in [
+            (
+                "exclude_policy_constrained",
+                "/api/v4/channels?per_page=200&exclude_policy_constrained=true",
+                false,
+            ),
+            (
+                "access_control_policy_enforced",
+                "/api/v4/channels?per_page=200&access_control_policy_enforced=true",
+                false,
+            ),
+        ] {
+            let (go, rust) = fetch_both_stable(&client, &token, path).await;
+            assert_lists_agree_modulo_ties(&go, &rust, path);
+            let names = display_names(&rust);
+            assert_eq!(
+                names.contains(&format!("a{STEM} alpha")),
+                present,
+                "{label}: the retention-constrained channel"
+            );
+            if label == "access_control_policy_enforced" {
+                assert_eq!(
+                    names,
+                    vec![format!("m{STEM} private")],
+                    "{label} keeps only the enforced channel, server-wide"
+                );
             }
         }
 
