@@ -11478,3 +11478,54 @@ exists so a unit test can read what a client cannot.
 urgent post exists, `count_urgent_posts_after` is only ever compared at `0`, and both arms of the
 `ServiceSettings.PostPriority` gate answer the same body. The SQL is schema-checked and the
 `'urgent'` literal is pinned to `model.PostPriorityUrgent` by a unit test; the *count* is not.
+
+
+## `GET /api/v4/channels`, `POST /api/v4/channels/search`, `POST /api/v4/channels/group/search` (2026-09-13, branch `wt/channelsearch`)
+
+| layer | file | status |
+|---|---|---|
+| store | `crates/mm-store/src/channel_store.rs` — `get_all_channels`, `get_all_channels_count`, `search_all_channels`, `search_group_channels`, `autocomplete`, `autocomplete_in_team_filtered` | DONE |
+| app | `crates/mm-app/src/channel.rs` — `get_all_channels`, `get_all_channels_count`, `search_all_channels`, `search_group_channels`, `autocomplete_channels`, `autocomplete_channels_for_team_filtered` | DONE |
+| api | `crates/mm-api/src/channels.rs` — `get_all_channels`, `search_all_channels`, `search_group_channels`, `sanitize_all_channels_response` | DONE |
+| test | `crates/mm-api/tests/parity/channel_search_all.rs` — 18 tests | DONE |
+| test | `crates/mm-api/src/lib.rs` — `the_channel_routes_are_all_still_answered_here` (52 route+method pairs) | DONE |
+
+The fourth route of the family, `GET /api/v4/teams/{team_id}/channels/managed_categories`, is
+**not registered by Go on this stack** and stays forwarded — see [D-440].
+
+### What a reader would otherwise get wrong
+
+1. **`include_total_count` changes the response's top-level type**, from a bare array to
+   `{"channels":…,"total_count":…}` — and on `searchAllChannels` the same switch is driven by
+   `page` *and* `per_page` both being present **in the body**, not by a query flag.
+2. **`GetAllChannelsCount` is not the size of `GetAllChannels`, for two independent reasons.**
+   Its store options drop `AccessControlPolicyEnforced` and
+   `ExcludeAccessControlPolicyEnforced` (app/channel.go:2471-2479), and its query omits the
+   `Teams` join. So `?include_total_count=true&exclude_access_control_policy_enforced=true`
+   returns a filtered list beside an unfiltered count. Pinned by
+   `the_retention_and_access_control_filters_need_planted_rows`, which plants the
+   `AccessControlPolicies` row the stack otherwise has none of.
+3. **The same 403 is two different bodies.** `getAllChannels` passes all three sysconsole
+   permissions to `SetPermissionError`; `searchAllChannels` passes only
+   `sysconsole_read_user_management_channels`.
+4. **`?system_console` defaults to true and is true when empty**, and only a non-empty
+   unparseable value is a 400. False selects the *autocomplete* queries, which split again on
+   `team_ids`: exactly one valid id is team-scoped and gated on `view_team`; none, two, or one
+   malformed id is cross-team and gated on **nothing**.
+5. **`ORDER BY c.DisplayName, t.DisplayName` has no third key**, so ties are the planner's on
+   both servers. Adding `c.Id` would make this port more deterministic than Go — the parity
+   comparator therefore asserts the *sequence of sort keys* and the *contents of each tie group*
+   rather than bytes, and refuses to invent an order Go does not have.
+6. **`searchGroupChannels` matches aggregated member usernames, not channel names**, every word
+   must match, and squirrel's empty `And{}` renders as `(1=1)` — so a term of a single space
+   returns the caller's group messages unfiltered while the empty term short-circuits to `[]` in
+   the app and never reaches the store.
+7. **Its LIKE escapes with `\`, not `*`**, and carries no `ESCAPE` clause; every other channel
+   search in the file uses `*`.
+
+### What is not here
+
+`channelSearchQuery`'s `PolicyID` branch — an inner join narrowing to one retention policy — has
+no caller in api4 and is not ported; `ChannelSearch` has no json tag for it. [D-441] records the
+`%q`-versus-JSON quoting of `parent_access_control_policy_id`, which is the same bytes for every
+id shape that field can hold.

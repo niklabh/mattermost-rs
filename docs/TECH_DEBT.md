@@ -7899,3 +7899,35 @@ Recorded as ACCEPTED rather than OPEN because there is nothing to *do*: a licens
 forwarded and Go applies the tier test itself. What a future session must not do is "complete" the
 route by adding the id and permission checks its neighbours in `api4/post.go` have — Go skips all
 of them, and `parity::post_acks::nothing_else_about_an_ack_request_is_ever_consulted` is the proof.
+
+## D-440 · `managed_categories` is not a route on an unlicensed, flag-off server
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-13 (channel listing and search)
+
+`GET /api/v4/teams/{team_id}/channels/managed_categories` is registered by Go **only inside**
+`if api.srv.Config().FeatureFlags.ManagedChannelCategories` (api4/channel.go:72), and that flag is
+`false` at the pinned SHA (feature_flags.go:202). Its handler then refuses anything below
+`MinimumEnterpriseLicense` with a 501 `api.license_error` (api4/channel.go:3311).
+
+So on this stack the path is not a route at all: gorilla's `NotFoundHandler` answers
+`api.context.404.app_error`, measured. **Registering the handler here would be a divergence, not
+progress** — it would answer 501 where Go answers 404 — so the route stays forwarded and
+`channel_search_all::the_managed_categories_route_is_a_404_on_both` pins both the status and the
+absence of `x-mmrs-served-by`.
+
+What it would need to ship: a feature-flag surface `mm-app::config` does not have (so the router
+could register the route conditionally, as Go does), and `GetVisibleManagedCategoryMappings`,
+which is enterprise. Neither is blocked on licensing *policy* — the licence check is a refusal we
+could serve — but on the registration being conditional on a flag we cannot read.
+
+## D-441 · `parent_access_control_policy_id` is quoted with Go's `%q`, bound here as JSON
+
+**Status** ACCEPTED · **Severity** cosmetic · **Raised** 2026-09-13 (channel listing and search)
+
+`channelSearchQuery` interpolates `fmt.Sprintf("%q", opts.ParentAccessControlPolicyId)` and lets
+Postgres parse the result as `jsonb` for `Data->'imports' @> ?` (channel_store.go:3768). The port
+binds a `serde_json::Value::String` instead, which reaches the same document for every ASCII
+input. Go's `%q` and JSON's string escaping diverge only on non-ASCII — `%q` emits `é`-style
+escapes for some runes JSON leaves alone — and this field carries 26-character base32 ids, so no
+reachable input can tell them apart. Recorded rather than fixed because fixing it would mean
+reimplementing Go's quoting for a value that cannot exercise the difference.
