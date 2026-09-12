@@ -340,36 +340,7 @@ pub async fn handle_device_props(
     let device_id = received.get("device_id").map_or("", String::as_str);
     let voip_device_id = received.get("voip_device_id").map_or("", String::as_str);
 
-    // `newProps := map[string]string{}` — built in validation order, and only from the keys that
-    // were actually sent. An empty value is skipped rather than written, so this route can never
-    // *clear* a prop.
-    let mut new_props: Vec<(&str, &str)> = Vec::with_capacity(2);
-
-    let notifications_disabled = received
-        .get(SESSION_PROP_DEVICE_NOTIFICATION_DISABLED)
-        .map_or("", String::as_str);
-    if !notifications_disabled.is_empty() {
-        // `!= "false" && != "true"` — an exact match against two literals, not a truthy parse.
-        if notifications_disabled != "false" && notifications_disabled != "true" {
-            return Err(ApiError::invalid_param(
-                SESSION_PROP_DEVICE_NOTIFICATION_DISABLED,
-            ));
-        }
-        new_props.push((
-            SESSION_PROP_DEVICE_NOTIFICATION_DISABLED,
-            notifications_disabled,
-        ));
-    }
-
-    let mobile_version = received
-        .get(SESSION_PROP_MOBILE_VERSION)
-        .map_or("", String::as_str);
-    if !mobile_version.is_empty() {
-        if !is_strict_semver(mobile_version) {
-            return Err(ApiError::invalid_param(SESSION_PROP_MOBILE_VERSION));
-        }
-        new_props.push((SESSION_PROP_MOBILE_VERSION, mobile_version));
-    }
+    let new_props = validate_device_props(&received).map_err(ApiError::invalid_param)?;
 
     // `if deviceId != "" || voIPDeviceId != ""` — one non-empty id is enough to enter, and both
     // are then written by `AttachDeviceId`, the empty one falling back to the column's current
@@ -405,6 +376,67 @@ pub async fn handle_device_props(
         }
     }
     Ok(response)
+}
+
+/// The two device-id checks of `attachDeviceIds` (user.go:2758-2763), in Go's order.
+///
+/// Separate from the handler for the same reason [`validate_device_props`] is: which of the two
+/// parameters is named cannot be seen from our response body ([D-092]), so the order and the
+/// **allowlists** are asserted here instead. They are different allowlists — a standard device id
+/// may be Apple, Apple-beta or Android; a VoIP one may not be Android — and swapping them is the
+/// mutation this exists to catch.
+fn validate_device_ids(device_id: &str, voip_device_id: &str) -> Result<(), &'static str> {
+    if !device_id.is_empty() && !is_valid_standard_device_id(device_id) {
+        return Err("device_id");
+    }
+    if !voip_device_id.is_empty() && !is_valid_voip_device_id(voip_device_id) {
+        return Err("voip_device_id");
+    }
+    Ok(())
+}
+
+/// The prop half of `handleDeviceProps` (user.go:2711-2733): validate, and collect what to write.
+///
+/// Extracted from the handler for one reason — **the order is the thing worth testing and it is
+/// invisible from outside.** All four of this route's parameters are refused with the same status
+/// and the same error id, differing only in the interpolated parameter *name*, and that name does
+/// not reach our wire at all: i18n is unported, so our `message` is the raw error id ([D-092]).
+/// So two servers can disagree about which parameter they rejected and every route-level
+/// assertion still passes. Hoisting the device-id check above this one survived the whole parity
+/// suite for exactly that reason; [`the_validation_order_is_notifications_then_version`] is what
+/// catches it now.
+///
+/// Returns the offending parameter name on failure, and otherwise the props to write, **in
+/// validation order** — Go builds its map the same way, and only from keys that were actually
+/// sent, so an empty value is skipped rather than written and this route can never *clear* a prop.
+fn validate_device_props(received: &StringMap) -> Result<Vec<(&str, &str)>, &str> {
+    let mut new_props: Vec<(&str, &str)> = Vec::with_capacity(2);
+
+    let notifications_disabled = received
+        .get(SESSION_PROP_DEVICE_NOTIFICATION_DISABLED)
+        .map_or("", String::as_str);
+    if !notifications_disabled.is_empty() {
+        // `!= "false" && != "true"` — an exact match against two literals, not a truthy parse.
+        if notifications_disabled != "false" && notifications_disabled != "true" {
+            return Err(SESSION_PROP_DEVICE_NOTIFICATION_DISABLED);
+        }
+        new_props.push((
+            SESSION_PROP_DEVICE_NOTIFICATION_DISABLED,
+            notifications_disabled,
+        ));
+    }
+
+    let mobile_version = received
+        .get(SESSION_PROP_MOBILE_VERSION)
+        .map_or("", String::as_str);
+    if !mobile_version.is_empty() {
+        if !is_strict_semver(mobile_version) {
+            return Err(SESSION_PROP_MOBILE_VERSION);
+        }
+        new_props.push((SESSION_PROP_MOBILE_VERSION, mobile_version));
+    }
+
+    Ok(new_props)
 }
 
 /// Port of `attachDeviceIds` (user.go:2750). Returns the `Set-Cookie` value the caller must send.
@@ -457,12 +489,7 @@ async fn attach_device_ids(
     device_id: &str,
     voip_device_id: &str,
 ) -> Result<String, ApiError> {
-    if !device_id.is_empty() && !is_valid_standard_device_id(device_id) {
-        return Err(ApiError::invalid_param("device_id"));
-    }
-    if !voip_device_id.is_empty() && !is_valid_voip_device_id(voip_device_id) {
-        return Err(ApiError::invalid_param("voip_device_id"));
-    }
+    validate_device_ids(device_id, voip_device_id).map_err(ApiError::invalid_param)?;
 
     if !device_id.is_empty() {
         state
@@ -807,7 +834,7 @@ mod tests {
 
     use super::{
         StatusCode, check_embedded_cookie, is_strict_semver, map_from_json, render_session_cookie,
-        sanitize_cookie_value, status_ok,
+        sanitize_cookie_value, status_ok, validate_device_ids, validate_device_props,
     };
 
     fn oracle() -> serde_json::Value {
@@ -1089,6 +1116,97 @@ mod tests {
         assert_eq!(sanitize_cookie_value("/a\nb"), "/ab");
         assert_eq!(sanitize_cookie_value("/a\u{7f}b"), "/ab");
         assert_eq!(sanitize_cookie_value("/normal/path"), "/normal/path");
+    }
+
+    /// The order of the four validations, which no route-level test can see.
+    ///
+    /// Every one of them is a 400 with the same error id, and the parameter name lives only in
+    /// the interpolated message — which our server does not produce, because i18n is unported
+    /// ([D-092]). So a request with **all four** parameters wrong must be refused on
+    /// `device_notification_disabled`, and the only place that can be asserted is here.
+    #[test]
+    fn the_validation_order_is_notifications_then_version() {
+        let props = |pairs: &[(&str, &str)]| -> mm_model::utils::StringMap {
+            pairs
+                .iter()
+                .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+                .collect()
+        };
+
+        // Both wrong: the notification flag is checked first and is the one named.
+        assert_eq!(
+            validate_device_props(&props(&[
+                ("device_notification_disabled", "maybe"),
+                ("mobile_version", "v1"),
+            ])),
+            Err("device_notification_disabled")
+        );
+        // Only the version wrong: now it is the one named.
+        assert_eq!(
+            validate_device_props(&props(&[
+                ("device_notification_disabled", "true"),
+                ("mobile_version", "v1"),
+            ])),
+            Err("mobile_version")
+        );
+        // Both fine: collected in validation order, the flag first.
+        assert_eq!(
+            validate_device_props(&props(&[
+                ("mobile_version", "2.34.0"),
+                ("device_notification_disabled", "true"),
+            ])),
+            Ok(vec![
+                ("device_notification_disabled", "true"),
+                ("mobile_version", "2.34.0"),
+            ])
+        );
+        // An empty value is skipped, not written — this route can never clear a prop.
+        assert_eq!(
+            validate_device_props(&props(&[
+                ("device_notification_disabled", ""),
+                ("mobile_version", ""),
+            ])),
+            Ok(vec![])
+        );
+        assert_eq!(validate_device_props(&props(&[])), Ok(vec![]));
+    }
+
+    /// The device ids are validated **after** the two props, each against its own allowlist, and
+    /// `device_id` before `voip_device_id`.
+    #[test]
+    fn the_device_ids_are_checked_after_the_props_and_in_order() {
+        // Android is a valid standard platform and **not** a valid VoIP one: the whole difference
+        // between the two allowlists, and what a swap would invert.
+        assert_eq!(validate_device_ids("android_rn:tok", ""), Ok(()));
+        assert_eq!(
+            validate_device_ids("", "android_rn:tok"),
+            Err("voip_device_id")
+        );
+        assert_eq!(validate_device_ids("apple_rn:tok", "apple_rn:tok"), Ok(()));
+        // Both wrong: `device_id` is named, because it is checked first.
+        assert_eq!(
+            validate_device_ids("nonsense", "nonsense"),
+            Err("device_id")
+        );
+        // An empty id is not validated at all — that is what makes a one-sided update possible.
+        assert_eq!(validate_device_ids("", ""), Ok(()));
+
+        // And the props come first overall: a request with everything wrong is refused on the
+        // notification flag, never on `device_id`.
+        let all_wrong: mm_model::utils::StringMap = [
+            ("device_notification_disabled", "maybe"),
+            ("mobile_version", "v1"),
+            ("device_id", "nonsense"),
+            ("voip_device_id", "nonsense"),
+        ]
+        .iter()
+        .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+        .collect();
+        assert_eq!(
+            validate_device_props(&all_wrong),
+            Err("device_notification_disabled"),
+            "the props are validated before the ids"
+        );
     }
 
     /// `CheckEmbeddedCookie` is the `MMEMBED` **cookie** equal to `"1"` — not a header, and not
