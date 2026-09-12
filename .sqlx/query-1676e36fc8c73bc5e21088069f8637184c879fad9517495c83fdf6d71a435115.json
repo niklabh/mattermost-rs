@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            UPDATE reactions\n               SET updateat = $1, deleteat = $1\n             WHERE emojiname = $2 AND COALESCE(deleteat, 0) = 0\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1676e36fc8c73bc5e21088069f8637184c879fad9517495c83fdf6d71a435115"
+}

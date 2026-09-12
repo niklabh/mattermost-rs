@@ -1,8 +1,10 @@
-//! Port of the single-emoji reads in `server/channels/app/emoji.go`.
+//! Port of `server/channels/app/emoji.go`: the single-emoji reads, the list and search, and the
+//! two writes `POST /api/v4/emoji` and `DELETE /api/v4/emoji/{emoji_id}` sit on.
 
 use mm_model::emoji::Emoji;
 use mm_model::utils::{AppError, AppResult};
 use mm_store::emoji_store::EmojiStore;
+use mm_store::reaction_store::ReactionStore;
 
 use crate::App;
 use crate::post::PrepareError;
@@ -452,5 +454,349 @@ mod tests {
                 .connect_lazy("postgres://unused/unused")
                 .expect("a lazy pool needs no server"),
         )
+    }
+}
+
+// -------------------------------------------------------------------------------------------
+// writes: CreateEmoji / DeleteEmoji
+// -------------------------------------------------------------------------------------------
+
+/// Port of `app.MaxEmojiFileSize` (app/emoji.go:33) — `1 << 19`, 512 KiB.
+pub const MAX_EMOJI_FILE_SIZE: i64 = 1 << 19;
+
+/// Port of `app.MaxEmojiWidth` / `MaxEmojiHeight` (app/emoji.go:34) — above this the image is
+/// **resized**, not refused.
+pub const MAX_EMOJI_WIDTH: i64 = 128;
+/// See [`MAX_EMOJI_WIDTH`].
+pub const MAX_EMOJI_HEIGHT: i64 = 128;
+
+/// Port of `app.MaxEmojiOriginalWidth` / `MaxEmojiOriginalHeight` (app/emoji.go:36) — above this
+/// the upload is **refused**, with the two limits in the error's i18n params.
+pub const MAX_EMOJI_ORIGINAL_WIDTH: i64 = 1028;
+/// See [`MAX_EMOJI_ORIGINAL_WIDTH`].
+pub const MAX_EMOJI_ORIGINAL_HEIGHT: i64 = 1028;
+
+/// The `image` part of the multipart form, as `CreateEmoji` needs it.
+///
+/// Go carries a `*multipart.Form` all the way down and reaches into `Form.File["image"]`; this
+/// carries the one part that matters, because the multipart shape is the handler's business.
+#[derive(Debug, Clone, Copy)]
+pub struct EmojiUpload<'a> {
+    /// `imageData[0].Filename`. It picks the GIF branch in `uploadEmojiImage` and nothing else —
+    /// the stored path is derived from the emoji id, never from this.
+    pub filename: &'a str,
+    /// The part's bytes, already buffered. Capped at [`MAX_EMOJI_FILE_SIZE`] by the handler.
+    pub data: &'a [u8],
+}
+
+impl App {
+    /// Port of `app.App.CreateEmoji` (app/emoji.go:40).
+    ///
+    /// # The order of the seven refusals is the wire format
+    ///
+    /// 1. `EnableCustomEmoji` off → **403** `api.emoji.disabled.app_error`. Unreachable through
+    ///    the route: `createEmoji` checks the same setting first and answers **501**.
+    /// 2. `FileSettings.DriverName` empty → 403 `api.emoji.storage.app_error`.
+    /// 3. `PreSave` then `IsValid` → whatever `model.emoji.*` error the name or the ids earn.
+    ///    **The id is blanked first**, so a client cannot choose an emoji's id or overwrite one.
+    /// 4. `creator_id` is not the session's user → 403 `api.emoji.create.other_user.app_error`.
+    /// 5. A live emoji already holds the name → 400 `api.emoji.create.duplicate.app_error`.
+    /// 6. No `image` part → 400 `api.context.invalid_body_param.app_error`, whose `Name` is the
+    ///    literal **`createEmoji`** and not `image`, and whose `where` is `Context`.
+    /// 7. The image itself — see [`App::upload_emoji_image`].
+    ///
+    /// Steps 3 and 5 are the pair a reader is most likely to swap: validating *after* the
+    /// duplicate check would answer "already taken" for a name that is not a legal name at all.
+    ///
+    /// # The file is written before the row, and nothing cleans up
+    ///
+    /// `uploadEmojiImage` runs at step 7 and `Store().Emoji().Save` after it, so a failed insert
+    /// leaves the image orphaned under `emoji/<id>/image`. Go's own comment at step 3 says the
+    /// validation is deliberately early "so that we don't have to clean up orphaned files"; the
+    /// gap between the write and the insert is what remains of that.
+    ///
+    /// # `PreSave` runs twice
+    ///
+    /// Once here and once inside [`mm_store::EmojiStore::save`]. The second call keeps the id
+    /// (non-empty by then) and **moves `create_at` and `update_at` again**, so the row's
+    /// timestamps are the store's, not this function's. Reproduced rather than hoisted.
+    #[tracing::instrument(skip_all, fields(emoji_name, emoji_id, bytes))]
+    pub async fn create_emoji(
+        &self,
+        session_user_id: &str,
+        mut emoji: Emoji,
+        image: Option<EmojiUpload<'_>>,
+    ) -> Result<Emoji, PrepareError> {
+        self.emoji_storage_available("CreateEmoji")
+            .map_err(PrepareError::App)?;
+
+        // "wipe the emoji id so that existing emojis can't get overwritten" (app/emoji.go:51).
+        emoji.id = String::new();
+
+        emoji.pre_save();
+        emoji.is_valid().map_err(PrepareError::App)?;
+        tracing::Span::current().record("emoji_name", &emoji.name);
+        tracing::Span::current().record("emoji_id", &emoji.id);
+
+        if emoji.creator_id != session_user_id {
+            return Err(PrepareError::App(AppError::boxed(
+                "CreateEmoji",
+                "api.emoji.create.other_user.app_error",
+                None,
+                String::new(),
+                403,
+            )));
+        }
+
+        // `err == nil && existingEmoji != nil` — a store *failure* is not a duplicate, and a
+        // not-found is a store failure here. So an unreachable database does not refuse the
+        // create at this step; it fails at the insert instead.
+        if self.store().emoji().get_by_name(&emoji.name).await.is_ok() {
+            return Err(PrepareError::App(AppError::boxed(
+                "CreateEmoji",
+                "api.emoji.create.duplicate.app_error",
+                None,
+                String::new(),
+                400,
+            )));
+        }
+
+        let Some(image) = image else {
+            let mut params: std::collections::HashMap<String, serde_json::Value> =
+                std::collections::HashMap::new();
+            // `map[string]any{"Name": "createEmoji"}` — the *handler's* name, not the field's.
+            params.insert(
+                "Name".to_owned(),
+                serde_json::Value::String("createEmoji".to_owned()),
+            );
+            return Err(PrepareError::App(AppError::boxed(
+                "Context",
+                "api.context.invalid_body_param.app_error",
+                Some(params),
+                String::new(),
+                400,
+            )));
+        };
+        tracing::Span::current().record("bytes", image.data.len());
+
+        self.upload_emoji_image(&emoji.id, image).await?;
+
+        let saved = self
+            .store()
+            .emoji()
+            .save(emoji)
+            .await
+            // **Every** store failure is one 500 with one id, including a validation error the
+            // store raises — Go wraps unconditionally here rather than re-raising the `AppError`.
+            .map_err(|err| {
+                tracing::error!(error = %err, "emoji insert failed");
+                PrepareError::App(AppError::boxed(
+                    "CreateEmoji",
+                    "app.emoji.create.internal_error",
+                    None,
+                    String::new(),
+                    500,
+                ))
+            })?;
+
+        self.publish_emoji_added(&saved).await;
+        Ok(saved)
+    }
+
+    /// Port of the `emoji_added` broadcast at the end of `CreateEmoji` (app/emoji.go:87).
+    ///
+    /// **The emoji is a JSON string inside `data`, not a nested object** — `message.Add("emoji",
+    /// string(emojiJSON))` — the same double-encoding the reaction events use, and the same one a
+    /// client decodes twice.
+    ///
+    /// The broadcast has no team, channel or user, so the hub sends it to **everyone connected**:
+    /// a custom emoji is server-wide. Go answers 500 `api.marshal_error` if the marshal fails;
+    /// that branch cannot fire for a six-field struct of `String`s and `i64`s, so this logs
+    /// instead of inventing an error path the type system rules out.
+    async fn publish_emoji_added(&self, emoji: &Emoji) {
+        let mut message = mm_model::websocket_message::WebSocketEvent::new(
+            mm_model::websocket_message::WEBSOCKET_EVENT_EMOJI_ADDED,
+            "",
+            "",
+            "",
+            None,
+            "",
+        );
+        match serde_json::to_string(emoji) {
+            Ok(json) => message.add("emoji", serde_json::Value::String(json)),
+            Err(err) => {
+                tracing::error!(error = %err, "failed to encode the new emoji for the websocket");
+                return;
+            }
+        }
+        self.publish(message).await;
+    }
+
+    /// Port of `app.App.uploadEmojiImage` (app/emoji.go:105).
+    ///
+    /// # What this port answers, and what it hands to Go
+    ///
+    /// Go decodes the image header, refuses anything over 1028×1028, counts the frames of a GIF,
+    /// and then either writes the bytes through untouched (≤128×128) or **resizes and re-encodes**
+    /// them. The resize is `imaging.Fit` followed by `EncodePNG` or `gif.EncodeAll`, and no second
+    /// implementation reproduces those bytes — so the resize path is
+    /// [`PrepareError::Unreproducible`] and the request is forwarded. So is every format whose
+    /// header this port does not measure exactly (see [`crate::imaging::decode_config`]), and so
+    /// is any filename that is not `.png`, which is what keeps the GIF frame walk out of reach.
+    ///
+    /// Both forwarding points sit **before** the only write, so a forwarded request has left
+    /// nothing behind in the file backend. That is not incidental: `WriteFile` is the last
+    /// statement of every branch.
+    ///
+    /// # The two refusals that are answered here
+    ///
+    /// * No registered decoder claimed the bytes → 400 `api.emoji.upload.image.app_error`.
+    /// * Over 1028 in either dimension → 400
+    ///   `api.emoji.upload.large_image.too_large.app_error`, carrying `MaxWidth` **and**
+    ///   `MaxHeight` as i18n params. This check is `>`, not `>=`: exactly 1028 is accepted.
+    ///
+    /// Their order matters and is Go's: a 2000-pixel image that is not an image at all is the
+    /// decode error, never the size one.
+    #[tracing::instrument(skip_all, fields(format, width, height))]
+    async fn upload_emoji_image(
+        &self,
+        id: &str,
+        image: EmojiUpload<'_>,
+    ) -> Result<(), PrepareError> {
+        let (width, height) = match crate::imaging::decode_config(image.data) {
+            crate::imaging::ImageConfig::NoFormat => {
+                return Err(PrepareError::App(AppError::boxed(
+                    "uploadEmojiImage",
+                    "api.emoji.upload.image.app_error",
+                    None,
+                    String::new(),
+                    400,
+                )));
+            }
+            crate::imaging::ImageConfig::Undecidable(why) => {
+                tracing::debug!(why, "emoji image header is not measured here");
+                return Err(PrepareError::Unreproducible(
+                    "the emoji image's format is not decoded here",
+                ));
+            }
+            crate::imaging::ImageConfig::Known {
+                format,
+                width,
+                height,
+            } => {
+                tracing::Span::current().record("format", format);
+                tracing::Span::current().record("width", width);
+                tracing::Span::current().record("height", height);
+                (width, height)
+            }
+        };
+
+        if width > MAX_EMOJI_ORIGINAL_WIDTH || height > MAX_EMOJI_ORIGINAL_HEIGHT {
+            let mut params: std::collections::HashMap<String, serde_json::Value> =
+                std::collections::HashMap::new();
+            params.insert(
+                "MaxWidth".to_owned(),
+                serde_json::Value::from(MAX_EMOJI_ORIGINAL_WIDTH),
+            );
+            params.insert(
+                "MaxHeight".to_owned(),
+                serde_json::Value::from(MAX_EMOJI_ORIGINAL_HEIGHT),
+            );
+            return Err(PrepareError::App(AppError::boxed(
+                "uploadEmojiImage",
+                "api.emoji.upload.large_image.too_large.app_error",
+                Some(params),
+                String::new(),
+                400,
+            )));
+        }
+
+        // `isGIF` decides whether `CountGIFFrames` runs, and it is read off the **filename**.
+        // Anything but a certain `.png` goes to Go rather than being guessed at.
+        if !crate::imaging::filename_is_certainly_png(image.filename) {
+            return Err(PrepareError::Unreproducible(
+                "only a .png filename is certain to skip the GIF frame walk",
+            ));
+        }
+
+        if width > MAX_EMOJI_WIDTH || height > MAX_EMOJI_HEIGHT {
+            return Err(PrepareError::Unreproducible(
+                "the emoji image needs resizing, whose output bytes are not reproducible here",
+            ));
+        }
+
+        self.write_file(image.data, &emoji_image_path(id)).await?;
+        Ok(())
+    }
+
+    /// Port of `app.App.DeleteEmoji` (app/emoji.go:180).
+    ///
+    /// # Only the store failure can fail the call
+    ///
+    /// The image move and the reaction sweep that follow it are `mlog.Warn`-and-carry-on in Go,
+    /// so an emoji whose image cannot be renamed is still deleted and the route still answers
+    /// `{"status":"OK"}`. Reproduced: swallowing those two is the behaviour, not an oversight.
+    ///
+    /// Both error ids carry `id=<emoji id>` in `detailed_error`, and the **404 id has no
+    /// `.app_error` suffix** (`app.emoji.delete.no_results`) where the 500 does
+    /// (`app.emoji.delete.app_error`) — the kind of asymmetry a transcription regularises away.
+    #[tracing::instrument(skip_all, fields(emoji_id = %emoji.id, emoji_name = %emoji.name))]
+    pub async fn delete_emoji(&self, emoji: &Emoji) -> AppResult {
+        self.store()
+            .emoji()
+            .delete(&emoji.id, mm_model::utils::get_millis())
+            .await
+            .map_err(|err| {
+                let missing = err.is_not_found();
+                if !missing {
+                    tracing::error!(error = %err, "emoji delete failed");
+                }
+                AppError::boxed(
+                    "DeleteEmoji",
+                    if missing {
+                        "app.emoji.delete.no_results"
+                    } else {
+                        "app.emoji.delete.app_error"
+                    },
+                    None,
+                    format!("id={}", emoji.id),
+                    if missing { 404 } else { 500 },
+                )
+            })?;
+
+        self.delete_emoji_image(&emoji.id).await;
+        self.delete_reactions_for_emoji(&emoji.name).await;
+        Ok(())
+    }
+
+    /// Port of `app.App.deleteEmojiImage` (app/emoji.go:381).
+    ///
+    /// A **rename, not a delete**: `emoji/<id>/image` becomes `emoji/<id>/image_deleted`, so the
+    /// bytes survive a delete and `GET /emoji/{id}/image` stops finding them. The destination
+    /// path is built inline in Go — `"emoji/"+id+"/image_deleted"` — rather than through
+    /// `getEmojiImagePath`, so the two spellings live side by side there and here.
+    async fn delete_emoji_image(&self, id: &str) {
+        if let Err(err) = self
+            .move_file(&emoji_image_path(id), &format!("emoji/{id}/image_deleted"))
+            .await
+        {
+            tracing::warn!(error = %err, emoji_id = id, "Failed to rename image when deleting emoji");
+        }
+    }
+
+    /// Port of `app.App.deleteReactionsForEmoji` (app/emoji.go:387).
+    async fn delete_reactions_for_emoji(&self, emoji_name: &str) {
+        if let Err(err) = self
+            .store()
+            .reaction()
+            .delete_all_with_emoji_name(emoji_name)
+            .await
+        {
+            tracing::warn!(
+                error = %err,
+                emoji_name,
+                "Unable to delete reactions when deleting emoji"
+            );
+        }
     }
 }

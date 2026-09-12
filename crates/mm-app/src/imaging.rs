@@ -175,3 +175,393 @@ mod go_parity {
         }
     }
 }
+
+/// What [`decode_config`] could establish about a byte string, in the terms `CreateEmoji` needs.
+///
+/// `uploadEmojiImage` (app/emoji.go:107) asks `image.DecodeConfig` for three things: whether the
+/// bytes are an image at all, how wide and how tall. Only the first is answerable for every
+/// format from a magic prefix, so this type keeps "not an image" and "an image this port does not
+/// measure" apart — the first is an answer, the second is a reason to hand the request to Go.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImageConfig {
+    /// No registered magic matched. Go returns `image.ErrFormat`, and `uploadEmojiImage` answers
+    /// **400 `api.emoji.upload.image.app_error`** — which this port can give on its own.
+    NoFormat,
+    /// A decoder this port reproduces accepted the header. The dimensions are Go's.
+    Known {
+        format: &'static str,
+        width: i64,
+        height: i64,
+    },
+    /// A registered magic matched, but this port does not reproduce that decoder's header parse
+    /// closely enough to claim its answer. The caller forwards; the string says why, for the log.
+    ///
+    /// Everything but a straightforward non-paletted PNG lands here today, on purpose: a
+    /// dimension this port guessed wrong is a wrong *refusal* (or a wrong acceptance) on a route
+    /// that writes to the file backend. See [D-380].
+    Undecidable(&'static str),
+}
+
+/// The header half of `image.DecodeConfig`, for the formats this port measures exactly.
+///
+/// # Only PNG, and only the unambiguous part of PNG
+///
+/// [`detect_format`] already reproduces Go's whole registry, so `NoFormat` is exact for all six
+/// decoders. The *dimensions* are another matter: each decoder has its own header grammar and its
+/// own refusals, and a port that got one subtly wrong would not fail loudly — it would accept an
+/// emoji Go rejects, or resize one Go writes through. So this measures PNG, where the layout is
+/// fixed at bytes 16..24 and every one of `parseIHDR`'s conditions is checkable, and hands
+/// everything else back as [`ImageConfig::Undecidable`].
+///
+/// Within PNG, a **paletted** image (colour type 3) is undecidable too: `DecodeConfig` does not
+/// stop at IHDR for those (`cbPaletted(d.cb)` keeps the loop going until `dsSeentRNS`), so it can
+/// fail on a PLTE chunk long after the dimensions were read.
+///
+/// Pinned by `fixtures/behaviour_emoji_upload.json`, whose corpus is run through Go's own
+/// `image.DecodeConfig`.
+pub fn decode_config(data: &[u8]) -> ImageConfig {
+    let Some(format) = detect_format(data) else {
+        return ImageConfig::NoFormat;
+    };
+    if format != "png" {
+        return ImageConfig::Undecidable("only PNG headers are measured here");
+    }
+    png_config(data)
+}
+
+/// `png.decoder.parseIHDR` (image/png/reader.go:141) plus the chunk framing around it.
+///
+/// Every refusal Go can make here becomes `Undecidable` rather than an error of our own: the
+/// point is to be certain when we answer, not to reproduce PNG's error strings.
+fn png_config(data: &[u8]) -> ImageConfig {
+    // 8 signature + 4 length + 4 type + 13 data + 4 CRC.
+    const IHDR_END: usize = 33;
+    if data.len() < IHDR_END {
+        return ImageConfig::Undecidable("truncated before the end of IHDR");
+    }
+
+    if u32::from_be_bytes([data[8], data[9], data[10], data[11]]) != 13 {
+        return ImageConfig::Undecidable("bad IHDR length");
+    }
+    if &data[12..16] != b"IHDR" {
+        return ImageConfig::Undecidable("the first chunk is not IHDR");
+    }
+
+    let ihdr = &data[16..29];
+    // `d.crc` is reset before the type and covers the type *and* the data (reader.go:938).
+    let crc = crc32_ieee(&data[12..29]);
+    if crc != u32::from_be_bytes([data[29], data[30], data[31], data[32]]) {
+        return ImageConfig::Undecidable("IHDR checksum mismatch");
+    }
+
+    if ihdr[10] != 0 {
+        return ImageConfig::Undecidable("unsupported compression method");
+    }
+    if ihdr[11] != 0 {
+        return ImageConfig::Undecidable("unsupported filter method");
+    }
+    // `itNone` (0) and `itAdam7` (1) are the only interlace methods png accepts.
+    if ihdr[12] > 1 {
+        return ImageConfig::Undecidable("invalid interlace method");
+    }
+
+    // Go reads these as **signed** 32-bit, so a width with the top bit set is negative and the
+    // `w <= 0` check refuses it — where an unsigned read would see two billion and try to
+    // allocate. Reproduced with `i32::from_be_bytes` rather than a `u32` compared against a limit.
+    let width = i32::from_be_bytes([ihdr[0], ihdr[1], ihdr[2], ihdr[3]]);
+    let height = i32::from_be_bytes([ihdr[4], ihdr[5], ihdr[6], ihdr[7]]);
+    if width <= 0 || height <= 0 {
+        return ImageConfig::Undecidable("non-positive dimension");
+    }
+    // `nPixels != (nPixels*8)/8` on a 64-bit `int`: the product must fit in 61 bits.
+    if i64::from(width).saturating_mul(i64::from(height)) >= (1_i64 << 60) {
+        return ImageConfig::Undecidable("dimension overflow");
+    }
+
+    // Colour type 3 is paletted, and `DecodeConfig` keeps parsing chunks for those.
+    let (depth, colour_type) = (ihdr[8], ihdr[9]);
+    if colour_type == 3 {
+        return ImageConfig::Undecidable("paletted: DecodeConfig reads past IHDR");
+    }
+    // The depth/colour-type pairs `parseIHDR` accepts for the non-paletted types. Anything else
+    // leaves `d.cb == cbInvalid` and Go answers `UnsupportedError`.
+    let supported = match colour_type {
+        // ctGrayscale
+        0 => matches!(depth, 1 | 2 | 4 | 8 | 16),
+        // ctTrueColor, ctGrayscaleAlpha, ctTrueColorAlpha
+        2 | 4 | 6 => matches!(depth, 8 | 16),
+        _ => false,
+    };
+    if !supported {
+        return ImageConfig::Undecidable("bit depth / color type pair png does not accept");
+    }
+
+    ImageConfig::Known {
+        format: "png",
+        width: i64::from(width),
+        height: i64::from(height),
+    }
+}
+
+/// CRC-32/IEEE, bitwise. Seventeen bytes per call, so the table is not worth carrying.
+fn crc32_ieee(data: &[u8]) -> u32 {
+    let mut crc = 0xffff_ffff_u32;
+    for byte in data {
+        crc ^= u32::from(*byte);
+        for _ in 0..8 {
+            let mask = 0_u32.wrapping_sub(crc & 1);
+            crc = (crc >> 1) ^ (0xedb8_8320 & mask);
+        }
+    }
+    !crc
+}
+
+/// Whether `uploadEmojiImage` can be certain it will **not** take the GIF branch for this
+/// filename.
+///
+/// # The filename decides that branch, not the bytes
+///
+/// `isGIF := model.NewInfo(filename).MimeType == "image/gif"` (app/emoji.go:129), and
+/// `NewInfo` is `mime.TypeByExtension(strings.ToLower(filepath.Ext(name)))`. So a PNG uploaded as
+/// `x.gif` is walked by `CountGIFFrames` and fails, and an animated GIF uploaded as `x.png` skips
+/// the 70-frame cap entirely.
+///
+/// # Which is why this asks for `.png` rather than "not `.gif`"
+///
+/// Go's `mime` package **loads the host's `/etc/mime.types` at init** on Linux, so the set of
+/// extensions that map to `image/gif` is a property of the machine the Go server runs on, not of
+/// its source. Testing for `.gif` would therefore be a guess about someone else's filesystem.
+/// `.png` is in Go's built-in table and cannot be *re*-mapped away from `image/png` by a system
+/// file (the built-in table wins), so an extension of exactly `.png` is the one answer that is
+/// safe to give without consulting the host — and the GIF walk is skipped for it on every
+/// machine. Every other extension is handed to Go.
+///
+/// Case-insensitive, because `NewInfo` lowercases the extension first.
+pub fn filename_is_certainly_png(filename: &str) -> bool {
+    go_path_extension(filename).eq_ignore_ascii_case(".png")
+}
+
+/// Port of `filepath.Ext` (path/filepath/path.go): everything from the **last** dot in the last
+/// path element, or the empty string when that element has none.
+fn go_path_extension(path: &str) -> &str {
+    let start = path.rfind(['/']).map_or(0, |i| i + 1);
+    let element = &path[start..];
+    match element.rfind('.') {
+        Some(dot) => &element[dot..],
+        None => "",
+    }
+}
+
+#[cfg(test)]
+mod decode_config_parity {
+    use super::{ImageConfig, decode_config, filename_is_certainly_png};
+
+    fn oracle() -> serde_json::Value {
+        serde_json::from_str(include_str!(
+            "../../../fixtures/behaviour_emoji_upload.json"
+        ))
+        .expect("behaviour_emoji_upload.json is generated by reference/dump")
+    }
+
+    /// The corpus rows this port deliberately does **not** measure, even though Go decodes them.
+    ///
+    /// Listed by name rather than derived, so that widening the port has to change this list and
+    /// narrowing it cannot happen silently. One entry, and the reason is in
+    /// [`super::decode_config`]: `DecodeConfig` keeps reading chunks past IHDR for a paletted
+    /// image, so its dimensions are not the last word on whether it decodes.
+    const HANDED_TO_GO: &[&str] = &["png_paletted_8x8"];
+
+    /// `image.DecodeConfig` itself, over PNG headers built around 128 and 1028 and around every
+    /// field `parseIHDR` refuses on.
+    ///
+    /// Three-way, and each way is a different bug it catches:
+    ///
+    /// - Go decoded it → we must report the **same width and height**, or admit we did not
+    ///   measure it. A wrong dimension here is a wrong HTTP status: 400 for an image Go stores,
+    ///   or a stored image Go refuses.
+    /// - Go failed with `ErrFormat` → `NoFormat`, the one refusal this port answers itself.
+    /// - Go failed *without* `ErrFormat` → a magic matched and the body did not parse, so we must
+    ///   be `Undecidable`: neither `NoFormat` (which would answer where Go's error is different)
+    ///   nor `Known` (which would accept bytes Go refuses).
+    #[test]
+    fn decode_config_matches_go() {
+        use base64::Engine;
+
+        let oracle = oracle();
+        let cases = oracle["decode_config"].as_array().expect("an array");
+        assert!(cases.len() >= 25, "the corpus should cover parseIHDR");
+
+        let mut measured = 0;
+        for case in cases {
+            let name = case["name"].as_str().expect("a name");
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(case["bytes_base64"].as_str().expect("base64"))
+                .expect("valid base64");
+            let got = decode_config(&bytes);
+
+            if case["ok"].as_bool().expect("ok") {
+                if HANDED_TO_GO.contains(&name) {
+                    assert!(
+                        matches!(got, ImageConfig::Undecidable(_)),
+                        "{name} is on the hand-to-Go list but was measured"
+                    );
+                    continue;
+                }
+                let ImageConfig::Known {
+                    format,
+                    width,
+                    height,
+                } = got
+                else {
+                    panic!("{name}: Go decoded this and the port did not measure it");
+                };
+                assert_eq!(Some(format), case["format"].as_str(), "{name}");
+                assert_eq!(Some(width), case["width"].as_i64(), "{name}");
+                assert_eq!(Some(height), case["height"].as_i64(), "{name}");
+                measured += 1;
+            } else if case["err_is_format"].as_bool().expect("err_is_format") {
+                assert_eq!(got, ImageConfig::NoFormat, "{name}: Go found no magic");
+            } else {
+                assert!(
+                    matches!(got, ImageConfig::Undecidable(_)),
+                    "{name}: a magic matched and Go then failed, so this is not ours to answer"
+                );
+            }
+        }
+        assert!(
+            measured >= 12,
+            "only {measured} rows were actually measured; the test would pass vacuously"
+        );
+    }
+
+    /// The dimensions that decide `uploadEmojiImage`'s three outcomes, read straight off the
+    /// oracle so the thresholds cannot drift apart from Go's constants.
+    #[test]
+    fn the_thresholds_fall_where_the_constants_say() {
+        use base64::Engine;
+
+        let oracle = oracle();
+        let constants = &oracle["constants"];
+        assert_eq!(constants["max_emoji_width"].as_i64(), Some(128));
+        assert_eq!(constants["max_emoji_height"].as_i64(), Some(128));
+        assert_eq!(constants["max_emoji_original_width"].as_i64(), Some(1028));
+        assert_eq!(constants["max_emoji_original_height"].as_i64(), Some(1028));
+        assert_eq!(constants["max_emoji_file_size"].as_i64(), Some(1 << 19));
+
+        let by_name = |name: &str| {
+            let case = oracle["decode_config"]
+                .as_array()
+                .expect("an array")
+                .iter()
+                .find(|case| case["name"].as_str() == Some(name))
+                .unwrap_or_else(|| panic!("{name} is in the corpus"));
+            base64::engine::general_purpose::STANDARD
+                .decode(case["bytes_base64"].as_str().expect("base64"))
+                .expect("valid base64")
+        };
+
+        // Exactly at the resize threshold is *not* resized: the check is `>`, not `>=`.
+        assert_eq!(
+            decode_config(&by_name("png_128x128")),
+            ImageConfig::Known {
+                format: "png",
+                width: 128,
+                height: 128
+            }
+        );
+        // One pixel over in either dimension crosses it.
+        assert_eq!(
+            decode_config(&by_name("png_129x128")),
+            ImageConfig::Known {
+                format: "png",
+                width: 129,
+                height: 128
+            }
+        );
+        assert_eq!(
+            decode_config(&by_name("png_128x129")),
+            ImageConfig::Known {
+                format: "png",
+                width: 128,
+                height: 129
+            }
+        );
+        // And the same, one order of magnitude up, at the refusal threshold.
+        assert_eq!(
+            decode_config(&by_name("png_header_1028x1028")),
+            ImageConfig::Known {
+                format: "png",
+                width: 1028,
+                height: 1028
+            }
+        );
+        assert_eq!(
+            decode_config(&by_name("png_header_1029x1028")),
+            ImageConfig::Known {
+                format: "png",
+                width: 1029,
+                height: 1028
+            }
+        );
+        assert_eq!(
+            decode_config(&by_name("png_header_1028x1029")),
+            ImageConfig::Known {
+                format: "png",
+                width: 1028,
+                height: 1029
+            }
+        );
+    }
+
+    /// `model.NewInfo(name).MimeType`, and the claim this port makes about it.
+    ///
+    /// # An iff, not an implication
+    ///
+    /// Over this corpus, "the extension is `.png`" and "`mime.TypeByExtension` says `image/png`"
+    /// are the **same set**, so the assertion is an equivalence rather than a one-way check.
+    /// Safety only needs the forward direction — a claimed filename must never be the GIF branch
+    /// — but a one-way check cannot see a port that claims *too few*: case-folding dropped from
+    /// the comparison, or `filepath.Ext` reading the first dot instead of the last, would both
+    /// leave the forward direction true and quietly forward requests this server can answer.
+    ///
+    /// The reverse direction is a claim about this corpus and not about every possible host: Go's
+    /// `mime` package reads `/etc/mime.types`, so a machine could map some other extension to
+    /// `image/png`. That would fail this test, which is the right outcome — it would mean the
+    /// fixture was generated somewhere that does not resemble the server.
+    #[test]
+    fn a_png_extension_is_exactly_the_set_go_calls_image_png() {
+        let oracle = oracle();
+        let mut claimed = 0;
+        for case in oracle["mime_by_extension"].as_array().expect("an array") {
+            let filename = case["filename"].as_str().expect("a filename");
+            let is_png = case["mime_type"].as_str() == Some("image/png");
+
+            assert_eq!(
+                filename_is_certainly_png(filename),
+                is_png,
+                "{filename}: Go says {:?}",
+                case["mime_type"]
+            );
+            if is_png {
+                claimed += 1;
+                assert_eq!(
+                    case["is_gif"].as_bool(),
+                    Some(false),
+                    "{filename} was claimed as certainly PNG"
+                );
+            }
+        }
+        assert!(claimed >= 7, "only {claimed} filenames were claimed");
+
+        // And the direction that matters for safety, stated separately so it cannot be lost in a
+        // future rewrite of the equivalence above.
+        for case in oracle["mime_by_extension"].as_array().expect("an array") {
+            if case["is_gif"].as_bool() == Some(true) {
+                assert!(
+                    !filename_is_certainly_png(case["filename"].as_str().expect("a filename")),
+                    "a GIF filename must never be claimed"
+                );
+            }
+        }
+    }
+}
