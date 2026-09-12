@@ -11386,3 +11386,30 @@ prefixed `pa`.
 caller's first channel is a `D`, so a "set_unread in an open channel forwards" test built on it
 was answered by the DM branch and passed for the wrong reason. The module creates its own open
 channel.
+
+### Notes — the second pass (mutation findings)
+
+**A wire-format bug the first pass shipped, and the test that could not see it.**
+`model.MapBoolFromJSON` decodes into a `map[string]bool`, and `encoding/json` treats a wrong-typed
+value as a `saveError` — it records the `UnmarshalTypeError` and **keeps walking** — so every key
+whose value really is a boolean survives and the map comes back non-nil. Decoding straight into a
+`HashMap<String, bool>` fails the whole object, so `{"collapsed_threads_supported":true,"x":"nope"}`
+was `true` on Go and `false` here. Fixed by decoding to `HashMap<String, serde_json::Value>`.
+
+Two things hid it. It is invisible on a **root** post, where both flags answer the same body; and
+a two-server body comparison cannot see it at all, because with the flag `false` we *forward* — Go
+supplies both halves and the comparison is green while the divergence is live. The oracle had to
+be Go's own answer for an explicit `true` against an explicit `false`, plus an assertion about
+which server answered. `parity::post_acks::a_good_flag_survives_a_bad_value_beside_it`.
+
+**The order of the two id validations is not observable on our wire.** `RequirePostId` before
+`RequireUserId` — same error id, same 400, and the parameter name lives only in `AppError.params`,
+which is `json:"-"` ([D-384]); our `message` is the untranslated id rather than Go's interpolated
+sentence ([D-092]). Swapping them survives the whole parity suite. `require_post_id_then_user_id`
+exists so a unit test can read what a client cannot.
+
+**`urgent_mention_count` is not verified against Go.** `POST /api/v4/posts` carrying a
+`metadata.priority` is a **403** on this stack — measured, in a DM and in a public channel — so no
+urgent post exists, `count_urgent_posts_after` is only ever compared at `0`, and both arms of the
+`ServiceSettings.PostPriority` gate answer the same body. The SQL is schema-checked and the
+`'urgent'` literal is pinned to `model.PostPriorityUrgent` by a unit test; the *count* is not.

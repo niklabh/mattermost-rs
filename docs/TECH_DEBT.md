@@ -7722,7 +7722,9 @@ Two facts worth keeping, because they are cheap to get wrong and are already in 
 
 `parity::post_acks::the_reminder_route_is_forwarded_whole` pins the forward, so registering the
 route without the embed machinery fails a test rather than shipping a websocket event with a
-missing preview.
+missing preview. The two store methods are exercised by
+`crates/mm-store/tests/db_post_reminder_store.rs` (4 tests) rather than left for the compiler —
+the upsert, the not-found that must write nothing, and the `COALESCE` a DM needs.
 
 ## D-421 · setPostUnread serves a DM or group channel and forwards the rest
 
@@ -7740,6 +7742,12 @@ written.
 
 The mention engine is the same unlock [D-401] names, and it is now owed by two routes rather than
 one.
+
+One line of `update_last_viewed_at_post` is unreachable from the served path and stays that way:
+the read-back's `c.deleteat = 0` guard. It is reached only for a DM or group channel, and Go has
+no route that archives one; an open channel, which can be archived, is forwarded before the store
+is touched. A mutation dropping the guard therefore survives, and the reason is the route shape
+rather than a missing fixture — recorded here so the next batch does not re-derive it.
 
 `App.UpdateMobileAppBadge` is deliberately absent from both served arms: there is no push
 notifications hub in this port and nothing about it reaches the HTTP response or the websocket.
