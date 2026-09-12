@@ -2270,6 +2270,29 @@ impl SecondServer {
         }
         let database_url = std::env::var("DATABASE_URL").ok()?;
 
+        // **Free the port first, or this function reports success for somebody else's server.**
+        //
+        // The poll below asks `{base}/system/ping` whether *something* is listening. If a stale
+        // mm-api already holds the port, the child we spawn fails to bind and exits immediately,
+        // the ping is answered by the stale process anyway, and `start` returns `Some` wrapping a
+        // child that is already dead — after which every request in the suite is served by the old
+        // binary. Nothing in the result says so.
+        //
+        // That is not hypothetical and it cost a wrong conclusion: a SecondServer left from a build
+        // hours earlier held :8082, and `parity_views`' two list comparisons disagreed with Go on
+        // row order on every run. It was reported as a port bug and filed as [D-330]. It was not
+        // one — the store, the app layer and the handler were all correct, and Postgres with the
+        // store's own `ORDER BY` returns exactly Go's order. Killing the stale process made both
+        // tests pass three runs out of three. `scripts/parity.sh` had just been taught the same
+        // lesson for the stack's own port; this is the other port nobody had checked.
+        let _ = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(format!(
+                "ss -ltnp 2>/dev/null | awk '$4 ~ /:{port}$/' \
+                 | grep -oE 'pid=[0-9]+' | cut -d= -f2 | sort -u | xargs -r kill -9"
+            ))
+            .status();
+
         let mut command = std::process::Command::new(binary);
         command
             .env("DATABASE_URL", database_url)
@@ -2284,7 +2307,13 @@ impl SecondServer {
 
         let base = format!("http://127.0.0.1:{port}");
         let client = client();
+        let mut child = child;
         for _ in 0..60 {
+            // Our own child has to still be running. A ping alone cannot tell "my server came up"
+            // from "somebody else's was already there", which is the whole failure above.
+            if child.try_wait().ok().flatten().is_some() {
+                return None;
+            }
             if client
                 .get(format!("{base}/api/v4/system/ping"))
                 .send()
@@ -2296,7 +2325,6 @@ impl SecondServer {
             tokio::time::sleep(Duration::from_millis(200)).await;
         }
         // Never came up: kill it rather than leaving it, and let the caller skip.
-        let mut child = child;
         let _ = child.kill();
         let _ = child.wait();
         None

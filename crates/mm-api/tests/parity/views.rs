@@ -382,7 +382,6 @@ fn without_volatile(mut value: serde_json::Value) -> serde_json::Value {
 /// way round — and `serde_json::Map` is a `BTreeMap` for us. A build with serde_json's
 /// `preserve_order` feature would emit insertion order and fail here, which is the only place
 /// that could be caught.
-#[ignore = "D-330: our list disagrees with Go on the CreateAt tiebreak; fails every run"]
 #[tokio::test]
 async fn the_list_is_byte_identical_including_the_props_key_order() {
     let Some(lit) = lit().await else { return };
@@ -416,7 +415,6 @@ async fn the_list_is_byte_identical_including_the_props_key_order() {
 
 /// `include_total_count` changes the body from an array to an object, and the count is the
 /// channel's whole live population rather than the page's length.
-#[ignore = "D-330: our list disagrees with Go on the CreateAt tiebreak; fails every run"]
 #[tokio::test]
 async fn include_total_count_and_pagination_agree() {
     let Some(lit) = lit().await else { return };
