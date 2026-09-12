@@ -111,6 +111,7 @@ mod parity {
     pub mod server_limits;
     pub mod session_activity;
     pub mod session_team_members;
+    pub mod session_writes;
     pub mod sessions_for_user;
     pub mod sidebar_categories;
     pub mod sidebar_category_writes;

@@ -69,6 +69,19 @@ pub trait OAuthStore {
         offset: i64,
         limit: i64,
     ) -> impl std::future::Future<Output = Result<Vec<OAuthApp>, StoreError>> + Send;
+
+    /// Port of `SqlOAuthStore.RemoveAllAccessData` (oauth_store.go:262).
+    ///
+    /// `DELETE FROM OAuthAccessData`, no predicate. The only caller is
+    /// `RevokeSessionsFromAllUsers`, and Go's comment there says why it runs **first**: "revoke
+    /// tokens before sessions so they can't be used to relogin" (platform/session.go:169). An
+    /// OAuth access token outlives the session it minted, so deleting the sessions first would
+    /// leave a window in which every revoked client can trade its token for a new one. The order
+    /// is the security property; see [`crate::SessionStore::remove_all_sessions`] for the
+    /// other half.
+    fn remove_all_access_data(
+        &self,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
 }
 
 /// Postgres-backed implementation.
@@ -458,6 +471,20 @@ impl OAuthStore for SqlOAuthStore {
 
         tracing::Span::current().record("found", rows.len());
         rows.into_iter().map(OAuthAppRow::into_model).collect()
+    }
+
+    #[tracing::instrument(skip_all, fields(deleted))]
+    async fn remove_all_access_data(&self) -> Result<(), StoreError> {
+        let result = sqlx::query!("DELETE FROM oauthaccessdata")
+            .execute(&self.pool)
+            .await
+            .map_err(|source| StoreError::Db {
+                context: "failed to delete OAuthAccessData".to_owned(),
+                source,
+            })?;
+
+        tracing::Span::current().record("deleted", result.rows_affected());
+        Ok(())
     }
 }
 

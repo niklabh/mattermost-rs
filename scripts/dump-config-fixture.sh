@@ -65,6 +65,12 @@ MODELLED = {
         "EnableOutgoingOAuthConnections", "EnablePostUsernameOverride",
         "MaximumPersonalAccessTokenLifetimeDays", "EnableCommands",
         "AllowPersistentNotifications", "UniqueEmojiReactionLimitPerPost",
+        # The mobile session length and the cookie-domain flag, read by
+        # `PUT /api/v4/users/sessions/device`. Both `SessionLengthMobile*` keys are projected
+        # because Config derives hours from days when the hours key is absent, and the fixture
+        # has to be able to show which branch the live document actually takes.
+        "SessionLengthMobileInHours", "SessionLengthMobileInDays",
+        "AllowCookiesForSubdomains",
         # Not a setting Config carries — the `isUpdate` discriminator. `Config.isUpdate` is
         # `ServiceSettings.SiteURL != nil` (config.go:4289) and two defaults are `!isUpdate`, so
         # the fixture has to record that a real document *has* the key. The value is "" here and
