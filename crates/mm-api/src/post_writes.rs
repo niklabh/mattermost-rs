@@ -26,12 +26,14 @@ use axum::response::{IntoResponse, Response};
 use mm_app::license::LicenseState;
 use mm_app::post::PrepareError;
 use mm_app::post_create::CreatePostFlags;
+use mm_app::post_unread::MarkUnreadError;
 use mm_app::post_write::post_edit_time_limit_expired;
 use mm_model::permission::{
     PERMISSION_CREATE_POST, PERMISSION_CREATE_POST_EPHEMERAL, PERMISSION_CREATE_POST_PUBLIC,
     PERMISSION_DELETE_OTHERS_POSTS, PERMISSION_DELETE_POST, PERMISSION_EDIT_FILE_ATTACHMENT,
-    PERMISSION_EDIT_OTHERS_POSTS, PERMISSION_EDIT_POST, PERMISSION_MANAGE_SYSTEM,
-    PERMISSION_READ_CHANNEL_CONTENT, PERMISSION_UPLOAD_FILE, make_permission_error,
+    PERMISSION_EDIT_OTHER_USERS, PERMISSION_EDIT_OTHERS_POSTS, PERMISSION_EDIT_POST,
+    PERMISSION_MANAGE_SYSTEM, PERMISSION_READ_CHANNEL_CONTENT, PERMISSION_UPLOAD_FILE,
+    make_permission_error,
 };
 use mm_model::post::{POST_TYPE_CARD, Post, PostEphemeral, PostPatch};
 use mm_model::utils::{AppError, is_valid_id, parse_go_bool, string_interface_to_json};
@@ -1044,6 +1046,160 @@ pub async fn create_ephemeral_post(
     }
 }
 
+/// Port of `setPostUnread` (api4/post.go:1295) —
+/// `POST /api/v4/users/{user_id}/posts/{post_id}/set_unread`.
+///
+/// # The body is read before the permission checks, and a malformed one is not an error
+///
+/// `model.MapBoolFromJSON(r.Body)` (model/utils.go:519) decodes into a `map[string]bool` and
+/// **discards the decode error**, returning an empty map for anything that does not decode — a
+/// truncated body, a list, a string, an object whose values are not booleans, or no body at all.
+/// So `collapsed_threads_supported` is simply `false` in every one of those cases and the request
+/// proceeds. This is the opposite of every neighbouring route in `post.go`, each of which answers
+/// `SetInvalidParamWithErr` on a bad body, and it is reproduced: a client sending `{"collapsed_
+/// threads_supported": "yes"}` gets a **200 with the non-collapsed response shape**, not a 400.
+///
+/// Note that Go's `Decode` fills the map with whatever it managed to read before failing only if
+/// the top-level value decodes; a partial object leaves `objmap` nil and the map empty. Modelled
+/// as all-or-nothing, which is what `encoding/json` does for a `map[string]bool` target.
+///
+/// # Two permission gates, and the first one is not the one it looks like
+///
+/// `session.UserId != c.Params.UserId && !SessionHasPermissionToUser(...)` — so acting for
+/// yourself never consults a permission, and acting for somebody else needs `edit_other_users`.
+/// The second gate is `SessionHasPermissionToReadPost`, whose refusal names
+/// `read_channel_content`. A caller who may edit other users but cannot read the post gets the
+/// **second** error, and the order is observable because the two carry different permission ids.
+///
+/// # `me` is resolved, and `post_id` is validated first
+///
+/// `c.RequirePostId().RequireUserId()` in that order, so an invalid `{post_id}` reports
+/// `post_id` even when `{user_id}` is also invalid. `RequireUserId` maps the literal `me` to the
+/// session's own user id **after** the post id has passed (web/context.go:296), which is why the
+/// substitution here sits below the post-id check rather than above it.
+///
+/// # The response is `model.ChannelUnreadAt`, encoder-framed
+///
+/// `json.NewEncoder(w).Encode(state)` — a trailing newline ([D-086]) and a `200`. Its
+/// `mention_count_root` and `urgent_mention_count` depend on the flag from the body; see
+/// [`mm_app::post_unread`] for the table.
+///
+/// # What forwards, and why it forwards before writing anything
+///
+/// [`MarkUnreadError::Unreproducible`] — an open or private channel (the mention parser), or a
+/// reply post when the client did not claim collapsed-thread support (the thread-membership
+/// recount). Both are decided from reads alone, so the forwarded request reaches Go with the
+/// database untouched and Go performs the single write itself.
+#[tracing::instrument(skip_all, fields(user_id = %path_user_id, post_id = %post_id, forwarded))]
+pub async fn set_post_unread(
+    State(state): State<AppState>,
+    Path((path_user_id, post_id)): Path<(String, String)>,
+    session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    if !is_valid_id(&post_id) {
+        return ApiError::invalid_url_param("post_id").into_response();
+    }
+    let user_id = if path_user_id == mm_model::user::ME {
+        session.0.user_id.clone()
+    } else {
+        path_user_id
+    };
+    if !is_valid_id(&user_id) {
+        return ApiError::invalid_url_param("user_id").into_response();
+    }
+
+    let (parts, body) = request.into_parts();
+    let bytes = match axum::body::to_bytes(body, usize::MAX).await {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            tracing::warn!(error = %err, "could not read the request body");
+            // Go's `MapBoolFromJSON` cannot see a read failure either — `Decode` returns the
+            // error and it is dropped — so this is the same empty map, not a 400.
+            axum::body::Bytes::new()
+        }
+    };
+    let collapsed_threads_supported =
+        serde_json::from_slice::<std::collections::HashMap<String, bool>>(&bytes)
+            .unwrap_or_default()
+            .get("collapsed_threads_supported")
+            .copied()
+            .unwrap_or(false);
+
+    if session.0.user_id != user_id
+        && !state
+            .app
+            .session_has_permission_to_user(&session.0, &user_id)
+            .await
+    {
+        return ApiError::from(*make_permission_error(
+            &session.0,
+            &[&PERMISSION_EDIT_OTHER_USERS],
+        ))
+        .into_response();
+    }
+
+    let (can_read, _is_member) = state
+        .app
+        .session_has_permission_to_read_post(&session.0, &post_id)
+        .await;
+    if !can_read {
+        return ApiError::from(*make_permission_error(
+            &session.0,
+            &[&PERMISSION_READ_CHANNEL_CONTENT],
+        ))
+        .into_response();
+    }
+
+    match state
+        .app
+        .mark_channel_as_unread_from_post(&post_id, &user_id, collapsed_threads_supported)
+        .await
+    {
+        Ok(state_) => match channel_unread_at_response(&state_) {
+            Ok(response) => response,
+            Err(err) => err.into_response(),
+        },
+        Err(MarkUnreadError::App(err)) => ApiError::from(err).into_response(),
+        Err(MarkUnreadError::Unreproducible(why)) => {
+            tracing::Span::current().record("forwarded", true);
+            tracing::debug!(reason = why, "handing set_unread to Go");
+            proxy::forward_to_go(State(state), Request::from_parts(parts, bytes.into())).await
+        }
+    }
+}
+
+/// `json.NewEncoder(w).Encode(state)` for a `model.ChannelUnreadAt`.
+///
+/// Every field is a plain string or `int64` with no `omitempty`, so all nine keys are always
+/// present; `NotifyProps` is `json:"-"` and never among them.
+#[allow(clippy::result_large_err)]
+fn channel_unread_at_response(
+    state: &mm_model::channel_member::ChannelUnreadAt,
+) -> Result<Response, ApiError> {
+    let mut body = serde_json::to_vec(state).map_err(|err| {
+        tracing::error!(error = %err, "failed to serialise ChannelUnreadAt");
+        ApiError::from(AppError::new(
+            "setPostUnread",
+            "api.marshal_error",
+            None,
+            String::new(),
+            500,
+        ))
+    })?;
+    body.push(b'\n');
+
+    Ok((
+        axum::http::StatusCode::OK,
+        [
+            ("Content-Type", "application/json"),
+            ("x-mmrs-served-by", "rust"),
+        ],
+        body,
+    )
+        .into_response())
+}
+
 /// Port of `createPostChecks` (api4/post.go:74), whose Go comment asks that any change here be
 /// mirrored into `scheduledPostChecks`.
 ///
@@ -1377,6 +1533,13 @@ mod tests {
     #[tokio::test]
     async fn a_forwarded_route_is_a_502_here_which_is_what_makes_the_list_above_mean_something() {
         for (method, path) in [
+            // `setPostReminder`, the one sibling of `/ack` and `/set_unread` that is *not*
+            // registered — it forwards whole, see [D-420]. Here rather than merely absent, so
+            // that registering it by accident fails a test.
+            (
+                "POST",
+                format!("/api/v4/users/{AN_ID}/posts/{AN_ID}/reminder"),
+            ),
             ("POST", format!("/api/v4/posts/{AN_ID}/move")),
             ("POST", format!("/api/v4/posts/{AN_ID}/restore/{AN_ID}")),
             ("POST", "/api/v4/posts/rewrite".to_owned()),

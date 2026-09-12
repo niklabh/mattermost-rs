@@ -1364,6 +1364,32 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/users/{user_id}/posts/{post_id}/reactions/{emoji_name}",
             partially_migrated(axum::routing::delete(reactions::delete_reaction)),
         )
+        // `BaseRoutes.PostForUser.Handle("/set_unread")` (api4/post.go:44) — POST only, a sibling
+        // of `/ack` below at the same depth. `/reminder` (:45) is the third sibling and is **not**
+        // registered: it forwards whole, see MIGRATION.md and [D-420].
+        .route(
+            "/api/v4/users/{user_id}/posts/{post_id}/set_unread",
+            partially_migrated_with_ids(&state, post(post_writes::set_post_unread)),
+        )
+        // `BaseRoutes.PostForUser.Handle("/ack")` (api4/post.go:50-51) — POST and DELETE on one
+        // path, two handlers, two *different* licence-refusal ids. Four segments below
+        // `{user_id}`, a depth only the reaction delete below shares, so nothing shadows them and
+        // they shadow nothing — `flagged` sits where `{post_id}` sits but a segment shallower.
+        //
+        // `partially_migrated_with_ids` and not bare `partially_migrated`: an out-of-charset
+        // `{user_id}` or `{post_id}` does not match Go's mux **at all**, so Go 404s it from the
+        // router and never reaches the handler that would have said 501. The charset layer
+        // forwards exactly those, and everything Go's mux accepts — including a three-character
+        // id — reaches our refusal, which is what Go does with the licence test above
+        // `RequirePostId`.
+        .route(
+            "/api/v4/users/{user_id}/posts/{post_id}/ack",
+            partially_migrated_with_ids(
+                &state,
+                post(licensed_features::acknowledge_post)
+                    .delete(licensed_features::unacknowledge_post),
+            ),
+        )
         // `BaseRoutes.Post.Handle("/edit_history")` (api4/post.go:30) — another sibling of
         // `/thread` and `/reactions`, one segment deeper than `/posts/{post_id}`.
         .route(
@@ -2623,6 +2649,102 @@ mod tests {
                     Request::builder()
                         .method(method.clone())
                         .uri(*path)
+                        .body(axum::body::Body::empty())
+                        .expect("a request"),
+                )
+                .await
+                .expect("the router answers");
+
+            assert_eq!(
+                response
+                    .headers()
+                    .get(crate::error::SERVED_BY)
+                    .map(|v| v.as_bytes()),
+                Some(b"rust".as_slice()),
+                "{method} {path} is no longer answered here"
+            );
+            assert_eq!(
+                response.status(),
+                StatusCode::UNAUTHORIZED,
+                "{method} {path} should have stopped at the session check"
+            );
+        }
+    }
+
+    /// The `/users/{user_id}/posts/{post_id}/…` family and every neighbour it could have taken
+    /// out of service.
+    ///
+    /// # The failure this exists to catch
+    ///
+    /// See [`the_emoji_and_terms_routes_are_all_still_answered_here`] for the mechanism. Here the
+    /// risk is the *other* direction: `ack` and `set_unread` are **literals** hanging off a
+    /// `{post_id}` that itself hangs off a `{user_id}`, and both of those parameter positions
+    /// already carry literals this server answers — `flagged` where `{post_id}` sits,
+    /// and `sessions`, `preferences`, `teams`, … where `{user_id}` never reaches. Registering a
+    /// deeper parameterised path must not disturb any of them.
+    ///
+    /// Every path below is asserted to reach a handler *here*, so a registration that stole one
+    /// fails this test rather than silently forwarding it to a Go server that will not always be
+    /// running.
+    #[tokio::test]
+    async fn the_per_user_post_routes_and_their_neighbours_are_all_still_answered_here() {
+        use axum::http::{Method, Request, StatusCode};
+        use tower::ServiceExt;
+
+        let app = App::new(mm_store::SqlStore::from_pool(
+            sqlx::postgres::PgPoolOptions::new()
+                .connect_lazy("postgres://x/y")
+                .expect("a lazy pool needs no server"),
+        ));
+        let state = AppState::new(app, "http://127.0.0.1:1".to_owned());
+
+        const USER: &str = "abcdefghijklmnopqrstuvwxyz";
+        const POST: &str = "zyxwvutsrqponmlkjihgfedcba";
+
+        let served: &[(Method, String)] = &[
+            // The two this session adds.
+            (
+                Method::POST,
+                format!("/api/v4/users/{USER}/posts/{POST}/ack"),
+            ),
+            (
+                Method::DELETE,
+                format!("/api/v4/users/{USER}/posts/{POST}/ack"),
+            ),
+            (
+                Method::POST,
+                format!("/api/v4/users/{USER}/posts/{POST}/set_unread"),
+            ),
+            // The literal that sits exactly where `{post_id}` sits, one segment shallower. If a
+            // `{post_id}` registration ever swallowed it, this is the line that says so.
+            (Method::GET, format!("/api/v4/users/{USER}/posts/flagged")),
+            // The one route that already used this depth, and is the reason `{post_id}` was
+            // already in the tree under `{user_id}`.
+            (
+                Method::DELETE,
+                format!("/api/v4/users/{USER}/posts/{POST}/reactions/mmrsname"),
+            ),
+            // Shallower neighbours under `{user_id}`, none of which may move.
+            (Method::GET, format!("/api/v4/users/{USER}")),
+            (
+                Method::GET,
+                format!("/api/v4/users/{USER}/terms_of_service"),
+            ),
+            // The post subtree the same handlers live beside, addressed without a `{user_id}`.
+            (Method::GET, format!("/api/v4/posts/{POST}")),
+            (Method::GET, format!("/api/v4/posts/{POST}/thread")),
+            (Method::POST, format!("/api/v4/posts/{POST}/pin")),
+            (Method::POST, format!("/api/v4/posts/{POST}/unpin")),
+            (Method::POST, "/api/v4/posts".to_owned()),
+            (Method::POST, "/api/v4/posts/ephemeral".to_owned()),
+        ];
+
+        for (method, path) in served {
+            let response = router(state.clone())
+                .oneshot(
+                    Request::builder()
+                        .method(method.clone())
+                        .uri(path)
                         .body(axum::body::Body::empty())
                         .expect("a request"),
                 )

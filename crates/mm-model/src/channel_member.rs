@@ -617,6 +617,41 @@ mod tests {
         ChannelUnreadAt,
         "channel_unread_at.json"
     );
+    /// The five counters in the `ChannelUnreadAt` fixture must hold five **different** numbers.
+    ///
+    /// A round trip compares `serde_json::Value` graphs, so two fields whose fixture values happen
+    /// to be equal have interchangeable `rename`s as far as that test is concerned. The generated
+    /// fixture gave `mention_count` and `mention_count_root` both `54` — a hash collision mod 100
+    /// — which made exactly the pair that `setPostUnread`'s collapsed-threads branch changes
+    /// unmutable. `reference/dump/main.go` now pins `channelunreadat.mentioncountroot`; this is
+    /// the assertion that says why, and that fails if a future regeneration re-collides them.
+    #[test]
+    fn the_channel_unread_at_fixture_gives_every_counter_a_different_number() {
+        let fixture: serde_json::Value =
+            serde_json::from_str(include_str!("../../../fixtures/channel_unread_at.json"))
+                .expect("the fixture parses");
+        let counters: Vec<i64> = [
+            "msg_count",
+            "msg_count_root",
+            "mention_count",
+            "mention_count_root",
+            "urgent_mention_count",
+        ]
+        .iter()
+        .map(|key| {
+            fixture[key]
+                .as_i64()
+                .unwrap_or_else(|| panic!("{key} is a number"))
+        })
+        .collect();
+        let distinct: std::collections::BTreeSet<i64> = counters.iter().copied().collect();
+        assert_eq!(
+            distinct.len(),
+            counters.len(),
+            "two counters share a value, so their `rename`s are interchangeable: {counters:?}"
+        );
+    }
+
     round_trip!(
         member_with_team_data_matches_go,
         ChannelMemberWithTeamData,

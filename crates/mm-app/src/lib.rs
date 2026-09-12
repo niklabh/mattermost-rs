@@ -40,6 +40,7 @@ pub mod oauth;
 pub mod password;
 pub mod post;
 pub mod post_create;
+pub mod post_unread;
 pub mod post_write;
 pub mod preference;
 pub mod properties;

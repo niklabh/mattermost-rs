@@ -608,6 +608,14 @@ var overrides = map[string]any{
 	// true, and Channel.IsValid only accepts Discoverable on a private channel. Pinning
 	// the type keeps every other field non-zero — pinning Discoverable to false instead
 	// would trade a real parity signal for a cosmetic one.
+	// The path root is the lowercased **Go type name**, not the registry key.
+	// `MentionCount` and `MentionCountRoot` hash to the same value mod 100, so the generated
+	// fixture gave both 54 and the round-trip test could not tell the two `rename`s apart — on a
+	// type `POST /users/{user_id}/posts/{post_id}/set_unread` now serves, where the pair is
+	// exactly what the CRT branch changes. Pinned so the five counters hold five different
+	// numbers. This rewrites `fixtures/channel_unread_at.json`; no Rust test asserted the old
+	// values, only the round trip.
+	"channelunreadat.mentioncountroot":   int64(71),
 	"channel.type":        "P",
 	"channel.displayname": "Town Square",
 	"channel.name":        "town-square",

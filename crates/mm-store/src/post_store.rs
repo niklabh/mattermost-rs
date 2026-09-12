@@ -437,6 +437,75 @@ pub trait PostStore {
         &self,
         channel_id: &str,
     ) -> impl std::future::Future<Output = Result<bool, StoreError>> + Send;
+
+    /// Port of `SqlPostStore.SetPostReminder` (post_store.go:3278) — the write behind
+    /// `POST /api/v4/users/{user_id}/posts/{post_id}/reminder`.
+    ///
+    /// # The existence check is the reason this is a transaction
+    ///
+    /// `PostReminders` has **no foreign key** to `Posts` (see the table: two `varchar(26)`
+    /// columns and a bigint, a composite primary key, and one index on `TargetTime`), so the
+    /// `SELECT EXISTS` is the only thing stopping a reminder being filed against a post id that
+    /// was never written. Go runs it inside the same transaction as the insert, which is what
+    /// makes the pair atomic against a concurrent delete.
+    ///
+    /// # The insert is an upsert, and the conflict target is the composite key
+    ///
+    /// `ON CONFLICT (postid, userid) DO UPDATE SET TargetTime = ?` — setting a second reminder
+    /// on the same post **moves** the first rather than adding to it, so a user has at most one
+    /// reminder per post. A plain `INSERT` here would 500 the second request.
+    ///
+    /// # `TargetTime` is Unix **seconds**, not milliseconds
+    ///
+    /// The one place in the migrated surface where a timestamp on the wire is not epoch millis.
+    /// `SetPostReminder` formats it with `time.Unix(targetTime, 0)` (app/post.go:2866) and
+    /// `CheckPostReminders` compares it against `time.Now().UTC().Unix()`, so both ends agree on
+    /// seconds. Nothing here validates it: a negative or absurd value is stored as given.
+    ///
+    /// Returns [`StoreError::NotFound`] for a post that does not exist — Go's
+    /// `store.NewErrNotFound("Post", …)`, which the app layer turns into a 500 and **not** a 404;
+    /// see [`mm_app::App::set_post_reminder`].
+    fn set_post_reminder(
+        &self,
+        post_id: &str,
+        user_id: &str,
+        target_time: i64,
+    ) -> impl std::future::Future<Output = Result<(), StoreError>> + Send;
+
+    /// Port of `SqlPostStore.GetPostReminderMetadata` (post_store.go:3341).
+    ///
+    /// # `Username` is the **author's**, not the reminded user's
+    ///
+    /// `JOIN Users u ON p.UserId=u.Id` walks the post's author. The ephemeral confirmation says
+    /// "You will be reminded about <link> by @<username>", which reads as the person who is
+    /// reminding you and is in fact the person who wrote the post. Getting this wrong produces a
+    /// sentence that is grammatical, plausible, and names the wrong human.
+    ///
+    /// # The team join is a `LEFT JOIN` and its `COALESCE` is load-bearing
+    ///
+    /// A DM or group channel has `Channels.TeamId = ''`, which matches no team, so `t.name` is
+    /// SQL `NULL` and `COALESCE(t.name, '')` makes it the empty string. The caller branches on
+    /// exactly that emptiness to choose between a `{siteURL}/pl/{postID}` permalink and a
+    /// `{siteURL}/{teamName}/pl/{postID}` one — so dropping the `COALESCE` would not merely
+    /// change a string, it would send a NULL into the branch that builds the link.
+    fn get_post_reminder_metadata(
+        &self,
+        post_id: &str,
+    ) -> impl std::future::Future<Output = Result<PostReminderMetadata, StoreError>> + Send;
+}
+
+/// Port of `store.PostReminderMetadata` (channels/store/store.go:1389).
+///
+/// Not a wire type — it has no `json:` tags and never leaves the server. `UserLocale` is selected
+/// by the Go query and read by nothing on this path (the ephemeral message is deliberately
+/// untranslated, app/post.go:2882), and is carried here so that the row and the query stay the
+/// same shape.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PostReminderMetadata {
+    pub channel_id: String,
+    pub team_name: String,
+    pub user_locale: String,
+    pub username: String,
 }
 
 /// Port of `model.GetPostsOptions` (post.go:456), narrowed to the fields the page branch of
@@ -3005,6 +3074,105 @@ impl PostStore for SqlPostStore {
         .map_err(|source| StoreError::Db {
             context: "failed to look for keyword mention recipients".to_owned(),
             source,
+        })
+    }
+
+    #[tracing::instrument(skip(self), fields(post_id = %post_id, user_id = %user_id, target_time))]
+    async fn set_post_reminder(
+        &self,
+        post_id: &str,
+        user_id: &str,
+        target_time: i64,
+    ) -> Result<(), StoreError> {
+        let mut tx = self.pool.begin().await.map_err(|source| StoreError::Db {
+            context: "begin_transaction".to_owned(),
+            source,
+        })?;
+
+        // Go's `SELECT EXISTS (SELECT 1 FROM Posts WHERE Id=?)`. Note it does **not** exclude
+        // soft-deleted posts: a reminder can be set on a post whose `DeleteAt` is non-zero, and
+        // the app layer's `GetSinglePost(…, false)` is what refuses that one request earlier.
+        let exists = sqlx::query_scalar!(
+            r#"SELECT EXISTS (SELECT 1 FROM posts WHERE id = $1) AS "exists!""#,
+            post_id
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to check for post".to_owned(),
+            source,
+        })?;
+
+        if !exists {
+            // Go returns here without committing; the deferred `finalizeTransactionX` rolls back.
+            // Dropping `tx` does the same thing.
+            return Err(StoreError::NotFound {
+                entity: "Post",
+                criteria: post_id.to_owned(),
+            });
+        }
+
+        sqlx::query!(
+            r#"
+            INSERT INTO postreminders (postid, userid, targettime)
+                 VALUES ($1, $2, $3)
+            ON CONFLICT (postid, userid)
+              DO UPDATE SET targettime = $3
+            "#,
+            post_id,
+            user_id,
+            target_time,
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: "failed to insert post reminder".to_owned(),
+            source,
+        })?;
+
+        tx.commit().await.map_err(|source| StoreError::Db {
+            context: "commit_transaction".to_owned(),
+            source,
+        })
+    }
+
+    #[tracing::instrument(skip(self), fields(post_id = %post_id))]
+    async fn get_post_reminder_metadata(
+        &self,
+        post_id: &str,
+    ) -> Result<PostReminderMetadata, StoreError> {
+        // Go hangs `AND p.Id=?` off the final `JOIN Users` ON clause rather than a WHERE. It is
+        // an *inner* join, so the two are equivalent and this spells it as the WHERE it is.
+        //
+        // `Get` into a struct, not `Select`: zero rows is `sql.ErrNoRows`, which Go wraps and
+        // returns as an ordinary error — there is no not-found branch on this read, and the app
+        // layer turns whatever comes back into the same 500.
+        let row = sqlx::query!(
+            r#"
+            SELECT c.id            AS "channel_id!",
+                   COALESCE(t.name, '') AS "team_name!",
+                   u.locale        AS "user_locale!",
+                   u.username      AS "username!"
+              FROM posts p
+              JOIN channels c ON p.channelid = c.id
+              LEFT JOIN teams t ON c.teamid = t.id
+              JOIN users u ON p.userid = u.id
+             WHERE p.id = $1
+            "#,
+            post_id
+        )
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|source| StoreError::Db {
+            context: format!("failed to get post reminder metadata: postId {post_id}"),
+            source,
+        })?;
+
+        Ok(PostReminderMetadata {
+            channel_id: row.channel_id,
+            team_name: row.team_name,
+            user_locale: row.user_locale,
+            username: row.username,
         })
     }
 
