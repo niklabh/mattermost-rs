@@ -1140,6 +1140,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err := writeUserAgentBehaviourFixture(*out); err != nil {
+		fmt.Fprintf(os.Stderr, "FAIL: user agent behaviour fixture: %v\n", err)
+		os.Exit(1)
+	}
+
 	if err := writeJSONFoldBehaviourFixture(*out); err != nil {
 		fmt.Fprintf(os.Stderr, "FAIL: json fold behaviour fixture: %v\n", err)
 		os.Exit(1)

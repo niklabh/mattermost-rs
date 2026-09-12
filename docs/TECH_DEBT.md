@@ -7811,3 +7811,46 @@ before any write.
 
 **What is owed:** the SKU tier on `LicenseState`, which the same gap blocks in [D-300], [D-360],
 [D-371] and [D-390]. One port of `LicenseToLicenseTier` closes all five.
+
+---
+
+## D-430 · `POST /users/login` is not rate limited here; Go limits it to 5/s
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-13 (the login vertical)
+
+Go registers the route as
+`RateLimitedHandler(APIHandler(login), RateLimitSettings{PerSec: 5, MaxBurst: 10})`
+(api4/user.go:69) — the only rate limit on any route this server answers, and it exists because
+`login` is the credential-guessing surface. `mm-api` implements no rate limiting at all, so a
+client that fronts this server can attempt passwords as fast as it can open sockets.
+
+The failed-attempt lockout still applies and is shared with Go, so the *account* protection is
+intact; what is missing is the per-IP throttle in front of it, which is what stops an attacker
+spreading attempts across many accounts. `RateLimitSettings` is also off by default
+(`ServiceSettings.RateLimitSettings.Enable`), so on a stock deployment Go does not throttle either
+— which is why this is a divergence to record rather than a hole that is open today.
+
+**What is owed:** a `tower` rate-limit layer keyed the way Go's is (`VaryByRemoteAddr`,
+`VaryByHeader`, `VaryByUser`), applied to this route and to `/login/desktop_token` when that one
+lands. Nothing else in api4 needs it.
+
+---
+
+## D-431 · the SSO session length is unmodelled, and so is every SSO login route
+
+**Status** OPEN · **Severity** coverage · **Raised** 2026-09-13 (the login vertical)
+
+`DoLogin` picks between three session lengths (app/login.go:167-173): mobile, **SSO**, and web.
+`mm_app::config::Config` carries the first and third and not `ServiceSettings.SessionLengthSSOInHours`,
+because the SSO arm is `opts.IsOAuthUser || opts.IsSaml` and `POST /users/login` sets neither —
+it is reachable only from `completeOAuth`, `completeSaml` and `loginWithDesktopToken`, none of
+which is ported.
+
+So the field is absent for the reason rule 2 of CLAUDE.md gives: no route this server answers
+reads it. It is recorded rather than left silent because the *next* route into `DoLogin` needs it
+and the omission is invisible from here — a session created through the SSO arm would silently
+take the web length.
+
+**What is owed:** add `session_length_sso_in_hours` (config.go:421, the same days→hours cascade as
+the other two) to `Config`, to `scripts/dump-config-fixture.sh` and to the third arm of
+`App::do_login`, at the same time as the first SSO login route.

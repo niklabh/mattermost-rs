@@ -18,6 +18,8 @@
     "EnableSearching": false
   },
   "EmailSettings": {
+    "EnableSignInWithEmail": true,
+    "EnableSignInWithUsername": true,
     "RequireEmailVerification": false
   },
   "ExperimentalSettings": {
@@ -28,23 +30,39 @@
     "EnablePublicLink": false,
     "MaxFileSize": 104857600
   },
+  "GitLabSettings": {
+    "Enable": false
+  },
+  "GoogleSettings": {
+    "Enable": false
+  },
   "GuestAccountsSettings": {
+    "Enable": false,
+    "EnableGuestMagicLink": false,
     "RestrictCreationToDomains": ""
   },
   "ImageProxySettings": {
     "Enable": false
   },
   "LdapSettings": {
+    "Enable": false,
     "PictureAttribute": ""
   },
   "MessageExportSettings": {
     "DownloadExportResults": false
+  },
+  "Office365Settings": {
+    "Enable": false
+  },
+  "OpenIdSettings": {
+    "Enable": false
   },
   "PrivacySettings": {
     "ShowEmailAddress": true,
     "ShowFullName": true
   },
   "SamlSettings": {
+    "Enable": false,
     "EnableSyncWithLdap": false
   },
   "ServiceSettings": {
@@ -56,6 +74,7 @@
     "EnableCustomEmoji": true,
     "EnableDynamicClientRegistration": false,
     "EnableIncomingWebhooks": true,
+    "EnableMultifactorAuthentication": false,
     "EnableOAuthServiceProvider": true,
     "EnableOutgoingOAuthConnections": false,
     "EnableOutgoingWebhooks": true,
@@ -66,6 +85,7 @@
     "ExperimentalEnableHardenedMode": false,
     "ExtendSessionLengthWithActivity": false,
     "GoroutineHealthThreshold": -1,
+    "MaximumLoginAttempts": 10,
     "MaximumPersonalAccessTokenLifetimeDays": 0,
     "PostEditTimeLimit": -1,
     "PostPriority": true,
@@ -73,6 +93,8 @@
     "SessionIdleTimeoutInMinutes": 43200,
     "SessionLengthMobileInDays": 180,
     "SessionLengthMobileInHours": 4320,
+    "SessionLengthWebInDays": 180,
+    "SessionLengthWebInHours": 4320,
     "SiteURL": "",
     "UniqueEmojiReactionLimitPerPost": 50
   },

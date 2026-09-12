@@ -11417,3 +11417,63 @@ function returns its own value.
 `GET /api/v4/users/{user_id}/image` already serves its stored-bytes branch; what is unported
 beside these four is `PUT /api/v4/users/{user_id}/patch` and the rest of the `users.go` write
 surface, none of which needs multipart.
+
+---
+
+## `POST /api/v4/users/login`, `POST /api/v4/users/login/type` (2026-09-13, branch `wt/login`)
+
+**DONE.** The route every client calls first. `login` is served for the local-password path;
+`login/type` answers its **404 with an empty body**, which is the whole route on any server
+without guest magic links. 12 parity tests, 29 unit tests across the four new modules.
+
+| File | What |
+|---|---|
+| `crates/mm-api/src/login.rs` | both handlers, the error mask, the three cookies |
+| `crates/mm-app/src/login.rs` | `GetUserForLogin`, `AuthenticateUserForLogin`, `CheckPasswordAndAllCriteria`, `CreateSession`, `DoLogin` |
+| `crates/mm-app/src/user_agent.rs` | `channels/app/user_agent.go` **and** the OS/browser half of `github.com/avct/uasurfer` |
+| `crates/mm-store/src/user_store.rs` | `GetForLogin`, `UpdateLastLogin` |
+| `crates/mm-store/src/session_store.rs` | `Save`, `GetLRUSessions` |
+
+### What a reader would otherwise get wrong
+
+1. **The error id is chosen by the configuration, not by the failure.** A deferred mask
+   (api4/user.go:2127) rewrites all but twelve ids into one of four `invalid_credentials_*`
+   strings picked by five SSO flags and two sign-in toggles, always at 401 — so a 500 from a
+   broken database and a wrong password are the same response. Clients branch on those four.
+   `mm_api::login::mask_login_error`.
+2. **A user-agent parser is on the wire.** `DoLogin` writes `platform`, `os` and `browser` into
+   `Sessions.Props`, which `GET /users/{id}/sessions` echoes — so `uasurfer` had to be ported, not
+   approximated. `fixtures/behaviour_user_agent.json` is the real `uasurfer.Parse` over a
+   46-string corpus; the four Mattermost mapping functions beside it are **transcribed** into the
+   oracle because they are unexported, and the parity test that logs into both servers with three
+   different agents is what covers that seam.
+3. **Everything this port cannot serve is detected before the failed-attempt counter moves.**
+   Go checks MFA *after* claiming a slot, so a forward taken there would have Go claim a second
+   slot for the same attempt. `App::login_needs_mfa` asks the same question one `SELECT` earlier.
+   Forwarded: `magic_link_token` present, `LdapSettings.Enable`, any licence, MFA.
+4. **`UpdateLastLogin` writes two different instants.** `LastLogin` is the *session's* `CreateAt`,
+   minted inside the store's `PreSave`; `UpdateAt` is a fresh clock read in the same statement.
+5. **The cookies take the web session length even for a mobile session**, because
+   `AttachSessionCookies` reads `SessionLengthWebInHours` unconditionally while `DoLogin` may have
+   used the mobile one. And only `MMAUTHTOKEN` is `HttpOnly` — the webapp reads the other two.
+6. **No cookies at all without `X-Requested-With: XMLHttpRequest`**, compared for equality on the
+   whole header value. `curl` gets the `Token` header alone.
+7. **The guest, magic-link and remote refusals run *after* a successful password check**, so an
+   account that is refused for one of them still has its lockout counter cleared.
+
+### What is not here
+
+[D-430] the rate limit Go puts on this route (5/s, burst 10) and nothing in this port implements.
+[D-431] `SessionLengthSSOInHours` and the SSO arm of `DoLogin`, unreachable from this route.
+`/login/sso/code-exchange`, `/login/desktop_token`, `/login/switch` and `/login/cws` are
+deliberately unregistered, which is what keeps them forwarded.
+
+One divergence is in the code and not in the register: Go writes the `Token` header **inside**
+`DoLogin`, before the terms-of-service read, so a 500 from that read still carries a live
+credential. This port returns the error without the header. `mm_api::login::login` says so.
+
+### The next route in this family
+
+`POST /api/v4/users/login/desktop_token` needs `ConsumeTokenOnce` and the OAuth/SAML user check;
+`POST /api/v4/users/login/switch` needs the whole `switchAccountType` matrix. Neither needs
+anything this session did not build except [D-431].

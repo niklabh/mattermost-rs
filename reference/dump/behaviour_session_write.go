@@ -187,6 +187,8 @@ func cookieDomainFromSiteURL(allowSubdomains bool, siteURL string) string {
 // fixture is deterministic.
 type sessionCookieCase struct {
 	Name         string `json:"name"`
+	CookieName   string `json:"cookie_name"`
+	HttpOnly     bool   `json:"http_only"`
 	Token        string `json:"token"`
 	Path         string `json:"path"`
 	Domain       string `json:"domain"`
@@ -207,16 +209,26 @@ const cookieExpiresUnix = 1788636490
 // set when `secure` is already true) and is recorded anyway, so the renderer is pinned
 // independently of its caller.
 var sessionCookieCorpus = []sessionCookieCase{
-	{Name: "plain", Token: "cqjc7ec6bpy65jjamstkhpe6fr", Path: "/", MaxAge: 2592000},
-	{Name: "subpath", Token: "tok", Path: "/mattermost", MaxAge: 3600},
-	{Name: "empty path", Token: "tok", Path: "", MaxAge: 3600},
-	{Name: "domain", Token: "tok", Path: "/", Domain: "example.com", MaxAge: 3600},
-	{Name: "secure", Token: "tok", Path: "/", MaxAge: 3600, Secure: true},
-	{Name: "secure embedded", Token: "tok", Path: "/", MaxAge: 3600, Secure: true, SameSiteNone: true},
-	{Name: "embedded not secure", Token: "tok", Path: "/", MaxAge: 3600, SameSiteNone: true},
-	{Name: "domain and secure embedded", Token: "tok", Path: "/sub", Domain: "mm.example.com", MaxAge: 4320 * 3600, Secure: true, SameSiteNone: true},
-	{Name: "zero max age", Token: "tok", Path: "/", MaxAge: 0},
-	{Name: "negative max age", Token: "tok", Path: "/", MaxAge: -1},
+	{Name: "plain", CookieName: "MMAUTHTOKEN", HttpOnly: true, Token: "cqjc7ec6bpy65jjamstkhpe6fr", Path: "/", MaxAge: 2592000},
+	{Name: "subpath", CookieName: "MMAUTHTOKEN", HttpOnly: true, Token: "tok", Path: "/mattermost", MaxAge: 3600},
+	{Name: "empty path", CookieName: "MMAUTHTOKEN", HttpOnly: true, Token: "tok", Path: "", MaxAge: 3600},
+	{Name: "domain", CookieName: "MMAUTHTOKEN", HttpOnly: true, Token: "tok", Path: "/", Domain: "example.com", MaxAge: 3600},
+	{Name: "secure", CookieName: "MMAUTHTOKEN", HttpOnly: true, Token: "tok", Path: "/", MaxAge: 3600, Secure: true},
+	{Name: "secure embedded", CookieName: "MMAUTHTOKEN", HttpOnly: true, Token: "tok", Path: "/", MaxAge: 3600, Secure: true, SameSiteNone: true},
+	{Name: "embedded not secure", CookieName: "MMAUTHTOKEN", HttpOnly: true, Token: "tok", Path: "/", MaxAge: 3600, SameSiteNone: true},
+	{Name: "domain and secure embedded", CookieName: "MMAUTHTOKEN", HttpOnly: true, Token: "tok", Path: "/sub", Domain: "mm.example.com", MaxAge: 4320 * 3600, Secure: true, SameSiteNone: true},
+	{Name: "zero max age", CookieName: "MMAUTHTOKEN", HttpOnly: true, Token: "tok", Path: "/", MaxAge: 0},
+	{Name: "negative max age", CookieName: "MMAUTHTOKEN", HttpOnly: true, Token: "tok", Path: "/", MaxAge: -1},
+
+	// `AttachSessionCookies` (app/login.go:270) emits three cookies, and only the first is
+	// `HttpOnly`. The user-id and CSRF cookies are read by the webapp is own JavaScript, so the
+	// attribute is absent by design rather than by omission — and a port that set it on all
+	// three would break the client without failing any status-code assertion.
+	{Name: "login token", CookieName: "MMAUTHTOKEN", HttpOnly: true, Token: "mxnmpiimcjbe7ets4qyckj7b3y", Path: "/", MaxAge: 4320 * 3600},
+	{Name: "login user id", CookieName: "MMUSERID", Token: "opukwu61f7ft8exssjxf3huyjy", Path: "/", MaxAge: 4320 * 3600},
+	{Name: "login csrf", CookieName: "MMCSRF", Token: "f9jnw7z47fbbzmkxt9ba9naene", Path: "/", MaxAge: 4320 * 3600},
+	{Name: "login user id secure embedded", CookieName: "MMUSERID", Token: "opukwu61f7ft8exssjxf3huyjy", Path: "/sub", Domain: "mm.example.com", MaxAge: 3600, Secure: true, SameSiteNone: true},
+	{Name: "login csrf subpath", CookieName: "MMCSRF", Token: "f9jnw7z47fbbzmkxt9ba9naene", Path: "/mattermost", MaxAge: 3600},
 }
 
 // renderSessionCookie is api4/user.go:2789-2807 transcribed: the struct literal `attachDeviceIds`
@@ -226,12 +238,12 @@ var sessionCookieCorpus = []sessionCookieCase{
 // character.
 func renderSessionCookie(c sessionCookieCase) string {
 	cookie := &http.Cookie{
-		Name:     "MMAUTHTOKEN",
+		Name:     c.CookieName,
 		Value:    c.Token,
 		Path:     c.Path,
 		MaxAge:   c.MaxAge,
 		Expires:  time.Unix(cookieExpiresUnix, 0),
-		HttpOnly: true,
+		HttpOnly: c.HttpOnly,
 		Domain:   c.Domain,
 		Secure:   c.Secure,
 	}

@@ -92,6 +92,7 @@ mod parity {
     pub mod licence_gated_channels;
     pub mod license_client;
     pub mod licensed_features;
+    pub mod login;
     pub mod me_alias;
     pub mod oauth_app_writes;
     pub mod oauth_apps;

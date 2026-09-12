@@ -44,6 +44,7 @@ pub mod licensed_features;
 pub mod limits;
 /// The local-mode admin API: the api4 handlers on a unix socket, with an unrestricted session.
 pub mod local;
+pub mod login;
 pub mod multipart;
 pub mod oauth;
 pub mod permissions;
@@ -497,6 +498,37 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/v4/users/logout",
             partially_migrated(post(auth_writes::logout)),
+        )
+        // `BaseRoutes.Users.Handle("/login", RateLimitedHandler(APIHandler(login), …))`
+        // (api4/user.go:69) and `"/login/type"` (user.go:74), POST both.
+        //
+        // # Two literals, one nested inside the other, beside a `{param}` that is already served
+        //
+        // `/users/login` is a sibling of `/users/{user_id}`, which answers GET today; axum
+        // prefers the static segment, so `POST /users/login` lands here while every other method
+        // and every other second segment is untouched. `/users/login/type` is a literal **child**
+        // of `/users/login`, and that is the shape the image session measured as dangerous:
+        // matchit prefers a static child and a path that reaches `/users/login/` and finds no
+        // matching child does not fall back across method routers. Registering the child
+        // explicitly is what keeps it answered; `the_login_routes_and_their_neighbours_are_all_still_answered_here`
+        // is the regression guard, and it lists the whole `/users/` neighbourhood rather than
+        // only these two.
+        //
+        // Neither handler takes a session extractor: both are `APIHandler`, so an unauthenticated
+        // request is the normal case rather than a 401.
+        //
+        // **Go rate-limits `/login` to 5/s with a burst of 10** and `/login/desktop_token` to
+        // 2/s. Nothing in this port implements rate limiting, on this route or any other — see
+        // [D-430]. `/login/sso/code-exchange`, `/login/desktop_token`, `/login/switch` and
+        // `/login/cws` are deliberately **not** registered: leaving them off this router is what
+        // keeps them forwarded, and each needs SSO, a licence or CWS.
+        .route(
+            "/api/v4/users/login",
+            partially_migrated(post(login::login)),
+        )
+        .route(
+            "/api/v4/users/login/type",
+            partially_migrated(post(login::get_login_type)),
         )
         // `BaseRoutes.Users.Handle("/password/reset", APIHandler(resetPassword))`
         // (api4/user.go:55). Two segments under `/users/`, so it is a sibling of
@@ -2767,6 +2799,137 @@ mod tests {
                 "{method} {path} should have stopped at the session check"
             );
         }
+    }
+
+    /// Nothing the login session registered removed a route this server answers.
+    ///
+    /// # Why this family needs its own guard
+    ///
+    /// `/users/login` is a **literal sibling** of `/users/{user_id}`, and `/users/login/type` is
+    /// a literal **child of that literal**. axum prefers a static segment to a `{param}` at the
+    /// same depth and does not backtrack across method routers, so registering either one a
+    /// segment too shallow — or registering the parent and forgetting the child — takes routes
+    /// away rather than adding them, and a parity suite that only exercised the new routes would
+    /// not notice.
+    ///
+    /// # The two new routes need a different signal from their neighbours
+    ///
+    /// Everything else on this list is behind [`crate::auth::AuthenticatedSession`] and so
+    /// answers **401** with no credentials. `login` and `login/type` are `APIHandler` — an
+    /// anonymous request is their normal case — so `x-mmrs-served-by` is the only assertion that
+    /// applies to all of them, and it is the one that matters: a forwarded response carries no
+    /// such header because there is no Go server on port 1.
+    ///
+    /// # Non-vacuity
+    ///
+    /// Checked by temporarily adding `POST /api/v4/users/login/desktop_token`, which this server
+    /// deliberately forwards, and confirming the assertion fails. It does.
+    #[tokio::test]
+    async fn the_login_routes_and_their_neighbours_are_all_still_answered_here() {
+        use axum::http::{Method, Request, StatusCode};
+        use tower::ServiceExt;
+
+        let app = App::new(mm_store::SqlStore::from_pool(
+            sqlx::postgres::PgPoolOptions::new()
+                .connect_lazy("postgres://x/y")
+                .expect("a lazy pool needs no server"),
+        ));
+        let state = AppState::new(app, "http://127.0.0.1:1".to_owned());
+
+        const USER: &str = "abcdefghijklmnopqrstuvwxyz";
+
+        // The two this session adds. No session check to stop at, so only the header is asserted.
+        let anonymous: Vec<(Method, String)> = vec![
+            (Method::POST, "/api/v4/users/login".to_owned()),
+            (Method::POST, "/api/v4/users/login/type".to_owned()),
+            // Already anonymous before this session, and a literal under `/users/` like the two
+            // above — so a botched registration could shadow it.
+            (Method::POST, "/api/v4/users/logout".to_owned()),
+            (Method::POST, "/api/v4/users/password/reset".to_owned()),
+            (Method::POST, "/api/v4/users/email/verify".to_owned()),
+        ];
+
+        // The session-gated neighbourhood, two and three segments under `/users/`.
+        let authenticated: Vec<(Method, String)> = vec![
+            (Method::GET, "/api/v4/users/me".to_owned()),
+            (Method::GET, format!("/api/v4/users/{USER}")),
+            (Method::GET, format!("/api/v4/users/{USER}/sessions")),
+            (
+                Method::POST,
+                format!("/api/v4/users/{USER}/sessions/revoke"),
+            ),
+            (Method::POST, "/api/v4/users/sessions/revoke/all".to_owned()),
+            (Method::PUT, "/api/v4/users/sessions/device".to_owned()),
+            (Method::PUT, format!("/api/v4/users/{USER}/password")),
+            (
+                Method::POST,
+                format!("/api/v4/users/{USER}/reset_failed_attempts"),
+            ),
+            (Method::GET, format!("/api/v4/users/{USER}/status")),
+            (Method::GET, format!("/api/v4/users/{USER}/preferences")),
+            (Method::POST, "/api/v4/users/ids".to_owned()),
+            (Method::POST, "/api/v4/users/usernames".to_owned()),
+            (Method::GET, "/api/v4/users/me/preferences".to_owned()),
+        ];
+
+        for (method, path) in anonymous.iter().chain(authenticated.iter()) {
+            let response = router(state.clone())
+                .oneshot(
+                    Request::builder()
+                        .method(method.clone())
+                        .uri(path)
+                        .body(axum::body::Body::empty())
+                        .expect("a request"),
+                )
+                .await
+                .expect("the router answers");
+
+            assert_eq!(
+                response
+                    .headers()
+                    .get(crate::error::SERVED_BY)
+                    .map(|v| v.as_bytes()),
+                Some(b"rust".as_slice()),
+                "{method} {path} is no longer answered here"
+            );
+        }
+
+        for (method, path) in &authenticated {
+            let response = router(state.clone())
+                .oneshot(
+                    Request::builder()
+                        .method(method.clone())
+                        .uri(path)
+                        .body(axum::body::Body::empty())
+                        .expect("a request"),
+                )
+                .await
+                .expect("the router answers");
+            assert_eq!(
+                response.status(),
+                StatusCode::UNAUTHORIZED,
+                "{method} {path} should have stopped at the session check"
+            );
+        }
+
+        // `login/type` is a **404 with an empty body** on an unlicensed server with guest magic
+        // links off, which is the stock configuration and `Config::default`. Not a
+        // "not implemented" 404 — it is the answer, and the body has to be empty.
+        let response = router(state.clone())
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/api/v4/users/login/type")
+                    .body(axum::body::Body::from(r#"{"login_id":"a@b.c"}"#))
+                    .expect("a request"),
+            )
+            .await
+            .expect("the router answers");
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("a body");
+        assert!(body.is_empty(), "getLoginType writes no body: {body:?}");
     }
 
     /// The two privacy accessors read **different** settings.

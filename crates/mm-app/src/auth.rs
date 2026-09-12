@@ -43,7 +43,8 @@ pub const PASSWORD_MAXIMUM_LENGTH: usize = 72;
 
 /// The id every credential mismatch shares, and the **only** one `DoubleCheckPassword` treats as
 /// a real failed attempt. Named because three call sites compare against it.
-const CHECK_USER_PASSWORD_INVALID: &str = "api.user.check_user_password.invalid.app_error";
+pub(crate) const CHECK_USER_PASSWORD_INVALID: &str =
+    "api.user.check_user_password.invalid.app_error";
 
 impl App {
     /// Port of `users.IsPasswordValidWithSettings` (app/users/password.go:18) wrapped in
@@ -154,7 +155,7 @@ impl App {
     ///
     /// If the row was hashed with anything but the latest hasher it is silently re-hashed and
     /// updated — see [`App::migrate_password`]. So a *successful* password check is not a read.
-    async fn check_user_password(&self, user: &User, password: &str) -> AppResult {
+    pub(crate) async fn check_user_password(&self, user: &User, password: &str) -> AppResult {
         if user.password.is_empty() || password.is_empty() {
             return Err(invalid_password(&user.id));
         }
@@ -919,7 +920,7 @@ fn contains_any(s: &str, chars: &str) -> bool {
 /// A configured value beyond `i32` saturates rather than wrapping: wrapping a large positive
 /// setting to a negative one would make `FailedAttempts < max` false for every account and lock
 /// the whole server out, which is the opposite of what the operator asked for.
-fn clamp_attempts(max_attempts: i64) -> i32 {
+pub(crate) fn clamp_attempts(max_attempts: i64) -> i32 {
     max_attempts.clamp(i32::MIN as i64, i32::MAX as i64) as i32
 }
 
@@ -933,7 +934,7 @@ fn invalid_password(user_id: &str) -> Box<AppError> {
     )
 }
 
-fn attempts_error(whence: &'static str) -> Box<AppError> {
+pub(crate) fn attempts_error(whence: &'static str) -> Box<AppError> {
     AppError::boxed(
         whence,
         "app.user.update_failed_pwd_attempts.app_error",

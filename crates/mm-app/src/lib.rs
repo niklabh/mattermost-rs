@@ -36,6 +36,7 @@ pub mod import;
 pub mod job;
 pub mod license;
 pub mod limits;
+pub mod login;
 pub mod oauth;
 pub mod password;
 pub mod post;
@@ -61,6 +62,7 @@ pub mod upload;
 pub mod usage;
 pub mod user;
 pub mod user_access_token;
+pub mod user_agent;
 pub mod user_terms_of_service;
 pub mod utils;
 /// Port of `app/view.go` — the integrated-boards (kanban view) surface.
