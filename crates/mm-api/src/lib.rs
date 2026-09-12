@@ -1138,7 +1138,7 @@ pub fn router(state: AppState) -> Router {
         )
         .route(
             "/api/v4/groups",
-            partially_migrated(get(groups::get_groups)),
+            partially_migrated(get(groups::get_groups).post(groups::create_group)),
         )
         .route(
             "/api/v4/users/{user_id}/groups",
@@ -1981,13 +1981,48 @@ pub fn router(state: AppState) -> Router {
         // id-shaped, so the handler carries that charset itself; `members` and `stats` are
         // literals beside it and axum prefers a literal, which is the order gorilla registers
         // them in too.
+        // `/names` is a **literal** beside `{group_id:[A-Za-z0-9]+}`, and `names` matches that
+        // class — so in Go the method picks the handler: `POST` is `getGroupsByNames`, `DELETE` is
+        // `deleteGroup` with `group_id = "names"`.
+        //
+        // **A static route shadows its parameterised sibling for every method**, because axum
+        // prefers the literal segment and does not backtrack across method routers. Registering
+        // `/names` for `POST` alone would therefore have handed `GET /api/v4/groups/names` — which
+        // `groups::get_group` served until now — to the fallback. The two methods gorilla actually
+        // routes at that path are re-claimed here; `PUT` and the rest stay forwarded, which is
+        // also what gorilla does with them. Measured in
+        // `parity::group_writes::groups_names_is_a_literal_for_the_post_only`.
+        .route(
+            "/api/v4/groups/names",
+            partially_migrated(
+                post(groups::get_groups_by_names)
+                    .get(groups::get_group_named_names)
+                    .delete(groups::delete_group_named_names),
+            ),
+        )
         .route(
             "/api/v4/groups/{group_id}",
-            partially_migrated_with_ids(&state, get(groups::get_group)),
+            partially_migrated_with_ids(
+                &state,
+                get(groups::get_group).delete(groups::delete_group),
+            ),
+        )
+        .route(
+            "/api/v4/groups/{group_id}/patch",
+            partially_migrated_with_ids(&state, put(groups::patch_group)),
+        )
+        .route(
+            "/api/v4/groups/{group_id}/restore",
+            partially_migrated_with_ids(&state, post(groups::restore_group)),
         )
         .route(
             "/api/v4/groups/{group_id}/members",
-            partially_migrated_with_ids(&state, get(groups::get_group_members)),
+            partially_migrated_with_ids(
+                &state,
+                get(groups::get_group_members)
+                    .post(groups::add_group_members)
+                    .delete(groups::delete_group_members),
+            ),
         )
         .route(
             "/api/v4/groups/{group_id}/stats",
