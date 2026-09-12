@@ -2478,6 +2478,36 @@ mod tests {
         );
     }
 
+    /// The four settings the image routes read reach the overlay, each under its own name.
+    ///
+    /// An operator who raises `MaxFileSize` or names an LDAP picture attribute through the
+    /// environment has overridden the Go server beside us, and a variable this port does not
+    /// consult is a route answering differently on each side for a reason that has nothing to do
+    /// with the code. Two of the four are also the only readers of their whole section, so a
+    /// transposed name would silently keep the default rather than fail to compile.
+    #[test]
+    fn the_image_settings_are_overridable_by_environment() {
+        let config = Config::default().apply_env_from(&|key| match key {
+            "MM_FILESETTINGS_MAXFILESIZE" => Some("4096".to_owned()),
+            "MM_TEAMSETTINGS_LOCKPROFILEFIELDSFOREMAILUSERS" => Some("all".to_owned()),
+            "MM_LDAPSETTINGS_PICTUREATTRIBUTE" => Some("thumbnailPhoto".to_owned()),
+            "MM_SAMLSETTINGS_ENABLESYNCWITHLDAP" => Some("true".to_owned()),
+            _ => None,
+        });
+
+        assert_eq!(config.file_max_file_size, 4096, "down from 100 MiB");
+        assert_eq!(config.lock_profile_fields_for_email_users, "all");
+        assert_eq!(config.ldap_picture_attribute, "thumbnailPhoto");
+        assert!(config.saml_enable_sync_with_ldap);
+
+        // And with nothing set every one of them keeps the value the document gave it.
+        let untouched = Config::default().apply_env_from(&|_| None);
+        assert_eq!(untouched.file_max_file_size, 100 * 1024 * 1024);
+        assert_eq!(untouched.lock_profile_fields_for_email_users, "none");
+        assert_eq!(untouched.ldap_picture_attribute, "");
+        assert!(!untouched.saml_enable_sync_with_ldap);
+    }
+
     /// `MM_TEAMSETTINGS_ENABLEOPENSERVER` reaches the overlay.
     ///
     /// The Go server beside us sets this variable and nothing else does, so without the overlay
@@ -2909,6 +2939,14 @@ mod go_parity {
     /// struct's keys, and the number below is what the script writes: **40** — the thirty-eight
     /// modelled keys plus `ServiceSettings.SiteURL`, projected for its presence rather than its
     /// value, and counted here like any other.
+    ///
+    /// **It drifted again, the same way, and the count is why.** The four image-route settings —
+    /// `FileSettings.MaxFileSize`, `TeamSettings.LockProfileFieldsForEmailUsers`,
+    /// `LdapSettings.PictureAttribute` and `SamlSettings.EnableSyncWithLdap` — were added to
+    /// [`Config`] with their defaults transcribed from `config.go` and *not* added to the
+    /// script, so [`every_default_matches_what_go_actually_wrote`] compared four defaults against
+    /// their own fallback and passed. A hardcoded number cannot notice a missing key on its own;
+    /// what it can do is fail the moment somebody adds the key, which is what happened here.
     #[test]
     fn the_fixture_covers_every_document_sourced_setting() {
         let fixture: serde_json::Value = serde_json::from_str(ACTIVE).expect("the fixture is JSON");
@@ -2920,8 +2958,8 @@ mod go_parity {
             .sum();
 
         assert_eq!(
-            keys, 49,
-            "the fixture covers {keys} settings and Config reads 49 from the document. \
+            keys, 53,
+            "the fixture covers {keys} settings and Config reads 53 from the document. \
              Add the new key to scripts/dump-config-fixture.sh and re-run it — a modelled \
              setting the fixture does not carry is a setting Go's own output never checked"
         );
@@ -2948,7 +2986,10 @@ mod go_parity {
             "ComplianceSettings": { "Enable": true },
             "ExperimentalSettings": { "RestrictSystemAdmin": true },
             "ImageProxySettings": { "Enable": true },
-            "FileSettings": { "DriverName": "amazons3" },
+            "FileSettings": { "DriverName": "amazons3", "MaxFileSize": 4096 },
+            "TeamSettings": { "LockProfileFieldsForEmailUsers": "all" },
+            "LdapSettings": { "PictureAttribute": "thumbnailPhoto" },
+            "SamlSettings": { "EnableSyncWithLdap": true },
             "PrivacySettings": { "ShowFullName": false, "ShowEmailAddress": false }
         }"#;
         let config = Config::from_document(inverted).expect("valid document");
@@ -2965,6 +3006,13 @@ mod go_parity {
         assert!(config.restrict_system_admin);
         assert!(config.image_proxy_enable);
         assert_eq!(config.file_driver_name, "amazons3");
+        // The four the image routes read. Each is in its own section, and two of those sections
+        // exist in `Document` for one key each — so a wiring that dropped either would fall back
+        // to a default that every other test in this module is happy with.
+        assert_eq!(config.file_max_file_size, 4096);
+        assert_eq!(config.lock_profile_fields_for_email_users, "all");
+        assert_eq!(config.ldap_picture_attribute, "thumbnailPhoto");
+        assert!(config.saml_enable_sync_with_ldap);
         assert!(!config.show_full_name);
         assert!(!config.show_email_address);
         assert_eq!(config.session_idle_timeout_in_minutes, 17);
