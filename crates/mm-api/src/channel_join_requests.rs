@@ -108,11 +108,17 @@ impl Outcome {
     }
 }
 
+/// The byte `json.NewEncoder(w).Encode` appends after every document.
+///
+/// Named rather than inlined for the reason `views.rs` gives: a mutation plan converts `\n` in a
+/// pattern into a real newline, so no anchor can quote a literal `b'\n'`.
+const ENCODER_NEWLINE: u8 = b'\n';
+
 /// `json.NewEncoder(w).Encode(value)` — a **trailing newline**, which a plain `to_vec` omits.
 fn encoded(handler: &'static str, status: StatusCode, value: &impl serde::Serialize) -> Outcome {
     match serde_json::to_vec(value) {
         Ok(mut body) => {
-            body.push(b'\n');
+            body.push(ENCODER_NEWLINE);
             Outcome::Served(
                 (
                     status,

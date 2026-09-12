@@ -111,6 +111,13 @@ async fn plant(
 
 /// The four-row fixture described in the module docs, all pending, all on [`CHANNEL`] but each
 /// belonging to a different user so the partial unique index does not refuse them.
+///
+/// **The tied pair is planted low id first**, and that is the whole reason this file can see the
+/// `Id DESC` half of the sort key. A mutation dropping it survived the first run: with no tiebreak
+/// the query is a seq scan and a sort, and Postgres's sort is stable at this size — so the tied
+/// rows come back in *insertion* order, and inserting `zzz` before `mmm` made that the same answer
+/// `Id DESC` gives. The right answer and the wrong answer coincided. Measured directly against
+/// Postgres, not guessed: planting `mmm` first makes the two disagree.
 async fn seed(pool: &PgPool) {
     purge(pool).await;
     plant(
@@ -124,18 +131,18 @@ async fn seed(pool: &PgPool) {
     .await;
     plant(
         pool,
-        TIED_HIGH,
+        TIED_LOW,
         CHANNEL,
-        "mmrsjrstoreuserB0000000001",
+        "mmrsjrstoreuserC0000000001",
         "pending",
         2000,
     )
     .await;
     plant(
         pool,
-        TIED_LOW,
+        TIED_HIGH,
         CHANNEL,
-        "mmrsjrstoreuserC0000000001",
+        "mmrsjrstoreuserB0000000001",
         "pending",
         2000,
     )

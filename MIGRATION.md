@@ -10887,3 +10887,117 @@ parameter typing rather than on anything about the port. The lesson from the las
 the plan header: **a new mutation is worth `cargo check`ing by hand before it costs an hour of
 machine time.**
 
+
+## The join-request family, and a third Go server to see it at all (2026-09-12)
+
+**389 → 396 of 764.** All seven routes of `api4/channel_join_request.go` — the queue behind a
+*discoverable* private channel: request to join, withdraw, read mine, list the channel's, count the
+pending, and review one.
+
+- `crates/mm-store/src/channel_join_request_store.rs` — the whole `ChannelJoinRequestStore`
+  interface, seven methods
+- `crates/mm-store/tests/db_channel_join_request_store.rs` — 5 tests, on a fixture built so the two
+  sort keys disagree
+- `crates/mm-app/src/channel_join_request.rs` — the whole of `app/channel_join_request.go`,
+  both websocket broadcasts included
+- `crates/mm-app/src/config.rs` — `feature_flag_discoverable_channels`
+- `crates/mm-api/src/channel_join_requests.rs` — the seven handlers
+- `crates/mm-api/tests/parity/channel_join_requests.rs` — 7 tests
+- `crates/mm-model/src/channel_join_request.rs` — a `go_parity` module; the model was already
+  ported with fixture round-trips and **no** behavioural oracle, so `IsValid`'s eleven refusals were
+  asserted from a reading of the Go source
+- `reference/dump/behaviour_channel_join_request.go`, `fixtures/behaviour_channel_join_request.json`
+- `scripts/go-discoverable.sh`, started by `scripts/stack.sh up`
+
+### The routes do not exist on the server this one fronts
+
+`initChannelJoinRequestRoutes` returns before its first `Handle` when
+`FeatureFlags.DiscoverableChannels` is off, which it is at the pinned SHA. gorilla/mux has
+therefore never heard of `/channels/{id}/join_request`, and the answer is its own
+`api.context.404.app_error` — whose `detailed_error` interpolates the request URL. So the flag is
+the first statement of every handler and a dark request is **forwarded**: the same shape
+`api4/view.go` already has, for the same reason. [D-153] is the pin.
+
+Seeing the lit shape needed a third pinned Go process. `scripts/go-discoverable.sh` runs one on
+`MMRS_GO_PORT + 31` with the flag on, sharing the database, the configuration document and the
+`Sessions` table. Turning the flag on in `go-server.sh` would move `getChannel`, `createChannel`
+and `patchChannel` under suites that already assert against them — the argument `go-boards.sh`
+makes, one flag over.
+
+### A conflicting save is a 201, not a 409
+
+The partial unique index `(ChannelId, UserId) WHERE Status = 'pending'` refuses a second pending
+row. Go catches that one constraint **by name**, re-reads the caller's existing request and returns
+*it*, still at 201 — so POSTing twice hands back the original `id`, `create_at` and `message`, and
+the second body's message is discarded. Measured. The store therefore has no pre-read: checking
+first and inserting second would add a race Go does not have.
+
+### Two paths drop the requester's free text, and `IsValid` is asymmetric about reviewers
+
+`WithdrawChannelJoinRequest` and `UpdateChannelJoinRequest` both set `Message = ""` before writing,
+so the body a client gets back from `DELETE` and `PATCH` carries an empty message even though the
+row it started from had one. And `IsValid` demands `ReviewedBy` *and* `ReviewedAt` for `approved`
+and `denied` and **neither** for `withdrawn`, because the requester withdraws their own request —
+a port that treated the three terminal states alike refuses every withdrawal.
+
+### The review's allowlist is not the model's allowlist
+
+`IsValidChannelJoinRequestStatus` accepts four values; the patch accepts **two**. `pending` and
+`withdrawn` are both 400 `api.channel.discoverable_join_request.invalid_patch.app_error` — which is
+what the `app-review-accepts-any-valid-status` mutation exists to catch, and the reason the handler
+does not reach for the model's predicate.
+
+### `getMyChannelJoinRequest`'s miss is a bodiless 404
+
+`w.WriteHeader(http.StatusNotFound)` and `return` — no `AppError`, no `Content-Type`, zero bytes.
+Go's comment says why: a client has to be able to tell "no pending request" from "service down".
+Every other 404 in the family carries a body, and the withdraw route's 404 for the same state does.
+
+### `edit_other_users` is reported and never checked
+
+`getMyChannelJoinRequests` gates on `c.Params.UserId != session.UserId` — a string comparison — and
+refuses with `SetPermissionError(PermissionEditOtherUsers)`. A system admin holding that permission
+is refused a colleague's list all the same.
+
+### The generator's own drift, which was not this session's
+
+`cd reference/dump && TZ=Asia/Kolkata go run .` rewrote three fixtures beyond the new one, and all
+three are environment-dependent rather than code-dependent: `behaviour_filestore.json` embeds a
+**random** multipart boundary, and `behaviour_scheduled_post{,_recurrence}.json` record whether
+`time.LoadLocation` accepts `america/new_york` in lower case — which depends on whether Go finds
+the system zoneinfo directory or its embedded copy. All three were reverted and none is committed.
+A generator whose output is claimed to be deterministic has at least two rows that are not.
+
+### What is deferred
+
+[D-340] — `useOnlyChannelAdminsHook` narrows both join-request broadcasts to the channel's admins,
+and this server strips hooks without running them ([D-183]). So a plain member would be told who
+asked to join, and with what status. Latent while the flag is off; a disclosure bug the moment it
+is on, and the missing half is entirely in `mm-ws`.
+
+### The next route in this family
+
+The rest of the discoverable surface, which [D-153] has been holding: `serveDiscoverableNonMember`
+in `getChannel` (api4/channel.go:886) plus `IsDiscoverableJoinAllowed` and
+`sanitizeDiscoverableChannel`, and the `discoverable` arms of `createChannel` and `patchChannel`
+that `channel_creates.rs` and `channel_writes.rs` currently refuse with a locally-minted 400. The
+blocker D-153 named — "a feature-flag/config surface, which this server does not have at all" — is
+gone: `Config::feature_flag_discoverable_channels` reads it the way the other five are read, and
+`scripts/go-discoverable.sh` is the oracle those three routes need.
+
+### Mutation tally
+
+`scripts/mutations/channel-join-requests.plan`: **41 run, 38 caught, 3 survived, 0 harness
+faults**, both controls SURVIVED. Two of the three survivors are those controls. The third is an
+equivalent mutant — clearing `DenialReason` before the review re-sets it cannot be observed,
+because the row reaching that line is always `pending` and `IsValid` refuses a non-empty reason on
+any status but `denied`.
+
+Two lines survived the first run and are counted only after the fixtures were fixed and each was
+re-run alone. The more interesting one is the ordering: dropping `Id DESC` from the list was
+invisible because the tied pair was **planted high id first**, the query is a seq scan and a sort,
+and Postgres's sort is stable at that size — so the tied rows came back in insertion order, which
+was the same answer the tiebreak gives. Planting `mmm` before `zzz` separates them. That is the
+third time in this project a mutation has found a fixture where the right answer and the wrong
+answer coincided, and the first where the coincidence was the database's sort stability rather than
+the data.

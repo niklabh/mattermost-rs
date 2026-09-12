@@ -902,7 +902,12 @@ mod tests {
 
     #[test]
     fn a_negative_page_becomes_the_first_page() {
+        // **`-1` first**, and it is the one that matters: `< 0` is the predicate, so a mutation
+        // loosening it to `< -1` is invisible to `-3`, and only `-1` separates the two. The first
+        // mutation run of this file reported it as a survivor for exactly that reason.
+        assert_eq!(sanitize_list_opts(opts("", -1, 10)).page, 0);
         assert_eq!(sanitize_list_opts(opts("", -3, 10)).page, 0);
+        assert_eq!(sanitize_list_opts(opts("", 0, 10)).page, 0);
         assert_eq!(sanitize_list_opts(opts("", 4, 10)).page, 4);
     }
 

@@ -7194,3 +7194,34 @@ never exercised. One `SQLX_OFFLINE=true cargo check --workspace --all-targets` i
 in whatever runs before a merge — is what turns the README's claim into something the tree
 asserts rather than something a reader has to trust.
 
+
+## D-340 · the `only_channel_admins` broadcast hook is not run, so a join request is announced to every channel member
+
+**Status** OPEN · **Severity** divergence · **Raised** 2026-09-12 (app/channel_join_request.go)
+
+`broadcastChannelJoinRequestCreated` and `broadcastChannelJoinRequestUpdated` publish to
+`Broadcast{ChannelId: …}` — the channel's whole membership — and then narrow the audience with
+`useOnlyChannelAdminsHook`, whose `Process` **rejects** the event for any connection whose user is
+not in the precomputed admin set (app/web_broadcast_hooks.go:519). The fan-out is the outer bound
+and the hook is the filter.
+
+[D-183] records that this server strips the hook fields and does not run the hooks. Until now that
+was a fidelity gap — the stock `posted` hook *adds* fields. This is the first ported event whose
+hook **removes recipients**, so dropping it does not degrade a payload, it widens an audience: a
+plain member of a discoverable private channel would be told that a named user has asked to join
+it, and with what status, where Go tells only the channel admins.
+
+**What is owed:** `platform.HookedWebSocketEvent`'s reject path in the hub, plus the
+`only_channel_admins` hook itself. Nothing smaller fixes it — the admin set is already computed
+correctly and attached to the event (`channel_admin_user_ids`), so the missing half is entirely in
+`mm-ws`.
+
+**Why it is not urgent, and why that is not a reason to close it.** The seven routes that raise
+these events are dark: `FeatureFlags.DiscoverableChannels` is false at the pinned SHA ([D-153]), so
+nothing on this deployment can publish either event. The moment that flag is turned on this becomes
+a disclosure bug, which is why it is recorded rather than left to the doc comment on
+`publish_channel_join_request_event`.
+
+**Where the finding lives in the code:** the module docs of
+`crates/mm-app/src/channel_join_request.rs` and the doc comment on
+`App::publish_channel_join_request_event`.
