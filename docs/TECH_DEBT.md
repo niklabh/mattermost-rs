@@ -7107,39 +7107,34 @@ use anywhere yet and would be the first.
 
 ---
 
-## D-330 · `parity_views`' two list tests disagree with Go on **order**, reliably
+## [D-330] `parity_views`' list order — CLOSED 2026-09-12, and it was never a port bug
 
-**Status** OPEN · **Severity** divergence · **Raised** 2026-09-12 · **Revised** same day
+Raised as a wire-order divergence: `views::include_total_count_and_pagination_agree` and
+`views::the_list_is_byte_identical_including_the_props_key_order` disagreed with Go on row order on
+every run, Go returning `CreateAt` order and our side returning `Id` order.
 
-`views::include_total_count_and_pagination_agree` and
-`views::the_list_is_byte_identical_including_the_props_key_order` fail on **every** run of the
-views suite in isolation — one or both, three runs out of three. Both are `#[ignore]`d with a
-pointer here so the rest of the suite is green; **un-ignore them as the first step of fixing this.**
+**Both tests were correct and so was the port.** `SecondServer::start` spawned mm-api and then
+decided it was up by polling `{base}/system/ping`. When a stale mm-api already held the port, the
+child failed to bind and exited, the ping was answered by the **stale process**, and `start`
+returned `Some` wrapping a dead child — so the suite measured a binary from hours earlier. A
+SecondServer from 00:31 held :8082. Killing it made both tests pass, three runs out of three, and
+they have passed every run since.
 
-**An earlier version of this entry blamed a concurrent count race. That was wrong and is
-retracted** — `total_count` agrees at 4 on both sides. The disagreement is the *order of the rows*:
+What was established while chasing it, all of it now permanent:
 
-    Go    Alpha(create_at 1789157065891), Beta(…896), Gamma(…901)
-    Rust  Beta(…896), Gamma(…901), Alpha(…891)
+* `crates/mm-store/tests/db_view_store.rs` exists. The view store had **no** DB-backed test before.
+* Postgres, given the store's own `ORDER BY`, returns exactly Go's order for the rows the failing
+  test produced. The store, the app layer and the handler never reordered anything.
+* `SecondServer::start` frees its port before spawning **and** requires its own child to still be
+  running. A ping cannot distinguish "mine came up" from "someone else's was already there", which
+  was the whole defect.
+* `scripts/mutations/view-routes.plan` now has its first valid run: 33 run, 28 caught, both controls
+  survived.
 
-Every row has `sort_order: 0`, so the tiebreak decides everything, and Go's is `CreateAt` while
-ours behaves as though it were `Id` (Beta `5ccf…` < Gamma < Alpha `q6ts…`). Corroborated
-independently: `store-list-drops-the-createat-tiebreak` is the one non-control mutation in
-`view-routes.plan` that survives — the suite cannot see the `CreateAt` tiebreak being removed
-because it is not in effect.
+Two entries in this file were wrong about this and are superseded by the above: the first blamed a
+concurrent `total_count` race, the second a `CreateAt` tiebreak our store does in fact apply.
 
-**What is ruled out.** Both `ORDER BY` clauses are textually identical —
-`sortorder ASC, createat ASC, id ASC` in `view_store.rs:324` and `SortOrder ASC, CreateAt ASC,
-Id ASC` in `view_store.go:108`. Postgres cannot return 896, 901, 891 from that clause, so **the
-response did not come from that query**, and the bug is not in the clause itself. Neither the app
-layer (`get_views_for_channel`) nor the handler re-sorts. Not fixture accumulation either: the
-`Views` purge landed first and the failures are unchanged.
-
-**What is owed:** find which code path actually produces the list body. Worth checking in order —
-whether `ViewQueryOpts`/`clamp_page` routes to a different store method than the one read above,
-whether the `SecondServer` the suite starts is serving these routes at all or forwarding them, and
-whether the Go side is answering from something other than that query. Then re-run
-`scripts/mutations/view-routes.plan`: its tally is void today because **both no-op controls come
-back CAUGHT**, decided by these same two tests, so no number from that plan means anything yet.
-
-**Where the pin lives:** the `#[ignore]` attributes on the two tests.
+**The lesson worth keeping is not about views.** Twice in one session a stale server produced
+confident, wrong conclusions — once through `scripts/parity.sh` (36 false failures after a
+`git worktree move`) and once here. Both are fixed by killing on the **port**, which is the thing
+that identifies a server, rather than on a path or a ping.

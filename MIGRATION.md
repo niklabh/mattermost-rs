@@ -10631,3 +10631,26 @@ nothing. That is fixed three ways (`stack.sh` starts the oracle, the skip is now
 purge sweeps the `Views` table it had never heard of, 754 leaked rows). It still scores nothing:
 both controls fail, naming `include_total_count_and_pagination_agree`. See [D-330]. A run whose
 controls fail has no verdicts, so no number from that plan is quoted here.
+
+## The view "wire-order bug" did not exist (2026-09-12)
+
+The previous entry closed by reporting that the view round "shipped a wire-order bug that only
+mutation testing's controls exposed". **That was wrong and this retracts it.** The port was correct
+at every layer; the suite was measuring a stale server.
+
+`SecondServer::start` judged success by polling `/system/ping`. With a stale mm-api already on the
+port, the child it spawned failed to bind and died, the ping was answered by the *old* process, and
+`start` handed back a dead child — so `parity_views` compared Go against a binary built hours
+earlier. That is the second time in one session a stale server produced a confident wrong answer:
+the first, through `scripts/parity.sh`, produced 36 false failures after a `git worktree move`
+stranded a server whose cmdline no `pkill` pattern could match. **Identify a server by its port.**
+Both call sites now free the port, and `SecondServer` additionally requires its own child to be
+alive, because a ping cannot tell whose server answered.
+
+Along the way the view store acquired the DB-backed test it never had
+(`crates/mm-store/tests/db_view_store.rs`), built so that ordering by `sortorder`, `createat` and
+`id` each give a different answer — without that, the assertion is vacuous. `view-routes.plan` then
+had its **first valid run: 33 run, 28 caught, both controls survived.** Three earlier attempts were
+void and none of their numbers mean anything. The two remaining survivors are recorded in the plan
+header: no caller the suite has can tell the write gate from the read gate, and `skip_fetch_threads`
+is invisible while no fixture channel contains a reply.
