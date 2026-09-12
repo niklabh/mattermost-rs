@@ -73,17 +73,18 @@ use std::sync::Arc;
 
 use axum::Router;
 use axum::body::Body;
-use axum::extract::{Extension, Query, Request, State};
-use axum::http::StatusCode;
+use axum::extract::{Extension, Path as UrlPath, Query, RawPathParams, RawQuery, Request, State};
+use axum::http::{HeaderMap, StatusCode};
+use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{MethodRouter, get};
+use axum::routing::{MethodRouter, get, post};
 use mm_app::license::LicenseState;
 use mm_model::session::Session;
 use mm_model::utils::AppError;
 
 use crate::auth::AuthenticatedSession;
 use crate::error::ApiError;
-use crate::{AppState, system};
+use crate::{AppState, bots, roles, status, system};
 
 /// The path of the Go server's own local socket, carried as a request extension.
 ///
@@ -111,6 +112,60 @@ pub fn local_session() -> AuthenticatedSession {
 /// the `GET` beside it into a 405 from our router instead of Go's answer.
 fn partially_migrated(methods: MethodRouter<AppState>) -> MethodRouter<AppState> {
     methods.fallback(forward_to_go_local)
+}
+
+/// [`crate::mux_segments_or_forward`] for the socket: forward, over the **unix socket**, any
+/// request whose path segments Go's local mux would not have matched.
+///
+/// The TCP middleware cannot be reused, and the reason is the one thing that would make this a
+/// silent bug: it forwards through [`crate::proxy::forward_to_go`], which dials the Go server's
+/// *port*. A local request answered over the port is answered by a **different handler chain** —
+/// `APISessionRequired` rather than `APILocal` — so an `mmctl --local` call with a malformed id
+/// would come back 401 instead of Go's mux 404.
+///
+/// `role_name` is here and not in the TCP table because on that side
+/// [`crate::roles::get_role_by_name`] carries its own charset check and its own forward. Handling
+/// it here means that check is unreachable on the socket, which is deliberate: a handler that
+/// forwards over the port must never run on this router.
+async fn local_mux_segments_or_forward(
+    Extension(go): Extension<GoLocalSocket>,
+    params: RawPathParams,
+    request: Request,
+    next: Next,
+) -> Response {
+    for (name, value) in &params {
+        let matched = match name {
+            // `{role_name:[a-z0-9_]+}` (api4/api.go) — narrower than the id class.
+            "role_name" => {
+                !value.is_empty()
+                    && value
+                        .bytes()
+                        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+            }
+            n if crate::parameter_is_id_shaped(n) => crate::segment_matches_go_mux(value),
+            _ => true,
+        };
+        if !matched {
+            tracing::debug!(
+                parameter = name,
+                "path segment is outside Go's mux charset; forwarding so Go answers its own 404"
+            );
+            return forward_over_unix(&go.0, request).await;
+        }
+    }
+    next.run(request).await
+}
+
+/// [`partially_migrated`], plus the segment charset check, for a local route with path
+/// parameters.
+fn partially_migrated_with_ids(
+    state: &AppState,
+    methods: MethodRouter<AppState>,
+) -> MethodRouter<AppState> {
+    partially_migrated(methods).layer(axum::middleware::from_fn_with_state(
+        state.clone(),
+        local_mux_segments_or_forward,
+    ))
 }
 
 /// Build the local-mode router.
@@ -148,6 +203,62 @@ pub fn router(state: AppState, go_socket: PathBuf) -> Router {
         .route(
             "/api/v4/license/client",
             partially_migrated(get(local_get_client_license)),
+        )
+        // ---- `bot_local.go`. Six of its seven pairs; `convert_to_user` is unported on both
+        // routers and falls through to the socket. Every handler is the **HTTP one**, unchanged:
+        // each gate on this family is a `SessionHasPermissionTo`, which short-circuits on
+        // `Session.Local`, so the local answer is the HTTP handler's own with every check passing.
+        // Sharing them rather than reimplementing is what keeps the two routers from drifting.
+        .route("/api/v4/bots", partially_migrated(get(local_get_bots)))
+        .route(
+            "/api/v4/bots/{bot_user_id}",
+            partially_migrated_with_ids(&state, get(local_get_bot).put(local_patch_bot)),
+        )
+        .route(
+            "/api/v4/bots/{bot_user_id}/disable",
+            partially_migrated_with_ids(&state, post(local_disable_bot)),
+        )
+        .route(
+            "/api/v4/bots/{bot_user_id}/enable",
+            partially_migrated_with_ids(&state, post(local_enable_bot)),
+        )
+        .route(
+            "/api/v4/bots/{bot_user_id}/assign/{user_id}",
+            partially_migrated_with_ids(&state, post(local_assign_bot)),
+        )
+        // ---- `status_local.go`, both pairs.
+        //
+        // **`me` is not a user here.** `RequireUserId` rewrites `me` to the session's `UserId`,
+        // which on this router is the empty string, so `GET /users/me/status` over the socket is
+        // a 400 naming `user_id` — not the caller's status, and not a 401. The handlers already
+        // do that rewrite from the session they are handed, so it needs no local-only branch;
+        // `local_mode::me_is_not_a_user_on_the_socket` pins it.
+        .route(
+            "/api/v4/users/{user_id}/status",
+            partially_migrated_with_ids(
+                &state,
+                get(local_get_user_status).put(local_update_user_status),
+            ),
+        )
+        // ---- `role_local.go`. Four of its five pairs; `{role_id}/patch` is unported.
+        .route(
+            "/api/v4/roles",
+            partially_migrated(get(local_get_all_roles)),
+        )
+        // Registered POST-only, exactly as on the TCP router: gorilla matched `{role_id}` first,
+        // so a **GET** of `/roles/names` is a `getRole` call with `role_id = "names"` and 400s.
+        // Letting the method fallback forward it keeps that Go's answer rather than ours.
+        .route(
+            "/api/v4/roles/names",
+            partially_migrated(post(local_get_roles_by_names)),
+        )
+        .route(
+            "/api/v4/roles/name/{role_name}",
+            partially_migrated_with_ids(&state, get(local_get_role_by_name)),
+        )
+        .route(
+            "/api/v4/roles/{role_id}",
+            partially_migrated_with_ids(&state, get(local_get_role)),
         )
         // `srv.LocalRouter.Handle("/api/v4/{anything:.*}", api.Handle404)` (api.go:527) is Go's
         // own fallback; ours forwards instead, so an unmigrated local route is answered by the Go
@@ -283,6 +394,113 @@ async fn local_get_client_license(
             .into_response()
         }
     }
+}
+
+/// `getBots` through `APILocal` (bot_local.go:16).
+async fn local_get_bots(
+    state: State<AppState>,
+    query: RawQuery,
+    headers: HeaderMap,
+) -> Result<Response, ApiError> {
+    bots::get_bots(state, query, headers, local_session()).await
+}
+
+/// `getBot` through `APILocal` (bot_local.go:9).
+///
+/// The handler's three-armed permission block collapses to its first arm here —
+/// `read_others_bots` passes unconditionally — so the socket sees every bot, including one owned
+/// by nobody. Its `bot.OwnerId == session.UserId` arm is the only branch that could compare
+/// against the empty local user id, and it is unreachable once the first arm has passed.
+async fn local_get_bot(
+    state: State<AppState>,
+    path: UrlPath<String>,
+    query: RawQuery,
+    headers: HeaderMap,
+) -> Result<Response, ApiError> {
+    bots::get_bot(state, path, query, headers, local_session()).await
+}
+
+/// `patchBot` through `APILocal` (bot_local.go:10).
+async fn local_patch_bot(
+    state: State<AppState>,
+    path: UrlPath<String>,
+    request: Request,
+) -> Response {
+    bots::patch_bot(state, path, local_session(), request).await
+}
+
+/// `disableBot` through `APILocal` (bot_local.go:11).
+async fn local_disable_bot(state: State<AppState>, path: UrlPath<String>) -> Response {
+    bots::disable_bot(state, path, local_session()).await
+}
+
+/// `enableBot` through `APILocal` (bot_local.go:12).
+async fn local_enable_bot(state: State<AppState>, path: UrlPath<String>) -> Response {
+    bots::enable_bot(state, path, local_session()).await
+}
+
+/// `assignBot` through `APILocal` (bot_local.go:14).
+///
+/// `me` in the `{user_id}` segment rewrites to the session's user id, which is empty here, so
+/// `POST /bots/{id}/assign/me` over the socket is a 400 naming `user_id`. The segment is
+/// alphanumeric, so the mux charset check routes it rather than forwarding it — the 400 is ours
+/// to produce, and it is Go's.
+async fn local_assign_bot(state: State<AppState>, path: UrlPath<(String, String)>) -> Response {
+    bots::assign_bot(state, path, local_session()).await
+}
+
+/// `getUserStatus` through `APILocal` (status_local.go:9).
+async fn local_get_user_status(
+    state: State<AppState>,
+    path: UrlPath<String>,
+) -> Result<Response, ApiError> {
+    status::get_user_status(state, path, local_session()).await
+}
+
+/// `updateUserStatus` through `APILocal` (status_local.go:10).
+///
+/// The handler's own gate is `SessionHasPermissionToUser`, which the local session passes for any
+/// target — so the socket can set anyone's status, which is what `mmctl` uses it for. What it
+/// cannot do is say `me`.
+async fn local_update_user_status(
+    state: State<AppState>,
+    path: UrlPath<String>,
+    request: Request,
+) -> Response {
+    status::update_user_status(state, local_session(), path, request).await
+}
+
+/// `getAllRoles` through `APILocal` (role_local.go:9).
+async fn local_get_all_roles(state: State<AppState>) -> Response {
+    roles::get_all_roles(state, local_session()).await
+}
+
+/// `getRole` through `APILocal` (role_local.go:10).
+async fn local_get_role(state: State<AppState>, path: UrlPath<String>) -> Response {
+    roles::get_role(state, path, local_session()).await
+}
+
+/// `getRoleByName` through `APILocal` (role_local.go:11).
+///
+/// The handler carries its own `[a-z0-9_]+` check with a **TCP** forward behind it. That branch
+/// is dead on this router: [`local_mux_segments_or_forward`] tests the same charset first and
+/// forwards over the socket. It is called rather than reimplemented so the two routers cannot
+/// disagree about the rest of the handler; the dead branch is the price and it is written down
+/// here rather than left for a reader to find.
+async fn local_get_role_by_name(
+    state: State<AppState>,
+    path: UrlPath<String>,
+    request: Request,
+) -> Response {
+    roles::get_role_by_name(state, path, local_session(), request).await
+}
+
+/// `getRolesByNames` through `APILocal` (role_local.go:12).
+async fn local_get_roles_by_names(
+    state: State<AppState>,
+    request: Request,
+) -> Result<Response, ApiError> {
+    roles::get_roles_by_names(state, local_session(), request).await
 }
 
 /// The local router's fallback: forward to the Go server's socket.

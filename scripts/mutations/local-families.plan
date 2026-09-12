@@ -1,0 +1,67 @@
+# Mutation plan for the twelve local-mode pairs of `bot_local.go`, `status_local.go` and
+# `role_local.go`.
+#
+#   scripts/mutate-batch.sh scripts/mutations/local-families.plan
+#
+# The handlers themselves are the HTTP ones and are mutated by their own plans. What is new here,
+# and all this file tests, is the **wiring**: which session the socket hands them, which segments
+# reach them at all, and where a request that does not reach them is forwarded to.
+#
+# The forwarding target is the line worth reading twice. Forwarding a local request over the
+# *port* instead of the socket reaches `APISessionRequired` rather than `APILocal`, so a malformed
+# id comes back **401** where Go answers **404** — a difference no test that only compares bodies
+# would notice, which is why `a_segment_outside_the_mux_charset_is_forwarded_over_the_socket`
+# asserts the status too.
+#
+# `control-reorder-two-independent-registrations` moves one `.route` call past another with a
+# different path. Registration order is not routing order in axum — matchit builds a tree — so a
+# passing suite after the move is the control it is meant to be.
+#
+# The first version of both controls was broken rather than no-op, and each failed in its own way:
+# renaming `let matched` without renaming `if !matched` does not compile, and a "reorder" written
+# as a prepend **duplicated** a route, which axum rejects at startup with "Overlapping method
+# route". Neither is a verdict; a control that does not build proves nothing about the harness.
+# They are a contiguous rename of a binding *and its use*, and a true swap, now.
+#
+# # The valid run: **11 run, 9 caught, 2 controls survived, 0 harness faults** (2026-09-12)
+#
+# Every mutation is caught, which for a registration round means what it should: the wiring is
+# what these tests are about, and there is no logic here of the kind that hides behind a fixture.
+#
+# # What the first (aborted) run found
+#
+# Three lines were removed because they are **equivalent mutants**, and saying so costs less than
+# leaving them to be re-derived:
+#
+# * `local-the-role-name-charset-accepts-upper-case` and `…-accepts-a-hyphen`. Loosening the
+#   middleware's `role_name` class lets the request through to `roles::get_role_by_name`, whose
+#   own `[a-z0-9_]+` check then forwards it — over the **port**. That looks like the bug this
+#   middleware exists to prevent, and it is not observable: measured against the stack's Go server,
+#   `GET /api/v4/roles/name/System_User` and `GET /api/v4/bots/bad-id` are **404
+#   `api.context.404.app_error`** on the HTTP router *and* on the local one, because neither mux
+#   matches and `Handle404` runs before any session is required. Same status, same body, same
+#   interpolated URL.
+# * `local-a-bad-segment-is-forwarded-over-the-port` did not compile: the middleware takes
+#   `Extension(go)`, not `State(state)`, so there is no state in scope to hand `forward_to_go`.
+#
+# The transport *is* observable, at the other forwarding site: `GET /api/v4/roles/names` is a
+# **400** over the socket (Go's local mux matches `{role_id}` and `getRole("names")` refuses) and a
+# **401** over the port (the same route behind `APISessionRequired`, with no credential on a socket
+# request). `local-the-method-fallback-forwards-over-the-port` is that line, and
+# `the_role_reads_match_over_the_socket` is what catches it.
+#
+# `local-the-status-write-uses-an-ordinary-session` also survived, and that one *was* a fixture
+# gap: the only PUT the suite made carried a body Go rejects, so it never reached
+# `session_has_permission_to_user`. The test now also sets a planted bot's status through each
+# socket, which is a 200 only because the session is `Local`.
+local-the-id-charset-is-not-checked	crates/mm-api/src/local.rs	            n if crate::parameter_is_id_shaped(n) => crate::segment_matches_go_mux(value),	            n if crate::parameter_is_id_shaped(n) => !n.is_empty() && !value.is_empty(),	api	local_mode
+local-the-mux-check-runs-after-the-handler	crates/mm-api/src/local.rs	        if !matched {\n            tracing::debug!(	        if !matched && false {\n            tracing::debug!(	api	local_mode
+local-the-bot-reads-use-an-ordinary-session	crates/mm-api/src/local.rs	    bots::get_bots(state, query, headers, local_session()).await	    bots::get_bots(state, query, headers, AuthenticatedSession(Session::default())).await	api	local_mode
+local-the-role-list-uses-an-ordinary-session	crates/mm-api/src/local.rs	    roles::get_all_roles(state, local_session()).await	    roles::get_all_roles(state, AuthenticatedSession(Session::default())).await	api	local_mode
+local-the-status-write-uses-an-ordinary-session	crates/mm-api/src/local.rs	    status::update_user_status(state, local_session(), path, request).await	    status::update_user_status(state, AuthenticatedSession(Session::default()), path, request).await	api	local_mode
+local-the-status-read-resolves-me-to-an-admin	crates/mm-api/src/local.rs	    status::get_user_status(state, path, local_session()).await	    status::get_user_status(\n        state,\n        path,\n        AuthenticatedSession(Session {\n            local: true,\n            user_id: "zzzzzzzzzzzzzzzzzzzzzzzzzz".to_owned(),\n            ..Session::default()\n        }),\n    )\n    .await	api	local_mode
+local-roles-names-answers-a-get-here	crates/mm-api/src/local.rs	        .route(\n            "/api/v4/roles/names",\n            partially_migrated(post(local_get_roles_by_names)),\n        )	        .route(\n            "/api/v4/roles/names",\n            partially_migrated(post(local_get_roles_by_names).get(local_get_all_roles)),\n        )	api	local_mode
+local-the-bot-enable-flag-is-inverted	crates/mm-api/src/local.rs	async fn local_enable_bot(state: State<AppState>, path: UrlPath<String>) -> Response {\n    bots::enable_bot(state, path, local_session()).await	async fn local_enable_bot(state: State<AppState>, path: UrlPath<String>) -> Response {\n    bots::disable_bot(state, path, local_session()).await	api	local_mode
+local-the-method-fallback-forwards-over-the-port	crates/mm-api/src/local.rs	fn partially_migrated(methods: MethodRouter<AppState>) -> MethodRouter<AppState> {\n    methods.fallback(forward_to_go_local)	fn partially_migrated(methods: MethodRouter<AppState>) -> MethodRouter<AppState> {\n    methods.fallback(crate::proxy::forward_to_go)	api	local_mode
+control-rename-a-binding-and-its-use	crates/mm-api/src/local.rs	        let matched = match name {\n            // `{role_name:[a-z0-9_]+}` (api4/api.go) — narrower than the id class.\n            "role_name" => {\n                !value.is_empty()\n                    && value\n                        .bytes()\n                        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')\n            }\n            n if crate::parameter_is_id_shaped(n) => crate::segment_matches_go_mux(value),\n            _ => true,\n        };\n        if !matched {	        let routable = match name {\n            // `{role_name:[a-z0-9_]+}` (api4/api.go) — narrower than the id class.\n            "role_name" => {\n                !value.is_empty()\n                    && value\n                        .bytes()\n                        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')\n            }\n            n if crate::parameter_is_id_shaped(n) => crate::segment_matches_go_mux(value),\n            _ => true,\n        };\n        if !routable {	api	local_mode
+control-swap-two-independent-registrations	crates/mm-api/src/local.rs	            "/api/v4/roles/names",\n            partially_migrated(post(local_get_roles_by_names)),\n        )\n        .route(\n            "/api/v4/roles/name/{role_name}",\n            partially_migrated_with_ids(&state, get(local_get_role_by_name)),\n        )	            "/api/v4/roles/name/{role_name}",\n            partially_migrated_with_ids(&state, get(local_get_role_by_name)),\n        )\n        .route(\n            "/api/v4/roles/names",\n            partially_migrated(post(local_get_roles_by_names)),\n        )	api	local_mode

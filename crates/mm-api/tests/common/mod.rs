@@ -2163,6 +2163,20 @@ pub async fn plant_bot(tag: &str, owner_id: &str, delete_at: i64) -> Option<Stri
 
 /// [`purge_api_fixtures`] sweeps `mmrsbot%`, so this is belt-and-braces for a run that continues
 /// after these tests rather than for one that crashes in them.
+/// The `Status` rows a bot acquires when a test sets its status.
+///
+/// `unplant_bots` cannot do it: `Status` is keyed on `UserId` with no prefix of its own, and a row
+/// whose user has been deleted is invisible to every route that would otherwise clean it up — the
+/// orphan class [D-155] names. One line here, rather than a fixture that grows a row per run.
+pub async fn clear_planted_bot_statuses() {
+    let Some(pool) = fixture_pool().await else {
+        return;
+    };
+    let _ = sqlx::query("DELETE FROM status WHERE userid LIKE 'mmrsbot%'")
+        .execute(&pool)
+        .await;
+}
+
 pub async fn unplant_bots() {
     let Some(pool) = fixture_pool().await else {
         return;

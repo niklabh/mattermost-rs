@@ -10745,3 +10745,55 @@ the suite had no `user/values` probe at all.
 
 None of those three would have been found by a green suite, and each was a real hole in the
 evidence for a predicate that decides which rows a client sees.
+
+## Three families on the socket, and the forward leg that has to be a socket too (2026-09-12)
+
+**+12 local-mode pairs.** `bot_local.go` (six of seven), `status_local.go` (both) and
+`role_local.go` (four of five), on the unix socket, against a denominator that stood at 6 of 171
+after the local router landed. Registration and wiring only — every handler is the **HTTP one**,
+called with `model.Session{Local: true}`:
+
+- `crates/mm-api/src/local.rs` — the twelve registrations, their wrappers, and
+  `local_mux_segments_or_forward`
+- `crates/mm-api/tests/parity/local_mode.rs` — six new tests
+
+### Why the handlers could be shared and the middleware could not
+
+Every gate on these three families is a `SessionHasPermissionTo*`, which short-circuits on
+`Session.Local` (app/authorization.go:19) — so the local answer *is* the HTTP handler's with every
+check passing, and reimplementing them would only create two things to keep in step.
+
+`mux_segments_or_forward` is the exception, and the reason is the one thing that would have been
+silently wrong: it forwards through `proxy::forward_to_go`, which dials the Go server's **port**.
+A local request answered over the port reaches `APISessionRequired` rather than `APILocal`, so a
+malformed id would come back **401** where Go's local mux answers **404**. The local middleware
+forwards over the socket, and
+`a_segment_outside_the_mux_charset_is_forwarded_over_the_socket` asserts the status, not just the
+body, because that is where the difference shows.
+
+It also carries `role_name` (`[a-z0-9_]+`), which the TCP table does not: on that side
+`roles::get_role_by_name` does its own charset check and its own forward. Handling it in the
+middleware makes that branch dead on this router, which is deliberate — a handler that forwards
+over the port must never run here.
+
+### `me` is nobody, and that is the whole local authentication model
+
+`RequireUserId` rewrites `me` to the session's `UserId`, which is the **empty string** on this
+transport — so `GET /users/me/status` and `POST /bots/{id}/assign/me` are both 400s naming
+`user_id` over the socket, where the same paths over TCP resolve to the caller. No local-only
+branch was needed for it: the handlers already do the rewrite from the session they are handed.
+
+### Mutation tally
+
+`scripts/mutations/local-families.plan`: **11 run, 9 caught, 2 controls survived, 0 harness
+faults.** Two earlier runs were void and neither number is quoted: the first had three equivalent
+mutants and a line that did not compile, the second had *both controls* broken — a rename that
+missed its use, and a "reorder" written as a prepend, which axum rejects at startup with
+"Overlapping method route". A control that does not build proves nothing about the harness, which
+is the whole reason the rule is that a fault voids the run.
+
+One survivor in that first run was a real fixture gap and is closed: the only `PUT …/status` the
+suite made carried a body Go rejects, so it never reached `session_has_permission_to_user` and a
+handler handed an ordinary session would have passed. The test now also sets a planted bot's
+status through each socket, which is a 200 only because the session is `Local`.
+
