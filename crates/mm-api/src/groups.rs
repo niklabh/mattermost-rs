@@ -17,7 +17,7 @@
 //! `License().Features.LDAPGroups` — neither is ported — so a licensed installation is forwarded
 //! whole.
 //!
-//! # Seventeen routes, one gate
+//! # Twenty routes, one gate — the whole of `api4/group.go`
 //!
 //! **Extended 2026-09-12 with the seven CRUD and membership writes** — `createGroup`,
 //! `getGroupsByNames`, `patchGroup`, `deleteGroup`, `restoreGroup`, `addGroupMembers` and
@@ -26,8 +26,15 @@
 //! unlicensed server all seventeen collapse to the same 501, and a write with malformed JSON is
 //! refused for the licence rather than for the JSON.
 //!
+//! **Completed 2026-09-12 with the three syncable writes** — `linkGroupSyncable`,
+//! `unlinkGroupSyncable` and `patchGroupSyncable`. `InitGroup` registers twenty route+method
+//! pairs and every one of them is now answered here; `api4/group.go` has no handler left that
+//! this server forwards on its own account.
+//!
 //! What is *not* ported is everything behind the gate, which for the writes is the whole of the
-//! group store and the custom-group permission model. See [D-360].
+//! group store and the custom-group permission model ([D-360]), and for the three syncable
+//! writes the `GroupSyncable` upsert surface, the two permission verifiers and
+//! `SyncRolesAndMembership` ([D-390]).
 //!
 //! # All ten reads are the same gate
 //!
@@ -385,6 +392,100 @@ pub async fn delete_group_members(
     request: Request,
 ) -> Response {
     let _ = &group_id;
+    answer(&state, request).await
+}
+
+/// Port of `linkGroupSyncable` (group.go:319) —
+/// `POST /api/v4/groups/{group_id}/{syncable_type}/{syncable_id}/link`.
+///
+/// # The gate is still the first statement, and here it precedes *four* things
+///
+/// `requireLicense` opens this handler ahead of `RequireGroupId`, `RequireSyncableId`,
+/// `RequireSyncableType` **and** `io.ReadAll(r.Body)` — in that order in the source, all of them
+/// below the gate. So on an unlicensed server a `POST` with a malformed body, an unroutable
+/// `group_id` and an empty `syncable_id` is the same 501 as a well-formed link request, and the
+/// body is never read. Measured in `parity::group_syncables`.
+///
+/// # `RequireSyncableType` can never fail through the mux
+///
+/// `Params.SyncableType` is not the URL segment: `params.go:269` maps `teams` → `Team` and
+/// `channels` → `Channel` and leaves it **empty for anything else**, while the route pattern
+/// `{syncable_type:teams|channels}` already refused anything else. So the `syncable_type` arm of
+/// `SetInvalidURLParam` is dead code reachable only from a non-mux caller — which is why a third
+/// value is forwarded for gorilla's 404 here rather than answered with a 400.
+///
+/// # What is behind the gate
+///
+/// This is the deepest unported handler in the family: `verifyLinkUnlinkPermission` (five
+/// permission questions whose shape depends on the syncable type and, for a channel, on whether
+/// the parent *team* is already synced), `verifySchemeAdminAssignmentPermission`, the
+/// read-modify-write over `GetGroupSyncable`/`UpsertGroupSyncable` whose re-link of a
+/// soft-deleted row deliberately starts from a zero value, and the asynchronous
+/// `SyncRolesAndMembership`. None of it is reachable without a licence; see [D-390].
+#[tracing::instrument(skip_all, fields(group_id = %group_id, syncable_type = %syncable_type, licensed, forwarded))]
+pub async fn link_group_syncable(
+    State(state): State<AppState>,
+    Path((group_id, syncable_type, syncable_id)): Path<(String, String, String)>,
+    _session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    let _ = (&group_id, &syncable_id);
+    if !syncable_type_matches_go_mux(&syncable_type) {
+        tracing::Span::current().record("forwarded", true);
+        return crate::proxy::forward_to_go(State(state), request).await;
+    }
+    tracing::Span::current().record("forwarded", false);
+    answer(&state, request).await
+}
+
+/// Port of `unlinkGroupSyncable` (group.go:624) —
+/// `DELETE /api/v4/groups/{group_id}/{syncable_type}/{syncable_id}/link`.
+///
+/// Shares its path with [`link_group_syncable`] and differs only in method, exactly as
+/// [`get_group`] and [`delete_group`] do. It is the one of the three that **never reads a body**
+/// even behind the gate, and the only one whose success is `ReturnStatusOK` rather than a
+/// marshalled syncable — so the three routes have three response shapes: a 201 with a body, a 200
+/// with a body, and a 200 with `{"status":"OK"}`.
+#[tracing::instrument(skip_all, fields(group_id = %group_id, syncable_type = %syncable_type, licensed, forwarded))]
+pub async fn unlink_group_syncable(
+    State(state): State<AppState>,
+    Path((group_id, syncable_type, syncable_id)): Path<(String, String, String)>,
+    _session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    let _ = (&group_id, &syncable_id);
+    if !syncable_type_matches_go_mux(&syncable_type) {
+        tracing::Span::current().record("forwarded", true);
+        return crate::proxy::forward_to_go(State(state), request).await;
+    }
+    tracing::Span::current().record("forwarded", false);
+    answer(&state, request).await
+}
+
+/// Port of `patchGroupSyncable` (group.go:527) —
+/// `PUT /api/v4/groups/{group_id}/{syncable_type}/{syncable_id}/patch`.
+///
+/// The `patch` literal here sits at a **fourth** path segment under two parameters, which is a
+/// different position from `/groups/{group_id}/patch` ([`patch_group`]); the two never compete,
+/// and a request reaches this one only with a `syncable_type` and a `syncable_id` between them.
+///
+/// Behind the gate it differs from [`link_group_syncable`] in exactly one way that matters:
+/// `GetGroupSyncable` failing is fatal here (there is nothing to patch), where the link handler
+/// tolerates a 404 and creates the row. Both then run the same two permission verifiers and the
+/// same asynchronous `SyncRolesAndMembership`. See [D-390].
+#[tracing::instrument(skip_all, fields(group_id = %group_id, syncable_type = %syncable_type, licensed, forwarded))]
+pub async fn patch_group_syncable(
+    State(state): State<AppState>,
+    Path((group_id, syncable_type, syncable_id)): Path<(String, String, String)>,
+    _session: AuthenticatedSession,
+    request: Request,
+) -> Response {
+    let _ = (&group_id, &syncable_id);
+    if !syncable_type_matches_go_mux(&syncable_type) {
+        tracing::Span::current().record("forwarded", true);
+        return crate::proxy::forward_to_go(State(state), request).await;
+    }
+    tracing::Span::current().record("forwarded", false);
     answer(&state, request).await
 }
 

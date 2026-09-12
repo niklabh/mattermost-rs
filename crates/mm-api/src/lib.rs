@@ -2067,6 +2067,24 @@ pub fn router(state: AppState) -> Router {
             "/api/v4/groups/{group_id}/{syncable_type}/{syncable_id}",
             partially_migrated_with_ids(&state, get(groups::get_group_syncable)),
         )
+        // The last three of `InitGroup`'s twenty pairs. Both literals sit at a **fourth** segment
+        // under two parameters, where nothing was registered before — so unlike `/groups/names`
+        // neither can shadow a served sibling: `/groups/{group_id}/patch` is one parameter and a
+        // literal, this is two parameters, a literal and one more segment between them. That is
+        // an argument, not evidence, so
+        // `parity::group_syncables::every_group_route_this_server_answered_still_answers` re-asks
+        // all twenty after these two registrations.
+        .route(
+            "/api/v4/groups/{group_id}/{syncable_type}/{syncable_id}/link",
+            partially_migrated_with_ids(
+                &state,
+                post(groups::link_group_syncable).delete(groups::unlink_group_syncable),
+            ),
+        )
+        .route(
+            "/api/v4/groups/{group_id}/{syncable_type}/{syncable_id}/patch",
+            partially_migrated_with_ids(&state, put(groups::patch_group_syncable)),
+        )
         .route(
             "/api/v4/channels/{channel_id}/groups",
             partially_migrated_with_ids(&state, get(groups::get_groups_by_channel)),
