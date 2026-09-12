@@ -192,8 +192,8 @@ cargo fmt && cargo check --workspace && cargo clippy --all-targets -- -D warning
   paid for every session and improved in none.
 - Update `MIGRATION.md` (see *Write the finding once*). Open a `docs/TECH_DEBT.md` entry only for
   work genuinely deferred.
-- Then stop. Do not start the next route. Do not commit unless asked — but **say plainly how much
-  uncommitted work is in the tree**, since it survives no accident.
+- Do not commit unless asked — but **say plainly how much uncommitted work is in the tree**, since
+  it survives no accident.
 
 ## Reporting
 
