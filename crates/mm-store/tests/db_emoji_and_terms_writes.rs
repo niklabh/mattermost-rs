@@ -47,6 +47,17 @@ async fn pool() -> PgPool {
 async fn purge(pool: &PgPool) {
     for statement in [
         "DELETE FROM emoji WHERE name LIKE 'mmrsew%'",
+        // The two names `an_invalid_emoji_never_reaches_the_table` proves are refused. They carry
+        // no prefix — they cannot: one has to be a real system-emoji name and the other has to
+        // contain a space — so the prefix sweep above does not reach them.
+        //
+        // **This is not defensive tidying.** A mutation that removes `Save`'s `IsValid` call makes
+        // that test fail *after* the insert has already happened, and the row then survives the
+        // mutation's own rollback and fails the test on every later run, for ever. Measured: the
+        // `emoji-save-skips-validation` line left a live `grinning` row behind, and the next clean
+        // `cargo test --workspace` failed on it. Any test whose subject is "this write must not
+        // happen" has to purge the write it is asserting against.
+        "DELETE FROM emoji WHERE name IN ('grinning', 'has space')",
         "DELETE FROM reactions WHERE emojiname LIKE 'mmrsew%'",
         "DELETE FROM posts WHERE id LIKE 'mmrsewpost%'",
         "DELETE FROM termsofservice WHERE userid LIKE 'mmrsewuser%'",

@@ -213,9 +213,10 @@ pub enum ImageConfig {
 /// fixed at bytes 16..24 and every one of `parseIHDR`'s conditions is checkable, and hands
 /// everything else back as [`ImageConfig::Undecidable`].
 ///
-/// Within PNG, a **paletted** image (colour type 3) is undecidable too: `DecodeConfig` does not
-/// stop at IHDR for those (`cbPaletted(d.cb)` keeps the loop going until `dsSeentRNS`), so it can
-/// fail on a PLTE chunk long after the dimensions were read.
+/// Within PNG, a **paletted** image (colour type 3) is undecidable too — but for a reason that
+/// comes *after* the header is accepted, not instead of accepting it: `DecodeConfig` does not stop
+/// at IHDR for those (`cbPaletted(d.cb)` keeps the loop going until `dsSeentRNS`), so it can fail
+/// on a PLTE chunk long after the dimensions were read.
 ///
 /// Pinned by `fixtures/behaviour_emoji_upload.json`, whose corpus is run through Go's own
 /// `image.DecodeConfig`.
@@ -279,21 +280,34 @@ fn png_config(data: &[u8]) -> ImageConfig {
     }
 
     // Colour type 3 is paletted, and `DecodeConfig` keeps parsing chunks for those.
+    // The depth/colour-type pairs `parseIHDR` accepts. Anything else leaves `d.cb == cbInvalid`
+    // and Go answers `UnsupportedError`.
+    //
+    // **Paletted is in this table**, exactly as it is in Go's: `ctPaletted` has arms for depths 1,
+    // 2, 4 and 8 (and none for 16). Leaving it out would refuse paletted images *here*, for the
+    // wrong reason — the reason they are handed over is the chunk loop below, not their header —
+    // and would make the guard that does hand them over unreachable and untestable. A mutation
+    // deleting that guard survived until this table said what Go's says.
     let (depth, colour_type) = (ihdr[8], ihdr[9]);
-    if colour_type == 3 {
-        return ImageConfig::Undecidable("paletted: DecodeConfig reads past IHDR");
-    }
-    // The depth/colour-type pairs `parseIHDR` accepts for the non-paletted types. Anything else
-    // leaves `d.cb == cbInvalid` and Go answers `UnsupportedError`.
     let supported = match colour_type {
         // ctGrayscale
         0 => matches!(depth, 1 | 2 | 4 | 8 | 16),
         // ctTrueColor, ctGrayscaleAlpha, ctTrueColorAlpha
         2 | 4 | 6 => matches!(depth, 8 | 16),
+        // ctPaletted — accepted by `parseIHDR`, and handed over below for a different reason.
+        3 => matches!(depth, 1 | 2 | 4 | 8),
         _ => false,
     };
     if !supported {
         return ImageConfig::Undecidable("bit depth / color type pair png does not accept");
+    }
+
+    // Colour type 3 is paletted, and `DecodeConfig` does **not** stop at IHDR for those:
+    // `cbPaletted(d.cb)` keeps the chunk loop going to `dsSeentRNS`, so it can still fail on a
+    // PLTE chunk long after these dimensions were read. The header is fine; the answer is not
+    // ours to give.
+    if colour_type == 3 {
+        return ImageConfig::Undecidable("paletted: DecodeConfig reads past IHDR");
     }
 
     ImageConfig::Known {
