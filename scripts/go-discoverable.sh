@@ -44,6 +44,7 @@ DSN="postgres://mmuser:mmuser_password@localhost:$MMRS_PG_PORT/mattermost?sslmod
 case "${1:-start}" in
   port) echo "$PORT" ;;
   stop)
+    mmrs_free_port "$PORT"
     pkill -f "$RUN/bin/mattermost" 2>/dev/null || true
     echo "stopped"
     ;;
@@ -66,6 +67,7 @@ case "${1:-start}" in
     export MM_FEATUREFLAGS_ENABLESHIFTESCAPETOMARKALLREAD=true
     # The one difference from `go-server.sh`, and the entire point of this script.
     export MM_FEATUREFLAGS_DISCOVERABLECHANNELS=true
+    mmrs_free_port "$PORT"
     pkill -f "$RUN/bin/mattermost" 2>/dev/null || true
     sleep 1
     (cd "$RUN" && nohup "$RUN/bin/mattermost" server > "$LOG" 2>&1 &)

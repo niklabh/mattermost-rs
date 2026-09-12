@@ -47,16 +47,12 @@ cargo build -p mm-api
 # every one of them a route that branch predated. The same shape could as easily produce a false
 # *pass*, since an older binary still serves the routes it did have.
 #
-# Killing by port is safe now that `scripts/worktree.sh` enforces one stack per worktree: the port
-# belongs to the stack, and the stack belongs to exactly one checkout. `ss -ltnp` is Linux-only,
-# which is what this harness runs on; the path-scoped kill stays as a second pass so a process
-# that is running but not listening is still cleared.
-for pid in $(ss -ltnp 2>/dev/null \
-  | awk -v port=":$MMRS_API_PORT" '$4 ~ port"$" {print $0}' \
-  | grep -oE 'pid=[0-9]+' | cut -d= -f2 | sort -u); do
-  echo "  freeing :$MMRS_API_PORT from pid $pid ($(tr '\0' ' ' < /proc/$pid/cmdline 2>/dev/null | cut -c1-70))"
-  kill -9 "$pid" 2>/dev/null || true
-done
+# The kill-by-port itself is `mmrs_free_port` in `stack-env.sh`, shared with the three Go server
+# scripts, which had the same hole for a second reason (a worktree's `reference/.build` is a
+# symlink, so one run directory has as many path spellings as there are checkouts). The
+# path-scoped kill stays as a second pass so a process that is running but not listening is
+# still cleared.
+mmrs_free_port "$MMRS_API_PORT"
 pkill -f "$ROOT/target/debug/mm-api" 2>/dev/null || true
 sleep 1
 mmrs_launch_mm_api "/tmp/mmrs-mm-api$MMRS_STACK_SUFFIX.log"

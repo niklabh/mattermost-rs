@@ -72,6 +72,36 @@ mmrs_compose() {
   fi
 }
 
+# Free a TCP port by killing whoever listens on it, and say who that was.
+#
+# **The port is the owner key, not the path.** `scripts/parity.sh` learned this for `mm-api` (see
+# its comment): a process's command line is fixed at `exec` time, so a path-scoped `pkill` misses
+# a server whose path string differs from the one you are about to launch. The Go servers have the
+# same hole for a second reason — `reference/.build` is a **symlink** in every worktree, so a
+# stack's run directory has as many spellings as there are checkouts. A server started as
+# `/home/…/mattermost-rs/reference/.build/mmroot-3/bin/mattermost` is the same physical directory
+# as `/home/…/mmrs-worktrees/config/reference/.build/mmroot-3/bin/mattermost`, and `pkill -f` on
+# one does not match the other.
+#
+# The consequence is silent and it is not hypothetical. Measured 2026-09-12 on stacks 2 and 3:
+# a Go server left from the main checkout held :8365, the worktree's `go-server.sh start` could
+# not bind, and its **readiness probe was answered by the foreign process** — so the script
+# reported success and the suite ran against a server with someone else's configuration. Two
+# `config_reads` tests failed naming `LocalModeSocketLocation`, a setting the branch never
+# touched. A false *pass* is just as available.
+#
+# Killing by port is safe because `scripts/worktree.sh` enforces one stack per worktree: the port
+# belongs to the stack, and the stack belongs to exactly one checkout. `ss -ltnp` is Linux-only,
+# which is what this harness runs on.
+mmrs_free_port() {
+  for pid in $(ss -ltnp 2>/dev/null \
+    | awk -v port=":$1" '$4 ~ port"$" {print $0}' \
+    | grep -oE 'pid=[0-9]+' | cut -d= -f2 | sort -u); do
+    echo "  freeing :$1 from pid $pid ($(tr '\0' ' ' < /proc/$pid/cmdline 2>/dev/null | cut -c1-70))"
+    kill -9 "$pid" 2>/dev/null || true
+  done
+}
+
 # The two unix domain sockets of the local-mode admin API, per stack.
 #
 # `MMRS_GO_LOCAL_SOCKET` is the one the Go server binds (`ServiceSettings.LocalModeSocketLocation`,

@@ -117,6 +117,7 @@ env_for_server() {
 
 case "${1:-run}" in
   stop)
+    mmrs_free_port "$PORT"
     pkill -f "$RUN/bin/mattermost" 2>/dev/null || true
     echo "stopped"
     ;;
@@ -127,6 +128,7 @@ case "${1:-run}" in
     [ -x "$BUILD/mattermost" ] || build
     layout
     env_for_server
+    mmrs_free_port "$PORT"
     pkill -f "$RUN/bin/mattermost" 2>/dev/null || true
     sleep 1
     if [ "${1:-run}" = "run" ]; then
